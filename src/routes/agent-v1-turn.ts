@@ -74,6 +74,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
@@ -699,14 +700,14 @@ function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
 }
 
 /** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
-function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
+function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[], omitted?: readonly RunOmittedRisk[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
   if (!chanceShownFor(cells)) return {};
   const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
   const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
     && node.draft_widening?.provenance === 'ai_suggested_widen') : [];
   // Each added risk's own line already says its option's chance leaves it out: the generic note and its marker would say
   // the same omission again (capacity e2e 57687e86 turn 01, judge row 4). Said once, by the line that names the risk.
-  const ownLines = risksSaidLeftOutOfTheChance(graph, cells);
+  const ownLines = risksSaidLeftOutOfTheChance(graph, cells, omitted);
   if (addedRisks.length > 0 && addedRisks.every(risk => ownLines.has(String(risk.id)))) return { saidByOwnLines: true };
   const note = widenedRiskNote({ options: 0, risks: addedRisks.length });
   const marker = widenedRiskMarker(addedRisks);
@@ -2523,7 +2524,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const waitingId = executableWaitingProposal(scenarioId, userId, state.graphHash, state.graph);
           const atRest = { awaitingApproval: waitingId !== undefined && !isSteadyCardProposal(waitingId), builtOrRan: true,
-            chanceCells: replayChanceCells };
+            chanceCells: replayChanceCells, omittedRisks: runOmittedRisks(state.analysisResult) };
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           let say = goalChanceLineOwed([{ ok: true, ran: true,
             goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText),
@@ -2715,7 +2716,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: replayComposeText, chanceCells: replayChanceCells, obligations: withA7AsDetail(replayObligations, replayA7, withoutProposalIds(replayText), replayChanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')), graph: state.graph ?? null, profile: 'coaching', typedControlQuestions: replayControlQuestions,
           faceContract: 'run',
-          ...widenedRunWordsOf(state.graph, replayChanceCells),
+          ...widenedRunWordsOf(state.graph, replayChanceCells, runOmittedRisks(state.analysisResult)),
           ...(replayHorizon === null ? {} : { horizonLine: replayHorizon }),
           ...(replayWhatChanges === null ? {} : { whatChanges: replayWhatChanges }),
           ...(replayEstimates !== null && replayEstimates.count > 0 ? { estimatesLine: `Olumi's estimates: ${replayEstimates.count}, see Check estimates.` } : {}),
@@ -5229,6 +5230,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : owed.filter((line) => !owedHeldByAi.has(line));
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
+      // #3167 fix-forward: the risks the Run on screen recorded leaving out, never today's predicate.
+      omittedRisks: runOmittedRisks(analysisResult),
       // A steady-state answer must not hide an unrelated missing objective/target ask on this Run.
       // Otherwise exactly the turn's rule: an offered approve chip, or the ONE executable waiting proposal.
       awaitingApproval: offeredNow.some(a => { const id = typedApprovalOf({ chip: { id: a.id } }); return id !== undefined && !isSteadyCardProposal(id); })
@@ -5686,7 +5689,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || screenLines.length > 0
-        ? widenedRunWordsOf(readbackGraph, chanceCells) : {};
+        ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult)) : {};
       const widenNote = chanceShownFor(chanceCells) && runWidenWords.saidByOwnLines !== true
         ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
       // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.

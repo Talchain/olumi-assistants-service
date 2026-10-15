@@ -266,3 +266,34 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     }
   });
 });
+
+/**
+ * ⭐ #3167 fix-forward (PL 6135017311; AIE 6180618773 T9), second brief: served pricing a6ed1bff, whose ‘Price sensitivity’ is
+ * Olumi's (ai_inferred). The review says what THAT Run recorded leaving out, by its label then; a Run that recorded nothing
+ * claims nothing, whatever today's model would leave out.
+ */
+describe('#3167 fix-forward: the review reads the Run\'s own omission record', () => {
+  const RECORD = { code: 'UNSIZED_OLUMI_RISK_OMITTED', severity: 'info', source: 'cee', message: '', scope: 'modelled_effects_only',
+    node_ids: ['price_sensitivity'], omitted: [{ node_id: 'price_sensitivity', label: 'Price sensitivity', reason: 'unsized_olumi_risk' }] };
+  const LINE = 'This calculation covers the modelled effects only. ‘Price sensitivity’ is Olumi’s unsized risk suggestion and is not '
+    + 'included in this calculation; its likelihood and impact remain unresolved.';
+  const withRecord = (): Rec => ({ ...PLOT, inference_warnings: [...((PLOT.inference_warnings as Rec[] | undefined) ?? []), RECORD] });
+
+  it('RED: the Run recorded leaving ‘Price sensitivity’ out → the review says so once, in the AIE\'s words', () => {
+    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: withRecord() }));
+    expect(turn.lines.filter((l) => l === `- ${LINE}`)).toHaveLength(1);
+  });
+
+  it('RED (old Run): renamed and sized since, the review still says THAT Run\'s omission by its label then', () => {
+    const graph = { ...STORED.graph, nodes: (STORED.graph.nodes as Rec[]).map((n) => (n.id === 'price_sensitivity'
+      ? { ...n, label: 'Churn from price rise', observed_state: { value: 0.2, raw_value: 20, unit: '%', source: 'user' } } : n)) };
+    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: withRecord(), graph }));
+    expect(turn.lines).toContain(`- ${LINE}`);
+    expect(turn.lines.join(' ')).not.toContain('Churn from price rise’ is Olumi’s unsized');
+  });
+
+  it('⛔ CONTRAST: a Run with no record claims no omission', () => {
+    const turn = decisionReviewFor(SCENARIO, readOf());
+    expect(turn.lines.join(' ')).not.toContain('unsized risk suggestion');
+  });
+});
