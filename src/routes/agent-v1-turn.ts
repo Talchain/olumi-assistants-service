@@ -153,7 +153,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-targe
 import { goalHorizonNextStep, goalHorizonReplyLead } from '../orchestrator-v5/goal-target/goal-horizon-detail.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, shapeFromDerivedAnswerText, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
-import { withoutDriverAbsenceClaimsAtEgress, removeDriverAbsenceClaims, screenNamesADriver } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
+import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { AI_WRITES_RUN_TURN } from '../orchestrator-v5/agent-lane/ai-writes-run-turn.js';
 import { runToolOutputLicensesLeader } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -5674,12 +5674,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
      */
     {
-      if (aiRunTurn && typeof wireBody.assistant_text === 'string' && screenNamesADriver(analysisResult, readbackGraph)) {
-        const checked = removeDriverAbsenceClaims(wireBody.assistant_text, screenLines.map(l => l.label));
-        if (checked.removed > 0 && checked.text.trim() === '') {
-          wireBody = { ...wireBody, assistant_text: withScreenLinesOwed('', screenLines).text };
-        }
-      }
       const driverEdited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),

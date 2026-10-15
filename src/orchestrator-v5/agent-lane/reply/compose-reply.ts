@@ -672,6 +672,8 @@ function composeReplyShapeWhole(input: ReplyComposeInput): ReplyComposition {
 function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const faceContract = input.faceContract !== undefined;
   const canMark = input.keepWhole === undefined && input.profile !== 'method_step' && input.profile !== 'proposal';
+  // Suppressing coaching additions never suppresses a condition that licences a shown number.
+  const canQualifyChance = canMark || input.keepWhole === 'ai_run_answer';
   const foldedInput = foldQuotes(input.text);
   const disclosures = canMark ? (input.obligations ?? []).filter(o => o.disclosure !== undefined && o.ownsNextStep !== true)
     .flatMap(o => {
@@ -691,8 +693,8 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
         : input.text.split('\n').flatMap(raw => sentencesOf(BULLET_LINE.exec(raw)?.[2] ?? raw)).find(part => part.includes(written));
       return [{ ...o, text: sentence ?? written }];
     }) : [];
-  const chanceDisclosure = canMark && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
-  const horizonWithholdDetails = !canMark || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
+  const chanceDisclosure = canQualifyChance && faceContract ? withholdDisclosureForCells(input.graph, input.chanceCells ?? []) : null;
+  const horizonWithholdDetails = !canQualifyChance || !faceContract ? [] : (input.chanceCells ?? []).flatMap(cell => cell.kind !== 'withheld' ? []
     : cell.reasons.filter(reason => reason.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED' || reason.code === 'HORIZON_NOT_TESTED')
       .flatMap(reason => typeof reason.message === 'string' && reason.message.trim() !== '' ? [reason.message] : []));
   /**
@@ -723,22 +725,22 @@ function composeNormalReplyShape(input: ReplyComposeInput): ReplyComposition {
   const method = goalStockMethodForRun(input.graph, input.analysisResult);
   const steadyAttested = goalHorizonVerdict(input.graph) === 'steady_attested';
   const horizonWithheld = chanceDisclosure?.kind === 'withhold' && chanceDisclosure.cause === 'horizon_not_tested';
-  const horizonDetail = canMark && input.faceContract === 'run' && !steadyAttested && method === null && !horizonWithheld ? input.horizonLine : undefined;
+  const horizonDetail = canQualifyChance && input.faceContract === 'run' && !steadyAttested && method === null && !horizonWithheld ? input.horizonLine : undefined;
   const horizonBesideChance = (input.chanceCells ?? []).some(cell => cell.kind === 'figure' || cell.kind === 'range');
-  const steadyWhy = canMark && faceContract && steadyAttested && horizonBesideChance
+  const steadyWhy = canQualifyChance && faceContract && steadyAttested && horizonBesideChance
     ? goalHorizonSteadyWhyLine(input.graph) : undefined;
-  const widenDetail = canMark && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
+  const widenDetail = canQualifyChance && faceContract ? [input.faceContract === 'run' ? input.widenedLine : undefined, input.widenedRiskNote] : [];
   const widenedRiskMarker = input.faceContract === 'run' && input.widenedRiskNote !== undefined
     ? input.widenedRiskMarker ?? WIDENED_RISK_MARKER_MAY_MOVE : undefined;
-  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canMark && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonDetailBeyondLead, ...widenDetail]
+  const detailLines = [...new Set([...(input.detailLines ?? []), ...disclosures.map(o => o.text).filter((text, index, all) => !all.some((other, otherIndex) => otherIndex !== index && other.length > text.length && other.includes(text))), horizonDetail, steadyWhy, ...(canQualifyChance && faceContract && horizonBesideChance && method !== null ? [method.why] : []), ...horizonDetailBeyondLead, ...widenDetail]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== ''))];
   const markerLines = [...new Set([...markerObligations.map(o => o.text), ...(chanceMarker === undefined ? [] : [chanceMarker])])];
-  const faceHostLines = !faceContract || !canMark ? [] : [
+  const faceHostLines = !faceContract || !canQualifyChance ? [] : [
     horizonDetail === undefined || !horizonBesideChance ? undefined : HORIZON_MARKER,
     input.faceContract === 'draft' ? input.widenedLine : undefined,
     widenedRiskMarker,
     input.faceContract === 'run' && horizonBesideChance && method !== null ? method.face : undefined,
-    input.whatChanges, input.estimatesLine,
+    canMark ? input.whatChanges : undefined, canMark ? input.estimatesLine : undefined,
   ].filter((line): line is string => typeof line === 'string' && line.trim() !== '');
   const inputQuestions = openQuestionsSegment(input.text);
   const addedFaceLines = [...faceHostLines, ...markerLines].filter(line => !input.text.includes(line));
