@@ -1,10 +1,11 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
-import { goalTargetBasisIn } from '../statement-door/fields/goal-timing.js';
+import { goalTargetBasisIn, humanEffectsTimingOf, optionLeadWords, optionTimingAtPeriodEnd, referenceWords } from '../statement-door/fields/goal-timing.js';
+import { periodEndWords } from './goal-target-basis.js';
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
 import { readGoalRecord } from './goal-record.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
-import { GOAL_FIGURES_HORIZON_NOT_TESTED, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_HORIZON_NOT_TESTED, GOAL_FIGURES_OPTION_NOT_IN_PLACE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { goalHorizonWithholdDetail } from './goal-horizon-detail.js';
 import { horizonSteadyAttested } from './horizon-basis.js';
 import { goalKindOf } from './goal-kind.js';
@@ -104,6 +105,42 @@ export function withholdGoalFiguresForUntestedHorizon<E>(response: E, graph: unk
   // shape the product cannot work out: neither knows of it, so either chance would be manufactured certainty. Only a withhold is added.
   const outsideTheClass = (verdict === 'computed_at_h' || verdict === 'steady_attested') && timeClassOf(brief).shapes.length > 0;
   return verdict === 'withhold' || outsideTheClass ? withholdUntestedHorizonFigures(response, graph, brief) : response;
+}
+
+/**
+ * ⭐ M3c (AIE 6181933060): where the options' OWN recorded leads give the reading at the target's month (`goalTargetBasisIn`), an
+ * option whose effect is not fully in place by then, or may or may not be (a lead that straddles it), stays visible with its
+ * outcome, but its chance at that month is not part of this scored set; never read as "no change". Two conditional chances are
+ * not representable on today's engine, so a straddling lead withholds rather than invents a law. Every share and the leader go
+ * too: the comparison would set an effect that is not yet there against the others. Pure.
+ */
+export function withholdOptionsNotInPlaceAtPeriodEnd<E>(response: E, graph: unknown): E {
+  const nodes = recordOf(graph)?.nodes;
+  const goals = Array.isArray(nodes) ? nodes.map(recordOf).filter((n): n is Rec => n?.kind === 'goal') : [];
+  const goal = goals.length === 1 ? goals[0]! : undefined;
+  if (goal === undefined || typeof goal.id !== 'string' || humanEffectsTimingOf(graph, goal.id) !== undefined) return response;
+  const basis = goalTargetBasisIn(graph, goal);
+  const timing = optionTimingAtPeriodEnd(graph, goal.id);
+  if (basis === undefined || !basis.effects_at_period_end || timing === undefined) return response;
+  // Only options this Run scored are named: an option the Run left out says so elsewhere (`option_participation`).
+  const env = recordOf(response);
+  const scored = new Set(env === undefined ? [] : readOptionResultSources(env).flat().map((row) => row.option_id ?? row.id)
+    .filter((id): id is string => typeof id === 'string'));
+  const out = timing.options.filter((o) => scored.has(o.option_id)
+    && (((o.kind === 'later' || o.kind === 'straddles') && o.lead !== undefined) || (o.kind === 'unknown' && o.olumi_proposed === true)));
+  if (out.length === 0) return response;
+  const at = `${periodEndWords(basis)} ${referenceWords(basis)}`;
+  const said = out.map((o) => (o.kind === 'later'
+    ? `‘${o.label}’ is not fully in place by ${at} on your forecast (${optionLeadWords(o.lead!)}), so its chance at that point is not part of this scored set.`
+    : o.kind === 'straddles'
+      ? `‘${o.label}’ may or may not be fully in place by ${at} on your forecast (${optionLeadWords(o.lead!)}), so its chance at that point is withheld.`
+      : `‘${o.label}’ is Olumi’s suggestion and has no forecast of when its effect is fully in place, so its chance at ${at} is withheld.`));
+  const message = `${said.join(' ')} The options are not ranked against each other here, because that comparison would count an effect that is not yet in place.`;
+  const ids = out.map((o) => o.option_id);
+  return withholdOptionGoalFigures(response, new Set(ids), {
+    code: GOAL_FIGURES_OPTION_NOT_IN_PLACE, severity: 'warning', message, say: message, node_ids: ids, option_ids: ids,
+    detail: { reason: 'OPTION_NOT_IN_PLACE_AT_PERIOD_END', per_option: out.map((o) => ({ option_id: o.option_id, kind: o.kind })) },
+  }, { keepOutcome: true });
 }
 
 /** Only callers that have obtained the ONE verdict enter this projection. */
