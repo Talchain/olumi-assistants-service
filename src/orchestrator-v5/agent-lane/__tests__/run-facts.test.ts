@@ -47,6 +47,9 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
     const [, body] = BRIEFS[0]!;
     const stale = runFactsOf(body.analysis_result, body.graph, false);
     expect(stale).toMatchObject({ current: false, chances: {}, withheld: [], sensitivity: { measured: false }, must_say: [] });
+    expect(stale.chances).toEqual({});
+    expect(stale.olumi_inputs).toBeUndefined();
+    expect(stale.leader).toMatchObject({ option_id: null, goal_chance_leader: null, similar_option_ids: [] });
   });
 
   it('the user’s recorded statements ride in the packet, verbatim', () => {
