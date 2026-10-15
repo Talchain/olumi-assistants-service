@@ -18,8 +18,8 @@ const argsA = { interventions: [{ option_label: 'a', factor_label: 'goal', value
 const argsB = { interventions: [{ option_label: 'b', factor_label: 'goal', value: 2 }] };
 const say = [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'That change needs a target first.' }] }];
 
-interface Turn { history?: readonly unknown[]; revision?: string | null; typed?: string[]; calls?: object[]; codes?: (string | null)[] }
-async function turn({ history = [], revision = 'rev-1', typed = [brief], calls = [argsA], codes = ['revised_draft_has_no_target'] }: Turn) {
+interface Turn { history?: readonly unknown[]; revision?: string | null; typed?: string[]; calls?: object[]; codes?: (string | null)[]; state?: unknown }
+async function turn({ history = [], revision = 'rev-1', typed = [brief], calls = [argsA], codes = ['revised_draft_has_no_target'], state }: Turn) {
   const store = new ProposalStore();
   const d: InternalDispatch = async () => ({ status: 200, json: { graph, graph_hash: 'h0' } });
   const caps = createAgentCapabilities(d, store);
@@ -36,7 +36,9 @@ async function turn({ history = [], revision = 'rev-1', typed = [brief], calls =
   };
   const ctx = { scenario_id: '0a2a2a2a-0000-4000-8000-000000000000', authenticated_user_id: 'user', request_id: 'a2', user_text: typed.join('\n'),
     user_turn_text: typed[typed.length - 1], verified_user_messages: typed };
-  const canonicalContext = revision === null ? undefined : { packet: null, expectation: {
+  const packet = state === undefined || revision === null ? null
+    : { scenario_id: ctx.scenario_id, authenticated_user_id: 'user', graph_revision: revision, captured_at_turn: 0, state, binding: 'unverified' };
+  const canonicalContext = revision === null ? undefined : { packet, expectation: {
     scenario_id: ctx.scenario_id, authenticated_user_id: 'user', graph_revision: revision, current_turn: 0, binding_secret: 's' } };
   const result = await runAgentTurn({ ctx, history, message: typed[typed.length - 1], instructions: 'i', maxOutputTokens: 200, maxHops: 6,
     ...(canonicalContext === undefined ? {} : { canonicalContext }) }, guarded, model);
@@ -73,6 +75,15 @@ describe('A2: a refusal is remembered across turns with its cause, and only an u
   it('CONTRAST a new saved revision runs the call', async () => {
     const first = await turn({});
     expect((await turn({ history: first.result.items, revision: 'rev-2' })).dispatches).toBe(1);
+  });
+  it('⛔ #3255 follow-up CONTRAST: a new Run that licenses what was withheld (same revision, same typed words) runs the call; the same Run view still blocks it', async () => {
+    const withheld = { analysis: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } }, run_facts: { current: true } };
+    const licensed = { analysis: { leader_claim: { permitted: true } }, run_facts: { current: true } };
+    const first = await turn({ state: withheld, codes: ['query_cannot_be_shown'] });
+    expect(first.dispatches).toBe(1);
+    expect((await turn({ history: first.result.items, state: structuredClone(withheld), codes: ['query_cannot_be_shown'] })).dispatches,
+      'the same Run view: unchanged cause, not run again').toBe(0);
+    expect((await turn({ history: first.result.items, state: licensed, codes: [null] })).dispatches, 'a Run that licenses it: a changed cause').toBe(1);
   });
   it('CONTRAST changed arguments run the call', async () => {
     const first = await turn({});
