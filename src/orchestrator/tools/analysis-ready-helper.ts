@@ -47,7 +47,9 @@ import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-ana
 import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
 import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
-import { findScaleIncoherentBaselineFactorIds } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
+import { buildFactorScaleMap, decideAnalysisScaleBlock, findScaleIncoherentBaselineFactorIds, projectRequestInterventionsToWireScale } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
+import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
+import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -1540,25 +1542,37 @@ function appendSemanticIssues(
  * Both the wire projection and Run admission are adapters over this record.
  */
 /**
- * The factors the Run's baseline gate refuses (`baseline_scale_unresolved`), computed as the Run computes them: every option
- * node's merged intervention objects (`mergeInterventionSourceObjects`, the Run loader's own merge), options holding no value
- * left out (the analysable gate), then the unadopted-Olumi-suggestion rule (`filterOlumiProposedOptions`). Readiness has no
- * scaffold, so no value is CEE-supplied here, as none is in the user's options the Run reads.
+ * The Run's scale verdict (`decideAnalysisScaleBlock`, run-analysis.ts §3–3.1), computed through the Run's own chain: the
+ * options as the loader builds them (the readiness projection's options, each with its node's merged intervention objects,
+ * `mergeInterventionSourceObjects`), the user's own exclusions (`userExcludedOptions`), the analysable gate and its scaffold
+ * (`gateAnalysableOptions`; its `held` values are CEE-supplied), the unadopted-Olumi-suggestion rule
+ * (`filterOlumiProposedOptions`), then the request projection and the baseline gate. Each step is the Run's function.
  */
-function baselineScaleGaps(nodes: readonly unknown[], graph: unknown): Array<{ id: string; label: string; value: number }> {
-  const options = nodes
-    .filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'option'
-      && typeof (n as { id?: unknown }).id === 'string')
-    .map((n) => ({ id: n.id as string, option_id: n.id as string, interventions: mergeInterventionSourceObjects(n) }));
-  const valued = options.filter((o) => Object.keys(o.interventions).length > 0);
-  const submitted = filterOlumiProposedOptions({ submitted: valued, graph,
-    unanalysableOptionIds: options.filter((o) => !valued.includes(o)).map((o) => o.option_id) }).options;
-  const ids = findScaleIncoherentBaselineFactorIds(nodes,
-    submitted.map((o) => (o.interventions !== null && typeof o.interventions === 'object' ? o.interventions as Record<string, unknown> : {})));
-  return ids.map((id) => {
-    const node = nodes.find((n) => (n as { id?: unknown }).id === id) as { label?: unknown; observed_state?: { value?: unknown } } | undefined;
-    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(node?.observed_state?.value) };
-  });
+function runScaleGaps(parsedGraph: { nodes: readonly unknown[] }, graph: unknown,
+  projected: ReadonlyArray<{ option_id: string; label: string; is_baseline?: boolean }>):
+  { reason: 'mixed_scale_unresolved' | 'baseline_scale_unresolved'; gaps: Array<{ id: string; label: string; value: number }> } | null {
+  const nodes = parsedGraph.nodes;
+  const nodeById = new Map(nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object')
+    .map((n) => [String((n as { id?: unknown }).id), n] as const));
+  const loaded = projected.map((o) => ({ id: o.option_id, option_id: o.option_id, label: o.label,
+    interventions: mergeInterventionSourceObjects(nodeById.get(o.option_id) ?? {}),
+    ...(o.is_baseline !== undefined ? { is_baseline: o.is_baseline } : {}) }));
+  const userStatus = userExcludedOptions({ options: loaded, graph });
+  const gate = gateAnalysableOptions({ options: userStatus.options as ReadonlyArray<Record<string, unknown>>, graph: parsedGraph,
+    rawPersistedGraph: graph, scaleNetEnabled: true });
+  const submitted = filterOlumiProposedOptions({ submitted: gate.options as ReadonlyArray<Record<string, unknown>>, graph,
+    unanalysableOptionIds: gate.excluded.map((x) => x.option_id) }).options;
+  const raw = submitted.map((o) => (o.interventions !== null && typeof o.interventions === 'object' ? o.interventions as Record<string, unknown> : {}));
+  const heldBy = new Map(gate.held.map((r) => [r.option_id, new Set(r.factor_ids)] as const));
+  const synthesised = submitted.map((o) => heldBy.get(String(o.option_id ?? o.id)) ?? new Set<string>());
+  const verdict = decideAnalysisScaleBlock(projectRequestInterventionsToWireScale(raw, buildFactorScaleMap(nodes), synthesised),
+    findScaleIncoherentBaselineFactorIds(nodes, raw, synthesised));
+  if (!verdict.blocked) return null;
+  return { reason: verdict.reason_code, gaps: verdict.unresolvedFactorIds.map((id) => {
+    const node = nodeById.get(id) as { label?: unknown; observed_state?: { value?: unknown; raw_value?: unknown } } | undefined;
+    const v = node?.observed_state?.raw_value ?? node?.observed_state?.value;
+    return { id, label: typeof node?.label === 'string' ? node.label : id, value: Number(v) };
+  }) };
 }
 
 export function assessCanonicalAnalysisReadiness(
@@ -1743,13 +1757,17 @@ export function assessCanonicalAnalysisReadiness(
     // range"). The Run's own baseline gate (`findScaleIncoherentBaselineFactorIds`, run-analysis.ts) over the options the Run
     // would send — those holding a value (the analysable gate), then `filterOlumiProposedOptions`' own rule — so readiness
     // and the Run cannot disagree. Asked as that factor's level, in its unit or with its range: never "no control can repair it".
-    baselineScaleGaps(parsed.data.nodes, graph).forEach((gap, index) => {
+    const scale = runScaleGaps(parsed.data, graph, semantic?.options ?? []);
+    scale?.gaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_scale_${index + 1}`,
         code: 'FACTOR_LEVEL_SCALE_UNRESOLVED',
         category: 'numeric_integrity',
-        message: `What is "${gap.label}" today, in its own unit (for example £ per year, %, or a count)? It is recorded as ${gap.value} `
-          + 'with no unit or range, so the analysis cannot use it yet. A range is fine if you are not sure.',
+        message: scale.reason === 'baseline_scale_unresolved'
+          ? `What is "${gap.label}" today, in its own unit (for example £ per year, %, or a count)? It is recorded as ${gap.value} `
+            + 'with no unit or range, so the analysis cannot use it yet. A range is fine if you are not sure.'
+          : `What unit are "${gap.label}" and the levels your options set for it in? Its recorded value (${gap.value}) and those levels `
+            + 'cannot be read on one scale yet, so the analysis cannot use them.',
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,

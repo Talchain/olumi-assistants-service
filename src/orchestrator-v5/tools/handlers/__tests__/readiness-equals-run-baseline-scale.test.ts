@@ -17,6 +17,20 @@ import type { HandlerInvocation } from '../../registry.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { createAgentCapabilities, type InternalDispatch } from '../../../agent-lane/runtime/agent-capabilities.js';
+import { ProposalStore } from '../../../agent-lane/proposal.js';
+import { computeGraphIdentityHash } from '../../../context/graph-identity.js';
+import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { GraphV3 } from '../../../../schemas/cee-v3.js';
+import { applyFactorValueEdit } from '../../../system-events/factor-value-edit.js';
+import { recoverScaleFrame } from '../d1-shared/scale-frame.js';
+import { committedValueWrite } from '../../../agent-lane/__tests__/fixtures/served-value-write.js';
+
+// The drafter-raw recorder writes its own table; it is a recorder, not logic.
+vi.mock('../../../drafter-raw/index.js', () => ({
+  buildWithDrafterRawRecord: async (_ctx: unknown, _brief: unknown, _op: unknown, call: unknown,
+    build: (drafter: unknown) => Promise<unknown>) => build(call),
+}));
 
 type Rec = Record<string, any>;
 const MARKETING = (): Rec => JSON.parse(readFileSync('tests/fixtures/marketing-withheld-once/run-08.json', 'utf8')).graph as Rec;
@@ -73,6 +87,33 @@ async function run(stored: Rec): Promise<{ ran: boolean; refusal?: string }> {
   }
 }
 
+/**
+ * The Run's OWN verdict on `variant`, readiness bypassed explicitly: the snapshot is loaded from `control` (which readiness
+ * clears), then its graph bytes are the variant's. Only the factor's recorded level differs, so the options the loader built are
+ * the variant's options too; every gate after the loader (scaffold, filters, scale projection, baseline gate) runs as served.
+ */
+async function runOwn(control: Rec, variant: Rec): Promise<{ ran: boolean; refusal?: string }> {
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', {
+    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: structuredClone(control), briefText: null }),
+    loadGraph: async () => structuredClone(control),
+  } as never) as Rec;
+  const swapped = { ...snapshot, graph: GraphV3.parse(structuredClone(variant)), rawPersistedGraph: structuredClone(variant) };
+  const plotRun = vi.fn(async (payload: Rec) => ({ ...structuredClone(minimalFixture), inference_warnings: [],
+    results: payload.options.map((o: Rec) => ({ option_id: o.id ?? o.option_id, option_label: o.label, win_probability: 1 / payload.options.length })),
+    option_comparison: payload.options.map((o: Rec) => ({ option_id: o.id ?? o.option_id, option_label: o.label, win_probability: 1 / payload.options.length,
+      probability_of_goal: 0.4, outcome: { p10: 0, p50: 1, p90: 3, mean: 1, std: 1, n_samples: 1000, n_valid_samples: 1000, validity_ratio: 1, percentiles_source: 'samples' } })),
+  }) as unknown as V2RunResponseEnvelope);
+  const handler = createRunAnalysisHandler({ plotClient: { run: plotRun, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient,
+    scenarioReader: async () => swapped as never });
+  try {
+    await handler({ payload: { kind: 'message', scenario_id: SID, turn_id: 't-run' }, requestId: 'req-run',
+      signal: new AbortController().signal, context: {}, orientationText: '' } as unknown as HandlerInvocation);
+    return { ran: plotRun.mock.calls.length === 1 };
+  } catch (err) {
+    return { ran: false, refusal: JSON.stringify({ message: (err as Error).message, details: (err as { details?: unknown }).details ?? null }) };
+  }
+}
+
 describe('readiness ≡ Run on a level recorded with no scale (the Run\'s baseline gate is part of the ONE readiness authority)', () => {
   for (const [brief, load] of [['marketing run-08', MARKETING], ['hiring r4', HIRING]] as const) {
     it(`${brief}: CONTROL — as stored, readiness is ready and the Run reaches PLoT`, async () => {
@@ -84,23 +125,97 @@ describe('readiness ≡ Run on a level recorded with no scale (the Run\'s baseli
     });
 
     for (const v of ['bare', 'scaled_pair', 'stated_range'] as const) {
-      it(`${brief} · ${v}: readiness blocks for that factor ⇔ the Run refuses it; readiness clear ⇔ the Run never refuses it`, async () => {
+      it(`${brief} · ${v}: readiness asks for scale ⇔ the Run's OWN gates refuse for scale; served, the Run refuses with readiness's ask`, async () => {
         const { g, id } = variant(load(), v);
-        const r = assessCanonicalAnalysisReadiness(g);
-        const asked = r.blockingIssues.filter((i) => i.code === CODE);
-        const out = await run(g);
-        if (v === 'bare') {
-          expect(asked.map((i) => i.factor_id)).toEqual([id]);
-          expect(asked[0]!.repairability).toBe('human_input_required');
-          expect(asked[0]!.message).toMatch(/in its own unit .*A range is fine if you are not sure\.$/);
-          expect(out.ran).toBe(false);
-          // The Run refuses with READINESS's ask (one gate), never a second sentence saying no control can repair it.
-          expect(out.refusal ?? '').toContain(asked[0]!.factor_label!);
+        const asked = assessCanonicalAnalysisReadiness(g).blockingIssues.filter((i) => i.code === CODE);
+        const own = await runOwn(load(), g);
+        const ownScale = /(?:baseline|mixed)_scale_unresolved/.test(own.refusal ?? '');
+        expect(asked.length > 0, `readiness ${JSON.stringify(asked.map((i) => i.factor_id))} vs Run ${own.refusal ?? 'ran'}`).toBe(ownScale);
+        if (v === 'bare') expect(asked.map((i) => i.factor_id)).toContain(id);
+        if (asked.length > 0) {
+          expect(asked.every((i) => i.repairability === 'human_input_required')).toBe(true);
+          const served = await run(g);
+          expect(served.ran).toBe(false);
+          expect(served.refusal ?? '').toContain(asked[0]!.factor_label!);
         } else {
-          expect(asked).toEqual([]);
-          expect(out.refusal ?? '').not.toContain('baseline_scale_unresolved');
+          expect(own.refusal ?? '').not.toMatch(/scale_unresolved/);
         }
       });
     }
   }
+});
+
+/**
+ * DL condition (15 Oct, no FACTOR_LEVEL door row): the user's typed answer to readiness's ask lands as THEIR figure, with its
+ * unit and a scale the Run can read, through the existing path (`propose_assumptions` revise → the card → `authorise_change`), and the Run then
+ * proceeds. The store is the register route's compare-and-set, in memory.
+ */
+describe('the answer to the ask lands as the user\'s level and the Run proceeds (marketing run-08)', () => {
+  /** Readiness's ask, answered with `answer` in the factor's own unit, through the user's card and its press; the saved model after. */
+  async function answered(answer: number): Promise<{ graph: Rec; id: string; os: Rec; unit: string; factorUnit: unknown }> {
+    const { g: bare, id } = variant(MARKETING(), 'bare');
+    const factor = (bare.nodes as Rec[]).find((n) => n.id === id)!;
+    const unit = typeof factor.observed_state.unit === 'string' && factor.observed_state.unit !== '' ? factor.observed_state.unit : 'units';
+    expect(assessCanonicalAnalysisReadiness(bare).blockingIssues.map((i) => i.code)).toContain(CODE);
+    let graph: Rec = structuredClone(bare);
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path === `/assist/v1/scenarios/${SID}/graph`) {
+        return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: 'brief',
+          graph_identity_hash: computeGraphIdentityHash(graph as never) } };
+      }
+      if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
+        const b = body as { graph: Rec; expected_graph_hash?: unknown; expected_graph_identity_hash?: unknown };
+        if (b.expected_graph_hash !== computeAnalysisAffectingGraphHash(graph as never)
+          || b.expected_graph_identity_hash !== computeGraphIdentityHash(graph as never)!.value) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+        graph = GraphV3.parse(b.graph) as Rec;
+        return { status: 200, json: { registered: true, graph_identity_hash: computeGraphIdentityHash(graph as never) } };
+      }
+      // The served route applies a value edit through its ONE writer and answers with the committed patch block.
+      if (path === '/orchestrate/v2/turn' && (body as Rec)?.kind === 'system_event' && (body as Rec).event?.kind === 'factor_value_edit') {
+        const b = body as Rec;
+        const res = await applyFactorValueEdit({ payload: b as never, event: b.event as never, requestId: 'req-write', persistedGraph: structuredClone(graph), priorFacts: [] }) as Rec;
+        if (res.kind !== 'mutated') return { status: 200, json: { assistant_text: 'Not recorded.', blocks: [] } };
+        graph = GraphV3.parse(res.mutatedGraph) as Rec;
+        return { status: 200, json: committedValueWrite(String(b.event.target_id)) };
+      }
+      return { status: 404, json: {} };
+    };
+    const proposals = new ProposalStore();
+    const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full');
+    const said = `${factor.label} is about ${answer} ${unit}.`;
+    const ctx = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-answer', turn_id: 'answer-turn-0001', user_turn_text: said, user_text: said };
+    const card = await caps.proposeAssumptions(ctx as never, { assumptions: [{ user_stated: true, factor_label: factor.label, value: answer, unit,
+      basis: 'the user\'s answer to the ask', revise: true }] } as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    expect(card.assumptions[0]).toMatchObject({ value: answer, your_figure: true });
+    const applied = await caps.authoriseChange!({ ...ctx, request_id: 'req-press', turn_id: 'press-turn-0001', user_turn_text: '',
+      typed_approval_of: card.proposal_id } as never, { proposal_id: card.proposal_id } as never) as Rec;
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, mutated: true });
+    const os = (graph.nodes as Rec[]).find((n) => n.id === id)!.observed_state as Rec;
+    return { graph, id, os, unit, factorUnit: factor.observed_state.unit };
+  }
+
+  it('bare level → ask → the user types a figure in its unit → their card, pressed → user origin, unit, a readable scale → readiness clear → the Run reaches PLoT', async () => {
+    const { graph, os, unit, factorUnit } = await answered(2);
+    // The user's figure, with its unit, and a scale the Run can read; the user's own stamp, never an assumption's.
+    expect(os).toMatchObject({ raw_value: 2, source: 'user_override' });
+    expect(os.unit).toBe(factorUnit ?? unit);
+    expect(recoverScaleFrame({ value: os.value, raw_value: os.raw_value }) !== undefined || typeof os.cap === 'number').toBe(true);
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map((i) => i.code)).not.toContain(CODE);
+    const out = await run(graph);
+    expect(out.refusal ?? '').not.toContain('scale_unresolved');
+    expect(out.ran, out.refusal).toBe(true);
+  });
+
+  it('readiness ≡ Run on the OTHER half of the scale verdict: an answer off its factor\'s frame (300 on a 0–3 frame) leaves the options\' levels on another scale — readiness asks it ⇔ the Run refuses mixed_scale_unresolved', async () => {
+    const { graph, id } = await answered(300);
+    const asked = assessCanonicalAnalysisReadiness(graph).blockingIssues.filter((i) => i.code === CODE);
+    const own = await runOwn(MARKETING(), graph);
+    expect(own.refusal ?? '', 'the Run\'s own gate refuses').toContain('mixed_scale_unresolved');
+    const out = await run(graph);
+    expect(out.ran).toBe(false);
+    expect(asked.map((i) => i.factor_id)).toContain(id);
+    expect(asked.find((i) => i.factor_id === id)!.message).toMatch(/^What unit are .* and the levels your options set for it in\?/);
+    expect(out.refusal ?? '').toContain(asked.find((i) => i.factor_id === id)!.factor_label!);
+  });
 });
