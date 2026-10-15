@@ -380,7 +380,7 @@ function currentLevelWords(text: string): string[] {
 const PAST_ANCHOR = new Set(['last', 'previous', 'ago', 'yesterday']);
 /** V2: the credited figure's own unit, written right after it, is the quantity, not an attribution: "processing 1,400
  * claims per week" reports no claim, while "The insurer claims: …" still does. */
-function currentLevelRole(text: string, frame?: { span: { start: number; end: number }; unit: unknown }): boolean {
+function currentLevelRole(text: string, frame?: { span: { start: number; end: number }; unit: unknown; label?: string }): boolean {
   let attributed = text;
   if (frame !== undefined) {
     const unitWords = words(typeof frame.unit === 'string' ? frame.unit : '');
@@ -390,8 +390,11 @@ function currentLevelRole(text: string, frame?: { span: { start: number; end: nu
     const end = frame.span.end + (stop < 0 ? tail.length : run[stop]!.index!);
     attributed = text.slice(0, frame.span.start) + text.slice(end);
   }
-  return !FOREIGN_LEVEL.test(attributed) && !currentLevelWords(text).some(w => BOUNDS.has(w) || PAST_ANCHOR.has(w)
-    || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w));
+  // PROPOSAL (DL starting view 15 Oct ~06:3xZ): a word inside the factor's OWN label is never a role signal for that factor
+  // ("plan" in "Pro plan price" is its name, not an aim). Only the label's own words are set aside; the role words stay.
+  const own = new Set(words(frame?.label ?? ''));
+  return !FOREIGN_LEVEL.test(attributed) && !currentLevelWords(text).some(w => !own.has(w) && (BOUNDS.has(w) || PAST_ANCHOR.has(w)
+    || ['goal', 'target', 'limit', 'plan', 'forecast', 'estimate', 'estimated', 'or', 'but', 'if'].includes(w)));
 }
 
 /**
@@ -829,7 +832,11 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
       && words(quote.slice(amount.index + amount.matchedText.length)).slice(0, name.length).map(singular).join(' ') === name.join(' ');
     // The denominator may stay implicit in the sentence's subject ("Each additional specialist resolves about 20 tickets per
     // week" for tickets per week per specialist), as `quoteBindsFactorFigure` already reads it; a different written one refuses.
-    const inFrame = findLinkEffectAmounts(quote).filter((amount) => !ends.includes(amount.magnitude) &&
+    // A figure another verified statement of this same sentence binds to ANOTHER subject (the option's "to £59") is that
+    // subject's, set aside like a stated range's ends; the ambiguity test then counts what is left (PROPOSAL, pricing £49).
+    const owned = [...map.verified.entries()].filter(([other]) => other !== key)
+      .flatMap(([, statements]) => statements.filter((s) => s.quote === quote && s.low === s.high && s.low !== value).map((s) => s.low!));
+    const inFrame = findLinkEffectAmounts(quote).filter((amount) => !ends.includes(amount.magnitude) && !owned.includes(amount.magnitude) &&
       sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount, labelBeside(amount), true));
     if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
     const stated = inFrame[0]!;
@@ -957,7 +964,7 @@ function levelInContext(model: CandidateModel, factor: Factor, brief: string | u
     const span = bind(a.text);
     if (span === null) return false;
     if (insideQuotation(brief, a, span)) return false;
-    if (!currentLevelRole(a.text, { span, unit: factor.unit })) return false;
+    if (!currentLevelRole(a.text, { span, unit: factor.unit, label: factor.label })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
       if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
       // DL ruling 15 Oct ~06:2xZ: a neighbour bounds a figure only if it speaks about THAT figure. A repeat of the magnitude
