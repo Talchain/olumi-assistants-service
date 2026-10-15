@@ -194,7 +194,7 @@ export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, go
    * target, so the warning binds to them; unbound, the several-targets licence put "Does ‘conversion rate’ mean…" on the
    * customer target's line. None given: unbound, as before.
    */
-  ownTargetRowIds: readonly string[] = []): E {
+  ownTargetRowsOf: (goalId: unknown) => readonly string[] = () => []): E {
   if (!isRec(envelope)) return envelope;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -213,7 +213,7 @@ export function withholdForOpenTargetQuestion<E>(envelope: E, graph: unknown, go
   const out = withholdOptionGoalFigures(envelope, new Set(scored), {
     code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning', message, say: question,
     node_ids: [String(goalId)], option_ids: scored, detail: { reason: conditions ? 'conditions_not_kept' : 'target_reading_open' },
-    ...(ownTargetRowIds.length > 0 ? { constraint_ids: [...ownTargetRowIds] } : {}),
+    ...((rows) => (rows.length > 0 ? { constraint_ids: [...rows] } : {}))(ownTargetRowsOf(goalId)),
   }, { keepOutcome: true, keepOrdering: true });
   // ⛔ R5-5 (DL ruling): the conditions reason WINS. Sizing a link (the placeholder path's ask for today's level) cannot bring
   // this chance back while the reading is refused, so that ask is not offered as the reason here; the links stay unsized in

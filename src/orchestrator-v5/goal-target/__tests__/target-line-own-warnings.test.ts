@@ -31,7 +31,7 @@ function licensed(bind: boolean): { reading: Rec; licence: Rec } {
   pre.option_comparison.forEach((r: Rec, i: number) => { r.probability_of_goal = [0.31, 0.27, 0.12][i]; });
   const stored = F.graph.goal_constraints;
   let env = withholdGoalFiguresForMissingCurrentLevel(pre, F.graph, stored) as Rec;
-  env = withholdForOpenTargetQuestion(env, F.graph, 'conversion_rate', bind ? ownTargetRowIds(stored, 'conversion_rate') : []) as Rec;
+  env = withholdForOpenTargetQuestion(env, F.graph, 'conversion_rate', bind ? (id: unknown) => ownTargetRowIds(stored, id) : undefined) as Rec;
   const enrichment = withGoalChanceLicence(env, F.graph, 'conversion_rate', () => false, undefined, F.graph, {
     storedConstraints: stored, sentConstraints: wireGoalConstraints(stored), perLimit: F.limit_verdicts.per_limit }) as Rec;
   const find = (code: string): Rec => (enrichment.inference_warnings as Rec[]).find((w) => w.code === code)!;
@@ -95,7 +95,7 @@ describe('S9: each target’s line uses only the warnings bound to its own targe
     const pre = structuredClone(F.enrichment);
     pre.inference_warnings = (pre.inference_warnings as Rec[]).filter((w) => w.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE' && w.code !== 'GOAL_CHANCE_LICENSED');
     pre.option_comparison.forEach((r: Rec) => { r.probability_of_goal = 0.3; });
-    const env = withholdForOpenTargetQuestion(pre, graph, 'conversion_rate', ownTargetRowIds(graph.goal_constraints, 'conversion_rate')) as Rec;
+    const env = withholdForOpenTargetQuestion(pre, graph, 'conversion_rate', (id: unknown) => ownTargetRowIds(graph.goal_constraints, id)) as Rec;
     expect(env.option_comparison.every((r: Rec) => !('probability_of_goal' in r))).toBe(true);
     expect((env.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!.message).toBe(READING);
   });

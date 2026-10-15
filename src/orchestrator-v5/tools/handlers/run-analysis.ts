@@ -2264,7 +2264,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // ⭐ Recovery Batch C (amendment 3): a target read more than one way is not tested until the user says which.
-    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id, ownTargetRowIds(storedGoalRows, snapshot.goal_node_id));
+    response = withholdForOpenTargetQuestion(response, graphForAnalysis, snapshot.goal_node_id, (id) => ownTargetRowIds(storedGoalRows, id));
     // ⛔ AMEND item 2 (kept, DL 12 Oct): a level chance on Olumi's own estimate of the goal's level is refused by the licence;
     // the Run says why, with the next step (confirm the estimate, or give today's level) — never a silent gap.
     // ⭐ D3 (AIE #94 6128697025; recovery Batch D): a change target whose effects are not stated at the period's end (ruling
