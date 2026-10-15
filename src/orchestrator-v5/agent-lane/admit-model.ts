@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { statusQuoStatesZero, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -2983,7 +2983,23 @@ export function goalLevelOfStatedSum(model: CandidateModel, brief: string | unde
   const quote = sums.length === 1 ? sums[0]!.evidence?.quote : undefined;
   if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return model;
   const unitOf = (u: unknown): string => String(u ?? '').trim().toLowerCase();
-  const matches = sums[0]!.factors.map((label) => model.factors.filter((f) => f.label === label));
+  // ⭐ SYSTEM 2 step 2 (DL 15 Oct): a part may be an OUTCOME the brief defines as a product whose level today is 0 because the
+  // status quo explicitly sets one of its factors to 0 (`statusQuoStatesZero`): "80 + 0, by your definition". Any other
+  // outcome part leaves the goal's level as it was; there is no default 0.
+  const zeroOutcome = (label: string): CandidateModel['factors'][number] | undefined => {
+    if (!model.outcomes.some((o) => o.label === label)) return undefined;
+    const products = (model.identities ?? []).filter((d) => d?.operation === 'product' && d.outcome === label);
+    if (products.length !== 1) return undefined;
+    const operands = products[0]!.factors.map((l) => model.factors.filter((f) => f.label === l));
+    if (operands.some((m) => m.length !== 1)) return undefined;
+    return operands.some((m) => statusQuoStatesZero(model, m[0]!, brief))
+      ? { label, role: 'observable', baseline_known: true, baseline_value: 0, unit: goal.unit, provenance: 'explicit' } : undefined;
+  };
+  const matches = sums[0]!.factors.map((label) => {
+    const own = model.factors.filter((f) => f.label === label);
+    const zero = own.length === 0 ? zeroOutcome(label) : undefined;
+    return zero !== undefined ? [zero] : own;
+  });
   if (matches.length < 2 || matches.some((m) => m.length !== 1)) return model;
   const parts = matches.map((m) => m[0]!);
   if (parts.some((f) => unitOf(f.unit) !== unitOf(goal.unit) || f.baseline_known !== true

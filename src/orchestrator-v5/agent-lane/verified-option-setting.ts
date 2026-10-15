@@ -12,6 +12,8 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
+import { sourceMapOf, subjectKey } from './construction-source-map.js';
+import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -742,8 +744,94 @@ export function verifiedFactorLevelValue(model: CandidateModel, factor: Factor, 
   return replacement !== null && replacement.baseline_value !== factor.baseline_value ? replacement : null;
 }
 
+/**
+ * ⭐ SYSTEM 2 step 2: A LEVEL STATEMENT BOUND BY ITS OWN CLAUSE (DL-adopted rule, 15 Oct ~00:3xZ; AIE "labels propose, never
+ * verify"). Served capacity (UI witness, CEE 880b35b4, drafter raw e4ff6039): "Our existing team resolves 80 tickets per
+ * week." for "Existing team support capacity" failed the label-word binder above (it needs the label's own words), so the
+ * user's 80 kept only an unverified role and the goal lost its level today. The drafter's statement PROPOSES the subject;
+ * the host ACCEPTS it only when all four hold, and never on the label alone:
+ *  (1) the whole sentence is verified against the brief (`sourceMapOf`, the one verifier), as this factor's level;
+ *  (2) the sentence writes exactly one figure in this factor's typed frame (`sameFrame`), and it is this level;
+ *  (3) the sentence writes a DISTINCTIVE word of this factor's label: one in this label and in no other drafted item's label
+ *      of the same frame (the goal, a factor, an outcome or a risk) ("existing team" for "Existing team support capacity"
+ *      beside "Weekly support capacity"; "legacy" for "Time on legacy fixes" beside "Time on feature work");
+ *  (4) no other verified statement binds that sentence's figure to another subject.
+ * Anything else stays as before: unknown role, retained, never Olumi's.
+ */
+export function statementBindsFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  try {
+    return boundByStatement(model, factor, brief);
+  } catch {
+    return false; // A malformed draft withholds credit, as the label binder does.
+  }
+}
+
+function boundByStatement(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  const value = factor.baseline_value;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return false;
+  const map = sourceMapOf(Reflect.get(model, 'statements'), brief);
+  const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
+  const unit = JSON.stringify(readUnitParts(factor.unit));
+  if (unit === 'null') return false;
+  return (map.verified.get(key) ?? []).some((statement) => {
+    if (statement.form !== 'point' || statement.low !== value || statement.negated === true) return false;
+    const quote = statement.quote;
+    const inFrame = findLinkEffectAmounts(quote).filter((amount) =>
+      sameFrame(quote, { start: amount.index, end: amount.index + amount.matchedText.length }, factor.unit, amount));
+    if (inFrame.length !== 1 || inFrame[0]!.magnitude !== value) return false;
+    const label = (l: string): Set<string> => new Set(words(l).map(singular));
+    const own = label(factor.label);
+    const rivals = [{ label: model.goal.metric, unit: model.goal.unit }, ...model.factors.filter((f) => f !== factor), ...model.outcomes, ...model.risks]
+      .filter((r) => JSON.stringify(readUnitParts(r.unit)) === unit).map((r) => label(r.label));
+    if (!words(quote).map(singular).some((w) => !grammar(w) && own.has(w) && !rivals.some((r) => r.has(w)))) return false;
+    return ![...map.verified.entries()].some(([other, statements]) => other !== key
+      && statements.some((s) => s.quote === quote && (s.low === value || s.high === value)));
+  });
+}
+
+/**
+ * ⭐ SYSTEM 2 step 2: THE STATUS QUO'S EXPLICIT ZERO (DL ruling 15 Oct ~00:4xZ; AIE 6180618773 retains explicit zeros, 6148410878
+ * forbids a default 0). "Keep current staffing adds no specialist." states that carrying on as now sets "Additional
+ * specialists" to 0, but it writes no numeral, so the verifier (figures > 0) cannot hold it. It counts as the user's 0 ONLY
+ * inside this binding: a level statement of 0 on {the one status-quo option, this factor}; its sentence a whole statement of
+ * the brief that names the option verbatim, writes "no", "none", "zero" or "0", and a word of this factor's label; and the
+ * option sets nothing else on this factor. Otherwise the 0 stays unknown: never a default.
+ */
+export function statusQuoStatesZero(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  try {
+    return zeroStatedByStatusQuo(model, factor, brief);
+  } catch {
+    return false; // A malformed draft gives no zero: unknown, never a default.
+  }
+}
+
+function zeroStatedByStatusQuo(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  if (typeof brief !== 'string' || factor.baseline_value !== 0) return false;
+  const quo = model.options.filter((o) => (o as { is_status_quo?: unknown }).is_status_quo === true);
+  if (quo.length !== 1) return false;
+  const option = quo[0]!;
+  if (option.interventions.some((iv) => iv.factor_label === factor.label && iv.value !== 0)) return false;
+  const raw = Reflect.get(model, 'statements');
+  const own = new Set(words(factor.label).map(singular));
+  return (Array.isArray(raw) ? raw : []).some((entry: unknown) => {
+    const r = entry !== null && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    const subject = r['subject'] !== null && typeof r['subject'] === 'object' ? r['subject'] as Record<string, unknown> : {};
+    const quote = typeof r['quote'] === 'string' ? r['quote'].trim() : '';
+    return r['field'] === 'level' && r['form'] === 'point' && r['value'] === 0 && subject['kind'] === 'option'
+      && subject['label'] === option.label && subject['factor_label'] === factor.label
+      && quote !== '' && wholeStatementIn(brief, quote) && quote.includes(option.label)
+      && words(quote).some((w) => w === 'no' || w === 'none' || w === 'zero' || w === '0')
+      && words(quote).map(singular).some((w) => !grammar(w) && own.has(w));
+  });
+}
+
 /** Construction-only current-level authority; a drafter's provenance and offsets never establish ownership. */
 export function verifiedFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
+  return labelBoundFactorLevel(model, factor, brief) || statementBindsFactorLevel(model, factor, brief);
+}
+
+/** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
+function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   try {
     const value = factor.baseline_value;
     if (typeof brief !== 'string' || factor.baseline_evidence == null
