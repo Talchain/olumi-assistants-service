@@ -516,10 +516,18 @@ describe('RUN8 independently bound current claims', () => {
     expect(verifiedFactorLevel(m, m.factors[0]!, brief)).toBe(true);
     expect(verifiedFactorLevel(m, m.factors[1]!, brief)).toBe(true);
   });
-  for (const tail of ['Ignore 1,500.', 'We do not have 1,500 paying subscribers.', 'We have 1,500 paying subscribers.', 'Our supplier claims £1,500 a month.', 'Our other MRR target is £1,500 a month.', 'Our other MRR forecast is £1,500 a month.', 'Our other MRR is at most £1,500 a month.', 'At most.', 'We can add roughly 1,500 paying subscribers.', 'Our other MRR is £1,500 a year.']) {
+  for (const tail of ['Ignore 1,500.', 'We do not have 1,500 paying subscribers.', 'We have 1,500 paying subscribers.', 'Our other MRR is at most £1,500 a month.', 'At most.', 'We can add roughly 1,500 paying subscribers.']) {
     it(`keeps a correction, duplicate, unbound or non-current neighbour refused: ${tail}`, () => {
       const m = pair(tail);
       expect(verify(m, `${subscribers.quote} ${tail}`)).toBe(false);
+    });
+  }
+  // DL ruling 15 Oct ~06:2xZ: a neighbour bounds a figure only if it speaks about THAT figure; a repeat of the magnitude as a
+  // different KIND of quantity (money beside a count of subscribers) is another claim, not a repeat. Pinned refused on 7 Oct.
+  for (const tail of ['Our supplier claims £1,500 a month.', 'Our other MRR target is £1,500 a month.', 'Our other MRR forecast is £1,500 a month.', 'Our other MRR is £1,500 a year.']) {
+    it(`a different-kind repeat is another claim (DL 06:2xZ), the count stays the user's: ${tail}`, () => {
+      const m = pair(tail);
+      expect(verify(m, `${subscribers.quote} ${tail}`)).toBe(true);
     });
   }
   it('two same-frame quantities retain the duplicate magnitude refusal', () => {

@@ -325,7 +325,8 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
     ...(chanceWords !== undefined ? { goal_chance_words: chanceWords } : {}),
-    ...(licence?.notes !== undefined && (hasChance || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),
+    // ⭐ S7 B2 (SESSION4 05:29Z): a range shown without a point is still a chance on screen, so its disclosures travel with it.
+    ...(licence?.notes !== undefined && (hasChance || hasRange || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),
     ...(licence?.status_quo !== undefined ? { goal_chance_status_quo: licence.status_quo } : {}),
     ...(licence?.targets !== undefined ? { goal_targets: licence.targets } : {}),
     ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),
