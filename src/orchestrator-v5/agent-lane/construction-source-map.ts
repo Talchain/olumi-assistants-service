@@ -18,6 +18,7 @@
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { STATEMENT_FORMS, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
+import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 
@@ -112,7 +113,37 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
   });
   const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
   return amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
-    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]);
+    ...(a.magnitude > 0 && (TRUST_DRAFTER_STATEMENTS || statesLossBefore(quote, a.index)) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]);
+}
+
+/**
+ * ⭐ S4 SHORTCUT (Paul 15 Oct 09:15Z, "PoC today… patching makes it more fragile"; DL plan of record): ADMISSION TRUSTS THE
+ * DRAFTER'S STATEMENT. A statement's role (its subject, field and form), sign and unit are the drafter's; the host checks only
+ * that its quote is a whole sentence of the brief and writes the figure (its magnitude: the sign is the drafter's reading).
+ * This one line switches off the per-meaning host verifiers on a draft that carries `statements[]`: the net-loss sign words,
+ * the factor-level binder (frame, label word, neighbours, the about-N anchor, the level-in-context roles) and the
+ * option-setting clause checks. Nothing is deleted; a draft recorded before SYSTEM 2 is read exactly as before.
+ */
+export const TRUST_DRAFTER_STATEMENTS = true;
+
+/**
+ * The drafter's statement that `subject`'s `field` is `value` (a point, or a range's own figure), trusted as filed: the quote is a
+ * whole sentence of the brief and writes |value|. Its quote, or `undefined` when the drafter filed none. `raw` is
+ * `draftStatements(model)`. Pure.
+ */
+export function drafterStatement(raw: unknown, brief: string, subject: DraftedSubject, field: StatementField, value: number): string | undefined {
+  const key = subjectKey(subject, field);
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
+    const drafted = subjectOf(r['subject']);
+    const filed = STATEMENT_FIELDS.find((f) => f === r['field']);
+    if (drafted === undefined || filed === undefined || subjectKey(drafted, filed) !== key) continue;
+    if (r['negated'] === true || (r['form'] !== 'point' && r['form'] !== 'range') || r['value'] !== value) continue;
+    const quote = typeof r['quote'] === 'string' ? r['quote'].trim() : '';
+    if (quote === '' || !wholeStatementIn(brief, quote)) continue;
+    if (figuresWritten(quote).some((f) => f.low === Math.abs(value))) return quote;
+  }
+  return undefined;
 }
 
 /**
