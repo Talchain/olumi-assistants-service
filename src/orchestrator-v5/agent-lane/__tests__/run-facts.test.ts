@@ -47,9 +47,16 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
     const [, body] = BRIEFS[0]!;
     const stale = runFactsOf(body.analysis_result, body.graph, false);
     expect(stale).toMatchObject({ current: false, chances: {}, withheld: [], sensitivity: { measured: false }, must_say: [] });
-    expect(stale.chances).toEqual({});
-    expect(stale.olumi_inputs).toBeUndefined();
     expect(stale.leader).toMatchObject({ option_id: null, goal_chance_leader: null, similar_option_ids: [] });
+    // Exactly no chance facts on either served Run when stale; contrast: the same Run, current, carries them.
+    let carried = 0;
+    for (const [, x] of BRIEFS) {
+      const s = runFactsOf(x.analysis_result, x.graph, false);
+      expect(s.chances).toEqual({});
+      expect(s.olumi_inputs).toBeUndefined();
+      carried += Object.keys(runFactsOf(x.analysis_result, x.graph, true).chances).length;
+    }
+    expect(carried).toBeGreaterThan(0);
   });
 
   it('the user’s recorded statements ride in the packet, verbatim', () => {
