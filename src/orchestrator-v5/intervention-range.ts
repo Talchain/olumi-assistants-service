@@ -17,6 +17,10 @@
  *      scored as though the user's range had been sampled.
  */
 import { InterventionRangeMeaningV3, InterventionRangeV3, type InterventionRangeV3T } from '../schemas/cee-v3.js';
+import { isPersonsOwnSetting } from '../cee/provenance/provenance-of.js';
+import { sayFigureExactly } from './agent-lane/say-figure.js';
+import { pressedRecord, userStatementOnNode } from './statement-door/statements.js';
+import { subjectKey, type DoorSubject } from './statement-door/subject.js';
 
 /** schemas 0.66.0 `InterventionRangeMeaning`, imported. Only `likely_range` is sampled by ISL. */
 export const INTERVENTION_RANGE_MEANINGS = InterventionRangeMeaningV3.options;
@@ -151,4 +155,74 @@ export function wireInterventionRangePlan(
     (ranges ??= {})[factorId] = { low, high, meaning };
   }
   return { ranges, notForwarded };
+}
+
+/**
+ * ⭐ C2 JOIN (AIE 6184022140; DL 15 Oct: disclose + provisional for every likely range): a `likely_range` the analysis samples is
+ * two ends (the person's, or the brief's, or Olumi's) READ WITH OLUMI'S EQUAL-TAIL APPROXIMATION, which ISL samples as the
+ * quartiles of a lognormal. No writer elicits that law from anyone, so it is never the person's calibration, whoever gave the
+ * ends: every result that rests on it says so ({@link likelyRangeLawWords}), and the person's own ends stay theirs.
+ */
+export interface LikelyRangeUse {
+  readonly factor_id: string;
+  readonly low: number;
+  readonly high: number;
+  readonly unit?: string;
+  /** The ends are the person's own (the range's own stamp, `isPersonsOwnSetting`), else not theirs. */
+  readonly persons_own: boolean;
+  /** The words the ends were stated in, where the range keeps them (`source_quote`): the approximation card quotes them. */
+  readonly source_quote?: string;
+  /** Set by a reader that knows the option (`rangeLawAdopted`): the approximation of exactly these ends was adopted. */
+  readonly adopted?: boolean;
+}
+
+/**
+ * ⭐ AIE 6184726873: a person's likely range licenses a number only once Olumi's equal-tail approximation of it is ADOPTED, by the
+ * press of a card that showed it whole (`RANGE_LAW_ROW`, the C2 template). The adoption is the ONE door store's record on the
+ * factor, keyed by the option's setting, attesting the law and the exact ends it was shown for: a changed range is not adopted.
+ */
+export const RANGE_LAW_EQUAL_TAIL = 'equal_tail' as const;
+/** The door subject an option's setting of a factor is: its range's adoption record is keyed by it. */
+export const rangeLawSubject = (optionId: string, factorId: string): DoorSubject => ({ kind: 'factor', id: factorId, option_id: optionId, field: 'level' });
+export function rangeLawAdopted(graph: unknown, optionId: string, u: Pick<LikelyRangeUse, 'factor_id' | 'low' | 'high'>): boolean {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
+  const node = nodes.find((n) => isRec(n) && n.id === u.factor_id);
+  // Only a PRESS adopts (#3207: a record construction wrote from the brief on the same setting is never one).
+  const record = node === undefined ? undefined : pressedRecord(userStatementOnNode(node, subjectKey(rangeLawSubject(optionId, u.factor_id))));
+  return record?.attest?.range_law === RANGE_LAW_EQUAL_TAIL && record.attest.low === u.low && record.attest.high === u.high;
+}
+/** AIE 6184726873's face, exact, where the recorded use is known. */
+export const rangeLawWithheldWords = (factorLabel: string, optionLabel: string): string =>
+  `Chance not shown: this result uses an equal-tail approximation for ‘${factorLabel.trim()}’ in ‘${optionLabel.trim()}’ that has not been adopted. `
+  + 'Your stated range remains recorded.';
+
+/** The admitted `likely_range` an option's cell carries for a factor, or `undefined` (none, another meaning, or refused). */
+export function likelyRangeUseOf(factorId: string, cell: unknown): LikelyRangeUse | undefined {
+  const verdict = admitInterventionRange(cell);
+  if (verdict === undefined || 'refused' in verdict || verdict.range.meaning !== 'likely_range') return undefined;
+  const unit = isRec(cell) && typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit.trim() : undefined;
+  return { factor_id: factorId, low: verdict.range.low, high: verdict.range.high, ...(unit !== undefined ? { unit } : {}),
+    persons_own: isPersonsOwnSetting(verdict.range),
+    ...(verdict.range.source_quote !== undefined ? { source_quote: verdict.range.source_quote } : {}) };
+}
+
+/**
+ * ⭐ C2 (template AIE 6184022140, exact): the person's range AS STATED, then the equal-tail fit as Olumi's proposed approximation,
+ * never their calibration. Its basis is the analysis's own convention for a likely range (ISL samples it as the quartiles of a
+ * lognormal, RATIFIED_COVERAGE 0.5): a modelling convention, not evidence or the meaning of "likely"; the lognormal's shape is said
+ * as its limitation. The level card (`statedRangeAssumptionWords`) and the approximation card (`RANGE_LAW_ROW`) say it alike.
+ */
+export const rangeApproximationWords = (low: string, high: string): string =>
+  `Your stated range is ${low} to ${high}, with its qualification read as “likely”; any other qualifications or conditions in your `
+  + `words were not read. Olumi proposes an equal-tail approximation, about one chance in four below ${low} and one in four above ${high}, `
+  + `for this analysis, based on how the analysis treats a likely range (as its lower and upper quarter points), a modelling convention, `
+  + `not evidence about this case or what “likely” means, with the limitation that the shape of the spread is also Olumi’s assumption: `
+  + `always above zero, with a longer tail on the high side. Your words did not specify those tail probabilities or how values are distributed`;
+
+/** One sentence: the option, the range's ends with whose they are, and the law as Olumi's approximation (never their calibration). */
+export function likelyRangeLawWords(optionLabel: string, factorLabel: string, u: LikelyRangeUse): string {
+  const say = (n: number): string => sayFigureExactly(n, u.unit ?? '') ?? `${n}${u.unit !== undefined ? ` ${u.unit}` : ''}`;
+  return `‘${optionLabel.trim()}’ uses ${u.persons_own ? 'your' : 'Olumi’s'} range for ‘${factorLabel.trim()}’, ${say(u.low)} to ${say(u.high)}, `
+    + `read with Olumi’s equal-tail approximation: about one chance in four below ${say(u.low)} and one in four above ${say(u.high)}, `
+    + `a modelling convention, not ${u.persons_own ? 'your own' : 'a measured'} calibration.`;
 }

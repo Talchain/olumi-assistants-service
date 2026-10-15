@@ -54,6 +54,7 @@ import { goalOwnConstraintChanceRecords, sentRunPairsChange, sentRunScoresHeldCh
 import { effectsTimingOf, periodEndAssumptionNote, type EffectsTiming } from './period-end-assumption.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import { goalChanceEstimateCounts, olumiEstimateWords, type GoalChanceEstimateCounts } from '../agent-lane/goal-chance-estimate-attribution.js';
+import { likelyRangeLawWords, rangeLawWithheldWords, type LikelyRangeUse } from '../intervention-range.js';
 import { inputOriginOf, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { resolveGoalDirection } from './goal-direction.js';
 import { goalReadingsOf, type GoalReading } from '../coaching/goal-reading-disclosure.js';
@@ -156,7 +157,17 @@ export interface GoalChanceUnearnedCertainty {
   readonly line: string;
 }
 
-export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved | GoalChanceUnearnedCertainty;
+/**
+ * AIE 6184726873: this Run's chance for the option rests on Olumi's equal-tail approximation of the person's likely range, which
+ * they have not adopted (no press of a card that showed it whole): withheld, with the AIE's face. The range stays recorded, and the
+ * approximation card is the next step (`RANGE_LAW_ROW`); its press, read-back and the automatic re-Run show the chance.
+ */
+export interface GoalChanceRangeLawUnadopted {
+  readonly reason: 'range_law_unadopted';
+  readonly line: string;
+}
+
+export type GoalChanceWithheldReason = GoalChanceZeroSpread | GoalChanceReferenceMoved | GoalChanceUnearnedCertainty | GoalChanceRangeLawUnadopted;
 
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
@@ -612,6 +623,9 @@ export function goalChanceLicenceOf(
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
   const zeroSpreadSide: Record<string, 'meets' | 'falls_short'> = {};
   const unearnedSide: Record<string, 'meets' | 'falls_short'> = {};
+  // AIE 6184726873: each option's likely ranges on the goal's path, with whether Olumi's approximation of them was adopted.
+  const rangesByOption = goalChanceEstimateCounts(graph, undefined, goalId).likelyRangesByOption ?? {};
+  const rangeLawWithheld: Record<string, LikelyRangeUse> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
@@ -636,6 +650,9 @@ export function goalChanceLicenceOf(
     }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
+    // AIE 6184726873: a figure resting on Olumi's equal-tail reading of the person's range, not adopted, is not licensed.
+    const unadopted = (rangesByOption[id] ?? []).find((u) => u.persons_own && u.adopted !== true);
+    if (unadopted !== undefined) { withheld.push(id); rangeLawWithheld[id] = unadopted; continue; }
     licensed.push(id);
     // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
     if (precision !== null) {
@@ -651,7 +668,7 @@ export function goalChanceLicenceOf(
   const sqSaid = (sqByAssumption || sqReading === 'moved') && statusQuoId !== undefined && withheld.includes(statusQuoId)
     && typeof sqP === 'number' && goalLabel !== undefined;
   if (option_ids.length < 2 || (licensed.length === 0 && Object.keys(zeroSpreadSide).length === 0
-    && Object.keys(unearnedSide).length === 0 && !sqSaid)) return null;
+    && Object.keys(unearnedSide).length === 0 && Object.keys(rangeLawWithheld).length === 0 && !sqSaid)) return null;
 
   // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
   // A status quo withheld by assumption counts as withheld here too, exactly as a change target's always has: no superlative
@@ -720,6 +737,9 @@ export function goalChanceLicenceOf(
   const estimates = licensed.length === 0 ? NO_ESTIMATES : goalChanceEstimateCounts(graph, option_ids, goalId);
   const jointEstimates = eventNodes.length === 0 ? undefined : goalChanceEstimateCounts(graph, option_ids, goalId, eventNodes);
   const settingsByOption = Object.fromEntries(Object.entries(estimates.settingsByOption).filter(([id, n]) => licensed.includes(id) && n > 0));
+  // C2 join (AIE 6184022140; DL 15 Oct): a licensed option whose setting on the path carries a likely range rests on Olumi's
+  // equal-tail approximation of it: provisional, and said once per range, beside the result.
+  const rangeUses = Object.entries(estimates.likelyRangesByOption ?? {}).filter(([id, xs]) => licensed.includes(id) && xs.length > 0);
   // ⛔ R5-2: an input whose origin is unverified is never "zero estimates" and never Olumi's: disclosed once, beside the result.
   const unverifiedInputs = unverifiedOn(estimates, licensed);
   const estimateLinks = estimates.links;
@@ -733,6 +753,8 @@ export function goalChanceLicenceOf(
     })),
     ...(sqReading === 'moved' && statusQuoId !== undefined && withheld.includes(statusQuoId) && goalLabel !== undefined
       ? { [statusQuoId]: { reason: 'reference_moved' as const, line: statusQuoMovedWords([goalLabel]) } } : {}),
+    ...Object.fromEntries(Object.entries(rangeLawWithheld).map(([id, u]) => [id, { reason: 'range_law_unadopted' as const,
+      line: rangeLawWithheldWords(labelOfNode(nodes, u.factor_id) ?? u.factor_id, labelOfNode(nodes, id) ?? id) }])),
   };
   const single: GoalChanceLicence = {
     code: GOAL_CHANCE_LICENSED,
@@ -777,7 +799,7 @@ export function goalChanceLicenceOf(
     statusQuoLabel: statusQuoId === undefined ? undefined : labelOfNode(nodes, statusQuoId),
     // Acceptance is not authorship (DL 12 Oct, BLOCKING 3): an accepted Olumi value or link is still Olumi's — provisional.
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
-      + estimates.acceptedValues + estimates.acceptedLinks > 0, unverifiedInputs,
+      + estimates.acceptedValues + estimates.acceptedLinks + rangeUses.length > 0, unverifiedInputs,
     constraints, option_ids,
     estimates, jointEstimates,
   });
@@ -788,7 +810,8 @@ export function goalChanceLicenceOf(
   // ⭐ E-TAIL (b), AIE 6130197656 §2: a licensed option whose hire link rests on Olumi's limit says so once, verbatim.
   // L4 (DL conditions 2–3): a licensed capacity-ratio option says what its chance leaves out, and why no comparison is shown.
   const ratioLicensed = onShare && capacityRatioOptionIds(graph).some(id => licensed.includes(id));
-  const notes = [...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
+  const rangeLines = rangeUses.flatMap(([id, xs]) => xs.map(u => likelyRangeLawWords(labelOfNode(nodes, id) ?? id, labelOfNode(nodes, u.factor_id) ?? u.factor_id, u)));
+  const notes = [...rangeLines, ...(assumedRange === null ? [] : [olumiAssumedRangeLine(assumedRange)]),
     ...(onShare && hireLinkLimitedFor(graph, licensed) ? [OLUMI_HIRE_LIMIT_NOTE] : []),
     ...(ratioLicensed ? [CAPACITY_RATIO_ASSUMPTION_NOTE, CAPACITY_RATIO_COMPARISON_NOTE] : [])];
   return notes.length === 0 ? worded : { ...worded, notes: [...(worded.notes ?? []), ...notes] };
@@ -1609,6 +1632,9 @@ export function goalChanceLicenceForAgent(result: unknown): {
     } else if (reason.reason === 'reference_moved' && reason.side === undefined) {
       // AIE status-quo disposition: the status quo's row disagrees with the same-draw reference (a typed reason, no side).
       zeroSpreadReasons[id] = { reason: 'reference_moved', line: reason.line };
+    } else if (reason.reason === 'range_law_unadopted' && reason.side === undefined) {
+      // AIE 6184726873: the stored Run's own words for a chance resting on an unadopted equal-tail approximation.
+      zeroSpreadReasons[id] = { reason: 'range_law_unadopted', line: reason.line };
     }
   }
   const sent = isRec(r.sent_threshold) ? r.sent_threshold : undefined;
