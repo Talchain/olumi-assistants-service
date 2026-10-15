@@ -14,7 +14,7 @@ import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { applyCohortForecastEdit, cohortForecastAskWords, cohortQuartileQuestion, storedTargetRowsOf } from '../../goal-target/cohort-forecast-write.js';
 import { readCohortForecast, targetForecastWireOf } from '../../goal-target/cohort-forecast.js';
 import { goalTargetBasisOf, launchWindowQuestion, periodWords } from '../../goal-target/goal-target-basis.js';
-import { cohortForecastAsks, COHORT_RELATION_ROW } from '../fields/cohort-relation.js';
+import { cohortForecastAsks, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW } from '../fields/cohort-relation.js';
 import { readStatement, type DoorQuote } from '../read.js';
 import { doorRowFor } from '../role-table.js';
 import { userStatementFor } from '../statements.js';
@@ -96,10 +96,10 @@ function conversation(b: Brief) {
 }
 
 describe.each(BRIEFS)('T8 cohort relation on the door: $name', (b) => {
-  it('the ONE row for an option\'s relation is this one; a goal or a factor has none', () => {
+  it('the ONE row for an option\'s relation is this one; the goal\'s is the same-people row; a factor has none', () => {
     const g = b.graph();
     expect(doorRowFor(subjectOf(b), g)).toBe(COHORT_RELATION_ROW);
-    expect(doorRowFor({ ...subjectOf(b), kind: 'goal', id: g.nodes.find((n: Rec) => n.kind === 'goal').id }, g)).toBeUndefined();
+    expect(doorRowFor({ ...subjectOf(b), kind: 'goal', id: g.nodes.find((n: Rec) => n.kind === 'goal').id }, g)).toBe(COHORT_SAME_PEOPLE_ROW);
     expect(doorRowFor({ kind: 'factor', id: 'candidate_quality', field: 'relation' }, g)).toBeUndefined();
   });
 
