@@ -4374,7 +4374,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // narration whose key is not the latest (narrationTurn.ts `namesALatestRun`/`isForeignExplanation`), so "ready"
         // here hid this Run's reply.
         if (pressedForInterpretation) {
-          runInterpreted = true; text = said;
+          // Admission is not delivered coaching: an empty/failed interpretation keeps the existing
+          // uninterpreted-Run fallback, including its factual qualification and one-copy composition.
+          runInterpreted = interpretedRun.interpreted !== undefined; text = said;
           if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
         }
         else text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
