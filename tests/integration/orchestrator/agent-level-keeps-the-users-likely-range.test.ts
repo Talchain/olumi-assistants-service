@@ -194,7 +194,9 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     // What the user approves names the range AND how it is read (AIQ 5909998288 / 5914439702).
-    expect(String(proposed.public_label)).toMatch(/likely between 5 days and 20 days \(read as the middle half of what.s likely\)/);
+    // C2 (AIE 6180618773 row 2): the user's range as stated, then the quartile fit as Olumi's assumption; never their "middle half".
+    expect(String(proposed.public_label)).toContain("Your range: 5 days to 20 days. Olumi's assumption: Olumi reads that range as about one chance in four below 5 days and one in four above 20 days");
+    expect(String(proposed.public_label)).not.toMatch(/middle half/i);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
     const cell = liftCell();
@@ -208,7 +210,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
       unmodelled_mechanisms: ['supplier learning'] });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(proposed.public_label).toContain('supplier learning');
-    expect(proposed.public_label).toContain('likely between 5 days and 20 days');
+    expect(proposed.public_label).toContain('Your range: 5 days to 20 days.');
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });

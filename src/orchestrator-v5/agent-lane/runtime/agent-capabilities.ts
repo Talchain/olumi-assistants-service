@@ -1035,6 +1035,14 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  * proposal coordinate frame differs from the range this approval settles. The transaction re-encodes them together.
  */
 /** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
+/**
+ * ⭐ C2 (AIE 6180618773 row 2, DL ruling A): the user's range AS STATED, then the quartile fit as Olumi's disclosed assumption,
+ * never as the user's own "middle half". The press adopts it ("Use this reading", AIE 6181498097).
+ */
+export const statedRangeAssumptionWords = (low: string, high: string): string =>
+  `. Your range: ${low} to ${high}. Olumi's assumption: Olumi reads that range as about one chance in four below ${low} and one in four `
+  + `above ${high}, so the analysis can use it. You did not say that; if you meant the lowest and highest possible, say so`;
+
 function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
 }
@@ -7343,8 +7351,10 @@ export function createAgentCapabilities(
          * arguments only (Codex CR 5963331228 P1: no parsing of the user's words). Both ends; the reading the Agent took
          * (`range_meaning`: only `likely_range` is recorded, so a 95% interval, a min–max or a bound is never stored as
          * one); that the USER gave it (`range_user_stated`); beside a level they gave; the level inside it. The user then
-         * approves the range AND its reading, shown on the approval ("read as the middle half of what's likely"): that
-         * approval is the provenance check. An invalid optional range is left out and disclosed; its level follows ordinary grounding.
+         * sees the range as they stated it and, separately, Olumi's assumption that about one in four falls below it and one in
+         * four above (C2, AIE 6180618773 row 2): the quartile fit is Olumi's disclosed approximation, adopted by the press, never
+         * the user's quartiles, and approval adopts it without making it theirs. An invalid optional range is left out and
+         * disclosed; its level follows ordinary grounding.
          */
         const hasLow = i?.likely_low !== undefined;
         const hasHigh = i?.likely_high !== undefined;
@@ -7358,7 +7368,7 @@ export function createAgentCapabilities(
             : !(Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low) ? 'a likely range needs a positive low end below its high end'
             : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
             : i?.range_meaning !== 'likely_range'
-              ? `Olumi records only a LIKELY range (the middle half of what\u2019s likely); a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
+              ? `Olumi records only a plain likely range; a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
             : !claimedByUser ? 'a likely range is recorded only beside a level the user gave (user_stated)'
             : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
             : null;
@@ -7564,7 +7574,7 @@ export function createAgentCapabilities(
         public_label:
           ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`
             // TEMPORAL (AIQ 5909998288 / 5914439702): the reading is part of what the user approves, in their units.
-            + (i.likelyRange !== undefined ? `, likely between ${likelyBound(i.likelyRange.low, i.unit)} and ${likelyBound(i.likelyRange.high, i.unit)} (read as the middle half of what\u2019s likely)` : '')).join('; ') +
+            + (i.likelyRange !== undefined ? statedRangeAssumptionWords(likelyBound(i.likelyRange.low, i.unit), likelyBound(i.likelyRange.high, i.unit)) : '')).join('; ') +
           ambiguousClause(ambiguous) +
           gaps.declarations.map(d => `; ${optionGapApprovalWords(optionNodes.nodes.find(n => n.id === d.optionId)!.label, d.mechanisms, optionGapOperands(g.raw, d.optionId)!)}`).join(''),
       });

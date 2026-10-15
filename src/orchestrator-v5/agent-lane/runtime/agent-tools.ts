@@ -765,8 +765,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             enum: ['likely_range', 'min_max', 'at_most', 'at_least', 'other'],
             description:
               'How the user meant that range. likely_range ONLY for a plain likely range (\u201clikely between 5 and 20 ' +
-              'days\u201d), which Olumi reads as the middle half of what\u2019s likely. min_max for the lowest and highest ' +
-              'possible; at_most / at_least for a bound; other for anything else (e.g. a 95% confidence interval). ' +
+              'days\u201d). The user has not said how likely the ends are: the card shows their range as stated, and Olumi\u2019s ' +
+              'assumption that about one in four falls below and one in four above, which they adopt by pressing. min_max for the ' +
+              'lowest and highest possible; at_most / at_least for a bound; other for anything else (e.g. a 95% confidence interval). ' +
               'Only likely_range is recorded; for the rest, tell the user and ask for their likely range.',
           },
           range_user_stated: {
