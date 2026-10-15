@@ -688,6 +688,8 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     const env = wireEnvelope(run, g);
     const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
     expect(cells.carry_on).toMatchObject({ kind: 'withheld', why: ZERO_SPREAD_FIXED_BASELINE_LINE });
+    // The generic line (the e2e's "very narrow central range… review whether the model captures") is not said of it.
+    expect(cells.carry_on.why).not.toBe(ZERO_SPREAD_LINE);
     expect(JSON.stringify(cells.carry_on)).not.toMatch(/by assumption|doesn’t match/);
     // NEGATIVE: a status-quo figure already withheld upstream (an untested horizon strips every option's) said nothing before,
     // so no status-quo-only record is added for it (goal-horizon-verdict.route "a stored triple does not unlock…").
