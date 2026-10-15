@@ -4895,6 +4895,38 @@ export async function commitOptionRenameInProcess(input: CommitOptionRenameInput
 }
 
 /**
+ * ⭐ S5 (DL 15 Oct, unseen brief R4): the removal card's press, in-process, through the ONE durable removal writer
+ * (`structural_delete`: resolved on the server's own read, its links and options' settings of a removed factor going with it,
+ * ONE atomic commit). `written` only when the committed bytes no longer hold what was removed.
+ */
+export interface CommitStructuralDeleteInput {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly base_graph_hash: string;
+  readonly removed_node_ids: readonly string[];
+  readonly removed_edges: readonly { readonly from: string; readonly to: string }[];
+}
+export type CommitStructuralDeleteResult =
+  | { readonly status: 'written' } | { readonly status: 'stale' } | { readonly status: 'refused' } | { readonly status: 'unconfirmed' };
+
+export async function commitStructuralDeleteInProcess(input: CommitStructuralDeleteInput, requestId: string): Promise<CommitStructuralDeleteResult> {
+  const event = { kind: 'structural_delete' as const, removed_node_ids: [...input.removed_node_ids],
+    removed_edges: input.removed_edges.map((e) => ({ from: e.from, to: e.to })), base_graph_hash: input.base_graph_hash,
+  } as Extract<SystemEventTurnPayload['event'], { kind: 'structural_delete' }>;
+  const payload = { kind: 'system_event', turn_id: input.turn_id, scenario_id: input.scenario_id, stage: 'frame', event } as SystemEventTurnPayload;
+  const r = await dispatchStructuralDelete(payload, event, requestId, Date.now());
+  if (r.graphConflict !== undefined) {
+    rethrowRevisionConflict(r.graphConflict);
+    return { status: 'stale' };
+  }
+  const g = r.graph as { nodes?: { id?: unknown }[]; edges?: { from?: unknown; to?: unknown }[] } | null | undefined;
+  if (!r.commitPerformed || g === null || g === undefined || !Array.isArray(g.nodes)) return { status: 'unconfirmed' };
+  const gone = input.removed_node_ids.every((id) => !g.nodes!.some((n) => n.id === id))
+    && input.removed_edges.every((e) => !(g.edges ?? []).some((x) => x.from === e.from && x.to === e.to));
+  return gone ? { status: 'written' } : { status: 'refused' };
+}
+
+/**
  * `structural_add` — commit the new entry, verify it in the committed bytes.
  *
  * Same shape as its two siblings; two things differ, and both are derived from

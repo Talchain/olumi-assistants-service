@@ -99,6 +99,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
+  // S5: the ONE generic change tool; its card's button is its op's (`changeApproveOf`).
+  propose_change: { label: 'Make this change', message: 'Yes, make that change.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).
@@ -167,6 +169,14 @@ export const AMEND_CHIP: SuggestedAction = {
  * press renames. Its words ride in `detail`.
  */
 export const OPTION_RENAME_APPROVE = { label: 'Rename it', message: 'Yes, rename it.' } as const;
+/** ⭐ S5: propose_change's ONE card takes the button of what its press does (its op). */
+const CHANGE_APPROVE: Readonly<Record<string, { readonly label: string; readonly message: string }>> = {
+  remove_node: { label: 'Remove it', message: 'Yes, remove it.' },
+  remove_edge: { label: 'Remove it', message: 'Yes, remove it.' },
+};
+const changeApproveOf = (tool: string, proposal: { readonly operations: readonly { readonly op: string }[] } | undefined)
+  : { readonly label: string; readonly message: string } | undefined =>
+  (tool === 'propose_change' && proposal?.operations.length === 1 ? CHANGE_APPROVE[proposal.operations[0]!.op] : undefined);
 export const optionRenameChipsFor = (proposalId: string, words: string): SuggestedAction[] =>
   [{ id: approvalChipIdFor(proposalId), ...OPTION_RENAME_APPROVE, detail: words }, AMEND_CHIP];
 
@@ -216,7 +226,7 @@ export function approvalChipsFor(
   const offered = proposalsAwaitingApproval(toolCalls);
   if (offered.size !== 1) return [];
   const [proposalId, tool] = [...offered.entries()][0]!;
-  const approve = APPROVE[tool]!;
+  let approve = APPROVE[tool]!;
   // ⭐ THE CHIP CARRIES THE PROPOSAL'S IDENTITY (fast path 2, RC #63 5803995225). The
   // UI echoes `chip.id` verbatim on the click, so the route applies EXACTLY this
   // proposal with no model call. The id is never rendered (label/message are).
@@ -241,6 +251,7 @@ export function approvalChipsFor(
   // Adoption is a proposal about an EXISTING Olumi option. The card, including every displayed
   // level, is derived from the stored proposal; only its exact pressed words authorise the write.
   const stored = source?.proposal;
+  approve = changeApproveOf(tool, stored) ?? approve;
   // A real label-source lookup that cannot recover the stored levels card
   // cannot prove that its omitted operations were gap-free. Offer no approval.
   if (labelSourceFor !== undefined && stored === undefined
@@ -683,7 +694,7 @@ function fitted(head: string, entity: unknown, tail: string): string | null {
 }
 
 export function approvalLabelFor(tool: string, source: ApprovalLabelSource | undefined): string {
-  const fallback = APPROVE[tool]?.label ?? 'Make this change';
+  const fallback = changeApproveOf(tool, source?.proposal)?.label ?? APPROVE[tool]?.label ?? 'Make this change';
   const proposal = source?.proposal;
   const result = source?.result;
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;

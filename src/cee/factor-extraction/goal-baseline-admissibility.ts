@@ -94,6 +94,11 @@ export function admitGoalBaseline(args: {
    * conservative reading of the ruling). Rule 2 is unchanged. Absent ⇒ the floor rule, byte for byte.
    */
   readonly ceiling?: boolean;
+  /**
+   * S4 2b (AIE 6187351293): a NEGATIVE current level on its own magnitude's scale (`cap` = |level|, provenance
+   * `level_frame`) is admitted at −1 on the floor reading. Absent ⇒ the [0, 1] rule, byte for byte.
+   */
+  readonly signedLevel?: true;
 }): GoalBaselineAdmission {
   const { rawTarget, rawBaseline, cap } = args;
 
@@ -111,7 +116,7 @@ export function admitGoalBaseline(args: {
   }
 
   const normalised = rawBaseline / cap;
-  if (!(normalised >= 0 && normalised <= 1)) {
+  if (!(normalised >= (args.signedLevel === true && args.ceiling !== true ? -1 : 0) && normalised <= 1)) {
     return { admitted: false, reason: 'baseline_off_cap_scale' };
   }
 

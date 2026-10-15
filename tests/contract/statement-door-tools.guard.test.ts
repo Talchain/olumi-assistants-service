@@ -17,7 +17,7 @@ const USER_STATEMENT_ARGS = ['statements'];
 /** Every other proposing tool: Olumi's proposals and structural changes, not a user's statement. A new name fails here (FREEZE). */
 const OTHER_TOOLS = ['propose_assumptions', 'propose_goal_deadline', 'propose_goal_target', 'propose_identity', 'propose_limit_change',
   'propose_link_strength', 'propose_link_strengths', 'propose_model_change', 'propose_new_factor', 'propose_new_limit', 'propose_new_option',
-  'propose_new_risk', 'propose_option_interventions', 'propose_option_status', 'propose_starting_point'];
+  'propose_new_risk', 'propose_option_interventions', 'propose_option_status', 'propose_change', 'propose_starting_point'];
 /** The door's ONE tool (lands with the first migration, M1). */
 const DOOR_TOOL = 'propose_statement';
 

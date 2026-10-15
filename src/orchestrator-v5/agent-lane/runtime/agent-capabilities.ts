@@ -24,6 +24,7 @@ import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fiel
 import { readStatement, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
 import { resolveSubject } from '../../statement-door/subject.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
 /** What binds a user's statement to one subject beside their words: their canvas selection, Olumi's preceding question, its asks. */
@@ -283,7 +284,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, computeProposalId, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionRenameInput, CommitOptionRenameResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionRenameInput, CommitOptionRenameResult, CommitOptionStatusInput, CommitOptionStatusResult, CommitStructuralDeleteInput, CommitStructuralDeleteResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -2552,6 +2553,8 @@ export function createAgentCapabilities(
     readonly commitOptionStatus?: (input: CommitOptionStatusInput) => Promise<CommitOptionStatusResult>;
     /** ⭐ S5: the option-rename card's door, in-process (`commitOptionRenameInProcess`), fenced like the status door. Absent ⇒ never "applied". */
     readonly commitOptionRename?: (input: CommitOptionRenameInput) => Promise<CommitOptionRenameResult>;
+    /** ⭐ S5: the removal card's door, in-process (`commitStructuralDeleteInProcess`), fenced like the status door. Absent ⇒ never "applied". */
+    readonly commitStructuralDelete?: (input: CommitStructuralDeleteInput) => Promise<CommitStructuralDeleteResult>;
     /** The clock a deadline is counted from (S-E GOALS; `deadline-date.ts` reads Europe/London's day of it). Absent ⇒ now. */
     readonly now?: () => Date;
   } = {},
@@ -6003,6 +6006,69 @@ export function createAgentCapabilities(
         note: 'Show the user exactly this change, never the id, and call authorise_change with this proposal_id once they agree.' };
     },
 
+    /**
+     * ⭐ S5 (DL 15 Oct, unseen brief R4): ONE removal the user asked for in THIS message — a factor, a risk, or a link ("set this
+     * link to zero": the link is removed, so the analysis reads no effect along it). Olumi proposes; the user authors: the card
+     * quotes their words and says exactly what goes with it (a part's links, and any option's setting of a factor), and only its
+     * press removes it, through the ONE removal writer (`structural_delete`). Never an option (its status card) or the goal.
+     */
+    async proposeRemoval(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const kind = args?.kind;
+      const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
+      if (kind !== 'factor' && kind !== 'risk' && kind !== 'link') {
+        return { ok: false, mutated: false, refusal: 'not_removable',
+          detail: 'Only a factor, a risk or a link can be removed here: an option is taken out with its status card, and the goal stays. Nothing was prepared.' };
+      }
+      // The user's own request, from THIS message: a removal is never Olumi's idea.
+      if (quote === '' || !wholeStatementIn(ctx.user_turn_text ?? '', quote)) {
+        return { ok: false, mutated: false, refusal: 'not_asked',
+          detail: 'A removal is prepared only from the user’s own request in this message, quoted exactly. Nothing was prepared.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
+      const resolved = resolveSubject(g.raw, { kind, id: args.id, label: args.label, to_id: args.to_id, to_label: args.to_label,
+        field: kind === 'link' ? 'effect' : kind === 'risk' ? 'occurrence' : 'level' });
+      if (resolved.kind === 'unresolved') {
+        return { ok: false, mutated: false, refusal: 'subject_not_found', detail: resolved.reason === 'ambiguous'
+          ? 'More than one part of the model has that label, so nothing was prepared. Ask which one the user means.'
+          : 'No part of the model matches that kind and label, so nothing was prepared. Use the id or label get_canonical_state returned.' };
+      }
+      const raw = g.raw as { nodes?: Record<string, unknown>[]; edges?: Record<string, unknown>[] };
+      const nodes = Array.isArray(raw.nodes) ? raw.nodes : [];
+      const edges = Array.isArray(raw.edges) ? raw.edges : [];
+      const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id);
+      const said = `From your message: “${quote}” `;
+      const listed = (xs: readonly string[]): string => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)!}`;
+      let operation: ProposalOperation;
+      let card: string;
+      if (kind === 'link') {
+        const { id: from, to_id: to } = resolved.subject;
+        operation = { op: 'remove_edge', path: `${from}::${to}`, value: { from_label: labelOf(from), to_label: labelOf(to) } };
+        card = `${said}Olumi proposes removing the link from ‘${labelOf(from)}’ to ‘${labelOf(to)}’, so the analysis reads ‘${labelOf(from)}’ `
+          + `as having no effect on ‘${labelOf(to)}’. Remove it?`;
+      } else {
+        const id = resolved.subject.id;
+        // What goes with it, said once: its links with other parts, then the options that set a value for it (setting and link go).
+        const setterIds = nodes.filter((n) => n.kind === 'option' && typeof n.interventions === 'object' && n.interventions !== null
+          && Object.hasOwn(n.interventions as object, id)).map((n) => n.id);
+        const neighbours = [...new Set(edges.filter((e) => e.from === id || e.to === id).map((e) => (e.from === id ? e.to : e.from)))];
+        const others = neighbours.filter((o) => !setterIds.includes(o)).map((o) => `‘${labelOf(o)}’`);
+        const setters = setterIds.map((o) => `‘${labelOf(o)}’`);
+        operation = { op: 'remove_node', path: id, value: { kind, expected_label: resolved.label } };
+        card = `${said}Olumi proposes removing ‘${resolved.label}’ from the model.`
+          + (others.length > 0 ? ` ${others.length === 1 ? 'Its link with' : 'Its links with'} ${listed(others)} ${others.length === 1 ? 'goes' : 'go'} with it.` : '')
+          + (setters.length > 0 ? ` ${listed(setters)} no longer ${setters.length === 1 ? 'sets' : 'set'} it.` : '')
+          + ' Remove it?';
+      }
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+        operations: [operation], provenance: { authored_by: 'user_stated', basis: quote },
+        validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: card });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: card, base_revision: g.graph_hash,
+        note: 'Show the user exactly this card, never the id. Nothing is removed until they press it.' };
+    },
+
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const typed = args?.constraint_type;
@@ -7992,6 +8058,46 @@ export function createAgentCapabilities(
         };
       }
 
+      /**
+       * ⭐ S5: the press on the removal card — ONE removal through the ONE removal writer (`structural_delete`), carrying the card's
+       * base hash. "Done" only when the model read back no longer holds what was removed.
+       */
+      if (ops.length === 1 && (ops[0]!.op === 'remove_node' || ops[0]!.op === 'remove_edge')) {
+        const op = ops[0]!;
+        const pid = decision.proposal.proposal_id;
+        if (opts.commitStructuralDelete === undefined) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'Nothing can be removed here, so nothing was written. Tell the user plainly.' };
+        }
+        const [from, to] = op.path.split('::');
+        const operationId = authorisationTurnId(pid);
+        const res = await opts.commitStructuralDelete({ scenario_id: ctx.scenario_id, turn_id: operationId,
+          base_graph_hash: decision.proposal.base_graph_identity_hash,
+          removed_node_ids: op.op === 'remove_node' ? [op.path] : [], removed_edges: op.op === 'remove_edge' ? [{ from: from!, to: to! }] : [] });
+        if (res.status === 'stale') {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
+            detail: 'The model changed just before this was written, so nothing was removed. Offer to prepare it again.' };
+        }
+        if (res.status === 'refused') {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'It could not be matched to the saved model, so nothing was removed. Tell the user plainly.' };
+        }
+        const after = await readGraph(ctx.scenario_id);
+        const afterRaw = after?.raw as { nodes?: { id?: unknown }[]; edges?: { from?: unknown; to?: unknown }[] } | undefined;
+        const gone = afterRaw !== undefined && (op.op === 'remove_node'
+          ? !(afterRaw.nodes ?? []).some((n) => n.id === op.path)
+          : !(afterRaw.edges ?? []).some((e) => e.from === from && e.to === to));
+        if (res.status !== 'written' || !gone) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The removal was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.' };
+        }
+        proposals.markApplied(pid, []);
+        const v = (op.value ?? {}) as { expected_label?: string; from_label?: string; to_label?: string };
+        return { ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts: [],
+          follow_up: op.op === 'remove_node' ? `Removed ‘${String(v.expected_label ?? op.path)}’ from the model.`
+            : `Removed the link from ‘${String(v.from_label ?? from)}’ to ‘${String(v.to_label ?? to)}’.`,
+          note: 'The last analysis no longer reflects this model. Offer to run the analysis again.' };
+      }
       /**
        * ⭐ THE GOAL'S SUCCESS TARGET, AS THE USER STATED IT — ONE typed `goal_target_edit`, the product's own target
        * writer, carrying the proposal's base hash (its stale gate). Applied ONLY when this response succeeded AND the
