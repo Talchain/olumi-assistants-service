@@ -73,7 +73,20 @@ export interface RunComparison {
   readonly rerun_record?: unknown;
 }
 
+/**
+ * ⭐ S7 PR-B: how the AI uses the packet, said once beside it (the `rerun_record.use` convention). Model-facing prompt text:
+ * AIE FYI on #94. The host no longer writes these lines itself; the egress check holds the AI to them.
+ */
+export const RUN_FACTS_USE = 'These are the selected Run\u2019s own facts. Give each option\u2019s chance only as `chances` gives it, with its '
+  + 'range and uncertainty where given, and never as a share of runs. Explain each `withheld` reason in plain words, once. Say each '
+  + 'line in `must_say` word for word, once. Name an option as most likely to meet the goal only where `leader.goal_chance_leader` '
+  + 'names it; where `leader.similar_option_ids` lists options, say their chances are similar; never call any option best, a winner '
+  + 'or recommended. Where `comparison` is given, say what changed since the '
+  + 'preceding Run from it alone. Never estimate a figure these facts do not give.';
+
 export interface RunFacts {
+  /** How the AI uses these facts (`RUN_FACTS_USE`), present only with a current Run's facts. */
+  readonly use?: string;
   /** Whether these facts are the selected CURRENT Run's (a stale Run's facts are never read as current). */
   readonly current: boolean;
   /** Who leads, as the UI shows it too (`runLeaderOf`). */
@@ -127,6 +140,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     ? { links: licence.olumi_estimate_link_count ?? 0, values: licence.olumi_estimate_value_count ?? 0,
       settings_by_option: licence.olumi_estimate_settings_by_option ?? {} } : undefined;
   return {
+    ...(current ? { use: RUN_FACTS_USE } : {}),
     current,
     leader: runLeaderOf(analysisResult, state.analysisState, state.analysisReady, current),
     chances,
@@ -141,4 +155,18 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
         ...(recordFacts(state.comparison.rerun_record) !== undefined ? { rerun_record: recordFacts(state.comparison.rerun_record) } : {}) } } : {}),
     must_say: [...(chances.goal_chance_notes ?? [])],
   };
+}
+
+const sayable = (t: string): string => t.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * ⭐ S7 PR-B MUST-SAY (DL 00:51Z condition 1): the AIE's exact disclosures for THIS Run are checked PRESENT in the AI's reply; a
+ * line the reply does not say is appended exactly, never dropped and never paraphrased. Presence is by the line's own words
+ * (quotes and spacing normalised); a reply that already says it is returned unchanged.
+ */
+export function withMustSay(reply: string, mustSay: readonly string[]): { readonly text: string; readonly appended: readonly string[] } {
+  const said = sayable(reply);
+  const missing = mustSay.filter((line, i) => line.trim() !== '' && mustSay.indexOf(line) === i && !said.includes(sayable(line)));
+  if (missing.length === 0) return { text: reply, appended: [] };
+  return { text: [reply.trimEnd(), ...missing].filter((t) => t !== '').join('\n\n'), appended: missing };
 }
