@@ -99,8 +99,7 @@ import { CONVERSATION_ROWS_READ } from './assist.v1.scenario-graph.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessSentenceOnce, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
-import { constructionOperationId, strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
-import { registrationTurnId } from '../orchestrator-v5/graph-registration/registration-identity.js';
+import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../orchestrator-v5/agent-lane/runtime/widen-draft.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, identityProposalOfferable, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
@@ -4346,8 +4345,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const autoRunIdentity = autoRun?.ran === true ? (autoRun as { run_identity?: unknown }).run_identity : undefined;
     // ⭐ THE SAME FOR A RUN PRESS AFTER A CHANGE (DL 14 Oct, joined-flow witness): the canvas's own automatic Run after an
     // edit or Undo (DGAI #2767) reaches CEE as a Run press, which answered only "Your results are ready", so its coaching
-    // never came. A pressed Run after a committed change gets this same one call over THAT Run (`pressedAfterChange`); a
-    // Run with no committed change since the model was built or last run keeps the ready line and spends no call.
+    // never came. Each eligible completed selected Run gets this same one call, including the first Run.
+    // A preceding Run is required only for comparison. This interprets the existing Run; it never starts another one.
     const pressedRunIdentity = fastPath === 'run' && runPressResult?.ran === true
       ? (runPressResult as { run_identity?: unknown }).run_identity : undefined;
     const interpretRunIdentity = autoRunIdentity ?? pressedRunIdentity;
@@ -4363,24 +4362,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const selectedRead = selected ? await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {}) : undefined;
       const currentRead = selectedRead?.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
-      // ⭐ KEYED TO A COMMITTED CHANGE, not to a preceding Run (PL #94, 14 Oct 19:41): only the COMPARISON needs a prior Run.
-      // With a prior Run, its delta says whether anything changed (`C0_identical`: nothing). With none, a change is a
-      // committed write in the turn ledger (`model_version_mutation_id`: never typing, a proposal or a failed write) other
-      // than the construction's own. A ledger that cannot be read, or is not a census, is no evidence: no call.
-      const delta = typeof currentRead?.run_delta === 'object' && currentRead.run_delta !== null ? currentRead.run_delta : undefined;
-      const committedSinceConstruction = async (): Promise<boolean> => {
-        const brief = selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined;
-        if (typeof brief !== 'string' || brief.trim() === '' || typeof store.readCommittedTurnLedger !== 'function') return false;
-        try {
-          const ledger = await store.readCommittedTurnLedger(scenarioId);
-          if (ledger.complete !== true) return false;
-          const construction = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
-          return ledger.write_turn_ids.some((id) => id !== construction);
-        } catch { return false; }
-      };
-      const pressedAfterChange = autoRunIdentity === undefined && selected
-        && (delta !== undefined ? (delta as { attribution_case?: unknown }).attribution_case !== 'C0_identical' : await committedSinceConstruction());
-      const interpretedRun = !selected || (autoRunIdentity === undefined && !pressedAfterChange) ? undefined
+      const pressedForInterpretation = autoRunIdentity === undefined && selected;
+      const interpretedRun = !selected ? undefined
         : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true,
           selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined);
       if (interpretedRun?.admitted === true) {
@@ -4391,8 +4374,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // (pending/unavailable): DGAI takes the latest Run's key only from those, and drops the WHOLE message of a "ready"
         // narration whose key is not the latest (narrationTurn.ts `namesALatestRun`/`isForeignExplanation`), so "ready"
         // here hid this Run's reply.
-        if (pressedAfterChange) {
-          runInterpreted = true; text = said;
+        if (pressedForInterpretation) {
+          // Admission is not delivered coaching: an empty/failed interpretation keeps the existing
+          // uninterpreted-Run fallback, including its factual qualification and one-copy composition.
+          runInterpreted = interpretedRun.interpreted !== undefined; text = said;
           if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
         }
         else text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
@@ -5280,8 +5265,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // BYPASS1: on the AI's reply only the value changes and the identity ask it holds as typed facts are not restated. Every
     // other owed line (receipts, what was left out, the first analysis, open questions, the methods note, the Run lines) is
     // server truth and stays, and so does every line when the current state is unknown (the no-present-claim rule).
+    // An interpreting call cannot issue the figure-confirm tool. Its existing card survives, and the exact
+    // confirmation question remains owed if the AI omitted it; the asked-once pass above still owns repeats.
+    const identityAskStillOwed = aiRunTurn ? identityAskLineOwed(result.tool_results, narrationText) : null;
     const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed
-      : owed.filter((line) => !owedHeldByAi.has(line));
+      : owed.filter((line) => !owedHeldByAi.has(line) || line === identityAskStillOwed);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owedShown), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       // #3167 fix-forward: the risks the Run on screen recorded leaving out, never today's predicate.

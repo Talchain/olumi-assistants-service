@@ -521,6 +521,17 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
     });
 
+    it.each(['first', 'identical'] as const)('AIE-03: eligible %s explicit Run gets one same-Run interpretation, without an extra Run', async kind => {
+      runStampedAt = RUN_AT;
+      if (kind === 'identical') runDelta = NOTHING_CHANGED;
+      const b = await press();
+      expect(runs, 'only the scientific Run the user pressed').toBe(1);
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      expect(b.assistant_text).toContain(COACHING);
+      expect(b.assistant_text).not.toContain('Your results are ready.');
+      expect(b.narration?.status).toBe('pending');
+    });
+
     it('ADVERSARIAL: the read selects another Run (same hash, another computed_at) → no interpreting call, no coaching', async () => {
       runStampedAt = '2026-10-01T11:59:00.000Z';
       runDelta = LINK_ENTERED;
