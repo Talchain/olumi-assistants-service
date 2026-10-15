@@ -97,10 +97,12 @@ const option = (g: Rec): Rec => g.nodes.find((n: Rec) => n.id === 'hire_marketin
 const press = (w: ReturnType<typeof world>, id: string) =>
   w.caps.authoriseChange({ ...ctx(PRESS), typed_approval_of: id, typed_approval_words: PRESS } as never, { proposal_id: id }) as Promise<Rec>;
 /** The same-people answer, recorded on the goal through its own card and press. */
-async function sameRecorded(w: ReturnType<typeof world>): Promise<void> {
+async function sameRecorded(w: ReturnType<typeof world>): Promise<Rec> {
   const card = await w.caps.proposeStatement!(ctx(SAME, SAME) as never, sameArgs() as never) as Rec;
   expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
-  expect(await press(w, card.proposal_id), 'the same-people press').toMatchObject({ ok: true, applied: true });
+  const res = await press(w, card.proposal_id);
+  expect(res, 'the same-people press').toMatchObject({ ok: true, applied: true });
+  return { card, res };
 }
 
 describe("the user's cohort forecast: their words → one card → their press → the option holds it → the Run sends it", () => {
@@ -114,8 +116,12 @@ describe("the user's cohort forecast: their words → one card → their press �
     const w = world();
     const start = JSON.stringify(w.graph());
     // 1. The goal's same-people question, answered and pressed once: recorded on the goal, as theirs.
-    await sameRecorded(w);
+    const same = await sameRecorded(w);
     expect(sameCohortStatementOf(w.graph())?.quote).toBe(SAME);
+    // AIE 6182987896: the card and the receipt say ONLY the relation the user answered, in the question's own words.
+    expect(same.card.public_label).toContain('your answer that your ‘New customers in first 3 months’ come from the same people your ‘Conversion rate’ is measured on');
+    expect(same.res.follow_up).toBe('Recorded from your words: your answer that your ‘New customers in first 3 months’ come from the same people your ‘Conversion rate’ is measured on.');
+    expect(`${same.card.public_label} ${same.res.follow_up}`).not.toMatch(/counts the people who convert/);
     expect(option(w.graph())).toEqual(option(JSON.parse(start)));
     // 2. The option's forecast card.
     const before = JSON.stringify(w.graph());
