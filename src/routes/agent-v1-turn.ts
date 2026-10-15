@@ -88,7 +88,7 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analysis-interpretation-identity.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionRenameInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -129,7 +129,9 @@ import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAge
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, optionRenameChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { optionRenameCardOf } from '../orchestrator-v5/agent-lane/option-label-count.js';
+import { createProposal } from '../orchestrator-v5/agent-lane/proposal.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText, identityPartFiguresToIssue, identityReadingOf } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { heldFigureAskToConfirm, heldFigureConfirmArgs } from '../orchestrator-v5/agent-lane/held-figure-confirm.js';
 import { precedingAssistantText } from '../orchestrator-v5/statement-door/ask.js';
@@ -2260,8 +2262,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ]);
         recordUnsavableEffect();
       }
+      /**
+       * ⭐ S5 (DL 15 Oct; served hiring e2e c1e944a4): a committed level edit whose figure contradicts a count in the option's own
+       * name ("Hire two developers" now at 3) offers ONE rename card on this receipt (`optionRenameCardOf`). Olumi proposes; the
+       * user authors: only the card's press renames (`rename_option`, card-only, the ONE label writer). Never renamed automatically.
+       */
+      const edit = typeof body.event === 'object' && body.event !== null ? body.event as Record<string, unknown> : undefined;
+      const renameCard = forwarded.status === 200 && kind === 'system_event' && edit?.kind === 'option_intervention_edit'
+        && typeof edit.option_id === 'string' && typeof edit.factor_id === 'string' && typeof forwarded.json.graph_hash === 'string'
+        ? optionRenameCardOf(forwardedState?.graph, edit.option_id, edit.factor_id) : undefined;
+      const renameProposal = renameCard === undefined ? undefined : proposals.put(createProposal({
+        scenario_id: scenarioId, user_id: req.scenarioAccess?.callerUserId ?? null,
+        base_graph_identity_hash: String(forwarded.json.graph_hash),
+        operations: [{ op: 'rename_option', path: renameCard.option_id, value: { expected_label: renameCard.expected_label, label: renameCard.label } }],
+        provenance: { authored_by: 'model_proposed', basis: 'the option’s name counts what its level no longer holds' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: renameCard.words,
+      }));
       return reply.code(forwarded.status).send({
         ...forwardedBody,
+        ...(renameProposal !== undefined && renameCard !== undefined ? { suggested_actions: [
+          ...(Array.isArray(forwardedBody.suggested_actions) ? forwardedBody.suggested_actions : []),
+          ...optionRenameChipsFor(renameProposal.proposal_id, renameCard.words)] } : {}),
         // Underscore sidecar: egress is `.strict()`. Says plainly that this
         // turn was NOT agent-handled, so a reader cannot mistake a forwarded
         // canvas edit for something the Agent decided.
@@ -3097,6 +3119,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ MG F1 T6 (#2471): an option's status, in-process, so "applied" rests on the writer's own typed outcome. It runs
         // as an Agent SUB-TURN, exactly as the HTTP dispatch it replaces did (:1499): the writer's narration is not the
         // conversation, so its row keeps no conversation text (#2352 class; DL CR on #2471 P2).
+        // ⭐ S5: the rename card's press, in-process, through the ONE label writer; fenced and run as a sub-turn like the status door.
+        commitOptionRename: async (input) => {
+          writesDispatched += 1;
+          return undoRefusedWrite(() => {
+            return readCache.around(() => runAsAgentSubturn(input.scenario_id, () => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionRenameInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
+          });
+        },
         commitOptionStatus: async (input) => {
           writesDispatched += 1;
           return undoRefusedWrite(() => {

@@ -282,7 +282,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, computeProposalId, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionRenameInput, CommitOptionRenameResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '../../routing/relies-on-risk.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -2486,6 +2486,8 @@ export function createAgentCapabilities(
      * It returns the WRITER's own typed outcome, the only evidence "applied" may rest on. Absent ⇒ never "applied".
      */
     readonly commitOptionStatus?: (input: CommitOptionStatusInput) => Promise<CommitOptionStatusResult>;
+    /** ⭐ S5: the option-rename card's door, in-process (`commitOptionRenameInProcess`), fenced like the status door. Absent ⇒ never "applied". */
+    readonly commitOptionRename?: (input: CommitOptionRenameInput) => Promise<CommitOptionRenameResult>;
     /** The clock a deadline is counted from (S-E GOALS; `deadline-date.ts` reads Europe/London's day of it). Absent ⇒ now. */
     readonly now?: () => Date;
   } = {},
@@ -7886,6 +7888,39 @@ export function createAgentCapabilities(
        * ⭐ MG F1 T6: ONE option's status through the ONE writer (`option_status_edit`), carrying the proposal's base hash.
        * "Done" only when the model HOLDS the status and its participation (`optionStatusHolds`, the writer's own read-back).
        */
+      /**
+       * ⭐ S5 (DL 15 Oct): the press on the rename card the edit's receipt offered — ONE rename through the ONE label writer
+       * (`structural_rename`), gated on the label the card showed. "Done" only when the model read back holds the new name.
+       */
+      if (ops.length === 1 && ops[0]!.op === 'rename_option') {
+        const op = ops[0]!;
+        const { expected_label, label } = op.value as { expected_label: string; label: string };
+        const pid = decision.proposal.proposal_id;
+        if (opts.commitOptionRename === undefined) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'The option cannot be renamed here, so nothing was written. Tell the user plainly.' };
+        }
+        const operationId = authorisationTurnId(pid);
+        const res = await opts.commitOptionRename({ scenario_id: ctx.scenario_id, turn_id: operationId, node_id: op.path, expected_label, label,
+          base_graph_hash: decision.proposal.base_graph_identity_hash });
+        if (res.status === 'stale') {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
+            detail: 'The model changed just before this was written, so nothing was renamed. Offer to prepare it again.' };
+        }
+        if (res.status === 'refused') {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'The option’s name changed after this was offered, so it was not renamed. Tell the user its current name and ask what they would like.' };
+        }
+        const after = await readGraph(ctx.scenario_id);
+        const held = after?.nodes.find((n) => n.id === op.path)?.label;
+        if (res.status !== 'written' || held !== label) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The rename was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.' };
+        }
+        proposals.markApplied(pid, []);
+        return { ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts: [],
+          follow_up: `Renamed ‘${expected_label}’ to ‘${label}’.` };
+      }
       if (ops.length === 1 && ops[0]!.op === 'set_option_status') {
         const op = ops[0]!;
         const { status, expected_status } = op.value as { status: 'feasible' | 'infeasible' | 'removed'; expected_status: 'feasible' | 'infeasible' | 'removed' };
