@@ -1807,7 +1807,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const protectedLines = [...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
         ...(opts.protectedHostLines ?? []).filter((line) => line !== '' && !line.includes('\n'))];
       const runCurrent = (response as { analysis_state?: { run_state?: { kind?: unknown } } }).analysis_state?.run_state?.kind === 'complete_current';
-      const licensedChances = licensedChancesOf(resultBlock, opts.graph, runCurrent);
+      const licensedChances = licensedChancesOf(resultBlock, opts.graph, runCurrent, (response as { run_delta?: unknown }).run_delta);
       const projected = dropRankingSentences(projectionInput, { ...rankingLabelContext(opts.graph, opts.analysisReady),
         ...(licensedChances !== undefined ? { licensedChances } : {}) },
         protectedLines.length > 0 ? protectedLines : undefined);
