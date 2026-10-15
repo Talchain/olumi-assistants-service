@@ -1,4 +1,5 @@
 import { entryKey, type GuidanceState, type PolicyId } from '../guidance/index.js';
+import { isHeldEntryKey } from '../guidance/held-keys.js';
 import { POLICY } from '../guidance/policy.js';
 import type { GuidanceRecord, Variant } from '../guidance/types.js';
 import type { GuidanceWire } from './guidance-wire.js';
@@ -9,7 +10,6 @@ export interface AnswerGuidance {
   readonly entries: Readonly<Record<string, { readonly status: GuidanceRecord['status']; readonly state_key_hash: string; readonly variant_id?: Variant; readonly slot?: number }>>;
 }
 export const GUIDANCE_HISTORY_LIMIT = 20;
-const KEY = /^(RC-WIDEN|RC-WHAT-CHANGES|RC-PREMORTEM|RC-COACH-EDITS|RC-OUTSIDE-VIEW|RC-STRENGTHEN-ITEM:[0-9a-f]{12})$/;
 const HASH = /^[0-9a-f]{12}$/;
 const ENTRY_KEYS = new Set(['status', 'state_key_hash', 'variant_id', 'slot']);
 
@@ -29,7 +29,7 @@ export function parseAnswerGuidance(value: unknown): AnswerGuidance | null {
   if (pairs.length > 3) return null;
   const entries: Record<string, AnswerGuidance['entries'][string]> = {};
   for (const [key, item] of pairs) {
-    if (!KEY.test(key) || !record(item) || Object.keys(item).some(key => !ENTRY_KEYS.has(key))
+    if (!isHeldEntryKey(key) || !record(item) || Object.keys(item).some(key => !ENTRY_KEYS.has(key))
       || typeof item.status !== 'string' || !STATUSES.has(item.status)
       || typeof item.state_key_hash !== 'string' || !HASH.test(item.state_key_hash)
       || ('variant_id' in item && !isGuidanceVariant(key, item.variant_id))
@@ -70,7 +70,7 @@ export function guidanceOnAnswer(wire: GuidanceWire | undefined, history: Guidan
   for (const [index, row] of [wire?.slot1, wire?.slot2].entries()) {
     if (row === undefined) continue;
     const key = entryKey(row.policy_id, row.policy_id === 'RC-STRENGTHEN-ITEM' ? row.item : undefined);
-    if (KEY.test(key) && HASH.test(row.state_key_hash)) entries[key] = { status: 'offered', state_key_hash: row.state_key_hash,
+    if (isHeldEntryKey(key) && HASH.test(row.state_key_hash)) entries[key] = { status: 'offered', state_key_hash: row.state_key_hash,
       ...(row.variant !== undefined ? { variant_id: row.variant } : {}), slot: index + 1 };
   }
   if (press !== undefined && history !== null) {

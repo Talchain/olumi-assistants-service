@@ -1,12 +1,14 @@
 /** C1 acceptance: real Fastify route; storage/snapshot ports and scripted HTTP provider only. */
+import { randomUUID } from 'node:crypto';
 import { it, expect, vi, describe, beforeAll } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { capture, object, array, valueAt, fixture, type Obj, type Snapshot } from './provider-harness.js';
 import c2Base from './fixtures/composer-c2-base.json';
 import policy from '../../../orchestrator-v5/agent-lane/guidance/reasoning-interventions.json';
 import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
 import { composeReplyShape } from '../../../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { guidanceHistoryOf } from '../../../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
+import { StateCommitFailedError } from '../../../orchestrator-v5/session/store.js';
 
 vi.setConfig({ testTimeout: 60_000 });
 const row = (id: string) => policy.rows.find(r => r.policy_id === id)!;
@@ -78,9 +80,57 @@ it('A1 recorded conversation: one W6 carrier, whole answer, science verbatim, pl
   expect(String(w.response.assistant_text).split('\n\n')).not.toContain('Suggest risks');
   expect(object(object(w.response.guidance).slot1)).toMatchObject({ policy_id: 'RC-WIDEN', variant: 'W6' });
 });
+/**
+ * ⛔ The shared store's guidance entry-key check, read from the newest migration that defines it (the live
+ * `append_agent_answer_with_guidance` body matched it in the read-only dump of 15 Oct). An answer carrying any other key
+ * is refused WHOLE, so this double refuses exactly as the store does; `read({ id })` accepted anything, which is how #3052
+ * shipped an offer that lost every answer it was shown on (Paul's pricing turn b5a28fad, `durability: not_recorded`).
+ */
+const storeEntryKey = (() => {
+  const dir = new URL('../../../../supabase/migrations/', import.meta.url);
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.sql')).sort().reverse()) {
+    const check = /v_entry\.key !~ '(\^\(RC-[^']+)'/.exec(readFileSync(new URL(file, dir), 'utf8'));
+    if (check) return new RegExp(check[1]!);
+  }
+  throw new Error('no guidance entry-key check in supabase/migrations');
+})();
+/** A store that holds what it writes (the turn claim is read back) and refuses guidance exactly as the shared store does. */
+const storeLike = (rows: Obj[]) => ({
+  append: vi.fn(async (write: Obj) => {
+    const keys = Object.keys(write.agent_guidance === undefined ? {} : object(object(write.agent_guidance).entries));
+    if (keys.some(k => !storeEntryKey.test(k))) {
+      throw new StateCommitFailedError('append_agent_answer_with_guidance RPC failed: invalid content-free guidance event', { rpc_code: 'P0001' });
+    }
+    rows.push({ ...write, id: write.turn_id });
+    return { id: String(write.turn_id) };
+  }),
+  readCommittedTurn: vi.fn(async (_scenario: string, id: string) => rows.find(r => r.turn_id === id) ?? null),
+});
+it('OV0 ⭐ RED (Lane A A3(a)): the Outside View, which today\'s store cannot hold, is not offered, and the answer IS recorded', async () => {
+  const rows: Obj[] = [];
+  // As the UI sends it (Paul's pricing turn had its turn_id): a named turn's answer is always written and reports its durability.
+  const w = await run('OV', { payload: { message, turn_id: randomUUID() }, providerReply: () => response('Our churn is 3%.'), storage: storeLike(rows) });
+  expect(object(w.response._agent).durability, 'the answer row was written').toBe('recorded');
+  const answers = rows.filter(r => r.response_emitted === true);
+  expect(answers.map(r => r.assistantMessage), 'the stored answer is the reply the user saw').toEqual([w.response.assistant_text]);
+  expect(carriers(w), 'a row whose showing cannot be recorded is not offered (E6 cooling needs the record)').toEqual([]);
+  expect(JSON.stringify(w.response.guidance ?? null)).not.toContain('RC-OUTSIDE-VIEW');
+  // Contrast: the same store holds a row it CAN keep (W6), with its guidance on the answer row.
+  const kept: Obj[] = [];
+  const w6 = await run('W6', { payload: { message, turn_id: randomUUID() }, storage: storeLike(kept) });
+  expect(object(w6.response._agent).durability).toBe('recorded');
+  expect(kept.filter(r => r.response_emitted === true).map(r => Object.keys(object(r.agent_guidance).entries))).toEqual([['RC-WIDEN']]);
+});
 it('OV1 a goal-path figure you gave with no range: the Outside View is the one carrier (typed signal, no keyword)', async () => {
   const ov = row('RC-OUTSIDE-VIEW');
-  const w = await run('OV', { providerReply: () => response('Our churn is 3%.') });
+  // ⛔ Lane A A3(a): asserted on the store AFTER the additive migration that holds RC-OUTSIDE-VIEW (post-Monday ask to
+  // Paul); today's store cannot hold it, so it is withheld (OV0 above). Every assertion below is unchanged.
+  vi.doMock('../../../orchestrator-v5/agent-lane/guidance/held-keys.js', async (original) => {
+    const today = await original<typeof import('../../../orchestrator-v5/agent-lane/guidance/held-keys.js')>();
+    const held = new Set([...today.HELD_POLICY_IDS, 'RC-OUTSIDE-VIEW' as const]);
+    return { ...today, HELD_POLICY_IDS: held, isHeldEntryKey: (key: string) => key === 'RC-OUTSIDE-VIEW' || today.isHeldEntryKey(key) };
+  });
+  const w = await run('OV', { providerReply: () => response('Our churn is 3%.') }).finally(() => vi.doUnmock('../../../orchestrator-v5/agent-lane/guidance/held-keys.js'));
   expect(carriers(w)).toEqual([{ policy_id: 'RC-OUTSIDE-VIEW', variant_id: null, name: ov.name, why: ov.science_basis.summary,
     trigger: ov.trigger_predicate.all.join(' AND ') }]);
   const slot1 = object(object(w.response.guidance).slot1);
