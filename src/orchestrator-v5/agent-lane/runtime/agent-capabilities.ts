@@ -10,7 +10,7 @@ import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input
 import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
-import { isCalendarDate, applyGoalHorizonEdit, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
 import { userStatementsOn } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
@@ -1551,6 +1551,9 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
+      // ⭐ S7 B2 (hiring e2e c1e944a4 item 6): a date Olumi read from the user's words, which the user approved, says so:
+      // approval is not authorship, so it is never "what you supplied" (`approvedDeadlineReadingOf`).
+      ...((reading) => (deadline === undefined || reading === undefined ? {} : { deadline_set_by: reading }))(approvedDeadlineReadingOf(g.raw, n.id)),
       // ⭐ M3a (AIE 6180193788 §1): the user's recorded statements about the goal, verbatim, and the measure one of them defines,
       // so THIS working input and a cold reopen hold the user's definition apart from Olumi's reading.
       ...((): Record<string, unknown> => {
