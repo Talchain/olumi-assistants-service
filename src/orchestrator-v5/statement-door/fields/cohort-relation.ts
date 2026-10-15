@@ -13,11 +13,11 @@
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from '../../goal-target/cohort-forecast.js';
 import {
-  applyCohortForecastEdit, applyGoalRelationEdit, approvedCohortForecastOf, approvedGoalRelationOf, asksQuartileQuestion, cohortFixedReachScenario,
+  applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForecastOf, approvedStatementRecordOf, asksQuartileQuestion, cohortFixedReachScenario,
   cohortQuartileQuestion, UNDERLYING_RATE_MEANING,
   cohortForecastAskWords, cohortForecastRecordedWords, cohortLawApproximation, cohortWindowOf, peopleFiguresIn, percentRangesIn,
   sameCohortLabelsOf, sameCohortRecordedWords, sameCohortStatementOf, storedTargetRowsOf, withoutPercentRanges,
-  type ApprovedCohortForecast, type ApprovedGoalRelation,
+  type ApprovedCohortForecast, type ApprovedStatementRecord,
 } from '../../goal-target/cohort-forecast-write.js';
 import { goalTargetBasisOf, launchWindowQuestion, periodWords } from '../../goal-target/goal-target-basis.js';
 import type { StatementAsk } from '../ask.js';
@@ -48,7 +48,7 @@ const theGoal = (graph: unknown): Rec | undefined => {
   return goals.length === 1 ? goals[0] : undefined;
 };
 /** The goal's relation subject: the one the same-people question is asked in. */
-const goalRelation = (graph: unknown): DoorSubject | undefined => {
+const goalRelationSubject = (graph: unknown): DoorSubject | undefined => {
   const goal = theGoal(graph);
   return typeof goal?.id === 'string' ? { kind: 'goal', id: goal.id, field: 'relation' } : undefined;
 };
@@ -74,7 +74,7 @@ export const COHORT_RELATION_ROW: RoleRow = {
   signed_by: COHORT_RELATION_SIGNED_BY,
   applies,
   answersFor: (subject, graph) => {
-    const goal = applies(subject, graph) ? goalRelation(graph) : undefined;
+    const goal = applies(subject, graph) ? goalRelationSubject(graph) : undefined;
     return goal === undefined ? [] : [goal];
   },
   get writer() { return COHORT_FORECAST_WRITER; },
@@ -168,7 +168,7 @@ export const COHORT_FORECAST_WRITER: FieldWriter = {
  */
 export function cohortForecastAsks(graph: unknown): StatementAsk[] {
   const window = cohortWindowOf(graph);
-  const goal = goalRelation(graph);
+  const goal = goalRelationSubject(graph);
   const basis = goalTargetBasisOf(theGoal(graph));
   const labels = sameCohortLabelsOf(graph);
   if (window === undefined || goal === undefined || basis === undefined || labels === undefined) return [];
@@ -185,7 +185,7 @@ export function cohortForecastAsks(graph: unknown): StatementAsk[] {
 const countLabelOf = (graph: unknown): string => sameCohortLabelsOf(graph)?.count ?? 'the count';
 const rateLabelOf = (graph: unknown): string => sameCohortLabelsOf(graph)?.rate ?? 'the rate';
 const appliesToGoal = (subject: DoorSubject, graph: unknown): boolean => subject.kind === 'goal' && subject.field === 'relation'
-  && goalRelation(graph)?.id === subject.id && cohortWindowOf(graph) !== undefined && rateAndCount(graph) !== undefined;
+  && goalRelationSubject(graph)?.id === subject.id && cohortWindowOf(graph) !== undefined && rateAndCount(graph) !== undefined;
 
 /**
  * ⭐ M4-cohort, T8 on the GOAL: the user's answer to the same-people question (`launchWindowQuestion`), one figure-free statement,
@@ -196,7 +196,7 @@ export const COHORT_SAME_PEOPLE_ROW: RoleRow = {
   field: 'relation',
   unit: '',
   forms: ['holds_now'],
-  carrier: 'goal_relation',
+  carrier: 'statement_record',
   maxStatements: 1,
   signed_by: COHORT_RELATION_SIGNED_BY,
   applies: appliesToGoal,
@@ -213,21 +213,21 @@ export const COHORT_SAME_PEOPLE_ROW: RoleRow = {
   recordedWords: (_s, _subject, _label, graph) => sameCohortRecordedWords(graph),
 };
 
-/** The adapter onto the `goal_relation` member: the ONE verified answer, recorded on the goal and read back by identity. */
+/** The adapter onto the `statement_record` member: the ONE verified answer, recorded on the goal and read back by identity. */
 export const GOAL_RELATION_WRITER: FieldWriter = {
   approve(reading: DoorReading, graph: unknown) {
     const goal = nodesOf(graph).find((n) => n.id === reading.subject.id && n.kind === 'goal');
     if (goal === undefined || !appliesToGoal(reading.subject, graph) || reading.statements.length !== 1) return { refused: 'targets_not_cohort' };
     const record = userStatementRecord(reading.subject, reading.statements, new Date().toISOString());
-    const approved: ApprovedGoalRelation = { goal_id: String(goal.id), expected_goal: structuredClone(goal), user_statement: { subject: reading.subject, record } };
-    const dry = applyGoalRelationEdit(graph, approved);
+    const approved: ApprovedStatementRecord = { node_id: String(goal.id), expected_node: structuredClone(goal), user_statement: { subject: reading.subject, record } };
+    const dry = applyStatementRecordEdit(graph, approved);
     if (dry.kind !== 'mutated') return { refused: dry.kind === 'refused' ? dry.reason : 'already_held' };
-    return { member: 'goal_relation', payload: JSON.parse(JSON.stringify(approved)) as unknown };
+    return { member: 'statement_record', payload: JSON.parse(JSON.stringify(approved)) as unknown };
   },
   /** The stored write's words, held on its goal by identity. */
   holds(write: DoorWrite, after: unknown) {
-    const approved = write.member === 'goal_relation' && isRec(write.payload) && typeof write.payload.goal_id === 'string'
-      ? approvedGoalRelationOf({ path: write.payload.goal_id, value: write.payload }) : undefined;
+    const approved = write.member === 'statement_record' && isRec(write.payload) && typeof write.payload.node_id === 'string'
+      ? approvedStatementRecordOf({ path: write.payload.node_id, value: write.payload }) : undefined;
     return approved !== undefined && holdsUserStatement(after, approved.user_statement.record, approved.user_statement.subject);
   },
 };

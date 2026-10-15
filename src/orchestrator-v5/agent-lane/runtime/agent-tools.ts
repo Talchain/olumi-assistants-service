@@ -544,6 +544,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'population, reference, timing, bounds and conditions. Reuse retained applicable words; where this row cannot represent their meaning, '
       + 'retain them and explain only that missing binding or carrier rather than force a point. Any allocation-to-pace or timing assumption '
       + 'remains Olumi\u2019s separate grounded proposal on the complete card. '
+      + 'It also supports when ONE option\u2019s effect would be fully in place (subject the option, field lead), with reading_words set to the '
+      + 'user\u2019s own words for that option that state the month(s). '
       + 'Olumi proposes the interpretation; a complete quote or matching label alone does not verify it. Do not '
       + 'supply an Olumi estimate here or substitute a different event, quantity or time window. If the meaning or current carrier is '
       + 'unsupported, retain the original statement and explain that exact gap. This tool prepares one card and changes nothing. Only the '
@@ -560,7 +562,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({
         quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
         answering: { type: 'string', description: 'Only when the statement answers a question you asked: that question, copied exactly from your reply.' },
-        reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place): the user\u2019s own words that say it, copied from the quote.' },
+        reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place), or for when one option\u2019s effect is fully in place: the user\u2019s own words that say it, copied from the quote.' },
       }, ['quote']) },
     }, ['subject', 'statements']),
   },

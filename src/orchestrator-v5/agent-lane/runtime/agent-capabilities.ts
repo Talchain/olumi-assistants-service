@@ -338,8 +338,8 @@ import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type To
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
 import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
-import { applyCohortForecastEdit, applyGoalRelationEdit, approvedCohortForecastOf, approvedGoalRelationOf, cohortForecastRecordedWords,
-  SET_COHORT_FORECAST_OP, SET_GOAL_RELATION_OP, storedTargetRowsOf, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
+import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForecastOf, approvedStatementRecordOf, cohortForecastRecordedWords,
+  SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast } from '../../goal-target/cohort-forecast-write.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
@@ -4279,7 +4279,7 @@ export function createAgentCapabilities(
     // M5: an option's new share of time is the option-capacity member's own registered revision (its read-back, its retry replay).
     const res = memberOp.op === SET_RISK_OCCURRENCE_OP ? await applyRiskOccurrence(ctx, asMember, before)
       : memberOp.op === SET_COHORT_FORECAST_OP ? await applyCohortForecast(ctx, asMember, before)
-      : memberOp.op === SET_GOAL_RELATION_OP ? await applyGoalRelation(ctx, asMember, before)
+      : memberOp.op === SET_STATEMENT_RECORD_OP ? await applyStatementRecord(ctx, asMember, before)
       : memberOp.op === SET_OPTION_CAPACITY_CHANGE ? await applyOptionCapacityChange(ctx, asMember, before)
       : { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' } satisfies ToolResult;
     if (res.ok !== true) return res;
@@ -4336,20 +4336,20 @@ export function createAgentCapabilities(
   };
 
   /**
-   * ⭐ M4-cohort (T8): the press on the goal's same-people card. ONE commit through the level door's `goal_relation` member, alone,
+   * ⭐ M4-cohort (T8): the press on the goal's same-people card. ONE commit through the level door's `statement_record` member, alone,
    * then a read-back holding exactly the user's words on the goal (`user_statements`). The receipt is the door row's.
    */
-  const applyGoalRelation = async (
+  const applyStatementRecord = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
-    const approved = approvedGoalRelationOf(op);
+    const approved = approvedStatementRecordOf(op);
     if (approved === undefined || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
     const res = await opts.commitOptionLevels({ scenario_id: ctx.scenario_id, base_graph_hash: before.graph_hash,
-      turn_id: authorisationTurnId(pid), links: [], levels: [], goal_relation: approved });
+      turn_id: authorisationTurnId(pid), links: [], levels: [], statement_record: approved });
     if (res.status === 'stale' || res.status === 'refused') {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: res.status, ...(res.status === 'refused' ? { reason: res.reason } : {}) };
     }
@@ -4357,7 +4357,7 @@ export function createAgentCapabilities(
       detail: RISK_OCCURRENCE_UNKNOWN_SAVE, readiness_after: readinessViewOf(undefined) };
     if (res.status === 'unconfirmed') return notConfirmed;
     const check = await readGraph(ctx.scenario_id);
-    if (check === null || applyGoalRelationEdit(check.raw, approved).kind !== 'unchanged') return notConfirmed;
+    if (check === null || applyStatementRecordEdit(check.raw, approved).kind !== 'unchanged') return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: pid, receipts };

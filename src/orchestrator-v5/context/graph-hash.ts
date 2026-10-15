@@ -1,3 +1,4 @@
+import { subjectKey } from '../statement-door/subject.js';
 import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
 /**
  * V5 Phase 1.5 — deterministic graph hash.
@@ -394,6 +395,12 @@ function projectNode(raw: unknown): NodeProjection {
   // to it alone stales a stored Run. CEE-local like `relies_on`: present and well-formed only, so other graphs hash unchanged.
   const cohortForecast = NodeV3.shape.cohort_forecast.safeParse(r.cohort_forecast);
   if (cohortForecast.success && cohortForecast.data !== undefined) out.cohort_forecast = cohortForecast.data;
+
+  // M3c (AIE 6181933060): an option's recorded lead (when its effect is fully in place, Olumi's reading of the user's words)
+  // decides whether its chance at the target's month may be said, so recording or changing it alone stales a stored Run.
+  // CEE-local and present-only: a graph with no option lead hashes byte-identically to before.
+  const lead = r.kind === 'option' ? optionLeadHashMember(r) : undefined;
+  if (lead !== undefined) out.option_lead = lead;
 
   const observed = projectObservedState(r.observed_state);
   if (observed !== undefined && Object.keys(observed).length > 0) {
@@ -809,4 +816,16 @@ function legacyProjectOption(raw: unknown): legacyOptionProjection {
   }
 
   return out;
+}
+
+/** The months, stance and reference of an option's recorded lead (`user_statements`, field `lead`), as the timing reader reads them. */
+function optionLeadHashMember(node: Record<string, unknown>): Record<string, unknown> | undefined {
+  const key = typeof node.id === 'string' ? subjectKey({ kind: 'option', id: node.id, field: 'lead' }) : undefined;
+  const records = Array.isArray(node.user_statements) ? node.user_statements : [];
+  const record = records.find((x): x is Record<string, unknown> => x !== null && typeof x === 'object' && (x as Record<string, unknown>).subject_key === key);
+  const a = record !== undefined && record.attest !== null && typeof record.attest === 'object' ? record.attest as Record<string, unknown> : undefined;
+  if (a === undefined) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const k of ['month_low', 'month_high', 'low_exclusive', 'reference_assumed', 'stance', 'fingerprint']) if (a[k] !== undefined) out[k] = a[k];
+  return Object.keys(out).length > 0 ? out : undefined;
 }
