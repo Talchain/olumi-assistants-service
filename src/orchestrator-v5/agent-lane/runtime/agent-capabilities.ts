@@ -338,7 +338,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
-import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, REVISED_DRAFT_MORE_LINKS, findConstructionVersion, type CallStructuredModel, type ConstructionContext, type ConstructionTrace, type RetainedMessage } from './build-model.js';
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForecastOf, approvedStatementRecordOf, cohortForecastRecordedWords,
   SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
@@ -3896,11 +3896,20 @@ export function createAgentCapabilities(
     const input = revisedDraftBrief(storedBrief, typedSince);
     let out: ToolResult;
     try {
-      // The user's typed words since the brief, named to the drafter as later than it; the current saved model (the agent's own
-      // view of it), the later messages of unknown origin and the objections, as CONTEXT only.
-      const unverified = gate.messages.filter((m) => !typedSince.includes(m.trim()));
-      const context: ConstructionContext = { since_brief: { brief: storedBrief, messages: typedSince }, ...(gate.later ? { current_model: projectModelContext(g),
-        ...(unverified.length > 0 ? { messages: unverified } : {}), ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : {}) };
+      // The retained conversation in its stored order (AIE-09), each item with its recorded speaker and source: the user's
+      // (typed) ONLY as the next of the user's typed messages by the route's request-level origin (the stored order aligns the
+      // position; the identity is that origin's); anything else stored, a chip's or button's text included, stays unknown.
+      // This turn's typed message is last. The current saved model (the agent's own view of it) and the objections are context.
+      const typedEarlier = typedSince.slice(0, -1);
+      let nextTyped = 0;
+      const user = (text: string): RetainedMessage => ({ speaker: 'user', source: 'typed', text });
+      const conversation: RetainedMessage[] = gate.messages.map((m) => {
+        if (nextTyped < typedEarlier.length && m.trim() === typedEarlier[nextTyped]) { nextTyped += 1; return user(m.trim()); }
+        return { speaker: 'unknown', source: 'stored, origin not verified', text: m.trim() };
+      });
+      conversation.push(...typedEarlier.slice(nextTyped).map(user), user(typedGoal));
+      const context: ConstructionContext = { retained: { brief: storedBrief, conversation }, ...(gate.later ? { current_model: projectModelContext(g),
+        ...(gate.objections.length > 0 ? { objections: gate.objections } : {}) } : {}) };
       out = await runPreparingDraftReplacement(sid, () => buildWithDrafterRawRecord(ctx, input, constructionOperationId(sid, input), callStructured,
         // No widening for a revised draft (prepare-only card): it stays exactly as served before the arms were restored.
         (drafter) => buildModelFromBrief(sid, input, dispatch, drafter, undefined, opts.deadlineAt, undefined, undefined, context, deliverable, true)));

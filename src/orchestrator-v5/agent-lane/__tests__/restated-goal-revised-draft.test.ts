@@ -23,7 +23,7 @@ import { retainedLimitOnlyNodeIds, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../.
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
-import { buildModelFromBrief, constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, USER_MESSAGES_SINCE_BRIEF_LEAD, REVISED_DRAFT_MORE_LINKS, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, constructionOperationId, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, REVISION_LEAD, REVISED_DRAFT_MORE_LINKS, type CallStructuredModel } from '../runtime/build-model.js';
 import { revisedDraftBrief } from '../runtime/draft-replacement.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
@@ -97,6 +97,8 @@ const candidate = (): Rec => ({
 
 /** The in-memory store: the read route, the register route's compare-and-set and replay rules, and the committed turn ledger. */
 function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledgerFails?: boolean; afterCommit?: (g: Rec) => void;
+  /** The stored brief (default: the fixture's). */
+  brief?: string;
   /** A route that stores something other than the approved candidate, and acknowledges what it stored (AIE B34). */
   beforeAck?: (stored: Rec) => void;
   /** The register route refuses with this 409 code, writing nothing (as every 409 of `assist.v1.scenario-graph-register.ts` does). */
@@ -110,7 +112,7 @@ function server(opts: { graph?: Rec; ledger?: Partial<CommittedTurnLedger>; ledg
   const identity = () => computeGraphIdentityHash(graph as never)!.value;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path === `/assist/v1/scenarios/${SID}/graph`) {
-      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: FX.brief_text,
+      return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never), brief_text: opts.brief ?? FX.brief_text,
         graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     }
     if (path === `/assist/v1/scenarios/${SID}/graph/register`) {
@@ -560,10 +562,14 @@ function laneWith(s: ReturnType<typeof server>, o: { draft?: () => Rec; objectio
   return { caps, proposals, inputs, drafts: () => inputs.length };
 }
 /**
- * ⚠ Lane A A1 re-pin (founder verify df243cbc): the drafter now sees WHICH of the user's words came after the brief. The typed goal
- * reaches it as the user's later message under USER_MESSAGES_SINCE_BRIEF_LEAD; still nothing else is made the user's words.
+ * ⚠ Lane A A1 re-pin (founder verify df243cbc; AIE-09 and the AIE's revision lead): the drafter now sees the brief, the revision
+ * lead, then the retained conversation in order, each item with its recorded speaker and source. The typed goal is the user's
+ * (typed) last item; still nothing else is made the user's words.
  */
-const typedBrief = `${FX.brief_text.trim()}\n\n${USER_MESSAGES_SINCE_BRIEF_LEAD} ${JSON.stringify([L20.trim()])}`;
+type Said = readonly [speaker: 'user' | 'unknown', text: string];
+const revisionInput = (...said: Said[]): string => `${FX.brief_text.trim()}\n\n${REVISION_LEAD}\n\n${LATER_MESSAGES_CONTEXT_LEAD} `
+  + JSON.stringify(said.map(([speaker, text]) => ({ speaker, source: speaker === 'user' ? 'typed' : 'stored, origin not verified', text })));
+const typedBrief = revisionInput(['user', L20.trim()]);
 const cardOf = (proposals: ProposalStore, r: Rec): string => String(proposals.get(String(r.proposal_id))!.public_label);
 const candidateOf = (proposals: ProposalStore, r: Rec): Rec => (proposals.get(String(r.proposal_id))!.operations[0]!.value as Rec).candidate as Rec;
 
@@ -805,14 +811,13 @@ describe('later human work is kept: carried by identity, read as context, named 
     expect(card).not.toContain('Kept as you set them');
   });
 
-  it('G3 (adopted): a later message is the drafter\'s context only, after the brief and typed goal, never part of them; the press binds it', async () => {
+  it('G3 (adopted; A1 re-pin): a later message of unverified origin is the drafter\'s context only, in its place in the conversation, never the user\'s; the press binds it', async () => {
     const s = server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'],
       later_user_messages: [{ turn_id: 'chip-turn-run-analysis', text: 'Run the analysis' }] } });
     const { caps, inputs } = laneWith(s);
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r, JSON.stringify(r).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
-    expect(inputs[0]!.startsWith(`${typedBrief}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
-    expect(inputs[0]!.endsWith(`\n\n${LATER_MESSAGES_CONTEXT_LEAD} ["Run the analysis"]`)).toBe(true);
+    expect(inputs[0]!.startsWith(`${revisionInput(['unknown', 'Run the analysis'], ['user', L20.trim()])}\n\n${CURRENT_MODEL_CONTEXT_LEAD} {`)).toBe(true);
     s.said(FX.l20.turn_id);
     const applied = await caps.authoriseChange(pressed(String(r.proposal_id)), { proposal_id: r.proposal_id } as never);
     expect(applied, JSON.stringify(applied).slice(0, 600)).toMatchObject({ ok: true, applied: true });
@@ -1451,9 +1456,9 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
   const CHIP = 'Yes, use the revised draft.';
   const typedTurn = (typed: readonly string[]) => ({ ...turn, turn_id: 'corr-a1-0001', user_turn_text: NOW,
     user_text: [FX.l1.message, ...typed, NOW].join('\n'), verified_user_messages: [FX.l1.message, ...typed, NOW] });
-  const changeAs = async (caps: ReturnType<typeof lane>['caps'], ctx: Rec) => {
+  const changeAs = async (caps: ReturnType<typeof lane>['caps'], ctx: Rec, quote = NOW) => {
     const { dispatchTool } = await import('../runtime/agent-tools.js');
-    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote: NOW }] }),
+    return dispatchTool('propose_change', JSON.stringify({ ops: [{ op: 'revise_model', kind: 'goal', label: 'product feature launch', quote }] }),
       ctx as never, caps) as Promise<Rec>;
   };
   const at250k = (): Rec => { const c = qualitative(); c.goal = { ...c.goal, operator: '>=', target_stated: true, value: 250000, unit: '\u00a3' }; return c; };
@@ -1465,10 +1470,9 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     const out = await changeAs(caps, typedTurn([TYPED_60, TYPED_250K]));
     expect(out, JSON.stringify(out).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     expect(inputs).toHaveLength(1);
-    expect(inputs[0]!.startsWith(`${FX.brief_text.trim()}\n\n${USER_MESSAGES_SINCE_BRIEF_LEAD} ${JSON.stringify([TYPED_60, TYPED_250K, NOW])}\n\n`)).toBe(true);
-    // CONTRAST: the chip's words ("Yes, use the revised draft.") stay context of unverified origin, never the user's later words.
-    expect(inputs[0]).toContain(`${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify([CHIP])}`);
-    expect(inputs[0]!.split(LATER_MESSAGES_CONTEXT_LEAD)[0]).not.toContain(CHIP);
+    // In stored order; CONTRAST: the chip's words ("Yes, use the revised draft.") keep speaker unknown, never the user's.
+    expect(inputs[0]!.startsWith(`${revisionInput(['user', TYPED_60], ['unknown', CHIP], ['user', TYPED_250K], ['user', NOW])}\n\n`)).toBe(true);
+    expect(inputs[0]).not.toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: CHIP }));
   });
 
   it('⭐ A1 RED: the user\'s LATER typed target (\u00a3250,000) supersedes the saved 1.3 million: offered as theirs → press → reopen holds it', async () => {
@@ -1511,6 +1515,45 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     const labels = (candidateOf(proposals, out).nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => n.label);
     expect(labels).toEqual(expect.arrayContaining(['Hire marketing manager', 'AI planning + advertising']));
     expect(labels).not.toContain('hire_marketing_manager');
+  });
+
+  /**
+   * ⭐ Lane A A1, turn-11 shape (AIE-09: turn 11 already had £250,000 in its main brief, yet both raw goals kept 1.3 million).
+   * The drafter is TOLD the current aim governs (the AIE's goal sentence and revision lead are in what it is sent); when it
+   * drafts the current aim at £250,000 and keeps 1.3 million as the eventual ambition, that is what is offered and saved: the
+   * 1.3 million survives as the user's own retained statement on the goal, never as its operative target.
+   */
+  it('⭐ A1 turn-11 shape: current aim £250,000 governs; 1.3 million kept as the eventual ambition, never the operative target', async () => {
+    const FOUNDER = 'I need to decide how best to split my attention as the main founder working on Olumi at the moment.\n'
+      + 'I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\n'
+      + 'I need to complete the PoC. I have AI working on it, so I don\'t need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\n'
+      + 'I need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.';
+    const EVENTUAL = 'I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.';
+    const currentAim = (): Rec => { const c = at250k(); c.statements = [
+      { quote: TYPED_250K, subject: { kind: 'goal', label: 'Larger fund secured', to_label: null, factor_label: null }, field: 'target', form: 'lower_bound',
+        value: 250000, low: null, high: null, unit: '\u00a3', qualifier: 'even', conditions: null },
+      { quote: EVENTUAL, subject: { kind: 'goal', label: 'Larger fund secured', to_label: null, factor_label: null }, field: 'relation', form: 'describes',
+        value: 1.3, low: null, high: null, unit: 'million (currency unspecified)', qualifier: 'eventually', conditions: 'a later, larger fund' },
+    ]; return c; };
+    const s = server({ graph: withRawTarget(), brief: FOUNDER, ledger: { first_user_message: FOUNDER,
+      write_turn_ids: [registrationTurnId(SID, constructionOperationId(SID, FOUNDER))] } });
+    const sent: Rec[] = [];
+    const call = (async (req: Rec) => { sent.push(structuredClone(req)); return { text: JSON.stringify(currentAim()) }; }) as unknown as CallStructuredModel;
+    const caps = createAgentCapabilities(s.dispatch, new ProposalStore(), call, 'full', undefined, { readCommittedTurnLedger: s.readCommittedTurnLedger, readStatedObjections: async () => [] });
+    const turn11 = { ...turn, turn_id: 'corr-a1-0011', user_turn_text: TYPED_250K, user_text: `${FOUNDER}\n${TYPED_250K}`, verified_user_messages: [FOUNDER, TYPED_250K] };
+    const offer = await changeAs(caps, { ...turn11 }, TYPED_250K);
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    // What the drafter is sent: the AIE's governing-aim sentence and its revision lead, and £250,000 as the user's (typed) words.
+    expect(String(sent[0]!.instructions)).toContain('The goal carries the user\'s CURRENT governing aim and the target, if any, that actually belongs to it.');
+    expect(String(sent[0]!.input)).toContain(REVISION_LEAD);
+    expect(String(sent[0]!.input)).toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: TYPED_250K }));
+    expect(String(offer.public_label)).toContain(', in place of 1.3 million (currency unspecified). ');
+    s.said('corr-a1-0011');
+    expect(await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never)).toMatchObject({ ok: true, applied: true });
+    const reopened = (await s.dispatch(`/assist/v1/scenarios/${SID}/graph`, undefined as never)).json as Rec;
+    const goal = (reopened.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect([goal.goal_threshold_raw, goal.goal_threshold_unit], 'the operative target is the current aim').toEqual([250000, '\u00a3']);
+    expect(JSON.stringify(goal.user_statements ?? []), 'the eventual 1.3 million is kept, as the user\'s own words').toContain('eventually, a larger fund of at least 1.3 million');
   });
 
   it('CONTRAST (the gate kept where it guards a loss): the saved model HAS a target and the revision drops it → refused', async () => {
