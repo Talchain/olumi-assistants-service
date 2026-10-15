@@ -331,7 +331,18 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(result).toMatchObject({ ok: true, mutated: true });
     expect(registrations).toHaveLength(1);
     // Base staging 94b2554d registered this exact graph (census r3, graph_sha prefix).
-    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(registrations[0], JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
+    // ONE intended delta from base (AIE #94 6184383302): this pre-statement draft has no goal target statement, so "by Q3"
+    // is asked, not held on the goal. Base's bytes are reproduced exactly once that one field is put back where base held it.
+    const goal = (registrations[0].nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    expect(Object.hasOwn(goal, 'goal_deadline_as_stated')).toBe(false);
+    const asBase = { ...registrations[0], nodes: (registrations[0].nodes as Rec[]).map((n) => {
+      if (n.kind !== 'goal') return n;
+      const entries = Object.entries(n);
+      const at = entries.findIndex(([k]) => k === 'unit_reading');
+      entries.splice(at === -1 ? entries.length : at, 0, ['goal_deadline_as_stated', 'by Q3']);
+      return Object.fromEntries(entries);
+    }) };
+    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(asBase, JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
     expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
   });
 

@@ -87,7 +87,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { withConstructionStatements } from '../construction-source-map.js';
+import { sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -2420,12 +2420,12 @@ export async function buildModelFromBrief(
         } as AdmittedModel['loss'][number]])],
       };
     }
-    // ⛔ What the drafter filed as an unknown (or a concern's copy of one) is never the goal's deadline (AIE 6183705670).
-    const filedUnknowns = (candidate as { unknowns?: unknown }).unknowns;
-    const filedConcerns = (candidate as { unknown_concerns?: unknown }).unknown_concerns;
-    const filedAsUnknown: unknown[] = [...(Array.isArray(filedUnknowns) ? filedUnknowns : []),
-      ...(Array.isArray(filedConcerns) ? filedConcerns.map((c: unknown) => (c !== null && typeof c === 'object' ? (c as { unknown?: unknown }).unknown : undefined)) : [])];
-    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, filedAsUnknown);
+    // ⭐ The goal's own verified target statements (the one statement contract, `construction-source-map.ts`): with no deadline
+    // claimed, a period is the goal's deadline only inside one of them (AIE 6184383302).
+    const goalMetric = typeof candidate.goal?.metric === 'string' ? candidate.goal.metric : '';
+    const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf((candidate as { statements?: unknown }).statements, brief)
+      .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
+    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, goalTargetQuotes);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
@@ -2611,6 +2611,11 @@ export async function buildModelFromBrief(
       openQuestions.unshift(deadlineHeld
         ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
         : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
+    } else if (statedGoal.horizon.unbound !== undefined && calendarDeadline === undefined && goalMetric.trim() !== '') {
+      // ⭐ AIE 6184383302: a period the brief writes outside the goal's target (a learning or measurement window, a start) keeps
+      // its words and the exact missing reading; it is never written as the goal's deadline, and a month count the drafter guessed
+      // for it is never asked in its place (the brief's words come first).
+      openQuestions.unshift(`Is "${statedGoal.horizon.unbound}" the period by which "${goalMetric}" should be achieved? Your brief does not say, so the model holds no deadline for it.`);
     } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0 && !statedGoal.held.horizon) {
       openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
     } else if (statedGoal.horizon.status === 'absent' && calendarDeadline !== undefined) {
