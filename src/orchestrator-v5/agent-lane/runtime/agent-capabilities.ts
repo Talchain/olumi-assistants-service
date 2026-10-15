@@ -87,7 +87,7 @@ import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty
 import { runOptionSetForCopy, readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { reframedNodeIds } from '../refit-frames.js';
-import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
+import { acceptedOlumiEstimateSentence, goalChanceChangesOf, rerunRecordForModel, type RunGoalChanceChange } from '../rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -1217,7 +1217,9 @@ interface GraphRead {
  * where none is licensed or its C1 was checked down, Olumi's own leader-free record of what changed (`rerunRecordForModel`).
  * Both undefined for a first Run.
  */
-async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel> }> {
+async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel>;
+  /** S9: the goal chances both Runs showed, beside a licensed delta (whose projection drops `goal_chances`); in `rerunRecord` otherwise. */
+  goalChanceChanges: readonly RunGoalChanceChange[] }> {
   const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
   const delta = await selectedRunDeltaForModel(scenarioId, g, g.run_delta);
   const optionNames = optionNameAliasesForCurrentRun(g);
@@ -1236,7 +1238,10 @@ async function runComparisonFacts(scenarioId: string, requestId: string, g: Grap
   const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
     [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
     pairRead?.frameRefitLinks);
-  return { delta, rerunRecord };
+  // ⭐ S9 (capacity e2e R2e): the model-facing projection strips `goal_chances`, so beside a licensed delta they travel typed here.
+  const goalChanceChanges = rerunRecord !== undefined || delta === undefined ? []
+    : goalChanceChangesOf(g.run_delta, (id) => g.nodes.find((n) => n.id === id)?.label);
+  return { delta, rerunRecord, goalChanceChanges };
 }
 
 /** What a Run's output tells the model to do with its comparison facts (Paul #94 6166259456). */
@@ -4883,7 +4888,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
+      const { delta, rerunRecord, goalChanceChanges } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
       // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
       // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
       let statedObjectionsUnreadable = false;
@@ -4947,6 +4952,7 @@ export function createAgentCapabilities(
         // host contract tells the AI to end its reply with that step; no host line says it.
         ...nextStepFactOf(g),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
+        ...(goalChanceChanges.length === 0 ? {} : { goal_chance_changes: goalChanceChanges }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
@@ -11377,9 +11383,10 @@ export function createAgentCapabilities(
         };
         if (postRunRead && postRunRead.run_delta !== undefined
           && compareAnalysisRunFactIdentity(runIdentity, readRun).status === 'match') {
-          const { delta, rerunRecord } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
+          const { delta, rerunRecord, goalChanceChanges } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
           if (delta !== undefined || rerunRecord !== undefined) {
             runComparison = { ...(delta !== undefined ? { run_delta: delta } : {}), ...(rerunRecord !== undefined ? { rerun_record: rerunRecord } : {}),
+              ...(goalChanceChanges.length === 0 ? {} : { goal_chance_changes: goalChanceChanges }),
               note: RUN_COMPARISON_NOTE };
           }
         }
