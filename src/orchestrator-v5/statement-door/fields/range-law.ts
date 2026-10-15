@@ -8,7 +8,7 @@
  * ends (`rangeLawAdopted`; a changed range is not adopted). The ends stay the person's; the law stays Olumi's. The press's
  * read-back and the existing automatic re-Run then show the chance. Pure.
  */
-import { likelyRangeUseOf, rangeApproximationWords, rangeLawSubject, RANGE_LAW_EQUAL_TAIL, type LikelyRangeUse } from '../../intervention-range.js';
+import { likelyRangeUseOf, rangeApproximationWords, rangeLawCarrierOf, rangeLawSubject, RANGE_LAW_EQUAL_TAIL, type LikelyRangeUse } from '../../intervention-range.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { sayFigureExactly } from '../../agent-lane/say-figure.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
@@ -87,8 +87,30 @@ export function rangeLawAdoption(graph: unknown, optionId: string, factorId: str
   const factor = nodesOf(graph).find((n) => n.id === factorId && n.kind === 'factor');
   if (factor === undefined || statements.length !== 1 || statements[0]!.form !== 'range') return undefined;
   const subject = rangeLawSubject(optionId, factorId);
-  const record = userStatementRecord(subject, statements, at, { range_law: RANGE_LAW_EQUAL_TAIL, low, high });
+  // ⭐ C2 currentness: bound to the range the setting holds (`rangeLawCarrierOf`). Where this commit itself writes the range (the
+  // level card), the edit door stamps it from the cell as written (`rangeLawOnCarrier`).
+  const carrier = rangeLawCarrierOf(rangeCellOf(graph, optionId, factorId));
+  const record = userStatementRecord(subject, statements, at, { range_law: RANGE_LAW_EQUAL_TAIL, low, high, ...(carrier !== undefined ? { carrier } : {}) });
   return { node_id: factorId, expected_node: structuredClone(factor), user_statement: { subject, record } };
+}
+
+/** ONE option's setting of a factor, as `graph` holds it. */
+function rangeCellOf(graph: unknown, optionId: string, factorId: string): unknown {
+  const option = nodesOf(graph).find((n) => n.kind === 'option' && n.id === optionId);
+  const cells = option === undefined ? undefined : [option.interventions, isRec(option.data) ? option.data.interventions : undefined]
+    .find((x): x is Rec => isRec(x) && factorId in x);
+  return cells?.[factorId];
+}
+
+/**
+ * The adoption bound to the range `graph` holds for its setting (the post-write graph of the commit that writes that range), or
+ * `undefined` when that setting holds no likely range with the adopted ends: an adoption never binds to a range it was not shown.
+ */
+export function rangeLawOnCarrier(approved: ApprovedStatementRecord, graph: unknown): ApprovedStatementRecord | undefined {
+  const { subject, record } = approved.user_statement;
+  const use = subject.option_id === undefined ? undefined : likelyRangeUseOf(subject.id, rangeCellOf(graph, subject.option_id, subject.id));
+  if (use === undefined || use.low !== record.attest?.low || use.high !== record.attest?.high) return undefined;
+  return { ...approved, user_statement: { subject, record: { ...record, attest: { ...record.attest, carrier: use.carrier } } } };
 }
 
 /** The person's range as the level card read it from their sentence: the statement its adoption record holds. */

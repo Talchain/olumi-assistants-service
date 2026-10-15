@@ -100,6 +100,7 @@ import { deadlineGoalStillBound } from '../agent-lane/proposal-object/still-appl
 import { applyGoalReadingEdit, goalReadingPostimageIsScoped, type ApprovedGoalReading } from '../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, riskOccurrencePostimageIsScoped, type ApprovedRiskOccurrence } from '../agent-lane/risk-occurrence.js';
 import { applyCohortForecastEdit, applyStatementRecordEdit, cohortForecastPostimageIsScoped, statementRecordPostimageIsScoped, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../goal-target/cohort-forecast-write.js';
+import { rangeLawOnCarrier } from '../statement-door/fields/range-law.js';
 import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
@@ -1408,7 +1409,10 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const nodeIn = (g: unknown): unknown => (isEditableGraph(g) ? g.nodes.find(n => n.id === r.node_id) : undefined);
     if (!isDeepStrictEqual(nodeIn(before), r.expected_node)) return { kind: 'refused', reason: 'range_law_node_changed' };
     const base = projectGraphForPersistence(levelBase as EditableGraph);
-    const onBase: ApprovedStatementRecord = { ...r, expected_node: structuredClone(nodeIn(base)) as ApprovedStatementRecord['expected_node'] };
+    // ⭐ C2 currentness: bound to the range this commit wrote for that setting, never to one it was not shown.
+    const bound = rangeLawOnCarrier(r, base);
+    if (bound === undefined) return { kind: 'refused', reason: 'range_law_without_its_range' };
+    const onBase: ApprovedStatementRecord = { ...bound, expected_node: structuredClone(nodeIn(base)) as ApprovedStatementRecord['expected_node'] };
     const written = applyStatementRecordEdit(base, onBase);
     if (written.kind === 'refused') return { kind: 'refused', reason: `range_law_${written.reason}` };
     if (written.kind === 'unchanged') continue;

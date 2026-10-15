@@ -16,6 +16,7 @@
  *      disagree). The wire plan reports that conversion loss so affected outcomes are withheld, never silently
  *      scored as though the user's range had been sampled.
  */
+import { createHash } from 'node:crypto';
 import { InterventionRangeMeaningV3, InterventionRangeV3, type InterventionRangeV3T } from '../schemas/cee-v3.js';
 import { isPersonsOwnSetting } from '../cee/provenance/provenance-of.js';
 import { sayFigureExactly } from './agent-lane/say-figure.js';
@@ -174,6 +175,8 @@ export interface LikelyRangeUse {
   readonly source_quote?: string;
   /** Set by a reader that knows the option (`rangeLawAdopted`): the approximation of exactly these ends was adopted. */
   readonly adopted?: boolean;
+  /** What the approximation is OF, as the setting holds it now ({@link rangeLawCarrierOf}): an adoption binds to it. */
+  readonly carrier: string;
 }
 
 /**
@@ -184,12 +187,35 @@ export interface LikelyRangeUse {
 export const RANGE_LAW_EQUAL_TAIL = 'equal_tail' as const;
 /** The door subject an option's setting of a factor is: its range's adoption record is keyed by it. */
 export const rangeLawSubject = (optionId: string, factorId: string): DoorSubject => ({ kind: 'factor', id: factorId, option_id: optionId, field: 'level' });
-export function rangeLawAdopted(graph: unknown, optionId: string, u: Pick<LikelyRangeUse, 'factor_id' | 'low' | 'high'>): boolean {
+export function rangeLawAdopted(graph: unknown, optionId: string, u: Pick<LikelyRangeUse, 'factor_id' | 'low' | 'high' | 'carrier'>): boolean {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
   const node = nodes.find((n) => isRec(n) && n.id === u.factor_id);
   // Only a PRESS adopts (#3207: a record construction wrote from the brief on the same setting is never one).
   const record = node === undefined ? undefined : pressedRecord(userStatementOnNode(node, subjectKey(rangeLawSubject(optionId, u.factor_id))));
-  return record?.attest?.range_law === RANGE_LAW_EQUAL_TAIL && record.attest.low === u.low && record.attest.high === u.high;
+  // ⭐ PL 07:50 (C2 currentness): the adoption is of the interpretation the card SHOWED, bound to the setting's range as it was then
+  // (its ends, meaning, author, unit and stated words). A later change to any of them is a different range: not adopted, so the
+  // chance is withheld again and the card is offered for it. A record with no carrier (before this binding) proves nothing current.
+  return record?.attest?.range_law === RANGE_LAW_EQUAL_TAIL && record.attest.low === u.low && record.attest.high === u.high
+    && typeof record.attest.carrier === 'string' && record.attest.carrier === u.carrier;
+}
+
+/** Spacing, quote marks, dashes and letter case say the same words; nothing else is folded. */
+const sameWords = (s: string): string => s.normalize('NFKC').replace(/[\u2018\u2019\u201B\u2032]/g, "'").replace(/[\u201C\u201D\u201F\u2033]/g, '"')
+  .replace(/[\u2010-\u2015\u2212]/g, '-').replace(/\s+/g, ' ').trim().toLocaleLowerCase('en-GB');
+
+/**
+ * ⭐ PL 07:50 (C2 currentness; the timing door's fingerprint pattern, `timingFingerprintOf`): what an equal-tail adoption is OF —
+ * the admitted likely range of ONE option's setting as it is held: its ends, its meaning, who gave them, the unit, and the words
+ * they were stated in (which keep any condition). Harmless re-expression reads the same: spacing, quote marks, dashes and letter
+ * case; and the option's own point inside the range, which the approximation does not use. `undefined` when no likely range is held.
+ */
+export function rangeLawCarrierOf(cell: unknown): string | undefined {
+  const verdict = admitInterventionRange(cell);
+  if (verdict === undefined || 'refused' in verdict || verdict.range.meaning !== 'likely_range') return undefined;
+  const r = verdict.range;
+  const unit = isRec(cell) && typeof cell.unit === 'string' ? sameWords(cell.unit) : '';
+  const carrier = [r.low, r.high, r.meaning, r.source, unit, r.source_quote === undefined ? null : sameWords(r.source_quote)];
+  return createHash('sha256').update(JSON.stringify(carrier)).digest('hex').slice(0, 32);
 }
 /** AIE 6184726873's face, exact, where the recorded use is known. */
 export const rangeLawWithheldWords = (factorLabel: string, optionLabel: string): string =>
@@ -202,7 +228,7 @@ export function likelyRangeUseOf(factorId: string, cell: unknown): LikelyRangeUs
   if (verdict === undefined || 'refused' in verdict || verdict.range.meaning !== 'likely_range') return undefined;
   const unit = isRec(cell) && typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit.trim() : undefined;
   return { factor_id: factorId, low: verdict.range.low, high: verdict.range.high, ...(unit !== undefined ? { unit } : {}),
-    persons_own: isPersonsOwnSetting(verdict.range),
+    persons_own: isPersonsOwnSetting(verdict.range), carrier: rangeLawCarrierOf(cell)!,
     ...(verdict.range.source_quote !== undefined ? { source_quote: verdict.range.source_quote } : {}) };
 }
 
