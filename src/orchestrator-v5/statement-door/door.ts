@@ -14,6 +14,7 @@ import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type Sub
 import { RECORD_STATEMENT_OP, type DoorWriteMember } from './write.js';
 import type { ProposalOperation } from '../agent-lane/proposal.js';
 import { RISK_HOLDS_NOW_ROW } from './fields/risk.js';
+import { timingAskOf } from './fields/goal-timing.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -69,7 +70,9 @@ const nodesOf = (graph: unknown): Rec[] => (isRec(graph) && Array.isArray(graph.
 
 /** The readiness asks the door binds an answer to, each in the words readiness says (`analysis-ready-helper` levelGapAsk). */
 export function doorAsks(graph: unknown): StatementAsk[] {
-  return nodesOf(graph).flatMap((n) => {
+  return nodesOf(graph).flatMap((n): StatementAsk[] => {
+    // M3b: the goal's ONE timing ask (every current option effect at the target's end point), so its answer binds by `answering`.
+    if (n.kind === 'goal' && typeof n.id === 'string') { const t = timingAskOf(graph, n.id); return t === undefined ? [] : [t]; }
     if (n.kind !== 'risk' || typeof n.id !== 'string' || typeof n.label !== 'string') return [];
     const e = riskOccurrenceSubject(graph, n.id);
     if (e.kind !== 'eligible') return [];

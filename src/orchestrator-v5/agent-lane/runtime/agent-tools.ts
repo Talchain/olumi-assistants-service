@@ -534,8 +534,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description: 'Record the user\u2019s OWN statement about one part of the model, quoted exactly, as ONE card they approve with '
       + '\u201cRecord what you said\u201d. Use it when the user stated it in any of their messages, this one or an earlier one. Name the '
       + 'subject: its kind, its exact label as get_canonical_state returned it, and the field the statement is about. On the door now: a '
-      + 'RISK\u2019s occurrence (how likely it is to happen, with the time span the user gave) and a RISK\u2019s holds_now (a condition the '
-      + 'user says is already true now). Give each statement as the user\u2019s complete words; Olumi reads the figure, its form and its '
+      + 'RISK\u2019s occurrence (how likely it is to happen, with the time span the user gave), a RISK\u2019s holds_now (a condition the '
+      + 'user says is already true now), a GOAL\u2019s measure (what it is measured in) and a GOAL\u2019s lead (when its effects are fully in '
+      + 'place). Give each statement as the user\u2019s complete words; Olumi reads the figure, its form and its '
       + 'window from those words itself, and refuses with the reason when it cannot. Never put your own estimate or a number the user did '
       + 'not state here. This does NOT change anything: it prepares ONE card, and only the user\u2019s press records it.',
     parameters: obj({
@@ -549,6 +550,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({
         quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
         answering: { type: 'string', description: 'Only when the statement answers a question you asked: that question, copied exactly from your reply.' },
+        reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place): the user\u2019s own words that say it, copied from the quote.' },
       }, ['quote']) },
     }, ['subject', 'statements']),
   },

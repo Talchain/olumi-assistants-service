@@ -6091,7 +6091,8 @@ export function createAgentCapabilities(
           : 'No part of the model matches that kind, exact label and field, so nothing was prepared. Use the label get_canonical_state returned.' };
       }
       const quotes = (Array.isArray(args?.statements) ? args.statements : []).flatMap((x) => (isPlainRecord(x) && typeof x.quote === 'string'
-        ? [{ quote: x.quote, ...(typeof x.answering === 'string' ? { answering: x.answering } : {}) }] : []));
+        ? [{ quote: x.quote, ...(typeof x.answering === 'string' ? { answering: x.answering } : {}),
+          ...(typeof x.reading_words === 'string' ? { reading_words: x.reading_words } : {}) }] : []));
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text,
         unverified: [ctx.unverified_user_text, g.brief_text].filter((t): t is string => typeof t === 'string').join('\n') };
       const v = readStatement(g.raw, resolved.subject, resolved.label, quotes, texts, doorContextOf(ctx, g.raw));

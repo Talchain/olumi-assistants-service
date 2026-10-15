@@ -16,11 +16,16 @@
  *  · is undecided (`analysis_participation` absent: an adopted risk asks; a `retained_excluded` one is already out);
  *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it, and a directed path to a goal;
  *  · is not something the Run needs: no option sets or links to it, and no limit names it (those keep asking, as before).
+ *
+ * ⭐ SYSTEM 1 M1 (DL 15 Oct 00:41Z, S12): the SAME rule, never a second one, for a risk whose only reading is the brief's own
+ * sentence the model holds unconfirmed (`already_true_quote`, "I'm not that experienced with marketing"): an unconfirmed reading
+ * never blocks the Run. It is left out with its own disclosure, its door card is offered, and its press (a written block) brings it
+ * in. Every other condition above holds for it too.
  * Pure; read on the model as saved by readiness, the Run's and what-if's compute projection, and the host's line.
  */
 import { authorshipOf, nodeIntroductionOf } from '../../cee/provenance/provenance-of.js';
 import { limitNodeIds } from '../../graph/retained-limit.js';
-import { riskHoldsALevel } from './risk-occurrence.js';
+import { alreadyTrueQuoteOf, riskHoldsALevel } from './risk-occurrence.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -28,6 +33,8 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 /** Olumi's suggestion by positive evidence: the drafter's own label, or admission's stamp. Never by a missing stamp. */
 const olumiSuggested = (n: Rec): boolean => authorshipOf({ nodeTag: n.provenance }).origin === 'ai'
   || nodeIntroductionOf(n).origin === 'olumi_added';
+/** The brief's own reading of this risk, still unconfirmed by the user's press (no block yet: the set's other conditions say so). */
+const unconfirmedBriefReading = (n: Rec): boolean => alreadyTrueQuoteOf(n) !== undefined;
 
 export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return new Set();
@@ -62,7 +69,7 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
     return false;
   };
   return new Set(nodes.filter((n) => n.kind === 'risk' && typeof n.id === 'string' && counts.get(n.id) === 1
-    && olumiSuggested(n) && n.analysis_participation === undefined
+    && (olumiSuggested(n) || unconfirmedBriefReading(n)) && n.analysis_participation === undefined
     && (n.event_risk === undefined || n.event_risk === null) && !riskHoldsALevel(n, graph)
     && !needed.has(n.id) && !edges.some((e) => e.to === n.id) && reachesGoal(n.id)).map((n) => n.id as string));
 }
@@ -88,6 +95,8 @@ export function unsizedOlumiRiskLine(graph: unknown, riskId: string, besideChanc
   const node = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === riskId) : undefined;
   const label = typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : null;
   if (label === null || /[\r\n]/.test(label)) return null;
+  // SYSTEM 1 M1 (DL 00:41Z; AIE FYI): the brief's unconfirmed reading is the user's words, never "Olumi's suggestion".
+  if (!olumiSuggested(node!) && unconfirmedBriefReading(node!)) return `‘${label}’ from your brief is not in this calculation until you confirm how it applies.`;
   return `${besideChance ? 'These chances cover' : 'This calculation covers'} the modelled effects only. ‘${label}’ is Olumi’s `
     + 'unsized risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.';
 }

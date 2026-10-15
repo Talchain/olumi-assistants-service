@@ -251,9 +251,13 @@ export const TIMING_ROW: RoleRow = {
     const h = heldTiming(graph, subject.id);
     const r = h === undefined ? undefined : readingOf(statements, words, graph, subject.id);
     if (h === undefined || r === undefined) return '';
-    return `your forecast that ${listed(h.effects.map((e) => effectWords(graph, e)))} would be fully in place by month ${r.month} ${referenceWords(h.basis)}`;
+    // AIE 6180193788 timing card: the reading, then "This target is evaluated at …", then its own question, then the rest.
+    const evaluatedAt = timingAssumptions(statements, subject, graph, words)[0];
+    return `your forecast that ${listed(h.effects.map((e) => effectWords(graph, e)))} would be fully in place by month ${r.month} ${referenceWords(h.basis)}`
+      + (evaluatedAt !== undefined ? `. ${evaluatedAt}` : '');
   },
-  assumptions: timingAssumptions,
+  assumptions: (statements, subject, graph, words) => timingAssumptions(statements, subject, graph, words).slice(1),
+  question: 'Record this timing reading?',
   recordedWords: timingRecordedWords,
   bindsWhole: (quote, subject, graph, words) => {
     const goals = nodesOf(graph).filter((n) => n.kind === 'goal');
@@ -294,6 +298,9 @@ export const TIMING_WRITER: FieldWriter = {
       user_statement: { subject: reading.subject, record } };
     const written = applyGoalReadingEdit(graph, payload);
     if (written.kind === 'refused') return { refused: written.reason };
-    return { member: 'goal_reading', payload, holds: (after: unknown) => timingHolds(payload, after) };
+    return { member: 'goal_reading', payload: JSON.parse(JSON.stringify(payload)) as unknown };
   },
+  // SYSTEM 1 M1: the read-back reads the STORED write (a proposal is saved, then pressed), never a closure.
+  holds: (write, after) => isRec(write.payload) && typeof write.payload.goal_id === 'string'
+    && timingHolds(write.payload as Rec as ApprovedGoalReading, after),
 };

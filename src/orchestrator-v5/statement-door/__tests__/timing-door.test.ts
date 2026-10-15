@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readStatement, type DoorQuote } from '../read.js';
 import { doorCardWords } from '../card.js';
 import { doorRowFor } from '../role-table.js';
-import { goalTargetBasisIn, humanEffectsTimingOf, timingAskOf } from '../fields/goal-timing.js';
+import { goalTargetBasisIn, humanEffectsTimingOf, timingAskOf, TIMING_ROW } from '../fields/goal-timing.js';
 import { userStatementFor } from '../statements.js';
 import type { DoorSubject } from '../subject.js';
 import type { DoorWrite } from '../write.js';
@@ -73,9 +73,10 @@ describe('M3b r4: a volunteered "All of these effects…" is never refused; only
     const v = read(R10, [volunteered(), answered(R10)], texts);
     expect(v.kind).toBe('read');
     if (v.kind !== 'read') return;
-    expect(doorCardWords(v.reading)).toBe(`From your words: “${SAID}” and “${YES}”. Olumi reads this as your forecast that ${EFFECTS_R10} would be fully `
-      + 'in place by month 3 from today. This target is evaluated at month three from today (14 January 2027). It describes the effects at that point; it '
-      + 'does not say they operate throughout the preceding window or that their arrival has been simulated. Record this reading?');
+    // AIE 6180193788's timing card, in its own order: the reading, when it is evaluated, its question, then what it does not say.
+    expect(doorCardWords(v.reading)).toBe(`From your words: “${SAID}” and “${YES}” Olumi reads this as your forecast that ${EFFECTS_R10} would be fully `
+      + 'in place by month 3 from today. This target is evaluated at month three from today (14 January 2027). Record this timing reading? It describes '
+      + 'the effects at that point; it does not say they operate throughout the preceding window or that their arrival has been simulated.');
     const before = goalOf(R10).goal_target_basis as Rec;
     expect(before.effects_at_period_end).toBe(false);
     const { w, after } = write(R10, [volunteered(), answered(R10)], texts);
@@ -83,8 +84,8 @@ describe('M3b r4: a volunteered "All of these effects…" is never refused; only
     expect(userStatementFor(after, subjectOf(R10))).toMatchObject({ field: 'lead', statements: [{ quote: SAID }, { quote: YES, answering: ASK_R10 }],
       attest: { month: 3, later: false } });
     expect(humanEffectsTimingOf(after, 'productivity')).toMatchObject({ kind: 'in_place', month: 3 });
-    expect(w.holds(after)).toBe(true);
-    expect(w.holds(R10)).toBe(false);
+    expect(TIMING_ROW.writer.holds(w, after)).toBe(true);
+    expect(TIMING_ROW.writer.holds(w, R10)).toBe(false);
     expect(applyGoalReadingEdit(after, w.payload as never)).toEqual({ kind: 'unchanged' });
   });
 
