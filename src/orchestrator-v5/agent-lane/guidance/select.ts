@@ -1,3 +1,4 @@
+import { HELD_POLICY_IDS } from './held-keys.js';
 import { POLICY } from './policy.js';
 import { renderCopy } from './render.js';
 import { isDecisionPlan, methodPlanOf, planOf } from './plan.js';
@@ -89,6 +90,8 @@ function honestLimitItem(s: GuidanceSignals): string | undefined {
 }
 
 function evaluate(id: PolicyId, s: GuidanceSignals): Evaluation {
+  // ⛔ Lane A A3(a): a row the shared store cannot record is never offered (held-keys.ts; E6 cooling needs the record).
+  if (!HELD_POLICY_IDS.has(id)) return none();
   const options = s['model.non_sq_option_ids'];
   const risks = s['model.risk_ids'];
   const sensitivity = s['run.decision_sensitivity'];

@@ -149,4 +149,18 @@ describe('0.79 · a guidance answer row records the run_delivery too, and never 
     expect(answer).toBeUndefined();
     expect(body._agent?.durability).toBe('not_recorded');
   });
+
+  // ⛔ Lane A A3(a) (Paul's pricing turn b5a28fad, 15 Oct): the store refused the answer's GUIDANCE ("invalid content-free
+  // guidance event") and the whole answer was lost (`durability: not_recorded`). That refusal comes before any write.
+  const GUIDANCE_REFUSED = (row: Record<string, unknown>) => (row.agent_guidance !== undefined
+    ? new StateCommitFailedError('append_agent_answer_if_latest RPC failed: invalid content-free guidance event', { rpc_code: 'P0001' })
+    : undefined);
+  it('⭐ A3(a) RED: the store refuses the guidance → the answer is appended ONCE more without it, and is durable', async () => {
+    refuse = GUIDANCE_REFUSED;
+    const { body, answer, attempts } = await run();
+    expect(attempts.map((r) => r.agent_guidance !== undefined), 'precondition: the first attempt carried guidance and was refused').toStrictEqual([true, false]);
+    expect(answer?.assistantMessage, 'the answer the user saw is the one stored').toBeTruthy();
+    expect(factsOf(answer), 'the Run delivery is kept: only the refused guidance is dropped').toHaveLength(1);
+    expect(body._agent?.durability).toBe('recorded');
+  });
 });

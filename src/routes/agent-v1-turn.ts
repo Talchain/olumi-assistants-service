@@ -163,6 +163,7 @@ import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-r
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { firstAnalysisRunReceipt, GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
+import { GUIDANCE_ENTRY_REFUSALS } from '../orchestrator-v5/agent-lane/guidance/held-keys.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_GOAL_PATH_UNSIZED, WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_LEADER_CAUSE_UNRECORDED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -6007,7 +6008,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const wireBeforeFloor = wireBody;
         let overCapAtAppend: readonly PendingAction[] = [];
         let overCapSaid: readonly string[] = [];
-        const appendAnswer = (handlerFacts: readonly HandlerFact[]) => appendCheckedGraphWrite({
+        const appendAnswer = (handlerFacts: readonly HandlerFact[], withGuidance = true) => appendCheckedGraphWrite({
           store,
           writesGraph: false,
           source: 'agent_turn',
@@ -6062,7 +6063,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_facts: handlerFacts,
           userMessage: message,
           assistantMessage: String(wireBody.assistant_text ?? text),
-          ...(answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
+          ...(withGuidance && answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
           ...(answerOffers.length > 0 ? {
             suggested_actions: answerOffers,
             suggested_actions_run_key: answerOffersRunKey,
@@ -6081,10 +6082,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // ⛔ The DELIVERY never costs the ANSWER: a guidance wrapper without 20261006070522 (rolled back) refuses the whole
           // row, and the RPC rolled it back. That one refusal retries once without the fact: the answer and its offers stay
           // durable, and only the delivery record is lost (and logged).
-          if (runDelivery.kind !== 'recorded' || !String(err).includes(GUIDANCE_WRAPPER_REFUSAL)) throw err;
-          log.warn({ event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId, outcome: 'omitted', reason: 'guidance_wrapper_refused' },
-            'agent-lane: run_delivery refused by the guidance wrapper (migration 20261006070522 rolled back?): answer written without it');
-          outcome = await appendAnswer([]);
+          // ⛔ Lane A A3(a): nor does the GUIDANCE cost the answer. The store refuses an entry it cannot hold before any write
+          // (held-keys.ts), so that definite refusal alone retries once without the guidance. Nothing else is retried here:
+          // no model write, Run or delivery is repeated, and an unknown outcome stays `not_recorded`.
+          const guidanceRefused = answerGuidance !== undefined && GUIDANCE_ENTRY_REFUSALS.some(m => String(err).includes(m));
+          if (guidanceRefused) {
+            log.warn({ event: 'v5.answer_guidance', request_id: String(req.id), scenario_id: scenarioId, outcome: 'omitted', reason: 'guidance_entry_refused', err: String(err) },
+              'agent-lane: the store refused this answer\'s guidance metadata before writing: answer written without it');
+            outcome = await appendAnswer(runDelivery.kind === 'recorded' ? [runDelivery.fact] : [], false);
+          } else {
+            if (runDelivery.kind !== 'recorded' || !String(err).includes(GUIDANCE_WRAPPER_REFUSAL)) throw err;
+            log.warn({ event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId, outcome: 'omitted', reason: 'guidance_wrapper_refused' },
+              'agent-lane: run_delivery refused by the guidance wrapper (migration 20261006070522 rolled back?): answer written without it');
+            outcome = await appendAnswer([]);
+          }
         }
         for (const h of overCapAtAppend) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
         oweHeldLapses(scenarioId, overCapSaid);
