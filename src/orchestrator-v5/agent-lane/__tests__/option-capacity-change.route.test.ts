@@ -231,7 +231,7 @@ describe('the coaching loop: Paul\'s answer to "how much it would speed up the w
     // CONTRAST: every numeral (the reading the PL found) would have taken the 3.
     expect([...SENTENCE.matchAll(/\d+/g)].map((m) => Number(m[0]))).toContain(3);
     const w = world();
-    const r = await offer(w, { option_id: LEGACY, statements: [{ quote: SENTENCE, form: 'point', value: 15 }] }, SENTENCE);
+    const r = await offer(w, { option_id: LEGACY, statements: [{ quote: SENTENCE }] }, SENTENCE);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.public_label).toContain('sets ‘Legacy-code fixing time’ to 15% of developer time (25% of developer time today)');
     expect(r.public_label).toContain('Full effect 3 months from now: your start in 3 months');

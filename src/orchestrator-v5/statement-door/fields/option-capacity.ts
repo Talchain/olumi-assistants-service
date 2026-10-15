@@ -128,5 +128,5 @@ export const OPTION_CAPACITY_WRITER: FieldWriter = {
     return { member: 'option_capacity', payload: JSON.parse(JSON.stringify(p.approved)) as unknown };
   },
   holds: (write, after) => isRec(write.payload) && typeof write.payload.option_id === 'string'
-    && optionCapacityChangeHeld(after, write.payload as unknown as ApprovedOptionCapacityChange),
+    && optionCapacityChangeHeld(after, write.payload as ApprovedOptionCapacityChange),
 };

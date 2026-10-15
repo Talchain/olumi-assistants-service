@@ -48,9 +48,8 @@ import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArguments
 import { deliverableWrittenIn, draftedTeamPartOf, eventModelAsk, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
-import { optionCapacityChangeCard, optionCapacityChangeHeld, optionCapacityChangeStillApplies, optionCapacityTarget, planOptionCapacityChange,
-  otherSharesOf, shareFiguresFor, withOptionCapacityChange, SET_OPTION_CAPACITY_CHANGE_OP, type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
-import { effectLeadFromStatements } from '../../goal-target/effect-lead.js';
+import { optionCapacityChangeHeld, optionCapacityChangeStillApplies, withOptionCapacityChange, SET_OPTION_CAPACITY_CHANGE_OP,
+  type ApprovedOptionCapacityChange } from '../../goal-target/option-capacity-change.js';
 import { goalOutOfReachFact, outOfReachWhyOf } from '../out-of-reach-why.js';
 import { readNewLimit, limitFigure, hasLimitQuantity, hasPercentageCrossing, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 import { readUnitParts } from '../same-unit.js';
