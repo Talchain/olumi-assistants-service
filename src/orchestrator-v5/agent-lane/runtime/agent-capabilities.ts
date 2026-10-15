@@ -6054,6 +6054,47 @@ export function createAgentCapabilities(
         note: 'Show the user exactly this card, never the id. Nothing is removed until they press it.' };
     },
 
+    /**
+     * ⭐ S5 (propose_change op rename): the user's OWN new name for ONE option, factor or risk, from their whole statement in THIS
+     * message, which holds that name exactly. Olumi proposes; the user authors: ONE card, and only its press renames, through the
+     * existing label writer (`structural_rename`, its base hash and the name the card showed). A name another part has is refused.
+     */
+    async proposeRename(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const kind = args?.kind;
+      const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
+      const label = typeof args?.new_label === 'string' ? args.new_label.trim() : '';
+      if (kind !== 'option' && kind !== 'factor' && kind !== 'risk') {
+        return { ok: false, mutated: false, refusal: 'not_renamable', detail: 'Only an option, a factor or a risk can be renamed here. Nothing was prepared.' };
+      }
+      if (quote === '' || !wholeStatementIn(ctx.user_turn_text ?? '', quote) || label === '' || label.length > 120 || quoteSpansIn(quote, label).length === 0) {
+        return { ok: false, mutated: false, refusal: 'not_asked',
+          detail: 'A rename is prepared only from the user’s own request in this message, quoted exactly, holding the new name exactly as they wrote it. Nothing was prepared.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
+      const resolved = resolveSubject(g.raw, { kind, id: args.id, label: args.label, field: kind === 'risk' ? 'occurrence' : 'level' });
+      if (resolved.kind === 'unresolved') {
+        return { ok: false, mutated: false, refusal: 'subject_not_found', detail: resolved.reason === 'ambiguous'
+          ? 'More than one part of the model has that label, so nothing was prepared. Ask which one the user means.'
+          : 'No part of the model matches that kind and label, so nothing was prepared. Use the id or label get_canonical_state returned.' };
+      }
+      const id = resolved.subject.id;
+      const nodes = (g.raw as { nodes?: Record<string, unknown>[] }).nodes ?? [];
+      const same = (l: unknown): boolean => typeof l === 'string' && l.trim().toLowerCase() === label.toLowerCase();
+      if (same(resolved.label)) return { ok: false, mutated: false, refusal: 'already_named', detail: `It is already called ‘${resolved.label}’. Nothing was prepared.` };
+      if (nodes.some((n) => n.id !== id && same(n.label))) {
+        return { ok: false, mutated: false, refusal: 'name_taken', detail: `Another part of the model is already called ‘${label}’, so nothing was prepared. Ask the user for another name.` };
+      }
+      const card = `From your message: “${quote}” Olumi proposes renaming ‘${resolved.label}’ to ‘${label}’. Rename it?`;
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'rename_option', path: id, value: { expected_label: resolved.label, label } }],
+        provenance: { authored_by: 'user_stated', basis: quote }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: card });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: card, base_revision: g.graph_hash,
+        note: 'Show the user exactly this card, never the id. Nothing is renamed until they press it.' };
+    },
+
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const typed = args?.constraint_type;
@@ -8096,7 +8137,7 @@ export function createAgentCapabilities(
         const pid = decision.proposal.proposal_id;
         if (opts.commitOptionRename === undefined) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
-            detail: 'The option cannot be renamed here, so nothing was written. Tell the user plainly.' };
+            detail: 'It cannot be renamed here, so nothing was written. Tell the user plainly.' };
         }
         const operationId = authorisationTurnId(pid);
         const res = await opts.commitOptionRename({ scenario_id: ctx.scenario_id, turn_id: operationId, node_id: op.path, expected_label, label,
@@ -8107,7 +8148,7 @@ export function createAgentCapabilities(
         }
         if (res.status === 'refused') {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
-            detail: 'The option’s name changed after this was offered, so it was not renamed. Tell the user its current name and ask what they would like.' };
+            detail: 'Its name changed after this was offered, so it was not renamed. Tell the user its current name and ask what they would like.' };
         }
         const after = await readGraph(ctx.scenario_id);
         const held = after?.nodes.find((n) => n.id === op.path)?.label;

@@ -642,16 +642,19 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'op remove: remove ONE factor or risk, or ONE link between two parts ("remove staff training", "drop that risk"); a factor\u2019s '
       + 'or risk\u2019s links, and any option\u2019s setting of a factor, go with it. '
       + 'op set_zero: the user says a link has no effect ("set this link to zero"): the link is removed, so the analysis reads no effect '
-      + 'along it (kind link). Never for an option (use propose_option_status) or the goal, and never a part the user did not ask to change.',
+      + 'along it (kind link). Never remove an option (use propose_option_status) or the goal. '
+      + 'op rename: the user gives a new name for ONE option, factor or risk ("call it Hire three developers"): new_label is that name, '
+      + 'copied exactly from their words. Never a part the user did not ask to change, and never a name of your own.',
     parameters: obj({
       ops: { type: 'array', minItems: 1, maxItems: 1, items: obj({
-        op: { type: 'string', enum: ['remove', 'set_zero'] },
-        kind: { type: 'string', enum: ['factor', 'risk', 'link'] },
+        op: { type: 'string', enum: ['remove', 'set_zero', 'rename'] },
+        kind: { type: 'string', enum: ['option', 'factor', 'risk', 'link'] },
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
         to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
         id: { type: 'string', description: 'The part\u2019s id, as get_canonical_state returned it. Give it whenever you have it: it names the part exactly.' },
         to_id: { type: 'string', description: 'Only for a link: the id of the part it points to.' },
         quote: { type: 'string', description: 'The user\u2019s complete statement asking for the change, copied exactly from THIS message.' },
+        new_label: { type: 'string', description: 'Only for op rename: the new name, copied exactly from the user\u2019s words in quote.' },
       }, ['op', 'kind', 'label', 'quote']) },
     }, ['ops']),
   },
@@ -1059,6 +1062,8 @@ export interface AgentCapabilities {
   proposeRemoval?(ctx: AgentToolContext, args: {
     kind: 'factor' | 'risk' | 'link'; label: string; to_label?: string; id?: string; to_id?: string; quote: string;
   }): Promise<ToolResult>;
+  /** Optional: propose_change's rename op (S5): the user's own new name for ONE option, factor or risk. */
+  proposeRename?(ctx: AgentToolContext, args: { kind: 'option' | 'factor' | 'risk'; label: string; id?: string; new_label: string; quote: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
     label: string; rationale: string;
@@ -1244,8 +1249,11 @@ async function dispatchToolUnbounded(
       if ((op?.op === 'remove' || (op?.op === 'set_zero' && op.kind === 'link')) && caps.proposeRemoval !== undefined) {
         return caps.proposeRemoval(ctx, { kind: op.kind, label: op.label, to_label: op.to_label, id: op.id, to_id: op.to_id, quote: op.quote } as never);
       }
+      if (op?.op === 'rename' && caps.proposeRename !== undefined) {
+        return caps.proposeRename(ctx, { kind: op.kind, label: op.label, id: op.id, new_label: op.new_label, quote: op.quote } as never);
+      }
       return { ok: false, mutated: false, refusal: 'unsupported_change',
-        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link). Nothing was prepared.' };
+        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link; rename). Nothing was prepared.' };
     }
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
