@@ -16,11 +16,13 @@ type Rec = Record<string, any>;
 const G = (JSON.parse(readFileSync('tests/fixtures/risk-occurrence/served-hiring-post3007-read01-20261014.json', 'utf8')) as Rec).body.graph as Rec;
 const RISK: DoorSubject = { kind: 'risk', id: 'code_quality_deterioration', field: 'occurrence' };
 const SAID = 'I’d say there’s about a 30% chance it slips within the next 3 months.';
+/** The test-only row's subject: a field no signed row reads for a risk, so the real rows never answer for it. */
+const RISK_T: DoorSubject = { ...RISK, field: 'relation' };
 const ASK = { subject: RISK, words: 'How likely is ‘Code quality deterioration’ to happen at least once within 3 months?' };
 afterEach(() => { for (let i = TABLE.length - 1; i >= 0; i -= 1) if (TABLE[i]!.signed_by === 'test-only') TABLE.splice(i, 1); });
-/** A test-only row: a percent figure, read by a trivial reader (SYSTEM 4's signed row replaces it in M1). */
-const ROW: RoleRow = { field: 'occurrence', unit: '%', forms: ['point'], carrier: 'risk_occurrence', maxStatements: 1, signed_by: 'test-only',
-  applies: (s) => s.kind === 'risk', writer: { approve: () => ({ refused: 'test-only' }) },
+/** A test-only row: a percent figure, read by a trivial reader. */
+const ROW: RoleRow = { field: 'relation', unit: '%', forms: ['point'], carrier: 'risk_occurrence', maxStatements: 1, signed_by: 'test-only',
+  applies: (s) => s.kind === 'risk', writer: { approve: () => ({ refused: 'test-only' }), holds: () => false },
     read: (q) => { const m = /(\d+)%/.exec(q); return m === null ? { refused: `“${q}” states no chance.` } : { form: 'point', low: Number(m[1]), high: Number(m[1]), qualifier: 'about' }; },
     readingWords: (s, _sub, label) => `your estimate of about ${s[0]!.low}% that ‘${label}’ happens`,
     assumptions: () => ['How strongly it affects the model is a separate assumption.'],
@@ -61,13 +63,13 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
   });
 
   it('ONE dispatch by subject, keyed by (field, carrier): the one row that applies; none or two is no row (fail closed)', () => {
-    expect(doorRowFor(RISK, G)).toBeUndefined();
+    expect(doorRowFor(RISK_T, G)).toBeUndefined();
     testRow();
-    expect(doorRowFor(RISK, G)).toBe(ROW);
-    expect(doorRowFor({ kind: 'factor', id: 'leadership_coverage', field: 'occurrence' }, G), 'a row applies to its own subjects only').toBeUndefined();
+    expect(doorRowFor(RISK_T, G)).toBe(ROW);
+    expect(doorRowFor({ kind: 'factor', id: 'leadership_coverage', field: 'relation' }, G), 'a row applies to its own subjects only').toBeUndefined();
     expect(doorRowFor({ ...RISK, field: 'level' }, G)).toBeUndefined();
     TABLE.push({ ...ROW, carrier: 'levels' });
-    expect(doorRowFor(RISK, G), 'two rows apply: no row, never a choice').toBeUndefined();
+    expect(doorRowFor(RISK_T, G), 'two rows apply: no row, never a choice').toBeUndefined();
     expect(new Set(TABLE.map(rowKey)).size).toBe(TABLE.length);
   });
 
@@ -81,7 +83,7 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
     expect(statementBoundTo(G, RISK, SAID, { preceding_ask: ASK.words, asks }, goalAsk.words), 'it answered another subject’s ask').toBe('another');
     expect(statementBoundTo(G, RISK, SAID, { preceding_ask: ASK.words, asks }, 'An ask Olumi never said.'), 'never falls back to the last reply').toBe('unbound');
     testRow();
-    const v = readStatement(G, RISK, 'Code quality deterioration', [{ quote: SAID, answering: ASK.words }], { now: SAID }, { asks });
+    const v = readStatement(G, RISK_T, 'Code quality deterioration', [{ quote: SAID, answering: ASK.words }], { now: SAID }, { asks });
     expect(v).toMatchObject({ kind: 'read', reading: { statements: [{ quote: SAID, answering: ASK.words }] } });
   });
 
@@ -96,19 +98,19 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
   });
 
   it('ONE reading through the table row, ONE card template and ONE button; a field with no signed row stays off the door', () => {
-    expect(readStatement(G, RISK, 'Code quality deterioration', [SAID], { now: SAID })).toMatchObject({ kind: 'refused', refusal: 'no_table_row' });
+    expect(readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: SAID })).toMatchObject({ kind: 'refused', refusal: 'no_table_row' });
     testRow();
     const ctx = { preceding_ask: ASK.words, asks: [ASK] };
-    const v = readStatement(G, RISK, 'Code quality deterioration', [SAID], { now: SAID }, ctx);
+    const v = readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: SAID }, ctx);
     expect(v.kind).toBe('read');
     if (v.kind !== 'read') return;
-    expect(doorCardWords(v.reading)).toBe(`From your words: “${SAID}”. Olumi reads this as your estimate of about 30% that ‘Code quality deterioration’ happens. `
-      + 'How strongly it affects the model is a separate assumption. Record this reading?');
-    expect(v.reading.statements[0]).toMatchObject({ subject: { quantity: 'occurrence', node_id: RISK.id }, qualifier: 'about', low: 30 });
+    expect(doorCardWords(v.reading)).toBe(`From your message: “${SAID}” Olumi reads this as your estimate of about 30% that ‘Code quality deterioration’ happens. `
+      + 'Record this reading? How strongly it affects the model is a separate assumption.');
+    expect(v.reading.statements[0]).toMatchObject({ subject: { quantity: 'relation', node_id: RISK.id }, qualifier: 'about', low: 30 });
     expect(DOOR_APPROVE).toEqual({ label: 'Record what you said', message: 'Yes, record what I said.' });
     // Refusals keep the words: not this field, not this subject, not their words.
-    expect(readStatement(G, RISK, 'Code quality deterioration', ['It might slip.'], { now: 'It might slip.' }, ctx)).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
-    expect(readStatement(G, RISK, 'Code quality deterioration', [SAID], { now: SAID })).toMatchObject({ kind: 'refused', refusal: 'not_this_subject' });
-    expect(readStatement(G, RISK, 'Code quality deterioration', [SAID], { now: 'Yes.', unverified: SAID }, ctx)).toMatchObject({ kind: 'refused', refusal: 'origin_unknown' });
+    expect(readStatement(G, RISK_T, 'Code quality deterioration', ['It might slip.'], { now: 'It might slip.' }, ctx)).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
+    expect(readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: SAID })).toMatchObject({ kind: 'refused', refusal: 'not_this_subject' });
+    expect(readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: 'Yes.', unverified: SAID }, ctx)).toMatchObject({ kind: 'refused', refusal: 'origin_unknown' });
   });
 });

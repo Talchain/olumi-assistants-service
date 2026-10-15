@@ -10,12 +10,10 @@ export const RECORD_STATEMENT_OP = 'record_statement' as const;
 export type DoorWriteMember = 'levels' | 'values' | 'link_effects' | 'risk_occurrence' | 'team_time' | 'cohort_forecast' | 'goal_reading'
   | 'identity_confirm' | 'hiring_times';
 
-/** What ONE press writes: the member, its payload, and the read-back that proves exactly that landed. */
+/** What ONE press writes: the member and its payload, as JSON (the proposal is stored, and read back at the press). */
 export interface DoorWrite {
   readonly member: DoorWriteMember;
   readonly payload: unknown;
-  /** True when `after` holds exactly the card's write (the read-back, and the verified no-op on a retry). */
-  readonly holds: (after: unknown) => boolean;
 }
 
 /**
@@ -24,6 +22,8 @@ export interface DoorWrite {
  */
 export interface FieldWriter {
   readonly approve: (reading: DoorReading, graph: unknown) => DoorWrite | { readonly refused: string };
+  /** True when `after` holds exactly this payload's write (the read-back by identity, and the verified no-op on a retry). */
+  readonly holds: (payload: unknown, after: unknown) => boolean;
 }
 
 /** The ONE record writer and reader of the user's words (`statements.ts`), called by a row's writer in the same commit. */

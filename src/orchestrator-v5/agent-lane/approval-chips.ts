@@ -1,3 +1,5 @@
+import { DOOR_APPROVE } from '../statement-door/card.js';
+import { RECORD_STATEMENT_OP } from '../statement-door/write.js';
 import type { NewLimitValue } from './stated-limit.js';
 /**
  * ⭐ ONE CLICK TO APPROVE THE PROPOSAL THE USER IS LOOKING AT.
@@ -48,14 +50,8 @@ export const CONFIRM_GOAL_READING_APPROVE = { label: 'Yes, read it that way', me
 
 /** AIE packet 6e52e896 `event_risk.Q3`: the button on the card of Olumi's range for a risk root (`risk-occurrence.ts`). */
 const RISK_OCCURRENCE_APPROVE = { label: 'Use as a starting assumption', message: 'Yes, use that.' } as const;
-/**
- * AIE_TEXT_PENDING (DL relays): the button on a risk card that records the USER'S OWN statement (S2: holds now, or their own
- * chance), so it says record, never "use Olumi's starting assumption" (the cohort forecast's precedent).
- */
-const RISK_STATEMENT_APPROVE = { label: 'Record what you said', message: 'Yes, record what I said.' } as const;
-/** A risk card whose block is the user's own statement (`ApprovedRiskOccurrence.holds_now` / `.stated_occurrence`). */
-const recordsUsersRiskStatement = (op: { readonly op: string; readonly value?: unknown }): boolean => op.op === 'set_risk_occurrence'
-  && op.value !== null && typeof op.value === 'object' && ('holds_now' in op.value || 'stated_occurrence' in op.value);
+/** SYSTEM 1: a card through the ONE statement door records the USER'S OWN statement, so its ONE button says record (`DOOR_APPROVE`). */
+const recordsUsersStatement = (op: { readonly op: string }): boolean => op.op === RECORD_STATEMENT_OP;
 /** The user's own cohort forecast (science PR-4b): recorded from their words, so the button says record, never "use Olumi's". */
 const COHORT_FORECAST_APPROVE = { label: 'Record this forecast', message: 'Yes, record that forecast.' } as const;
 
@@ -65,6 +61,8 @@ const REPLACE_DRAFT_APPROVE = { label: 'Use the revised draft', message: 'Yes, u
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
+  // SYSTEM 1: the ONE statement door's card records the user's own words (`DOOR_APPROVE`).
+  propose_statement: DOOR_APPROVE,
   propose_option_interventions: { label: 'Use as starting option levels', message: 'Yes, use those.' },
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
   // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
@@ -242,10 +240,10 @@ export function approvalChipsFor(
       || held.public_label !== stored!.public_label) return [];
     const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
     const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
-    const usersRiskStatement = stored!.operations.some(recordsUsersRiskStatement);
+    const usersStatement = stored!.operations.some(recordsUsersStatement);
     const cohortForecast = stored!.operations.some((op) => op.op === 'set_cohort_forecast');
     return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
-      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : usersRiskStatement ? RISK_STATEMENT_APPROVE.message
+      message: replacesDraft ? REPLACE_DRAFT_APPROVE.message : usersStatement ? DOOR_APPROVE.message
         : riskOccurrence ? RISK_OCCURRENCE_APPROVE.message
         : cohortForecast ? COHORT_FORECAST_APPROVE.message : approve.message,
       detail: stored!.public_label }, AMEND_CHIP];
@@ -672,7 +670,7 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   // A revised draft replaces the whole early draft: its button says so, never "Set this target" (B restated goal).
   if (ops.length === 1 && ops[0]!.op === 'replace_draft') return REPLACE_DRAFT_APPROVE.label;
   // Olumi's range for a risk root is ONE starting assumption (`risk-occurrence.ts`), never "starting assumptions".
-  if (ops.length === 1 && recordsUsersRiskStatement(ops[0]!)) return RISK_STATEMENT_APPROVE.label;
+  if (ops.length === 1 && recordsUsersStatement(ops[0]!)) return DOOR_APPROVE.label;
   if (ops.length === 1 && ops[0]!.op === 'set_risk_occurrence') return RISK_OCCURRENCE_APPROVE.label;
   if (ops.length === 1 && ops[0]!.op === 'set_cohort_forecast') return COHORT_FORECAST_APPROVE.label;
   /**
