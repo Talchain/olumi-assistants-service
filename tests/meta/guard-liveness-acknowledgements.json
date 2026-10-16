@@ -45,6 +45,13 @@
       "why": "Reachable only from ci.yml::Security Audit, which is not the required check, so its verdict never blocks a merge."
     },
     {
+      "path": "scripts/ci/boot-smoke.sh",
+      "via": [
+        "NONREQUIRED_WORKFLOW"
+      ],
+      "why": "Runs inside 'Typecheck Drift (ratchet)', which IS staging's only required context since the 14 Oct lean deploy (gh api repos/Talchain/olumi-assistants-service/branches/staging/protection); this test still models 'Lint, TypeCheck, Unit Tests' as the gate. Added by #3282 (TL 09:50Z: aaf70d6a crashed at boot)."
+    },
+    {
       "path": "scripts/ci/golden-journey-replay-gate.sh",
       "via": [
         "NONREQUIRED_WORKFLOW"
