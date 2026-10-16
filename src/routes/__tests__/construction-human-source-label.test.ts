@@ -84,7 +84,9 @@ const sourceDraft = (human: boolean) => {
   c.statements = human ? [{ subject: { kind: 'factor', label: 'Weekly founder hours available' }, field: 'level', form: 'point', quote: HUMAN, value: 60, low: null, high: null, unit: 'hours/week', qualifier: 'possibly more if I needed to', conditions: 'Planning assumption, not a fixed ceiling or measured current working time.' }] : [];
   return c as unknown as CandidateModel;
 };
-it('native build → admission → register retains the 60-hour human source separately from its unverified current-level binding', async () => {
+// DL-3 16 Oct (#3279 BUDDY-B B1): the admission stamp behind this row put a false brief source on other figures; it moved to
+// Lane A's admission-authorship PR, which re-enables this row with its own fix.
+it.skip('native build → admission → register retains the 60-hour human source separately from its unverified current-level binding', async () => {
   const out = await construct(BRIEF, [sourceDraft(true)]);
   expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true }); expect(out.writes).toHaveLength(1);
   const node = out.graph!.nodes.find((n: Rec) => n.kind === 'factor');

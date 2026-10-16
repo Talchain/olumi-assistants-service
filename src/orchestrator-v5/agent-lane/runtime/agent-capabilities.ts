@@ -6542,8 +6542,15 @@ export function createAgentCapabilities(
         const lines = [ctx.user_text, ctx.user_turn_text].flatMap(t => typeof t === 'string' ? t.split('\n') : []);
         const source = [...lines].reverse().find(line => figureTheUserWrote(derived?.base ?? value, unit, line));
         if (source === undefined || source.trim() === '' || source.length > 200 || derived !== null || ctx.user_text_complete === false
-          || quoteIsNotTheUsersClaim(source, source)) return { ok: false, mutated: false, refusal: 'target_source_not_supported',
-          detail: 'The complete source and its interpretation could not be retained on this target card. Nothing was prepared; keep the original statement available.' };
+          || quoteIsNotTheUsersClaim(source, source)) {
+          // DL-3 (#3279 BUDDY-B): a restatement this card can't carry (e.g. marketing L20's two targets in one long line)
+          // keeps the revised-draft card it had before, rather than losing its only card.
+          if (norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
+            return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
+          }
+          return { ok: false, mutated: false, refusal: 'target_source_not_supported',
+            detail: 'The complete source and its interpretation could not be retained on this target card. Nothing was prepared; keep the original statement available.' };
+        }
         const event = { kind: 'goal_target_edit' as const, goal_node_id: goal.id, constraint_type: inclusiveType,
           raw_value: value, unit, base_graph_hash: g.graph_hash };
         const turn = ctx.turn_id ?? ctx.request_id;

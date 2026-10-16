@@ -487,6 +487,16 @@ export interface UntestableTargetParts {
   readonly launchWindow: boolean;
 }
 
+/**
+ * "your target" only for a target the user set (TL 05:18; approval never reauthors): a figure Olumi read as this goal's
+ * target (`cee_inference`, e.g. a pressed budget or headcount card) is "the target", before and after approval. The
+ * user's own sources (`user`, `brief_extraction`) and an unrecorded source keep their existing words.
+ */
+export function targetNounOf(graph: unknown, goalId: unknown): 'your target' | 'the target' {
+  const source = typeof goalId === 'string' ? readGoalRecord(graph, goalId)?.target?.source : undefined;
+  return source === 'cee_inference' ? 'the target' : 'your target';
+}
+
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
   if (verdict.kind !== 'not_testable' || !isRec(graph) || !Array.isArray(graph.nodes)) return null;
   const goal = graph.nodes.filter(isRec).find((n) => n.id === verdict.goal_id);
@@ -572,7 +582,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
       identityCase || lever === undefined ? null : askedAfterTheBand(linkQuestion())]
     : c === 'b' ? [`it can't yet test a '${comparatorTarget}' target on ${name}`, null, null]
-    : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
+    : [`${targetNounOf(graph, verdict.goal_id)} is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
   const cases = [...new Set(verdict.failures.map((f) => f.case))];
   const askingCase = cases.find((c) => said(c)[2] !== null);
@@ -631,7 +641,7 @@ const TARGET_TESTABLE_SENTENCE_CAP = 388;
 export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): string | null {
   const parts = untestableTargetParts(graph, verdict, namedLinkCount);
   if (parts === null) return null;
-  return `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+  return `Olumi can compare your options, but can't yet test them against ${targetNounOf(graph, 'goal_id' in verdict ? verdict.goal_id : undefined)} (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
 }
 
 /** The "because …" of a target sentence: consecutive needs share one "it needs" ("it needs today's level of X and a size
@@ -694,7 +704,7 @@ export function targetNotTestableWarning(
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string; level_only_say?: string; first_ask?: { kind: 'link'; from: string; to: string } } | null {
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = targetWarningSentence(graph, verdict);
-  const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
+  const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : `Not shown. Olumi can compare your options, but can't yet test them against ${targetNounOf(graph, verdict.goal_id)}.`;
   // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
   const tail = untestableTargetTail(graph, verdict);
   const levelOnly = targetLevelOnlyQuestion(graph, verdict);

@@ -22,6 +22,7 @@ import {
   targetNotTestableWarning,
   untestableTargetParts,
   untestableTargetTail,
+  targetNounOf,
   type TargetTestability,
   type TargetTestabilityFailure,
 } from '../admission/target-testability.js';
@@ -63,7 +64,7 @@ export function scopedFailuresFor(
 function ownSentence(graph: unknown, verdict: Extract<TargetTestability, { kind: 'not_testable' }>, namedLinkCount: number): string | null {
   const parts = untestableTargetParts(graph, verdict, namedLinkCount);
   if (parts === null) return null;
-  return `It can't yet be tested against your target (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+  return `It can't yet be tested against ${targetNounOf(graph, verdict.goal_id)} (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
 }
 
 /**
