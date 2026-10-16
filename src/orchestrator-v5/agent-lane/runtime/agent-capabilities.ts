@@ -1,6 +1,6 @@
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
-import { verbatimSourceLine } from '../quote-confirmation.js';
+import { carriesQuoteConfirmation, verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
@@ -6443,7 +6443,7 @@ export function createAgentCapabilities(
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
       const figure = targetFigure(value, unit);
-      const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
+      const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated', conflict_fields: ['figure_absent'],
         detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
           + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
       /**
@@ -6552,15 +6552,19 @@ export function createAgentCapabilities(
         return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
       }
       if (restatedQuantity && opts.turnAuthority === true) {
-        const lines = [ctx.user_text, ctx.user_turn_text].flatMap(t => typeof t === 'string' ? t.split('\n') : []);
-        const source = [...lines].reverse().find(line => figureTheUserWrote(derived?.base ?? value, unit, line));
-        if (source === undefined || source.trim() === '' || source.length > 200 || derived !== null || ctx.user_text_complete === false
-          || quoteIsNotTheUsersClaim(source, source)) {
-          // No redraft fallback (#3279 BUDDY-A r2): a redraft from here saved 4 options → 1 (founder). A restatement this
-          // card can't carry is refused truthfully; the full-redraft correction path is retired (DRASTIC CUT C5).
-          return { ok: false, mutated: false, refusal: 'target_source_not_supported',
-            detail: 'The complete source and its interpretation could not be retained on this target card. Nothing was prepared; keep the original statement available.' };
-        }
+        const messages = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
+        const matchedSource = messages.reverse().find(message => figureTheUserWrote(derived?.base ?? value, unit, message));
+        // TL 11:15Z: these are uncertainties for the existing interpretation card, not reasons to refuse it.
+        // The quantity/unit and derivation arithmetic were checked above; source/field binding is never promoted by a press.
+        const source = matchedSource ?? ctx.user_text ?? ctx.user_turn_text ?? '';
+        const sourcePredicates = [
+          ...(matchedSource === undefined ? ['source_message_missing'] : []),
+          ...(source.length > 200 ? ['source_over_200'] : []),
+          ...(derived !== null ? ['derived_target'] : []),
+          ...(ctx.user_text_complete === false ? ['context_incomplete'] : []),
+          ...(quoteIsNotTheUsersClaim(source, source) ? ['not_own_claim'] : []),
+        ];
+        // user_text is the route's verified human words; incomplete coverage or uncertain field binding never reauthors them.
         const event = { kind: 'goal_target_edit' as const, goal_node_id: goal.id, constraint_type: inclusiveType,
           raw_value: value, unit, base_graph_hash: g.graph_hash };
         const turn = ctx.turn_id ?? ctx.request_id;
@@ -6578,7 +6582,7 @@ export function createAgentCapabilities(
           detail: 'The target adapter would also change the goal’s retained reasoning. No card was offered and nothing changed.' };
         const subject = { kind: 'goal' as const, id: goal.id, field: 'target' as const };
         const record = userStatementRecord(subject, [{ speaker: 'user', quote: source, source,
-          subject: { quantity: measures }, form: 'describes', unit, reading: 'olumi' }], new Date().toISOString());
+          form: 'describes', subject: { quantity: measures, node_id: goal.id }, unit, reading: 'olumi' }], new Date().toISOString());
         const candidate = withUserStatement(result.mutatedGraph as Record<string, unknown> & { nodes: unknown[] }, record, subject);
         if (candidate === undefined) return { ok: false, mutated: false, refusal: 'target_not_prepared' };
         const targetNode = (candidate.nodes as Array<Record<string, unknown>>).find(n => n.id === goal.id)!;
@@ -6608,9 +6612,14 @@ export function createAgentCapabilities(
             brief_text: g.brief_text, goal_turn_id: turn, operation_id, confirmation: { source, quote: source } } }],
           provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] },
           public_label: `From your message: “${source}”. Olumi read ${DIRECTION_WORDS[type]} ${figure} as the target for “${goal.label}”.`
-            + measurement + replaces + levelLeftOut + ' Your figure and source stay yours; binding it to this goal is Olumi’s reading, including after approval. All saved options and their settings stay in this model. Use this target, or correct the reading.' });
+            + (derived === null ? '' : ` Olumi derived this figure as ${derived.multiplier} × ${targetFigure(derived.base, unit)}; the original figure stays in the quote.`)
+            + measurement + replaces + levelLeftOut
+            + ' Your original words stay yours; the target and its binding are Olumi’s reading, including after approval.'
+            + (ctx.user_text_complete === false ? ' The retained context is incomplete; check this interpretation and its conditions.' : '')
+            + ' All saved options and their settings stay in this model. Use this target, or correct the reading.'  });
         proposals.put(proposal);
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+          outcome: `target_reading:${sourcePredicates.length === 0 ? 'binding_unverified' : sourcePredicates.join(',')}`,
           note: 'Show this complete target card. Only its own approval saves the prepared correction to the existing model; no redraft is offered.' };
       }
       if (unitsConflict(unit, goalUnit) !== null) {
@@ -7384,33 +7393,21 @@ export function createAgentCapabilities(
         // A comparison whose direction or concept cannot be read credits nobody: Olumi's, and said (AIQ 5907227964).
         const readable = !shareFactor || relativeFigureAgainst(node.label, ctx.user_text, Number(a.value) * 100) !== 'unknown';
         const writtenAbout = readable && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, ownerScope);
-        // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE, here too (the DL's ruling on #2235 for the add-factor door; AIQ #75
-        // 5902528686). Served cut-costs (DL alt-B r0/r1, CEE 1f9d769): "Our team's quote shows GCP would be about 25% cheaper
-        // than AWS for our workload." revised the discount factor to 0.25, the user's exact figure, and stored it as
-        // `user_assumption` ("Olumi's suggestion the user accepted"), replied "recorded as Olumi's assumption": word proximity
-        // read "AWS … workload" after the comparative as another quantity's. A revision the user asked for, whose figure is
-        // the ONE written in this message, is theirs when the approval shows the pairing with their own sentence, verbatim:
-        // their Yes makes it theirs (AIQ 5902884139). A figure Olumi worked out from it (£112.50 per point) is not written,
-        // so it stays Olumi's.
-        // ONE figure written and ONE value proposed: no swap among the user's figures is possible, and the card shows the
-        // one pairing. With two figures or more the strict matcher decides, as before (journey E's salaries: a swap is
-        // never theirs, `revise-door-same-matcher`).
-        // ⛔ "ONE WRITTEN IN THIS MESSAGE" MEANS THIS MESSAGE (MG SUCCESSOR #75 5911974162; served #2359 row on 660befa4):
-        // counted over the session's typed words, the brief's own figures (£45k, 20%, 2 weeks) made every later revision
-        // Olumi's, and so did the user's "Yes, use 25%." (their 25% written twice). The route binds THIS turn's typed
-        // message (`user_turn_text`, never a chip's text); with none, the session's words are read exactly as before.
+        // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
+        // The shared authorship owner reads the verified quantity evidence; a deliberately new Olumi estimate stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
-        const soleFigure = input.length === 1 && figuresWrittenIn(turnWords) === 1;
-        // And nothing BESIDE the figure names another quantity (`nearOnly`): "Keep salary spend under £400k" is the limit's,
-        // "our MRR is £12,000" is MRR's, never a revised salary or price, card or not.
-        const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
-          && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
-          ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
-        if (statementOrigin(writtenAbout || quote !== null,
+        const explicitEstimate = a.user_stated === false && a.revise !== true;
+        const writtenFigure = a.user_stated !== false && figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text);
+        const origin = statementOrigin(writtenFigure,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, a.user_stated === false && a.revise !== true) === 'unknown') {
-          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
-        }
+          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown',
+          conflict_fields: ['figure_absent'], detail: UNKNOWN_ORIGIN_DETAIL };
+        // The existing matcher is only a disclosure hint for the binding; it no longer decides the figure's author.
+        const quote = origin === 'human' && !writtenAbout
+          ? [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
+            .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? ''
+          : null;
         /**
          * ⭐ S2 (DL 14 Oct, SCIENCE's marketing capture; PL 18:41Z): words the user said ABOUT this factor ("I'm not that
          * experienced with marketing") are kept, quoted, as theirs. They are never turned into a number of theirs: the figure
@@ -7432,7 +7429,7 @@ export function createAgentCapabilities(
           ...(described !== undefined ? { described } : {}),
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
-          userWrote: writtenAbout || quote !== null,
+          userWrote: origin === 'human',
           ...(quote !== null ? { quote } : {}),
           // A 0–1 share the user wrote as a percentage ("25%" for 0.25) is shown in their units: "15% → 25%" (AIQ 5902884139).
           ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', turnWords) ? { asPercent: true as const } : {}),
@@ -7484,6 +7481,7 @@ export function createAgentCapabilities(
           // S2: the user's own statement this figure is confirmed from (the card quotes it; the press makes it theirs), or the
           // words Olumi's estimate is read from (quoted; the figure stays Olumi's).
           ...(a.confirmed !== undefined ? { confirmed_from: a.confirmed } : {}),
+          ...(a.quote !== undefined ? { confirmation: { source: a.quote, quote: a.quote } } : {}),
           ...(a.described !== undefined ? { described_by: a.described } : {}),
           ...storedFactorDomain(g.nodes.find(n => n.id === a.id)?.observed_state) },
       }));
@@ -7509,9 +7507,9 @@ export function createAgentCapabilities(
           // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A). A pairing the
           // approval confirms is shown with the user's own sentence (above), in the units they wrote.
           ? a.quote !== undefined
-            ? `${a.label}: ${a.asPercent ? `${pct(a.replaces)} \u2192 ${pct(a.value)}` : `${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`} (your figure, in your words: "${a.quote}")`
+            ? `${a.label}: ${a.asPercent ? `${pct(a.replaces)} \u2192 ${pct(a.value)}` : `${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`} (Olumi’s reading of your quoted figure)`
             : `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
-          : `${a.label} = ${withUnit(a)}`;
+          : `${a.label} = ${withUnit(a)}${a.quote !== undefined ? " (Olumi’s reading of your quoted figure)" : ""}`;
       const kept = ordered.filter((a) => a.kept);
       // A first value the user wrote is RECORDED as theirs, never offered as a starting assumption (`usersOwn`).
       const freshYours = fresh.filter(usersOwn);
@@ -7528,7 +7526,8 @@ export function createAgentCapabilities(
           // The figure is unchanged and stays Olumi's; what the Yes records is the user's acceptance (AIQ words).
           ? `Accept Olumi\u2019s estimate${kept.length === 1 ? '' : 's'}, unchanged: `
           : `${actsSaid.charAt(0).toUpperCase()}${actsSaid.slice(1)}: `;
-      const allYours = kept.length === 0 && ordered.every(usersOwn);
+      const bindingSources = [...new Set(ordered.flatMap(a => a.quote === undefined ? [] : [a.quote]))];
+      const allYours = kept.length === 0 && ordered.every(usersOwn) && bindingSources.length === 0;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -7538,6 +7537,7 @@ export function createAgentCapabilities(
           // Figures the user wrote are theirs, not the model's. Only a proposal made entirely of those may claim it.
           authored_by: allYours ? 'user_stated' : 'model_proposed',
           basis:
+            bindingSources.length > 0 ? `Olumi’s reading of the verified user words: ${bindingSources.join('\n')}` :
             kept.length > 0
               ? KEEP_PROPOSAL_BASIS
               : allYours && fresh.length === 0
@@ -7551,7 +7551,8 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: heading + ordered.map(a => {
+        public_label: (bindingSources.length === 0 ? '' : bindingSources.map(source => `From your words: “${source}”.`).join('\n')
+          + ' Your figures stay yours; these field bindings are Olumi’s reading, including after approval. ') + heading + ordered.map(a => {
           const figure = describe(a);
           // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
           // Keeping a canonical estimate is retention, not a newly authored estimate.
@@ -7570,6 +7571,7 @@ export function createAgentCapabilities(
           factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
           ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
           ...(usersOwn(a) ? { your_figure: true } : {}),
+          ...(a.quote !== undefined ? { interpretation: 'olumi', source: a.quote } : {}),
           ...(a.confirmed !== undefined ? { confirms_your_figure: true, from_your_words: a.confirmed.source } : {}),
           ...(a.kept ? { keeps_olumis_estimate: true } : {}),
         })),
@@ -9527,7 +9529,7 @@ export function createAgentCapabilities(
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
               // S2: a figure the user wrote, confirmed from their statement, is their authorship even though it is unchanged
               // (schemas 0.62.0 `intent: 'set'`); without it the writer reads an unchanged value as a review.
-              ...((v as { confirmed_from?: unknown }).confirmed_from !== undefined && valueOpAuthor(o, decision.proposal) === 'user_stated'
+              ...(((v as { confirmed_from?: unknown }).confirmed_from !== undefined || carriesQuoteConfirmation(o)) && valueOpAuthor(o, decision.proposal) === 'user_stated'
                 ? { intent: 'set' as const } : {}),
             },
           });

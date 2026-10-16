@@ -27,6 +27,8 @@ import { parsePendingAction } from '../../orchestrator-v5/session/pending-action
 import { approvalChipsFor } from '../../orchestrator-v5/agent-lane/approval-chips.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
+import { userStatementFor } from '../../orchestrator-v5/statement-door/statements.js';
+import { runAgentTurn } from '../../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { approvedGraphHeld } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement.js';
 
 type Rec = Record<string, any>;
@@ -96,6 +98,8 @@ describe.each(cases)('saved $name target correction, native registration', row =
     const pid = String(offered.proposal_id), held = w.proposals.get(pid)!;
     expect(held.operations).toHaveLength(1); expect(held.operations[0]!.op).toBe('set_goal_target');
     expect(offered.public_label).toContain(row.message);
+    const sourceRecord = userStatementFor((held.operations[0]!.value as Rec).candidate, { kind: 'goal', id: held.operations[0]!.path, field: 'target' });
+    expect(sourceRecord?.statements).toContainEqual(expect.objectContaining({ speaker: 'user', source: row.message, quote: row.message, form: 'describes', reading: 'olumi' }));
     expect(offered.public_label).toContain('Olumi');
     const oldUnit = w.original.nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_unit;
     if (oldUnit !== row.unit) expect(offered.public_label).toContain(`changes the goal’s measurement from ${oldUnit} to ${row.unit}`);
@@ -155,19 +159,32 @@ describe.each(cases)('saved $name target correction, native registration', row =
     const result = await w.caps(restoreCard(held, out, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid });
     expect(result.ok).toBe(false); expect(w.writes).toHaveLength(1);
   });
-  it('unknown or incomplete source offers no target and writes nothing', async () => {
-    for (const ctx of [{ user_text: '', user_turn_text: '', unverified_user_text: row.message }, { user_text_complete: false }]) {
-      const w = await world(row), out = await offer(w, { ...w.ctx, ...ctx });
-      expect(out.ok).toBe(false); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
-    }
+  it('a figure absent from the user context offers no target and records the refusing predicate', async () => {
+    const w = await world(row), out = await offer(w, { ...w.ctx, user_text: '', user_turn_text: '', unverified_user_text: row.message });
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'target_not_stated', conflict_fields: ['figure_absent'] });
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
   });
-  it('#3279 BUDDY-A: a single-target statement the card cannot carry (over 200 characters) is refused, never redrafted', async () => {
+  it('an incomplete retained context offers Olumi’s source-bound reading; approval does not change authorship', async () => {
+    const w = await world(row), out = await offer(w, { ...w.ctx, user_text_complete: false });
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false, outcome: 'target_reading:context_incomplete' });
+    expect(out.public_label).toContain(row.message); expect(out.public_label).toContain('Olumi');
+    expect(out.public_label).toContain('retained context is incomplete');
+    expect(w.writes).toHaveLength(0);
+    const saved = await w.caps().authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: String(out.proposal_id) }, { proposal_id: String(out.proposal_id) });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').threshold_source).toBe('cee_inference');
+  });
+  it('a complete source over 200 characters stays complete on the targeted card and native readback', async () => {
     const long = `${row.message} I want to be clear that this is the near-term figure I am working towards right now, and it is the one figure I want the model to hold for us this quarter.`;
     expect(long.length).toBeGreaterThan(200);
     const w = await world({ ...row, message: long } as typeof row);
     const out = await offer(w, { ...w.ctx, user_turn_text: long, user_text: long, verified_user_messages: [long] });
-    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'target_source_not_supported' });
-    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false, outcome: 'target_reading:source_over_200' });
+    expect(out.public_label).toContain(long); expect(w.writes).toHaveLength(0);
+    const cold = restoreCard(w.proposals.get(String(out.proposal_id))!, out, w.ctx);
+    const saved = await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: String(out.proposal_id) }, { proposal_id: String(out.proposal_id) });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(JSON.stringify(w.graph().nodes.find((n: Rec) => n.kind === 'goal').user_statements)).toContain(long);
   });
   it('preserves all source rather than offering a card that would strip an unknown saved member', async () => {
     const custom = { ...row, graph: structuredClone(row.graph) };
@@ -192,6 +209,114 @@ describe.each(cases)('saved $name target correction, native registration', row =
     expect(candidate.candidate.goal_constraints.find((r: Rec) => r.node_id === proposal.operations[0]!.path)).toMatchObject({ provenance: 'inferred', source_quote: message });
     const yes = await w.caps().authoriseChange({ ...w.ctx, user_turn_text: 'Yes.' }, { proposal_id: proposal.proposal_id });
     expect(yes.ok).toBe(false); expect(w.writes).toHaveLength(0);
+    const saved = await w.caps().authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(w.writes).toHaveLength(1);
+    const readiness = saved.readiness_after as Rec;
+    expect(readiness.target_not_testable).toContain('the target');
+    expect(JSON.stringify(readiness)).not.toMatch(/your target/i);
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').threshold_source).toBe('cee_inference');
   });
 
+});
+
+// Protected comparisons rebound from the retired full-redraft handoff onto the surviving native target card.
+describe('targeted saved correction retains the numerical/source boundaries', () => {
+  it.each([{ value: 0, refusal: 'target_not_positive' }, { value: -1, refusal: 'target_not_stated' }])(
+    'an at-least target £$value is refused without a card or write', async ({ value, refusal }) => {
+      const w = await world(cases[0]);
+      const message = `I need angel funding of at least £${value} to bring in technical resource.`;
+      const ctx = { ...w.ctx, user_turn_text: message, user_text: message, verified_user_messages: [message] };
+      const result = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value,
+        unit: 'GBP', constraint_type: 'at_least', rationale: message }), ctx, w.caps());
+      expect(result).toMatchObject({ ok: false, mutated: false, refusal });
+      expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+      expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    });
+
+  it.each([
+    { message: 'I need angel funding of at most £0 to bring in technical resource.', value: 0, constraint_type: 'at_most', operator: '<=', as_stated: undefined },
+    { message: 'I need angel funding of more than £250,000 to bring in technical resource and allow me to have more time.', value: 250000, constraint_type: 'at_least', operator: '>=', as_stated: '>' },
+  ])('keeps the approved comparator and source through native readback: $message', async row => {
+    const w = await world(cases[0]);
+    const ctx = { ...w.ctx, user_turn_text: row.message, user_text: row.message, verified_user_messages: [row.message] };
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: row.value,
+      unit: 'GBP', constraint_type: row.constraint_type, rationale: row.message }), ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id), proposal = w.proposals.get(pid)!;
+    const value = proposal.operations[0]!.value as Rec;
+    const expected = { node_id: proposal.operations[0]!.path, value: row.value, operator: row.operator, provenance: 'inferred', source_quote: row.message };
+    expect(value.candidate.goal_constraints).toContainEqual(expect.objectContaining(expected));
+    if (row.as_stated !== undefined) expect(value.candidate.goal_constraints.find((r: Rec) => r.node_id === expected.node_id).operator_as_stated).toBe(row.as_stated);
+    expect(w.writes).toHaveLength(0);
+    const saved = await w.caps().authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(value.candidate, w.graph())).toBe(true);
+    expect(w.graph().goal_constraints).toContainEqual(expect.objectContaining(expected));
+    if (row.as_stated !== undefined) expect(w.graph().goal_constraints.find((r: Rec) => r.node_id === expected.node_id).operator_as_stated).toBe(row.as_stated);
+    expect(w.graph().nodes.find((n: Rec) => n.id === expected.node_id).observed_state?.raw_value).not.toBe(250000);
+  });
+});
+
+
+describe('TL11:15 the retained founder correction is offered through the existing loop', () => {
+  it.each([false, true])('the £250k source plus short confirmation keeps one card and all options (short reply: %s)', async short => {
+    const w = await world(cases[0]);
+    const ctx = { ...w.ctx, user_turn_text: short ? 'Yes, at least' : cases[0].message, user_text_complete: false };
+    let hop = 0;
+    const result = await runAgentTurn({ ctx, history: [], message: ctx.user_turn_text, instructions: 'Offline test.', maxOutputTokens: 500 }, w.caps(),
+      async () => ({ output: hop++ === 0
+        ? [{ type: 'function_call', name: 'propose_goal_target', call_id: 'founder-target', arguments: JSON.stringify({ measures: 'angel funding', value: 250000, unit: 'GBP', constraint_type: 'at_least' }) }]
+        : [{ type: 'message', content: [{ type: 'output_text', text: 'The interpretation is ready to review.' }] }] }));
+    expect(result.tool_calls).toHaveLength(1);
+    expect(result.tool_calls[0]).toMatchObject({ name: 'propose_goal_target', ok: true, mutated: false, outcome: 'target_reading:context_incomplete' });
+    const pid = result.tool_calls[0]!.proposal_id!;
+    const op = w.proposals.get(pid)!.operations[0]!;
+    expect((op.value as Rec).candidate.nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    expect(w.proposals.outstanding(ctx.scenario_id, null)).toHaveLength(1);
+  });
+});
+
+describe('the interpretation card does not reauthor its context', () => {
+  it('known current human words stay human without an optional per-message history array; the binding stays Olumi’s', async () => {
+    const w = await world(cases[0]);
+    const { verified_user_messages: _messages, ...currentHumanCtx } = w.ctx;
+    const out = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000,
+      unit: 'GBP', constraint_type: 'at_least' }), currentHumanCtx, w.caps());
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false });
+    expect(out.public_label).toContain('From your message'); expect(out.public_label).not.toContain('speaker is unverified');
+    const pid = String(out.proposal_id), op = w.proposals.get(pid)!.operations[0]!;
+    const subject = { kind: 'goal' as const, id: op.path, field: 'target' as const };
+    expect(userStatementFor((op.value as Rec).candidate, subject)?.statements).toContainEqual(expect.objectContaining({ source: cases[0].message, speaker: 'user', form: 'describes' }));
+    expect(await w.caps().authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.find((n: Rec) => n.id === op.path).threshold_source).toBe('cee_inference');
+    expect(userStatementFor(w.graph(), subject)?.statements).toContainEqual(expect.objectContaining({ source: cases[0].message, speaker: 'user' }));
+  });
+
+  it('retains multiline conditions and source through the card, original-statement reader and native save', async () => {
+    const w = await world(cases[0]);
+    const message = 'If we secure angel funding of £250,000,\nonly if the terms preserve our control, it buys time for the technical work.';
+    const ctx = { ...w.ctx, user_turn_text: message, user_text: message, verified_user_messages: [message] };
+    const out = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000, unit: 'GBP', constraint_type: 'at_least' }), ctx, w.caps());
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false }); expect(out.public_label).toContain(message);
+    const pid = String(out.proposal_id), op = w.proposals.get(pid)!.operations[0]!;
+    expect(await w.caps().authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(userStatementFor(w.graph(), { kind: 'goal', id: op.path, field: 'target' })?.statements).toContainEqual(expect.objectContaining({ quote: message, source: message }));
+    expect(w.graph().goal_constraints).toContainEqual(expect.objectContaining({ source_quote: message, provenance: 'inferred' }));
+  });
+
+  it('a verified base can support an explicitly derived Olumi reading without calling the derived target the user’s figure', async () => {
+    const w = await world(cases[0]);
+    const message = 'For angel funding, we had discussed £100,000. Double that for this target.';
+    const ctx = { ...w.ctx, user_turn_text: message, user_text: message, verified_user_messages: [message] };
+    const out = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 200000,
+      unit: 'GBP', constraint_type: 'at_least', derived_from: { base: 100000, multiplier: 2 } }), ctx, w.caps());
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false, outcome: 'target_reading:derived_target' });
+    expect(out.public_label).toContain(message); expect(out.public_label).toContain('Olumi derived this figure as 2 ×');
+    const pid = String(out.proposal_id);
+    expect(await w.caps().authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().goal_constraints).toContainEqual(expect.objectContaining({ value: 200000, provenance: 'inferred', source_quote: message }));
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').observed_state?.raw_value).not.toBe(200000);
+  });
 });

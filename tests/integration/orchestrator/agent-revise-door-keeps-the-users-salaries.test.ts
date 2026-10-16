@@ -7,6 +7,10 @@
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 
+import { provenanceOf } from '../../../src/cee/provenance/provenance-of.js';
+import { proposalPendingAction, rehydrateProposals } from '../../../src/orchestrator-v5/agent-lane/durable-proposal.js';
+import { approvalChipsFor } from '../../../src/orchestrator-v5/agent-lane/approval-chips.js';
+import { parsePendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
@@ -97,8 +101,7 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
       graph: write.graph, source_turn_id: write.turn_id,
     });
   });
-  const agent = (user_text: string) => {
-    const store = new ProposalStore();
+  const agent = (user_text: string, store = new ProposalStore()) => {
     const d = async (path: string, body?: unknown) => {
       if (path.endsWith('/graph/register')) {
         const b = body as { graph: unknown; expected_graph_hash?: string; operation_id?: string };
@@ -112,7 +115,7 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
     });
-    return { caps, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text } };
   };
   const os = (id: string) => (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === id)!.observed_state ?? {};
   const SALARIES = { assumptions: [
@@ -141,5 +144,40 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     expect(rows.size).toBe(2);
     for (const id of ['senior_engineer_annual_salary', 'junior_engineer_annual_salary']) expect(os(id).source).toBe('user_override');
     expect(os('annual_salary_spend').source, JSON.stringify(os('annual_salary_spend'))).not.toBe('user_override');
+    expect(provenanceOf({ value: os('annual_salary_spend') }).origin).toBe('ai');
   });
+
+  it('TL11:51: three verified figures with uncertain bindings share one own card; the native save preserves their human source', async () => {
+    const text = 'Blue’s annual quote is £90k; Green’s is £60k; Orange’s is £140k.';
+    const a = agent(text);
+    const ctx = { ...a.ctx, user_turn_text: text, user_text_complete: false, verified_user_messages: [text] };
+    const p = await a.caps.proposeAssumptions(ctx, { assumptions: [
+      { user_stated: true, factor_label: 'Senior engineer annual salary', value: 90000, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Blue quote', revise: true },
+      { user_stated: true, factor_label: 'Junior engineer annual salary', value: 60000, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Green quote', revise: true },
+      { user_stated: true, factor_label: 'Annual salary spend', value: 140000, unit: 'GBP/year', basis: 'Olumi’s binding of the Orange quote', revise: true },
+    ] });
+    expect(p.ok, JSON.stringify(p)).toBe(true); expect(p.not_the_users_figure).toBeUndefined();
+    expect(String(p.public_label)).toContain(text);
+    expect(String(p.public_label).split(text)).toHaveLength(2); // complete source said once, not once per field
+    expect(String(p.public_label)).toContain('field bindings are Olumi’s reading, including after approval');
+    const held = a.store.get(String(p.proposal_id))!;
+    expect(held.provenance.authored_by).toBe('model_proposed'); // binding author, separate from every figure’s source
+    expect(held.operations).toHaveLength(3);
+    for (const op of held.operations) expect(op.value).toMatchObject({ authored_by: 'user_stated', confirmation: { source: text, quote: text } });
+    const chip = approvalChipsFor([{ name: 'propose_assumptions', ...p } as never], () => ({ proposal: held, result: p }))[0]!;
+    const pending = parsePendingAction(JSON.parse(JSON.stringify(proposalPendingAction(held, chip, { scenario_id: SCENARIO_ID, emitted_at_iso: new Date().toISOString() }))));
+    expect(pending).not.toBeNull();
+    const restored = new ProposalStore();
+    expect(rehydrateProposals([pending!], restored, { scenario_id: SCENARIO_ID, user_id: 'user-a' })).toBe(1);
+    const cold = agent(text, restored);
+    expect((await cold.caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(false);
+    expect(rows.size).toBe(0);
+    const out = await cold.caps.authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true); expect(rows.size).toBe(1);
+    for (const [id, value] of [['senior_engineer_annual_salary', 90000], ['junior_engineer_annual_salary', 60000], ['annual_salary_spend', 140000]] as const) {
+      expect(os(id).raw_value ?? os(id).value).toBe(value);
+      expect(provenanceOf({ value: os(id) }).origin, JSON.stringify(os(id))).toBe('human');
+    }
+  });
+
 });
