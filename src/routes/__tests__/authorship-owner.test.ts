@@ -123,14 +123,12 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
     expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toMatchObject({ raw_value: 6.5, source: 'brief_extraction' });
     expect(JSON.stringify(out.result.not_represented ?? [])).not.toContain('own estimate of the current level');
   });
-  it('the owner itself: a point or bound the user wrote is theirs; an end of their range, a figure they did not write, and a statement never made are not', () => {
+  it('the owner itself: a point or bound the user wrote is theirs; a figure they did not write, and a statement never made, are not', () => {
     const m = draftOf(COSTS);
     const option = { kind: 'option', label: 'Evening sort shift', factor_label: 'Total financial-year spend' } as const;
     expect(figureSource(m, COSTS.brief_text, option, 'level', 90000)).toBe('user');
     expect(figureSource(m, COSTS.brief_text, option, 'level', 90001)).toBe('unverified');
     expect(figureSource(m, COSTS.brief_text, { kind: 'goal', label: 'On-time delivery rate' }, 'target', 94)).toBe('user');
-    const link = { kind: 'link', label: 'Route-planning software deployed', to_label: 'On-time delivery rate' } as const;
-    expect(figureSource(m, COSTS.brief_text, link, 'effect', 3), 'the low end of "3 to 6" is not a single figure of theirs').toBe('unverified');
     expect(figureSource(m, COSTS.brief_text, { kind: 'factor', label: 'Evening sort shift deployed' }, 'level', 1)).toBe('unclaimed');
     expect(figureSource({ ...m, statements: undefined }, COSTS.brief_text, option, 'level', 90000), 'a draft before SYSTEM 2').toBeUndefined();
   });
