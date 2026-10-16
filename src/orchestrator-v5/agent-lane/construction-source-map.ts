@@ -162,6 +162,30 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
 }
 
 /**
+ * ⭐ S2 C4 (TL 6208664188 rule 1; DL-3 09:05Z DRASTIC CUT): the user's sentences the AI itself bound as the goal's TARGET with
+ * `figure` (its `{goal, target}` statements, each verified here as a whole sentence of the brief that writes that figure). A
+ * figure found elsewhere in the brief is the user's statement about its own subject, never this goal's target by membership.
+ * `undefined` only for a draft recorded before SYSTEM 2 (no `statements`; the sent schema requires them), which keeps its bytes.
+ */
+export function goalTargetSentences(model: unknown, brief: string, figure: number): readonly string[] | undefined {
+  const m = model !== null && typeof model === 'object' ? model as { statements?: unknown; goal?: { metric?: unknown } } : {};
+  if (!Array.isArray(m.statements)) return undefined;
+  const metric = typeof m.goal?.metric === 'string' ? m.goal.metric : '';
+  if (metric.trim() === '' || !Number.isFinite(figure)) return [];
+  const states = (n: number | undefined): boolean => typeof n === 'number' && Math.abs(n) === Math.abs(figure);
+  const map = sourceMapOf(m.statements, brief);
+  const key = subjectKey({ kind: 'goal', label: metric }, 'target');
+  // TL 09:18Z (2), AMENDED 10:49Z: a rival is ONLY another of the AI's own verified statements on the same sentence that gives
+  // that figure to another subject or field ("We have a budget of £40,000." as the budget's level and the goal's target). No
+  // unit comparison, mention count or text scan (BUDDY-A B1 R1/R2 on #3284): the AI's own labels decide, and the card offers
+  // Olumi's reading for one click wherever they compete, so the user's figure is never lost and never mis-authored.
+  const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
+    && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
+  return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote))
+    .map((s) => s.quote);
+}
+
+/**
  * ⭐ AIE 6183705670 (1), the admission first loss: a draft's verified statements are RECORDED on their subjects at construction,
  * as the statement door records a press (`user_statements`, one record per subject, `withUserStatement`), so the saved model, a
  * cold reopen and the AI's working input hold the user's own sentences, not only the authorship they decided. Each entry is

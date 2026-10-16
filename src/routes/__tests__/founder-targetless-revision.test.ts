@@ -318,7 +318,14 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     const raw = JSON.parse(FX.turns[0].calls[0].raw_text);
     raw.goal = { ...raw.goal, target_stated: true, value: 250000, unit: '£', operator: '>=' };
     const s = await harness(graph, [raw]);
-    expect(await s.revise(message)).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
+    // S2 C4 (TL 09:50Z, cost 3 ACKed): the drafter's 250000 is a figure the user wrote for something else, so it is never bound as
+    // the target. The redraft holds none, and the card flags the change BEFORE any approval (#3264), never a silent swap or a write.
+    const offer = await s.revise(message) as Rec;
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true, mutated: false });
+    const prepared = s.candidateOf(offer).candidate;
+    expect(readGoalRecord(prepared, prepared.nodes.find((n: Rec) => n.kind === 'goal').id)?.target?.raw, 'the unrelated/withdrawn numeral is never the target').toBeUndefined();
+    expect(String(offer.public_label)).toMatch(/^Check this change first: the goal\u2019s target would change from \u2018Funding secured\u2019 1\.3 million/);
+    expect(String(offer.public_label)).not.toContain('250,000');
     expect(s.writes).toHaveLength(0);
   });
 });
