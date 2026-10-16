@@ -187,14 +187,25 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
  * Which subject and role the figure has stays the AI's reading.
  */
 export type FigureSource = 'user' | 'unverified' | 'unclaimed';
-/** Qualitative introduction uses the SAME verified source map, not the drafter's provenance flag. */
-export function subjectSource(model: unknown, brief: string | undefined, subject: DraftedSubject): {
+/**
+ * Qualitative introduction uses the SAME verified source map, not the drafter's provenance flag.
+ * ⭐ ONE BINDER (DL-3 22:53Z, BUDDY-A #3327 B1): only the AI's own STATEMENT for this subject, verified, makes it the user's.
+ * `retained` is words the drafter attached to the subject outside its statements (a risk's `already_true_evidence`): they are
+ * never verified and never bind (an unrelated budget sentence there proves nothing about the risk). A whole sentence of the
+ * user's among them keeps the subject unverified human material, its words kept in `claimed`; never Olumi's estimate.
+ */
+export function subjectSource(model: unknown, brief: string | undefined, subject: DraftedSubject, retained: readonly string[] = []): {
   readonly author: ReturnType<typeof authorshipOf>;
   readonly statements: readonly { readonly field: StatementField; readonly statement: UserStatement }[];
   readonly claimed: readonly GivenStatement[];
 } {
   const entries = draftStatements(model);
-  const unknown = (claimed: readonly GivenStatement[] = []) => ({ author: authorshipOf({ words: { verified: false, unknown: true } }), statements: [], claimed });
+  const kept: GivenStatement[] = retained.map((quote) => ({ quote }));
+  const usersWords = typeof brief === 'string' && retained.some((q) => wholeStatementIn(brief, q) && !quoteIsNotTheUsersClaim(brief, q));
+  const unverifiedHuman = (claimed: readonly GivenStatement[], statements: readonly { readonly field: StatementField; readonly statement: UserStatement }[] = []) =>
+    ({ author: authorshipOf({ nodeTag: 'unverified_brief' }), statements, claimed: [...claimed, ...kept] });
+  const unknown = (claimed: readonly GivenStatement[] = []) => (usersWords ? unverifiedHuman(claimed)
+    : { author: authorshipOf({ words: { verified: false, unknown: true } }), statements: [], claimed: [...claimed, ...kept] });
   if (!Array.isArray(entries) || typeof brief !== 'string') return unknown();
   // A list with an entry that names no subject is not a complete source: its claims are unknown, never "nobody claimed it".
   if (entries.some((e) => e === null || typeof e !== 'object' || Array.isArray(e) || subjectOf((e as Record<string, unknown>).subject) === undefined)) return unknown();
@@ -205,18 +216,21 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
     return sub !== undefined && keyOf(sub) === keyOf(subject);
   });
   const claimed = claims.map(givenOf);
-  if (claims.length === 0) return { author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed };
+  if (claims.length === 0) {
+    return usersWords ? unverifiedHuman(claimed)
+      : { author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed: [...claimed, ...kept] };
+  }
   const map = sourceMapOf(entries, brief);
   const ownKeys = new Set(STATEMENT_FIELDS.map(field => subjectKey(subject, field)));
   const statements = STATEMENT_FIELDS.flatMap(field => (map.verified.get(subjectKey(subject, field)) ?? []).map(statement => ({ field, statement })));
   if (statements.some(({ statement: st }) => !quoteIsNotTheUsersClaim(st.source, st.quote)
     && ![...map.verified].some(([key, other]) => !ownKeys.has(key) && other.some(o => o.quote === st.quote)))) {
-    return { author: authorshipOf({ words: { verified: true, unknown: false } }), statements, claimed };
+    return { author: authorshipOf({ words: { verified: true, unknown: false } }), statements, claimed: [...claimed, ...kept] };
   }
   // Known human words with an unverified field/figure remain human material, never an Olumi estimate.
   return claims.some(c => typeof c.quote === 'string' && wholeStatementIn(brief, c.quote)
     && !quoteIsNotTheUsersClaim(brief, c.quote))
-    ? { author: authorshipOf({ nodeTag: 'unverified_brief' }), statements, claimed } : unknown(claimed);
+    ? unverifiedHuman(claimed, statements) : unknown(claimed);
 }
 
 export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {

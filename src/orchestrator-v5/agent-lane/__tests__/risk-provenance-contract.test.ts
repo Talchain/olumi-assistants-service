@@ -142,14 +142,41 @@ describe('draft source → risk admission → retained participation → readine
     const model = draft(); model.risks[0].already_true_evidence = { quote: 'Our budget is £2 million as of 2026-09-01.' };
     model.statements.push(entry('Budget', 'factor', 'level', model.risks[0].already_true_evidence.quote, 2000000, 'GBP'));
     const { risk } = admitted(model, `${BASE} ${model.risks[0].already_true_evidence.quote} Our deadline is six months.`);
-    // The receipt is a claim the owner reads like any statement: a sentence another subject claims lends no credit (no
-    // already-true quote, never from_brief), and claimed human words stay unverified human material, never Olumi's.
+    // The receipt binds nothing, and a sentence another subject's statement claims lends no credit (no already-true quote,
+    // never from_brief); the user's words stay unverified human material, never Olumi's.
     expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
   });
 
-  it('the drafter\'s live holds-now receipt, a whole sentence nobody else claims, is the user\'s: kept whole, from_brief', () => {
+  // ⭐ ONE BINDER (DL-3 22:53Z; BUDDY-A #3327 B1 N1, its exact native counterexample): the receipt binds nothing. A whole user
+  // sentence placed ONLY in the risk's receipt, unrelated to the risk and claimed by no statement, keeps its words but never makes
+  // the risk the user's, never says it is already true, and never asks for a time period on its account.
+  it('N1: an unrelated budget sentence ONLY in the risk\'s receipt: unverified human words, no already-true credit or claim', () => {
+    const quote = 'Our budget is £2 million as of 2026-09-01.';
+    const model = draft(); model.risks[0].already_true_evidence = { quote };
+    const { risk, graph, out } = admitted(model, `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
+    expect(risk.user_statements).toBeUndefined();
+    expect(JSON.stringify(out.loss)).toContain(quote);
+    // Readiness asks only for the risk's own size, exactly as for the same receipt beside a Budget statement claiming it
+    // (BUDDY-A's rivalled control): never "Your brief says … already being true now".
+    const rivalled = draft(); rivalled.risks[0].already_true_evidence = { quote };
+    rivalled.statements.push(entry('Budget', 'factor', 'level', quote, 2000000, 'GBP'));
+    const control = admitted(rivalled, `${BASE} ${quote}`);
+    expect(issuesFor(graph, risk.id)).toEqual(issuesFor(control.graph, control.risk.id));
+    expect(JSON.stringify(issuesFor(graph, risk.id))).not.toContain(quote);
+  });
+
+  it('a genuine receipt alone is still only words: unverified human material, no already-true quote', () => {
     const quote = 'The specialist role is already unfilled, and the team disagrees about its impact.';
     const model = draft(); model.risks[0].already_true_evidence = { quote };
+    const { risk, out } = admitted(model, `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
+    expect(JSON.stringify(out.loss)).toContain(quote);
+  });
+
+  it('POSITIVE: the same receipt beside the AI\'s own verified {risk, holds_now} statement is the user\'s: from_brief, quote whole', () => {
+    const quote = 'The specialist role is already unfilled, and the team disagrees about its impact.';
+    const model = draft([riskStatement(quote, { form: 'holds_now' })]); model.risks[0].already_true_evidence = { quote };
     const { risk } = admitted(model, `${BASE} ${quote}`);
     expect(risk.provenance).toBe('from_brief'); expect(risk.already_true_quote).toBe(quote);
   });

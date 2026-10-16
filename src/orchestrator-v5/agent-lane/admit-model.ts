@@ -4320,14 +4320,11 @@ function admitOnce(
     // ⛔ STRUCTURE IS NEVER REMOVED TO SATISFY A FIGURE RULE (DL 5916217417): a risk kept out of the calculation keeps its
     // node, its words and its link; the run guard hands PLoT the model without it, and says so. One `node` for both.
     ...model.risks.map((r) => {
-      // The drafter's live holds-now receipt (`already_true_evidence`, the AIE's prompt line) is ONE more claim of this risk's source,
-      // read by the same owner as a statements entry: verified, bound and never lent by a sentence another subject claims.
-      // With no statements list, the receipt is this risk's one claim (a risk without one stays unknown).
-      const receipt = typeof r.already_true_evidence?.quote === 'string'
-        ? [{ subject: { kind: 'risk', label: r.label }, field: 'holds_now', form: 'holds_now', quote: r.already_true_evidence.quote }] : [];
-      const listed = (model as { statements?: unknown }).statements;
-      const source = subjectSource(receipt.length === 0 ? model : { ...model, statements: [...(Array.isArray(listed) ? listed : []), ...receipt] },
-        brief, { kind: 'risk', label: r.label });
+      // ⭐ ONE BINDER (DL-3 22:53Z; BUDDY-A #3327 B1): only the AI's own verified {risk, holds_now} STATEMENT makes this risk the
+      // user's and carries today's condition. The drafter's holds-now receipt (`already_true_evidence`) is words kept with the risk,
+      // never a binding: a whole sentence of the user's there keeps the risk unverified human material, with no already-true credit.
+      const receipt = typeof r.already_true_evidence?.quote === 'string' ? [r.already_true_evidence.quote] : [];
+      const source = subjectSource(model, brief, { kind: 'risk', label: r.label }, receipt);
       // The drafter's OWN tag saying the risk is Olumi's is honoured where no claim settles its source: it can only keep the risk
       // Olumi's, never make it the user's (T4f, AIE 6177505214 T9). A human tag still needs the owner's verified source.
       const author = source.author.origin === 'unknown' && (r.provenance === 'inferred' || r.provenance === 'ai_proposed')
