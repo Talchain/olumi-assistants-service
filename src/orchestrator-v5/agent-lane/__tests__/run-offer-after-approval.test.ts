@@ -332,7 +332,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const approveAndRun = async (reply = COACHING) => {
       readiness = { status: 'ready', may_run: true };
       interpretation = reply;
-      const b = await proposeThenApprove() as unknown as { assistant_text: string; suggested_actions: Chip[] };
+      const b = await proposeThenApprove() as unknown as { assistant_text: string; suggested_actions: Chip[]; _answer_shape?: unknown; _diagnostic_trace: { reply_author?: string } };
       expect(runs, 'the automatic Run ran once').toBe(1);
       return b;
     };
@@ -347,6 +347,21 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(sent.request, 'the Explain press\'s own request').toBe(RUN_EXPLANATION_MESSAGE);
       expect(sent.canonical_state?.ok, 'over the canonical read after the Run').toBe(true);
       expect(b.assistant_text).toContain(COACHING);
+      // G3: a successful automatic interpretation owns the reply just like explicit Run/Explain.
+      expect(b._diagnostic_trace.reply_author).toBe('ai');
+      expect(b.assistant_text).toMatch(/Saved|Recorded/);
+      expect(b._answer_shape).toBeUndefined();
+      expect(b.assistant_text.split(COACHING)).toHaveLength(2);
+    });
+
+    it('an empty automatic interpretation keeps the factual receipt and existing fallback', async () => {
+      runStampedAt = RUN_AT;
+      const b = await approveAndRun('');
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      expect(b._diagnostic_trace.reply_author).toBe('host');
+      expect(b.assistant_text).not.toContain(COACHING);
+      expect(b.assistant_text).toMatch(/Saved|Recorded/);
+      expect(edges).toHaveLength(1);
     });
 
     it('compare: the actual request keeps the preceding Run record and the AI leads with the current finding', async () => {

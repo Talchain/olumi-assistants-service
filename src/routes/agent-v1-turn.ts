@@ -4437,9 +4437,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Admission is not delivered coaching: an empty/failed interpretation keeps the existing
           // uninterpreted-Run fallback, including its factual qualification and one-copy composition.
           runInterpreted = interpretedRun.interpreted !== undefined; text = said;
-          if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
         }
         else text = [text, said].filter((x) => x.trim() !== '').join('\n\n');
+        // The automatic post-save interpretation is AI narration too; its receipt stays in text.
+        if (interpretedRun.words !== null) narratorWords = interpretedRun.words;
         result = { ...result,
           // The next turn sees the interpretation: an id-less assistant message, which needs no reasoning item.
           items: [...result.items, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }],

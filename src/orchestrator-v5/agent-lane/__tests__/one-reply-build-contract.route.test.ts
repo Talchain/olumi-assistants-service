@@ -381,7 +381,7 @@ describe('ONE reply contract through the build route', () => {
     expect(sentText().includes("today's level of MRR")).toBe(true);
     expect(sentText().includes(GOAL_CHANCE_CAPTURE)).toBe(true);
     expect(sentText().includes('Price-rise cancellation risk')).toBe(true);
-    expect(sentText().includes('not included in this calculation')).toBe(true);
+    expect(sentText()).toContain(JSON.stringify({ scope: 'modelled_effects_only', risks: omitted }));
     expect(body.assistant_text).not.toContain('How likely is ‘Price-rise cancellation risk’');
     expect(body.assistant_text).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
