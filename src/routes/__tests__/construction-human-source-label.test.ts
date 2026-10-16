@@ -84,16 +84,8 @@ const sourceDraft = (human: boolean) => {
   c.statements = human ? [{ subject: { kind: 'factor', label: 'Weekly founder hours available' }, field: 'level', form: 'point', quote: HUMAN, value: 60, low: null, high: null, unit: 'hours/week', qualifier: 'possibly more if I needed to', conditions: 'Planning assumption, not a fixed ceiling or measured current working time.' }] : [];
   return c as unknown as CandidateModel;
 };
-// DL-3 16 Oct (#3279 BUDDY-B B1): the admission stamp behind this row put a false brief source on other figures; it moved to
-// Lane A's admission-authorship PR, which re-enables this row with its own fix.
-it.skip('native build → admission → register retains the 60-hour human source separately from its unverified current-level binding', async () => {
-  const out = await construct(BRIEF, [sourceDraft(true)]);
-  expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true }); expect(out.writes).toHaveLength(1);
-  const node = out.graph!.nodes.find((n: Rec) => n.kind === 'factor');
-  expect(node.observed_state).toMatchObject({ raw_value: 60, source: 'brief_extraction', user_material_unverified: true });
-  expect(provenanceOf({ value: node.observed_state })).toMatchObject({ origin: 'human', role: 'unverified' });
-  expect(node.user_statements[0].statements[0]).toMatchObject({ speaker: 'user', source: HUMAN, qualifier: 'possibly more if I needed to', conditions: 'Planning assumption, not a fixed ceiling or measured current working time.' });
-});
+// The 60-hour human-source row moved to Lane A's admission-authorship PR (DL-3 16 Oct, #3279 BUDDY-B B1): the
+// admission stamp behind it put a false brief source on other figures. These two negatives stay.
 it('a genuine generated 60-hour estimate retains Olumi source even though the same literal appears elsewhere', async () => {
   const out = await construct(BRIEF, [sourceDraft(false)]);
   expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
