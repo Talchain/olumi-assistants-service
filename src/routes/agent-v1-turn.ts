@@ -1,3 +1,4 @@
+import { readRecordedRun, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { withoutUnsizedLinkInvitation } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { postResponses } from '../adapters/llm/openai.js';
@@ -84,7 +85,7 @@ import { agentSelectionContext, type AgentSelectionContext } from '../orchestrat
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
-import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
+import { turnReadCache, FRESH_READ } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { armedRecoveryFault, interruptIfArmed, RecoveryFaultInterrupt } from '../orchestrator-v5/agent-lane/recovery-fault-seam.js';
 import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
@@ -1840,6 +1841,8 @@ export function sameAgentTurnRequest(stored: string, requested: string, chipless
 }
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
+  // Active requests only: no result/model cache. The existing durable answer floor still decides the one stored reply.
+  const activeRunTurns = new Set<string>();
   if (config.proxy.agentLaneEnabled !== true) return;
 
   /**
@@ -2163,9 +2166,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * dispatch to the conventional handlers — is refused before network I/O and logged
    * (`adapters/llm/provider-policy.ts`).
    */
-  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
+  const agentTurnBody = async (req: FastifyRequest, reply: FastifyReply, takeActiveRun: (key: string) => boolean) => {
     const startedAt = Date.now();
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    let body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
     const recoveryFault = armedRecoveryFault(body, scenarioId);
@@ -2386,7 +2389,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? `approve:${approvedProposal}${editsForThisCard !== undefined ? `:${proposalEditsDigest(editsForThisCard)}` : ''}`
       : isRunExplanationChip(explanationId) ? explanationId : undefined;
     const pressedChipIsStructural = typeof explanationId === 'string' && explanationId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX);
-    const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
+    let requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
       ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
     /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
@@ -2856,6 +2859,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     // Set only when THIS request owns the turn — used to release it if nothing ran.
+    let recoveredRun: RecoveredRun | undefined;
     let claimHash: string | undefined;
     let claimAppendSucceeded = false;
     let claimReleaseRecorded = false;
@@ -2920,10 +2924,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (!claim.won && !claim.sameRequest) {
         return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
       }
+      const runKey = `${scenarioId}:${turnId}`;
+      if (claim.won && typedRunOf(body)) takeActiveRun(runKey);
       if (!claim.won) {
-        // Another request owns this turn: in flight now, or it ran and its answer
-        // was never recorded. It is NEVER run again here. Wait for its answer.
         const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
+        let recoveryAttempted = false;
         for (;;) {
           let answer: CommittedTurnRecord | null = null;
           try { answer = await readAnswer(); } catch { answer = null; }
@@ -2933,16 +2938,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             }
             return reply.code(200).send(await replayed(answer));
           }
+          // A concurrent original/recovery request finishes its reply first. No duplicate interpreting call here.
+          if (!recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
+            const recorded = await readRecordedRun(store, scenarioId, turnId, () => readBackState(
+              (path, body) => readCache.dispatch(path, { ...(body as Record<string, unknown>), ...FRESH_READ }), scenarioId));
+            if (recorded !== undefined && takeActiveRun(runKey)) {
+              // The builder we raced may have stored its answer while the fact/readback checks were in flight.
+              let recordedAnswer: CommittedTurnRecord | null;
+              try { recordedAnswer = await readAnswer(); } catch {
+                return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not check whether this turn already ran. Nothing was run — please try again.' });
+              }
+              if (recordedAnswer !== null) {
+                if (!sameAgentTurnRequest(recordedAnswer.request_hash, requestHash, chiplessRetry)) {
+                  return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
+                }
+                return reply.code(200).send(await replayed(recordedAnswer));
+              }
+              recoveredRun = recorded;
+              // Keep original chip authorship and Run-only permissions on a chipless UI retry.
+              requestHash = requestHashOfClaim(owner.request_hash);
+              if (chiplessRetry) body = { ...body, chip: { action_type: 'run_analysis' } };
+              break;
+            }
+            // A concurrent builder may have won while the durable proof was read. Wait for it; don't re-read a rejected Run.
+            recoveryAttempted = !activeRunTurns.has(runKey);
+          }
           if (Date.now() >= deadline) break;
           await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
         }
-        log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claimed but no answer recorded — outcome unknown, not re-run');
-        return reply.code(409).send({
-          error: 'TURN_OUTCOME_UNKNOWN',
-          detail: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again — reload to see the current model.',
-        });
+        if (recoveredRun === undefined) {
+          log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claimed but no answer recorded — outcome unknown, not re-run');
+          return reply.code(409).send({
+            error: 'TURN_OUTCOME_UNKNOWN',
+            detail: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again — reload to see the current model.',
+          });
+        }
       }
-      // This request created the claim: it alone runs the turn.
+      // A new claim may run; a recovered claim can only reuse its proven Run.
     }
     /**
      * ⛔ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT
@@ -3046,6 +3078,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
         turnAuthority: true,
+        ...(recoveredRun !== undefined ? { recoveredRun } : {}),
+        ...(typedRunOf(body) && turnId !== undefined ? { runOperationId: runOperationTurnId(scenarioId, turnId) } : {}),
         deadlineAt: constructionDeadlineAt,
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
         /**
@@ -6399,6 +6433,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
     });
+  };
+  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
+    let activeKey: string | undefined;
+    try {
+      return await agentTurnBody(req, reply, key => {
+        if (activeRunTurns.has(key)) return false;
+        activeRunTurns.add(key); activeKey = key;
+        return true;
+      });
+    } finally {
+      // Includes a thrown/aborted reply: a later retry can read durable proof and recover again.
+      if (activeKey !== undefined) activeRunTurns.delete(activeKey);
+    }
   };
   app.post('/agent/v1/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, (req: FastifyRequest, reply: FastifyReply) =>
     runWithProviderPolicy({ ...OPENAI_ONLY('agent_v1_turn'), request_id: String(req.id),
