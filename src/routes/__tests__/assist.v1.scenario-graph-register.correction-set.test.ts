@@ -19,10 +19,11 @@ vi.mock('../../orchestrator/user-identity.js', async original => ({
 }));
 
 import { tryStructureOriginAnswer } from '../../cee/context-integrity/structure-origin-answer.js';
+import { constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { ProposalStore, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
+import { ProposalStore, createProposal, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { proposalPendingAction, rehydrateProposals } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 import { parsePendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import { approvalChipsFor } from '../../orchestrator-v5/agent-lane/approval-chips.js';
@@ -194,4 +195,30 @@ it.each(cases.slice(0, 2))('rename-only source cannot smuggle a removal on the $
   const out = await dispatchTool('propose_change', JSON.stringify({ ops: [row.ops[0], { ...row.ops[1], quote: message }] }), w.ctx, w.caps());
   expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'not_asked' });
   expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+});
+
+describe.each(['goal_direction', 'goal_horizon'] as const)('a correction cannot silently lose %s', missing => {
+  it('refuses a complete own-card candidate that omitted an untouched goal field, before any native write', async () => {
+    const row = cases[0];
+    const graph = structuredClone(row.graph);
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    goal.goal_direction = '<=';
+    goal.goal_horizon = { deadline: '2027-06-30' };
+    const w = await world({ ...row, graph });
+    const offered = await dispatchTool('propose_change', JSON.stringify({ ops: row.ops }), w.ctx, w.caps());
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    const original = w.proposals.get(String(offered.proposal_id))!;
+    const operations = structuredClone(original.operations);
+    const value = operations[0]!.value as Rec;
+    delete value.candidate.nodes.find((n: Rec) => n.kind === 'goal')[missing];
+    value.operation_id = constructionOperationId(w.ctx.scenario_id, 'goal-fields:' + computeGraphIdentityHash(value.candidate as never)!.value);
+    // Simulates the preparation defect, before card identity is minted, not a tampered browser payload.
+    const broken = createProposal({ scenario_id: original.scenario_id, user_id: original.user_id,
+      base_graph_identity_hash: original.base_graph_identity_hash, operations,
+      provenance: original.provenance, validation: original.validation, public_label: original.public_label });
+    w.proposals.put(broken);
+    const result = await w.caps().authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: broken.proposal_id }, { proposal_id: broken.proposal_id });
+    expect(result).toMatchObject({ ok: false, mutated: false, applied: false });
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+  });
 });

@@ -1775,3 +1775,17 @@ describe('post-merge card messages reflect retained work and actual refusal', ()
     expect(s.graph().nodes.find((n: Rec) => n.id === 'advertising_spend').observed_state.raw_value).toBe(40000);
   });
 });
+
+it('C5: a redraft card cannot silently lose unrequested goal direction and deadline', async () => {
+  const graph = structuredClone(FX.graph);
+  const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+  goal.goal_direction = '<=';
+  goal.goal_horizon = { deadline: '2027-06-30' };
+  const s = server({ graph });
+  const { caps } = lane(s);
+  const offered = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+  expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+  const result = await caps.authoriseChange(pressed(String(offered.proposal_id)), { proposal_id: String(offered.proposal_id) });
+  expect(result).toMatchObject({ ok: false, mutated: false, applied: false, refusal: 'incomplete_goal_postimage' });
+  expect(s.commits).toHaveLength(0); expect(s.graph()).toEqual(graph);
+});

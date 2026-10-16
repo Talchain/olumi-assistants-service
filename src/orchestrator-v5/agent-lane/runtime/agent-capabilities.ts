@@ -4298,6 +4298,23 @@ export function createAgentCapabilities(
       return notApplied('superseded', targeted ? 'The model changed after this correction was offered, so nothing was saved. Prepare an updated card.'
         : 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
     }
+    // A complete candidate can still have omitted an untouched goal field before the card was minted. Checking only
+    // candidate == readback would confirm that loss. Check the saved goal contract BEFORE the native write as well.
+    for (const goal of before.nodes.filter(n => n.kind === 'goal')) {
+      const saved = readGoalRecord(before.raw, goal.id);
+      const proposed = readGoalRecord(v.candidate, goal.id);
+      if (saved === null) return notApplied('goal_not_readable', 'The saved goal could not be read completely. Nothing was saved.');
+      const withoutTarget = ({ target: _target, ...rest }: NonNullable<typeof saved>) => rest;
+      const changedUntouchedGoal = targeted && (proposed === null || !isDeepStrictEqual(
+        parent.operations[0]!.op === 'set_goal_target' ? withoutTarget(saved) : saved,
+        parent.operations[0]!.op === 'set_goal_target' ? withoutTarget(proposed) : proposed));
+      const lostDirection = saved.target?.comparator_source === 'goal_direction'
+        && proposed?.target?.comparator_source !== 'goal_direction';
+      const lostDeadline = saved.horizon?.deadline !== undefined && proposed?.horizon?.deadline === undefined;
+      if (changedUntouchedGoal || lostDirection || lostDeadline) {
+        return notApplied('incomplete_goal_postimage', 'This card would lose or change an untouched part of the saved goal, including its direction or deadline. Nothing was saved. Prepare a targeted correction that keeps the rest of the goal.');
+      }
+    }
     // The messages the offer bound (read as its context), then the typed goal's turn; any other message refuses.
     const bound = Array.isArray(v.bound_turn_ids) ? v.bound_turn_ids.filter((t): t is string => typeof t === 'string') : [];
     // Targeted candidates compose canonical adapters on the saved graph. They do not replace the user's other work
