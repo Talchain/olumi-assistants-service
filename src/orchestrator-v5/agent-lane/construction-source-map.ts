@@ -235,14 +235,14 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
     const unitAfter = st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`)
       ? after.slice(0, st.unit.length + 1) : '';
     const text = joined === undefined ? `${low} to ${high}${st.unit ? ` ${st.unit}` : ''}` : `${joined.text}${unitAfter}`;
-    // The clause that states it, with its own speaker (AIE: "the supplier … reckons …"), split at the sentence's own
-    // punctuation; the whole sentence when no shorter clause holds the range.
-    const clause = st.quote.split(/[,;:]\s+|\s+[—–]\s+/).map((c) => c.trim()).find((c) => c.includes(joined?.text ?? text));
-    return { low, high, text, end, reported: clause !== undefined && clause.length <= 220 ? clause : st.quote };
+    // ⛔ BUDDY-A #3297 B1: the WHOLE verified quote, never a clause cut at punctuation. A shorter "clause" dropped its speaker
+    // and condition ("The supplier estimates that, if the pilot succeeds, …" became only the numbers' clause) and was still
+    // said "as the brief puts it"; the AIE disposition keeps the full attributed range with its speaker and conditions.
+    return { low, high, text, end, reported: st.quote };
   }
   return null;
 }
-/** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the clause that reports it. */
+/** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
 export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };
 
 /**
