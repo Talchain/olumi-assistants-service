@@ -62,7 +62,9 @@ const UNSCANNED_COMPOSE_FILES: Readonly<
     // 3 since the whole-turn replay (olumi-programme-docs#63 5788656586): the
     // third site composes the ORIGINAL stored Agent text for an exact retry by
     // turn_id — same stance as the other two, no validator verdict on this path.
-    siteCount: 3,
+    // 4 since #3310: the turn-start reply when held proposals cannot be read composes a truthful
+    // 'could not verify' answer (no tools, no write) — same stance, no validator verdict on this path.
+    siteCount: 4,
     keyable: true,
     why:
       'The agent lane composes an answer the OpenAI Agent produced, not one the ' +

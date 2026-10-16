@@ -3276,7 +3276,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame', answerKind: 'substantive',
       });
       return reply.code(200).send({
-        ...finaliseV5Response(unavailable, { scenarioId, runDeltaBoundByCaller: true }),
+        ...withEstimateGoalPointsAtEgress(finaliseV5Response(unavailable, { scenarioId, runDeltaBoundByCaller: true }), {
+          analysisResult: null, graph: null, current: false,
+        }),
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0,
           stopped_reason: 'pending_actions_unreadable', durability: 'not_recorded', ...(turnId !== undefined ? { turn_id: turnId } : {}) },
         _provider_calls: recordedProviderCalls(),
