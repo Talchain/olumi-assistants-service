@@ -1,4 +1,3 @@
-import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
 /**
@@ -32,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 import { assertIdentityYes, WORDS } from './helpers/goal-reach-confirm-reading.js';
-const RUN_INTERPRETATION = RUN_RESULT_READY_TEXT;
+const RUN_INTERPRETATION = 'The model result is provisional.';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../orchestrator-v5/routing/answer-shape.js';
 
 const { port, source } = vi.hoisted(() => ({
@@ -165,7 +164,7 @@ beforeEach(async () => {
   port.ensureScenarioExists.mockResolvedValue({ user_id: OWNER }); port.getScenarioOwner.mockResolvedValue(OWNER);
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => { modelCalls += 1; modelBodies.push(JSON.parse(String(init?.body ?? '{}'))); return runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
-    { type: 'message', content: [{ type: 'output_text', text: 'The model result is provisional.' }] },
+    { type: 'message', content: [{ type: 'output_text', text: RUN_INTERPRETATION }] },
   ] }), { status: 200 }); }));
   app = Fastify({ logger: false });
   await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
@@ -261,8 +260,8 @@ describe('GOAL-REACH row 2 through the real doors', () => {
       // Adopted (Paul #94 6166259456): the committed Yes is analysed by the route's automatic Run, once, on the saved reading.
       expect(runRequests, 'the Run press, then ONE automatic Run after the committed Yes').toHaveLength(2);
       expect(runRequests[1]).toMatchObject({ stage: 'analyse', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
-      // The Run press's pre-tool call, then (adopted, DL after #3038) the automatic Run's one interpreting call; nothing else.
-      expect(modelBodies.map(isInterpretingCall), 'pre-tool Run call; the automatic Run\'s interpreting call').toEqual([false, true]);
+      // AIE-03: the press has one tool request and one interpretation; the committed Yes has its existing one interpretation.
+      expect(modelBodies.map(isInterpretingCall), 'pre-tool Run call; press interpretation; automatic Run interpretation').toEqual([false, true, true]);
     } finally { issue.mockRestore(); writer.mockRestore(); }
   });
   it('row 2 RED: withheld Run bar has one enabled confirm_reading, press → held card → Yes → saved/reloaded identity → NEXT Run wire', async () => {

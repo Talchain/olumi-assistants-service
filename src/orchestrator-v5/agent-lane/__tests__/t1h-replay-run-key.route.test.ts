@@ -1,3 +1,4 @@
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 /**
  * T1h (PL #94 6135017311 item 4): a replay of an earlier Run answer names THAT answer's Run, after a restart too: the
  * narration it was sent with is stored WITH its row (migration 20261013230000) and read back from the exact row
@@ -234,6 +235,10 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     const live = rootLineCalls.filter(c => c.fromRoute);
     expect(live.length, 'the live Run call site was reached').toBeGreaterThan(0);
     for (const c of live) expect(c.args[2]).toEqual(saved);
+    // This hook protects legacy/uninterpreted receipts. Seed its original ready-line receipt after the
+    // new setup interpretation; do not replace the saved Run identity, inputs, narration or result.
+    const receipt = table.find(row => row.turn_id === request.turn_id)!;
+    receipt.assistant_message = RUN_RESULT_READY_TEXT;
     rootLineCalls.length = 0;
     const replay = await resend(request.turn_id);
     expect(replay.json()._agent.replayed).toBe(true);

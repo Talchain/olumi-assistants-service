@@ -1,3 +1,4 @@
+import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ BYPASS1 THROUGH THE ROUTE (DL, 14 Oct). Harness: target-not-testable-beside-ranges.route.test.ts (served b9-1 readback,
@@ -135,6 +136,7 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
   const RANKING = 'Open Clifton shop is the best option to choose.';
 
   it('NEGATIVE (host-written): the Run press is the host\'s reply, so it keeps every host line', async () => {
+    outputs = [[]]; // An empty interpretation keeps the existing host-written fallback.
     const run = await runPress();
     expect(run._diagnostic_trace.reply_author).toBe('host');
     expect(run.assistant_text).toMatch(CHANCE_LINE);
@@ -209,6 +211,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
    */
   it('capacity Run press: the card says the status quo line and the notes, and the reply does not repeat them', async () => {
     served = CAPACITY;
+    const investigation = whatChangesFaceLine(served.analysis_result, served.graph);
+    expect(investigation, 'the current Run supplies this reasoning fact to the AI').not.toBeNull();
+    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: investigation! }] }]];
     const run = await runPress();
     const detail = run.canonical_analysis_view?.goal_chance as { status_quo: { line: string }; notes: string[] };
     expect((run.blocks as { type: string }[])[0]?.type).toBe('analysis_result');
@@ -264,6 +269,9 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
    */
   it('RED (served 5b6e5eb7 turn 01): the bound current card displays the chance, and the reply does not say it again', async () => {
     served = CAPACITY_3017;
+    const investigation = whatChangesFaceLine(served.analysis_result, served.graph);
+    expect(investigation, 'the current Run supplies this reasoning fact to the AI').not.toBeNull();
+    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: investigation! }] }]];
     const run = await runPress();
     const view = run.canonical_analysis_view as Json;
     expect(view.run.graph_hash_at_run).toBe(CAPACITY_3017.analysis_result.computed_against_hash);

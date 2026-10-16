@@ -1,4 +1,3 @@
-import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * The real Run/replay route carries the canonical unknown-risk withholding ask.
@@ -14,6 +13,7 @@ import { sentencesOf } from '../reply/compose-reply.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 const RUN_INTERPRETATION = 'The model result is provisional.';
+const RUN_FALLBACK = 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, missingRootUnnamedLine } from '../root-line.js';
@@ -144,17 +144,17 @@ function expectWithheldContract(body: Body, rootLine?: string): void {
   expect(shape!.headline).toBe('Not shown yet; why is under More detail');
   const rootOwnsAsk = rootLine?.includes('?') === true;
   const targetAsk = rootOwnsAsk ? null : decisionInputAsk(graphWith(riskValued, riskLabel), {
-    restingText: [RUN_RESULT_READY_TEXT, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
+    restingText: [RUN_FALLBACK, rootLine, WITHHELD_FINDING].filter(Boolean).join('\n\n'),
     questionsToggle: false, awaitingApproval: false, builtOrRan: true,
   });
   if (!rootOwnsAsk) expect(targetAsk).toBe('What figure should "Meet our next feature-launch deadline" reach or stay under? I\'ll propose it as your target.');
   const targetSentences = targetAsk === null ? [] : sentencesOf(targetAsk);
   expect(shape!.bullets).toEqual([rootOwnsAsk ? rootLine! : targetSentences[0]!]);
-  expect(shape!.detail).toBe([RUN_RESULT_READY_TEXT, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
+  expect(shape!.detail).toBe([RUN_FALLBACK, rootOwnsAsk ? undefined : rootLine, ...targetSentences.slice(1), WITHHELD_FINDING].filter(Boolean).join('\n\n'));
   expect(shape!.detail.split(WITHHELD_FINDING)).toHaveLength(2);
   expect(body.assistant_text.split(WITHHELD_FINDING)).toHaveLength(2);
   expect(body.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
-  expect(body.assistant_text.split(RUN_RESULT_READY_TEXT)).toHaveLength(2);
+  expect(body.assistant_text.split(RUN_FALLBACK)).toHaveLength(2);
   if (rootLine !== undefined) expect(body.assistant_text.split(rootLine)).toHaveLength(2);
   for (const sentence of targetSentences) expect(body.assistant_text.split(sentence)).toHaveLength(2);
   const face = [shape!.headline, ...shape!.bullets].join('\n');
@@ -165,9 +165,12 @@ function expectWithheldContract(body: Body, rootLine?: string): void {
 describe('a native Run with an unvalued risk root carries the numerical withholding ask (live route)', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (_url, init) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}'))) ?? new Response(JSON.stringify({ output: [
-      { type: 'message', content: [{ type: 'output_text', text: RUN_INTERPRETATION }] },
-    ] }), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const forced = runPressToolResponse(JSON.parse(String(init?.body ?? '{}')));
+      if (forced) return forced;
+      // The scientific fallback is under test: an unavailable interpreter supplies no risk fact or question.
+      return new Response(JSON.stringify({ output: [] }), { status: 200 });
+    }));
     app = await freshApp();
   }, 60_000);
   afterAll(async () => {

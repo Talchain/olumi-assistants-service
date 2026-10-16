@@ -135,6 +135,8 @@ describe('result-first on retry, lost response and failed explanation (live rout
     computedAt = RUN_B;
     const current = (await runTurn(randomUUID())).json() as Body;
     const savedRows = structuredClone(rows);
+    expect(modelCalls, 'one interpretation on each completed setup Run').toBe(2);
+    modelCalls = 0; // The original zero-call assertion below measures retry/recovery only.
     await app.close(); app = await freshApp();
     const retry = (await runTurn(turn)).json() as Body;
     // AMENDED (T1h; DL ruling 14 Oct = PL #94 6135017311 item 4, "never borrow today/latest key or rewrite old history").

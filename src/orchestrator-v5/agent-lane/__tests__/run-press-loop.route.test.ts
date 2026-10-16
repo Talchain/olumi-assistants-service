@@ -39,6 +39,7 @@ let licensedRecord: Rec | undefined;
 let modelWords = '';
 let claimCurrent = false;
 let originalLoop = false;
+let pressInterpretation = RUN_RESULT_READY_TEXT;
 // Historical AI-written Run receipts still need their original replay controls. Generate those receipts with
 // the unopted-in loop; T1r rows and ordinary presses below exercise the real result-first hook unchanged.
 vi.mock('../runtime/agent-loop.js', async (original) => {
@@ -80,6 +81,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
       } else {
         if (interpretationFailure === 'throw') throw new TypeError('fetch failed');
         if (interpretationFailure === 'http500') return new Response(JSON.stringify({ error: { message: 'interpretation unavailable' } }), { status: 500 });
+        // The selected-Run interpretation is a distinct tool-less call. These host/factual controls
+        // give it the original neutral narrator; scientific disclosures still come from the real handler.
+        if (!originalLoop && body.tool_choice === 'none') return new Response(JSON.stringify({ output: [answer(pressInterpretation)] }), { status: 200 });
         const toolOutput = [...body.input].reverse().find((i: Rec) => i.type === 'function_call_output' && i.call_id === 'run-one');
         turnToolResult = toolOutput ? JSON.parse(toolOutput.output) : undefined;
         // The scripted model only quotes the SAME tool result's licensed cells; no copied fixture percentage.
@@ -128,18 +132,19 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { graph = structuredClone(FX.graph); block = undefined; bodies = []; runs = []; writes = []; rows.length = 0;
     STATE.run_state.computed_at = AT;
-    claimCurrent = false; originalLoop = false; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
+    claimCurrent = false; originalLoop = false; pressInterpretation = RUN_RESULT_READY_TEXT; behavior = 'run'; interpretationFailure = undefined; engineFails = false; timing = 'in_place_by_period'; turnToolResult = undefined; licensedRecord = undefined; modelWords = ''; });
   const press = (extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', turn_id: randomUUID(), agent_session_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, ...extra,
   } });
 
-  it.each(['in_place_by_period', 'not_stated'])('T1r (a): timing %s licenses the saved result with one call and no narration', async (reading) => {
+  it.each(['in_place_by_period', 'not_stated'])('T1r (a): timing %s licenses the saved result with one Run and its interpretation', async (reading) => {
     timing = reading;
     const response = await press();
     expect(response.statusCode).toBe(200);
     const live = response.json();
-    expect(bodies).toHaveLength(1);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].tool_choice).toBe('none'); expect(bodies[1].tools).toEqual([]);
     expect(runs).toHaveLength(1);
     expect(runs[0]!.chip.parameters.effects_timing).toBe(reading);
     const licence = goalChanceLicenceForAgent(block);
@@ -151,12 +156,13 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(writes).toEqual([]);
   });
 
-  it('T1r (d): an unlicensed goal chance keeps the host explanation and next step without narration', async () => {
+  it('T1r (d): an unlicensed goal chance keeps its scientific explanation and next step after interpretation', async () => {
     timing = 'later_or_partial';
     const response = await press();
     expect(response.statusCode).toBe(200);
     const live = response.json();
-    expect(bodies).toHaveLength(1);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].tool_choice).toBe('none'); expect(bodies[1].tools).toEqual([]);
     expect(runs).toHaveLength(1);
     expect(runs[0]!.chip.parameters.effects_timing).toBe('later_or_partial');
     expect(goalChanceLicenceForAgent(block)).toBeUndefined();
@@ -256,6 +262,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
   });
 
   it('K2: replaying the same bound press never starts another Run or model call', async () => {
+    pressInterpretation = 'The model result is provisional.'; // A coached receipt; legacy ready-receipt controls stay below.
     const request = { turn_id: randomUUID(), agent_session_id: randomUUID() };
     const first = await press(request); const callCount = bodies.length;
     expect(first.statusCode).toBe(200); expect(runs).toHaveLength(1);
