@@ -116,7 +116,8 @@ describe("GET /admin/models/routing", () => {
     for (const task of EXECUTABLE_RUNTIME_TASKS) {
       expect(returnedTasks).toContain(task);
     }
-    expect(returnedTasks).toContain("clarify_brief");
+    // C1: the retired clarifier has no runtime row; explain_diff remains the live positive control.
+    expect(returnedTasks).not.toContain("clarify_brief");
     expect(returnedTasks).toContain("explain_diff");
   });
 
@@ -164,8 +165,10 @@ describe("GET /admin/models/routing", () => {
     expect(byTask.get("critique_graph")).toMatchObject({
       provider: "fixtures",
       availability: "fixture_only",
-      lifecycle_state: "standalone_route",
-      runtime_availability: "available",
+      executable: false,
+      has_executable_path: false,
+      lifecycle_state: "inert_compatibility",
+      runtime_availability: "not_executable",
     });
     // C1 deleted the M2 producer; its compatibility name has no executable path.
     expect(byTask.get("m2_graph_review")).toMatchObject({

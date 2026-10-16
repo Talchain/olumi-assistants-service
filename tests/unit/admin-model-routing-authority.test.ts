@@ -95,7 +95,8 @@ describe('admin runtime model-routing authority', () => {
         .filter(([, authority]) => authority.hasExecutablePath)
         .map(([task]) => task),
     );
-    expect(EXECUTABLE_RUNTIME_TASKS).toContain('clarify_brief');
+    // C1: clarify_brief is compatibility metadata; explain_diff remains a live positive control.
+    expect(EXECUTABLE_RUNTIME_TASKS).not.toContain('clarify_brief');
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('explain_diff');
     // ⭐⭐ BOTH ENTRIES ARE NOW OPEN, AND THAT CHANGES WHAT THIS MAP IS.
     //
@@ -147,7 +148,7 @@ describe('admin runtime model-routing authority', () => {
     });
     expect(
       buildStartupTaskModels(resolveModelRoutingSnapshot()),
-    ).toHaveProperty('critique_graph');
+    ).not.toHaveProperty('critique_graph');
   });
 
   it('reports critique env overrides through the shared provider capability', () => {
@@ -161,9 +162,8 @@ describe('admin runtime model-routing authority', () => {
       source: 'env_override',
       source_key: 'CEE_MODEL_CRITIQUE',
     });
-    expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
-      critique_graph: 'claude-sonnet-4-6',
-    });
+    // C1: model overrides remain inspectable, but a retired task never becomes a startup executable.
+    expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).not.toHaveProperty('critique_graph');
 
     // ⭐ INVERTED BY THIS PR, AND IT IS THE HEADLINE. An OpenAI model on
     // CEE_MODEL_CRITIQUE used to die at resolution with MODEL_PROVIDER_MISMATCH
@@ -184,7 +184,7 @@ describe('admin runtime model-routing authority', () => {
     });
     expect(
       buildStartupTaskModels(resolveModelRoutingSnapshot()),
-    ).toHaveProperty('critique_graph', 'gpt-4o');
+    ).not.toHaveProperty('critique_graph');
   });
 
   /**
@@ -479,9 +479,9 @@ describe('admin runtime model-routing authority', () => {
       registry_model_id: 'gpt-4.1-2025-04-14',
       source: 'env_override',
       source_key: 'CEE_MODEL_CLARIFICATION',
-      executable: true,
-      has_executable_path: true,
-      runtime_availability: 'available',
+      executable: false,
+      has_executable_path: false,
+      runtime_availability: 'not_executable',
     });
   });
 
@@ -579,9 +579,9 @@ describe('admin runtime model-routing authority', () => {
       availability: 'registry_enabled',
       source: 'global_model',
       source_key: 'LLM_MODEL',
-      executable: true,
-      has_executable_path: true,
-      runtime_availability: 'available',
+      executable: false,
+      has_executable_path: false,
+      runtime_availability: 'not_executable',
     });
 
     delete process.env.LLM_MODEL;

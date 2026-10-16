@@ -79,13 +79,12 @@ describe("the #835 false positive is dead, and only that", () => {
     expect(next).toEqual(["src/handlers/structural-edit-decline-copy.ts"]);
   });
 
-  it("the two legitimate -copy files tracked in this repo today are not findings", () => {
-    // Bound by IDENTITY to the real paths, so deleting or renaming either one
+  it("the retained legitimate -copy file tracked in this repo is not a finding", () => {
+    // C1: only the held-consent copy control survives; deleting or renaming it
     // shows up here rather than silently reducing the coverage.
     const tracked = listTrackedFiles(REPO_ROOT);
     for (const p of [
       "src/orchestrator-v5/handlers/__tests__/gm-held-consent-copy.test.ts",
-      "tests/unit/orchestrator/tools/edit-graph-f3-applied-turn-copy.test.ts",
     ]) {
       expect(tracked, `${p} must still be tracked for this control to mean anything`).toContain(p);
     }

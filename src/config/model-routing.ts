@@ -95,10 +95,9 @@ import {
  * getSystemPromptMeta('<task>') call — the second condition is what makes it a
  * task path rather than a generic harness.
  */
+// C1: only the retained draft parser still reads a task prompt-store model pin.
 export const STORE_MODEL_CONFIG_LIVE_CALL_SITES: readonly string[] = [
   "src/cee/unified-pipeline/stages/parse.ts", // draft_graph
-  "src/routes/assist.critique-graph.ts", // critique_graph
-  "src/routes/assist.suggest-options.ts", // suggest_options
 ];
 
 /**
@@ -120,9 +119,7 @@ export const STORE_MODEL_CONFIG_LIVE_CALL_SITES: readonly string[] = [
  * the server-side resolution.
  */
 export const STORE_MODEL_CONFIG_OUTRANKABLE_TASKS: readonly string[] = [
-  "critique_graph",
   "draft_graph",
-  "suggest_options",
 ];
 
 /**
@@ -142,8 +139,7 @@ export const STORE_MODEL_CONFIG_NON_TASK_READERS: readonly string[] = [
  * CEE task types that can have model selection applied
  */
 export type CeeTask =
-  // Display-only compatibility name. The executable standalone route calls
-  // getAdapter('clarify_brief'); this row does not serve that call by itself.
+  // Inert compatibility name: C1 retired the standalone clarify_brief route.
   | "clarification"
   | "preflight"
   | "draft_graph"
@@ -402,17 +398,8 @@ export function hasAiTaskExecutablePath(task: AiTaskLifecycleId): boolean {
 export const AI_TASK_LIFECYCLE: Readonly<
   Record<AiTaskLifecycleId, AiTaskLifecycle>
 > = {
-  clarification: {
-    executable: false,
-    state: 'display_only',
-    executableTask: 'clarify_brief',
-    note: 'Compatibility/display name; the standalone route calls clarify_brief.',
-  },
-  clarify_brief: {
-    executable: true,
-    state: 'standalone_route',
-    note: 'POST /assist/clarify-brief calls getAdapter(clarify_brief).',
-  },
+  clarification: { executable: false, state: 'inert_compatibility', note: 'C1 retired the route/executor producer; retained only for compatibility and PMS metadata.' },
+  clarify_brief: { executable: false, state: 'inert_compatibility', note: 'C1 retired the route/executor producer; retained only for compatibility and PMS metadata.' },
   preflight: {
     executable: false,
     state: 'deterministic_or_external',
@@ -423,11 +410,7 @@ export const AI_TASK_LIFECYCLE: Readonly<
     state: 'live_router',
     note: 'Unified draft pipeline resolves draft_graph through the router.',
   },
-  edit_graph: {
-    executable: true,
-    state: 'live_router',
-    note: 'V5 edit dispatch resolves edit_graph through the router.',
-  },
+  edit_graph: { executable: false, state: 'inert_compatibility', note: 'C1 retired the route/executor producer; retained only for compatibility and PMS metadata.' },
   bias_check: {
     executable: false,
     state: 'deterministic_or_external',
@@ -443,17 +426,8 @@ export const AI_TASK_LIFECYCLE: Readonly<
     state: 'deterministic_or_external',
     note: 'Capability is supplied by the analysis/ISL path, not this model default.',
   },
-  options: {
-    executable: false,
-    state: 'display_only',
-    executableTask: 'suggest_options',
-    note: 'Compatibility name; the executable route calls suggest_options.',
-  },
-  suggest_options: {
-    executable: true,
-    state: 'standalone_route',
-    note: 'POST /assist/suggest-options resolves suggest_options through the router.',
-  },
+  options: { executable: false, state: 'inert_compatibility', note: 'C1 retired the route/executor producer; retained only for compatibility and PMS metadata.' },
+  suggest_options: { executable: false, state: 'inert_compatibility', note: 'C1 retired the route/executor producer; retained only for compatibility and PMS metadata.' },
   explainer: {
     executable: false,
     state: 'display_only',
@@ -472,11 +446,7 @@ export const AI_TASK_LIFECYCLE: Readonly<
     state: 'inert_compatibility',
     note: 'Preserved for external PMS readiness; no LLM adapter capability or caller exists.',
   },
-  critique_graph: {
-    executable: true,
-    state: 'standalone_route',
-    note: 'POST /assist/critique-graph resolves critique_graph through the router.',
-  },
+  critique_graph: { executable: false, state: 'inert_compatibility', note: 'C1 retired the route/executor producer; retained only for compatibility and PMS metadata.' },
   decision_review: {
     executable: true,
     state: 'standalone_route',
@@ -525,12 +495,8 @@ export const AI_TASK_LIFECYCLE: Readonly<
 
 export type RuntimeAiTaskId =
   | 'draft_graph'
-  | 'edit_graph'
-  | 'suggest_options'
-  | 'critique_graph'
   | 'decision_review'
   | 'validate_graph'
-  | 'clarify_brief'
   | 'explain_diff'
   | 'extraction'
   | 'rolling_summary'
@@ -570,6 +536,7 @@ export interface RuntimeAiTaskAuthority {
  * The bounded runtime map: only remaining LLM call tasks after C1. Exact prompt bytes/version/hash remain runtime facts exposed
  * by prompt metadata; this map pins which authority must supply them.
  */
+// C1: retired route/executor tasks have no executable authority; retained task rows still follow real call sites.
 export const RUNTIME_AI_TASK_AUTHORITY = {
   draft_graph: {
     hasExecutablePath: true,
@@ -580,41 +547,6 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     promptIdentity: 'runtime_source_version_hash',
     structuredContract: 'DraftGraphResult + graph-schema validation/normalisation',
     fallback: 'checked-in draft_graph prompt and registered task model',
-    promotionGate: 'none_no_real_pack',
-  },
-  edit_graph: {
-    hasExecutablePath: true,
-    modelAuthority: 'router_task_chain',
-    checkedInModel: TASK_MODEL_DEFAULTS.edit_graph,
-    promptAuthority: 'pms_or_checked_in_default',
-    promptTask: 'edit_graph',
-    promptIdentity: 'runtime_source_version_hash',
-    structuredContract: 'Anthropic edit tool schema + deterministic patch validation',
-    fallback: 'checked-in edit_graph prompt and registered task model',
-    promotionGate: 'none_no_real_pack',
-  },
-  suggest_options: {
-    hasExecutablePath: true,
-    modelAuthority: 'router_task_chain',
-    checkedInModel: TASK_MODEL_DEFAULTS.suggest_options,
-    promptAuthority: 'pms_or_checked_in_default',
-    promptTask: 'suggest_options',
-    promptIdentity: 'runtime_source_version_hash',
-    structuredContract: 'SuggestOptionsOutput schema',
-    fallback:
-      'Anthropic and OpenAI serve the exact PMS/default suggest_options snapshot; fixtures remain deterministic',
-    promotionGate: 'none_no_real_pack',
-  },
-  critique_graph: {
-    hasExecutablePath: true,
-    modelAuthority: 'router_task_chain',
-    checkedInModel: TASK_MODEL_DEFAULTS.critique_graph,
-    promptAuthority: 'pms_or_checked_in_default',
-    promptTask: 'critique_graph',
-    promptIdentity: 'runtime_source_version_hash',
-    structuredContract: 'CritiqueGraphResult schema',
-    fallback:
-      'Anthropic serves PMS/default bytes; the checked-in task model is Anthropic so the capability constraint is satisfied without an env override',
     promotionGate: 'none_no_real_pack',
   },
   decision_review: {
@@ -650,17 +582,6 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
       'reject-only verdict JSON ({verdict, grounds[]}) parsed by a strict ' +
       'enum-bound parser that fails OPEN on anything unrecognised',
     fallback: 'checked-in draft_quality_review prompt; every failure ships the draft unjudged',
-    promotionGate: 'none_no_real_pack',
-  },
-  clarify_brief: {
-    hasExecutablePath: true,
-    modelAuthority: 'router_env_or_global_fallback',
-    checkedInModel: null,
-    promptAuthority: 'provider_specific_pms_or_inline_constant',
-    promptTask: 'clarify_brief',
-    promptIdentity: 'provider_specific_runtime_or_code_hash',
-    structuredContract: 'ClarifyBriefResult schema',
-    fallback: 'OpenAI serves its inline prompt; Anthropic serves PMS/default clarify_brief bytes',
     promotionGate: 'none_no_real_pack',
   },
   explain_diff: {

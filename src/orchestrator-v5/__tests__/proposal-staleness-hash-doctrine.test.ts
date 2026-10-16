@@ -216,29 +216,6 @@ describe('the edit-graph dispatch resume gate is fed by the ANALYSIS hash', () =
         + 'over-firing/blast-radius pins above before changing this',
     ).toEqual([]);
   });
+  // C1: resolveProposalResume has no production caller after executor retirement; kept hash-doctrine guards remain.
 
-  it('every currentGraphHash fed to resolveProposalResume derives from the analysis hash', () => {
-    // Derive rather than mirror: find each `resolveProposalResume({...})` call,
-    // read the identifier it passes as `currentGraphHash`, and require that
-    // identifier to be assigned from `computeAnalysisAffectingGraphHash`.
-    const callArgs = [...source.matchAll(/resolveProposalResume\(\{([\s\S]*?)\}\)/g)];
-    expect(callArgs.length).toBeGreaterThan(0); // positive control: we found the call sites
-
-    for (const [, args] of callArgs) {
-      const m = /currentGraphHash\s*(?::\s*([A-Za-z0-9_]+))?\s*,/.exec(args);
-      expect(m, `could not read currentGraphHash from:\n${args}`).not.toBeNull();
-      const identifier = m![1] ?? 'currentGraphHash'; // shorthand property
-      const assignment = new RegExp(
-        `${identifier}\\s*=\\s*computeAnalysisAffectingGraphHash\\(`,
-      );
-      expect(
-        assignment.test(source),
-        `\`${identifier}\` is passed to the proposal resume gate but is not `
-          + 'assigned from computeAnalysisAffectingGraphHash. Proposal staleness '
-          + 'is analysis-affecting by doctrine (#343); the identity hash is '
-          + '64-hex while every writer stamps the 16-hex analysis hash, so '
-          + 'swapping it rejects EVERY resume on an unchanged graph.',
-      ).toBe(true);
-    }
-  });
 });

@@ -92,26 +92,8 @@ export interface ScanResult {
 export const AUTHORITY_ALLOWLIST: Readonly<
   Record<string, { readonly count: number; readonly allowedArgs: readonly string[] }>
 > = {
-  'orchestrator-v5/turn-executor.ts': {
-    // 4th site (ROADMAP 2.73): STEP-5 applyCoachingSignal threads the
-    // controlled set into the rerun-delta comparator — same persisted-first
-    // form as the other three sites.
-    //
-    // 5th site (F1-flip lane, 2026-07-22): the bounded routing-failure fallback
-    // for a FORCED what_would_flip pill filters the prior-fact flip summary
-    // through the controlled set before composing the deterministic flip answer
-    // — the SAME persisted-first authority the routed happy-path fallback uses,
-    // so the pill's degrade-honestly answer suppresses option-pinned levers
-    // identically. No request-graph leg.
-    count: 5,
-    allowedArgs: [
-      'context.persistedGraph ?? options.graphState',
-      // ContextPack-only projection: a single selector-controlled snapshot.
-      // canonical wins whenever present; provisional is licensed only after
-      // an explicit successful absence read and validated first-touch input.
-      'contextGraphForReasoning',
-    ],
-  },
+  // C1: executor-only projections retired; every kept controlled-factor authority call remains enumerated.
+
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
     // The run_analysis chip path threads the controlled set into
     // applyCoachingSignal. Persisted-derived: the pre-loaded scenario

@@ -77,9 +77,9 @@ describe("GET /v1/status — model_routing states its own epistemic status", () 
     // POSITIVE CONTROL: a projection of {} makes every loop below vacuous.
     expect(Object.keys(startup).length).toBeGreaterThan(0);
 
-    // C1 removed the conventional orchestrator producer from runtime task models.
+    // C1: startup pins follow the retained draft, explanation and validation tasks.
     expect(Object.hasOwn(startup, "orchestrator")).toBe(false);
-    for (const task of ["draft_graph", "edit_graph", "critique_graph"]) {
+    for (const task of ["draft_graph", "explain_diff", "validate_graph"]) {
       expect(startup[task]).toBe(resolveTaskRouting(task as never).model);
     }
   });
@@ -116,19 +116,19 @@ describe("GET /v1/status — model_routing states its own epistemic status", () 
     expect(body.model_routing.startup_task_models_unverified).toContain("draft_graph");
   });
 
-  it("UNVERIFIED_IS_DISCRIMINATING — edit_graph has no rank-2 call site and is NOT listed", () => {
+  it("UNVERIFIED_IS_DISCRIMINATING — explain_diff has no rank-2 call site and is NOT listed", () => {
     /*
      * THE PROBE WHOSE EXPECTED ANSWER DIFFERS (CLAUDE.md trap 20).
      *
      * Every assertion above is satisfied by an implementation that marks EVERY
      * task unverified — a field that is always "unknown" discriminates nothing
-     * and would be its own kind of dishonesty. `edit_graph` is routed from
+     * and would be its own kind of dishonesty. `explain_diff` is routed from
      * env/defaults only: no call site reads a prompt-store pin for it (see
      * STORE_MODEL_CONFIG_LIVE_CALL_SITES), so its startup value IS the
      * server-side resolution and must not be flagged.
      */
-    expect(body.model_routing.startup_task_models).toHaveProperty("edit_graph");
-    expect(STORE_MODEL_CONFIG_OUTRANKABLE_TASKS).not.toContain("edit_graph");
-    expect(body.model_routing.startup_task_models_unverified).not.toContain("edit_graph");
+    expect(body.model_routing.startup_task_models).toHaveProperty("explain_diff");
+    expect(STORE_MODEL_CONFIG_OUTRANKABLE_TASKS).not.toContain("explain_diff");
+    expect(body.model_routing.startup_task_models_unverified).not.toContain("explain_diff");
   });
 });

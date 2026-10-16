@@ -463,7 +463,6 @@ export default async function route(app: FastifyInstance) {
                 required_rounds: requiredRounds,
                 completed_rounds: completedRounds,
                 suggested_questions: readiness.suggested_questions,
-                clarification_endpoint: "/assist/clarify-brief",
                 hint: `Complete ${requiredRounds - completedRounds} more clarification round(s) before drafting`,
               },
             }

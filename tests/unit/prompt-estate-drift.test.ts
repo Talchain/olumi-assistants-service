@@ -225,7 +225,7 @@ describe('prompt estate — the named defect stays fixed', () => {
     // three are real, live, and in three different files.
     const callSites = scanPromptResolutionCallSites();
     expect(callSites.get('draft_graph')).toBeDefined();
-    expect(callSites.get('repair_edit_graph')).toBeDefined();
+    // C1: repair_edit_graph was executor-only; draft_graph and routing remain real positive controls.
     expect(callSites.get('routing')).toBeDefined();
     expect(callSites.size).toBeGreaterThanOrEqual(8);
   });

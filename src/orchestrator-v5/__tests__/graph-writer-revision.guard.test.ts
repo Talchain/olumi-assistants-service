@@ -58,12 +58,11 @@ function versionedRpcCalls(file: ts.SourceFile): Array<{ path: string; rpc: stri
 
 describe('versioned graph writer revision propagation', () => {
   it('collects the real producer population, including the forwarding and registration doors', () => {
-    // C1: delete draft/apply/executor producers, retain the extracted held writer; exact population is now fourteen.
-    expect(DOORS.length).toBe(14);
+    // C1: delete draft/apply/executor producers, retain the extracted held writer; the deleted edit dispatcher leaves thirteen actual producers.
+    expect(DOORS.length).toBe(13);
     expect(new Set(DOORS.map((door) => door.path))).toEqual(new Set([
       'orchestrator-v5/commit.ts',
       'orchestrator-v5/handlers/approve-held-proposal.ts',
-      'orchestrator-v5/handlers/edit-graph-dispatch.ts',
       'orchestrator-v5/system-events/dispatch.ts',
       'orchestrator-v5/system-events/olumi-option-adoption.ts',
       'orchestrator-v5/system-events/option-intervention-edit.ts',

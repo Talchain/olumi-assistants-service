@@ -31,12 +31,11 @@ function expression(source: ts.SourceFile, node: ts.Node, scope: Record<string, 
   new Function('exports', ...Object.keys(scope), js)(exports, ...Object.values(scope));
   return exports.probe;
 }
-const edit = parse('../../handlers/edit-graph-dispatch.ts');
 const chip = parse('../../handlers/chip-click-dispatch.ts');
 const route = parse('../../../orchestrator/route-v2.ts');
 const writers = parse('../../system-events/dispatch.ts');
+// C1: the deleted executor recovery derives no freshness; retained route/chip/writer expressions remain mandatory.
 const sites = [
-  ...calls(edit, 'deriveAnalysisFreshness').map(node => ({ source: edit, node })),
   ...calls(route, 'deriveAnalysisFreshness').map(node => ({ source: route, node })),
   ...calls(chip, 'deriveChipClickFreshness').map(node => ({ source: chip, node })),
   // The writer helper is the common authority for pre-write and EVERY post-commit reply.
@@ -53,8 +52,7 @@ const editFact = { fact_type: 'edit_graph', fact_version: 1, noop: false, result
 const scenarios = ['failed', 'capped', 'durable-edit', 'hot-edit', 'db-chronology', 'unusable-rerun', 'noop', 'refused', 'non-rerun', 'healthy'] as const;
 
 describe('complete freshness evidence at every dispatch/recovery derivation', () => {
-  it('enumerates all six edit derivations, the retained route derivation, both chip callers and the writer authority', () => {
-    expect(calls(edit, 'deriveAnalysisFreshness')).toHaveLength(6);
+  it('enumerates the retained route derivation, both chip callers and the writer authority', () => {
     expect(calls(route, 'deriveAnalysisFreshness')).toHaveLength(1);
     expect(calls(chip, 'deriveAnalysisFreshness')).toHaveLength(1);
     expect(calls(chip, 'deriveChipClickFreshness')).toHaveLength(2);
@@ -91,22 +89,13 @@ describe('complete freshness evidence at every dispatch/recovery derivation', ()
         turnContext: context, context, currentGraphHash: hash, addOptionGraphHash: hash, textGraphHash: hash,
         persistedPostEditGraph: graph, addOptionFrameGraph: graph, textFrameGraph: graph, gmFrameBase: graph,
         gmCurrentHash: hash, unchangedHash: hash, withheldCurrentHash: hash, priorFactsForRecovery: facts,
-        freshnessReadOptionsForRecovery: options, cachedSnapshot: { rawPersistedGraph: graph, evaluatedScenarioRevision: 7 }, postDispatchFacts: facts,
+        cachedSnapshot: { rawPersistedGraph: graph, evaluatedScenarioRevision: 7 }, postDispatchFacts: facts,
         // These are real lexical inputs used by the source expressions after C2.
         editBase: { graph, revision: 7 }, currentScenarioRevision,
         read: { factSet: { ...factSet, facts }, hotWindow: { status: 'ok', facts }, analysisInvalidatedAt: null, priorFactsWithTurn },
         allowLegacyWindowAbsence: false,
         durableAuthority: true, persistedAnalysisGraphHash: hash, currentGraph: graph,
       };
-      // Capture the real recovery assignment, so dropping a field THERE cannot be hidden by the fixture.
-      let assignment: ts.Expression | undefined;
-      function find(node: ts.Node) {
-        if (ts.isBinaryExpression(node) && node.left.getText(edit) === 'freshnessReadOptionsForRecovery') assignment = node.right;
-        ts.forEachChild(node, find);
-      }
-      find(edit);
-      expect(assignment).toBeDefined();
-      scope.freshnessReadOptionsForRecovery = expression(edit, assignment!, scope);
       scope.deriveChipClickFreshness = (_snapshot: unknown, prior: Parameters<typeof deriveAnalysisFreshness>[0], readOk?: boolean,
         invalidated?: string | null, chronology?: DeriveAnalysisFreshnessOptions) => expression(chip, calls(chip, 'deriveAnalysisFreshness')[0]!, {
           deriveAnalysisFreshness, config: scope.config, cachedSnapshot: _snapshot, currentGraphHash: scope.currentGraphHash,

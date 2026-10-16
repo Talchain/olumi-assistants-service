@@ -484,6 +484,21 @@ function holdValueGraph(operations: PatchOperation[], tag: string): PendingActio
 }
 
 describe('(c) a held add with no typed authorship signal, approved, keeps its own provenance', () => {
+
+  it('an APPROVED add whose held payload carries another provenance literal never lands that literal (the confirm refuses it whole)', () => {
+    // C1: mint through the kept referee/hold producer; confirmation must still inspect the stored, unstripped payload.
+    const pending = holdValueGraph([RISK_ADD, RISK_LINK], 'forged-stamp');
+    const forged = structuredClone(pending);
+    const patch = 'inline_patch' in forged.action ? forged.action.inline_patch : undefined;
+    const ops: unknown = patch?.['operations'];
+    if (!Array.isArray(ops)) throw new Error('the held pending must embed its operations');
+    const add: unknown = ops.find((o: { op?: unknown }) => o.op === 'add_node');
+    if (add === null || typeof add !== 'object') throw new Error('the held batch must carry the add');
+    (add as { value: Record<string, unknown> }).value.provenance = 'from_brief';
+    const outcome = confirm(throughTheStore(forged), VALUE_GRAPH, 'forged-stamp');
+    expect(outcome.status, 'a yes never overrides a forged stamp').toBe('referee_blocked');
+  });
+
   it('RED (DL CR): a held risk add, confirmed → NOT user_set; the existing factor it links to earns nothing', () => {
     const pending = holdValueGraph([RISK_ADD, RISK_LINK], 'c');
     expect(statedOnHold(pending)).toBeUndefined();

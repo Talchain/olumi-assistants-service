@@ -23,12 +23,8 @@
  *      production files. The first drill found a real hole (alias laundering),
  *      which is why the reference-discipline rules exist.
  *
- * Rule 2 (single-snapshot binding): graph-derived ContextPack slices consume
- * the pure four-state selector's coherent snapshot. Exactly one controlled-
- * factor projection may use that selector, and it must be inside the
- * `assembleContextPackWithSummary` call. Every other executor projection stays
- * persisted-first. Block capture runs on the tokenised structural view, so
- * braces inside strings cannot mis-scope it.
+ * C1: the executor-only selector wiring was retired. Every surviving authority
+ * call, request-first negative and laundering detector remains guarded below.
  */
 
 import { readFileSync } from 'node:fs';
@@ -41,14 +37,12 @@ import {
   AUTHORITY_ALLOWLIST,
   AUTHORITY_FUNCTION,
   MIN_TOTAL_SITES,
-  captureBalanced,
   classifySites,
   extractAuthorityCallSites,
   findImportLaundering,
   isScannableFile,
   normaliseArg,
   scanRepository,
-  tokenise,
 } from './controlled-factor-authority.scan.js';
 
 const SRC_ROOT = fileURLToPath(new URL('../../../src', import.meta.url));
@@ -66,7 +60,7 @@ describe('detector RED cases (committed violations the scan must catch)', () => 
         ),
       });
     `;
-    const sites = extractAuthorityCallSites(source, 'orchestrator-v5/turn-executor.ts');
+    const sites = extractAuthorityCallSites(source, 'orchestrator-v5/handlers/chip-click-dispatch.ts');
     expect(sites).toHaveLength(1);
     expect(sites[0]!.argText).toBe('options.graphState ?? context.persistedGraph');
     const violations = classifySites(sites);
@@ -77,13 +71,13 @@ describe('detector RED cases (committed violations the scan must catch)', () => 
   it('flags a laundered argument alias — any rebinding fails because it is not listed', () => {
     const aliased = extractAuthorityCallSites(
       `const ids = ${AUTHORITY_FUNCTION}(graphStateForTurn ?? context.persistedGraph);`,
-      'orchestrator-v5/turn-executor.ts',
+      'orchestrator-v5/handlers/chip-click-dispatch.ts',
     );
     expect(classifySites(aliased)).toHaveLength(1);
 
     const rebound = extractAuthorityCallSites(
       `const g = options.graphState ?? context.persistedGraph;\nconst ids = ${AUTHORITY_FUNCTION}(g);`,
-      'orchestrator-v5/turn-executor.ts',
+      'orchestrator-v5/handlers/chip-click-dispatch.ts',
     );
     expect(rebound[0]!.argText).toBe('g');
     expect(classifySites(rebound)).toHaveLength(1);
@@ -196,9 +190,9 @@ describe('detector RED cases (committed violations the scan must catch)', () => 
     // The sanctioned direct named import + direct call is clean.
     expect(
       findImportLaundering(
-        `import { ${AUTHORITY_FUNCTION} } from './context/intervention-controlled-drivers.js';\n` +
+        `import { ${AUTHORITY_FUNCTION} } from '../context/intervention-controlled-drivers.js';\n` +
           `const ids = ${AUTHORITY_FUNCTION}(context.persistedGraph);`,
-        'orchestrator-v5/turn-executor.ts',
+        'orchestrator-v5/handlers/chip-click-dispatch.ts',
       ),
     ).toHaveLength(0);
   });
@@ -207,13 +201,13 @@ describe('detector RED cases (committed violations the scan must catch)', () => 
     const source = `
       const ids = ${AUTHORITY_FUNCTION}(
         // authority comment that must not perturb the capture
-        context.persistedGraph ??
-          options.graphState, /* trailing note */
+        cachedSnapshot?.rawPersistedGraph ??
+          context.persistedGraph, /* trailing note */
       );
     `;
-    const sites = extractAuthorityCallSites(source, 'orchestrator-v5/turn-executor.ts');
+    const sites = extractAuthorityCallSites(source, 'orchestrator-v5/handlers/chip-click-dispatch.ts');
     expect(sites).toHaveLength(1);
-    expect(sites[0]!.argText).toBe('context.persistedGraph ?? options.graphState');
+    expect(sites[0]!.argText).toBe('cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph');
     expect(classifySites(sites)).toHaveLength(0);
   });
 
@@ -280,19 +274,19 @@ describe('repository scan (the gate)', () => {
 
   it('reports true source line numbers for the live sites (drift-robust)', () => {
     // Assert each reported line ACTUALLY points at an authority call in the
-    // source, rather than pinning absolute line numbers. turn-executor.ts is
-    // the rank-1 collision file; pinning [1208,3283,4515] would false-RED this
+    // source, rather than pinning absolute line numbers. the retained chip dispatcher is
+    // a live authority consumer; pinning [1208,3283,4515] would false-RED this
     // gate on every unrelated edit that shifts lines above a site — a guard
     // that false-reds on harmless drift gets ignored. An off-by-one still
     // fails (the adjacent lines are the argument / surrounding code, not the
     // callee name). Correctness proven; drift tolerated.
-    const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/turn-executor.ts'), 'utf-8');
+    const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/handlers/chip-click-dispatch.ts'), 'utf-8');
     const sourceLines = source.split('\n');
-    const sites = result.sites.filter((s) => s.file === 'orchestrator-v5/turn-executor.ts');
+    const sites = result.sites.filter((s) => s.file === 'orchestrator-v5/handlers/chip-click-dispatch.ts');
     // Derived from the allowlist (was a hand-pinned `3` — a mirror of the
     // allowlist count that would false-RED on every reviewed extension).
     expect(sites).toHaveLength(
-      AUTHORITY_ALLOWLIST['orchestrator-v5/turn-executor.ts']!.count,
+      AUTHORITY_ALLOWLIST['orchestrator-v5/handlers/chip-click-dispatch.ts']!.count,
     );
     for (const site of sites) {
       expect(
@@ -304,156 +298,11 @@ describe('repository scan (the gate)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Rule 2 — graph-derived reasoning consumes one selector snapshot.
+// 3. Normalisation remains shared by all retained authority-site checks.
 // ---------------------------------------------------------------------------
 
-describe('single-snapshot authority rule', () => {
-  const source = readFileSync(join(SRC_ROOT, 'orchestrator-v5/turn-executor.ts'), 'utf-8');
-
-  function selectorBackedSites(candidate: string) {
-    return extractAuthorityCallSites(
-      candidate,
-      'orchestrator-v5/turn-executor.ts',
-    ).filter((site) => site.argText === 'contextGraphForReasoning');
-  }
-
-  it('S5 2b binds only a cloned, prepared request carrier and pins the saved-graph reassignments', () => {
-    const { structural } = tokenise(source);
-    const assignments = [...structural.matchAll(/\bgraphStateForTurn(?:\s*:\s*[^=;]+)?\s*=(?!=)/g)];
-    expect(assignments, 'no new carrier assignment may bypass preparation').toHaveLength(3);
-    expect(assignments.map((match) => normaliseArg(
-      structural.slice(match.index! + match[0].length, structural.indexOf(';', match.index!)),
-    ))).toEqual([
-      'options.graphState == null ? null : structuredClone(options.graphState)',
-      'parsed.data',
-      'canonicalReadinessGraphForRun as GraphStateIngress',
-    ]);
-    const initialIdx = assignments[0]!.index!;
-    expect(structural.slice(0, initialIdx)).toMatch(/\blet\s*$/);
-    const initEnd = structural.indexOf(';', initialIdx);
-    // Exactly one declaration may intervene; preparation must precede every carrier use/reassignment.
-    const prepIdx = structural.indexOf('prepareHorizonBasisForWrite(', initEnd);
-    expect(prepIdx, 'request clone must be prepared').toBeGreaterThan(initEnd);
-    expect(structural.slice(initEnd + 1, prepIdx)).toMatch(
-      /^\s*const\s+storedBasisReadAvailable\s*=\s*context\.persistedGraphRead\?\.status\s*===\s*\|\|\s*context\.persistedGraphRead\?\.status\s*===\s*;\s*$/,
-    );
-    const prepCall = captureBalanced(structural, prepIdx, '(', ')');
-    expect(prepCall, 'preparation call did not balance').not.toBeNull();
-    expect(structural.slice(prepCall!.start, prepCall!.end + 1)).toMatch(
-      /^\(\s*graphStateForTurn\s*,\s*storedBasisReadAvailable\s*\?\s*context\.persistedGraph\s*:\s*undefined\s*,\s*payload\.scenario_id\s*\)$/,
-    );
-    // Both later assignments already existed on staging: parsed saved graph fallback, then canonical constraint lookup.
-    expect(structural).toMatch(
-      /if\s*\(\s*!graphStateForTurn\s*\)\s*\{\s*const\s+persistedGraph\s*=\s*context\.persistedGraph\s*;\s*if\s*\(\s*persistedGraph\s*\)\s*\{\s*const\s+parsed\s*=\s*GraphStateIngressSchema\.safeParse\(persistedGraph\)\s*;\s*if\s*\(\s*parsed\.success\s*\)\s*\{\s*graphStateForTurn\s*=\s*parsed\.data\s*;/,
-    );
-    expect(assignments[1]!.index!).toBeGreaterThan(prepCall!.end);
-    expect(assignments[2]!.index!).toBeGreaterThan(structural.indexOf('const contextGraphSelection ='));
-    const constraintIdx = structural.indexOf('const constraintLookup = buildGraphLookup(');
-    const constraintBlock = captureBalanced(structural, structural.indexOf('if (constraintLookup.kind', constraintIdx), '{', '}');
-    expect(constraintBlock, 'canonical constraint lookup block did not balance').not.toBeNull();
-    expect(structural.slice(constraintBlock!.start, constraintBlock!.end + 1)).toMatch(
-      /^\{\s*graphLookupForValidate\s*=\s*constraintLookup\.lookup\s*;\s*graphLookupBuildReason\s*=\s*constraintLookup\.kind\s*;\s*graphLookupStatsForLog\s*=\s*constraintLookup\.stats\s*;\s*graphStateForTurn\s*=\s*canonicalReadinessGraphForRun\s+as\s+GraphStateIngress\s*;\s*\}$/,
-    );
-  });
-
-  it('binds the selector once and derives freshness/readiness from its graph', () => {
-    const { structural } = tokenise(source);
-    const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
-    expect(selectorIdx, 'selector binding not found').toBeGreaterThan(-1);
-    const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
-    expect(selectorCall, 'selector call did not balance').not.toBeNull();
-    const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
-    expect(selectorText).toMatch(
-      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*graphStateForTurn\s*,?\s*\}\s*\)$/,
-    );
-    expect(
-      selectorText,
-      'a missing canonical read must reach the selector as unavailable; absence must never be inferred',
-    ).not.toContain('??');
-
-    const binding = 'const contextGraphForReasoning = contextGraphSelection.graph';
-    expect(structural).toContain(binding);
-
-    const hashIdx = structural.indexOf('currentAnalysisGraphHashForTurn =', selectorCall!.end);
-    expect(hashIdx, 'hash derivation after selector not found').toBeGreaterThan(selectorCall!.end);
-    const hashEnd = structural.indexOf(';', hashIdx);
-    const hashText = structural.slice(hashIdx, hashEnd + 1);
-    expect(hashText).toContain('canonicalReadinessGraphForRun');
-    expect(hashText).not.toContain('graphStateForTurn');
-    expect(hashText).not.toContain('options.graphState');
-
-    const executorSites = extractAuthorityCallSites(
-      source,
-      'orchestrator-v5/turn-executor.ts',
-    );
-    const selectorSites = selectorBackedSites(source);
-    expect(
-      selectorSites,
-      'exactly one controlled-factor projection may use the selected snapshot',
-    ).toHaveLength(1);
-    expect(
-      executorSites
-        .filter((site) => site.argText !== 'contextGraphForReasoning')
-        .every((site) => site.argText === 'context.persistedGraph ?? options.graphState'),
-      'all non-ContextPack projections must remain persisted-first',
-    ).toBe(true);
-
-    const assemblyIdx = structural.indexOf(
-      'assembleContextPackWithSummary(',
-      selectorCall!.end,
-    );
-    expect(assemblyIdx, 'ContextPack assembly after selector not found').toBeGreaterThan(
-      selectorCall!.end,
-    );
-    const assemblyCall = captureBalanced(structural, assemblyIdx, '(', ')');
-    expect(assemblyCall, 'ContextPack assembly call did not balance').not.toBeNull();
-    const assemblySource = source.slice(assemblyIdx, assemblyCall!.end + 1);
-    const assemblySites = extractAuthorityCallSites(
-      assemblySource,
-      'orchestrator-v5/turn-executor.ts#context-pack',
-    );
-    expect(
-      assemblySites.map((site) => site.argText),
-      'ContextPack suppression must be the sole selector-backed authority call',
-    ).toEqual(['contextGraphForReasoning']);
-  });
-
-  it('turns red if a missing canonical read is laundered into proven absence', () => {
-    const { structural } = tokenise(source);
-    const selectorIdx = structural.indexOf('const contextGraphSelection = selectContextGraphSnapshot(');
-    const selectorCall = captureBalanced(structural, selectorIdx, '(', ')');
-    expect(selectorCall, 'selector call did not balance').not.toBeNull();
-    const selectorText = structural.slice(selectorCall!.start, selectorCall!.end + 1);
-    const forbiddenFallback = selectorText.replace(
-      'context.persistedGraphRead',
-      'context.persistedGraphRead ?? ({ status: ok_absent } as const)',
-    );
-
-    expect(forbiddenFallback).toContain('??');
-    expect(forbiddenFallback).not.toMatch(
-      /^\(\s*\{\s*canonicalRead:\s*context\.persistedGraphRead\s*,\s*requestGraph:\s*graphStateForTurn\s*,?\s*\}\s*\)$/,
-    );
-  });
-
-  it('turns red when an unrelated executor projection is switched to selector authority', () => {
-    const persistedFirstCall = `collectInterventionControlledFactorIds(
-            context.persistedGraph ?? options.graphState,
-          )`;
-    const selectorCall = `collectInterventionControlledFactorIds(
-            contextGraphForReasoning,
-          )`;
-    expect(source, 'discriminating-control anchor must exist exactly as reviewed').toContain(
-      persistedFirstCall,
-    );
-    const mutant = source.replace(persistedFirstCall, selectorCall);
-
-    expect(selectorBackedSites(source)).toHaveLength(1);
-    expect(
-      selectorBackedSites(mutant),
-      'the file-wide two-form allowlist alone would miss this authority expansion',
-    ).toHaveLength(2);
-  });
-
+// C1: selector preparation/binding pins were executor-only; keep the scanner self-check and every live-site negative.
+describe('argument normalisation for retained authorities', () => {
   it('normaliseArg is stable for the allowlisted forms (self-check)', () => {
     expect(normaliseArg('\n  context.persistedGraph ??\n    options.graphState,\n')).toBe(
       'context.persistedGraph ?? options.graphState',

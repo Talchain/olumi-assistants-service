@@ -218,7 +218,8 @@ describe("CEE Preflight Enforcement (Integration)", () => {
       expect(body.details).toBeDefined();
       expect(body.details.required_rounds).toBeGreaterThan(0);
       expect(body.details.completed_rounds).toBe(0);
-      expect(body.details.clarification_endpoint).toBe("/assist/clarify-brief");
+      // C1: guidance must not direct the user to the retired clarification route.
+      expect(body.details).not.toHaveProperty("clarification_endpoint");
       // Note: suggested_questions may be undefined if readiness.level is "ready"
       // because the level threshold (0.7) differs from clarification threshold (0.8)
       expect(body.details.hint).toContain("clarification round");

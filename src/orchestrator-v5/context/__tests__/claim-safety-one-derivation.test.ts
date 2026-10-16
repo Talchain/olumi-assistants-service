@@ -52,7 +52,8 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLAIM_SAFETY_READ = resolve(HERE, '../claim-safety-read.ts');
-const TURN_EXECUTOR = resolve(HERE, '../../turn-executor.ts');
+// C1: the Agent route is the kept turn authority; shared claim-safety selection/ordering guards remain unchanged.
+const AGENT_TURN = resolve(HERE, '../../../routes/agent-v1-turn.ts');
 /** Where both selectors live, and where the ONE ordering core has to stay. */
 const FRESHNESS = resolve(HERE, '../freshness.ts');
 
@@ -231,7 +232,7 @@ describe('the permission and the state come from ONE selection (B2)', () => {
 
 describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => {
   const claimSafetySource = readFileSync(CLAIM_SAFETY_READ, 'utf8');
-  const turnExecutorSource = readFileSync(TURN_EXECUTOR, 'utf8');
+  const agentTurnSource = readFileSync(AGENT_TURN, 'utf8');
   const freshnessSource = readFileSync(FRESHNESS, 'utf8');
 
   /** Count real CALLS, not the mentions in prose. Derived, never listed. */
@@ -351,7 +352,7 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
     expect(freshnessSource.slice(start, end)).not.toContain('.sort(');
   });
 
-  it('turn-executor NEVER re-reads the verdict state locally', () => {
+  it('the kept Agent route NEVER re-reads the verdict state locally', () => {
     // Both of these were live call sites before the collapse: the entry read
     // (`…ForFacts(context.prior_facts)`) and the explanation gate
     // (`…FromResult(selectedForDisclosure.fact.result)`). The state arrives on
@@ -362,9 +363,9 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
       'readConstraintVerdictStateForFacts',
     ]) {
       expect(
-        countCalls(turnExecutorSource, symbol),
-        `turn-executor.ts calls ${symbol} — the constraint verdict STATE must arrive on ` +
-          '`mayNameLeadingOptionVerdictForRun`, read off the same selected fact as the boolean. ' +
+        countCalls(agentTurnSource, symbol),
+        `agent-v1-turn.ts calls ${symbol} — the constraint verdict STATE must arrive on ` +
+          'the canonical scenario read, from the same selected fact as the boolean. ' +
           'A local re-read is a second derivation and it will agree with the permission only ' +
           'until someone changes the array or the scope of one of them (which is what happened ' +
           'in #726).',
@@ -372,58 +373,17 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
     }
   });
 
-  it('POSITIVE CONTROL: the turn-executor absence check can FAIL', () => {
+  it('POSITIVE CONTROL: the Agent absence check can FAIL', () => {
     // Prove the absence assertion can see a presence — plant the exact
     // expression the explanation gate used to carry. Measured RELATIVE to the
     // live count so this control reports the instrument's discrimination and
     // not the pin's verdict a second time (a control pinned to an absolute
     // "current" decays into a tautology or a duplicate alarm the first time
     // "current" moves — CLAUDE.md trap 12b).
-    const before = countCalls(turnExecutorSource, 'readConstraintVerdictStateFromResult');
-    const planted = `${turnExecutorSource}\n const s = readConstraintVerdictStateFromResult(sel.fact.result);`;
+    const before = countCalls(agentTurnSource, 'readConstraintVerdictStateFromResult');
+    const planted = `${agentTurnSource}\n const s = readConstraintVerdictStateFromResult(sel.fact.result);`;
     expect(countCalls(planted, 'readConstraintVerdictStateFromResult')).toBe(before + 1);
   });
 
-  /**
-   * Occurrences of the unified-array LITERAL in code, ignoring the comments
-   * that legitimately quote it while explaining the history. Derived per line
-   * the same way {@link countCalls} is, so prose can discuss the literal
-   * without arming the pin.
-   */
-  const countLiteralInCode = (source: string): number =>
-    source
-      .split('\n')
-      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
-      .filter((line) => line.includes('[...handlerFactsForCommit, ...context.prior_facts]')).length;
-
-  it('the unified fact array is BOUND once on the execute path, not retyped', () => {
-    // FOUR code sites retyped this literal in one block — the freshness
-    // derivation, the claim-safety re-read, the explanation gate's selection,
-    // and the composer's `lifecycle.priorFacts` — and the comments at three of
-    // them each asserted that the readers used "the SAME fact array". They did,
-    // by the literals matching. The `priorFacts` one is the sharpest: its
-    // comment explains that `freshness.selected_fact_index` is an index INTO
-    // this array, so a divergence there is an off-by-N into someone else's
-    // array, not a type error. One binding makes all four sentences true by
-    // construction.
-    expect(turnExecutorSource).toContain('const unifiedFactsForPostHandler = [');
-    expect(
-      countLiteralInCode(turnExecutorSource),
-      'the unified fact-array literal is retyped in turn-executor.ts. Bind it once ' +
-        '(`unifiedFactsForPostHandler`) and pass the binding: a retyped literal is a ' +
-        'hand-maintained mirror of its copies, and editing one of them is a silent divergence ' +
-        'between freshness, the permission, the prose explaining the permission, and the ' +
-        'index basis the composer resolves blocks against.',
-    ).toBe(0);
-  });
-
-  it('POSITIVE CONTROL: the retyped-literal check can FAIL, and ignores comments', () => {
-    const before = countLiteralInCode(turnExecutorSource);
-    const planted = `${turnExecutorSource}\n const again = [...handlerFactsForCommit, ...context.prior_facts];`;
-    expect(countLiteralInCode(planted)).toBe(before + 1);
-    // …and the discriminator really is code-vs-comment: the same text in a
-    // comment must NOT arm it, or the pin would forbid explaining itself.
-    const commented = `${turnExecutorSource}\n // [...handlerFactsForCommit, ...context.prior_facts]`;
-    expect(countLiteralInCode(commented)).toBe(0);
-  });
+  // C1: the unifiedFactsForPostHandler literal belonged only to the deleted executor; shared selection negatives above remain.
 });
