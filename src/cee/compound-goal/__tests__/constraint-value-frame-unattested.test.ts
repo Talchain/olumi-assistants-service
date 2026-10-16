@@ -105,6 +105,11 @@ const REGISTERED_STAMPERS = [
   // `goal_threshold_frame` is 'level' and its raw is the stored `goal_threshold_raw` (the goal panel's raw + row pair), so
   // it stamps 'level' only and has no branch that can produce a delta.
   'orchestrator-v5/agent-lane/admit-model.ts',
+  // S2 call-target reading: the typed goal-target call supplies an absolute threshold in its own units. This prepare-only
+  // mint copies that exact amount (no subtraction or delta conversion) onto the revised goal, with subject/unit checks and
+  // an explicit inferred-reading card. Its level frame attests this proposed threshold, not the original words' authorship;
+  // it never defaults a frame on a carried row or a drafter's arbitrary constraint.
+  'orchestrator-v5/agent-lane/runtime/agent-capabilities.ts',
 ] as const;
 
 /**
