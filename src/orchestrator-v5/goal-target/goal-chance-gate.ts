@@ -17,16 +17,18 @@ import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES
 import { CONDITIONS_NOT_KEPT, goalTargetBasisOf } from './goal-target-basis.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { resolveGoalDirection } from './goal-direction.js';
+import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** Why a goal chance was not shown. The first three are run-wide (the target); the last two are the figure's own. */
+/** Why a goal chance was not shown. Target/current-level causes are run-wide; the last two are the figure's own. */
 export type GoalChanceUnusable =
   | 'no_stated_target' | 'no_stated_direction' | 'no_target_unit' | 'ceiling_not_minimised' | 'floor_minimised'
+  | 'current_level_unit_mismatch'
   | 'not_finite' | 'outside_unit_interval';
 
-/** The run-wide cause, read off the goal the Run scored: null when the goal states a target, direction and unit. */
+/** The run-wide cause on the evaluated graph: target, direction and unit, with no conflicting recorded current-level unit. */
 export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChanceUnusable | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -42,6 +44,12 @@ export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChan
   } : null);
   if (target === null) return 'no_stated_target';
   if (typeof target.unit !== 'string' || target.unit.trim() === '') return 'no_target_unit';
+  // N1: a target correction retains the old observation in its own unit. The same unit comparison the
+  // target writer uses must not let a later Run/licence silently read that level in the new measure.
+  const state = isRec(goal?.observed_state) ? goal.observed_state : undefined;
+  const holdsLevel = [state?.raw_value, state?.value].some(v => typeof v === 'number' && Number.isFinite(v));
+  if (holdsLevel && typeof state?.unit === 'string' && state.unit.trim() !== ''
+    && unitComparisonKey(state.unit) !== unitComparisonKey(target.unit)) return 'current_level_unit_mismatch';
   // ⭐ D3 STEP 2 (DL 0df0e1, accepted 6 Oct; c6 words): a target figure with no comparator held or stated (22% of targeted
   // goals, DL measured) is no chance of meeting anything the user said — ISL scored its unattested maximiser. Withheld,
   // typed, and it carries the one-click "at least / at most {target}?" invitation (`invite`, below) that resolves it.
@@ -148,6 +156,9 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
   if (!isRec(envelope)) return envelope;
   const targetCause = goalChanceTargetCause(graph, goalId);
   if (targetCause === 'no_stated_target') return stripGoalChancesWithNoTarget(envelope, goalId) as E;
+  const message = targetCause === 'current_level_unit_mismatch'
+    ? 'Not shown. The recorded current level and target use different units. State the current level in the target’s unit before comparing the chance of meeting it.'
+    : MESSAGE;
   const causes = new Map<string, GoalChanceUnusable>();
   for (const record of readOptionResultSources(envelope).flat()) {
     if (!isRec(record) || !('probability_of_goal' in record) || record.probability_of_goal === undefined) continue;
@@ -164,7 +175,7 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
 
   let out: Rec = causes.size === 0 ? envelope : withholdOptionGoalFigures(envelope, new Set(causes.keys()), {
     code: GOAL_FIGURES_PROBABILITY_UNUSABLE,
-    message: MESSAGE,
+    message,
     severity: 'warning',
     option_ids: [...causes.keys()],
     causes: [...causes].map(([option_id, cause]) => ({ option_id, cause })),
@@ -177,7 +188,7 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
     const { goal_fit: _dropped, ...kept } = outSummary;
     out = { ...out, decision_brief: { ...outBrief, analysis_summary: kept } };
     const warnings = Array.isArray(out.inference_warnings) ? out.inference_warnings : [];
-    out = { ...out, inference_warnings: [...warnings, { code: GOAL_FIT_UNUSABLE, message: MESSAGE, severity: 'warning', goal_fit_cause: fitCause }] };
+    out = { ...out, inference_warnings: [...warnings, { code: GOAL_FIT_UNUSABLE, message, severity: 'warning', goal_fit_cause: fitCause }] };
   }
   return out as E;
 }
