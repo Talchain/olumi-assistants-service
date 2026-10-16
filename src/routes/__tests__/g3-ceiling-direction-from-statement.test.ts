@@ -125,10 +125,16 @@ describe('G3: a link size that is one end of the user\u2019s range is said with 
     const out = await construct(BRIEF, [served()]);
     expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
     const edge = camera(out.graph);
-    expect(edge.provenance.natural_effect.stated_range, JSON.stringify(edge)).toEqual({ low: 1.5, high: 2.5, text: '1.5 to 2.5 percentage points', end: 'low' });
+    expect(edge.provenance.natural_effect.stated_range, 'both ends kept as written; the reported clause is words only, not stored').toEqual({ low: 1.5, high: 2.5, text: '1.5 to 2.5 percentage points', end: 'low' });
     expect(edge.provenance.natural_effect.amount).toBe(-1.5);
     expect(edge.strength, 'Science C1: a range sets no spread; the stated size stays the mean').toEqual({ mean: -0.015, std: 0.0075 });
-    expect(JSON.stringify(out.result), 'said with the range as written, naming the end the model uses').toContain('low end of your \\"1.5 to 2.5 percentage points\\" range');
+    // AIE range disposition (16 Oct): said as the brief reports it, speaker and "reckons" kept, and the calculation's own figure
+    // named as a separate approximation; never the user's single figure, never "the low end" or a floor.
+    const said = JSON.stringify(out.result);
+    expect(said).toContain('(the supplier quotes £180k and reckons it would cut scrap by 1.5 to 2.5 percentage points)\\", as the brief puts it. '
+      + 'The current calculation uses a separate approximation, a change of \u22121.5 percentage points per switch, not that range.');
+    expect(said).not.toContain('low end of your');
+    expect(said).not.toMatch(/floor: at least|ceiling: at most/);
   });
   it('AIE 6180604131 kept: only figures JOINED as a range, low below high, pair; a change or two separate figures never do', () => {
     const ranges = (q: string) => figuresWritten(q).filter((f) => f.low < f.high);

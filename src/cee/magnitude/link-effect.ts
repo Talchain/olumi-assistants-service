@@ -260,6 +260,13 @@ export interface StatedRangeEnd {
   readonly high: number;
   readonly text: string;
   readonly end: 'low' | 'high' | 'centre';
+  /**
+   * ⭐ G3 (AIE range disposition, 16 Oct): the clause of the user's sentence that states the range, verbatim, with its own
+   * speaker and verb ("the supplier quotes £180k and reckons it would cut scrap by 1.5 to 2.5 percentage points"). Set for a
+   * range the AI's own verified statement gives the link. It is said as reported, and the size the calculation uses is named as
+   * a separate approximation: never the user's single figure, and never a floor. Admission-time words only; not stored.
+   */
+  readonly reported?: string;
 }
 
 /**
@@ -564,8 +571,11 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
         : `, so any figure that runs through this link is a ${floor ? 'floor: at least' : 'ceiling: at most'} that much.`;
       // A centre is no bound: the point stays the user's figure, and the range is the spread the Run reads (no loss to say).
       const range_words = range === undefined || range.end === 'centre' || carried === undefined ? undefined
-        : `${sayFigure(Math.abs(amount as number), unitOf(target) ?? '')} per ${perWords} on "${source.label}" → "${target.label}" is the `
-          + `${range.end} end of your "${range.text}" range${bound}`;
+        : range.reported !== undefined
+          ? `"${source.label}" → "${target.label}": "${range.reported}", as the brief puts it. The current calculation uses a separate `
+            + `approximation, a change of ${(amount as number) < 0 ? '\u2212' : '+'}${fmt(Math.abs(amount as number))} ${carried.amount_unit} per ${perWords}, not that range.`
+          : `${sayFigure(Math.abs(amount as number), unitOf(target) ?? '')} per ${perWords} on "${source.label}" → "${target.label}" is the `
+            + `${range.end} end of your "${range.text}" range${bound}`;
       return {
         outcome: 'user_stated', mean: beta, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
         ...(carried === undefined ? {} : {

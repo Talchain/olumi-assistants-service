@@ -374,7 +374,9 @@ export function admitCandidateLinks(
               `${sized.outcome === 'user_stated'
                 ? (sized.natural_effect?.stated_range === undefined ? 'Stated by the user'
                   : sized.natural_effect.stated_range.end === 'centre' ? `Stated by the user, inside the range they wrote ("${sized.natural_effect.stated_range.text}")`
-                    : `One end of the range the user wrote ("${sized.natural_effect.stated_range.text}")`)
+                    : (sized.natural_effect.stated_range as { reported?: string }).reported !== undefined
+                      ? `As the brief reports it ("${(sized.natural_effect.stated_range as { reported?: string }).reported}"); the current calculation uses a separate approximation`
+                      : `One end of the range the user wrote ("${sized.natural_effect.stated_range.text}")`)
                 : 'Olumi\'s estimate'}: ${sized.statement ?? 'as given'}. ` +
               'Read on the ranges the two are measured on, that is the strength shown.',
             severity: 'info',
