@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ANSWERED_EARLIER_LABEL, OLDER_WORDS_LABEL, RESTORED_FIRST_LABEL } from '../history-store.js';
+import { ANSWERED_EARLIER_LABEL, OLDER_WORDS_LABEL, RESTORED_FIRST_LABEL, SUPERSEDED_OUTPUT } from '../history-store.js';
 import { pairProviderInput } from '../provider-input-pairing.js';
 import { REASONING_CONTEXT_LABEL, turnContextItems } from '../turn-context.js';
 
@@ -43,8 +43,8 @@ describe.each(families)('$name: the requested context keeps complete ordered pro
   const assistant = { type: 'message', id: 'msg_unrelated_X9', status: 'completed', role: 'assistant',
     content: [{ type: 'output_text', text: family.reply, annotations: [] }] };
   const calls = [
-    { type: 'function_call', id: 'fc_native_1', call_id: 'call_state', name: 'get_canonical_state', arguments: '{"section":"run_explanation"}' },
-    { type: 'function_call', id: 'fc_native_2', call_id: 'call_source', name: 'get_source', arguments: '{"id":"separate-subject"}' },
+    { type: 'function_call', id: 'fc_native_1', call_id: 'call_state', name: 'give_provisional_view', arguments: '{"section":"run_explanation"}' },
+    { type: 'function_call', id: 'fc_native_2', call_id: 'call_source', name: 'offer_public_research', arguments: '{"id":"separate-subject"}' },
   ];
   const outputs = [
     { type: 'function_call_output', call_id: 'call_state', output: JSON.stringify({ unit: family.unit, source: 'unknown', warning: 'withhold every unsupported target' }) },
@@ -95,10 +95,34 @@ describe('window and source boundaries remain owned by existing context/history 
       { type: 'message', id: 'msg_old', role: 'assistant', content: [{ type: 'output_text', text: 'Old reply.' }] }];
     const kept = [1, 2, 3].flatMap(n => [message('user', `Retained turn ${n}.`),
       { type: 'reasoning', id: `rs_selected_${n}`, summary: [] },
-      { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name: 'get_canonical_state', arguments: '{}' },
+      { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name: 'give_provisional_view', arguments: '{}' },
       { type: 'function_call_output', call_id: `call_${n}`, output: `Unchanged record ${n}.` },
       { type: 'message', id: `msg_different_${n}`, role: 'assistant', content: [{ type: 'output_text', text: `Reply ${n}.` }] }]);
     expect(nativeItems(project([...dropped, ...kept]), [...dropped, ...kept])).toEqual(kept);
+  });
+
+  it('a snapshot read and this turn\'s Run output reach the interpreting call only as the saved history carries them', () => {
+    const rawRun = JSON.stringify({ ran: true, run_identity: { computed_at: '2026-10-16T21:59:00Z' }, headline: 'RAW RUN 0.62 chance',
+      ask: 'Roughly how much does MRR lost to price-driven churn change?' });
+    const rawState = JSON.stringify({ goal: 'RAW SNAPSHOT 80 tickets/week' });
+    const reasoning = { type: 'reasoning', id: 'rs_run_turn', summary: [] };
+    const answer = { type: 'message', id: 'msg_run_turn', role: 'assistant', content: [{ type: 'output_text', text: 'The Run is ready.' }] };
+    const history = [message('user', 'Run it.'), reasoning,
+      { type: 'function_call', id: 'fc_state', call_id: 'call_state', name: 'get_canonical_state', arguments: '{}' },
+      { type: 'function_call', id: 'fc_run', call_id: 'call_run', name: 'run_analysis', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'call_state', output: rawState },
+      { type: 'function_call_output', call_id: 'call_run', output: rawRun }, answer];
+    const sent = project(history);
+    const wire = JSON.stringify(sent);
+    expect(wire).not.toContain('RAW RUN'); expect(wire).not.toContain('price-driven churn'); expect(wire).not.toContain('RAW SNAPSHOT');
+    // Its reasoning also produced the kept Run call, so the snapshot pair stays with it, its output only the saved stub.
+    expect(sent.find(item => (item as { type?: unknown; call_id?: unknown }).type === 'function_call_output'
+      && (item as { call_id?: unknown }).call_id === 'call_state')).toEqual({ type: 'function_call_output', call_id: 'call_state', output: SUPERSEDED_OUTPUT });
+    expect(sent.find(item => (item as { type?: unknown; call_id?: unknown }).type === 'function_call_output'
+      && (item as { call_id?: unknown }).call_id === 'call_run')).toEqual({ type: 'function_call_output', call_id: 'call_run',
+      output: JSON.stringify({ note: 'Earlier analysis ran at 2026-10-16T21:59:00Z; see the current Run in CURRENT MODEL STATE.' }) });
+    expect(sent).toContain(reasoning); expect(sent).toContain(answer);
+    expect(pairProviderInput(sent)).toBe(sent);
   });
 
   it('keeps the existing older-source carriers ahead of the selected window without changing their recorded source', () => {

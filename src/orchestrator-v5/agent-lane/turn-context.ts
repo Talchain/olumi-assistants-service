@@ -5,7 +5,7 @@
  * The same authority rule applies to all quoted conversation; host-owned model records and instructions stay developer items.
  */
 import { sayDate, todayInLondon } from '../goal-target/deadline-date.js';
-import { isOlderWordsItem, trimToRecentTurns } from './history-store.js';
+import { dropSupersededPairs, isOlderWordsItem, pruneSupersededToolOutputs, trimToRecentTurns } from './history-store.js';
 
 export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the START of this turn. '
   + 'If a tool result later in this turn APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after), that result is '
@@ -65,12 +65,14 @@ export function turnContextItems(args: {
   if (brief !== '' && !args.conversation.some((item) => textOf(item).includes(brief))) {
     items.push({ role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] });
   }
-  // Chat already forwards its whole window. Explain keeps its three-turn window, including ordered reasoning/tool chains.
+  // Chat already forwards its whole window. Explain keeps its three-turn window, including ordered reasoning/tool chains,
+  // pruned exactly as the saved history is: a Run output is only a time marker (the canonical state carries the Run) and a
+  // superseded pair leaves with its reasoning, so this turn's raw tool outputs never reach the interpreting call.
   // The store's re-made items (the older words; the dropped replies beside Olumi's questions) are carried whole, as chat carries them.
   const older = args.conversation.filter(isOlderWordsItem);
   const forwardedConversation = args.request === undefined ? args.conversation
-    : [...older,
-      ...trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), 3)];
+    : dropSupersededPairs(pruneSupersededToolOutputs([...older,
+      ...trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), 3)]));
   const forwarded = new Set(forwardedConversation);
   let preceding: { item: unknown; text: string } | undefined;
   const answeredPairs: unknown[] = [];
