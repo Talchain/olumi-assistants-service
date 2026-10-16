@@ -11,6 +11,7 @@ import { createAgentCapabilities, projectModelContext, type InternalDispatch } f
 import { ProposalStore } from '../proposal.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
 import { reliesOnRiskLine } from '../../routing/relies-on-risk.js';
+import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -43,6 +44,36 @@ const graphOf = (option: string, risk: string) => [
 ];
 
 describe('S7 B2: the build result carries the typed reason a risk is left out of the Run', () => {
+  it('the shared owner recognises the served draft-widening dependency and both context readers carry its reason', async () => {
+    // The same stored metadata shape as G2 8d578550's “Role remains unfilled”; no invented causal edge or size.
+    const after = [
+      { id: 'goal_1', kind: 'goal', label: 'Weekly support capacity' },
+      { id: 'opt_add', kind: 'option', label: 'Add one specialist' },
+      { id: 'capacity', kind: 'factor', label: 'Additional specialists' },
+      { id: 'risk_pre', kind: 'risk', label: 'Role remains unfilled', proposed_by: 'olumi', analysis_participation: 'retained_excluded',
+        draft_widening: { hits: { id: 'opt_add', kind: 'option', label: 'Add one specialist' },
+          through: { id: 'capacity', label: 'Additional specialists', direction: 'positive' },
+          affects: { id: 'goal_1', label: 'Weekly support capacity', direction: 'negative' },
+          mechanism: 'relies_on', relies_on: 'filling the added specialist role', watch_for: 'Hiring process stalls', provenance: 'ai_suggested_widen' } },
+    ];
+    expect(preconditionRiskIds(after, [], []).has('risk_pre')).toBe(true);
+    const caps = createAgentCapabilities(dispatcher(after), new ProposalStore(), structured);
+    const result = await caps.buildModelFromBrief(ctx, { brief: 'a brief' }) as Record<string, unknown>;
+    const state = projectModelContext({ nodes: after, edges: [], raw: { nodes: after, edges: [] }, analysis_state: undefined, analysis_ready: undefined } as never);
+    expect(result.left_out_of_run).toEqual([{ id: 'risk_pre', label: 'Role remains unfilled', relies_on: { option_id: 'opt_add' },
+      reason: reliesOnRiskLine('Role remains unfilled', 'Add one specialist'),
+      use: 'Kept for discussion. Never a driver, sensitivity or worth-checking row, and never cite it as a reason for a goal chance: the Run leaves it out.' }]);
+    expect(state.left_out_of_run).toEqual(result.left_out_of_run);
+    // Exercise the actual canonical and Explain capability callers, retaining the full qualitative dependency.
+    for (const context of [await caps.getCanonicalState(ctx), await caps.getCanonicalState(ctx, { section: 'run_explanation' })]) {
+      expect(context.ok).toBe(true);
+      expect(context.left_out_of_run).toEqual(result.left_out_of_run);
+      const risk = (context.entities as { id: string; draft_widening?: unknown }[]).find(n => n.id === 'risk_pre');
+      expect(risk).toMatchObject({ proposed_by: 'olumi', analysis_participation: 'retained_excluded' });
+      expect(risk?.draft_widening).toEqual(after[3]!.draft_widening);
+    }
+  });
+
   for (const [brief, option, risk] of [
     ['capacity (e2e c1e944a4 turn 01)', 'Add one specialist', 'Specialist start delay'],
     ['hiring', 'Hire a senior engineer', 'Candidate declines the offer'],
