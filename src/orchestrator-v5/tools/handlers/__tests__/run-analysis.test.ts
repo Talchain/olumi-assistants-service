@@ -132,7 +132,7 @@ function makeInvocation(overrides?: Partial<HandlerInvocation>): HandlerInvocati
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — happy path', () => {
-  it('S4: the stored summary omits the stock authorship speech while the saved source stays intact', async () => {
+  it('S4: an unlicensed result retains its one authorship disclosure and the saved source stays intact', async () => {
     const snapshot = makeScenarioSnapshot({ graph: { nodes: [
       { id: 'g', kind: 'goal', label: 'Goal' },
       { id: 'f', kind: 'factor', label: 'Starting assumption', observed_state: { value: 0.2, raw_value: 20, source: 'cee_inference', extractionType: 'inferred' } },
@@ -141,8 +141,8 @@ describe('run_analysis handler — happy path', () => {
     const handler = createRunAnalysisHandler({ plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(snapshot) });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).not.toContain('I supplied');
-    expect(outcome.assistant_text).not.toContain('rather than yours');
+    expect(outcome.assistant_text).toContain('I supplied the value behind this');
+    expect(outcome.assistant_text.split('I supplied').length - 1).toBe(1);
     expect(snapshot.rawPersistedGraph).toEqual(before);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');

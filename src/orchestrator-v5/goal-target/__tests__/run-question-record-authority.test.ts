@@ -114,6 +114,10 @@ describe('S3 single evaluated-input authority — independent capacity capture24
       context: {}, signal: new AbortController().signal, orientationText: '' } as never);
     snapshotSpy?.mockRestore();
     expect(transport).toHaveBeenCalledTimes(1);
+    if (mode === 'normal') {
+      expect(outcome.assistant_text).toContain("using Olumi's estimates");
+      expect(outcome.assistant_text).not.toContain('I supplied');
+    }
     expect(outbound).toMatchObject({ goal_node_id: 'weekly_support_capacity', graph: { nodes: expect.arrayContaining([
       expect.objectContaining({ id: 'weekly_support_capacity', goal_threshold_raw: 100, goal_threshold: 0.2, goal_threshold_frame: 'level',
         goal_direction: '>=', goal_threshold_unit: 'tickets per week', observed_state: expect.objectContaining({ raw_value: 80, baseline: 0.16 }) }),

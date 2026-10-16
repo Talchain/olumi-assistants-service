@@ -157,8 +157,8 @@ beforeEach(async () => {
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
   port.readExistingScenario.mockResolvedValue({ userId: OWNER, graph: GRAPH, briefText: 'How can we improve velocity?', analysisInvalidatedAt: null });
   port.readMostRecentPendingActions.mockImplementation(async () => latest);
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message',
-    content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 })));
+  // Retained host menu: an incomplete model reply uses the existing host fallback; the original control negatives stay.
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'incomplete', output: [] }), { status: 200 })));
   app = Fastify({ logger: false });
   await installOwnershipHarness(app, () => ({ mode: 'verified', userId: identity.userId }));
   await scenarioGraphRoute(app); await app.register(agentV1TurnRoute); await app.ready();

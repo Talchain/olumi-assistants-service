@@ -1,11 +1,11 @@
 /**
- * WIRE through the real `run_analysis` handler: the sent inputs preserve every Olumi-authored value
- * (A6 `olumi-authored-disclosure-undercounts`), without reintroducing S4's retired stock summary paragraph.
+ * WIRE through the real `run_analysis` handler: the summary's "I supplied N of the values" counts every value of
+ * Olumi's the run computed on (A6 `olumi-authored-disclosure-undercounts`).
  *
  * The graph is the SERVED journey-A run-2 graph (CEE 523e18d, scenario 1ceb77d8; scrubbed fixture shared with
  * `coaching/__tests__/olumi-authored-disclosure-counts-all.test.ts`), and the stubbed PLoT response carries that
  * run's own engine warnings verbatim (code + field). Served, that run said "I supplied 6"; through this handler it
- * carried 22 — 6 baselines, 4 option levels and 12 link strengths. Those count/source controls stay. (The engine's 0.0 for the competitor risk rides
+ * must say 22 — 6 baselines, 4 option levels and 12 link strengths. (The engine's 0.0 for the competitor risk rides
  * in those warnings; this sentence does not count it — Tier-3, see `inferred-value-disclosure.ts`.)
  *
  * Status ladder: TESTED. Stubbed PLoT + stubbed scenario reader is not a wire witness.
@@ -22,7 +22,6 @@ import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot } from '../run-analysis.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
-import { deriveOlumiAuthoredValues } from '../../../coaching/inferred-value-disclosure.js';
 
 type Rec = Record<string, unknown>;
 interface Fixture {
@@ -54,7 +53,7 @@ function plotResponse(graph: Fixture['graph'], warnings: readonly Rec[]): V2RunR
   return JSON.parse(JSON.stringify(body)) as V2RunResponseEnvelope;
 }
 
-async function summaryFor(f: Fixture, warnings: readonly Rec[], goalId = 'mrr') {
+async function summaryFor(f: Fixture, warnings: readonly Rec[], goalId = 'mrr'): Promise<string> {
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph: f.graph,
     options: f.graph.nodes.filter((n) => n.kind === 'option'),
@@ -94,37 +93,28 @@ async function summaryFor(f: Fixture, warnings: readonly Rec[], goalId = 'mrr') 
   expect(plotClient.run).toHaveBeenCalledOnce();
   const fact = outcome.handler_facts[0];
   if (fact === undefined || fact.fact_type !== 'run_analysis') throw new Error('expected a run_analysis fact');
-  const sent = vi.mocked(plotClient.run).mock.calls[0]![0] as Record<string, unknown>;
-  const options = sent.options as Rec[];
-  const ids = new Set(options.map(o => String(o.option_id ?? o.id)));
-  return { summary: fact.result.summary ?? '', values: deriveOlumiAuthoredValues(sent.graph, ids) };
+  return fact.result.summary ?? '';
 }
 
 const sentence = (n: number): string =>
   ` I supplied ${n} of the values behind this, because your brief did not state them. They are mine rather than yours.` +
   ' Changing any of them changes what this model implies.';
 
-describe('WIRE — every Olumi value is retained in the sent inputs without the retired stock summary', () => {
-  it('the served A12 inputs retain 22 values (6 baselines, 4 option levels, 12 links), and the summary survives egress', async () => {
+describe('WIRE — the run summary counts every Olumi value the model carries into the run', () => {
+  it('⭐ the served A12 graph → "I supplied 22" (served said 6), and the summary survives egress', async () => {
     const f = load();
-    const { summary, values } = await summaryFor(f, f.response.inference_warnings);
-    expect(values).toHaveLength(22);
-    expect(values.filter(v => v.kind === 'factor_baseline')).toHaveLength(6);
-    expect(values.filter(v => v.kind === 'option_level')).toHaveLength(4);
-    expect(values.filter(v => v.kind === 'link_strength')).toHaveLength(12);
-    expect(summary).not.toContain(sentence(22));
+    const summary = await summaryFor(f, f.response.inference_warnings);
+    expect(summary).toContain(sentence(22));
     expect(summary).not.toContain('I supplied 6 of the values');
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 
-  it('CONTRAST — the sent £54 level stated by the user leaves 21 Olumi values: the count follows the author', async () => {
+  it('CONTRAST — the same run with the £54 level stated by the user says 21: the count follows the author', async () => {
     const f = load();
     const option = f.graph.nodes.find((n) => n.id === 'raise_pro_to_54_at_release');
     (option?.interventions as Record<string, Rec>).pro_plan_price.source = 'user_specified';
-    const { summary, values } = await summaryFor(f, f.response.inference_warnings);
-    expect(values).toHaveLength(21);
-    expect(values).not.toContainEqual({ kind: 'option_level', option_id: 'raise_pro_to_54_at_release', factor_id: 'pro_plan_price' });
-    expect(summary).not.toContain(sentence(21));
+    const summary = await summaryFor(f, f.response.inference_warnings);
+    expect(summary).toContain(sentence(21));
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 });
@@ -135,7 +125,7 @@ const capacity = (): Fixture => ({ ...(JSON.parse(readFileSync(CAPACITY, 'utf8')
 const ONE = ' I supplied the value behind this, because your brief did not state it. It is mine rather than yours.';
 
 describe('WIRE — a value on an option the Run left out is not "behind this" (capacity e2e c0998b2e, judge row 7)', () => {
-  it('capacity sends 1 Olumi value, excluding the unsent part-time option’s level and the user’s unconfirmed setting', async () => {
+  it('⭐ RED on served capacity: Olumi\'s part-time option is left out of the Run, so its level is not counted — "I supplied the value", never "2 of the values"', async () => {
     const f = capacity();
     // PRECONDITION (the capture): the part-time option is Olumi's suggestion and its level is Olumi's; the one Olumi
     // starting value is the specialist capacity; the user's unconfirmed setting is stamped as such, never Olumi's.
@@ -143,23 +133,19 @@ describe('WIRE — a value on an option the Run left out is not "behind this" (c
     expect(partTime.proposed_by).toBe('olumi');
     expect((partTime.interventions as Record<string, Rec>).additional_specialists.source).toBe('cee_hypothesis');
     expect((f.graph.nodes.find((n) => n.id === 'additional_specialists')!.observed_state as Rec).user_material_unverified).toBe(true);
-    const { summary, values } = await summaryFor(f, [], 'weekly_support_capacity');
-    expect(values).toHaveLength(1);
-    expect(values).not.toContainEqual({ kind: 'option_level', option_id: 'add_part_time_specialist', factor_id: 'additional_specialists' });
-    expect(summary).not.toContain(ONE);
+    const summary = await summaryFor(f, [], 'weekly_support_capacity');
+    expect(summary).toContain(ONE);
     expect(summary).not.toMatch(/I supplied \d+ of the values/);
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 
-  it('CONTRAST: the user-added option is sent, so its Olumi level is included among 2 values', async () => {
+  it('CONTRAST: the same option added by the user is sent, so Olumi\'s level on it IS behind this — "2 of the values"', async () => {
     const f = capacity();
     const partTime = f.graph.nodes.find((n) => n.id === 'add_part_time_specialist')!;
     delete partTime.proposed_by;
     partTime.provenance = 'from_brief';
-    const { summary, values } = await summaryFor(f, [], 'weekly_support_capacity');
-    expect(values).toHaveLength(2);
-    expect(values).toContainEqual({ kind: 'option_level', option_id: 'add_part_time_specialist', factor_id: 'additional_specialists' });
-    expect(summary).not.toContain(sentence(2));
+    const summary = await summaryFor(f, [], 'weekly_support_capacity');
+    expect(summary).toContain(sentence(2));
     expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
   });
 });

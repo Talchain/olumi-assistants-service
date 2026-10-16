@@ -124,6 +124,7 @@ const candidate = {
 /** What the conversation model does, one entry per conversation call; then it just answers. */
 let script: Array<Record<string, unknown>> = [];
 let modelBodies: Record<string, unknown>[] = [];
+let hostReplyOnly = false;
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${modelBodies.length}`, arguments: JSON.stringify(args) }] });
 
@@ -136,6 +137,7 @@ function installFetch() {
     modelBodies.push(body);
     const runCall = runPressToolResponse(body);
     if (runCall) return runCall;
+    if (hostReplyOnly && script.length === 0) return new Response(JSON.stringify({ status: 'incomplete', output: [] }), { status: 200 });
     const next = body['tool_choice'] === 'none' ? undefined : script.shift();
     return new Response(JSON.stringify(next ?? say('Here is where the model stands.')), { status: 200 });
   }));
@@ -920,8 +922,19 @@ describe('SAY-SHOWN: the first pass tells the AI its `say` is shown, and the ret
     expect(timesIn(b.assistant_text, 'Compare the staffing assumptions with your team.')).toBe(1);
     const ids = (b.suggested_actions ?? []).map((a: { id: string }) => a.id);
     // The AI's useful move above survives; the deleted generic activity menu adds no second task.
-    for (const id of ['agent-next-pre-mortem', 'agent-next-what-would-change', 'agent-next-strengthen']) expect(ids).not.toContain(id);
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([]);
+  });
+
+  it('CONTRAST: a host-written Run reply retains the three distinct typed activities', async () => {
+    await narrated('I built the comparison.');
+    script = [callTool('run_analysis', { reason: 'The user requested a run.', effects_timing: null })];
+    hostReplyOnly = true;
+    try {
+      const b = await turn(app, { message: 'Run the analysis please.' });
+      const ids = (b.suggested_actions ?? []).map((a: { id: string }) => a.id);
+      expect(ids).toEqual(['agent-next-pre-mortem', 'agent-next-widen', 'agent-next-strengthen']);
+      expect(new Set(ids).size).toBe(3);
+    } finally { hostReplyOnly = false; }
   });
 
   it('RED (a Run that ranks): the gate drops the ranking and adds no reason of its own → the same reply as without it', async () => {

@@ -107,6 +107,8 @@ import {
   nonlinearIdentityLeaderWithhold,
 } from '../../agent-lane/admit-model.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
+import { buildInferredValueDisclosure, deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
+import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
@@ -3066,9 +3068,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // A comparison share remains supporting data. No licensed chance means the truthful completion/caution template.
     const summaryHeadline = chanceHeadline === null ? null
       : chanceHeadline + (samplesReduced || statusOutcome.kind !== 'ok' ? ` ${template}` : '');
+    const estimatesOnChance = chanceHeadline !== null && goalChanceScreenLinesForAgent(
+      { ...response, run_id: runId, input_snapshot: runInputSnapshot }, graphForAnalysis, true,
+    ).some(line => line.olumi_estimate_link_count !== undefined);
+    const inferredValueDisclosure = buildInferredValueDisclosure(
+      estimatesOnChance ? [] : deriveOlumiAuthoredValues(graphForAnalysis, submittedIds),
+    );
     const headlineDisclosures = headlineParts.disclosures;
     const composedSummary = (() => {
-      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
       return summary;
     })();
     const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
