@@ -8,7 +8,7 @@ import { plainWords } from '../../goal-target/hiring-times.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
-import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, moreThanOneAnswerSinceDraft, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
+import { deadlineCardToIssue, deadlineOfferOpen, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
@@ -12138,16 +12138,16 @@ export function createAgentCapabilities(
     ...caps,
     /** Route-only authorship entry: no model argument can select the stored-brief source. */
     async deadlineCardFromDraft(ctx, input) {
-      if (readOnly || input.start === undefined || moreThanOneAnswerSinceDraft(input.start)) return undefined;
+      if (readOnly || input.start === undefined) return undefined;
       try {
         const g = await readGraph(ctx.scenario_id);
-        if (!g || !firstAgentTurnAfterDraft(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
+        // ⭐ DL-3 16 Oct: the offer stays open across answers given while another card was held, until a deadline card is offered
+        // once (`deadlineOfferOpen`, which also reads whether one was already offered: a declined card is never re-offered).
+        if (!g || !(await deadlineOfferOpen(input.start, ctx.scenario_id, g.brief_text ?? ''))) return undefined;
         // AIE MA3: a goal measured over the window from launch has no deadline of its own; a launch date opens that window
         // (`proposeGoalDeadline`'s `launch_opens_window`), so no card ever places one as the goal's deadline.
         const goalsHeld = g.nodes.filter((n) => n.kind === 'goal');
         if (goalsHeld.length === 1 && launchWindowOf(goalsHeld[0]) !== undefined) return undefined;
-        // The turn that built the draft already offered a deadline card (a committed set_goal_deadline proposal), or its offers are unknown.
-        if (await buildTurnAlreadyOfferedDeadline(input.start, ctx.scenario_id, g.brief_text ?? '')) return undefined;
         const draft = g.brief_text ? await findConstructionVersion(dispatch, ctx.scenario_id, g.brief_text) : null;
         // The ONE resolver (`draft-reference.ts`), shared with the model-facing door: a guest has no version, so the scenario's server stamp.
         const reference = draftReferenceDate({ versionCreatedAt: draft?.created_at, scenarioCreatedAt: g.scenario_created_at });
