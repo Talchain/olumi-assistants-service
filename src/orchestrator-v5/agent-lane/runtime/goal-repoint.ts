@@ -8,6 +8,7 @@ import { sayGoalChange } from '../limit-frame.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../limit-operator-words.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
+import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -29,7 +30,7 @@ export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuo
       ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`}.`]),
     ...(held.horizon === null ? [] : [`Earlier timing: ${[held.horizon.as_stated, held.horizon.deadline === undefined ? undefined : sayDate(held.horizon.deadline),
       held.horizon.months === undefined ? undefined : `${held.horizon.months} months`].filter(Boolean).join('; ')}. This does not set the current goal’s deadline.`]),
-    ...(held.horizon_basis === undefined ? [] : [`Earlier timing basis, recorded but not verified: ${held.horizon_basis.basis}. Earlier source: ${held.horizon_basis.source}.`]),
+    ...(held.horizon_basis === undefined ? [] : [`Earlier timing basis, recorded but not verified: ${held.horizon_basis.basis}. Earlier source: ${held.horizon_basis.source}; bound period: ${held.horizon_basis.bound_months} months. This earlier judgement does not validate the current goal.`]),
     ...rows.map(row => `Earlier saved bound: ${sayGoalChange(row.value_frame, Number(row.value), typeof row.unit === 'string' ? row.unit : undefined, figure, statedOperatorOf(row))
       ?? `${statedOperatorOf(row) === undefined ? String(row.operator) : LIMIT_OPERATOR_WORDS[statedOperatorOf(row)!]} ${figure(Number(row.value), row.unit)}`}.`
       + (typeof row.source_quote === 'string' ? ` Earlier saved source quote: “${row.source_quote}”.` : '')
@@ -60,13 +61,19 @@ export function repointRetainedBase(before: Rec, removals: unknown, ctx: AgentTo
 }
 
 /** The repoint card must retain the whole old aim and all options, before the one native registration. */
-export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: string, newId: string, expectedDescription: string): boolean {
+export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: string, newId: string, expectedDescription: string, scenarioId: string): boolean {
   if (!rec(candidate) || !Array.isArray(before.nodes) || !Array.isArray(candidate.nodes)) return false;
   const old = before.nodes.find((n): n is Rec => rec(n) && n.id === oldId && n.kind === 'goal');
   const kept = candidate.nodes.find((n): n is Rec => rec(n) && n.id === oldId);
   const goals = candidate.nodes.filter(n => rec(n) && n.kind === 'goal');
   if (!old || !kept || kept.kind !== 'outcome' || goals.length !== 1 || !rec(goals[0]) || goals[0].id !== newId) return false;
-  const { kind: _oldKind, ref: _oldRef, description: _oldDescription, ...oldFields } = old;
+  // Match the native writer: demotion retires old server proof, never transfers it to the new goal.
+  const prepared = structuredClone(candidate);
+  prepareHorizonBasisForWrite(prepared, before, scenarioId);
+  if (!isDeepStrictEqual(prepared, candidate)) return false;
+  const earlier: { nodes: Rec[] } = { nodes: [{ ...old, kind: 'outcome' }] };
+  prepareHorizonBasisForWrite(earlier, before, scenarioId);
+  const { kind: _oldKind, ref: _oldRef, description: _oldDescription, ...oldFields } = earlier.nodes[0]!;
   const { kind: _newKind, ref: _newRef, description, ...keptFields } = kept;
   if (!isDeepStrictEqual(oldFields, keptFields) || description !== expectedDescription) return false;
   // The prior aim is informational: leaving its target in the active array would turn it into a second goal/limit.

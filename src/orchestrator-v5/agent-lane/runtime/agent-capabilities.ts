@@ -1,4 +1,5 @@
 import { assignEntityRefs } from '../../graph/entity-refs.js';
+import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 import { priorAimDescription, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
@@ -3933,9 +3934,10 @@ export function createAgentCapabilities(
         details.push(String(offered.public_label));
       }
     }
+    prepareHorizonBasisForWrite(candidate, before.raw, ctx.scenario_id);
     candidate = assignEntityRefs(candidate, before.raw).graph;
     const retained = repointRetainedBase(before.raw, removals, ctx);
-    if (retained === undefined || !repointRetainsSavedWork(retained, candidate, old.id, newId, priorDescription)) return invalid('incomplete_goal_postimage',
+    if (retained === undefined || !repointRetainsSavedWork(retained, candidate, old.id, newId, priorDescription, ctx.scenario_id)) return invalid('incomplete_goal_postimage',
       'The earlier aim or an option would be lost by this change. Nothing was prepared.');
     const hash = identityHashOf(computeGraphIdentityHash(candidate as never));
     if (hash === '') return invalid('goal_not_prepared', 'The complete proposed model could not be checked. Nothing was prepared.');
@@ -3986,7 +3988,7 @@ export function createAgentCapabilities(
     const priorDescription = repoint && typeof v.previous_goal_id === 'string' ? priorAimDescription(before.raw, v.previous_goal_id,
       typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined) : undefined;
     if (repoint && (retained === undefined || priorDescription === undefined || typeof v.previous_goal_id !== 'string'
-      || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription))) {
+      || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription, ctx.scenario_id))) {
       return notApplied('incomplete_goal_postimage', 'The complete earlier aim or an option would be lost by this card. Nothing was saved.');
     }
     if (repoint && (!isDeepStrictEqual(readGoalRecord(v.candidate, parent.operations[0]!.path), v.expected_goal)

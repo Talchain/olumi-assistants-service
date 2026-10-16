@@ -1,4 +1,6 @@
 /** Saved-model corrections: real canonical adapters → own card → one native CAS registration → whole readback. */
+import { applyGoalSteadyEdit } from '../../orchestrator-v5/goal-target/goal-steady-write.js';
+import { horizonSteadyAttested } from '../../orchestrator-v5/goal-target/horizon-basis.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +11,7 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
 
 vi.mock('../../config/index.js', async original => {
   const actual = await original<typeof import('../../config/index.js')>();
-  return { ...actual, config: { ...actual.config, auth: { ...actual.config.auth, requireUserJwt: false } } };
+  return { ...actual, config: { ...actual.config, auth: { ...actual.config.auth, requireUserJwt: false, hmacSecret: 'native-correction-horizon-test-only-key-20261016' } } };
 });
 const { storeRef } = vi.hoisted(() => ({ storeRef: { value: null as object | null } }));
 vi.mock('../../orchestrator-v5/session/index.js', async original => ({
@@ -387,7 +389,7 @@ describe('one native governing-outcome correction', () => {
     expect(w.graph().nodes.some((n: Rec) => n.id === 'effort')).toBe(false);
     expect(w.graph().nodes.find((n: Rec) => n.id === 'focus').interventions).not.toHaveProperty('effort'); expect(w.writes).toHaveLength(1);
   });
-  it.each(['ambition', 'deadline', 'factor', 'new_target', 'new_source'] as const)('a prepared complete candidate cannot lose an untouched %s before minting', async missing => {
+  it.each(['ambition', 'deadline', 'factor', 'new_target', 'new_source', 'forged_timing'] as const)('a prepared complete candidate cannot lose an untouched %s before minting', async missing => {
     const w = await make(); const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
     expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true });
     const original = w.proposals.get(String(offered.proposal_id))!, operations = structuredClone(original.operations);
@@ -396,6 +398,7 @@ describe('one native governing-outcome correction', () => {
     if (missing === 'deadline') delete graph.nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon;
     if (missing === 'new_target') graph.nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw = 280000;
     if (missing === 'new_source') delete graph.nodes.find((n: Rec) => n.kind === 'goal').user_statements;
+    if (missing === 'forged_timing') graph.nodes.find((n: Rec) => n.kind === 'goal').horizon_basis = { basis: 'steady_attested', source: 'user_stated', bound_months: 8 };
     if (missing === 'factor') graph.nodes.find((n: Rec) => n.id === 'effort').observed_state.value = 0.2;
     value.operation_id = constructionOperationId(w.ctx.scenario_id, 'broken-goal:' + computeGraphIdentityHash(graph as never)!.value);
     const broken = createProposal({ scenario_id: original.scenario_id, user_id: original.user_id,
@@ -455,6 +458,29 @@ describe('one native governing-outcome correction', () => {
     const pid = String(offered.proposal_id);
     expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
     expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').label).toBe('Angel funding secured'); expect(w.writes).toHaveLength(1);
+  });
+
+  it.each(['licensed', 'stale', 'none'] as const)('keeps earlier timing context without transferring its permission (%s)', async state => {
+    let graph: Rec = funding(); graph.nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon_months = 8;
+    if (state !== 'none') {
+      const issued = applyGoalSteadyEdit(graph, { goal_id: 'large_fund', months: 8 }, 'test-old-scenario');
+      expect(issued.kind).toBe('mutated'); if (issued.kind !== 'mutated') throw Error('fixture judgement not issued');
+      graph = issued.mutatedGraph; expect(horizonSteadyAttested(graph)).toBe(true);
+      if (state === 'stale') graph.nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon = { deadline: '2027-11-30' };
+    }
+    expect(horizonSteadyAttested(graph)).toBe(state === 'licensed');
+    const w = await world({ graph, brief: ambition, message: source }); w.ctx.verified_user_messages = [ambition, source];
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id), cold = restoreCard(w.proposals.get(pid)!, offered, w.ctx);
+    const saved = await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true });
+    const earlier = w.graph().nodes.find((n: Rec) => n.id === 'large_fund');
+    expect(earlier).not.toHaveProperty('horizon_basis');
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal')).not.toHaveProperty('horizon_basis');
+    expect(horizonSteadyAttested(w.graph())).toBe(false);
+    if (state !== 'none') { expect(earlier.description).toContain('8 months'); expect(earlier.description).toContain('user_stated'); }
+    expect(w.writes).toHaveLength(1);
   });
 
 });
