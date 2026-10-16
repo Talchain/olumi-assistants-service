@@ -1990,11 +1990,12 @@ export async function buildModelFromBrief(
   // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
   const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
   /**
-   * The redraft still holds the unattested event as its goal: as an event, or under ANY kind with the event's own label
-   * (⛔ Codex FAIL 3026 r1: a retry keeping "Urgent launch" with `kind: null` registered). Identity, never a word match.
+   * Read quantities through the same authority as the first pass and admission: their event kind is demoted there.
+   * A figure-less event still cannot evade the check by keeping its label under kind null (Codex FAIL 3026 r1).
    */
-  const stillTheUnattestedEvent = (c: CandidateModel): boolean => unattestedEventGoal(c, brief, false) !== null
-    || (unattested !== null && canonicalLabel(c.goal.metric) === canonicalLabel(unattested.event));
+  const stillTheUnattestedEvent = (c: CandidateModel): boolean => !isQuantityGoalCandidate(c.goal)
+    && (unattestedEventGoal(c, brief, false) !== null
+      || (unattested !== null && canonicalLabel(c.goal.metric) === canonicalLabel(unattested.event)));
   let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
