@@ -1850,8 +1850,8 @@ export async function buildModelFromBrief(
   /** A revised draft (`prepareRevisedDraft`): a prepare-only card the user accepts before anything changes. */
   revisedDraft?: boolean,
   /**
-   * S3 (DL 15 Oct): told once with the admitted draft as it would be saved, BEFORE the widening calls start, so the canvas
-   * draws the model without waiting for them. Only when widening will run; an observer, so a throw never costs the build.
+   * S3/O3: told with an acceptable first pass before repair, then with the accepted draft before widening.
+   * Only when widening will run; an observer, so a throw never costs the build.
    */
   onDraftAdmitted?: (graph: unknown) => void,
 ): Promise<ToolResult> {
@@ -2116,6 +2116,16 @@ export async function buildModelFromBrief(
     ...(unattested !== null ? [unattestedEventIssue(unattested, brief)] : [])];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
+    // Only an already acceptable first pass reaches the canvas. A refused first pass still gets its repair.
+    // Finalize afresh after repair: this observer must not seed the final model's cache or recording timestamp.
+    if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
+      try {
+        if (checkedConstructionPre(size).ok) {
+          const preview = finalizeGraph(admitted);
+          if (constructionFinalRefusal(preview, eventFallbackRefusals.get(admitted)) === null) onDraftAdmitted(preview.graph);
+        }
+      } catch { /* an unavailable preview never costs the repair */ }
+    }
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
     const reasons = {
@@ -2325,33 +2335,66 @@ export async function buildModelFromBrief(
     path_missing: pathIssues(admitted).map(({ option_id, option, dead_end_ids, dead_ends }) => ({ option_id, option, dead_end_ids, dead_ends })),
   };
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
-  // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
-  const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
+  /** Refusals that precede widening on both the preview and registration paths. */
+  function checkedConstructionPre(acceptedSize: ConstructionSizeVerdict) {
+    // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
+    // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
+    if (unattested !== null && stillTheUnattestedEvent(candidate)) {
+      return { ok: false as const, refusal: { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) } };
+    }
 
-  // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
-  // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
-  if (unattested !== null && stillTheUnattestedEvent(candidate)) {
-    return { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) };
+    // Judged on the model that registers (an adopted repair retry included): over the link limit only, on a revised draft.
+    const admittedOverLinks = revisedDraft === true && !acceptedSize.within && !acceptedSize.user_material_exceeds_limit && acceptedSize.nodes <= acceptedSize.limits.maxNodes;
+    if (!acceptedSize.within && !acceptedSize.user_material_exceeds_limit && !admittedOverLinks) {
+      return { ok: false as const, refusal: {
+        ok: false,
+        mutated: false,
+        refusal: 'model_too_large',
+        detail: acceptedSize.detail,
+        nodes: acceptedSize.nodes,
+        edges: acceptedSize.edges,
+        limits: acceptedSize.limits,
+        by_kind: acceptedSize.by_kind,
+        // What was added beyond the brief — the honest shed target, reported so the
+        // refusal cannot read as "your decision was too complicated".
+        added_beyond_brief: acceptedSize.sheddable_nodes,
+        from_your_brief: acceptedSize.brief_stated_nodes,
+        retried: sizeRetried,
+      } };
+    }
+
+    if (notToldApart.length > 0) {
+      return { ok: false as const, refusal: {
+        ok: false,
+        mutated: false,
+        refusal: 'option_name_ambiguous',
+        detail: notToldApart.map(notToldApartLine).join(' '),
+        ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
+      } };
+    }
+    return { ok: true as const, admittedOverLinks };
   }
 
-  // Judged on the model that registers (an adopted repair retry included): over the link limit only, on a revised draft.
-  const admittedOverLinks = revisedDraft === true && !size.within && !size.user_material_exceeds_limit && size.nodes <= size.limits.maxNodes;
-  if (!size.within && !size.user_material_exceeds_limit && !admittedOverLinks) {
-    return {
-      ok: false,
-      mutated: false,
-      refusal: 'model_too_large',
-      detail: size.detail,
-      nodes: size.nodes,
-      edges: size.edges,
-      limits: size.limits,
-      by_kind: size.by_kind,
-      // What was added beyond the brief — the honest shed target, reported so the
-      // refusal cannot read as "your decision was too complicated".
-      added_beyond_brief: size.sheddable_nodes,
-      from_your_brief: size.brief_stated_nodes,
-      retried: sizeRetried,
-    };
+  /** Preview-only before widening; returned as the build's refusal only on the graph that registers. */
+  function constructionFinalRefusal(
+    final: ReturnType<typeof finalizeGraph>,
+    eventFallbackRefusal: string | undefined,
+  ): ToolResult | null {
+    // Never persist a graph the product cannot then read.
+    const parsed = GraphV3.safeParse(final.graph);
+    if (!parsed.success) {
+      return {
+        ok: false, mutated: false, refusal: 'admitted_graph_invalid',
+        issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
+      };
+    }
+    // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
+    // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
+    if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
+      return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
+    }
+
+    return null;
   }
 
   /**
@@ -2382,18 +2425,9 @@ export async function buildModelFromBrief(
   // ⛔ FAIL CLOSED AT REGISTRATION (PR Review CHANGES_REQUIRED on #2281 @ b3f0c2ab): a name the rename could not separate
   // would register as ONE node and silently lose the factor or risk that shared it, so nothing is saved; the refusal says
   // which name and why (`REFUSAL_WORDS.option_name_ambiguous`, the Agent reads `detail`).
-  if (notToldApart.length > 0) {
-    return {
-      ok: false,
-      mutated: false,
-      refusal: 'option_name_ambiguous',
-      detail: notToldApart.map(notToldApartLine).join(' '),
-      ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
-    };
-  }
   // Pure finalization includes event occurrence binding and frame fitting, where additions can affect old entities.
   // The un-widened and every proposed widened admission run the same path before any dispatch.
-  const finalizeGraph = (admitted: AdmittedModel) => {
+  function finalizeGraph(admitted: AdmittedModel) {
     // Said where the user always sees it: the carrier the model folded into their goal, with their own arithmetic.
     if (foldedCarrier !== null) {
       const f = foldedCarrier;
@@ -2740,13 +2774,17 @@ export async function buildModelFromBrief(
 
     return { admitted, prePersistGraph, graph, goalNodes, openQuestions, levelAsks, setAside,
       withheldOptions, scopeAsked, untypedScopeWords };
-  };
+  }
   const finals = new Map<AdmittedModel, ReturnType<typeof finalizeGraph>>();
   const finalFor = (admission: AdmittedModel) => {
     let final = finals.get(admission);
     if (final === undefined) { final = finalizeGraph(admission); finals.set(admission, final); }
     return final;
   };
+  const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
+  const checked = checkedConstructionPre(size);
+  if (!checked.ok) return checked.refusal;
+  const admittedOverLinks = checked.admittedOverLinks;
   finalFor(admitted);
   const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
   observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
@@ -2755,9 +2793,9 @@ export async function buildModelFromBrief(
   // and risks against the options. Every added item is Olumi's (`markOlumiOptions`, `draft_widening`, `proposed_by`), the
   // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
   if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
-    const draft = finalFor(admitted).graph;
-    if (GraphV3.safeParse(draft).success) {
-      try { onDraftAdmitted(draft); } catch { /* an observer never costs the build */ }
+    const draft = finalFor(admitted);
+    if (constructionFinalRefusal(draft, eventFallbackRefusal) === null) {
+      try { onDraftAdmitted(draft.graph); } catch { /* an observer never costs the build */ }
     }
   }
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
@@ -2768,22 +2806,10 @@ export async function buildModelFromBrief(
     size = assessConstructionSize(admitted);
   }
   const final = finalFor(admitted);
+  const finalRefusal = constructionFinalRefusal(final, eventFallbackRefusal);
+  if (finalRefusal !== null) return finalRefusal;
   admitted = final.admitted;
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
-
-  // Never persist a graph the product cannot then read.
-  const parsed = GraphV3.safeParse(graph);
-  if (!parsed.success) {
-    return {
-      ok: false, mutated: false, refusal: 'admitted_graph_invalid',
-      issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
-    };
-  }
-  // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
-  // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
-  if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
-    return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
-  }
 
   /**
    * ⛔⛔ THE CALLER'S EMPTY-GRAPH GUARD WENT STALE WHILE THIS WAS THINKING.
