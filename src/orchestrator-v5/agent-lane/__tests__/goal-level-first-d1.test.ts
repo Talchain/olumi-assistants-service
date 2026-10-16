@@ -350,10 +350,16 @@ describe('(iv) every other door stands on the level card with no target', () => 
     expect(s.registers).toEqual([]);
   });
 
+  // TL 21:30Z (G1 founder 829a152b): today's level does not depend on the target, so a half-written target no longer refuses it.
+  // It is recorded on its own frame, and still never said as "no target yet" (the goal HAS a half-written target).
   it('a half-written target (a normalised threshold with no raw figure) is never treated as "no target yet"', async () => {
     const g = noTarget(); mrr(g).goal_threshold = 0.8;
-    const r = await setup(g, 'Our current MRR is £12,000.').call(TOOL, { ...T, value: 12000 }) as Rec;
-    expect(r.refusal).toBe('no_target');
+    const s = setup(g, 'Our current MRR is £12,000.');
+    const r = await s.call(TOOL, { ...T, value: 12000 }) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(String(r.public_label)).toMatch(/^Record the current level of "/);
+    expect(`${String(r.public_label)} ${String(r.note)}`).not.toMatch(/no target yet|today's level of/);
+    expect(s.registers).toEqual([]);
   });
 });
 
