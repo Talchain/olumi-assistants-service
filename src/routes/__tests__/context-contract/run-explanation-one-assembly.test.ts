@@ -36,7 +36,8 @@ describe('Explain uses the canonical assembly (serialized provider bytes)', () =
     expect(q.evaluated_scenario_revision).toBe(expected.synthetic_run_revision);
     expect(q.fact_row_id).toBe('S3-selected-row');
     expect(q.asked).toBeNull();
-    expect(object(q.scope).can_show_goal_chance).toBe(false);
+    // C2: the same existing licence permits the displayed chance; this cannot recover missing historical inputs.
+    expect(object(q.scope)).toMatchObject({ can_show_goal_chance: true, reasons: ['static_scope_not_declared_by_licence'] });
     expect(object(q.evidence).missing).toContain('historical_model_at_evaluated_revision');
     expect(w.calls[0].sentBody).toContain('S3-selected-row');
   }, 60000);

@@ -23,11 +23,9 @@ import { withholdOptionLimitScores } from '../../../orchestrator/context/constra
  * today's 75% and a target of at least 85% in one unit: the LEVEL line, naming both as recorded values (never "meets").
  */
 // Plain words (Paul's principle review, 14 Oct): the row's new wording, same meaning.
-const SQ_GENERIC_PRODUCTIVITY = 'This Run can’t give a chance for carrying on as now, because it treats ‘Productivity’ as unchanged from today. '
-  + 'Worth checking: how ‘Productivity’ could change over the goal period if nothing is done, including any forecast or range already in the model.';
+const SQ_GENERIC_PRODUCTIVITY = 'This Run can’t give a chance for carrying on as now, because it treats ‘Productivity’ as unchanged from today.';
 const SQ_LEVEL_CAPACITY = 'This Run can’t give a chance for carrying on as now, because it treats ‘Development capacity’ as unchanged from '
-  + 'today’s 75% (your target is at least 85%). Worth checking: how ‘Development capacity’ could change over the goal period '
-  + 'if nothing is done, including any forecast or range already in the model.';
+  + 'today’s 75% (your target is at least 85%).';
 type Rec = Record<string, unknown>;
 
 // ── Hiring: productivity, % change from today; +10 by month three ─────────────────────────────────────────────────────

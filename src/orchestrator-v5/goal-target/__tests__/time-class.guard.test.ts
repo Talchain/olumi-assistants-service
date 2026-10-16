@@ -48,7 +48,7 @@ const COVERED: Readonly<Record<string, string>> = {
 };
 /** Callers handed the stored brief, which their callee checks against the class (the row below checks the argument). */
 const BRIEF_PASSED: Readonly<Record<string, { callee: string; shape: RegExp }>> = {
-  'orchestrator-v5/tools/handlers/run-analysis.ts': { callee: 'withholdGoalFiguresForUntestedHorizon', shape: /^withholdGoalFiguresForUntestedHorizon\(response, .*, snapshot\.briefText\)$/ },
+  'orchestrator-v5/goal-target/goal-chance-licence.ts': { callee: 'withholdGoalFiguresForUntestedHorizon', shape: /^withholdGoalFiguresForUntestedHorizon\(response, savedGraph, brief\)$/ },
   'routes/agent-v1-turn.ts': { callee: 'steadyHorizonCard', shape: /^steadyHorizonCard\(\{.*\bbrief: identityOfferBrief\b.*\}\)$/ },
 };
 /** Callers outside the boundary: the reason none can offer or license what the boundary withholds. The calls they make are pinned too. */
@@ -105,7 +105,7 @@ describe('every issuer of a time-bearing card or held-month chance is behind the
   it('the walk is real (a vacuous walk would pass): hundreds of files, and the known callers are found (positive control)', () => {
     expect(files.length).toBeGreaterThan(500);
     expect(scans.get('orchestrator-v5/agent-lane/runtime/build-model.ts')!.calls.join(' ')).toContain('admitAccumulationIdentities(');
-    expect(scans.get('orchestrator-v5/tools/handlers/run-analysis.ts')!.calls.join(' ')).toContain('withholdGoalFiguresForUntestedHorizon(');
+    expect(scans.get('orchestrator-v5/goal-target/goal-chance-licence.ts')!.calls.join(' ')).toContain('withholdGoalFiguresForUntestedHorizon(');
   });
 
   it('the set of caller files is exactly the three lists: a NEW caller in none fails here', () => {

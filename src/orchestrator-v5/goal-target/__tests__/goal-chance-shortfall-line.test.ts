@@ -71,8 +71,7 @@ describe('B19 goal-relative shortfall — one licensed point option at a time', 
     // a level goal holding today's level and its target in one unit names both as recorded values.
     // Plain words (Paul's principle review, 14 Oct): the same meaning in the row's new wording.
     expect(l.status_quo).toEqual({ option_id: KEEP, line: 'This Run can’t give a chance for carrying on as now, because it treats ‘Monthly recurring revenue’ '
-      + 'as unchanged from today’s £120,000 / month (your target is at least £126,000 / month). Worth checking: how ‘Monthly recurring revenue’ '
-      + 'could change over the goal period if nothing is done, including any forecast or range already in the model.' });
+      + 'as unchanged from today’s £120,000 / month (your target is at least £126,000 / month).' });
   });
   it('recorded delta positive control → level frame suppresses every shortfall', () => {
     const f = fixture(); positive(f); f.sent = { ...f.sent, frame: 'level' };
