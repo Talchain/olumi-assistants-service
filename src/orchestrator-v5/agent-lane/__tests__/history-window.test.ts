@@ -11,6 +11,7 @@
  *   - the item is never a user message, so no user-item test counts it (`needsDurableSeed`).
  * Rows W1–W4 are AIC's acceptance; W1–W3 are also served witnesses (AIC), W4 is measured here on served sizes.
  */
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { HistoryStore, OLDER_WORDS_LABEL, BOARD_EDIT_PREFIX, needsDurableSeed, dropDanglingCalls, APPLIED_PROPOSAL_OUTPUT,
   RESTORED_FIRST_LABEL, DURABLE_SEED_ROWS_READ, briefFromDurableTurns, historyFromDurableTurns } from '../history-store.js';
@@ -408,5 +409,52 @@ describe('SYS2 L80 · neutral reference retention', () => {
     expect(again).toBe(kept);
     expect(again.split(`- "${L80}"`)).toHaveLength(2);
     expect(again.split('- "Turn 1."')).toHaveLength(2);
+  });
+});
+
+/**
+ * ⭐ G1 (founder verify 79d4da30; drafter rows hash-proven): every typed message is a verified message ONCE, in order. The window
+ * moves a dropped typed message into the older words while the typed list still holds it, and `authorshipWords` joined the two:
+ * at the served turns 12, 13, 16 and 17 a revised draft's brief repeated the first 2, 3, 5 and 6 typed messages (the brief and
+ * the earliest corrections), after the later ones. Driven here on Paul's served turns (`fixtures/founder-79d4da30-typed-turns.json`).
+ */
+describe('G1: a trimmed typed message is verified once, never twice', () => {
+  const FOUNDER = JSON.parse(readFileSync(new URL('./fixtures/founder-79d4da30-typed-turns.json', import.meta.url), 'utf8')) as {
+    turns: { turn: number; source: 'composer' | 'chip'; message: string }[];
+    served_redraft_briefs: { turn: number; duplicated_typed_prefix: number }[];
+  };
+  /** The session as the route holds it at the START of `turn` (every earlier turn stored), and the typed messages before it. */
+  const before = (turn: number) => {
+    const earlier = FOUNDER.turns.filter((t) => t.turn < turn);
+    const { store } = drive(earlier.map((t) => (t.source === 'composer' ? { typed: t.message, reply: 'Olumi replies.' } : { chip: t.message, reply: 'Olumi replies.' })));
+    return { verified: store.authorshipWords('session-1').verified, typed: earlier.filter((t) => t.source === 'composer').map((t) => t.message) };
+  };
+
+  it.each(FOUNDER.served_redraft_briefs.map((s) => [s.turn, s.duplicated_typed_prefix] as const))(
+    'RED: at served turn %i (served drafter brief repeated the first %i typed messages) each typed message is verified once, in order',
+    (turn, servedRepeat) => {
+      const { verified, typed } = before(turn);
+      expect(servedRepeat, 'the served repeat is real at this turn').toBeGreaterThan(0);
+      expect(verified).toEqual(typed);
+    });
+
+  it('CONTROL: words the user really typed twice stay twice, in their places (never a text de-duplication)', () => {
+    const turns = Array.from({ length: 12 }, (_, k) => turn(k + 1));
+    turns[1] = { typed: 'Yes, at least.', reply: 'Noted.' };
+    turns[10] = { typed: 'Yes, at least.', reply: 'Noted again.' };
+    const { store } = drive(turns);
+    expect(store.authorshipWords('session-1').verified).toEqual(turns.map((t) => t.typed));
+  });
+
+  it('CONTROL: past the typed-words cap, the older words the cap dropped still lead, each once', () => {
+    const turns = Array.from({ length: 45 }, (_, k) => turn(k + 1));
+    const { store } = drive(turns);
+    expect(store.authorshipWords('session-1').verified).toEqual(turns.map((t) => t.typed));
+  });
+
+  it('CONTROL: 8 turns or fewer (nothing trimmed) — the typed words, as before', () => {
+    const turns = Array.from({ length: 8 }, (_, k) => turn(k + 1));
+    const { store } = drive(turns);
+    expect(store.authorshipWords('session-1').verified).toEqual(turns.map((t) => t.typed));
   });
 });

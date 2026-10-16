@@ -581,10 +581,21 @@ export class HistoryStore {
       .slice(0, this.unknownAhead.get(sessionId) ?? 0).flatMap(i => {
         const text = textOf(i); return text === undefined ? [] : [text];
       });
+    /**
+     * ⭐ EACH TYPED MESSAGE ONCE, IN ORDER (G1 founder verify 79d4da30, hash-proven on the drafter rows): the window moves a
+     * dropped typed message into `older` while `typed` (the newest MAX_TYPED_WORDS) still holds it, so joining the two said
+     * every trimmed message twice. From turn 9 on, a revised draft read the brief and the earliest corrections again AFTER the
+     * later ones, and its retained conversation lost the typed origin of every later message. `older`'s typed words are the
+     * oldest of what was typed and `typed` the newest, so the overlap is where the one ends as the other begins: said once.
+     */
+    const olderTyped = older.filter(e => e.source === 'typed').map(e => e.text);
+    const typed = this.typedWords(sessionId);
+    let overlap = Math.min(olderTyped.length, typed.length);
+    while (overlap > 0 && !typed.slice(0, overlap).every((t, i) => t === olderTyped[olderTyped.length - overlap + i])) overlap -= 1;
     return {
       complete: !this.incompleteAuthorship.has(sessionId) && this.has(sessionId) && this.typedWords(sessionId).length > 0 && this.typedWords(sessionId).length < MAX_TYPED_WORDS
         && restored.length === 0 && !older.some(e => e.source === 'unknown'),
-      verified: [...older.filter(e => e.source === 'typed').map(e => e.text), ...this.typedWords(sessionId)],
+      verified: [...olderTyped.slice(0, olderTyped.length - overlap), ...typed],
       unknown: [...older.filter(e => e.source === 'unknown').map(e => e.text), ...restored],
     };
   }
