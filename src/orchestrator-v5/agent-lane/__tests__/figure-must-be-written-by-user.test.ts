@@ -259,6 +259,8 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // #3134's and #3139's two route issuers: ONE dispatch site on the same carrier; the door re-verifies the quote as the user's
     // (a launch-period answer carries the question it answers, `answering`).
     expect(route).toContain("statements: doorArgs.quotes.map((q) => (typeof q === 'string' ? { quote: q } : q)) }), toolCtx, capabilities, mode);");
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance)').toBe(24);
+    // Recorded-Run answer recovery uses the SAME verified context and capability permission gate.
+    expect(route).toContain('await capabilities.runAnalysis(toolCtx,');
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the dispatch sites (the approve and widen-Add sites twice; GOAL-REACH confirm_reading press is the eleventh), the state read and two typed-words reads and Explain read, and the route-issued deadline card (its issuer read and its ONE dispatch, both on this same typed carrier), the typed-history completeness read (recordTyped … toolCtx.user_text_complete, A2i), the automatic Run after a committed change, and the three S2 one-press cards the route issues (the held figure, holds now, the user’s own risk chance), plus recorded-Run answer recovery').toBe(25);
   });
 });

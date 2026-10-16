@@ -6,6 +6,7 @@
  * (`before_write`, `after_write`) are proven on the stateful writer harness (`agent-writer-doors-seam.test.ts`).
  */
 import { randomUUID } from 'node:crypto';
+import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
@@ -69,12 +70,22 @@ describe('the recovery fault seam is impossible in production and off by default
 
 const rows: Record<string, unknown>[] = [];
 let runs = 0;
+let selectedRun = '';
+let hideFact = false;
+let interpretations = 0;
+let providerCalls = 0;
+let holdInterpretation: { entered: () => void; wait: Promise<void> } | undefined;
+const nativeTurnIds: string[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
-  append: vi.fn(async (row: Record<string, unknown>) => { rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
+  append: vi.fn(async (row: Record<string, unknown>) => {
+    const prior = rows.find(r => r.turn_id === row.turn_id);
+    if (prior) return { id: String(row.turn_id), replayedPriorTurn: true, priorTurnConflict: prior.request_hash !== row.request_hash };
+    rows.push({ ...row, id: row.turn_id, user_message: row.userMessage ?? null, assistant_message: row.assistantMessage ?? null }); return { id: String(row.turn_id) };
+  }),
   readRecent: vi.fn(async () => [...rows].reverse()),
-  readFactsFor: vi.fn(async () => []),
+  readFactsFor: vi.fn(async (ids: readonly string[]) => hideFact ? [] : rows.filter(r => ids.includes(String(r.id))).flatMap(r => (r.handler_facts ?? []) as HandlerFact[])),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -84,30 +95,57 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 
 describe('after_run on the live route: the Run is recorded once, and the turn ends before its answer row', () => {
   let app: FastifyInstance;
-  beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
-      ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 })));
-    vi.resetModules();
-    process.env.AGENT_LANE_ENABLED = 'true';
-    process.env.AGENT_LANE_PREVIEW = 'false';
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-    app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => {
+  let wait: { totalMs: number; everyMs: number };
+  let savedWait: number;
+  let savedEvery: number;
+  const freshApp = async () => {
+    const { agentV1TurnRoute, AGENT_TURN_CLAIM_WAIT } = await import('../../../routes/agent-v1-turn.js');
+    wait = AGENT_TURN_CLAIM_WAIT; savedWait = wait.totalMs; savedEvery = wait.everyMs; wait.totalMs = 100; wait.everyMs = 1;
+    const fresh = Fastify({ logger: false });
+    fresh.post('/orchestrate/v2/turn', async req => {
       runs += 1;
+      const body = req.body as { turn_id: string };
+      nativeTurnIds.push(body.turn_id);
+      selectedRun = randomUUID();
+      const fact = RunAnalysisHandlerFactSchema.parse({ fact_type: 'run_analysis', fact_version: 1, noop: false,
+        result: { scenario_id: SCENARIO, run_id: selectedRun, graph_hash_at_run: HASH, computed_at: AT,
+          leading_option_id: null, summary: BLOCK.summary, win_probabilities: BLOCK.win_probabilities, enrichment: BLOCK.enrichment } });
+      await store.append({ turn_id: body.turn_id, request_hash: 'native-run', handler_facts: [fact] });
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: HASH, blocks: [BLOCK],
         analysis_state: STATE, analysis_ready: READY };
     });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
+    fresh.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
       analysis_state: STATE, analysis_result: BLOCK, current_read: { run_state: { kind: 'complete_current', computed_at: AT },
-        computed_against_hash: HASH, current_analysis_hash: HASH, figures: [], run_id: 'run_seam_1' } }));
-    await app.register(agentV1TurnRoute);
-    await app.ready();
+        computed_against_hash: HASH, current_analysis_hash: HASH, figures: [], run_id: selectedRun } }));
+    await fresh.register(agentV1TurnRoute);
+    await fresh.ready();
+    return fresh;
+  };
+  const coldReopen = async () => {
+    await app.close(); vi.resetModules(); app = await freshApp();
+  };
+  beforeAll(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      providerCalls += 1;
+      if (Array.isArray(body.tools) && body.tools.length === 0 && body.tool_choice === 'none') {
+        interpretations += 1;
+        const hold = holdInterpretation; holdInterpretation = undefined;
+        if (hold !== undefined) { hold.entered(); await hold.wait; }
+      }
+      return runPressToolResponse(body) ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [
+        { type: 'output_text', text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 });
+    }));
+    vi.resetModules();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await freshApp();
   }, 60_000);
   afterAll(async () => {
-    await app.close(); vi.unstubAllGlobals(); restoreEnv();
+    wait.totalMs = savedWait; wait.everyMs = savedEvery; await app.close(); vi.unstubAllGlobals(); restoreEnv();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; runs = 0; setEnv({ OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }); });
+  beforeEach(() => { rows.length = 0; runs = 0; selectedRun = ''; hideFact = false; interpretations = 0; providerCalls = 0; holdInterpretation = undefined; nativeTurnIds.length = 0; setEnv({ OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }); });
   afterEach(restoreEnv);
 
   const runPress = (extra: Record<string, unknown> = {}) => {
@@ -123,6 +161,196 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
     expect(res.json()).toEqual({ error: 'RECOVERY_FAULT_INJECTED', point: 'after_run' });
     expect(runs, 'the Run happened before the interruption, once').toBe(1);
     expect(rows.filter((r) => r.turn_id === turnId), 'no answer row for the interrupted turn').toEqual([]);
+  });
+
+
+  const retry = (turnId: string, extra: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn',
+    payload: { turn_id: turnId, scenario_id: SCENARIO, message: 'Run the analysis', source: 'retry', ...extra } });
+
+  it('after_run → same operation chipless retry recovers its Run and appends one answer; another retry replays it', async () => {
+    const { res, turnId } = await runPress(armed());
+    expect(res.statusCode).toBe(503);
+    const originalRun = selectedRun;
+    const recovered = await retry(turnId);
+    expect(recovered.statusCode, recovered.body).toBe(200);
+    expect(runs).toBe(1); expect(selectedRun).toBe(originalRun);
+    const answers = rows.filter(r => r.turn_id === turnId);
+    expect(answers).toHaveLength(1);
+    expect(String(answers[0]!.request_hash)).toContain('#chip:'); // Never reclassify button words as human authorship.
+    expect(recovered.json().blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
+    const replay = await retry(turnId);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json().assistant_text).toBe(recovered.json().assistant_text);
+    expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+  });
+
+  it('the served same-request resend keeps chip/source/id, recovers one useful answer and survives a cold route reopen', async () => {
+    const { res, turnId } = await runPress(armed());
+    expect(res.statusCode).toBe(503);
+    const original = selectedRun;
+    await coldReopen();
+    const callsBefore = providerCalls;
+    const recovered = await runPress({ turn_id: turnId });
+    expect(recovered.res.statusCode, recovered.res.body).toBe(200);
+    expect(providerCalls - callsBefore, 'one interpretation, no new Run tool-selection call').toBe(1);
+    expect(recovered.res.json().assistant_text).toContain('The result depends on the assumptions in your model.');
+    expect(recovered.res.json().blocks).toContainEqual(BLOCK);
+    expect(rows.find(r => r.turn_id === turnId)?.assistant_message).toBe(recovered.res.json().assistant_text);
+    expect(selectedRun).toBe(original); expect(runs).toBe(1);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+    const before = interpretations;
+    await coldReopen();
+    const replay = await runPress({ turn_id: turnId });
+    expect(replay.res.statusCode, replay.res.body).toBe(200);
+    expect(replay.res.json().assistant_text).toBe(recovered.res.json().assistant_text);
+    expect(interpretations).toBe(before); expect(runs).toBe(1);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+  });
+
+  it('two concurrent retries recover one recorded Run and return the one committed answer', async () => {
+    const { turnId } = await runPress(armed());
+    const before = interpretations;
+    const nativeId = nativeTurnIds[0]!;
+    const read = store.readCommittedTurn.getMockImplementation()!;
+    let probes = 0;
+    let secondEntered!: () => void;
+    let firstFinished!: () => void;
+    const bothReading = new Promise<void>(r => { secondEntered = r; });
+    const answerWon = new Promise<void>(r => { firstFinished = r; });
+    // Both saw no answer. Hold the second durable Run lookup until the first reply has been stored and returned.
+    store.readCommittedTurn.mockImplementation(async (sid, id) => {
+      if (id === nativeId) {
+        probes += 1;
+        if (probes === 1) await bothReading;
+        else if (probes === 2) { secondEntered(); await answerWon; }
+      }
+      return read(sid, id);
+    });
+    try {
+      const complete = (res: Awaited<ReturnType<typeof retry>>) => { firstFinished(); return res; };
+      const replies = await Promise.all([retry(turnId).then(complete), retry(turnId).then(complete)]);
+      expect(probes).toBe(2);
+      expect(interpretations - before, 'concurrent duplicate waits/reads: one recovered interpretation').toBe(1);
+      expect(replies.map(r => r.statusCode)).toEqual([200, 200]);
+      expect(replies[0]!.json().assistant_text).toBe(replies[1]!.json().assistant_text);
+      expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+    } finally { secondEntered(); firstFinished(); store.readCommittedTurn.mockImplementation(read); }
+  });
+
+  it('an unavailable interpreter still returns and stores the recorded result without another science Run', async () => {
+    const { turnId } = await runPress(armed());
+    const fetchMock = vi.mocked(fetch), original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: 'interpretation unavailable' }), { status: 500 }));
+    try {
+      const recovered = await retry(turnId);
+      expect(recovered.statusCode, recovered.body).toBe(200);
+      expect(recovered.json().blocks).toContainEqual(BLOCK);
+      expect(recovered.json().assistant_text.length).toBeGreaterThan(20);
+      expect(recovered.json().assistant_text).not.toContain('The analysis did not run');
+      expect(rows.find(r => r.turn_id === turnId)?.assistant_message).toBe(recovered.json().assistant_text);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1); expect(runs).toBe(1);
+    } finally { fetchMock.mockImplementation(original); }
+  });
+
+  it('a concurrent original Run owns its in-flight answer: duplicate waits and reads, without recovery interpretation', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const atInterpretation = new Promise<void>(r => { entered = r; });
+    holdInterpretation = { entered, wait: new Promise<void>(r => { release = r; }) };
+    const turnId = randomUUID();
+    const original = runPress({ turn_id: turnId });
+    await atInterpretation;
+    let duplicateSettled = false;
+    const duplicate = retry(turnId).then(r => { duplicateSettled = true; return r; });
+    try {
+      await vi.waitFor(() => expect(store.readCommittedTurn.mock.calls.filter(c => c[1] === turnId).length).toBeGreaterThan(2));
+      expect(duplicateSettled).toBe(false);
+      expect(interpretations).toBe(1); expect(runs).toBe(1);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
+    } finally { release(); }
+    const [a, b] = await Promise.all([original, duplicate]);
+    expect(a.res.statusCode, a.res.body).toBe(200); expect(b.statusCode, b.body).toBe(200);
+    expect(b.json().assistant_text).toBe(a.res.json().assistant_text);
+    expect(interpretations).toBe(1); expect(runs).toBe(1);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+  });
+
+  it('an unreadable answer after the Run proof stays unconfirmed, never says the recorded Run did not happen', async () => {
+    const { turnId } = await runPress(armed());
+    const read = store.readCommittedTurn.getMockImplementation()!;
+    let sawRun = false;
+    store.readCommittedTurn.mockImplementation(async (sid, id) => {
+      if (id === nativeTurnIds[0]) sawRun = true;
+      if (sawRun && id === turnId) throw new Error('answer read unavailable');
+      return read(sid, id);
+    });
+    const before = providerCalls;
+    try {
+      const unknown = await retry(turnId);
+      expect(unknown.statusCode, unknown.body).toBe(503);
+      expect(unknown.json().error).toBe('TURN_STATE_UNVERIFIABLE');
+      expect(unknown.json().detail).toBe('Could not confirm whether the reply was recorded. Nothing was run again — please try again.');
+      expect(providerCalls).toBe(before); expect(runs).toBe(1);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
+    } finally { store.readCommittedTurn.mockImplementation(read); }
+    const recovered = await retry(turnId);
+    expect(recovered.statusCode, recovered.body).toBe(200);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1); expect(runs).toBe(1);
+  });
+
+  it('an answer append failure releases only the active request: a further retry recovers from durable Run proof', async () => {
+    const { turnId } = await runPress(armed());
+    const append = store.append.getMockImplementation()!;
+    store.append.mockImplementation(async row => {
+      if (row.turn_id === turnId) throw new Error('answer storage unavailable');
+      return append(row);
+    });
+    try {
+      const failedAppend = await retry(turnId);
+      expect(failedAppend.statusCode, failedAppend.body).toBe(200);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0); expect(runs).toBe(1);
+    } finally { store.append.mockImplementation(append); }
+    const recovered = await retry(turnId);
+    expect(recovered.statusCode, recovered.body).toBe(200);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1); expect(runs).toBe(1);
+  });
+
+  it('preview cannot resume a full-mode Run operation or gain a tool/interpretation permission', async () => {
+    const { turnId } = await runPress(armed());
+    const before = providerCalls;
+    process.env.AGENT_LANE_PREVIEW = 'true';
+    try {
+      await coldReopen();
+      const recovered = await retry(turnId);
+      expect(recovered.statusCode, recovered.body).toBe(409);
+      expect(recovered.json().error).toBe('TURN_OUTCOME_UNKNOWN');
+      expect(providerCalls).toBe(before); expect(runs).toBe(1);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
+    } finally { process.env.AGENT_LANE_PREVIEW = 'false'; await coldReopen(); }
+  });
+
+  it.each(['foreign selected Run', 'missing own fact'])('%s cannot recover or execute science again', async reason => {
+    const { turnId } = await runPress(armed());
+    if (reason === 'foreign selected Run') selectedRun = randomUUID(); else hideFact = true;
+    const before = providerCalls;
+    const recovered = await retry(turnId);
+    expect(recovered.statusCode, recovered.body).toBe(409);
+    expect(recovered.json().error).toBe('TURN_OUTCOME_UNKNOWN');
+    expect(providerCalls).toBe(before);
+    expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
+  });
+
+  it('a deliberate fresh Run on the same revision remains a second operation; changed message on the old id refuses', async () => {
+    const { turnId } = await runPress(armed());
+    const foreignChip = await retry(turnId, { source: 'chip_click', chip: { action_type: 'get_canonical_state' } });
+    expect(foreignChip.statusCode).toBe(409); expect(foreignChip.json().error).toBe('TURN_ID_REUSED');
+    const bad = await retry(turnId, { message: 'Another request' });
+    expect(bad.statusCode).toBe(409); expect(bad.json().error).toBe('TURN_ID_REUSED');
+    const fresh = await runPress();
+    expect(fresh.res.statusCode, fresh.res.body).toBe(200);
+    expect(runs).toBe(2); expect(new Set(nativeTurnIds).size).toBe(2);
+    expect(rows.filter(r => r.turn_id === fresh.turnId)).toHaveLength(1);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
   });
 
   it('CONTRAST: the same press with the switch off runs and answers as normal (one Run, one answer row)', async () => {

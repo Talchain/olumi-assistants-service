@@ -1,3 +1,4 @@
+import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
@@ -2491,6 +2492,10 @@ export function createAgentCapabilities(
     /** Absolute end of this turn's drafter call, shared with optional draft widening. */
     /** Ordinary agent-turn authority cut; legacy callers remain inventoried separately. */
     readonly turnAuthority?: boolean;
+    /** Route-only, proven from this operation’s durable Run and the canonical current read. */
+    readonly recoveredRun?: RecoveredRun;
+    /** Only a typed Run press: other tool sequences may contain distinct Run operations. */
+    readonly runOperationId?: string;
     readonly deadlineAt?: number;
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
@@ -11776,9 +11781,9 @@ export function createAgentCapabilities(
       };
     },
 
-    async runAnalysis(ctx, args, opts): Promise<ToolResult> {
+    async runAnalysis(ctx, args, runOptions): Promise<ToolResult> {
       // The Agent never runs an analysis as part of an approval; the route's automatic Run after a committed change does.
-      if (approvalAppliedThisRequest && opts?.afterCommittedChange !== true) {
+      if (approvalAppliedThisRequest && runOptions?.afterCommittedChange !== true) {
         return {
           ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
           detail:
@@ -11798,12 +11803,10 @@ export function createAgentCapabilities(
           return firstAnalysisThisRequest.result;
         }
       }
-      const r = await dispatch('/orchestrate/v2/turn', {
+      const r = opts.recoveredRun ?? await dispatch('/orchestrate/v2/turn', {
         kind: 'message',
-        // Deliberately NOT derived, unlike the authorised write above: asking
-        // for the analysis twice is two operations the user actually made, and
-        // collapsing them onto one identity would suppress the second.
-        turn_id: randomUUID(),
+        // A fresh press has a fresh parent id; a retry can recover THIS operation's stored Run.
+        turn_id: opts.runOperationId ?? randomUUID(),
         scenario_id: ctx.scenario_id,
         stage: 'analyse',
         turn_class: 'decide',
