@@ -2814,124 +2814,12 @@ export async function buildModelFromBrief(
   admitted = final.admitted;
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
 
-  /**
-   * ⛔⛔ THE CALLER'S EMPTY-GRAPH GUARD WENT STALE WHILE THIS WAS THINKING.
-   *
-   * `agent-capabilities.ts` refuses `model_already_exists` when the graph already
-   * has nodes — but it reads that BEFORE calling in here, and the generative call
-   * above takes tens of seconds. So a person who starts a build from a brief and
-   * then adds a node on the canvas, well inside that window, had their node
-   * REPLACED: this registration writes the whole graph, and `operation_id` only
-   * de-duplicates an IDENTICAL construction, so it cannot see a different writer.
-   *
-   * ⚠ IT HAS TO BE HERE, NOT AT THE CALL SITE. My first attempt put the re-check
-   * after `buildModelFromBrief` returned — which is too late, because the
-   * registration happens inside this function. A check after the write cannot
-   * prevent the write.
-   *
-   * ⚠ THIS RE-READ ALONE NARROWED THE WINDOW; IT DID NOT CLOSE IT. What remained was
-   * this read to the route's own read. The route has since gained an assert-absent
-   * convention (explicit `null` `expected_graph_identity_hash`), and the
-   * registration below now sends it — see "CREATE-ONLY". This re-read stays: it
-   * refuses before a register call is spent, with the same words.
-   *
-   * ⭐ A FAILED READ DOES NOT REFUSE. Degrading to today's behaviour is right —
-   * throwing away a build we have already paid for because a READ failed would
-   * cost the user their turn for no gain.
-   */
-  // ⭐ B RESTATED GOAL (`draft-replacement-context.ts`): a revised draft of an unreviewed scaffold is PREPARED, never
-  // written here. The caller offers these exact bytes as one card and registers them on approval, with compare-and-set
-  // on the base it read; so the empty-model guard and the create-only registration below are not this call's.
-  if (preparingDraftReplacementFor(scenarioId)) {
-    return { ok: true, mutated: false, prepared_graph: graph,
-      ...(admittedOverLinks ? { admitted_over_limit_because: REVISED_DRAFT_MORE_LINKS } : {}) };
-  }
-  // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
-  const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
-  if (stillEmpty.status === 200) {
-    const g = (stillEmpty.json.graph ?? {}) as { nodes?: unknown[] };
-    if (Array.isArray(g.nodes) && g.nodes.length > 0) {
-      return {
-        ok: false,
-        mutated: false,
-        refusal: 'model_already_exists',
-        detail: 'While that model was being built, something was added to this one — so nothing was written, and '
-          + 'your own change is untouched. Ask me to propose a change to the model you now have.',
-      };
-    }
-  }
-
-  /**
-   * ⛔ CREATE-ONLY: THE REGISTRATION ASSERTS THE MODEL IS STILL EMPTY (ChatGPT #69 5834761926 item 1).
-   *
-   * The re-read above leaves the gap from that read to the route's own read. An explicit `null`
-   * `expected_graph_identity_hash` closes it with the route's existing absence contract
-   * (`assist.v1.scenario-graph-register.ts`, "explicit `null` now asserts absence"): the route refuses 409
-   * `GRAPH_STALE` if a graph exists at ITS read, and hands its own read to the atomic writer as a KNOWN-absent
-   * base (`p_expected_base_known`, `append_turn_atomic_v5`), which refuses the same way in CAS `enforce` mode.
-   *
-   * ⚠ THE ROUTE CHECKS ABSENCE BEFORE THE ATOMIC RPC DECIDES A REPLAY, so a retry of THIS construction, already
-   * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
-   * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
-   */
-  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
-    graph,
-    brief_text: brief,
-    operation_id: constructionOperationId(scenarioId, brief),
-    expected_graph_identity_hash: null,
-  });
-  const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
-  if (reg.status === 409 && regCode === 'GRAPH_STALE') {
-    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
-    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
-    return {
-      ok: false,
-      mutated: false,
-      refusal: 'model_already_exists',
-      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
-        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
-    };
-  }
-  if (reg.status === 409 && regCode === 'OPERATION_ID_REUSED') {
-    /**
-     * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
-     * the empty-graph guard and generated a model — generation is not
-     * deterministic, so the bytes differ — and the route refused this one
-     * because the operation was already committed. That is the SAME
-     * construction, saved once: recover its receipt instead of reporting a
-     * refusal for a model the user now has.
-     */
-    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
-    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
-  }
-  if (reg.status !== 200) {
-    return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
-  }
-
-  // The canonical version this construction produced, so the Agent can cite a
-  // real version number instead of asserting one. Absent when the registration
-  // wrote no version (a graph GraphV3 cannot version) — the Agent must then not
-  // claim one.
-  const modelVersion = (reg.json as { model_version?: unknown }).model_version;
-  // True only when this construction had ALREADY been committed and the route
-  // handed back the original version rather than writing another.
-  const replayed = (reg.json as { replayed?: unknown }).replayed === true;
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
   const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
 
-  return {
-    ok: true,
-    mutated: true,
-    ...(widened !== null ? { widened: { ...widened.counts } } : {}),
-    ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
-    ...(replayed ? { replayed: true } : {}),
-    // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
-    ...(untypedScopeWords !== null && goalNodes.find(n => n.kind === 'goal') ? {
-      pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
-        goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
-        ...(candidate.goal.scope ? { declared_scope: candidate.goal.scope } : {}), expected: 'scope',
-        question: untypedScopeWords, operands: [], derivations: [] }),
-    } : {}),
+  // ⭐ What this construction reports about its graph, PREPARED or registered alike (FOUNDER explicit rebuild, DL-3 17:51Z):
+  // a prepared candidate's card shows the same omissions, asks and disclosures a registered build says.
+  const reported = {
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     // The compact verdict travels with the success, so a caller never has to
@@ -3057,6 +2945,126 @@ export async function buildModelFromBrief(
         .filter((l) => /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
+  };
+
+  /**
+   * ⛔⛔ THE CALLER'S EMPTY-GRAPH GUARD WENT STALE WHILE THIS WAS THINKING.
+   *
+   * `agent-capabilities.ts` refuses `model_already_exists` when the graph already
+   * has nodes — but it reads that BEFORE calling in here, and the generative call
+   * above takes tens of seconds. So a person who starts a build from a brief and
+   * then adds a node on the canvas, well inside that window, had their node
+   * REPLACED: this registration writes the whole graph, and `operation_id` only
+   * de-duplicates an IDENTICAL construction, so it cannot see a different writer.
+   *
+   * ⚠ IT HAS TO BE HERE, NOT AT THE CALL SITE. My first attempt put the re-check
+   * after `buildModelFromBrief` returned — which is too late, because the
+   * registration happens inside this function. A check after the write cannot
+   * prevent the write.
+   *
+   * ⚠ THIS RE-READ ALONE NARROWED THE WINDOW; IT DID NOT CLOSE IT. What remained was
+   * this read to the route's own read. The route has since gained an assert-absent
+   * convention (explicit `null` `expected_graph_identity_hash`), and the
+   * registration below now sends it — see "CREATE-ONLY". This re-read stays: it
+   * refuses before a register call is spent, with the same words.
+   *
+   * ⭐ A FAILED READ DOES NOT REFUSE. Degrading to today's behaviour is right —
+   * throwing away a build we have already paid for because a READ failed would
+   * cost the user their turn for no gain.
+   */
+  // ⭐ PREPARE-ONLY (`draft-replacement-context.ts`; B restated goal, now FOUNDER's explicit rebuild of a saved model): the
+  // candidate is PREPARED, never written here, after every admission, widening and finalisation step and before any read
+  // or write. The caller offers these exact bytes as one card, with everything `reported` says, and registers them on
+  // approval with compare-and-set on the base it read; so the empty-model guard and the create-only registration below
+  // are not this call's. No pending action: it would bind a later answer to a goal that is not saved.
+  if (preparingDraftReplacementFor(scenarioId)) {
+    return { ok: true, mutated: false, prepared_graph: graph, ...(widened !== null ? { widened: { ...widened.counts } } : {}), ...reported };
+  }
+  // `fresh`: this read exists to see OTHER writers, so the turn's read cache must not answer it (turn-read-cache.ts).
+  const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
+  if (stillEmpty.status === 200) {
+    const g = (stillEmpty.json.graph ?? {}) as { nodes?: unknown[] };
+    if (Array.isArray(g.nodes) && g.nodes.length > 0) {
+      return {
+        ok: false,
+        mutated: false,
+        refusal: 'model_already_exists',
+        detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+          + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+      };
+    }
+  }
+
+  /**
+   * ⛔ CREATE-ONLY: THE REGISTRATION ASSERTS THE MODEL IS STILL EMPTY (ChatGPT #69 5834761926 item 1).
+   *
+   * The re-read above leaves the gap from that read to the route's own read. An explicit `null`
+   * `expected_graph_identity_hash` closes it with the route's existing absence contract
+   * (`assist.v1.scenario-graph-register.ts`, "explicit `null` now asserts absence"): the route refuses 409
+   * `GRAPH_STALE` if a graph exists at ITS read, and hands its own read to the atomic writer as a KNOWN-absent
+   * base (`p_expected_base_known`, `append_turn_atomic_v5`), which refuses the same way in CAS `enforce` mode.
+   *
+   * ⚠ THE ROUTE CHECKS ABSENCE BEFORE THE ATOMIC RPC DECIDES A REPLAY, so a retry of THIS construction, already
+   * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
+   * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
+   */
+  const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
+    graph,
+    brief_text: brief,
+    operation_id: constructionOperationId(scenarioId, brief),
+    expected_graph_identity_hash: null,
+  });
+  const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
+  if (reg.status === 409 && regCode === 'GRAPH_STALE') {
+    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
+    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
+    return {
+      ok: false,
+      mutated: false,
+      refusal: 'model_already_exists',
+      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+    };
+  }
+  if (reg.status === 409 && regCode === 'OPERATION_ID_REUSED') {
+    /**
+     * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
+     * the empty-graph guard and generated a model — generation is not
+     * deterministic, so the bytes differ — and the route refused this one
+     * because the operation was already committed. That is the SAME
+     * construction, saved once: recover its receipt instead of reporting a
+     * refusal for a model the user now has.
+     */
+    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
+    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
+  }
+  if (reg.status !== 200) {
+    return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
+  }
+
+  // The canonical version this construction produced, so the Agent can cite a
+  // real version number instead of asserting one. Absent when the registration
+  // wrote no version (a graph GraphV3 cannot version) — the Agent must then not
+  // claim one.
+  const modelVersion = (reg.json as { model_version?: unknown }).model_version;
+  // True only when this construction had ALREADY been committed and the route
+  // handed back the original version rather than writing another.
+  const replayed = (reg.json as { replayed?: unknown }).replayed === true;
+
+  return {
+    ok: true,
+    mutated: true,
+    ...(widened !== null ? { widened: { ...widened.counts } } : {}),
+    ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
+    ...(replayed ? { replayed: true } : {}),
+    // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
+    ...(untypedScopeWords !== null && goalNodes.find(n => n.kind === 'goal') ? {
+      pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
+        goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
+        ...(candidate.goal.scope ? { declared_scope: candidate.goal.scope } : {}), expected: 'scope',
+        question: untypedScopeWords, operands: [], derivations: [] }),
+    } : {}),
+    ...reported,
   };
 }
 

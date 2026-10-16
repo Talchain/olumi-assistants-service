@@ -9,7 +9,9 @@
  * bytes through `/graph/register`, with compare-and-set on the base it was prepared against (`agent-capabilities.ts`).
  *
  * The same `AsyncLocalStorage` mechanism as `approved-adoption-context.ts`: unreachable from outside the process, and it
- * survives the in-process dispatch. Only the restated-goal path sets it.
+ * survives the in-process dispatch. The restated-goal card is retired (no caller today); FOUNDER's explicit rebuild of a
+ * saved model is its consumer (DL-3 17:51Z): the prepared result carries the whole construction report (`reported`), and
+ * nothing is read or written until that card's own approval registers the exact bytes.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
