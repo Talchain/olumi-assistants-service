@@ -154,6 +154,41 @@ function inject(h: Awaited<ReturnType<typeof harness>>, family: string) {
   return h.app.inject({ method: 'POST', url: family === 'sse' ? '/orchestrate/v2/turn/stream'
     : family === 'agent' || family === 'adoption' ? '/agent/v1/turn' : '/orchestrate/v2/turn', headers: { 'x-request-id': 'prop-request' }, payload: payload(family) });
 }
+it.each(['system_event', 'chip', 'adoption', 'agent', 'sse'])('refusal propagation: %s', async family => {
+  const warn = vi.spyOn(log, 'warn');
+  const adoptionDoor = vi.spyOn(adoption, 'commitOlumiOptionAdoptionInProcess');
+  const h = await harness(family);
+  try {
+    const r = await inject(h, family);
+    process.stdout.write(`PROP_BYTES ${family} ${r.statusCode} ${JSON.stringify(r.payload)}\n`);
+    if (family === 'adoption') {
+      process.stdout.write(`PROP_ADOPTION_CALLS ${adoptionDoor.mock.calls.length} ${JSON.stringify(await adoptionDoor.mock.results[0]?.value)}\n`);
+      expect(adoptionDoor).toHaveBeenCalledOnce();
+      await expect(adoptionDoor.mock.results[0]!.value).resolves.toEqual({ status: 'unconfirmed' });
+    }
+    let bytes = r.payload;
+    if (family === 'sse') {
+      expect(r.statusCode).toBe(200);
+      const frames = r.payload.split('\n\n').filter(f => f.startsWith('event: stage\n')).map(f => JSON.parse(f.split('\ndata: ')[1]!));
+      const terminal = frames.filter(f => f.stage === 'COMPLETE');
+      expect(terminal).toHaveLength(1); expect(terminal[0].status_code).toBe(403);
+      bytes = JSON.stringify(terminal[0].payload);
+    } else expect(r.statusCode, r.payload).toBe(403);
+    // Adoption publishes session history before its final refusal; it cannot claim no save.
+    expect(bytes).toBe(family === 'adoption' ? CODE_ONLY : BYTES.not_owner);
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
+    // The approved literal itself says "saved". Forbid success claims and flattened outcomes, not that refusal sentence.
+    expect(bytes.replace('Nothing was saved.', '')).not.toMatch(/saved|revision|unconfirmed/i);
+    expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
+    expect(h.getScenarioOwner).toHaveBeenCalled();
+    if (family !== 'agent') {
+      expect(h.fence.rows[0]).toMatchObject({ scenario_id: SID,
+        turn_id: family === 'adoption' ? authorisationTurnId(adoptionProposal().proposal_id) : TID, graph_write_failed_at: expect.any(String), graph_loss_disclosable_at: null,
+        graph_write_failure_reason: 'model_write_ownership_refused' });
+      await expect(state.store!.hasOtherAdmittedLiveTurn!(SID, 'another')).resolves.toBe(false);
+    }
+  } finally { await h.app.close(); }
+}, 30_000);
 it('after-commit exception keeps the existing catch bytes and logs the event', async () => {
   const warn = vi.spyOn(log, 'warn');
   const h = await harness('system_event', true);

@@ -663,9 +663,10 @@ describe.each([true, false])('CAS-ON real HTTP wire (model versions=%s)', versio
     const app = Fastify(); await ceeOrchestratorRouteV2(app);
     try {
       const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
-        kind: 'system_event', scenario_id: SCENARIO, turn_id: TURN, stage: 'analyse',
-        event: { kind: 'factor_value_edit', target_id: 'fac_price', value: 0.7 }, graph_state: baseGraph(),
+        kind: 'message', source: 'composer', message: 'Add opportunity cost of founder time as a risk', stage: 'frame',
+        turn_class: 'frame', scenario_id: SCENARIO, turn_id: TURN, graph_state: baseGraph(),
       } });
+      // Free text is retired before any read (system events stay: the AI lane's canvas edits use them).
       expect(result.statusCode, result.body).toBe(410);
       expect(result.json()).toMatchObject({ error: 'INGRESS_CONTRACT_VIOLATION',
         details: { reason: 'conventional_conversation_retired' }, retryable: false });
