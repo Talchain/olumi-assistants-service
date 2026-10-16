@@ -240,8 +240,8 @@ describe('retired full-redraft correction has no writer', () => {
     const row = cases[0], w = await world(row);
     const offered = await dispatchTool('propose_change', JSON.stringify({ ops: row.ops }), w.ctx, w.caps());
     const prepared = w.proposals.get(String(offered.proposal_id))!;
-    const operations = structuredClone(prepared.operations);
-    operations[0]!.op = 'replace_draft';
+    const operations = prepared.operations.map((op, index) => index === 0
+      ? { ...structuredClone(op), op: 'replace_draft' as const } : structuredClone(op));
     const historic = createProposal({ scenario_id: prepared.scenario_id, user_id: prepared.user_id,
       base_graph_identity_hash: prepared.base_graph_identity_hash, operations, provenance: prepared.provenance,
       validation: prepared.validation, public_label: prepared.public_label });
