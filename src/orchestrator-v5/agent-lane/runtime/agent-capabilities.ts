@@ -6543,9 +6543,12 @@ export function createAgentCapabilities(
         const source = [...lines].reverse().find(line => figureTheUserWrote(derived?.base ?? value, unit, line));
         if (source === undefined || source.trim() === '' || source.length > 200 || derived !== null || ctx.user_text_complete === false
           || quoteIsNotTheUsersClaim(source, source)) {
-          // DL-3 (#3279 BUDDY-B): a restatement this card can't carry (e.g. marketing L20's two targets in one long line)
-          // keeps the revised-draft card it had before, rather than losing its only card.
-          if (norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
+          // DL-3 (#3279 review): when the ONLY gap is an incomplete conversation text (marketing L20's two-target restatement),
+          // keep the revised-draft card staging offered, rather than losing its only card. Every other unsupported source
+          // (too long, derived, not the user's claim) is refused: it never falls into a redraft (4 options → 1, founder).
+          const onlyIncompleteHistory = source !== undefined && source.trim() !== '' && source.length <= 200 && derived === null
+            && !quoteIsNotTheUsersClaim(source, source) && ctx.user_text_complete === false;
+          if (onlyIncompleteHistory && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(value, unit, ctx.user_turn_text)) {
             return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
           }
           return { ok: false, mutated: false, refusal: 'target_source_not_supported',

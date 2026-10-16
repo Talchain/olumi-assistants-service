@@ -161,6 +161,14 @@ describe.each(cases)('saved $name target correction, native registration', row =
       expect(out.ok).toBe(false); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
     }
   });
+  it('#3279 BUDDY-A: a single-target statement the card cannot carry (over 200 characters) is refused, never redrafted', async () => {
+    const long = `${row.message} I want to be clear that this is the near-term figure I am working towards right now, and it is the one figure I want the model to hold for us this quarter.`;
+    expect(long.length).toBeGreaterThan(200);
+    const w = await world({ ...row, message: long } as typeof row);
+    const out = await offer(w, { ...w.ctx, user_turn_text: long, user_text: long, verified_user_messages: [long] });
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'target_source_not_supported' });
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
   it('preserves all source rather than offering a card that would strip an unknown saved member', async () => {
     const custom = { ...row, graph: structuredClone(row.graph) };
     custom.graph.nodes.find((n: Rec) => n.kind === 'option').future_reasoning = { source: 'Human note', disagreement: 'Retain this tension' };
