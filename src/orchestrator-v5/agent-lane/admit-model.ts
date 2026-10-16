@@ -35,7 +35,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
-import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
+import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly, targetTypedAsALevel } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, InterventionV3T } from '../../schemas/cee-v3.js';
@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figuresWritten, goalTargetSentences } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, type FigureSource } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -2865,12 +2865,19 @@ export function admitStatedGoalLevel(args: {
   readonly heldComparator?: unknown;
   /** The target's unit: a `<=` level is admitted beside a held ceiling only where it may be a level (AIQ 5872082179). */
   readonly targetUnit?: unknown;
+  /**
+   * ⭐ G3 (RT-10, Science ruling (1)): the target is TYPED as a level (`targetTypedAsALevel`, the wire's own rule for a held
+   * ceiling in any unit, percent included), so its `%` is no longer a possible change. Absent ⇒ the unit rule alone.
+   */
+  readonly targetFrame?: unknown;
   /** S4 2b: the level is negative and `cap` is its own magnitude (F = |level|); the floor reading admits it at −1. */
   readonly signedLevel?: true;
 }): StatedGoalLevelVerdict {
   const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator } = args;
   const heldCeiling = heldComparatorSense(heldComparator) === 'minimise';
-  if (operator === '<=' && heldComparator === '<=' && heldCeiling && ceilingTargetUnitMayBeALevel(args.targetUnit)) {
+  const mayBeALevel = ceilingTargetUnitMayBeALevel(args.targetUnit)
+    || (args.targetFrame !== undefined && targetTypedAsALevel(args.targetFrame, args.targetUnit));
+  if (operator === '<=' && heldComparator === '<=' && heldCeiling && mayBeALevel) {
     const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap, ceiling: true });
     if (admission.admitted) return { admitted: true, normalised: admission.normalised };
     if (admission.reason === 'baseline_off_cap_scale') return { admitted: false, reason: offCapScaleSentence(metric, baselineRaw, raw, cap) };
@@ -2975,24 +2982,18 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
 }
 
 /**
- * ⭐ THE TOTAL OF THE USER'S OWN SUM IS THE USER'S LEVEL TODAY (DL 13:36Z 14 Oct; served capacity 13:28Z, CEE cbcefb47,
- * drafter row 7b90af18). Since #2981's sum text, the drafter types a total's level today `inferred` when the brief DEFINES
- * that total as a sum of quantities it states ("Total weekly support capacity is defined as the existing 80 tickets per week
- * plus the additional specialist capacity": goal baseline 80 `inferred`). So the goal's level was withheld
- * (`goalLevelIsEstimated`), its sum was then refused for want of a level on its total, and capacity lost the chance it had
- * shown. The level is the user's when the user's own words fix it: ONE declared sum on the goal, bound to a sentence of the
- * brief; every part a factor in the goal's unit with a known level today; every non-zero part's level the user's
- * (`verifiedFactorLevel`), and at least one such part; and the parts adding up to the drafter's level. Then the goal's level
- * is typed `explicit`, and every later check still applies (the brief writes the figure, the subject rule, its scale).
- * Anything else is unchanged: a zero part adds nothing to the user's figures, and any non-zero estimate keeps it Olumi's.
+ * ⭐⭐ The goal's level as the total of the user's OWN declared sum (the checks below, whoever flagged the level): ONE sum on the
+ * goal bound to a sentence of the brief, every part in the goal's unit with a known level, every non-zero part's level the
+ * user's, and the parts adding up to the level. `null` otherwise. The ONE AUTHORSHIP OWNER reads it as proof of a goal level
+ * the AI made no statement about (`goalLevelOwner`); `goalLevelOfStatedSum` types the level by it.
  */
-export function goalLevelOfStatedSum(model: CandidateModel, brief: string | undefined): CandidateModel {
+function statedSumOfGoal(model: CandidateModel, brief: string | undefined): { readonly parts: readonly CandidateModel['factors'][number][]; readonly zeroParts: ReadonlySet<string>; readonly quote: string } | null {
   const goal = model.goal;
   const level = goal.baseline_value;
-  if (!goalLevelIsEstimated(goal) || goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return model;
+  if (goal.baseline_known !== true || typeof level !== 'number' || !Number.isFinite(level)) return null;
   const sums = (model.identities ?? []).filter((d) => d?.operation === 'sum' && d.outcome === goal.metric);
   const quote = sums.length === 1 ? sums[0]!.evidence?.quote : undefined;
-  if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return model;
+  if (typeof quote !== 'string' || locatedBriefSentence(brief, quote) === null) return null;
   const unitOf = (u: unknown): string => String(u ?? '').trim().toLowerCase();
   // ⭐ SYSTEM 2 step 2 (DL 15 Oct; AIE 6181498097): a part may be an OUTCOME the user's own definition names as ADDITIONAL
   // ("the existing 80 tickets per week plus the additional specialist capacity"): by that definition it counts only what is
@@ -3007,14 +3008,46 @@ export function goalLevelOfStatedSum(model: CandidateModel, brief: string | unde
     zeroParts.add(label);
     return [{ label, role: 'observable' as const, baseline_known: true, baseline_value: 0, unit: goal.unit, provenance: 'explicit' }];
   });
-  if (matches.length < 2 || matches.some((m) => m.length !== 1)) return model;
+  if (matches.length < 2 || matches.some((m) => m.length !== 1)) return null;
   const parts = matches.map((m) => m[0]!);
   if (parts.some((f) => unitOf(f.unit) !== unitOf(goal.unit) || f.baseline_known !== true
-    || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))) return model;
+    || typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))) return null;
   const stated = parts.filter((f) => f.baseline_value !== 0);
-  if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return model;
+  if (stated.length === 0 || !stated.every((f) => verifiedFactorLevel(model, f, brief))) return null;
   const total = parts.reduce((sum, f) => sum + (f.baseline_value as number), 0);
-  if (!(Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)))) return model;
+  if (!(Math.abs(total - level) <= 1e-9 * Math.max(1, Math.abs(level)))) return null;
+  return { parts, zeroParts, quote };
+}
+
+/**
+ * ⭐⭐ THE ONE AUTHORSHIP OWNER, FOR A GOAL'S CURRENT LEVEL (TL 11:51Z; BUDDY-A #3290 r1+r2; TL 13:18Z fail-safe). `figureSource` on
+ * the goal's own level statement; where the AI made none, the level is the user's only as the total of their own declared sum
+ * (`statedSumOfGoal`). Nothing else, and never the draft's `explicit` / `baseline_known` flags. `undefined`: a legacy draft.
+ */
+export function goalLevelOwner(model: CandidateModel, brief: string | undefined, value: number): FigureSource | undefined {
+  const own = figureSource(model, brief, { kind: 'goal', label: model.goal.metric }, 'level', value);
+  if (own !== 'unclaimed') return own;
+  return model.goal.baseline_value === value && statedSumOfGoal(model, brief) !== null ? 'user' : 'unclaimed';
+}
+
+/**
+ * ⭐ THE TOTAL OF THE USER'S OWN SUM IS THE USER'S LEVEL TODAY (DL 13:36Z 14 Oct; served capacity 13:28Z, CEE cbcefb47,
+ * drafter row 7b90af18). Since #2981's sum text, the drafter types a total's level today `inferred` when the brief DEFINES
+ * that total as a sum of quantities it states ("Total weekly support capacity is defined as the existing 80 tickets per week
+ * plus the additional specialist capacity": goal baseline 80 `inferred`). So the goal's level was withheld
+ * (`goalLevelIsEstimated`), its sum was then refused for want of a level on its total, and capacity lost the chance it had
+ * shown. The level is the user's when the user's own words fix it: ONE declared sum on the goal, bound to a sentence of the
+ * brief; every part a factor in the goal's unit with a known level today; every non-zero part's level the user's
+ * (`verifiedFactorLevel`), and at least one such part; and the parts adding up to the drafter's level. Then the goal's level
+ * is typed `explicit`, and every later check still applies (the brief writes the figure, the subject rule, its scale).
+ * Anything else is unchanged: a zero part adds nothing to the user's figures, and any non-zero estimate keeps it Olumi's.
+ */
+export function goalLevelOfStatedSum(model: CandidateModel, brief: string | undefined): CandidateModel {
+  const goal = model.goal;
+  if (!goalLevelIsEstimated(goal)) return model;
+  const sum = statedSumOfGoal(model, brief);
+  if (sum === null) return model;
+  const { parts, zeroParts, quote } = sum;
   if (zeroParts.size === 0) return { ...model, goal: { ...goal, baseline_provenance: 'explicit' } };
   // ⭐ AIE 6181498097: the total is DERIVED from the user's figures, never an explicitly measured total. It is carried as the
   // goal's level reading (its derived flag set), which the Run's reply and the licence's readings say; the level itself keeps
@@ -3989,8 +4022,8 @@ function admitOnce(
         // the user's sentences as the goal's target with it. A figure the user wrote for something else (a budget, a headcount) is
         // never auto-bound: no target is written, and it is said, so the goal-target card can offer it as Olumi's reading. A figure
         // the user never wrote ("break even" read as 0) is Olumi's reading, as before. A recorded pre-SYSTEM-2 draft is as before.
-        const boundSentences = typeof brief === 'string' && typeof raw === 'number' ? goalTargetSentences(model, brief, raw) : undefined;
-        const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundSentences?.length === 0
+        const boundStatements = typeof brief === 'string' && typeof raw === 'number' ? goalTargetStatements(model, brief, raw) : undefined;
+        const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundStatements?.length === 0
           && figuresWritten(brief ?? '').some((f) => f.low === Math.abs(raw));
         if (unbound) {
           loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].goal_target_unbound`,
@@ -4097,8 +4130,21 @@ function admitOnce(
         // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
         // `baseline_known` to its provenance, so a level the model marks known but
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
-        const estimated = goalLevelIsEstimated(model.goal);
-        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
+        // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z; BUDDY-A #3290 B1 r1+r2; TL 13:18Z fail-safe): whose this level is, read once
+        // (`goalLevelOwner`): the AI's verified statement of it, or the total of the user's own declared sum, whatever the
+        // draft's `explicit` / `baseline_known` flags say. Anything else, claimed and not verified (a 7% the brief never wrote,
+        // beside the user's 6.5%) or with no statement at all, is UNKNOWN: it is not used, and the user is asked to confirm it.
+        // A level the draft itself calls an estimate stays Olumi's; a legacy draft keeps its recorded path.
+        const ownLevel = typeof brief === 'string' && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
+          ? goalLevelOwner(model, brief, baselineRaw) : undefined;
+        const estimated = ownLevel !== 'user' && goalLevelIsEstimated(model.goal);
+        const levelUnconfirmed = ownLevel === 'unverified' || (ownLevel === 'unclaimed' && !estimated);
+        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && levelUnconfirmed) {
+          withheld(
+            `The current level of "${model.goal.metric}" (${baselineRaw}) could not be confirmed from your brief, so it was not used ` +
+            `and no chance of reaching ${raw} is shown. Confirm the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
+          );
+        } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
             `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
@@ -4117,9 +4163,17 @@ function admitOnce(
           );
         } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
           // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
+          // ⭐ G3 (TL 10:49Z): the ceiling the goal will HOLD (`holdStatedGoalAttributes`, the same AI reading: its verified target
+          // statement reads the user's sentence as an upper bound) is the comparator this level is read against, so a stated
+          // level beside "4% or lower" is admitted on the ceiling rule instead of refused for a direction the goal lacks.
+          const ceilingRead = (model.goal.operator === '<=' || model.goal.operator === '<')
+            && boundStatements?.some((st) => st.form === 'upper_bound') === true;
           const verdict = admitStatedGoalLevel({
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
             targetUnit: model.goal.unit, ...(signedScale !== undefined && resolved.provenance === 'level_frame' ? { signedLevel: true as const } : {}),
+            ...(ceilingRead ? { heldComparator: model.goal.operator } : {}),
+            // The AI typed this target as a level, as the run will score it.
+            ...(ceilingRead && model.goal.frame === 'level' ? { targetFrame: 'level' } : {}),
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
@@ -4637,11 +4691,19 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
-        (iv as { derived_total?: unknown }).derived_total === true);
+      const derived = (iv as { derived_total?: unknown }).derived_total === true;
+      // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z, `figureSource`; BUDDY-A #3290 r2; TL 13:18Z fail-safe): a setting the user wrote is
+      // theirs whatever the draft's flag says (G3 #3: the user's £90k / £60k / £140k were drafted "inferred" and saved as
+      // Olumi's). One the AI claimed that no verified statement states, or flagged `explicit` with no statement at all, is
+      // UNKNOWN: never theirs and never Olumi's (the flag alone is not proof). One the draft calls Olumi's stays Olumi's; a
+      // total build-model computed carries the owner's verdict on its parts (`prepareProvisionalCandidate`).
+      const own = derived ? undefined : figureSource(model, brief, { kind: 'option', label: o.label, factor_label: iv.factor_label }, 'level', iv.value);
+      const claimedUnproven = own === 'unclaimed' && iv.provenance === 'explicit';
+      const source = own === 'user' ? 'brief_extraction' : own === 'unverified' || claimedUnproven ? 'cee_hypothesis' : levelSourceFor(iv.provenance);
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, source, nodes.find((n) => n.id === factorId), unitById.get(factorId), derived);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
-      if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
+      if (own !== 'user' && (iv.user_material_unverified === true || own === 'unverified' || claimedUnproven)) bundle[factorId]!.user_material_unverified = true;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }

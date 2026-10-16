@@ -28,7 +28,7 @@
 
 import { isSizedOnlyByOlumi, isAcceptedOlumiSize, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
-import { isPersonsOwnSetting, isPersonsOwnValue, isUserSizedWithoutOlumiMarks, isUserStatedStrength } from '../../cee/provenance/provenance-of.js';
+import { isPersonsOwnSetting, isPersonsOwnValue, isUnverifiedUserMaterial, isUserSizedWithoutOlumiMarks, isUserStatedStrength } from '../../cee/provenance/provenance-of.js';
 import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 import { likelyRangeUseOf, rangeLawAdopted } from '../../orchestrator-v5/intervention-range.js';
@@ -141,6 +141,8 @@ export interface PlaceholderPartsFinding {
   /** `range_law` (AIE 6184726873): the option sets it with the person's likely range, read with an unadopted equal-tail approximation. */
   readonly arm?: 'link' | 'level' | 'point' | 'range_law';
   readonly link?: { readonly from: string; readonly to: string };
+  /** `point` only: the setting's origin is UNKNOWN (the owner's `user_material_unverified` stamp), so it is not Olumi's figure. */
+  readonly unverified?: true;
 }
 
 /**
@@ -452,7 +454,8 @@ export function placeholderPartsFinding(
     // #2382's writer; AIQ 5914222384: a range with no author is refused). The wire's `intervention_ranges` carries no
     // author, so it never does on its own.
     const theirs = isRec(setting) && (usersOwnSetting(setting) || (isRec(setting.range) && usersOwnSetting(setting.range)));
-    if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point' };
+    // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): admission's stamp says whose the point is; an UNKNOWN one is never called Olumi's.
+    if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point', ...(isUnverifiedUserMaterial(setting) ? { unverified: true as const } : {}) };
     // ⛔ AIE 6184726873: the person's likely range is sampled with Olumi's equal-tail approximation of it; until that is adopted
     // (the card's press), the P rests on it, whoever gave the point.
     const range = likelyRangeUseOf(targetId, setting);

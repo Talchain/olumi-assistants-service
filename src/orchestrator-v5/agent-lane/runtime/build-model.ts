@@ -43,7 +43,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { carriesStatements, verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -53,7 +53,7 @@ import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldA
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, goalLevelOfStatedSum, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, goalLevelOfStatedSum, goalLevelOwner, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -87,7 +87,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { draftStatements, goalTargetSentences, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { draftStatements, figureSource, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -1034,8 +1034,11 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
         // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
         // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
+        // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): for a draft with statements, whether the setting is the user's is the owner's verdict
+        // (`verifiedOptionSetting` reads `figureSource`), whatever the factor's baseline. A draft recorded before SYSTEM 2 keeps its
+        // recorded rule (credited only over a zero baseline).
         if (intervention.provenance === 'explicit' && unknownBaseline
-          && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
+          && !((carriesStatements(model) || factors[0]!.baseline_value === 0) && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
         } else {
@@ -1063,12 +1066,17 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (!factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
         unresolved('unit_mismatch'); continue;
       }
+      // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): the addition is the user's where the owner says so (`figureSource`), the baseline
+      // where its verifier does; the draft's `explicit` flags decide only for a draft recorded before SYSTEM 2.
+      const own = brief === undefined ? undefined
+        : figureSource(model, brief, { kind: 'option', label: option.label, factor_label: intervention.factor_label }, 'level', intervention.value);
+      const additionUsers = own === undefined ? intervention.provenance === 'explicit' : own === 'user';
+      const baselineUsers = own === undefined ? factor.baseline_known && factor.provenance === 'explicit' : verifiedFactorLevel(model, factor, brief);
       // A stated addition to known zero IS the stated figure, regardless of who named the factor.
-      const statedFigure = intervention.provenance === 'explicit' && factor.baseline_known === true && factor.baseline_value === 0;
+      const statedFigure = additionUsers && factor.baseline_known === true && factor.baseline_value === 0;
       interventions.push({
         ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
-        provenance: statedFigure || (factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit')
-          ? 'explicit' : 'ai_proposed',
+        provenance: statedFigure || (additionUsers && baselineUsers) ? 'explicit' : 'ai_proposed',
         // ⛔ A TOTAL WE COMPUTED IS NOT A FIGURE THE USER WROTE (RT-4 class A, #2603; Codex r1): a stated 5% today plus a
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
@@ -2447,7 +2455,7 @@ export async function buildModelFromBrief(
       .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
     const goalValue = candidate.goal?.value;
     let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, goalTargetQuotes,
-      typeof goalValue === 'number' ? goalTargetSentences(candidate, brief, goalValue) : undefined);
+      typeof goalValue === 'number' ? goalTargetStatements(candidate, brief, goalValue) : undefined);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
@@ -2479,8 +2487,14 @@ export async function buildModelFromBrief(
     // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
     // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
     // The same goal admission read: the total of the user's own sum is their level (`goalLevelOfStatedSum`).
-    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, goalLevelOfStatedSum(candidate, brief).goal, admitted.loss,
-      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
+    // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z; BUDDY-A #3290 r2; TL 13:18Z): for a draft with statements, whether the user wrote this
+    // level is the owner's verdict (`goalLevelOwner`), never a figure the host finds in the brief; the host reader decides only
+    // for a draft recorded before SYSTEM 2.
+    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, goalLevelOfStatedSum(candidate, brief).goal, admitted.loss, (value, unit) => {
+      const own = goalLevelOwner(candidate, brief, value);
+      return (own === undefined ? figureTheUserWrote(value, unit, brief) : own === 'user')
+        && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief);
+    });
     if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
     // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
     // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.

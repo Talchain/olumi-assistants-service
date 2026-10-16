@@ -55,12 +55,17 @@ describe('SYSTEM 2 step 3: an option\'s setting through its statement; a draft w
     expect(verifiedFactorLevel(CAPACITY.raw as never, CAPACITY.raw.factors.find((x: Rec) => x.label === 'Existing team support capacity'), CAPACITY.brief)).toBe(true);
   });
 
-  it('EQUIVALENCE on served settings the verifier cannot credit (capacity e4ff6039, pricing 30d64bc7): the statement path says what the legacy one says', () => {
+  // ⭐⭐ SUPERSEDED BY THE ONE AUTHORSHIP OWNER (TL 11:51Z; was "the statement path says what the legacy one says"). The legacy
+  // host reader still refuses both (a draft with no statements keeps it, unchanged below); for a draft WITH statements the
+  // owner decides (`figureSource`): the user's verified statement states the figure, so it is theirs. Its negatives: the same
+  // statement with another figure, or with the opposite sign, or no statement for it, is never theirs.
+  it('OWNER on served settings the legacy reader cannot credit (capacity e4ff6039, pricing 30d64bc7): legacy unchanged; the verified statement decides', () => {
     expect(settingOk(legacyOnly(CAPACITY.raw), CAPACITY.brief, 'Add one specialist')).toBe(false);
-    expect(settingOk(CAPACITY.raw, CAPACITY.brief, 'Add one specialist')).toBe(false);
+    expect(settingOk(CAPACITY.raw, CAPACITY.brief, 'Add one specialist')).toBe(true);
+    expect(settingOk(without(CAPACITY.raw, 'Add one specialist adds one specialist.'), CAPACITY.brief, 'Add one specialist')).toBe(false);
     const iv = optionOf(PRICING.raw, 'Raise Pro price to £59').interventions[0];
     const legacy = settingOk(PRICING.raw, PRICING.brief, 'Raise Pro price to £59');
-    const viaStatement = settingOk({ ...PRICING.raw, statements: [statement('Raise Pro price to £59', iv.factor_label, iv.stated_evidence.quote, 59)] }, PRICING.brief, 'Raise Pro price to £59');
-    expect([legacy, viaStatement]).toEqual([false, false]);
+    const via = (value: number): boolean => settingOk({ ...PRICING.raw, statements: [statement('Raise Pro price to £59', iv.factor_label, iv.stated_evidence.quote, value)] }, PRICING.brief, 'Raise Pro price to £59');
+    expect([legacy, via(59), via(58), via(-59)]).toEqual([false, true, false, false]);
   });
 });

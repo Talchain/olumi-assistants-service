@@ -168,6 +168,51 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
  * `undefined` only for a draft recorded before SYSTEM 2 (no `statements`; the sent schema requires them), which keeps its bytes.
  */
 export function goalTargetSentences(model: unknown, brief: string, figure: number): readonly string[] | undefined {
+  return goalTargetStatements(model, brief, figure)?.map((s) => s.quote);
+}
+
+/**
+ * ⭐⭐ THE ONE AUTHORSHIP OWNER FOR A DRAFTED FIGURE (TL 11:51Z SYSTEM RULING, S2/O4; G3 #3 b0f78e1d, BUDDY-A #3290 B1).
+ * Whose VALUE a drafted figure is, decided once, from the AI's statements as verified against the user's own words
+ * (`sourceMapOf`), never from the draft's own flags (`provenance`, `baseline_known`, `explicit`):
+ *  · `'user'`: a verified statement states that figure for that subject and field (a point or a bound), and no
+ *    other subject's verified statement claims the same figure in the same sentence (C4 rule 2);
+ *  · `'unverified'`: the AI made a statement for that subject and field, and none verifies this figure: its origin is
+ *    UNKNOWN, never the user's and never Olumi's;
+ *  · `'unclaimed'`: the AI made no statement for it (a structural setting, or a figure the AI produced itself);
+ *  · `undefined`: a draft recorded before SYSTEM 2 (no `statements`), which keeps its recorded path.
+ * Which subject and role the figure has stays the AI's reading.
+ */
+export type FigureSource = 'user' | 'unverified' | 'unclaimed';
+export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {
+  const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
+  if (!Array.isArray(m.statements)) return undefined;
+  const key = subjectKey(subject, field);
+  const drafted = draftStatements(model);
+  const claimed = (Array.isArray(drafted) ? drafted : []).some((e) => {
+    const r = e !== null && typeof e === 'object' && !Array.isArray(e) ? e as Record<string, unknown> : {};
+    const sub = subjectOf(r['subject']);
+    return sub !== undefined && r['field'] === field && subjectKey(sub, field) === key;
+  });
+  if (!claimed) return 'unclaimed';
+  if (typeof brief !== 'string' || !Number.isFinite(value)) return 'unverified';
+  // A point holds both ends equal and a bound one end; an end of a stated RANGE is never the user's single figure (AIE range
+  // disposition), so a figure the drafter took from one end stays unverified. SIGNED: the verifier owns the sign ("losing a net
+  // 15" verifies −15; "we lose 15" does not, #3243), so a figure whose sign differs from the verified one is never theirs.
+  const states = (st: UserStatement): boolean => st.negated !== true
+    && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && st.low === value
+      : typeof st.low === 'number' ? st.low === value : typeof st.high === 'number' && st.high === value);
+  const map = sourceMapOf(drafted, brief);
+  return (map.verified.get(key) ?? []).some((st) => states(st)
+    && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
+    ? 'user' : 'unverified';
+}
+
+/**
+ * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
+ * a ceiling's direction from that reading, never from a host word reader.
+ */
+export function goalTargetStatements(model: unknown, brief: string, figure: number): readonly UserStatement[] | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown; goal?: { metric?: unknown } } : {};
   if (!Array.isArray(m.statements)) return undefined;
   const metric = typeof m.goal?.metric === 'string' ? m.goal.metric : '';
@@ -181,8 +226,7 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
   // Olumi's reading for one click wherever they compete, so the user's figure is never lost and never mis-authored.
   const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
     && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
-  return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote))
-    .map((s) => s.quote);
+  return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote));
 }
 
 /**

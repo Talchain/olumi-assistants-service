@@ -143,6 +143,17 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
     expect(row?.ask).toBe('What’s each option’s likely range for ‘Migration downtime’?');
   });
 
+  it('⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): a point of UNKNOWN origin (admission\'s `user_material_unverified`) is withheld, and never called Olumi\'s', () => {
+    const g = setting('cee_hypothesis');
+    g.nodes.find((n: Json) => n.id === 'switch_to_gcp').interventions[TARGET].user_material_unverified = true;
+    expect(moved(g).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
+    const [row] = limitChecksForAgent(g, { per_limit: [{ constraint_id: LIMIT, state: 'scored' }], joint: { state: 'scored' } } as never) ?? [];
+    expect(row?.withheld_for).toEqual(['Switch to GCP']);
+    expect(row?.say).toContain('For ‘Switch to GCP’ it isn’t shown: its figure for ‘Migration downtime’ is not confirmed from your brief.');
+    expect(row?.say).not.toContain('Olumi figure');
+    expect(row?.ask).toBe('What’s each option’s likely range for ‘Migration downtime’?');
+  });
+
   it('RED: no owner at all → withheld (fails closed)', () => {
     expect(moved(setting(undefined)).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
   });

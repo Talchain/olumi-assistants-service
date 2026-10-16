@@ -90,6 +90,9 @@ function guessWords(
   if (target === null) return null;
   if (f.arm === 'level' && unverifiedLevel) return { why: 'Not confirmed from your brief', ask: `What is "${target}" today? Not confirmed from your brief` };
   if (f.arm === 'level') return { why: `it starts from Olumi’s estimate of today’s ${q(target)}.`, ask: `What is ${q(target)} today?` };
+  if (f.arm === 'point' && f.unverified === true) {
+    return { why: `its figure for ${q(target)} is not confirmed from your brief.`, ask: `What’s each option’s likely range for ${q(target)}?` };
+  }
   if (f.arm === 'point') {
     return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
   }
