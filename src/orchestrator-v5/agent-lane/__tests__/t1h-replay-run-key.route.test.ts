@@ -348,10 +348,11 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     const body = explained.json();
     expect(body.narration).toEqual({ status: 'ready', run_key: live.narration.run_key });
     const row = table.find(r => r.turn_id === turnId)!;
-    expect(row.suggested_actions?.length, 'precondition: durable next-step offers').toBeGreaterThan(0);
-    expect(row.suggested_actions_run_key).toBe(live.narration.run_key);
     expect(row.run_narration).toEqual(body.narration);
     expect(rpcCalls.filter(n => n.startsWith('append_agent_answer')).at(-1)).toBe('append_agent_answer_narrated');
+    // The narration and exact-row RPC assertions above still execute while the legacy menu setup remains RED.
+    expect(row.suggested_actions?.length, 'precondition: durable next-step offers').toBeGreaterThan(0);
+    expect(row.suggested_actions_run_key).toBe(live.narration.run_key);
   });
   it('default result-first Run press: the row stores its narration, and a cold replay of a still-current Run returns the same narration, words and shape', async () => {
     originalLoop = false;
