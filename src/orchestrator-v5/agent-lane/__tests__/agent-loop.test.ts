@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { runAgentTurn, type CallModel } from '../runtime/agent-loop.js';
+import { RUN_FACTS_USE } from '../run-facts.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from '../runtime/agent-tools.js';
 
 const ctx: AgentToolContext = { scenario_id: 'scn', authenticated_user_id: null, request_id: 'req' };
@@ -104,6 +105,35 @@ describe('runAgentTurn', () => {
     await runAgentTurn({ ctx, history, message: 'later turn', instructions: 'i', maxOutputTokens: 100 }, caps(), model);
     expect(JSON.stringify(seen[0])).toContain('earlier turn');
     expect(JSON.stringify(seen[0])).toContain('later turn');
+  });
+});
+
+describe('R2 Run instruction discovered by a tool', () => {
+  it.each([
+    { name: 'founder', brief: 'My current funding target is £250k within 60 hours per week.' },
+    { name: 'capacity', brief: 'Capacity is 80 tickets per week; the target is at least 100.' },
+  ])('$name: the first instruction follows the paired function_call_output', async ({ brief }) => {
+    const sent: unknown[][] = [];
+    const facts = { current: true, must_say: ['These are provisional estimates.'], user_statements: [brief] };
+    const model: CallModel = async req => {
+      sent.push(structuredClone([...req.input]));
+      return { output: sent.length === 1 ? callTool('get_canonical_state') : say('The model remains provisional.') };
+    };
+    const result = await runAgentTurn({ ctx, history: [], message: brief, briefText: brief,
+      instructions: 'Use the supplied facts.', maxOutputTokens: 100 },
+    caps({ getCanonicalState: async () => ({ ok: true, mutated: false, run_facts: { ...facts, use: RUN_FACTS_USE } }) }), model);
+    expect(sent).toHaveLength(2);
+    expect(JSON.stringify(sent[0])).not.toContain(RUN_FACTS_USE);
+    const hop2 = sent[1] as Record<string, any>[];
+    const callIndex = hop2.findIndex(i => i.type === 'function_call' && i.call_id === 'call_1');
+    const outputIndex = hop2.findIndex(i => i.type === 'function_call_output' && i.call_id === 'call_1');
+    expect(callIndex).toBeGreaterThan(0);
+    expect(outputIndex, 'never insert an instruction between a call and its output').toBe(callIndex + 1);
+    const instructionIndex = hop2.findIndex(i => i.role === 'developer' && i.content?.[0]?.text === RUN_FACTS_USE);
+    expect(instructionIndex).toBeGreaterThan(outputIndex);
+    expect(hop2.filter(i => i.content?.[0]?.text === RUN_FACTS_USE)).toHaveLength(1);
+    expect(JSON.parse(hop2[outputIndex]!.output).run_facts).toEqual(facts);
+    expect(JSON.stringify(result.items)).not.toContain(RUN_FACTS_USE);
   });
 });
 

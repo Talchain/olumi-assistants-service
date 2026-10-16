@@ -1,5 +1,11 @@
-/** The existing turn-context owner, shared by ordinary chat and Run interpretation. */
+/**
+ * The existing turn-context owner, shared by ordinary chat and Run interpretation.
+ * The brief is the USER's words, so it goes as a user item (history-store's rule: a developer item would lift the user's
+ * words above the lane's truth rules); only the date, Olumi's own fact, is a developer item.
+ * The same authority rule applies to all quoted conversation; host-owned model records and instructions stay developer items.
+ */
 import { sayDate, todayInLondon } from '../goal-target/deadline-date.js';
+import { isOlderWordsItem, trimToRecentTurns } from './history-store.js';
 
 export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the START of this turn. '
   + 'If a tool result later in this turn APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after), that result is '
@@ -59,23 +65,30 @@ export function turnContextItems(args: {
   if (brief !== '' && !args.conversation.some((item) => textOf(item).includes(brief))) {
     items.push({ role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] });
   }
-  let preceding: string | undefined;
+  // Chat already forwards its whole window. Explain keeps its existing three-turn window; pairs supply only dropped replies.
+  const older = args.conversation.find(isOlderWordsItem);
+  const forwardedConversation = args.request === undefined ? args.conversation
+    : [...(older === undefined ? [] : [older]),
+      ...trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), 3)]
+      .filter(item => ['user', 'assistant'].includes(String(record(item)?.role)));
+  const forwarded = new Set(forwardedConversation);
+  let preceding: { item: unknown; text: string } | undefined;
   const answeredPairs: unknown[] = [];
   for (const item of args.conversation) {
     const role = record(item)?.role;
     const text = textOf(item);
-    if (role === 'assistant' && text !== '') preceding = text;
+    if (role === 'assistant' && text !== '') preceding = { item, text };
     if (role === 'user' && text !== '') {
-      if (preceding !== undefined) answeredPairs.push({
-        olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: preceding },
+      if (preceding !== undefined && !forwarded.has(preceding.item)) answeredPairs.push({
+        olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: preceding.text },
         response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text },
       });
       preceding = undefined;
     }
   }
   if ((args.verifiedUserMessages?.length ?? 0) > 0 || answeredPairs.length > 0 || args.unknownUserText || args.currentRequestOrigin !== undefined) {
-    // This is Olumi's source-labelled record, like canonical state, not another user turn. The brief itself stays a user item.
-    items.push({ role: 'developer', content: [{ type: 'input_text', text: `${REASONING_CONTEXT_LABEL}\n${JSON.stringify({
+    // Quoted words retain user authority, including unknown-origin text and Olumi's historical replies.
+    items.push({ role: 'user', content: [{ type: 'input_text', text: `${REASONING_CONTEXT_LABEL}\n${JSON.stringify({
       order: STATEMENT_ORDER_LABEL, model_origin: MODEL_RECORD_LABEL, current_request_origin: args.currentRequestOrigin ?? 'unknown',
       verified_user_statements: (args.verifiedUserMessages ?? []).map((text) => ({ speaker: 'user', source: 'typed', text })),
       answered_pairs: answeredPairs,
@@ -84,7 +97,7 @@ export function turnContextItems(args: {
   }
   if (args.runFactsUse !== undefined) items.push(runFactsInstructionItem(args.runFactsUse));
   if (args.request !== undefined) {
-    items.push(...args.conversation.filter((item) => ['user', 'assistant'].includes(String(record(item)?.role))));
+    items.push(...forwardedConversation);
     items.push({ role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ request: args.request,
       model_origin: MODEL_RECORD_LABEL, canonical_state: args.canonicalState }) }] });
   } else if (args.canonicalState !== undefined) {

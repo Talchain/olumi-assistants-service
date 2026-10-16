@@ -12,8 +12,9 @@ describe('S1 shared context: origin belongs to the occurrence', () => {
     const text = 'Yes, at least 100 per week. Revenue was £2m on 2026-09-01.';
     const question = 'Is 100 per week your target, conditional on keeping the existing team?';
     const context = contextOf(turnContextItems({ now: new Date('2026-10-16T04:20:00Z'), briefText: 'Capacity planning.',
-      verifiedUserMessages: [text], unknownUserText: text,
-      conversation: [item('assistant', question), item('user', text), item('assistant', 'Use the existing figure?'), item('user', text)] }));
+      verifiedUserMessages: [text], unknownUserText: text, request: 'Explain this result',
+      conversation: [item('assistant', question), item('user', text), item('assistant', 'Use the existing figure?'), item('user', text),
+        ...[1, 2, 3].map(n => item('user', `Later turn ${n}.`))] }));
     expect(context.verified_user_statements).toEqual([{ speaker: 'user', source: 'typed', text }]);
     expect(context.unknown_origin).toEqual({ speaker: 'unknown', source: 'stored, origin not verified', text });
     expect(context.answered_pairs).toEqual([
@@ -25,9 +26,10 @@ describe('S1 shared context: origin belongs to the occurrence', () => {
   });
 
   it('a question is never credited to a non-adjacent response, nor a tool result treated as a human answer', () => {
-    const context = contextOf(turnContextItems({ now: new Date(), briefText: '', verifiedUserMessages: ['A later response.'],
+    const context = contextOf(turnContextItems({ now: new Date(), briefText: '', verifiedUserMessages: ['A later response.'], request: 'Explain this result',
       conversation: [item('assistant', 'Question one?'), item('user', 'First answer.'), item('user', 'A later response.'),
-        { type: 'function_call_output', output: 'Yes, 100 per week.' }] }));
+        { type: 'function_call_output', output: 'Yes, 100 per week.' },
+        ...[1, 2, 3].map(n => item('user', `Later turn ${n}.`))] }));
     expect(context.answered_pairs).toHaveLength(1);
     expect(context.answered_pairs[0].response.text).toBe('First answer.');
   });

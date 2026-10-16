@@ -734,6 +734,7 @@ export async function runAgentTurn(
     // calls — then one output per call, in the order they were made.
     items.push(...out);
     const hopResultsFrom = toolResults.length;
+    let discoveredRunInstruction: unknown;
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
@@ -843,12 +844,6 @@ export async function runAgentTurn(
       });
       toolResults.push(result);
       const toolContext = runFactsContext(modelFacingToolResult(String(call.name), result));
-      if (toolContext.use !== undefined && runFactsUse === undefined) {
-        runFactsUse = toolContext.use;
-        const instructionItem = runFactsInstructionItem(runFactsUse);
-        contextItems.push(instructionItem);
-        items.push(instructionItem);
-      }
       items.push({
         type: 'function_call_output',
         call_id: call.call_id,
@@ -856,7 +851,15 @@ export async function runAgentTurn(
         // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
         output: JSON.stringify(withRetryBasis(toolContext.facts, result, retryBasis)),
       });
+      if (toolContext.use !== undefined && runFactsUse === undefined) {
+        runFactsUse = toolContext.use;
+        const instructionItem = runFactsInstructionItem(runFactsUse);
+        contextItems.push(instructionItem);
+        discoveredRunInstruction = instructionItem;
+      }
     }
+    // Finish every paired output before adding an instruction, including when the model returned parallel calls.
+    if (discoveredRunInstruction !== undefined) items.push(discoveredRunInstruction);
     const hopResults = toolResults.slice(hopResultsFrom);
     // Finish every call's bookkeeping before returning, so history retains a paired output for each call.
     // The route still checks the final canonical read before shipping the result and its bound Explain control.
