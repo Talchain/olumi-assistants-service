@@ -219,7 +219,7 @@ describe('#3299 reviewer probes', () => {
   it('h2: the same press replayed (same turn id, same base) leaves exactly one row', async () => {
     const base = hash();
     expect((await door([HLT, TLH], base, 'prop-dup#levels')).status).toBe('committed');
-    const second = await door([HLT, TLH], base, 'prop-dup#levels');
+    await door([HLT, TLH], base, 'prop-dup#levels');
     expect(rows.size).toBe(1);
   });
 });
