@@ -25,8 +25,8 @@ export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuo
   const figure = (value: number, unit: unknown) => sayFigureWithoutRounding(value, typeof unit === 'string' ? unit : '');
   const earlierFigure = held.target?.raw === undefined ? '' : sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
     ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`;
-  const lines = [typeof old.description === 'string' ? old.description : '',
-    `Earlier aim (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}.`,
+  const lines = [`Earlier aim (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}.`,
+    typeof old.description === 'string' ? old.description : '',
     `This was the governing aim before the earlier revision: “${held.label}”.`,
     ...(laterAmbitionQuote === undefined ? [] : [`Later ambition, as Olumi reads your words: “${laterAmbitionQuote}”. Your source stays yours; the later role is a modelling interpretation.`]),
     ...(held.target?.raw === undefined ? [] : [`Earlier model target: ${sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
@@ -41,7 +41,7 @@ export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuo
       + (typeof row.provenance === 'string' ? ` Origin recorded by the earlier model: ${row.provenance}.` : '')
       + (typeof row.confidence === 'number' ? ` Earlier extraction confidence: ${row.confidence}; this is not a forecast chance.` : '')
       + (rec(row.retained_unresolved_limit) && typeof row.retained_unresolved_limit.question === 'string' ? ` Unresolved: ${row.retained_unresolved_limit.question}` : '')),
-    'The earlier structured target rows and their remaining metadata are not kept as current target controls. Their figures, quoted words and recorded extraction confidence are retained here as text for context; they do not constrain the current goal.'];
+    'The earlier target and its quoted source remain here as history; they do not constrain the current goal.'];
   return lines.filter(Boolean).join('\n');
 }
 
@@ -121,9 +121,9 @@ export function omittedGoalChangeWords(part: string, refusal: string): string {
     unit_mismatch: 'its measurement needs checking',
     unit_unstated: 'its measurement needs checking',
     unit_unrecognised: 'its measurement needs checking',
-    not_current_removal: "its quoted words couldn't be verified as your own current statement",
+    not_current_removal: 'the quoted source is from an earlier message; ask here to include it',
     not_asked: "the quoted words don't identify this change clearly enough",
     subject_not_found: "Olumi couldn't identify the relevant part in this model",
   };
-  return `${part.charAt(0).toUpperCase()}${part.slice(1)} isn't included: ${reasons[refusal] ?? "Olumi couldn't safely include this change"}. This card won't apply that change.`;
+  return `${part.charAt(0).toUpperCase()}${part.slice(1)} isn't included: ${reasons[refusal] ?? "Olumi couldn't safely include this change"}.`;
 }
