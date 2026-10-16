@@ -134,7 +134,7 @@ describe('G3: a link size that is one end of the user\u2019s range is said with 
     const ranges = (q: string) => figuresWritten(q).filter((f) => f.low < f.high);
     expect(ranges('it would cut scrap by 1.5 to 2.5 percentage points')).toEqual([{ low: 1.5, high: 2.5 }]);
     expect(ranges('between 3 and 5 weeks')).toEqual([{ low: 3, high: 5 }]);
-    expect(ranges('cut legacy from 25% to 15%')).toEqual([]);
+    expect(figuresWritten('cut legacy from 25% to 15%'), 'a change, high to low: two figures, no pair').toEqual([{ low: 25, high: 25 }, { low: 15, high: 15 }]);
     expect(ranges('six developers and 25% legacy')).toEqual([]);
     expect(ranges('12 engineers, 20 contractors')).toEqual([]);
   });
