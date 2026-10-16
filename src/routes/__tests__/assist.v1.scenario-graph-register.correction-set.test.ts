@@ -317,7 +317,8 @@ describe('one native governing-outcome correction', () => {
     const old = graph.nodes.find((n: Rec) => n.id === 'large_fund');
     expect(old).toMatchObject({ kind: 'outcome', goal_threshold_raw: 1300000, goal_horizon: { deadline: '2027-12-31' } });
     expect(old.description).toContain(ambition);
-    expect(boundNodeDescriptionForContext(old.description)).toContain('at least £1,300,000');
+    expect(boundNodeDescriptionForContext(old.description)).toContain('at least £1.3 million');
+    expect(boundNodeDescriptionForContext(old.description)).toContain('if the evidence supports it');
     expect(boundNodeDescriptionForContext(old.description)).toContain('later ambition');
     expect(old.description).toContain('Earlier saved bound: at least £1,300,000');
     expect(old.description).toContain('Earlier saved source quote');
@@ -515,7 +516,9 @@ describe('one native governing-outcome correction', () => {
     const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
     for (const key of ['goal_horizon', 'goal_horizon_months', 'goal_deadline_as_stated', 'horizon_basis',
       'goal_horizon_reference_date', 'goal_horizon_stated_months', 'goal_period']) expect(goal).not.toHaveProperty(key);
-    expect(goal.description).toMatch(/^Current governing goal/);
+    expect(goal.description).toMatch(/^The larger fund of at least £1.3 million/);
+    expect(boundNodeDescriptionForContext(goal.description)).toContain('if the evidence supports it');
+    expect(goal.description).not.toContain('Current governing goal proposed');
     expect(goal.description).toContain('31 December 2027');
     expect(goal.description).toContain('16 October 2026'); expect(goal.description).toContain('15 months');
     expect(goal.description).toContain('per month');
@@ -573,12 +576,37 @@ describe('one native governing-outcome correction', () => {
     const omitted = offered.not_included as Rec[];
     expect(omitted).toHaveLength(2); expect(omitted.every(p => p.refusal && p.detail)).toBe(true);
     expect(omitted.find(p => p.part.includes('removal'))).toMatchObject({ refusal: 'not_current_removal' });
-    expect(offered.public_label).toContain('Not included on this card'); expect(offered.public_label).toContain('today’s level');
+    expect(offered.public_label).toContain('Not included on this card');
+    expect(offered.public_label).toContain('Today’s level');
+    expect(offered.public_label).not.toContain('Say so plainly');
+    expect(offered.public_label).not.toContain('0 £');
+    expect(offered.public_label).not.toContain('not current removal permission');
+    expect(omitted.find(p => p.part.includes('level'))?.detail).toContain('Say so plainly');
     expect(w.writes).toHaveLength(0);
     const pid = String(offered.proposal_id);
     expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
     expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw).toBe(250000);
     expect(w.graph().nodes.some((n: Rec) => n.id === 'founder_job_spec_time')).toBe(w.original.nodes.some((n: Rec) => n.id === 'founder_job_spec_time'));
+    expect(w.writes).toHaveLength(1);
+  });
+
+  it('keeps the outcome’s full conditional description first through card, save and cold context', async () => {
+    const graph = funding();
+    const condition = 'Only if investor interest is credible and the PoC supports it. Priya disputes whether more outreach alone can resolve the funding gap; this is uncertain and needs evidence before we commit.';
+    graph.nodes.find((n: Rec) => n.id === 'angel_fund')!.description = condition;
+    const w = await world({ graph, brief: ambition, message: source }); w.ctx.verified_user_messages = [ambition, source];
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!;
+    const proposed = (held.operations[0]!.value as Rec).candidate.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(proposed.description).toBe(condition);
+    expect(boundNodeDescriptionForContext(proposed.description)).toMatch(/^Only if investor interest is credible/);
+    expect(boundNodeDescriptionForContext(proposed.description)).toContain('Priya disputes');
+    const cold = restoreCard(held, offered, w.ctx);
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    const reopened = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
+    expect(reopened.entities.find((n: Rec) => n.id === 'angel_fund').full_label).toBe(condition);
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').description).toBe(condition);
     expect(w.writes).toHaveLength(1);
   });
 

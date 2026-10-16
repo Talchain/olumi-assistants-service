@@ -25,9 +25,9 @@ export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuo
   const figure = (value: number, unit: unknown) => sayFigureWithoutRounding(value, typeof unit === 'string' ? unit : '');
   const earlierFigure = held.target?.raw === undefined ? '' : sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
     ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`;
-  const lines = [`Earlier aim (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}. No longer governing.`,
-    typeof old.description === 'string' ? old.description : '',
-    `Earlier aim, retained for context and no longer the governing goal: “${held.label}”.`,
+  const lines = [typeof old.description === 'string' ? old.description : '',
+    `Earlier aim (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}.`,
+    `This was the governing aim before the earlier revision: “${held.label}”.`,
     ...(laterAmbitionQuote === undefined ? [] : [`Later ambition, as Olumi reads your words: “${laterAmbitionQuote}”. Your source stays yours; the later role is a modelling interpretation.`]),
     ...(held.target?.raw === undefined ? [] : [`Earlier model target: ${sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
       ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`}.`]),
@@ -100,15 +100,30 @@ export function promotedOutcome(node: Rec): Rec {
   const goal: Rec = { ...node, kind: 'goal', analysis_participation: 'included' };
   const held = readGoalRecord({ nodes: [goal] }, String(node.id));
   const timing = held?.horizon;
-  const lines = ['Current governing goal proposed on this card. Earlier role and timing notes below are history; they do not set this goal’s deadline or period.',
-    typeof node.description === 'string' ? node.description : '',
+  const history = [
     ...(timing === null || timing === undefined ? [] : [`Earlier recorded timing: ${[timing.as_stated,
       timing.deadline === undefined ? undefined : sayDate(timing.deadline), timing.months === undefined ? undefined : `${timing.months} months`].filter(Boolean).join('; ')}.`]),
     ...(typeof node.goal_horizon_reference_date === 'string' ? [`Earlier timing reference: ${sayDate(node.goal_horizon_reference_date)}.`] : []),
     ...(typeof node.goal_horizon_stated_months === 'number' ? [`Earlier stated duration: ${node.goal_horizon_stated_months} months.`] : []),
     ...(held?.period === undefined || held.period === 'none' ? [] : [`Earlier figures were per ${held.period}.`])];
-  goal.description = lines.filter(Boolean).join('\n');
+  const lines = [typeof node.description === 'string' ? node.description : '',
+    ...(history.length ? ['Earlier timing was set aside.', ...history] : [])].filter(Boolean);
+  if (lines.length) goal.description = lines.join('\n');
   for (const key of ['goal_horizon', 'goal_horizon_months', 'goal_deadline_as_stated', 'horizon_basis',
     'goal_horizon_reference_date', 'goal_horizon_stated_months', 'goal_period']) delete goal[key];
   return goal;
+}
+
+/** User copy is derived from native refusal codes; the complete native detail remains AI-facing. */
+export function omittedGoalChangeWords(part: string, refusal: string): string {
+  const reasons: Readonly<Record<string, string>> = {
+    figure_not_in_users_words: "Olumi couldn't verify it as a current figure from your words",
+    unit_mismatch: 'its measurement needs checking',
+    unit_unstated: 'its measurement needs checking',
+    unit_unrecognised: 'its measurement needs checking',
+    not_current_removal: "its quoted words couldn't be verified as your own current statement",
+    not_asked: "the quoted words don't identify this change clearly enough",
+    subject_not_found: "Olumi couldn't identify the relevant part in this model",
+  };
+  return `${part.charAt(0).toUpperCase()}${part.slice(1)} isn't included: ${reasons[refusal] ?? "Olumi couldn't safely include this change"}. This card won't apply that change.`;
 }

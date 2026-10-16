@@ -1,6 +1,6 @@
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
-import { priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
+import { omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { carriesQuoteConfirmation, verbatimSourceLine } from '../quote-confirmation.js';
@@ -3970,7 +3970,7 @@ export function createAgentCapabilities(
       + ` Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.`
       + (!hasIncoming ? ' The new goal has no incoming causal relationships yet. This card does not establish how the options affect it; that remains to be modelled.' : '')
       + (details.length ? `\n${details.join('\n')}` : '')
-      + (notIncluded.length ? `\nNot included on this card: ${notIncluded.map(p => `${p.part}: ${p.detail}`).join('; ')} The goal change on this card can be approved without those parts; they remain unresolved.` : '');
+      + (notIncluded.length ? `\nNot included on this card: ${notIncluded.map(p => omittedGoalChangeWords(p.part, p.refusal)).join('; ')} The goal change on this card can be approved without those parts; they remain unresolved.` : '');
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
       operations: [{ op: 'repoint_goal', path: newId, value: { candidate, previous_goal_id: old.id, later_ambition_quote: args.later_ambition_quote, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
         brief_text: before.brief_text, goal_turn_id: turn, operation_id: constructionOperationId(ctx.scenario_id, `repoint_goal:${before.graph_identity_hash}:${hash}`) } }],
