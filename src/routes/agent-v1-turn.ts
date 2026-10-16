@@ -3237,14 +3237,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /**
      * ⭐ S-D (lane EDIT-PANEL; design §5): the held proposals as this turn FOUND them, read before any inner row, so the
      * answer row can carry each one until it is approved or declined — an inner row this turn writes (a new hold, a
-     * confirm) never drops another hold silently (D-08). A failed read holds nothing back: the latest row still rules.
+     * confirm) never drops another hold silently (D-08). An unreadable latest row is unknown authority, not no holds.
      */
     let deadlineTurnStart: DeadlineTurnStart | undefined;
     let heldAtStart: readonly PendingAction[] = [];
+    let pendingReadFailed = false;
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
         let latestRowId: string | null = null;
-        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } })).filter(isHeldProposal);
+        const latestPending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict', onLatestRowId: id => { latestRowId = id; } });
+        if (!Array.isArray(latestPending) || latestPending.some(p => parsePendingAction(p) === null || p.scenario_id !== scenarioId)) {
+          throw new Error('pending_actions_unreadable');
+        }
+        heldAtStart = latestPending.filter(isHeldProposal);
         if (latestRowId !== null) deadlineTurnStart = { rowId: latestRowId, rows: await store.readRecent(scenarioId, CONVERSATION_ROWS_READ),
           // A closed offer is silent to the user, so every UNKNOWN read of the build turn's committed offers says why (staging observability).
           committedPending: async (turnId: string) => {
@@ -3259,8 +3264,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             } catch (err) { closed('committed_read_failed', err); throw err; }
           } };
       } catch (err) {
-        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
+        pendingReadFailed = true;
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: pending authority unreadable — no tool or replacement answer row');
       }
+    }
+    if (pendingReadFailed) {
+      // Before any tool: preserve the unknown latest row and leave a named request retryable without borrowing approval.
+      await releaseUnwrittenTurnClaim();
+      const unavailable = composeDirectAnswerResponse({
+        assistant_text: 'I couldn’t verify the pending changes for this scenario. I haven’t applied any changes or run analysis in this request. Please try again.',
+        stage: 'frame', answerKind: 'substantive',
+      });
+      return reply.code(200).send({
+        ...finaliseV5Response(unavailable, { scenarioId, runDeltaBoundByCaller: true }),
+        _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0,
+          stopped_reason: 'pending_actions_unreadable', durability: 'not_recorded', ...(turnId !== undefined ? { turn_id: turnId } : {}) },
+        _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
+      });
     }
     const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip,
       ...heldAtStart.map(h => proposalRecord(h, undefined)?.approve_action)]

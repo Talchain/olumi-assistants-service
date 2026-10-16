@@ -32,12 +32,17 @@ const rows = new Map<string, Row>();
 let readFails = false;
 let answerAppendFails = false;
 let ownershipChangesAfterClaim = false;
+let pendingReadFails = false;
 const store = {
   getScenarioOwner: vi.fn(async () => ownershipChangesAfterClaim && rows.has(`${T1}:claim`) ? 'u-owner' : null),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => {
     if (readFails) throw new Error('read failed');
     return rows.get(turnId) ?? null;
+  }),
+  readMostRecentPendingActions: vi.fn(async (_sid: string, options?: { onLatestRowId?: unknown }) => {
+    if (pendingReadFails && options?.onLatestRowId !== undefined) throw new Error('pending authority unavailable');
+    return [];
   }),
   append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used: number }) => {
     if (answerAppendFails && !w.turn_id.endsWith(':claim')) throw new Error('answer append failed');
@@ -122,6 +127,7 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
   beforeEach(async () => {
     __setUseAppendV6ForTest(false);
     rows.clear(); readFails = false; answerAppendFails = false; ownershipChangesAfterClaim = false; provider.calls = 0; provider.userTurnsSeen = [];
+    pendingReadFails = false;
     refusedDoorSequence = undefined; internalCalls.length = 0; store.releaseTurnClaim.mockClear();
     store.append.mockClear(); store.readCommittedTurn.mockClear();
     vi.stubGlobal('fetch', fakeFetch);
@@ -136,6 +142,24 @@ describe('flag OFF: Agent claim release after revision refusal', () => {
     await dispatch(`/assist/v1/scenarios/${SID}/graph/register`, { turn_id: T2 });
     throw new Error('revision refusal must escape the dispatch');
   };
+
+  it('an unreadable turn-start pending row releases only its unwritten claim and the same request can retry', async () => {
+    pendingReadFails = true;
+    const response = await approve();
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()._agent).toMatchObject({ stopped_reason: 'pending_actions_unreadable', mutated: false, durability: 'not_recorded', turn_id: T1 });
+    expect(store.releaseTurnClaim).toHaveBeenCalledExactlyOnceWith(SID, `${T1}:claim`, expect.any(String));
+    expect(store.append).toHaveBeenCalledTimes(1); // Claim only: the unreadable latest answer remains untouched.
+    expect(rows.size).toBe(0);
+    expect(provider.calls).toBe(0);
+    expect(internalCalls).toEqual([]);
+    pendingReadFails = false;
+    const retry = await approve();
+    expect(retry.statusCode, retry.body).toBe(200);
+    expect(retry.json()._agent.durability).toBe('recorded');
+    expect(provider.calls).toBe(1);
+    expect(rows.has(T1)).toBe(true);
+  });
 
   it('ownership refusal on an unwritten final answer releases its conversation claim', async () => {
     ownershipChangesAfterClaim = true;
