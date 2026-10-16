@@ -57,7 +57,25 @@ const idOf = (g: Rec, label: string): string => (g.nodes as Rec[]).find((n) => n
 const linkOf = (g: Rec): Rec => (g.edges as Rec[]).find((e) => e.from === idOf(g, 'Corporate deal active') && e.to === idOf(g, 'weekday attendance'))!;
 const DISCLOSURE = new RegExp(`^The recorded source for "Corporate deal active" → "weekday attendance" is: "${EFFECT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" `
   + `The model currently holds Olumi's provisional size \\(switching on "Corporate deal active" raises "weekday attendance" by [^)]+\\) for this effect, `
-  + 'which (?:conflicts with|is not taken from) the stated "between 4 and 7 attendance points"\\. I cannot justify that value from this source\\.$');
+  + 'which is not taken from the stated "between 4 and 7 attendance points"\\. I cannot justify that value from this source\\.$');
+
+/**
+ * ⛔ BUDDY-A #3312 B1 (R1, its own brief): the user's range is for TEN staff ("adding 10 support staff could raise weekday
+ * attendance by between 40 and 55 percentage points") while Olumi's placeholder is per ONE (5 points per staff = 50 per 10,
+ * inside the range). A statement records no source-change basis, so the disclosure never says the two conflict.
+ */
+const STAFF_EFFECT = 'Option one is hiring one support staff member; our membership manager estimates that adding 10 support staff could raise weekday attendance by between 40 and 55 percentage points.';
+const STAFF_BRIEF = `${LEVEL} ${TARGET} ${STAFF_EFFECT} Option two is a referral scheme for existing members.`;
+function staffDraft(): string {
+  const d = JSON.parse(draft(false)) as Rec;
+  d.options[1] = { label: 'Hire one support staff member', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+    interventions: [{ factor_label: 'Support staff', value: 1, value_kind: 'absolute', unit: 'staff', provenance: 'explicit' }] };
+  d.factors = [{ label: 'Support staff', role: 'controllable', baseline_known: false, baseline_value: 0, unit: 'staff', provenance: 'inferred', plausible_max: 10 }];
+  d.links = [{ from: 'Support staff', to: 'weekday attendance', direction: 'positive', provenance: 'explicit', effect_amount: null,
+    effect_per_source_change: null, effect_provenance: 'explicit', definitional: null, basis: null, source_quote: STAFF_EFFECT }];
+  d.statements.push(statement(STAFF_EFFECT, { kind: 'link', label: 'Support staff', to_label: 'weekday attendance' }, 'effect', 'range', { low: 40, high: 55 }, 'percentage points'));
+  return JSON.stringify(d);
+}
 
 describe('construction: a stated range nobody sized is held, disclosed once against the placeholder, and never asked again', () => {
   it('⭐ the placeholder is said once in the AIE\'s words, against the user\'s whole recorded source', async () => {
@@ -81,6 +99,17 @@ describe('construction: a stated range nobody sized is held, disclosed once agai
     expect([4, 5.5, 7]).not.toContain(link.provenance.natural_effect?.amount);
     expect(userStatementFor(graph, { kind: 'link', id: link.from, to_id: link.to, field: 'effect' })?.statements[0])
       .toMatchObject({ form: 'range', low: 4, high: 7, quote: EFFECT });
+  });
+  it('⛔ B1 (BUDDY-A R1): a range for 10 staff is never said to conflict with Olumi\'s size for 1 staff (the basis is not recorded)', async () => {
+    const result = await buildModelFromBrief('7d7d7d7d-7d7d-4d7d-8d7d-7d7d7d7d7d7e', STAFF_BRIEF, (async (path: string) => (path.endsWith('/graph/register')
+      ? { status: 200, json: { registered: true, model_version: { version_number: 1 } } }
+      : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } })) as never,
+    (async () => ({ text: staffDraft(), status: 'completed' })) as never) as Rec;
+    expect(result.ok, JSON.stringify(result).slice(0, 1500)).toBe(true);
+    const said = (result.not_represented as string[]).filter((s) => s.includes('Support staff" → "weekday attendance'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('which is not taken from the stated "between 40 and 55 percentage points"');
+    expect(said[0]).not.toMatch(/conflicts/);
   });
   it('CONTRAST: with no stated range, the link is asked about as before, and no range disclosure is made', async () => {
     const { result } = await built(false);

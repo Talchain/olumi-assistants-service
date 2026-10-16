@@ -48,7 +48,7 @@ import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
-import { isRelativeChangePercentUnit, readPercentUnit, sameUnit } from './same-unit.js';
+import { isRelativeChangePercentUnit, readPercentUnit } from './same-unit.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
 import type { LabelHeadReading } from './label-head-unit.js';
@@ -3777,19 +3777,18 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
  * ⭐ ITEM 3 (AIE 16 Oct range contract, in its own words): the one disclosure for a link whose effect the USER stated as a
  * range while nobody gave it a size. The user's whole attributed sentence is recorded on the link (construction's statement
  * record); the model holds Olumi's provisional size, which that range does not supply. Said once (`not_represented`), never
- * asked: the range is not requested again, and no figure is chosen from it. "Conflicts" only where the two are read in the
- * same unit and the size lies outside the range; otherwise it is "not taken from" it. Pure.
+ * asked: the range is not requested again, and no figure is chosen from it. Always "is not taken from" it, never "conflicts
+ * with": ⛔ BUDDY-A #3312 B1, a statement records no source-change basis ("adding 10 support staff … between 40 and 55 points"
+ * against Olumi's 5 per 1 staff = 50 per 10, inside it), so no comparison between the two is proven. Pure.
  */
 function statedRangeUnsizedEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const ne = sized.natural_effect;
   const held = ne === undefined ? undefined
     : statementWords(ne.amount, ne.per_source_change, source, target, resolveMagnitudeFrame(source), resolveMagnitudeFrame(target));
-  const outside = ne !== undefined && range.unit !== undefined && sameUnit(range.unit, ne.amount_unit)
-    && (Math.abs(ne.amount) < range.low || Math.abs(ne.amount) > range.high);
   const said = range.reported.trim();
   const reason = `The recorded source for "${source.label}" → "${target.label}" is: "${said}"${/[.!?]$/u.test(said) ? "" : "."} `
     + `The model currently holds Olumi's provisional ${held === undefined ? 'value' : `size (${held})`} for this effect, `
-    + `which ${outside ? 'conflicts with' : 'is not taken from'} the stated "${range.text}". I cannot justify that value from this source.`;
+    + `which is not taken from the stated "${range.text}". I cannot justify that value from this source.`;
   return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_unsized`,
     before: { low: range.low, high: range.high, text: range.text }, after: ne?.amount ?? null, reason, severity: 'warn' } as RepairEntry;
 }

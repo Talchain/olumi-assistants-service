@@ -267,12 +267,12 @@ export function linkEffectStatedRange(model: unknown, brief: string, from: strin
   const text = rangeTextAsWritten(st, low, high);
   const at = st.quote.indexOf(text);
   const between = at >= 0 && /\bbetween\s+$/iu.test(st.quote.slice(0, at)) ? 'between ' : '';
-  return { low, high, text: `${between}${text}`, end: 'whole', reported: st.quote, ...(st.unit !== undefined && st.unit !== '' ? { unit: st.unit } : {}) };
+  return { low, high, text: `${between}${text}`, end: 'whole', reported: st.quote };
 }
 /** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
 export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };
-/** The range the user stated for a link nobody sized, as a WHOLE (never one of its ends as the size), with its own unit. */
-export type StatedWholeRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'whole'; readonly reported: string; readonly unit?: string };
+/** The range the user stated for a link nobody sized, as a WHOLE (never one of its ends as the size), as written. */
+export type StatedWholeRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'whole'; readonly reported: string };
 
 /**
  * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
