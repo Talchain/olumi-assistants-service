@@ -51,7 +51,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { edgeProvenanceDisplay, hasUserStatedSize, settingDisplayOf } from "../provenance/provenance-of.js";
 import { findStatedAmounts, readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
-import { readUnitParts, statedTailParts, type UnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { readUnitParts, sameUnit, statedTailParts, type UnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1872,7 +1872,7 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
       // which invites the user to add it rather than claiming we used it.
       if (q.unit === null || c.declaredUnit === null) return false;
       // A receipt-located count belongs only to the edge that verified it, with its full noun/period unit.
-      if (c.receiptedQuantity === q) return sameCountParts(readUnitParts(q.unit), readUnitParts(c.declaredUnit));
+      if (c.receiptedQuantity === q) return sameUnit(q.unit, c.declaredUnit);
       return sameCountParts(q.countParts, readUnitParts(c.declaredUnit));
     }
     default:
