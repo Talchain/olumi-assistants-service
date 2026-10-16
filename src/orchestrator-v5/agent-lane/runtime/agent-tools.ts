@@ -637,7 +637,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'propose_change',
     description:
-      'Propose ONE change the user asks for in THIS message that no other tool makes. This does NOT change anything: it prepares ONE '
+      'Propose one to six targeted changes the user asks for in THIS message that no other tool makes. Prepare them together on the saved model. This does NOT change anything: it prepares ONE '
       + 'card that quotes their words and says exactly what the change does; only their press makes it. '
       + 'op remove: remove ONE factor or risk, or ONE link between two parts ("remove staff training", "drop that risk"); a factor\u2019s '
       + 'or risk\u2019s links, and any option\u2019s setting of a factor, go with it. '
@@ -650,13 +650,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'op option_timing: when ONE option\u2019s effect would be fully in place, as the user said it ("live about two months after we '
       + 'commit; full effect in about 4 months"): kind option, quote their complete statement, reading_words their own words that state '
       + 'the month(s). It goes through the same card as propose_statement\u2019s lead. '
-      + 'op revise_model: the user corrects or reframes the model AS A WHOLE (a different question, a mechanism they reject, a changed '
-      + 'working assumption such as "60 hours a week, not 40", or a fact such as "we have no funding"): quote their correction from THIS '
+      + 'op revise_model: only an explicit request to rebuild or a different governing question, offered alone. A factual correction uses the existing targeted value or statement tool; it never requires a new draft. Quote the request from THIS '
       + 'message (kind and label: the goal). Olumi prepares ONE revised model from their brief and everything they have said since, on '
       + 'ONE card; only their press replaces the saved model. Never for one part\u2019s figure, and never ask them to repeat what they said. '
       + 'Never a part the user did not ask to change, and never a name or figure of your own.',
     parameters: obj({
-      ops: { type: 'array', minItems: 1, maxItems: 1, items: obj({
+      ops: { type: 'array', minItems: 1, maxItems: 6, items: obj({
         op: { type: 'string', enum: ['remove', 'set_zero', 'rename', 'option_timing', 'revise_model'] },
         kind: { type: 'string', enum: ['goal', 'option', 'factor', 'risk', 'link'] },
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
@@ -1078,6 +1077,8 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: propose_change's revise_model op (demo): ONE revised-draft card from the user's correction to the model as a whole. */
   proposeRevision?(ctx: AgentToolContext, args: { quote: string }): Promise<ToolResult>;
+  /** Several existing correction adapters, prepared on one saved graph and approved as one candidate. */
+  proposeChangeSet?(ctx: AgentToolContext, args: { ops: readonly unknown[] }): Promise<ToolResult>;
   /** Optional: propose_change's rename op (S5): the user's own new name for ONE option, factor or risk. */
   proposeRename?(ctx: AgentToolContext, args: { kind: 'option' | 'factor' | 'risk'; label: string; id?: string; new_label: string; quote: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
@@ -1259,8 +1260,9 @@ async function dispatchToolUnbounded(
         ? caps.proposeOptionStatus(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'An option cannot be taken out or put back here. Nothing was changed.' };
     case 'propose_change': {
-      // ⭐ S5: ONE change per card; each op goes to the existing writer's proposer. An op this tool does not hold is refused.
+      // Singletons keep their existing proposer; a bounded set composes those same adapters before one approved save.
       const ops = Array.isArray(args?.ops) ? args.ops as unknown[] : [];
+      if (ops.length > 1 && caps.proposeChangeSet !== undefined) return caps.proposeChangeSet(ctx, { ops });
       const op = ops.length === 1 && ops[0] !== null && typeof ops[0] === 'object' ? ops[0] as Record<string, unknown> : undefined;
       if ((op?.op === 'remove' || (op?.op === 'set_zero' && op.kind === 'link')) && caps.proposeRemoval !== undefined) {
         return caps.proposeRemoval(ctx, { kind: op.kind, label: op.label, to_label: op.to_label, id: op.id, to_id: op.to_id, quote: op.quote,

@@ -28,6 +28,9 @@ import { resolveSubject } from '../../statement-door/subject.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
+import { applyStructuralRename } from '../../system-events/structural-rename.js';
+import { applyStructuralDelete } from '../../system-events/structural-delete.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 /** What binds a user's statement to one subject beside their words: their canvas selection, Olumi's preceding question, its asks. */
 const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => ({ ...(ctx.grounded_selection !== undefined ? { selection: ctx.grounded_selection } : {}),
   ...(ctx.preceding_assistant_text !== undefined ? { preceding_ask: ctx.preceding_assistant_text } : {}),
@@ -4244,6 +4247,7 @@ export function createAgentCapabilities(
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
       goal_turn_id?: unknown; operation_id?: unknown; bound_turn_ids?: unknown; draft_context_identity?: unknown };
+    const targeted = parent.operations[0]!.op === 'apply_saved_correction';
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -4254,7 +4258,10 @@ export function createAgentCapabilities(
     }
     // The messages the offer bound (read as its context), then the typed goal's turn; any other message refuses.
     const bound = Array.isArray(v.bound_turn_ids) ? v.bound_turn_ids.filter((t): t is string => typeof t === 'string') : [];
-    const { found, flags, contextIdentity } = await unreviewedDraftGate(ctx, before, { bound, goalTurnId: v.goal_turn_id });
+    // Targeted candidates compose canonical adapters on the saved graph. They do not replace the user's other work
+    // with a new draft; own-card approval, both base hashes and whole-postimage readback below still apply.
+    const { found, flags, contextIdentity } = targeted ? { found: [], flags: [], contextIdentity: undefined }
+      : await unreviewedDraftGate(ctx, before, { bound, goalTurnId: v.goal_turn_id });
     if (typeof v.draft_context_identity === 'string') {
       if (contextIdentity !== v.draft_context_identity && found.length === 0) found.push('the saved history or objections changed after this card was offered; ask for an updated card');
     } else if (flags.length > 0) {
@@ -4310,6 +4317,8 @@ export function createAgentCapabilities(
         source_turn_id: registrationTurnId(ctx.scenario_id, v.operation_id) }]
       : [];
     proposals.markApplied(pid, receipts);
+    if (targeted) return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
+      follow_up: 'The changes on your card are saved together in the model.' };
     // A deadline goal is analysed only once its date and the team's time are held: the model's own next step, not a Run. A
     // deadline the user already typed goes on its own card, never asked for again.
     const eventPart = draftedTeamPartOf(after.raw);
@@ -6287,6 +6296,79 @@ export function createAgentCapabilities(
           + 'words, never its id. It reads everything the user has said since their brief, so never ask them to repeat a fact they already '
           + 'stated. Only the user pressing that card replaces the model: never call authorise_change for it yourself.'
           + (draft.flagged === true ? MEANING_FLAG_NOTE : '') };
+    },
+
+    async proposeChangeSet(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const invalid = (detail: string): ToolResult => ({ ok: false, mutated: false, refusal: 'unsupported_change', detail });
+      if (!Array.isArray(args.ops) || args.ops.length < 2 || args.ops.length > 6) {
+        return invalid('A correction card holds two to six targeted changes. Nothing was prepared.');
+      }
+      const before = await readGraph(ctx.scenario_id);
+      if (before === null || before.graph_identity_hash === '') return invalid('The saved model could not be read completely, so nothing was prepared.');
+      let candidate = structuredClone(before.raw);
+      const labels: string[] = [];
+      // Private preparation only: the existing proposers check each request against this candidate. No intermediate
+      // proposal reaches the user's store, and this dispatch has no writer or provider.
+      const held = new ProposalStore();
+      const prepareDispatch: InternalDispatch = async (path) => {
+        if (!path.endsWith('/graph')) throw new Error('Correction preparation cannot dispatch a write');
+        return { status: 200, json: { graph: structuredClone(candidate), brief_text: before.brief_text,
+          graph_hash: computeAnalysisAffectingGraphHash(candidate as never), graph_identity_hash: computeGraphIdentityHash(candidate as never) } };
+      };
+      const prepare = createAgentCapabilities(prepareDispatch, held, undefined, 'full', undefined, { turnAuthority: true });
+      for (const raw of args.ops) {
+        if (!isPlainRecord(raw)) return invalid('One correction could not be read, so nothing was prepared.');
+        let offered: ToolResult;
+        if (raw.op === 'rename') offered = await prepare.proposeRename!(ctx, raw as never);
+        else if (raw.op === 'remove' || (raw.op === 'set_zero' && raw.kind === 'link')) {
+          offered = await prepare.proposeRemoval!(ctx, { ...raw, ...(raw.op === 'set_zero' ? { zero: true } : {}) } as never);
+        } else if (raw.op === 'option_timing' && raw.kind === 'option') {
+          offered = await prepare.proposeStatement!(ctx, { subject: { kind: 'option', label: raw.label, id: raw.id, field: 'lead' },
+            statements: [{ quote: raw.quote, reading_words: raw.reading_words, answering: raw.answering }] });
+        } else return invalid('This correction cannot be composed on the saved model. A whole-model rebuild must be offered separately. Nothing was prepared.');
+        if (!offered.ok || typeof offered.proposal_id !== 'string') return { ...offered, mutated: false };
+        const one = held.get(offered.proposal_id);
+        if (one === undefined || one.operations.length !== 1) return invalid('One correction could not be prepared completely, so nothing was prepared.');
+        const op = one.operations[0]!;
+        const base = computeAnalysisAffectingGraphHash(candidate as never);
+        if (base === null) return invalid('The saved model could not be read completely, so nothing was prepared.');
+        const event = op.op === 'rename_option'
+          ? { kind: 'structural_rename' as const, node_id: op.path, expected_label: String((op.value as { expected_label: string }).expected_label),
+            label: String((op.value as { label: string }).label), base_graph_hash: base }
+          : op.op === 'remove_node' || op.op === 'remove_edge'
+            ? { kind: 'structural_delete' as const, removed_node_ids: op.op === 'remove_node' ? [op.path] : [],
+              removed_edges: op.op === 'remove_edge' ? [{ from: op.path.split('::')[0]!, to: op.path.split('::')[1]! }] : [], base_graph_hash: base }
+            : undefined;
+        if (event !== undefined) {
+          const payload = { kind: 'system_event' as const, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id ?? ctx.request_id,
+            stage: 'frame' as const, event };
+          const params = { payload, requestId: ctx.request_id, persistedGraph: candidate };
+          const result = event.kind === 'structural_rename' ? applyStructuralRename({ ...params, event }) : applyStructuralDelete({ ...params, event });
+          if (result.kind !== 'mutated') return invalid('One correction was refused by the saved model, so nothing was prepared.');
+          candidate = result.mutatedGraph;
+        } else {
+          const member = asMemberOp(op);
+          const approved = member?.op === SET_STATEMENT_RECORD_OP ? approvedStatementRecordOf(member) : undefined;
+          if (approved === undefined) return invalid('This correction has no complete saved-model adapter, so nothing was prepared.');
+          const result = applyStatementRecordEdit(candidate, approved);
+          if (result.kind !== 'mutated') return invalid('The statement could not be prepared on the saved model, so nothing was prepared.');
+          candidate = result.mutatedGraph;
+        }
+        labels.push(one.public_label);
+      }
+      const candidateHash = identityHashOf(computeGraphIdentityHash(candidate as never));
+      if (candidateHash === '') return invalid('The complete correction could not be checked, so nothing was prepared.');
+      const operation_id = constructionOperationId(ctx.scenario_id, `saved_correction:${before.graph_identity_hash}:${candidateHash}`);
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: before.graph_hash,
+        operations: [{ op: 'apply_saved_correction', path: ctx.scenario_id, value: { candidate,
+          base_identity: before.graph_identity_hash, brief_text: before.brief_text, goal_turn_id: ctx.turn_id ?? ctx.request_id, operation_id } }],
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text }, validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Save these changes together:\n${labels.join('\n')}` });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: before.graph_hash,
+        note: 'One card contains all these changes to the saved model. Nothing changes until the user presses it.' };
     },
 
     async proposeRename(ctx, args): Promise<ToolResult> {
@@ -8712,7 +8794,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === RECORD_STATEMENT_OP) return applyStatement(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_COHORT_FORECAST_OP) return applyCohortForecast(ctx, decision.proposal, before);
-      if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
+      if (ops.length === 1 && (ops[0]!.op === 'replace_draft' || ops[0]!.op === 'apply_saved_correction')) return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
