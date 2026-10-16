@@ -148,7 +148,7 @@ describe('the answer door’s reading of a restated range (pure; the proposer re
   it('GREEN today: a figure written BEFORE its range is the user’s, the range carried', () => {
     const q = said('about 5 percentage points to weekday attendance, between 4 and 7.');
     expect(linkEffectTheUserStated(q, fx(5), ends, scope)).toBeNull();
-    expect(centreRangeOfQuote(q, fx(5), ends)).toMatchObject({ low: 4, high: 7, end: 'centre' });
+    expect(centreRangeOfQuote(q, fx(5))).toMatchObject({ low: 4, high: 7, end: 'centre' });
   });
   it('GREEN today: a money range in the NEXT sentence leaves the figure and its range the user’s', () => {
     const q = `${said('about 5 percentage points to weekday attendance, between 4 and 7.')} It costs £5k to £7k a year.`;
