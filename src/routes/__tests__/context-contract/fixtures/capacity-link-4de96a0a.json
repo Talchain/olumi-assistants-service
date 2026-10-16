@@ -1,0 +1,30 @@
+{
+  "to": "additional_specialist_capacity",
+  "from": "additional_specialists",
+  "strength": {
+    "std": 0.39999999999999997,
+    "mean": 0.7999999999999999
+  },
+  "defaulted": true,
+  "provenance": {
+    "source": "brief_extraction",
+    "magnitude": "user_stated",
+    "source_quote": "Each additional specialist resolves about 20 tickets per week, between 10 and 30.",
+    "natural_effect": {
+      "amount": 20,
+      "amount_unit": "tickets per week",
+      "stated_range": {
+        "end": "centre",
+        "low": 10,
+        "high": 30,
+        "text": "between 10 and 30"
+      },
+      "strength_mean": 0.7999999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "specialists"
+    }
+  },
+  "effect_direction": "positive",
+  "exists_probability": 0.8
+}

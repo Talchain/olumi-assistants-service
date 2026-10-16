@@ -6,6 +6,7 @@
  */
 import { expect, vi } from 'vitest';
 import Fastify from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
@@ -163,6 +164,8 @@ export async function capture(turn: Turn, variant: Variant, options: {
   providerReply?: (body: Obj, index: number) => Obj;
   expectedCalls?: number | null;
   evidenceLabel?: string;
+  /** Additional in-memory storage ports; provider/model/projection execution stays real. */
+  storageRoutes?: (app: FastifyInstance) => Promise<void>;
 } = {}): Promise<Witness> {
   vi.resetModules();
   const { config } = await import('../../../config/index.js');
@@ -232,6 +235,7 @@ export async function capture(turn: Turn, variant: Variant, options: {
     expect(object(req.params).scenario).toBe(seed.scenario_id);
     return options.readSnapshot ? options.readSnapshot(structuredClone(snapshot)) : structuredClone(snapshot);
   });
+  await options.storageRoutes?.(app);
   await app.register(agentV1TurnRoute);
   const payload: Obj = { kind: 'message', scenario_id: seed.scenario_id, agent_session_id: `sess_${seed.scenario_id}`, message: 'What does this mean for my decision?' };
   if (turn === 'selected-converse') payload.selected_elements = [{ id: 'monthly_pro_churn', kind: 'factor', label: 'Monthly Pro churn' }];
