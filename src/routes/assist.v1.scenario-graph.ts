@@ -643,6 +643,10 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_run_option_set !== undefined
           ? { analysis_run_option_set: analysis.analysis_run_option_set }
           : {}),
+        // §9: the selected Run's own run_id, input_snapshot and row occurrence — same fact, same gates.
+        ...(analysis.analysis_run_evidence !== undefined
+          ? { analysis_run_evidence: analysis.analysis_run_evidence }
+          : {}),
         // C46 × R3-4: the carriers the selected fact's engine evaluated — same fact, same gates; absent when it records none.
         ...(analysis.analysis_identity_evaluated_node_ids !== undefined
           ? { analysis_identity_evaluated_node_ids: analysis.analysis_identity_evaluated_node_ids }
