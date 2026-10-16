@@ -889,8 +889,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'target. This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
       'authorise_change: show the user the figure, never the id, before asking them to approve. Only the user’s own ' +
       'figure for the goal’s OWN metric: never your estimate, and never a figure they gave for something else (a ' +
-      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.',
+      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.' + " Offer a reading of none (0) only when the user's words say there is none; if they say they don't know or are unsure, the level stays unknown. Ask, or leave it.",
     parameters: obj({
+      source_quote: { type: 'string', maxLength: 400, description: 'The user’s complete statement the level comes from, copied exactly from their own message (never your words or an earlier Run’s result). Required for read_from_words.' },
+      figure_origin: { type: 'string', enum: ['written', 'read_from_words', 'reported'], description: '"written": the statement writes today’s figure ("We do about 80 a week today"). "read_from_words": it writes no figure and says there is none ("We have no funding" → 0; only 0, never another figure). "reported": the user reports a figure from elsewhere (an earlier Run, an estimate or a forecast), not what they see today; it is never recorded as their level.' },
       goal_label: { type: 'string' },
       value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
       unit: { type: 'string', maxLength: 40, description: 'The unit the user stated, if any (e.g. GBP); at most 40 characters, e.g. "small-update equivalents per sprint".' },
@@ -1148,6 +1150,7 @@ export interface AgentCapabilities {
   reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
     goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
+    source_quote?: string; figure_origin?: 'written' | 'read_from_words' | 'reported';
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext, args?: { parts: readonly { part_label: string; value: number; unit: string }[] }): Promise<ToolResult>;
