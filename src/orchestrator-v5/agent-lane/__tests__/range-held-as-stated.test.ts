@@ -178,8 +178,9 @@ describe('the answer door’s reading of a restated range (pure; the proposer re
     expect(linkEffectTheUserStated(q, fx(5), ends, scope)).toBeNull();
     expect(centreRangeOfQuote(q, fx(5))).toMatchObject({ low: 4, high: 7, end: 'centre' });
   });
-  it('NEGATIVE: a range before the figure in ANOTHER clause is not its range ("Between 2 and 4 … leave, and … about 3")', () => {
-    const q = 'Between 2 and 4 members leave each month, and the corporate deal active would add about 3 percentage points to weekday attendance.';
+  it('NEGATIVE: a range before the figure in ANOTHER clause is not its range ("Last year it was between 2 and 4, and … about 3")', () => {
+    // No unit word after the range, so only the clause rule tells it apart (a unitless range in the figure's clause is its own).
+    const q = 'Last year it was between 2 and 4, and the corporate deal active would add about 3 percentage points to weekday attendance.';
     expect(centreRangeOfQuote(q, fx(3))).toBeUndefined();
     expect(linkEffectTheUserStated(q, fx(3), ends, scope)).toBe('unclear_figure');
   });

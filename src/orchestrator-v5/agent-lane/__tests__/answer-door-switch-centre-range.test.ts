@@ -208,7 +208,7 @@ describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their ra
     await landsWithRange('The starter tier would win about 150 new subscribers, between 80 and 250, and it would cost £2k to £3k a month to run.');
   });
   it.each([
-    ['a range BEFORE the figure in another clause (", and")', 'Between 80 and 250 people visit each week, and the starter tier would win about 150 new subscribers.'],
+    ['a range BEFORE the figure in another clause (", and"; no unit word, so only the clause rule tells it apart)', 'Last year it was between 80 and 250, and the starter tier would win about 150 new subscribers.'],
     ['a second range of the same quantity, the range first', 'The starter tier would win between 80 and 250 new subscribers, or 100-300 in a good year, probably about 150.'],
     ['a range in another unit written first, and no range of its own', 'Between 1 and 4 months after launch, the starter tier would win about 150 new subscribers.'],
   ] as const)('KEPT NEGATIVE: %s → asked, nothing proposed or stored', async (_name, said) => {
