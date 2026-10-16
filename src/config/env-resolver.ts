@@ -159,3 +159,11 @@ export function isTest(): boolean {
 export function isLocal(): boolean {
   return getRuntimeEnv() === "local";
 }
+
+/**
+ * The recovery fault seam's staging switch (`orchestrator-v5/agent-lane/recovery-fault-seam.ts`): exactly "on", read live.
+ * Unset everywhere by default; the seam also requires a positively identified staging process, so production never arms it.
+ */
+export function recoveryFaultSeamSwitchOn(): boolean {
+  return process.env.CEE_RECOVERY_FAULT_SEAM === 'on';
+}
