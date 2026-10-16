@@ -51,7 +51,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { edgeProvenanceDisplay, hasUserStatedSize, settingDisplayOf } from "../provenance/provenance-of.js";
 import { findStatedAmounts, readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
-import { readUnitParts, sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { readUnitParts, statedTailParts, type UnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -377,6 +377,10 @@ interface Quantity {
   /** Currency symbol for money, "%" for percent, null otherwise. Load-bearing:
    *  it is what stops a count matching a currency-denominated carrier. */
   readonly unit: string | null;
+  /** Source unit parts are read once, without dropping a denominator beyond the scanner's literal. */
+  readonly countParts?: UnitParts | null;
+  /** Only the existing source limit predicate can establish this role; no carrier infers it. */
+  readonly statedAsLimit?: boolean;
 }
 
 const toNumber = (raw: string): number => Number(raw.replace(/,/g, ""));
@@ -393,15 +397,27 @@ function countUnitWord(literal: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-/** Compound units retain their period/denominator through the existing unit owner. */
-function countUnitOf(q: Quantity): string | null {
-  if (q.unit === null) return null;
-  const amount = findStatedAmounts(q.literal)[0];
-  const tail = amount?.index === 0 ? q.literal.slice(amount.matchedText.length).trim() : '';
-  const parts = readUnitParts(tail);
-  // A rate cannot degrade into its final time word (950 MWh/year is never 950 years).
-  return parts !== null && (parts.period !== null || parts.per !== null)
-    ? tail : q.unit;
+/** Full quantity equality; keep the pre-existing people/person equivalence, never rates versus totals. */
+function sameCountParts(a: UnitParts | null | undefined, b: UnitParts | null | undefined): boolean {
+  if (a == null || b == null) return false;
+  const canonical = (parts: UnitParts): UnitParts => ({ ...parts,
+    noun: parts.noun?.map(word => word === "people" ? "person" : word) ?? null,
+    per: parts.per?.map(word => word === "people" ? "person" : word) ?? null,
+  });
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+/** Read the source, once at extraction: the bounded scanner must not silently truncate its unit. */
+function countPartsAt(text: string, literal: string, at: number): UnitParts | null {
+  const amount = findStatedAmounts(literal)[0];
+  if (amount?.index !== 0) return null;
+  const parts = readUnitParts(literal.slice(amount.matchedText.length).trim().replace(/^-/, ""));
+  if (parts === null) return null;
+  const source = statedTailParts(text, { ...amount, index: at });
+  // Extra source denominator/period is evidence the scanner stopped early, never licence to report a total.
+  if (source !== null && ((source.per !== null && JSON.stringify(source.per) !== JSON.stringify(parts.per))
+    || (source.period !== null && source.period !== parts.period))) return null;
+  return parts;
 }
 
 export function extractStatedQuantities(text: string): Quantity[] {
@@ -424,13 +440,13 @@ export function extractStatedQuantities(text: string): Quantity[] {
       out.push({ literal, at, kind: "period", value: null, mantissa: null, unit: null });
     } else if (g.counted !== undefined && g.cnum !== undefined) {
       const v = toNumber(g.cnum);
-      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal) });
+      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal), countParts: countPartsAt(text, literal, at) });
     } else if (g.hyph !== undefined && g.hnum !== undefined) {
       const v = toNumber(g.hnum);
-      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal) });
+      out.push({ literal, at, kind: "count", value: v, mantissa: v, unit: countUnitWord(literal), countParts: countPartsAt(text, literal, at) });
     }
   }
-  return out;
+  return out.map(q => ({ ...q, statedAsLimit: statesALimitAt(text, q.at) }));
 }
 
 export interface StatedLikelyRange {
@@ -826,6 +842,7 @@ interface ValueCarrier {
    *  the values, so a value can never borrow a unit from elsewhere. */
   readonly unit: unknown;
   readonly values: readonly number[];
+  readonly observed?: true;
 }
 
 /**
@@ -844,12 +861,14 @@ function valueCarriers(node: Record<string, unknown>): ValueCarrier[] {
     if (v !== null && typeof v === "object") carriers.push(v as Record<string, unknown>);
   }
   for (const carrier of carriers) {
-    const values: number[] = [];
     for (const field of VALUE_FIELDS) {
       const v = carrier[field];
-      if (typeof v === "number" && Number.isFinite(v)) values.push(v);
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      // Keep the original field order. An explicit cap is a bound even inside observed_state;
+      // its value/raw fields are readings and cannot substitute for a limit-worded target.
+      out.push({ unit: carrier.unit, values: [v],
+        ...(carrier === node.observed_state && field !== "cap" ? { observed: true as const } : {}) });
     }
-    out.push({ unit: carrier.unit, values });
   }
   /**
    * ⭐ THE GOAL'S OWN THRESHOLD, WHICH NO OTHER CARRIER CAN SEE.
@@ -1258,8 +1277,8 @@ interface Candidate {
   /** The unit string the model declared, verbatim. A count can only match a
    *  carrier that declares the same unit family. */
   readonly declaredUnit: string | null;
-  /** An edge's `natural_effect` figure, not a node's own value: it never certifies the NODE's figure as the user's. */
-  readonly carrier?: "edge_effect";
+  /** Preserve the carrier role: a signed edge effect may match a magnitude; a reading cannot certify a limit. */
+  readonly carrier?: "edge_effect" | "observed_state";
   /** The one place in the brief this figure may match. Absent means anywhere. */
   readonly boundSpan?: { readonly start: number; readonly end: number };
   /** A bare count located by this edge's verified quote and persisted user unit receipt. */
@@ -1442,6 +1461,7 @@ function collectCandidates(graph: Record<string, unknown>, briefText: string): C
             unitKind: kind,
             currencyCode: currencyCode ?? null,
             declaredUnit,
+            ...(carrier.observed ? { carrier: "observed_state" as const } : {}),
           });
         }
       }
@@ -1822,6 +1842,7 @@ function appearsInStrings(q: Quantity, strings: readonly string[]): boolean {
  * mean completely different things.
  */
 function unitCompatible(q: Quantity, c: Candidate): boolean {
+  if (q.statedAsLimit && c.carrier === "observed_state") return false;
   switch (q.kind) {
     case "money": {
       // Same currency, or it is not the user's figure. The trace measured a
@@ -1851,8 +1872,8 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
       // which invites the user to add it rather than claiming we used it.
       if (q.unit === null || c.declaredUnit === null) return false;
       // A receipt-located count belongs only to the edge that verified it, with its full noun/period unit.
-      if (c.receiptedQuantity === q) return sameUnit(q.unit, c.declaredUnit);
-      return sameUnit(countUnitOf(q), c.declaredUnit);
+      if (c.receiptedQuantity === q) return sameCountParts(readUnitParts(q.unit), readUnitParts(c.declaredUnit));
+      return sameCountParts(q.countParts, readUnitParts(c.declaredUnit));
     }
     default:
       // Dates and periods carry no magnitude; they match on text only.
@@ -2280,7 +2301,7 @@ function observedValueOf(graph: Record<string, unknown>, nodeId: string): number
  * genuine observation be withdrawn. It is also not bare numeric equality:
  * `4%`, `4 people` and `£4` share a number and state nothing in common, so the
  * kind must match, money must share its currency symbol, and a count must share
- * its unit family (`sameUnit`, so "month"/"months" agree).
+ * its full unit parts (so "month"/"months" agree).
  *
  * Dates and periods carry no magnitude at all (`value === null`); for those the
  * only honest comparison left is what was written.
@@ -2297,7 +2318,9 @@ function sameStatedQuantity(a: Quantity, b: Quantity): boolean {
   if (a.kind === "money") return a.unit === b.unit;
   if (a.kind === "count") {
     if (a.unit === null || b.unit === null) return a.unit === b.unit;
-    return sameUnit(countUnitOf(a), countUnitOf(b));
+    // Unread units cannot prove two same-magnitude occurrences distinct enough to demote an observation.
+    if (a.countParts == null || b.countParts == null) return true;
+    return sameCountParts(a.countParts, b.countParts);
   }
   return true;
 }
