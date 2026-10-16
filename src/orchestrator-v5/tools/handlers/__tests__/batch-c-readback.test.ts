@@ -30,7 +30,7 @@ import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
-import { goalChanceLicenceForAgent, goalChanceLicenceOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, goalChanceLicenceForAgent, goalChanceLicenceOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
 import { runFactsOf } from '../../../agent-lane/run-facts.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
@@ -622,6 +622,7 @@ describe('readback RESPONSE → LICENCE — the served capacity level brief (at 
       const distinct = { constraint_id: `different:${operator}:${value}`, node_id: goal.id, operator, value, unit: 'tickets per week' };
       const reading = goalChanceLicenceOf(evaluated.result.enrichment, evaluated.reloaded, goal.id, () => false,
         licence.sent_threshold, evaluated.reloaded, { sentRun: evaluated.payload,
+          evaluatedQuestion: deriveRunQuestion({ storedResult: evaluated.result }),
           storedConstraints: [...evaluated.reloaded.goal_constraints, distinct], sentConstraints: evaluated.payload.goal_constraints })!;
       expect(reading.notes?.join(' ')).toContain(`It does not include: ‘Weekly support capacity’ ${words} tickets per week`);
     }

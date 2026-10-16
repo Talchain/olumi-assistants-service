@@ -1,6 +1,6 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
-import { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
-import { deriveRunQuestion } from './run-question.js';
+import { hasRecordedLevelCalculation, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
+import { deriveRunQuestion, withRunQuestionScope, type RunQuestion } from './run-question.js';
 import { goalTargetBasisIn, humanEffectsTimingOf, optionLeadWords, optionTimingAtPeriodEnd, referenceWords } from '../statement-door/fields/goal-timing.js';
 import { periodEndWords } from './goal-target-basis.js';
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
@@ -177,18 +177,27 @@ function withholdUntestedHorizonFigures<E>(response: E, graph: unknown, brief?: 
 export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, storedEnvelope?: unknown): R {
   const block = recordOf(result);
   if (block === undefined) return result;
-  // A request-bound static calculation makes no claim about the held date. A caveat alone cannot grant this permission.
-  if (deriveRunQuestion({ storedResult: block }).scope.status === 'supported_static') return result;
-  const enrichment = recordOf(block.enrichment);
-  const envelope = enrichment ?? block;
-  const warnings = [block.inference_warnings, enrichment?.inference_warnings]
-    .flatMap(value => Array.isArray(value) ? value : []);
-  const missingStaticEvidence = warnings.some(value => {
-    const warning = recordOf(value);
-    return warning?.code === 'GOAL_CHANCE_LICENSED' && Array.isArray(warning.notes) && warning.notes.includes(STATIC_MODEL_SCOPE_NOTE);
-  });
-  if (!missingStaticEvidence && (warnings.some(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
-    || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold')) return result;
+  const question = deriveRunQuestion({ storedResult: block });
+  if (question.scope.status === 'supported_static' || hasRecordedLevelCalculation(block)) return withRecordedRunQuestion(result, question);
+  const envelope = recordOf(block.enrichment) ?? block;
+  const warnings = [block.inference_warnings, envelope.inference_warnings].flatMap(value => Array.isArray(value) ? value : []);
+  if (warnings.some(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
+    || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold') return result;
+  return withChanceReadbackWithheld(result, currentGraph, false);
+}
+
+/** Pure projection of the supplied Run record. No graph/horizon lookup or second scope decision. */
+export function withRecordedRunQuestion<R>(result: R, question: RunQuestion | undefined): R {
+  if (question?.scope.status === 'supported_static') return withRunQuestionScope(result, question);
+  return hasRecordedLevelCalculation(result) ? withChanceReadbackWithheld(result, undefined, true) : result;
+}
+
+/** Existing remove-only projection, shared by the temporal boundary and the evaluated static record. */
+function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, missingStaticEvidence: boolean): R {
+  const block = recordOf(result);
+  if (block === undefined) return result;
+  const enrichment = recordOf(block.enrichment), envelope = enrichment ?? block;
+  const warnings = [block.inference_warnings, enrichment?.inference_warnings].flatMap(value => Array.isArray(value) ? value : []);
   // Legacy blocks can keep their only chance record beside an otherwise empty enrichment. Its ids still need gating.
   const outerDisplays = enrichment === undefined || !Array.isArray(block.inference_warnings) ? []
     : block.inference_warnings.filter(w => ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(recordOf(w)?.code)));

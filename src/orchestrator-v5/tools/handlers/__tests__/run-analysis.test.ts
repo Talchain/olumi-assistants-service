@@ -1,3 +1,4 @@
+// TL06:23: these nine prose expectations retire win-share headlines; numerical maps, scientific guards and all negatives remain.
 /**
  * Slice C2 — run_analysis handler unit tests.
  *
@@ -139,13 +140,9 @@ describe('run_analysis handler — happy path', () => {
 
     const outcome = await handler(makeInvocation());
 
-    // Headline derived from happy fixture: leader = Option A, margin 24pp to
-    // the runner-up, top driver = Price (highest |elasticity| × confidence).
-    // No fragility resolvable (no from_label/to_label/from_node_id/to_node_id
-    // on the lone fragile edge, no graph nodes to map against), so the
-    // driver-with-margin shape (Case B) fires.
+    // This fixture has comparison shares but no licensed goal chance. The share stays in data; completion leads the reply.
     expect(outcome.assistant_text).toBe(
-      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
+      'Ran analysis on your current scenario.',
     );
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
@@ -283,7 +280,7 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      `Option A was supported by 62% of runs of this model because Price is the strongest driver.${REDUCED_SUFFIX}`,
+      `Ran analysis on your current scenario.${REDUCED_SUFFIX}`,
     );
   });
 
@@ -316,7 +313,7 @@ describe('run_analysis handler — reduced-samples disclosure', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
+      'Ran analysis on your current scenario.',
     );
   });
 });
@@ -642,9 +639,9 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('oc_a');
-    // option_comparison shape yields a Case D headline (winner + probability,
-    // no driver/fragility data in this synthetic fixture).
-    expect(outcome.assistant_text).toContain('OC A was supported by');
+    // Comparison source selection is unchanged; a win share is supporting data, never this reply's headline.
+    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario.');
+    expect(fact.result.win_probabilities).toEqual({ 'OC A': 0.8, 'OC B': 0.2 });
   });
 
   it('record with only option_label (no option_id) uses the label as id', async () => {
@@ -875,9 +872,9 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    // Single option at 100% → Case D headline (winner + probability).
+    // A single-option comparison share cannot stand in for a licensed goal chance.
     expect(outcome.assistant_text).toBe(
-      'X was supported by 100% of runs of this model. Run the follow-up checks before treating this as final.',
+      'Ran analysis on your current scenario.',
     );
   });
 
@@ -1158,8 +1155,9 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_only');
-    // Minimal fixture has a single option at 1.0 → Case D headline.
-    expect(outcome.assistant_text).toContain('was supported by 100% of runs of this model');
+    // The single-option share remains exactly1 in data; no licensed goal chance exists.
+    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario.');
+    expect(fact.result.win_probabilities).toEqual({ 'Only Option': 1 });
   });
 
   it('larger fixture (3 options) selects the top-prob option deterministically', async () => {
@@ -1423,7 +1421,7 @@ describe('run_analysis handler — numeric integrity guard', () => {
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toContain('Option A was supported by');
+    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario.');
     expect(findInvalidNumericEvent()).toBeUndefined();
   });
 });
@@ -1529,17 +1527,21 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     };
   }
 
-  it('POSITIVE CONTROL: the same fixture with NO ratified constraint still leads with the option — so the absence assertions below can observe a presence', async () => {
+  it('POSITIVE CONTROL: no ratified constraint retains the comparison permission/data, while the reply does not headline a win share', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(suppressedEnvelope() as unknown as V2RunResponseEnvelope),
       // Default snapshot graph carries NO goal_constraints.
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
-    // The engine's constraint warning alone must NOT change the message when
-    // the user ratified nothing — this is the byte-parity guarantee, and it
-    // is what proves the assertions in the next test are not vacuous.
-    expect(outcome.assistant_text).toMatch(ANY_LEAD_CLAUSE_RE);
+    // Retain a non-vacuous permission/data contrast against the ratified-condition refusal below.
+    // The unlicensed win-share headline is retired in both cases by TL06:23.
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.constraint_verdict?.may_name_leading_option).toBe(true);
+    expect(fact.result.leading_option_id).toBe('opt_a');
+    expect(fact.result.win_probabilities).toEqual({ 'Option A': 0.62, 'Option B': 0.38 });
+    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario.');
     expect(outcome.assistant_text).not.toContain('could not be checked');
   });
 
@@ -1569,6 +1571,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.summary).toBe(outcome.assistant_text);
+    expect(fact.result.constraint_verdict?.may_name_leading_option).toBe(false);
   });
 
   it('S3 — a ratified constraint that PLoT simply never scored (no warning code at all) is still disclosed', async () => {
@@ -1603,14 +1606,14 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 
-  it('negative: no ratified constraints ⇒ byte-identical to the pre-T1 message', async () => {
+  it('negative: no ratified constraints retains the truthful completion without inventing a goal chance', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).toBe(
-      'Option A was supported by 62% of runs of this model because Price is the strongest driver.',
+      'Ran analysis on your current scenario.',
     );
   });
 });

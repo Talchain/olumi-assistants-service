@@ -1,3 +1,4 @@
+import { runChanceHeadline } from '../coaching/run-chance-headline.js';
 /**
  * Default V5 handler validation registry.
  *
@@ -149,6 +150,17 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   // ⭐ The goal-reading tail is REBUILT here from the handler's own graph, never taken from its text (AIQ 5895590866).
   const goalReadingTail = goalReadingTailOf(outcome);
   const legacyFiguresDisclosure = legacyFiguresDisclosureOf(outcome);
+  // Exact existing fact/input reader, not a new prose grammar: neither a made-up figure nor a changed negative is admitted.
+  const source = outcome as { handler_facts?: unknown; __run_graph_snapshot?: unknown };
+  const fact = (Array.isArray(source.handler_facts) ? source.handler_facts : []).find((f: unknown) => f !== null
+    && typeof f === 'object' && 'fact_type' in f && f.fact_type === 'run_analysis' && 'noop' in f && f.noop === false);
+  const recorded = fact !== undefined && 'result' in fact && fact.result !== null && typeof fact.result === 'object' ? fact.result : undefined;
+  const chance = runChanceHeadline(recorded, source.__run_graph_snapshot);
+  if (chance !== null && typeof candidate === 'string' && candidate.startsWith(chance) && recorded !== undefined
+    && 'summary' in recorded && recorded.summary === candidate
+    && (isAllowedRunAnalysisAssistantText(RUN_ANALYSIS_FALLBACK_TEXT + candidate.slice(chance.length), goalReadingTail, legacyFiguresDisclosure)
+      || isAllowedRunAnalysisAssistantText(candidate.slice(chance.length).trimStart(), goalReadingTail, legacyFiguresDisclosure))) return candidate;
+
   if (legacyFiguresDisclosure === '') {
     if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {
       return candidate as string;

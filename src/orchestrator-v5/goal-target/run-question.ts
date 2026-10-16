@@ -1,3 +1,4 @@
+import { goalKindOf } from './goal-kind.js';
 /** Read-only question/scope projection owned by the goal-chance licence. No store or output-statistic inference. */
 import type { GoalRecord } from './goal-record.js';
 import type { RunEvidence } from '../agent-lane/run-evidence.js';
@@ -73,6 +74,12 @@ export function readRunOmissionScope(result: unknown): RunOmissionScope | undefi
 const questionText = (v: unknown): string | undefined => typeof v === 'string' && v.trim() !== '' ? v : undefined;
 const questionNumber = (v: unknown): number | undefined => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 
+/** Compatibility inspection uses this record's same input kernel; never a separate licence authority. */
+export function assessRunQuestionScope(savedGraph: unknown, dispatchedRequest: unknown, goalId: string): RunQuestionScope {
+  const scope = assessEvaluatedQuestionScope(savedGraph, dispatchedRequest, goalId, goalKindOf(savedGraph) === 'level');
+  return isRec(dispatchedRequest) ? { ...scope, dispatched_input_digest: sentDigest(dispatchedRequest) } : scope;
+}
+
 /**
  * Projection of ONE saved Run. No current graph argument exists deliberately. A historical model is usable only when its
  * immutable revision equals this occurrence's evaluated revision. A digest is not a recoverable request; missing fields
@@ -83,8 +90,6 @@ export function deriveRunQuestion(input: {
   readonly storedResult?: unknown;
   readonly historicalModel?: { readonly revision: number; readonly graph: unknown };
   readonly dispatchedRequest?: unknown;
-  /** The licence owner’s verified capability assessment of these exact inputs, not an output-based inference. */
-  readonly evaluatedScope?: RunQuestionScope;
 }): RunQuestion {
   const evidence = input.runEvidence;
   const suppliedSnapshot = evidence?.inputSnapshot === undefined && isRec(input.storedResult)
@@ -109,7 +114,6 @@ export function deriveRunQuestion(input: {
   const recordedAsked: RunQuestionSide | null = recorded === undefined ? null : {
     quantity: { node_id: recorded.goal_id, ...(recorded.label === undefined ? {} : { label: recorded.label }) },
     target: recorded.target, comparator: recorded.comparator, unit: recorded.unit, frame: 'level',
-    ...(recorded.by_date === undefined ? {} : { horizon: { as_stated: recorded.by_date } }),
   };
   const asked = saved === undefined || goalId === undefined ? recordedAsked : askedQuestionOf(saved, goalId);
   // The final request is usable only when the selected Run's own existing digest binds it.
@@ -123,13 +127,13 @@ export function deriveRunQuestion(input: {
     target: questionNumber(goal.target_raw), unit: questionText(goal.unit), frame: questionText(goal.frame), comparator: questionText(goal.operator),
     option_ids: (Array.isArray(snapshot?.options) ? snapshot.options.filter(isRec) : []).flatMap(o => typeof o.option_id === 'string' ? [o.option_id] : []),
   });
-  // The stored licence can attest the calculation, but cannot recover an original horizon/reference it never retained.
+  // Retained evaluated inputs attest the calculation; they cannot recover an original horizon/reference never retained.
   if (saved === undefined) missing.push('asked_horizon_and_reference_at_evaluated_revision', 'asked_options_at_evaluated_revision');
   if (exact === null && recorded === undefined) missing.push('dispatched_goal_threshold', 'dispatched_goal_baseline');
   const scope: RunQuestionScope = identityMismatch || runId === null
     ? { status: 'unverified' as const, can_show_goal_chance: false, reasons: [identityMismatch ? 'selected_run_identity_mismatch' : 'selected_run_identity_not_recorded'] }
-    : saved !== undefined && goalId !== undefined && exact !== null ? (input.evaluatedScope !== undefined && input.evaluatedScope.dispatched_input_digest === snapshot?.sent_digest ? input.evaluatedScope
-      : assessEvaluatedQuestionScope(saved, input.dispatchedRequest, goalId))
+    : goalId !== undefined && exact !== null ? { ...assessRunQuestionScope(saved ?? (input.dispatchedRequest as Rec).graph, input.dispatchedRequest, goalId),
+      dispatched_input_digest: questionText(snapshot?.sent_digest) }
     : recorded !== undefined ? { status: 'supported_static' as const, can_show_goal_chance: true, reasons: [], note: STATIC_MODEL_SCOPE_NOTE, capability: STATIC_LEVEL_CAPABILITY,
       dispatched_input_digest: questionText(snapshot?.sent_digest) }
     : { status: 'unverified' as const, can_show_goal_chance: false, reasons: ['evaluated_question_not_fully_recorded'] };
@@ -147,3 +151,23 @@ export function deriveRunQuestion(input: {
       dispatched_input_digest: questionText(snapshot?.sent_digest) ?? null } };
 }
 
+/** Project the one evaluated record into existing licence text. Never grants a figure or changes stored bytes. */
+export function withRunQuestionScope<R>(result: R, question: RunQuestion | undefined): R {
+  if (!isRec(result) || question?.scope.status !== 'supported_static') return result;
+  const q = question.calculated;
+  if (q === null) return result;
+  const boundWords: Readonly<Record<string, string>> = { '>=': 'at least', '>': 'above', '<=': 'at most', '<': 'below' };
+  const words = q.quantity.label !== undefined && q.target !== undefined && q.unit !== undefined && q.comparator !== undefined
+    ? `chance of ‘${q.quantity.label}’ being ${boundWords[q.comparator]} ${q.target.toLocaleString('en-GB')}${q.unit === '%' ? '%' : ` ${q.unit}`}` : undefined;
+  const project = (warnings: unknown): unknown => !Array.isArray(warnings) ? warnings : warnings.map(w => {
+    if (!isRec(w) || w.code !== 'GOAL_CHANCE_LICENSED' || (Array.isArray(w.notes) && w.notes.includes(STATIC_MODEL_SCOPE_NOTE))) return w;
+    return { ...w, notes: [...(Array.isArray(w.notes) ? w.notes : []), STATIC_MODEL_SCOPE_NOTE],
+      ...(typeof w.chance_words === 'string' || words === undefined ? {} : { chance_words: words }) };
+  });
+  const enrichment = isRec(result.enrichment) ? result.enrichment : undefined;
+  const outer = project(result.inference_warnings), inner = project(enrichment?.inference_warnings);
+  const changed = (old: unknown, next: unknown): boolean => Array.isArray(old) && Array.isArray(next) && old.some((w, i) => w !== next[i]);
+  if (!changed(result.inference_warnings, outer) && !changed(enrichment?.inference_warnings, inner)) return result;
+  return { ...result, ...(Array.isArray(outer) ? { inference_warnings: outer } : {}),
+    ...(enrichment === undefined ? {} : { enrichment: { ...enrichment, ...(Array.isArray(inner) ? { inference_warnings: inner } : {}) } }) };
+}
