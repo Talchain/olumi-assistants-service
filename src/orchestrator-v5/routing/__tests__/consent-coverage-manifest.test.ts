@@ -233,7 +233,16 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
       && mentionsInternalOptionWriter(readFileSync(p, 'utf8')));
     expect(consumers.map(p => p.slice(SRC_ROOT.length))).toEqual([
       'orchestrator-v5/system-events/dispatch.ts',
+      // ADMITTED (DL-3 16 Oct, S5/G4): a PREPARE-ONLY second consumer. It runs the one shared
+      // preparation before a card is offered and never reaches the applier, so it is not a second
+      // entry seam onto the writer. Pinned below to that single import; any other use REDs here.
+      'orchestrator-v5/system-events/option-intervention-preoffer.ts',
     ]);
+    const preoffer = readFileSync(join(SRC_ROOT, 'orchestrator-v5/system-events/option-intervention-preoffer.ts'), 'utf8');
+    expect(preoffer.match(/^import .*$/gm)).toEqual([
+      "import { prepareOptionInterventionBatchExecution } from './option-intervention-edit.js';",
+    ]);
+    expect(preoffer).not.toMatch(/\bexecuteOptionIntervention(Edit|BatchExecution|Batch)\b|commitOptionLevels/);
   });
 
   it.each([
