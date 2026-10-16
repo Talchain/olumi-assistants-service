@@ -55,6 +55,7 @@ interface StoreState {
   rows: Map<string, string | null>; // scenario_id → owner user_id (null = guest)
   throwOnEnsure: Error | null;
   throwOnAppend: Error | null;
+  appends: number;
 }
 const storeState: StoreState = {
   rows: new Map([
@@ -63,6 +64,7 @@ const storeState: StoreState = {
   ]),
   throwOnEnsure: null,
   throwOnAppend: null,
+  appends: 0,
 };
 
 // Locally-defined StateCommitFailedError that parrots the real one's shape.
@@ -97,6 +99,7 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
           return owner === undefined ? null : { userId: owner, graph: null, briefText: null, analysisInvalidatedAt: null };
         },
         append: async () => {
+          storeState.appends += 1;
           if (storeState.throwOnAppend) throw storeState.throwOnAppend;
           return { id: 'mock-row-id' };
         },
@@ -176,18 +179,16 @@ let events: Event[] = [];
 
 function buildRequest(scenarioId: string, userId?: string) {
   return {
-    kind: 'message' as const,
+    kind: 'system_event' as const,
     turn_id: 'a1111111-1111-4111-8111-111111111111',
     scenario_id: scenarioId,
-    message: 'pre-flight test message',
-    turn_class: 'frame' as const,
+    event: { kind: 'patch_accepted', patch_id: 'preflight-contract' },
     // ROADMAP 1.148 C4: stage 'analyse', NOT 'frame'. The frame-stage
     // no-brief guard (PR #203/#484) answers brief-less frame turns
     // deterministically BEFORE TurnExecutor; the pre-flight→TurnExecutor
     // sequencing this suite proves needs the turn to actually reach
     // TurnExecutor (turn_executor.started assertions).
     stage: 'analyse' as const,
-    source: 'composer' as const,
     ...(userId !== undefined ? { user_id: userId } : {}),
   };
 }
@@ -231,6 +232,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     events = [];
     storeState.throwOnEnsure = null;
     storeState.throwOnAppend = null;
+    storeState.appends = 0;
     // Reset rows to the baseline between tests so the "creates on-demand"
     // test below doesn't accumulate state across runs.
     storeState.rows = new Map([
@@ -249,7 +251,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     expect(res.statusCode).toBe(200);
     // RPC stub inserted the row.
     expect(storeState.rows.get(SCENARIO_NEW)).toBe(USER_CALLER);
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+    expect(storeState.appends).toBe(1);
   });
 
   it('passes pre-flight for an existing scenario owned by the caller (200)', async () => {
@@ -259,7 +261,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
       payload: buildRequest(SCENARIO_OWNED_BY_CALLER, USER_CALLER),
     });
     expect(res.statusCode).toBe(200);
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+    expect(storeState.appends).toBe(1);
   });
 
   it('rejects a cross-tenant attempt (existing scenario, different owner) with 422', async () => {
@@ -281,7 +283,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
       scenario_id: SCENARIO_OWNED_BY_OTHER,
     });
     // Pre-flight ran BEFORE TurnExecutor — no turn_executor events.
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(0);
+    expect(storeState.appends).toBe(0);
   });
 
   it('leak-guard: cross-tenant 422 details contain ONLY reason + scenario_id (no owner info)', async () => {
@@ -317,7 +319,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
       payload: buildRequest(SCENARIO_GUEST),
     });
     expect(res.statusCode).toBe(200);
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+    expect(storeState.appends).toBe(1);
     // The stub should have recorded the guest scenario with null user_id.
     expect(storeState.rows.get(SCENARIO_GUEST)).toBeNull();
   });
@@ -362,7 +364,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     expect(parsed.validator).toBe('scenario_preflight');
     expect(parsed.details).toMatchObject({ reason: 'scenario_ownership_unverifiable' });
     // The refusal must happen BEFORE any execution — no LLM spend, no writes.
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(0);
+    expect(storeState.appends).toBe(0);
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -446,14 +448,14 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     expect(parsed.validator).toBe('turn_commit');
     expect(parsed.retryable).toBe(true);
     expect(parsed.details).toMatchObject({
-      reason: 'state_commit_failed_or_turn_runtime_failure',
-      failure_type: 'INTERNAL_ERROR',
+      reason: 'system_event_commit_failed',
+      event_kind: 'patch_accepted',
     });
     // The response is a typed envelope, not an empty body.
     expect(Object.keys(body).length).toBeGreaterThan(0);
     expect(body).toHaveProperty('request_id');
     expect(body).toHaveProperty('error');
     // TurnExecutor DID start (preflight was skipped for want of user_id).
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+    expect(storeState.appends).toBe(1);
   });
 });

@@ -841,8 +841,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
   });
 
   it('DL condition (1): cold stamped Run stays stale after real press and the proposed Run loads the stored attestation', async () => {
-    const { createRunAnalysisTool } = await import('../../replacement/run-analysis-tool.js');
-    const { projectTurnContext } = await import('../../replacement/turn-context-view.js');
+    const { deriveAnalysisFreshness } = await import('../../context/freshness.js');
     const { reconcileScenarioAnalysisFacts } = await import('../../context/reconcile-scenario-analysis-facts.js');
     const { RUN_ANALYSIS_PROJECTION_KEY, ANALYSIS_PROJECTION_VERSION } = await import('../../context/graph-identity.js');
     const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
@@ -873,11 +872,11 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     expect(set.status).toBe('complete');
     const context = { session_id: SCENARIO, prior_turns: [], prior_facts: [], prior_facts_read_ok: true,
       scenario_analysis_fact_set: set, prior_facts_with_turn: [] };
-    const cold = projectTurnContext(context as never, hashAfter, after as never);
-    const proposed = await createRunAnalysisTool({ getGraph: () => after as never,
-      getAnalysis: () => cold.snapshot }).execute({});
-    expect(proposed, JSON.stringify({ freshness: cold.freshness, runOutcome: proposed })).toMatchObject({ type: 'proposed' });
-    expect(cold.freshness).toMatchObject({ freshness: 'stale', reason: 'graph_hash_diverged' });
+    // The retired replacement wrapper is gone; retain the cold-Run stale assertion at its surviving authority.
+    const cold = deriveAnalysisFreshness([run] as never, hashAfter, undefined, {
+      currentGraph: after, priorFactsReadOk: true, priorFactsWithTurn: [],
+    });
+    expect(cold).toMatchObject({ freshness: 'stale', reason: 'graph_hash_diverged' });
     expect(hashAfter).not.toBe(hashBefore);
     const runTransport = vi.fn(async () => JSON.parse(readFileSync(new URL(
       '../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url), 'utf8')));
@@ -1051,7 +1050,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
 // Compare each real entry with preparation disabled in the same process.
 // Fresh worlds and fixed time keep the only intervention the preparation export.
 const parityStates = ['ok_present', 'ok_absent', 'failed'] as const;
-const parityPaths = ['route-request', 'executor-provisional-proposal', 'executor-post-handler',
+const parityPaths = ['executor-provisional-proposal', 'executor-post-handler',
   'draft-post-draft', 'edit-candidate', 'edit-early-question'] as const;
 type ParityPath = typeof parityPaths[number];
 type ParityState = typeof parityStates[number];
@@ -1117,17 +1116,7 @@ async function runBasisFreePath(path: ParityPath, state: ParityState) {
     blocks: r.response?.blocks?.map((b: Rec) => b.type) ?? [],
     stage: r.response?.stage_indicator ?? null });
   try {
-    if (path === 'route-request') {
-      const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
-      const app = Fastify(); await ceeOrchestratorRouteV2(app);
-      try {
-        const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn',
-          payload: { ...payload('Add a risk for supplier delays affecting the launch'), turn_class: 'decide', graph_state: g,
-            analysis_state: { analysis_status: 'completed', meta: { graph_hash_at_run: realHash(g as never) } } } });
-        const body = result.json();
-        outcome = { status: result.statusCode, ...summarise({ response: body }), error: body.error ?? null };
-      } finally { await app.close(); }
-    } else if (path.startsWith('executor')) {
+    if (path.startsWith('executor')) {
       const handler = vi.fn(async () => ({ assistant_text: 'Would you like me to add reliability as a factor?',
         handler_facts: [], llm_calls_used: 0, mutated_graph: after }));
       const routedInput = { intent_class: 'execute', action: { handler_id: 'explain_from_structure',
@@ -1167,7 +1156,6 @@ async function runBasisFreePath(path: ParityPath, state: ParityState) {
   }
   expect(traces.length, 'real hash entry must be witnessed').toBeGreaterThan(0);
   if (path === 'executor-post-handler') expect(outcome.handlerCalls, JSON.stringify(outcome)).toBe(1);
-  if (path === 'route-request') expect(traces.some(t => t.caller.includes('route-v2'))).toBe(true);
   return { traces, identityTraces, reads, outcome, candidates: {
     request: JSON.stringify(g), handler: JSON.stringify(after), returned: JSON.stringify(returnedGraph),
   }, writes: w.writes.map(write => ({ graph: JSON.stringify(write.graph ?? null),
@@ -1193,9 +1181,9 @@ describe('P0 in-run differential without horizon_basis', () => {
 });
 
 describe('P0 r4 regression pins outside preparation', () => {
-  it.each(['route-request', 'executor-provisional-proposal'] as const)('Z1 %s hashes the non-null request carrier after a failed read', async path => {
+  it.each(['executor-provisional-proposal'] as const)('Z1 %s hashes the non-null request carrier after a failed read', async path => {
     const result = await runBasisFreePath(path, 'failed');
-    const caller = path === 'route-request' ? 'route-v2' : 'turn-executor';
+    const caller = 'turn-executor';
     expect(result.reads).toContain('loadGraphAndBriefText');
     expect(result.traces).toContainEqual(expect.objectContaining({
       caller: expect.stringContaining(caller), nonNull: true,
@@ -1226,7 +1214,7 @@ describe('P0 r4 regression pins outside preparation', () => {
 // Unavailable provenance affects basis bytes only; existing store failures
 // remain owned by staging's dispatch/commit logic.
 describe('R5 unavailable read drops basis without nulling hash candidates', () => {
-  it.each(['route-request', 'executor-proposal', 'edit-early-question'])('%s retains its graph and hashes after dropping submitted basis', async path => {
+  it.each(['executor-proposal', 'edit-early-question'])('%s retains its graph and hashes after dropping submitted basis', async path => {
     const g = attested(), w = world(null);
     activeStore = new Proxy(w.store, { get(target, key) {
       if (key === 'loadGraph' || key === 'loadGraphAndBriefText') {
@@ -1246,16 +1234,7 @@ describe('R5 unavailable read drops basis without nulling hash candidates', () =
       return hash;
     });
     try {
-      if (path === 'route-request') {
-        const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
-        const app = Fastify(); await ceeOrchestratorRouteV2(app);
-        try {
-          await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
-            ...payload('Add a risk for supplier delays affecting the launch'), turn_class: 'decide', graph_state: g,
-            analysis_state: { analysis_status: 'completed', meta: { graph_hash_at_run: realHash(seed() as never) } },
-          } });
-        } finally { await app.close(); }
-      } else if (path === 'executor-proposal') {
+      if (path === 'executor-proposal') {
         await runTurnExecutor(payload('Any thoughts?'), 'r5-drop', { graphState: g as never,
           routingAdapter: { chatWithTools: vi.fn(async () => ({ content: [{ type: 'text', text: 'Would you like me to add reliability as a factor?' }],
             stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 0 }, model: 'test-double', latencyMs: 0 })) } as never,

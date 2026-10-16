@@ -1,7 +1,6 @@
 /** Source-only ratchet; no doubles or provider calls. Target: ONE assembler.
  * Two guards, both scoped so unrelated PRs never trip them: (1) the explicit manifest may only shrink (≤ census n);
- * (2) a NEW file that sends a model request must be classified. Known census gap (fixture): widen-draft.ts and
- * open-frame-intake.ts send model requests but are not yet mapped to a manifest assembler.
+ * (2) a NEW file that sends a model request must be classified. The transport census is classified completely.
  */
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -22,8 +21,6 @@ export const ASSEMBLERS = [
   { file: `${base}context/context-pack-assembler.ts`, symbol: 'projectAnalysis' },
   { file: `${base}context/model-facing-context-pack.ts`, symbol: 'projectModelFacingContextPack' },
   { file: 'src/orchestrator/tools/edit-graph.ts', symbol: 'handleEditGraph' },
-  { file: `${base}replacement/turn-context-view.ts`, symbol: 'projectTurnContext' },
-  { file: `${base}replacement/read-tools.ts`, symbol: 'createReadResultsTool' },
   { file: `${base}coaching/decision-review-enricher.ts`, symbol: 'buildInvokeInputForTests', local: 'buildInvokeInput' },
   { file: 'src/cee/decision-review/invoke.ts', symbol: 'buildDecisionReviewUserMessage' },
   { file: 'src/cee/decision-review/decompose.ts', symbol: 'buildSlices' },
@@ -34,8 +31,9 @@ export const ASSEMBLERS = [
   { file: `${base}agent-lane/runtime/build-model.ts`, symbol: 'buildModelFromBrief' },
 ] as const;
 // 17 → 22: added build/draft specialists A18–A22; 22 → 21: #2900 removed A6. Target: 1.
+// 21 → 19: C1 deleted the replacement projection and read-results assembler.
 // #2900's opt-in getCanonicalState section remains A1 (its fact projection remains A3).
-const BASELINE_N = 21;
+const BASELINE_N = 19;
 interface MappedTransport { assembler?: string; kind?: string; via?: string; reason: string }
 const known = JSON.parse(readFileSync(new URL('./fixtures/source-inventory.json', import.meta.url), 'utf8')) as {
   transport_files: string[]; infrastructure: string[]; unclassified_census_gap: string[]; mapped: Record<string, MappedTransport>;

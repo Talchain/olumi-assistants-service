@@ -53,9 +53,9 @@ const editFact = { fact_type: 'edit_graph', fact_version: 1, noop: false, result
 const scenarios = ['failed', 'capped', 'durable-edit', 'hot-edit', 'db-chronology', 'unusable-rerun', 'noop', 'refused', 'non-rerun', 'healthy'] as const;
 
 describe('complete freshness evidence at every dispatch/recovery derivation', () => {
-  it('enumerates all six edit derivations, both route derivations, both chip callers and the writer authority', () => {
+  it('enumerates all six edit derivations, the retained route derivation, both chip callers and the writer authority', () => {
     expect(calls(edit, 'deriveAnalysisFreshness')).toHaveLength(6);
-    expect(calls(route, 'deriveAnalysisFreshness')).toHaveLength(2);
+    expect(calls(route, 'deriveAnalysisFreshness')).toHaveLength(1);
     expect(calls(chip, 'deriveAnalysisFreshness')).toHaveLength(1);
     expect(calls(chip, 'deriveChipClickFreshness')).toHaveLength(2);
     expect(calls(writers, 'deriveAnalysisFreshness')).toHaveLength(2); // authority + explicit fail-weak sentinel

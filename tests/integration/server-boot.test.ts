@@ -118,7 +118,7 @@ const VALID_PAYLOAD = {
 // flag-gated ON/OFF pair (which also self-simulated the server conditional
 // in-test) collapses to the single unconditional registration case.
 describe('server-boot: /orchestrate/v2/turn registration is unconditional', () => {
-  it('route registered → POST succeeds (200)', async () => {
+  it('route registered → retired free text returns the exact 410', async () => {
     const app = Fastify();
     // Mirrors src/server.ts: registration is unconditional.
     await installOwnershipHarness(app);
@@ -130,7 +130,8 @@ describe('server-boot: /orchestrate/v2/turn registration is unconditional', () =
       url: '/orchestrate/v2/turn',
       payload: VALID_PAYLOAD,
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(410);
+    expect(res.json().details.reason).toBe('conventional_conversation_retired');
     await app.close();
   });
 
@@ -148,7 +149,8 @@ describe('server-boot: /orchestrate/v2/turn registration is unconditional', () =
       // POSITIVE assertion (a not-404 pin proved vacuous — see mock note
       // above): the mocked adapter/session make a valid turn SUCCEED, so
       // registration must yield 200; an unregistered route yields 404.
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(410);
+    expect(res.json().details.reason).toBe('conventional_conversation_retired');
     } finally {
       await app.close();
       vi.unstubAllEnvs();

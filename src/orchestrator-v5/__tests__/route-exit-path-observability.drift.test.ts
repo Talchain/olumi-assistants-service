@@ -182,7 +182,7 @@ describe('route exit-path observability — every 200-OK turn names its dispatch
   it('the enumerator SEES the route exits (or every assertion below is vacuous)', () => {
     // Trap 13. A floor, never a count — the population grows, and a count here
     // would be the mirror this guard exists to prevent.
-    expect(calls.length).toBeGreaterThanOrEqual(15);
+    expect(calls.length).toBe(6);
   });
 
   it('the derived vocabulary is non-trivial (the union parser is not silently truncating)', () => {

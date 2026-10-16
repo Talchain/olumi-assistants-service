@@ -110,7 +110,7 @@ describe('2.1264 — a graph-bearing exit must thread a freshness derivation', (
     // Trap 13: an absence claim over an empty population is not a finding.
     // Floor, not an exact count — a count would be the mirror this guard exists
     // to avoid, and the number moves whenever a dispatch family is added.
-    expect(calls.length).toBeGreaterThanOrEqual(15);
+    expect(calls.length).toBe(6);
   });
 
   it('the enumerator sees BOTH classes — graph-less and graph-bearing exits exist', () => {

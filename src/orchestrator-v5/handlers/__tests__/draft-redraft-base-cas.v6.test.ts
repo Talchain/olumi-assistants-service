@@ -274,20 +274,18 @@ describe('Addendum 17 — append-v6 coverage', () => {
       expect(h.persisted).toEqual(BASE);
     });
 
-    it('RED: real route sends the existing stale-base 409; cold read in a fresh app reads the user model', async () => {
-      const h = harness(BASE, state => { state.persisted = structuredClone(USER_MODEL); });
+    it('the retired draft route returns 410; cold read in a fresh app reads the user model', async () => {
+      const h = harness(USER_MODEL);
       const app = Fastify();
       await ceeOrchestratorRouteV2(app);
       try {
         const refused = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: PAYLOAD });
-        expect(refused.statusCode).toBe(409);
+        expect(refused.statusCode).toBe(410);
         const body = refused.json();
         expect(BoundaryErrorSchema.safeParse(body).success).toBe(true);
-        expect(body).toMatchObject({ error: 'GRAPH_DIVERGED', retryable: false, details: {
-          reason: 'graph_write_conflict', recovery_action: 'refresh_and_reconfirm',
-          conflict_category: 'rpc_cas_conflict', expected_base_graph_hash: identity(BASE),
-        } });
-        expect(h.attempts).toHaveLength(1);
+        expect(body).toMatchObject({ error: 'INGRESS_CONTRACT_VIOLATION', retryable: false,
+        details: { reason: 'conventional_conversation_retired' } });
+        expect(h.attempts).toHaveLength(0);
         expect(h.committed).toHaveLength(0);
       } finally {
         await app.close();

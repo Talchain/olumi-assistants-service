@@ -258,28 +258,28 @@ describe('route-v2 — add-option intent-chip door + exit_path (R2)', () => {
   // back to `|| isAddOptionIntentChip` → these two go RED (the executor claims
   // the turn away from the edit lane, dispatchEditGraph never runs). ──
 
-  it('(F1-gm_off) a GM-off add_option chip regains the edit lane (NOT stranded at the executor)', async () => {
+  it('(F1-gm_off) a GM-off add_option chip is refused without reopening the retired edit lane', async () => {
     gmHolder.mode = 'off';
     const { status } = await post(app, addOptionPayload(VALID_PARAMS));
-    expect(status).toBe(200);
+    expect(status).toBe(422);
     // The arm fell through for gm_off …
     expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'fell_through:gm_off')).toBe(true);
     // … to the free-text EDIT lane (its only working fallback — the executor has
     // no add-option capability), NOT the executor door.
-    expect(dispatchEditGraphMock).toHaveBeenCalled();
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(0);
     expect(runTurnExecutorMock).not.toHaveBeenCalled();
   });
 
-  it('(F1-malformed) a malformed-spec add_option chip regains the edit lane (NOT stranded at the executor)', async () => {
+  it('(F1-malformed) a malformed-spec add_option chip is refused without reopening the retired edit lane', async () => {
     // GM live, but the parameters cannot build a transaction → skip with a
     // built.reason (NOT not_held) → edit-lane fallback.
     const { status } = await post(app, addOptionPayload({ label: 'nope' }));
-    expect(status).toBe(200);
+    expect(status).toBe(422);
     const events = addOptionEvents(emitSpy);
     expect(
       events.some((e) => String(e.outcome).startsWith('fell_through') && e.outcome !== 'fell_through:not_held'),
     ).toBe(true);
-    expect(dispatchEditGraphMock).toHaveBeenCalled();
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(0);
     expect(runTurnExecutorMock).not.toHaveBeenCalled();
   });
 

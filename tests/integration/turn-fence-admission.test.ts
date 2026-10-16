@@ -86,13 +86,11 @@ const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2
 
 function validTurn(turnId: string) {
   return {
-    kind: 'message' as const,
+    kind: 'system_event' as const,
     turn_id: turnId,
     scenario_id: SCENARIO,
-    message: 'admission test message',
-    turn_class: 'frame' as const,
+    event: { kind: 'patch_accepted', patch_id: 'admission-contract' },
     stage: 'analyse' as const,
-    source: 'composer' as const,
   };
 }
 

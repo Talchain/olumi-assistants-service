@@ -129,7 +129,6 @@ const SRC_ROOT = resolve(HERE, '../..');
  */
 const SCANNED_FILES: Readonly<Record<string, string>> = {
   'turn-executor.ts': TURN_EXECUTOR,
-  'route-v2.ts': resolve(HERE, '../../orchestrator/route-v2.ts'),
   'handlers/chip-click-dispatch.ts': resolve(HERE, '../handlers/chip-click-dispatch.ts'),
   // ROADMAP 1.276 — the two files `derivedComposeFileDomain()` surfaced on its
   // first run and that nothing had ever named. Both now carry a DERIVED stance;
@@ -575,16 +574,7 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
  * under a register entry still claiming it is safe (CLAUDE.md trap #14 — the
  * honest label overwritten by a false one).
  */
-const ROUTE_V2_SITES: Readonly<Record<string, RegisteredSite>> = {
-  EDIT_GRAPH_RECOVERY_TEXT: {
-    stance: 'structural',
-    why: "Module constant (route-v2.ts:1553), exported, zero interpolation: \"I can see you want to update the model, but I couldn't access the current graph…\". An edit-graph recovery notice — it never reaches an analysis, and there is no expression in it to carry one.",
-  },
-  NO_LIVE_PROPOSAL_TEXT: {
-    stance: 'structural',
-    why: 'Module constant (route-v2.ts:1853), zero interpolation: "I don\'t have a pending suggested update to apply…". Fires when no live proposal exists; names no option and makes no comparison.',
-  },
-};
+
 
 /**
  * `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — brought into scope
@@ -983,7 +973,6 @@ const GOAL_TARGET_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
 
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
-  'route-v2.ts': ROUTE_V2_SITES,
   'handlers/chip-click-dispatch.ts': CHIP_CLICK_DISPATCH_SITES,
   'compose/edit-clarify-response.ts': EDIT_CLARIFY_SITES,
   'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
@@ -1112,18 +1101,6 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
         'means a site was added or removed under an ALREADY-REGISTERED expression ' +
         "name, which would otherwise inherit that name's stance silently.)",
     ).toEqual(registered);
-  });
-
-  it('the scan really covers route-v2.ts, and route-v2.ts really has sites', () => {
-    // TESTING-DISCIPLINE rule 2 applied to the WIDENING itself. Adding a file to
-    // SCANNED_FILES that the enumerator finds nothing in would widen the scope
-    // on paper and change no measurement — the shape of a control that decays
-    // into a tautology (CLAUDE.md trap 12b). Pin that route-v2.ts contributes
-    // real, non-zero sites, so deleting them (or breaking the scan for that
-    // file) turns this red rather than reading as a clean widening.
-    const routeV2Keys = enumerateComposeSites(sources['route-v2.ts']!);
-    expect(routeV2Keys.length).toBeGreaterThan(0);
-    expect(routeV2Keys.sort()).toEqual(['EDIT_GRAPH_RECOVERY_TEXT', 'NO_LIVE_PROPOSAL_TEXT']);
   });
 
   it('the scan really covers chip-click-dispatch.ts, and it really has sites', () => {
@@ -1255,7 +1232,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // #1859 goal_target_edit: 46 -> 47. ONE added file (system-events/goal-target-edit.ts)
     // with the same `confirmation: outcome.assistant_text` site as factor-value-edit.ts.
     // SD-1 (#2617): 47 -> 48. ONE added site in the already-scanned factor-value-edit.ts (`review.assistant_text`).
-    expect(compared, 'the re-key comparison compared nothing').toBe(48);
+    expect(compared, 'the re-key comparison compared nothing').toBe(46);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1491,8 +1468,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // (GOAL_TARGET_EDIT_SITES). This ledger failed `pnpm test:required` on the commit
     // that created the site — the guard found it, not a human.
     // SD-1 (#2617): 53 -> 54 sites, 49 -> 50 keys — `review.assistant_text` in factor-value-edit.ts, registered structural.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(54);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(50);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(52);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(48);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
@@ -1501,7 +1478,6 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       'compose/option-label-clarify-response.ts',
       'compose/repair-value-ask-response.ts',
       'handlers/chip-click-dispatch.ts',
-      'route-v2.ts',
       'routing/post-analysis-label-intercept.ts',
       'system-events/edge-strength-edit.ts',
       'system-events/factor-value-edit.ts',

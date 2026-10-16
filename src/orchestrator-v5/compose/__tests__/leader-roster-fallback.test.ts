@@ -338,7 +338,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
     const source = readFileSync(ROUTE_V2, 'utf8');
 
     it('the enumerator SEES the exits (else every assertion here is vacuous)', () => {
-      expect(enumerateSendCalls(source).length).toBeGreaterThanOrEqual(15);
+      expect(enumerateSendCalls(source).length).toBe(6);
     });
 
     it('the roster fix sits at the ONE call site every exit funnels through', () => {
@@ -353,134 +353,10 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });
 
-    it('TRIPWIRE: the exit population is 26 — a new exit must be looked at, not assumed', () => {
+    it('TRIPWIRE: the retained exit population is 6 — a new exit must be looked at, not assumed', () => {
       const calls = enumerateSendCalls(source);
-      // Not a mirror to keep green: if you added an exit, confirm it funnels
-      // through sendFinalised200 (it must, or the guard above fails too) and
-      // then update this number deliberately.
-      //
-      // 2026-09-01, 24 -> 25: the add-option TEXT leg's held exit
-      // (`'add_option_transaction'`, route-v2). LOOKED AT, not assumed:
-      //  · it funnels through `sendFinalised200`, so it inherits the single
-      //    `enforceLeadingOptionClaimsAtWire` call the assertion above pins,
-      //    with both roster sources threaded — the "24th exit inherits this by
-      //    construction" case, now realised;
-      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
-      //    add-option CHIP exit beside it, so it adds no new claim authority;
-      //  · its copy is a held PROPOSAL — a receipt and a question about a change
-      //    that has not happened — so it cannot assert a leading option, and
-      //    `answerKind: 'functional'` keeps it out of the prose lane entirely.
-      //
-      // 2026-09-12, 25 -> 26: the add-option TEXT leg's option-LABEL CLARIFY
-      // exit (`'add_option_transaction'`, route-v2), which asks what to call an
-      // option proposed under its own decision's name. LOOKED AT, not assumed:
-      //  · it funnels through `sendFinalised200`, so it inherits the single
-      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
-      //    roster sources threaded;
-      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
-      //    held exit above it, so it adds no new claim authority;
-      //  · its copy is a QUESTION ABOUT A NAME, composed by
-      //    `compose/option-label-clarify-response.ts` from exactly two strings —
-      //    a rejected label naming a node that does NOT exist on the graph, and
-      //    the label of the DECISION it collided with. No analysis result, no
-      //    value, no candidate list and no option ordering is in scope, so there
-      //    is no per-option datum to rank or crown. `answerKind: 'functional'`
-      //    keeps it out of the prose lane, and it ships ZERO chips.
-      //
-      // 2026-09-13, 26 -> 27: the goalfence ask
-      // (`'draft_graph_goal_never_stated'`, route-v2) — a draft blocked because
-      // nothing could reach a goal CEE itself minted now answers with the
-      // outcome question instead of a dead 500. LOOKED AT, not assumed:
-      //  · it funnels through `sendFinalised200`, so it inherits the single
-      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
-      //    roster sources threaded;
-      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
-      //    clarify exit above it, so it adds no new claim authority — and here
-      //    `graph: null` is not merely conventional: THE DRAFT FAILED, so there
-      //    is no model at all, let alone one carrying options to rank;
-      //  · its copy is a QUESTION ABOUT THE USER'S OBJECTIVE, composed by
-      //    `clarify-v2/goal-never-stated-ask.ts` from the clarify-v2 `goal`
-      //    template. No analysis result, no value, no option ordering and no
-      //    per-option datum is in scope, so there is nothing to rank or crown.
-      //    `answerKind: 'functional'` keeps it out of the prose lane;
-      //  · it DOES ship chips, unlike the two exits above — but they are
-      //    candidate answers about the GOAL ("The goal is to increase
-      //    revenue."), never options, so they carry no leader claim either.
-      //
-      // 2026-09-15, 27 -> 28: the draft-failure recovery turn
-      // (`'draft_graph_recovery'`, route-v2 — #1505), the floor underneath the
-      // goalfence ask: a draft that failed for any other reason now speaks
-      // instead of returning a bare 500. LOOKED AT, not assumed:
-      //  · it funnels through `sendFinalised200`, so it inherits the single
-      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
-      //    roster sources threaded;
-      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
-      //    goalfence ask above it, so it adds no new claim authority — and as
-      //    there, `graph: null` is STRUCTURAL rather than conventional: the
-      //    draft failed and was discarded, so no model exists at all, let alone
-      //    one carrying options to rank. The PR is explicit that nothing is
-      //    repaired or synthesised on this path;
-      //  · its copy is a FAILURE REPORT — the producer's own `readable`
-      //    sentence plus a fault stamp and a copyable reference. No analysis
-      //    result, no value, no candidate list and no option ordering is in
-      //    scope, so there is no per-option datum to rank or crown.
-      //    `answerKind: 'functional'` keeps it out of the prose lane;
-      //  · it DOES ship a chip, like the goalfence ask — but it is the single
-      //    retry offer `draft_failure_retry` ("Try again" / "Yes, try building
-      //    the model again from what I have shared."), an instruction to redo
-      //    the DRAFT. It names no option and carries no leader claim.
-      //  · THE 29th EXIT IS `replacement_controller` (route-v2.ts), added by the
-      //    replacement conversation layer behind CEE_REPLACEMENT_COACH_ENABLED.
-      //    Examined rather than waved through, because a bumped tripwire that
-      //    records no finding is the hand-maintained mirror this census exists
-      //    to replace:
-      //      · it ships `graph: (extensions.graphState ?? null)` — a real
-      //        nullable EXPRESSION, not the `graph: null` LITERAL the 17 above
-      //        pass. So when the request carries a parseable graph the enforcer
-      //        gets a genuine roster, and when it does not this exit degrades
-      //        to the same roster_unavailable stand-down as its siblings — it
-      //        neither adds nor removes enforcement;
-      //      · its permission is `...(await claimSafety.forExit())`, the SAME
-      //        canonical derivation the other exits inherit. It is explicitly
-      //        NOT a hardcoded literal — an earlier revision of this exit did
-      //        pass one, which armed the withhold branch on every replacement
-      //        turn and rewrote 8 of 22 ordinary coaching sentences. That is
-      //        fixed at the source here, so this exit introduces no new claim
-      //        authority;
-      //      · it adds no per-option datum. The replacement layer answers about
-      //        the model the user is building and about pending proposals; it
-      //        ranks nothing and crowns nothing.
-      //    Net: the 29th exit changes the SIZE of the population and not its
-      //    shape, which is why the number below moves and nothing else does.
-      //
-      // 2026-09-26, 29 -> 30: the add-option CHIP leg's REFUSAL exit
-      // (`'add_option_transaction'`, route-v2 — (A) #1940). A typed batch the
-      // hold cannot carry (too many options, too many changes, or past the hold
-      // payload cap) is ANSWERED instead of falling to the free-text edit lane.
-      // LOOKED AT, not assumed:
-      //  · it funnels through `sendFinalised200`, so it inherits the single
-      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
-      //    roster sources threaded;
-      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
-      //    held add-option exit beside it, so it adds no new claim authority —
-      //    and nothing was written: it commits a direct answer with no pending
-      //    and no graph;
-      //  · its copy is a REFUSAL composed in `add-option-dispatch.ts` from a
-      //    count and a fixed sentence. No analysis result, no value, no candidate
-      //    list and no option ordering is in scope, so there is nothing to rank
-      //    or crown. `answerKind: 'functional'` keeps it out of the prose lane,
-      //    and it ships ZERO chips.
-      expect(calls.length).toBe(30);
-      // #1246's additional exit is a functional recorded-answer refusal, not
-      // a new claim authority. It still funnels through the shared finalizer,
-      // forwards claim safety, and uses only the canonical repair graph roster.
-      const recordedRefusals = calls.filter((c) => c.callSource.includes(
-        'buildCanonicalAnalysisReadyFromGraph(repairGraph)',
-      ));
-      expect(recordedRefusals).toHaveLength(1);
-      expect(recordedRefusals[0]!.graphIsNullLiteral).toBe(true);
-      expect(recordedRefusals[0]!.callSource).toContain('claimSafety.forExit()');
-      expect(recordedRefusals[0]!.callSource).toContain("answerKind: 'functional'");
+      // C1 removed the conventional exits. Six kept write/Run exits still share the one enforcer.
+      expect(calls.length).toBe(6);
       // Both classes still exist, so the scan is genuinely classifying.
       expect(calls.some((c) => c.graphIsNullLiteral)).toBe(true);
       expect(calls.some((c) => !c.graphIsNullLiteral)).toBe(true);

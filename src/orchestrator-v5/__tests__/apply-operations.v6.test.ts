@@ -36,11 +36,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import type { CommitMetadata, CommitResult } from '../commit.js';
-import { GraphStaleWriteError } from '../session/store.js';
 import { __setUseAppendV6ForTest } from '../session/supabase-store.js';
-import { EMPTY_CONVERSATION_MEMORY } from '../replacement/conversation-memory.js';
-import { EMPTY_PROPOSAL_STORE, needsReconciliation, openProposal } from '../replacement/proposal-store.js';
-import { ACCEPT_TOOL_NAME, runReplacementTurn } from '../replacement/run-replacement-turn.js';
 import {
   ApplyOperationsUnverifiedError,
   createApplyOperations,
@@ -465,70 +461,6 @@ describe('Addendum 17 — append-v6 coverage', () => {
       const request: PinnedInput = { ...input(), beforeAppend: async () => { throw failed; } };
       await expect(port(h)(request)).rejects.toBe(failed);
       expect(commitDirectAnswer).not.toHaveBeenCalled();
-    });
-
-    it('a refused apply whose clearing checkpoint fails cannot append at a fresh revision on the unrelated next turn', async () => {
-      const h = harness();
-      let graph = baseGraph();
-      let revision = 7;
-      let committed = false;
-      h.store.loadGraphAndBriefText = async () => ({ graph, briefText: null, revision });
-      h.loadGraph.mockImplementation(async () => graph);
-      h.readRecent.mockImplementation(async () => committed ? [{
-        id: TURN_ROW_ID, scenario_id: SCENARIO, turn_id: lastCommitMetadata().turn_id,
-        request_hash: lastCommitMetadata().request_hash,
-      }] : []);
-      const conflict = new GraphStaleWriteError('stale revision', {
-        conflict_category: 'revision_conflict',
-        cause: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) },
-      });
-      commitDirectAnswer.mockImplementation(async (response: unknown, metadata: CommitMetadata) => {
-        if (revision === 7) {
-          revision = 8; // A competing cosmetic save leaves the analysis hash unchanged.
-          throw conflict;
-        }
-        committed = true;
-        graph = metadata.graph as GraphV3T;
-        return { response, performed: true, persisted_row_id: TURN_ROW_ID,
-          modelVersionReceipt: null, graphPersisted: true } as unknown as CommitResult;
-      });
-      const proposals = openProposal(EMPTY_PROPOSAL_STORE, {
-        id: 'waiting', operations: proposalOperations(), model_revision: modelRevisionOf(graph)!,
-        proposed_at: '2026-10-08T12:00:00.000Z', proposed_in_turn: 'offer-turn',
-      });
-      let durable = clone({ memory: EMPTY_CONVERSATION_MEMORY, proposals });
-      const failed = new Error('refusal-state checkpoint unavailable');
-      const checkpoint = async (state: typeof durable) => {
-        if (state.proposals.proposals[0]?.status === 'stale') throw failed;
-        durable = clone(state);
-      };
-      const turnInput = {
-        message: 'yes go ahead', history: [], ...durable, modelRevision: modelRevisionOf(graph)!,
-        workspaceSummary: 'Campaign model', tools: [], turnId: 'agreement-turn',
-        now: '2026-10-08T12:01:00.000Z', idFor: (purpose: string, index: number) => `${purpose}-${index}`,
-      };
-      let calls = 0;
-      await expect(runReplacementTurn(turnInput, {
-        checkpoint, applyOperations: port(h),
-        chatWithTools: async () => ++calls === 1
-          ? { content: [{ type: 'tool_use', id: 'accept', name: ACCEPT_TOOL_NAME,
-              input: { proposal_id: 'waiting', user_agreement_quote: 'yes go ahead' } }], stop_reason: 'tool_use' }
-          : { content: [{ type: 'text', text: 'saved' }], stop_reason: 'end_turn' },
-      })).rejects.toBe(conflict);
-      // Refusal cleanup did not reach disk. Its earlier pin must still fence
-      // recovery, including a semantic no-op carrier which would use v4.
-      expect(needsReconciliation(durable.proposals)).toHaveLength(1);
-      expect((durable.proposals.proposals[0] as { expected_graph_revision?: number }).expected_graph_revision).toBe(7);
-      const checkpointAfterRecovery = async (state: typeof durable) => { durable = clone(state); };
-      await expect(runReplacementTurn({ ...turnInput, ...durable,
-        turnId: 'unrelated-turn', message: 'What evidence should we gather?',
-      }, { checkpoint: checkpointAfterRecovery, applyOperations: port(h),
-        chatWithTools: async () => ({ content: [{ type: 'text', text: 'Consider the evidence.' }], stop_reason: 'end_turn' }),
-      })).rejects.toMatchObject({ conflict_category: 'revision_conflict' });
-      expect(commitDirectAnswer).toHaveBeenCalledTimes(1);
-      expect(committed).toBe(false);
-      expect(needsReconciliation(durable.proposals)).toHaveLength(0);
-      expect((durable.proposals.proposals[0] as { expected_graph_revision?: number }).expected_graph_revision).toBe(7);
     });
 
     it.each(['semantic', 'no_op'] as const)('a moved numeric base is refused before append for a %s candidate', async (candidate) => {

@@ -30,8 +30,6 @@
  * real rather than incidental.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { FastifyRequest } from 'fastify';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
 
@@ -299,51 +297,5 @@ describe('2.684 §3 — no time left means no call', () => {
     const spent = turn_ms - COMPOSER_POST_CALL_RESERVE_MS - MIN_TIMEOUT_MS;
     await runTurn(FIXED_NOW_MS - spent);
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ===========================================================================
-// §4 — THE MOUNT PATH ITSELF
-// ===========================================================================
-
-describe('2.684 §4 — the ONE production call site threads the request baseline', () => {
-  /**
-   * ⭐⭐ WHY A SOURCE ASSERTION, AND WHY IT IS NOT A MIRROR.
-   *
-   * `requestStartMs` is optional on `DispatchEditGraphParams` — not because a
-   * caller may reasonably omit it, but because 128 test call sites predate it
-   * and making it required would have bought a compile-time guarantee with a
-   * diff nobody could review. The cost of that choice is a silent fallback: if
-   * `route-v2.ts` ever stops passing it, the composer quietly measures from the
-   * dispatcher's own start, over-estimates what is left, and NOTHING goes red —
-   * which is precisely the shape of the defect this row exists to kill.
-   *
-   * This is the fail-loud replacement for the guarantee we did not take. It
-   * derives the call site from the source rather than restating anything about
-   * it, so it cannot drift the way a comment saying "keep these in sync" drifts.
-   * Deleting the argument in `route-v2.ts` turns it RED — mutant M4 proves that.
-   */
-  it('P4-1 route-v2 passes requestStartMs into dispatchEditGraph', () => {
-    const source = readFileSync(
-      join(__dirname, '../../../orchestrator/route-v2.ts'),
-      'utf-8',
-    );
-    const callIndex = source.indexOf('await dispatchEditGraph({');
-    expect(callIndex).toBeGreaterThan(-1);
-    const callBlock = source.slice(callIndex, source.indexOf('});', callIndex));
-    expect(callBlock).toContain('requestStartMs');
-  });
-
-  it('P4-2 the baseline it passes is the ROUTE`s start, not a fresh clock reading', () => {
-    // `requestStartMs: Date.now()` at the call site would satisfy P4-1 while
-    // discarding everything pre-flight spent — the same class of error as
-    // measuring from the dispatcher. Bind to the identity of the baseline.
-    const source = readFileSync(
-      join(__dirname, '../../../orchestrator/route-v2.ts'),
-      'utf-8',
-    );
-    const callIndex = source.indexOf('await dispatchEditGraph({');
-    const callBlock = source.slice(callIndex, source.indexOf('});', callIndex));
-    expect(callBlock).toContain('requestStartMs: routeStartedAt');
   });
 });
