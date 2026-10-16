@@ -3855,7 +3855,7 @@ export function createAgentCapabilities(
     /** The card's own sentence on a result withheld for a carried limit (`limitsKeptBy`), when it has one. */ readonly withheld?: string;
     /** The card opens with a meaning flag (`meaning-flags.ts`): the offer's note tells the AI to say that change first. */ readonly flagged?: true;
     /** The goal-target call whose own target the host put on the governing goal (the redraft held none). */
-    readonly readTarget?: { readonly value: number; readonly unit: string; readonly comparator: string } }
+    readonly readTarget?: { readonly measures: string; readonly value: number; readonly unit: string; readonly comparator: string } }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
   /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
@@ -4020,7 +4020,7 @@ export function createAgentCapabilities(
      * user must have written the figure about that goal, not about another part ("conversion rate of over 15%" is never a
      * target for ‘New customers’: `figureTheUserWroteFor` with `scopeIn`). Never a figure of the drafter's own.
      */
-    const readGoalUnit = draftGoalNode === undefined ? undefined : draftGoalNode.goal_threshold_unit ?? factorUnitOf(candidate, draftGoalNode as never);
+    const readGoalUnit = draftGoalNode === undefined ? undefined : readGoalRecord(candidate, String(draftGoalNode.id))?.target?.unit ?? factorUnitOf(candidate, draftGoalNode as never);
     const readRowId = callTarget === undefined || typeof draftGoalNode?.id !== 'string' ? '' : `agent-lane:${draftGoalNode.id}:${callTarget.comparator}`;
     const readTarget = !correction && callTarget !== undefined && event === null && draftedTargets.length === 0
       && !held.some((t) => t.node_id === draftGoalNode?.id)
@@ -4032,7 +4032,8 @@ export function createAgentCapabilities(
       ? callTarget : undefined;
     if (readTarget !== undefined) {
       const c = candidate as { goal_constraints?: unknown };
-      const row = { constraint_id: readRowId, node_id: String(draftGoalNode!.id), role: 'goal_target', operator: readTarget.comparator,
+      const row = { constraint_id: readRowId, node_id: String(draftGoalNode!.id), role: 'goal_target', operator: readTarget.comparator === '>' ? '>=' : readTarget.comparator === '<' ? '<=' : readTarget.comparator,
+        ...((readTarget.comparator === '>' || readTarget.comparator === '<') ? { operator_as_stated: readTarget.comparator } : {}),
         value: readTarget.value, unit: readTarget.unit, label: String(draftGoalNode!.label ?? goal.label), provenance: 'inferred', value_frame: 'level' };
       c.goal_constraints = [...((Array.isArray(c.goal_constraints) ? c.goal_constraints : []) as unknown[]), row];
       held = targetsHeldBy(candidate);
@@ -4221,7 +4222,8 @@ export function createAgentCapabilities(
       && unitsConflict(target.unit, t.unit) === null);
     // The host put THIS call's own target on the goal (`readTarget`): held, with its goal binding flagged on the card.
     const readHere = draft.readTarget !== undefined && draft.readTarget.value === target.value
-      && draft.readTarget.comparator === target.comparator && draft.readTarget.unit === target.unit;
+      && draft.readTarget.comparator === target.comparator && draft.readTarget.unit === target.unit
+      && canonicalLabel(draft.readTarget.measures) === canonicalLabel(target.measures);
     const holds: boolean | 'unknown' = readHere || sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)) ? true
       : sameFigure.length > 0 ? 'unknown' : false;
     return {
