@@ -60,13 +60,20 @@ async function approveRevision(graph: typeof served, writerRefuses: boolean | ((
   const p = product(graph);
   const door = levelsPortOver(p.d);
   // The served refusal (the writer's base check) or the product's door.
-  const port = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> =>
-    typeof writerRefuses === 'function' ? writerRefuses(p)
+  let writerCalls = 0;
+  const port = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
+    writerCalls += 1;
+    return typeof writerRefuses === 'function' ? writerRefuses(p)
       : writerRefuses ? { status: 'refused', reason: 'canonical_graph_unavailable' } : door(input);
+  };
   const caps = createAgentCapabilities(p.d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: port });
   const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their contacts’ capacity', revise: true }] } as never);
   expect(r.ok, JSON.stringify(r)).toBe(true);
-  const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+  const unpressed = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+  expect(unpressed).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+  expect(writerCalls).toBe(0);
+  const out = await caps.authoriseChange({ ...ctx, typed_approval_of: String(r.proposal_id) }, { proposal_id: String(r.proposal_id) });
+  expect(writerCalls).toBe(1);
   const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [out], { versioned: false }).status ?? '';
   return { out, status, node: p.nodes().find((n) => n.id === TARGET)! };
 }
