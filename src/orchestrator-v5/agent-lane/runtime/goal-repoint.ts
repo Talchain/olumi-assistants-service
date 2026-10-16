@@ -121,8 +121,8 @@ export function omittedGoalChangeWords(part: string, refusal: string): string {
     unit_mismatch: 'its measurement needs checking',
     unit_unstated: 'its measurement needs checking',
     unit_unrecognised: 'its measurement needs checking',
-    not_current_removal: "this message doesn't contain a verified request to remove it",
-    not_asked: "this message doesn't contain a verified request to remove it",
+    not_current_removal: "its quoted words couldn't be verified as your own current statement",
+    not_asked: "the quoted words don't identify this change clearly enough",
     subject_not_found: "Olumi couldn't identify the relevant part in this model",
   };
   return `${part.charAt(0).toUpperCase()}${part.slice(1)} isn't included: ${reasons[refusal] ?? "Olumi couldn't safely include this change"}. This card won't apply that change.`;
