@@ -3921,7 +3921,7 @@ export function createAgentCapabilities(
         const result = applyGoalHorizonEdit(candidate, { goal_id: newId, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
           ...(typeof v.reference === 'string' ? { reference_date: v.reference } : {}),
           ...(typeof v.stated_months === 'number' ? { stated_months: v.stated_months } : {}) });
-        if (result.kind !== 'mutated') omit('deadline', { ok: false, refusal: result.kind === 'refused' ? result.reason : result.kind }, 'The native deadline adapter refused this date.');
+        if (result.kind !== 'mutated') omit('deadline', { ok: false, mutated: false, refusal: result.kind === 'refused' ? result.reason : result.kind }, 'The native deadline adapter refused this date.');
         else { candidate = result.mutatedGraph; details.push(String(offered.public_label)); }
       }
     }
@@ -3929,7 +3929,7 @@ export function createAgentCapabilities(
       if (!Array.isArray(args.remove_mechanisms) || args.remove_mechanisms.length > 6) return invalid('removal_not_prepared', 'This card supports up to six mechanism removals. Nothing was prepared.');
       for (const removal of args.remove_mechanisms) {
         if (!ownSource(removal.quote) || !(ctx.user_turn_text && wholeStatementIn(ctx.user_turn_text, removal.quote))) {
-          omit(`removal of ${removal.label}`, { ok: false, refusal: 'not_current_removal' }, 'A removal needs the user’s explicit request in this turn; an earlier statement is not current removal permission.');
+          omit(`removal of ${removal.label}`, { ok: false, mutated: false, refusal: 'not_current_removal' }, 'A removal needs the user’s explicit request in this turn; an earlier statement is not current removal permission.');
           continue;
         }
         const offered = await prepare.proposeRemoval!(ctx, removal);
@@ -3945,7 +3945,7 @@ export function createAgentCapabilities(
           event, requestId: ctx.request_id, persistedGraph: candidate });
         if (result.kind !== 'mutated' || !isPlainRecord(result.mutatedGraph)) {
           omit(`removal of ${removal.label}`, result.kind === 'refused'
-            ? { ok: false, refusal: result.reason, detail: result.response.assistant_text } : { ok: false, refusal: result.kind }, 'The native removal adapter refused this part.');
+            ? { ok: false, mutated: false, refusal: result.reason, detail: result.response.assistant_text } : { ok: false, mutated: false, refusal: result.kind }, 'The native removal adapter refused this part.');
           continue;
         }
         candidate = result.mutatedGraph; removals.push({ removed_node_ids: event.removed_node_ids, removed_edges: event.removed_edges });
