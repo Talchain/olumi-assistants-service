@@ -4138,7 +4138,10 @@ function admitOnce(
         const ownLevel = typeof brief === 'string' && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
           ? goalLevelOwner(model, brief, baselineRaw) : undefined;
         const estimated = ownLevel !== 'user' && goalLevelIsEstimated(model.goal);
-        const levelUnconfirmed = ownLevel === 'unverified' || (ownLevel === 'unclaimed' && !estimated);
+        // TL 14:17Z: a level the draft says it read out of the brief (`inferred` / `explicit`) is never said as Olumi's estimate;
+        // unverified, it is UNKNOWN. Only a level the draft calls its own (`ai_proposed`) is Olumi's.
+        const levelClaimedFromBrief = (model.goal.baseline_provenance ?? model.goal.provenance) !== 'ai_proposed';
+        const levelUnconfirmed = ownLevel === 'unverified' || (ownLevel === 'unclaimed' && (!estimated || levelClaimedFromBrief));
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && levelUnconfirmed) {
           withheld(
             `The current level of "${model.goal.metric}" (${baselineRaw}) could not be confirmed from your brief, so it was not used ` +
@@ -4695,10 +4698,13 @@ function admitOnce(
       // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z, `figureSource`; BUDDY-A #3290 r2; TL 13:18Z fail-safe): a setting the user wrote is
       // theirs whatever the draft's flag says (G3 #3: the user's £90k / £60k / £140k were drafted "inferred" and saved as
       // Olumi's). One the AI claimed that no verified statement states, or flagged `explicit` with no statement at all, is
-      // UNKNOWN: never theirs and never Olumi's (the flag alone is not proof). One the draft calls Olumi's stays Olumi's; a
+      // UNKNOWN: never theirs and never Olumi's (the flag alone is not proof). One the draft calls its own (`ai_proposed`) stays Olumi's; a
       // total build-model computed carries the owner's verdict on its parts (`prepareProvisionalCandidate`).
       const own = derived ? undefined : figureSource(model, brief, { kind: 'option', label: o.label, factor_label: iv.factor_label }, 'level', iv.value);
-      const claimedUnproven = own === 'unclaimed' && iv.provenance === 'explicit';
+      // ⭐ TL 14:17Z (G3 #4, a75de9cb): the draft's `inferred` means "read out of the brief" (the drafter's own contract), so an
+      // `inferred` setting with no statement claims the user's words just as `explicit` does: UNKNOWN, never Olumi's. Only the
+      // draft's `ai_proposed` ("anything you added beyond it") is Olumi's own figure.
+      const claimedUnproven = own === 'unclaimed' && iv.provenance !== 'ai_proposed';
       const source = own === 'user' ? 'brief_extraction' : own === 'unverified' || claimedUnproven ? 'cee_hypothesis' : levelSourceFor(iv.provenance);
       bundle[factorId] = constructedLevel(factorId, iv.value, cap, source, nodes.find((n) => n.id === factorId), unitById.get(factorId), derived);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
