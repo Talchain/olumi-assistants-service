@@ -1,4 +1,5 @@
 import { goalFiguresLeaderWithheld } from '../../orchestrator/context/option-result-source.js';
+import { goalChanceDisplayForAgent, withGoalChanceReadback } from '../goal-target/goal-chance-licence.js';
 /**
  * AN ANALYSIS NOBODY ASKED FOR MAY NOT ASSERT A QUANTIFIED RESULT.
  *
@@ -799,9 +800,11 @@ export function confineUnrequestedAnalysisBlock(
   // the mirror this estate keeps paying for; the withheld projection is already
   // the ratified owner of "what may a summary say when no leader may be named".
   const premiseHolds = unrequestedSummaryPremiseHolds(analysisReady);
+  // The chance licence is independent of the win-share leader permission. Keep its producer's summary and disclosures.
+  const licensedChance = goalChanceDisplayForAgent(withGoalChanceReadback(block, fact.result)) !== undefined;
   return {
     ...rest,
-    ...(premiseHolds ? { summary: UNREQUESTED_ANALYSIS_SUMMARY } : {}),
+    ...(premiseHolds && !licensedChance ? { summary: UNREQUESTED_ANALYSIS_SUMMARY } : {}),
     ...(enrichment !== undefined
       ? { enrichment: enrichment as AnalysisResultBlock['enrichment'] }
       : {}),

@@ -8,6 +8,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
+import { buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
 
 const stored = () => ({ ...structuredClone(captured.result), run_id: captured.evidence.run_id,
   input_snapshot: structuredClone(captured.evidence.input_snapshot), graph_hash_at_run: 'saved-capture' });
@@ -119,6 +120,13 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     expect(fact.result.summary).toContain('100 tickets per week');
     expect(fact.result.summary).toContain(STATIC_MODEL_SCOPE_NOTE);
     expect(fact.result.summary).not.toMatch(/88%|highest weekly support capacity/u);
+    const firstPass = buildAnalysisResultBlock({ ...fact, result: { ...fact.result,
+      enrichment: { ...fact.result.enrichment, run_provenance: buildConstructionAutoRunProvenance('graph_registration:capacity') } } });
+    expect(firstPass.summary).toBe(fact.result.summary);
+    expect(firstPass.summary).toMatch(/^‘Add one specialist’: about 40% chance of/u);
+    expect(firstPass.summary).toContain(STATIC_MODEL_SCOPE_NOTE);
+    expect(firstPass.leading_option_id).toBeNull();
+    expect(firstPass.win_probabilities).toBeUndefined();
     expect(outcome.assistant_text).toBe(fact.result.summary);
     if (mode === 'reduced') expect(outcome.assistant_text).toContain('analysis ran fewer simulations');
     if (mode === 'partial') expect(outcome.assistant_text).toContain('Some results may be incomplete — treat with caution.');
