@@ -186,25 +186,31 @@ const SHAPES: readonly [string, Rec, Rec][] = [
 const l20Script = (conversion: Rec, customers: Rec) => [
   call('propose_goal_target', { ...CONVERSION, ...conversion }),
   call('propose_goal_target', { ...CUSTOMERS, ...customers }),
-  say('I have prepared a revised draft that holds both of your goals.'),
+  say('One target interpretation is ready to review. The additional goal remains in your request; this card does not model both goals.'),
 ];
 
-describe('marketing L20 through the real route: a two-target restatement the saved-target card cannot carry is refused, nothing written (DL-3 ruling, #3279)', () => {
-  // DL-3 16 Oct (#3279, BUDDY-A r2): the revised-draft fallback this file used to pin is retired here (it saved the founder's
-  // 4 options as 1) and the full-redraft correction path goes in DRASTIC CUT C5. Until a two-target saved operation
-  // exists, this turn gets a truthful refusal: no card, no drafter call, no write.
-  it.each(SHAPES)('%s → no card; each target call is refused, nothing drafted or written', async (_name, conversion, customers) => {
+describe('marketing L20 through the real route: one scoped interpretation card, never a whole-model redraft', () => {
+  // TL11:15 supersedes the #3279 soft-source refusal: source uncertainty is a card decision. This does not add
+  // two-target construction. The first reading is explicit, the second change waits; the entire original request stays quoted.
+  it.each(SHAPES)('%s → one flagged target card, second change held, whole saved model unchanged', async (_name, conversion, customers) => {
     const w = world();
+    const before = structuredClone(w.read());
     const turn = await route(w);
     const body = await turn({ turn_id: randomUUID(), message: L20 }, l20Script(conversion, customers));
-    const calls = (body._agent.tool_calls as Rec[]).filter(c => c.name === 'propose_goal_target');
-    expect(calls.map(c => c.refusal ?? null), JSON.stringify(calls)).not.toContain('unreadable_derivation');
-    expect(calls.filter(c => c.ok === true), JSON.stringify(calls)).toHaveLength(0);
-    expect(calls.map(c => c.refusal)).toEqual(['target_source_not_supported', 'target_source_not_supported']);
-    expect(w.registers).toHaveLength(0);
-    expect(providerCalls.filter(c => c === 'drafter')).toHaveLength(0);
-  }, ROUTE_MS);
-
+    const calls = body._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_target');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ ok: true, mutated: false, outcome: 'target_reading:context_incomplete' });
+    expect(calls[1]).toMatchObject({ ok: false, mutated: false, refusal: 'one_change_per_approval' });
+    const cards = body.suggested_actions.filter((a: Rec) => a.id.startsWith('agent-approve-proposal:'));
+    expect(cards).toHaveLength(1);
+    expect(JSON.stringify(cards)).toContain('15');
+    expect(JSON.stringify(cards)).toContain('Olumi');
+    expect(JSON.stringify(cards)).toContain(L20);
+    expect(JSON.stringify(cards)).toContain('This card sets only');
+    expect(JSON.stringify(cards)).toContain('other targets or model changes in the quote are left out and will not be saved');
+    expect(w.registers).toHaveLength(0); expect(w.read()).toEqual(before);
+    expect(providerCalls.filter(p => p === 'whole_candidate')).toHaveLength(0);
+  }, 30_000);
   it('NEGATIVE (a real derivation keeps its checks): {base: 15, multiplier: 2} for 15% is refused derivation_mismatch, nothing offered', async () => {
     const w = world();
     const turn = await route(w);

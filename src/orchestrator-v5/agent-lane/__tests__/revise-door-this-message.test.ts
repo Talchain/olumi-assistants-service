@@ -1,21 +1,12 @@
-/**
- * ⛔ "THE ONE FIGURE WRITTEN IN THIS MESSAGE" IS READ FROM THIS MESSAGE (MG SUCCESSOR #75 5911974162).
- *
- * Served #2359 row on CEE 660befa4 (R3's cut-costs share graph, seeded): the user typed "Our team's quote shows GCP would
- * be about 25% cheaper than AWS for our workload.", the Agent asked, the user said "Yes, use 25%.", and the revision was
- * recorded "as an Olumi assumption" with the chip "Use as starting assumptions". The revise door's pairing rule (AIQ
- * 5902884139: one figure written, one value proposed, the card shows the user's own sentence and their Yes makes it
- * theirs) counted figures over the SESSION's typed words (`user_text`): on the real journey the brief is typed first, so
- * its £45k, 20% and 2 weeks, or the user's own 25% written twice, made every revision Olumi's.
- *
- * It now reads THIS turn's typed message (`user_turn_text`, bound by the route, never a chip's text). With two figures
- * or more in it, the strict matcher decides as before; with no typed message, the session's words are read as before.
+/** TL11:51: a retained human figure stays human across turns and windows; field binding is a separate
+ * Olumi reading. Keep the old another-subject/multiple-figure negatives as explicit own-card bindings,
+ * and retain a genuine new-AI-estimate contrast through the writer.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { ToolResult } from '../runtime/agent-tools.js';
-import { ProposalStore } from '../proposal.js';
+import { ProposalStore, hasCardOnlyOperations } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { createAgentCapabilitiesWithLevelsPort } from './fixtures/levels-port.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
@@ -33,15 +24,24 @@ async function revise(typed: readonly string[], turnText: string | undefined) {
   const d: InternalDispatch = async (path) => { if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: 'h0' } }; throw new Error(path); };
   const store = new ProposalStore();
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
-    { scenario_id: '550e8400-e29b-41d4-a716-446655440c03', authenticated_user_id: null, request_id: 'r', user_text: typed.join('\n'),
+    { scenario_id: '550e8400-e29b-41d4-a716-446655440c03', authenticated_user_id: null, request_id: 'r', user_text: typed.join('\n'), verified_user_messages: typed,
       ...(turnText !== undefined ? { user_turn_text: turnText } : {}) } as never,
     { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, unit: '%', basis: "your team's quote", revise: true }] } as never) as Json;
   expect(r.proposal_id, 'a proposal is prepared').toEqual(expect.any(String));
   const op = store.get(r.proposal_id)!.operations[0] as Json;
   const chip = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: r.proposal_id }],
     (id) => ({ proposal: store.get(id), result: id === r.proposal_id ? (r as ToolResult) : undefined }))[0] as Json | undefined;
-  return { author: op.value?.authored_by as string, value: op.value?.value as number, chip };
+  return { author: op.value?.authored_by as string, value: op.value?.value as number, chip,
+    bindingAuthor: store.get(r.proposal_id)!.provenance.authored_by, confirmation: op.value.confirmation,
+    cardOnly: hasCardOnlyOperations(store.get(r.proposal_id)!.operations) };
 }
+
+const explicitReading = (t: Awaited<ReturnType<typeof revise>>, source: string): void => {
+  expect(t.author).toBe('user_stated'); expect(t.bindingAuthor).toBe('model_proposed'); expect(t.cardOnly).toBe(true);
+  expect(t.chip?.detail).toContain(source);
+  expect(t.chip?.detail).toContain('field bindings are Olumi’s reading, including after approval');
+  expect(t.confirmation.source).toContain(source);
+};
 
 describe('the revise door reads the one figure from THIS message', () => {
   it('the served journey, quote turn: brief typed first, then "about 25% cheaper" → the user\'s 25%, shown in their words', async () => {
@@ -58,23 +58,23 @@ describe('the revise door reads the one figure from THIS message', () => {
     expect(t.chip?.label).toBe('Record your figure');
   });
 
-  it('CONTROL — no typed message this turn (a chip press): the session\'s words are read as before → Olumi\'s', async () => {
-    expect((await revise([BRIEF, R2.sentence], undefined)).author).toBe('model_proposed');
+  it('CONTROL — a chip never reauthors the retained human figure; the binding stays an own-card reading', async () => {
+    explicitReading(await revise([BRIEF, R2.sentence], undefined), R2.sentence);
   });
 
-  it('CONTROL — the figure beside ANOTHER quantity\'s words ("25% of our workloads") is never this factor\'s', async () => {
+  it('CONTROL — another subject is never silently declared the original field binding', async () => {
     const said = 'Move 25% of our workloads to GCP first.';
-    expect((await revise([BRIEF, said], said)).author).toBe('model_proposed');
+    explicitReading(await revise([BRIEF, said], said), said);
   });
 
-  it('CONTROL — two different figures in this message: the pairing does not apply (the strict matcher decides, as before)', async () => {
+  it('CONTROL — two figures keep their human source and the proposed binding needs its own card', async () => {
     const said = 'GCP would be about 25% cheaper than AWS for our workload, and we would move 60% of workloads.';
-    expect((await revise([BRIEF, said], said)).author).toBe('model_proposed');
+    explicitReading(await revise([BRIEF, said], said), said);
   });
 
-  it('CONTROL — a figure the user did not write this turn is never theirs by this door ("Yes, go ahead.")', async () => {
+  it('CONTROL — a short acknowledgement neither reauthors nor loses an earlier human figure', async () => {
     const said = 'Yes, go ahead.';
-    expect((await revise([BRIEF, R2.sentence, said], said)).author).toBe('model_proposed');
+    explicitReading(await revise([BRIEF, R2.sentence, said], said), R2.sentence);
   });
 });
 
@@ -103,13 +103,13 @@ function product() {
   return { SID, d, source };
 }
 
-async function cardThenPress(cardTurn: { typed: readonly string[]; turn?: string }, pressTyped: readonly string[]) {
+async function cardThenPress(cardTurn: { typed: readonly string[]; turn?: string }, pressTyped: readonly string[], userStated = true) {
   const p = product();
   const store = new ProposalStore();
   const caps = createAgentCapabilitiesWithLevelsPort(p.d, store);
   const base = { scenario_id: p.SID, authenticated_user_id: null, request_id: 'r' };
-  const r = await caps.proposeAssumptions({ ...base, user_text: cardTurn.typed.join('\n'), ...(cardTurn.turn !== undefined ? { user_turn_text: cardTurn.turn } : {}) } as never,
-    { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, unit: '%', basis: "your team's quote", revise: true }] } as never) as Json;
+  const r = await caps.proposeAssumptions({ ...base, user_text: cardTurn.typed.join('\n'), verified_user_messages: cardTurn.typed, ...(cardTurn.turn !== undefined ? { user_turn_text: cardTurn.turn } : {}) } as never,
+    { assumptions: [{ user_stated: userStated, factor_label: LABEL, value: 25, unit: '%', basis: userStated ? "your team's quote" : 'An explicitly new Olumi estimate', revise: true }] } as never) as Json;
   expect(r.proposal_id, JSON.stringify(r)).toEqual(expect.any(String));
   const shown = (store.get(r.proposal_id)!.operations[0] as Json).value.authored_by as string;
   // The press: a chip, so no typed text this turn; the session's words now end with a figure-less yes.
@@ -126,10 +126,10 @@ describe('AIQ rows A/B: the card decides whose figure it is; the press writes it
     expect(t.written).toBe('user_override');
   });
 
-  it('ROW A CONTRAST: a card issued as Olumi\'s (no typed message on its turn) is written as the user\'s ASSUMPTION', async () => {
+  it('ROW A CONTRAST: the card keeps an earlier human figure human when the current turn has no text', async () => {
     const t = await cardThenPress({ typed: [BRIEF, R2.sentence] }, [BRIEF, R2.sentence, 'Yes, use those.']);
-    expect(t.shown).toBe('model_proposed');
-    expect(t.written).toBe('user_assumption');
+    expect(t.shown).toBe('user_stated');
+    expect(t.written).toBe('user_override');
   });
 
   it('ROW B: one figure about ANOTHER subject ("our support team grew 25%") shows the factor AND the user\'s own sentence on the card', async () => {
@@ -141,4 +141,10 @@ describe('AIQ rows A/B: the card decides whose figure it is; the press writes it
     expect(t.chip?.detail).toContain(LABEL);
     expect(t.chip?.detail).toContain(said);
   });
+  it('genuine new Olumi estimate → press → still an Olumi assumption, never an original user figure', async () => {
+    const invite = 'Please estimate the GCP unit-cost saving.';
+    const t = await cardThenPress({ typed: [BRIEF, invite], turn: invite }, [BRIEF, invite, 'Use that estimate.'], false);
+    expect(t.shown).toBe('model_proposed'); expect(t.written).toBe('user_assumption');
+  });
+
 });

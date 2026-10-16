@@ -29,16 +29,18 @@ export interface ApprovedAdoption {
   readonly targetId: string;
   /** The approved figure, in the factor's own units — what the proposal stored. */
   readonly rawValue: number;
+  /** Human words whose proposed field binding remains unverified after this approval. */
+  readonly unverifiedBinding?: import('./quote-confirmation.js').QuoteConfirmation;
 }
 
 /** The contract's literal for a value the user adopted rather than authored (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
 export const APPROVED_ADOPTION_SOURCE = 'user_assumption' as const;
 
-const store = new AsyncLocalStorage<ApprovedAdoption>();
+const store = new AsyncLocalStorage<readonly ApprovedAdoption[]>();
 
 /** Run ONE verified approved write inside its adoption identity. */
 export function runWithApprovedAdoption<T>(adoption: ApprovedAdoption, fn: () => Promise<T>): Promise<T> {
-  return store.run(adoption, fn);
+  return store.run([adoption], fn);
 }
 
 /**
@@ -50,11 +52,23 @@ export function approvedAdoptionSourceFor(
   targetId: string,
   rawValue: unknown,
 ): typeof APPROVED_ADOPTION_SOURCE | undefined {
-  const a = store.getStore();
-  if (a === undefined) return undefined;
-  if (a.scenarioId !== scenarioId || a.targetId !== targetId) return undefined;
-  if (typeof rawValue !== 'number' || !Number.isFinite(rawValue) || rawValue !== a.rawValue) return undefined;
-  return APPROVED_ADOPTION_SOURCE;
+  const a = approvedValueFor(scenarioId, targetId, rawValue);
+  return a === undefined || a.unverifiedBinding !== undefined ? undefined : APPROVED_ADOPTION_SOURCE;
+}
+
+function approvedValueFor(scenarioId: string, targetId: string, rawValue: unknown): ApprovedAdoption | undefined {
+  if (typeof rawValue !== 'number' || !Number.isFinite(rawValue)) return undefined;
+  return store.getStore()?.find(a => a.scenarioId === scenarioId && a.targetId === targetId && a.rawValue === rawValue);
+}
+
+/** The SAME server-internal identity; this act approves a reading without verifying its binding. */
+export function runWithApprovedBindings<T>(bindings: readonly ApprovedAdoption[], fn: () => Promise<T>): Promise<T> {
+  return store.run(bindings, fn);
+}
+
+/** Only this exact approved scenario/target/native point may retain human + unverified binding. */
+export function approvedBindingFor(scenarioId: string, targetId: string, rawValue: unknown): ApprovedAdoption['unverifiedBinding'] {
+  return approvedValueFor(scenarioId, targetId, rawValue)?.unverifiedBinding;
 }
 
 /**

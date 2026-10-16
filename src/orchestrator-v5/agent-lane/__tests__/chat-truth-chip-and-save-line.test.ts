@@ -198,11 +198,11 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     expect(JSON.stringify(graph)).toBe(before);
   });
 
-  it.each([true, false])('A2i6 verified human source stays human despite flag=%s', async user_stated => {
+  it.each([true, false, undefined])('A2i6 verified human source stays human despite flag=%s', async user_stated => {
     const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
     const { store, caps } = capsOver(graph);
     const r = await caps.proposeAssumptions({ ...ctx, user_text_complete: false },
-      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'original figure', user_stated }] });
+      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'original figure', ...(user_stated === undefined ? {} : { user_stated }) }] } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const proposal = store.get(String(r.proposal_id))!;
     expect(proposal.provenance.authored_by).toBe('user_stated');
