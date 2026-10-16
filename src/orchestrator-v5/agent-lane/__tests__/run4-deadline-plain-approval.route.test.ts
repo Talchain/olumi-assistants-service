@@ -198,7 +198,7 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
       const body = res.json() as Rec;
       expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
         mutated: false, refusal: 'not_confirmed' }));
-      expect(body.assistant_text).toContain('The save could not be confirmed.');
+      expect(body.assistant_text).toBe('The save could not be confirmed. Check the current model before retrying.');
       expect(body.assistant_text).not.toContain('already saved');
       expect(body.assistant_text).not.toContain('could not read the model back');
       expect(JSON.stringify(graphOf.get(SCENARIO))).toBe(before);

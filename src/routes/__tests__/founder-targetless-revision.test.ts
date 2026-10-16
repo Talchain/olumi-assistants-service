@@ -29,7 +29,7 @@ import { constructionOperationId, type CallStructuredModel } from '../../orchest
 import { ProposalStore } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { registrationTurnId } from '../../orchestrator-v5/graph-registration/registration-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
-import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
+import { computeGraphIdentityHash, normaliseGraphForIdentity } from '../../orchestrator-v5/context/graph-identity.js';
 import { readGoalRecord } from '../../orchestrator-v5/goal-target/goal-record.js';
 import { MEANING_FLAG_NOTE, meaningFlagWords } from '../../orchestrator-v5/agent-lane/runtime/meaning-flags.js';
 
@@ -41,11 +41,18 @@ const OUTCOME = 'larger_fund_secured';
 const closed: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const close of closed.splice(0)) await close(); });
 
-async function harness(graph: Rec = FX.graph, raw: Rec[] = FX.turns[0].calls.map((c: Rec) => JSON.parse(c.raw_text))) {
+async function harness(graph: Rec = FX.graph, raw: Rec[] = FX.turns[0].calls.map((c: Rec) => JSON.parse(c.raw_text)),
+  history?: { scenario_id: string; brief_text: string; messages: { turn_id: string; user_message: string }[];
+    correction: { turn_id: string; message: string }; constructionRecorded: boolean }) {
+  const scenarioId = history?.scenario_id ?? SID;
+  const brief = history?.brief_text ?? FX.brief_text;
   let stored = structuredClone(graph);
   const writes: Rec[] = [];
-  const ledger = { write_turn_ids: [registrationTurnId(SID, constructionOperationId(SID, FX.brief_text))],
-    user_message_turn_ids: ['brief-turn'], first_user_message: FX.brief_text.trim(), complete: true };
+  const ledger = { write_turn_ids: [registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief))],
+    user_message_turn_ids: history?.messages.map(m => m.turn_id) ?? ['brief-turn'],
+    first_user_message: history?.messages[0]?.user_message.trim() ?? brief.trim(),
+    later_user_messages: history?.messages.slice(1).map(m => ({ turn_id: m.turn_id, text: m.user_message })) ?? [], complete: true };
+  if (history?.constructionRecorded === false) ledger.write_turn_ids = [];
   storeRef.value = {
     append: vi.fn(async (write: Rec) => { stored = structuredClone(write.graph); writes.push(write); return { id: write.turn_id }; }),
     loadGraph: async () => structuredClone(stored),
@@ -55,7 +62,7 @@ async function harness(graph: Rec = FX.graph, raw: Rec[] = FX.turns[0].calls.map
   const app = Fastify();
   await registerRoute(app); await app.ready(); closed.push(() => app.close());
   const dispatch: InternalDispatch = async (path, body) => {
-    if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(stored), brief_text: FX.brief_text,
+    if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(stored), brief_text: brief,
       graph_hash: computeAnalysisAffectingGraphHash(stored as never), graph_identity_hash: computeGraphIdentityHash(stored as never) } };
     if (path.endsWith('/graph/register')) {
       const response = await injectAsCeeWriter(app, { method: 'POST', url: path, payload: body as Record<string, unknown> });
@@ -70,10 +77,10 @@ async function harness(graph: Rec = FX.graph, raw: Rec[] = FX.turns[0].calls.map
   const caps = createAgentCapabilities(dispatch, proposals, model, 'full', undefined, {
     readCommittedTurnLedger: async () => structuredClone(ledger), readStatedObjections: async () => [],
   });
-  const request = FX.turns[0].request;
-  const context = (message = request.message) => ({ scenario_id: SID, authenticated_user_id: null,
+  const request = history?.correction ?? FX.turns[0].request;
+  const context = (message = request.message) => ({ scenario_id: scenarioId, authenticated_user_id: null,
     request_id: 'req-founder', turn_id: request.turn_id, user_turn_text: message,
-    user_text: `${FX.brief_text}\n${message}`, verified_user_messages: [FX.brief_text, message] });
+    user_text: `${brief}\n${message}`, verified_user_messages: [brief, message] });
   const revise = async (message?: string) => dispatchTool('propose_change', JSON.stringify({ ops: [
     { op: 'revise_model', kind: 'goal', label: 'Funding secured', quote: context(message).user_turn_text },
   ] }), context(message) as never, caps) as Promise<Rec>;
@@ -313,5 +320,28 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     const s = await harness(graph, [raw]);
     expect(await s.revise(message)).toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
     expect(s.writes).toHaveLength(0);
+  });
+});
+
+
+describe('turn-2 founder construction reaches the native CAS register', () => {
+  const capture = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/funding-16d51e1b-turn2-brief.json', import.meta.url), 'utf8')) as Rec;
+  it.each([true, false])('captured graph/brief/messages, construction record=%s: one flagged card → own approval → one native write → whole readback', async constructionRecorded => {
+    // Actual 16d51e1b capture; earlier recorded drafter outputs and a complete ledger are explicit offline doubles.
+    // Mutation rows were not captured: neither branch claims to reproduce their served presence.
+    const s = await harness(capture.graph, undefined, { ...capture, constructionRecorded } as never);
+    const offer = await s.revise(capture.correction.message);
+    expect(offer, JSON.stringify(offer)).toMatchObject({ ok: true, mutated: false });
+    expect(offer.public_label).toContain('saved brief does not match your first message');
+    if (!constructionRecorded) expect(offer.public_label).toContain('does not confirm the original construction');
+    expect(s.writes).toHaveLength(0);
+    const approved = s.candidateOf(offer).candidate;
+    expect(await s.approve(offer)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.writes).toHaveLength(1);
+    // The native route adds stable display refs; every approved component/field otherwise stays exactly equal.
+    const held = s.graph();
+    expect(held.nodes.every((n: Rec) => typeof n.ref === 'string')).toBe(true);
+    const withoutRefs = { ...held, nodes: held.nodes.map(({ ref: _ref, ...n }: Rec) => n) };
+    expect(normaliseGraphForIdentity(withoutRefs as never)?.graph).toEqual(normaliseGraphForIdentity(approved as never)?.graph);
   });
 });
