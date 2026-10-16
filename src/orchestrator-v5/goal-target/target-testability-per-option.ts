@@ -22,6 +22,7 @@ import {
   targetNotTestableWarning,
   untestableTargetParts,
   untestableTargetTail,
+  targetNounOf,
   type TargetTestability,
   type TargetTestabilityFailure,
 } from '../admission/target-testability.js';
@@ -63,7 +64,7 @@ export function scopedFailuresFor(
 function ownSentence(graph: unknown, verdict: Extract<TargetTestability, { kind: 'not_testable' }>, namedLinkCount: number): string | null {
   const parts = untestableTargetParts(graph, verdict, namedLinkCount);
   if (parts === null) return null;
-  return `It can't yet be tested against your target (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+  return `It can't yet be tested against ${targetNounOf(graph, verdict.goal_id)} (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
 }
 
 /**
@@ -142,6 +143,8 @@ export function perOptionTargetReasons(
     const node = nodes.find((n) => n.id === id);
     return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : undefined;
   };
+  // An Olumi-read target (saved cee_inference) is "the target" in the fallback too (#3279 BUDDY-A).
+  const ownReasonFallback = targetNounOf(graph, verdict.goal_id) === 'the target' ? "It can't yet be tested against the target." : OWN_REASON_FALLBACK;
   const out: Record<string, { message: string }> = {};
   for (const id of optionIds) {
     const failures = scopedFailuresFor(verdict.failures, pathsByOption.get(id) ?? [], labelOf);
@@ -152,7 +155,7 @@ export function perOptionTargetReasons(
       const s = ownSentence(graph, scoped, count);
       if (s !== null && s.length <= PER_OPTION_SENTENCE_CAP) said = s;
     }
-    Object.defineProperty(out, id, { enumerable: true, configurable: true, writable: true, value: { message: `Not shown. ${said ?? OWN_REASON_FALLBACK}` } });
+    Object.defineProperty(out, id, { enumerable: true, configurable: true, writable: true, value: { message: `Not shown. ${said ?? ownReasonFallback}` } });
   }
   return out;
 }

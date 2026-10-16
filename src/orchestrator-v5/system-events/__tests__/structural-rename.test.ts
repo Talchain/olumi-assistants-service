@@ -198,8 +198,8 @@ describe('structural_rename — the rename LANDS (defect class A)', () => {
     expect(result.handlerFacts[0]?.fact_type).toBe('edit_graph');
     const readback = JSON.parse(JSON.stringify(result.graph));
     expect(readback.goal_constraints).toEqual(base.goal_constraints);
-    expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').provenance).toBe('user_set');
-    expect(decisionInputAsk(readback, ctx)).not.toContain('provisional objective');
+    expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').provenance).toBe('ai_inferred');
+    expect(decisionInputAsk(readback, ctx)).toContain('provisional objective');
     expect(readback.nodes.find((n: Record<string, unknown>) => n.id === 'goal_revenue').label).toBe('Increase profit');
   });
   it('⭐ the named node carries the new label in the graph that would persist', () => {
@@ -407,12 +407,12 @@ function result_default(): StructuralRenameResult {
 }
 
 describe('structural_rename — provenance', () => {
-  it('⭐ a stale label_authored is DROPPED — the new label is the user\'s own words', () => {
+  it('⭐ label_authored records only the renamed wording — the new label is the user\'s own words', () => {
     // `label_authored` means "this label is OUR authored display string". After
     // the user types their own, leaving `true` is a false claim about the one
     // field the rename changed.
     const result = run();
-    expect('label_authored' in nodeById(result, 'fac_price')).toBe(false);
+    expect(nodeById(result, 'fac_price').label_authored).toBe(false);
   });
 
   it('⭐ source_quote SURVIVES — it is a historic record, not a stale mirror', () => {
@@ -423,8 +423,8 @@ describe('structural_rename — provenance', () => {
     );
   });
 
-  it('the node claims user provenance', () => {
-    expect(nodeById(result_default(), 'fac_price').provenance).toBe('user_set');
+  it('the node keeps its original provenance', () => {
+    expect(nodeById(result_default(), 'fac_price').provenance).toBe((persistedGraph().nodes as Array<Record<string, unknown>>).find(n => n.id === 'fac_price')!.provenance);
   });
 
   it('every other field on the renamed node is untouched', () => {

@@ -13,7 +13,7 @@
  * (`fixtures/marketing-020148Z-draft-before-L20.json`). Scripted: the Agent's outputs and the drafter's words (the
  * restated-goal spec's hand-written candidate), so this is TESTED, not WIRE-WITNESSED. 0 provider calls.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type {} from '../../../plugins/scenario-ownership.js';
@@ -33,14 +33,10 @@ vi.mock('../../drafter-raw/index.js', () => ({
 }));
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
-import { approvalChipIdFor, ONE_CHANGE_PER_APPROVAL } from '../approval-chips.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { resolveMagnitudeFrame, sizeLink } from '../../../cee/magnitude/link-effect.js';
-import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { refitFramesForOlumiEstimates } from '../refit-frames.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
@@ -193,23 +189,20 @@ const l20Script = (conversion: Rec, customers: Rec) => [
   say('I have prepared a revised draft that holds both of your goals.'),
 ];
 
-describe('marketing L20 through the real route: the target door offers ONE revised-draft card for every derivation shape the Agent sends', () => {
-  it.each(SHAPES)('%s → ONE card holding both targets; the second target call is the same approval, nothing written yet', async (_name, conversion, customers) => {
+describe('marketing L20 through the real route: a two-target restatement the saved-target card cannot carry is refused, nothing written (DL-3 ruling, #3279)', () => {
+  // DL-3 16 Oct (#3279, BUDDY-A r2): the revised-draft fallback this file used to pin is retired here (it saved the founder's
+  // 4 options as 1) and the full-redraft correction path goes in DRASTIC CUT C5. Until a two-target saved operation
+  // exists, this turn gets a truthful refusal: no card, no drafter call, no write.
+  it.each(SHAPES)('%s → no card; each target call is refused, nothing drafted or written', async (_name, conversion, customers) => {
     const w = world();
     const turn = await route(w);
     const body = await turn({ turn_id: randomUUID(), message: L20 }, l20Script(conversion, customers));
     const calls = (body._agent.tool_calls as Rec[]).filter(c => c.name === 'propose_goal_target');
     expect(calls.map(c => c.refusal ?? null), JSON.stringify(calls)).not.toContain('unreadable_derivation');
-    const offered = calls.filter(c => c.ok === true);
-    expect(offered, JSON.stringify(calls)).toHaveLength(1);
-    // The second target is on the same card (the revised draft is built from the whole L20), so the loop's one-change rule
-    // refusing its call before it is stored does not lose it: the turn ends with ONE control.
-    expect(calls.filter(c => c.ok !== true).map(c => c.refusal)).toEqual([ONE_CHANGE_PER_APPROVAL]);
-    const chip = (body.suggested_actions as Rec[]).find(c => c.id === approvalChipIdFor(String(offered[0]!.proposal_id)));
-    expect(chip, JSON.stringify(body.suggested_actions)).toMatchObject({ label: 'Use the revised draft' });
-    expect(chip!.detail).toContain('‘New customers’ at least 20 customers and ‘Conversion rate’ above 15%');
+    expect(calls.filter(c => c.ok === true), JSON.stringify(calls)).toHaveLength(0);
+    expect(calls.map(c => c.refusal)).toEqual(['target_source_not_supported', 'target_source_not_supported']);
     expect(w.registers).toHaveLength(0);
-    expect(providerCalls.filter(c => c === 'drafter')).toHaveLength(1);
+    expect(providerCalls.filter(c => c === 'drafter')).toHaveLength(0);
   }, ROUTE_MS);
 
   it('NEGATIVE (a real derivation keeps its checks): {base: 15, multiplier: 2} for 15% is refused derivation_mismatch, nothing offered', async () => {
@@ -219,47 +212,5 @@ describe('marketing L20 through the real route: the target door offers ONE revis
       [call('propose_goal_target', { ...CONVERSION, derived_from: { base: 15, multiplier: 2 } }), say('Could not prepare it.')]);
     expect((body._agent.tool_calls as Rec[]).filter(c => c.name === 'propose_goal_target').map(c => c.refusal)).toEqual(['derivation_mismatch']);
     expect(w.registers).toHaveLength(0);
-  }, ROUTE_MS);
-});
-
-describe('marketing L20 → press → the revised draft (DL question 3: do the new goal nodes get a level or frame that sizes their links?)', () => {
-  it('the press writes the revised draft once; what its goal and target nodes and their incoming links carry is recorded', async () => {
-    const w = world();
-    const turn = await route(w);
-    // Each row its own L20 turn: the route keeps ONE revised draft per turn and base, so a shared id would reuse a card.
-    const l20 = randomUUID();
-    const offer = await turn({ turn_id: l20, message: L20 }, l20Script({ derived_from: {} }, { derived_from: {} }));
-    w.said(l20);
-    const proposal = (offer._agent.tool_calls as Rec[]).find(c => c.name === 'propose_goal_target' && c.ok === true)!;
-    const yes = (offer.suggested_actions as Rec[]).find(c => c.id === approvalChipIdFor(String(proposal.proposal_id)))!;
-    const pressed = await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: offer._agent.session_id });
-    const writes = (pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change');
-    expect(writes, JSON.stringify(pressed._agent.tool_calls)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: proposal.proposal_id })]);
-    expect(w.registers).toHaveLength(1);
-    const g = w.read();
-    const rows = g.goal_constraints as Rec[];
-    expect(rows.filter(r => r.role === 'goal_target').map(r => r.node_id).sort()).toEqual(['conversion_rate', 'new_customers']);
-    // Evidence for question 3 (REPORT, not a fix): each target node's level/frame and each incoming link's size author.
-    const targets = (g.nodes as Rec[]).filter(n => n.id === 'conversion_rate' || n.id === 'new_customers');
-    const reading = {
-      goal_node_id: (g.nodes as Rec[]).find(n => n.kind === 'goal')?.id,
-      targets: targets.map(n => ({ id: n.id, kind: n.kind, observed_state: n.observed_state ?? null, frame: resolveMagnitudeFrame(n as never) ?? null })),
-      incoming: (g.edges as Rec[]).filter(e => targets.some(n => n.id === e.to))
-        .map(e => ({ from: e.from, to: e.to, strength: e.strength, magnitude: e.provenance?.magnitude ?? null,
-          natural_effect: e.provenance?.natural_effect ?? null, defaulted: e.defaulted ?? false, provenance: e.provenance ?? null })),
-      // Why the drafter's own goal-link size ("2 customers per point of conversion") is or is not carried, on the stored frames.
-      drafted_goal_link: (() => { const m = magnitudeNodes(g.nodes as Rec[], percentLevelIds(g));
-        const r = sizeLink({ direction: 'positive', effect_amount: 2, effect_per_source_change: 1, user_stated: false },
-          m.get('conversion_rate')!, m.get('new_customers')!);
-        // Construction's Olumi-estimate refit (`refitFramesForOlumiEstimates`, build-model after admission), replayed on the
-        // stored frames with this link's fit candidate restored: where, and why, it declines to move a frame.
-        const replay = structuredClone(g);
-        (replay.edges as Rec[]).find(e => e.from === 'conversion_rate' && e.to === 'new_customers')!.provenance.olumi_fit_candidate = r.fit_candidate;
-        const refit = refitFramesForOlumiEstimates(replay);
-        return { outcome: r.outcome, mean: r.mean, problem: r.problem ?? null, stated_strength: r.stated_strength ?? null, set_aside: r.set_aside ?? null,
-          fit_candidate: r.fit_candidate ?? null, refit_fitted: refit.fitted, refit_refused: refit.refused }; })(),
-    };
-    if (process.env.SYS1_EVIDENCE) writeFileSync(`${process.env.SYS1_EVIDENCE}/l20-revised-draft-sizes.json`, JSON.stringify(reading, null, 2));
-    expect(reading.incoming.length).toBeGreaterThan(0);
   }, ROUTE_MS);
 });

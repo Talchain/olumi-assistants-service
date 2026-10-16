@@ -4030,7 +4030,17 @@ function admitOnce(
         const signedLevel = model.goal.baseline_value;
         const signedScale = typeof signedLevel === 'number' && Number.isFinite(signedLevel) && signedLevel < 0 && raw >= signedLevel
           && (model.goal.operator === '>=' || model.goal.operator === '>') ? -signedLevel : undefined;
-        const resolved = resolveGoalThresholdCapWithProvenance(undefined, raw, model.goal.unit, undefined)
+        // ⭐ TL 09:23Z (G3 unseen, VERIFY-ab3df4cb-unseen.md): a CEILING's scale holds BOTH today's level and the target. A
+        // lower-is-better goal's stated level sits above its target by definition ("9 weeks today, at most 5 weeks"), so the scale
+        // from the target alone (5 × 1.25 = 6.25) put today off it and the user's own level was refused (`baseline_off_cap_scale`).
+        // With the user's level above the target it is that level's frame, same headroom: max(level, target) × 1.25, `level_frame`
+        // (D3 step 1). A floor, an estimated level, a % scale and an inherited cap are unchanged.
+        const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, raw, model.goal.unit, undefined);
+        const todayLevel = model.goal.baseline_value;
+        const ceilingScale = (model.goal.operator === '<=' || model.goal.operator === '<') && !goalLevelIsEstimated(model.goal)
+          && fromTarget?.provenance === 'target_derived_headroom' && typeof todayLevel === 'number' && Number.isFinite(todayLevel) && todayLevel > raw
+          ? { cap: Math.max(todayLevel, raw) * 1.25, provenance: 'level_frame' as const } : undefined;
+        const resolved = ceilingScale ?? fromTarget
           ?? (signedScale !== undefined ? { cap: signedScale, provenance: 'level_frame' as const } : null);
         /**
          * ⛔ A LEVEL FRAME WITH NO BASELINE HAS NO GOAL FIT. ISL reads the level

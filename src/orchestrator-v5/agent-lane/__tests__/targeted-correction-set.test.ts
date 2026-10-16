@@ -91,7 +91,7 @@ describe('one bounded targeted correction on the saved model', () => {
     expected.nodes = expected.nodes.filter(n => n.id !== 'delay');
     expected.edges = expected.edges.filter(e => e.from !== 'delay');
     expected.nodes.find(n => n.id === 'launch')!.label = 'Launch in stages';
-    Object.assign(expected.nodes.find(n => n.id === 'launch')!, { provenance: 'user_set' });
+    Object.assign(expected.nodes.find(n => n.id === 'launch')!, { label_authored: false });
     expected.options[0]!.label = 'Launch in stages';
     expect(w.graph()).toEqual(expected);
     await w.caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid });
