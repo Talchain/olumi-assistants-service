@@ -211,6 +211,11 @@ describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their ra
     ['a range BEFORE the figure in another clause (", and"; no unit word, so only the clause rule tells it apart)', 'Last year it was between 80 and 250, and the starter tier would win about 150 new subscribers.'],
     ['a second range of the same quantity, the range first', 'The starter tier would win between 80 and 250 new subscribers, or 100-300 in a good year, probably about 150.'],
     ['a range in another unit written first, and no range of its own', 'Between 1 and 4 months after launch, the starter tier would win about 150 new subscribers.'],
+    // ⛔ BUDDY-A #3311 B1: a range stated for ANOTHER claim, whose words never name the starter tier, is never this link's.
+    ['BUDDY-A B1: an earlier claim\'s range across an em dash', 'Earlier campaigns won between 80 and 250 new subscribers — the starter tier would win about 150 new subscribers.'],
+    ['BUDDY-A B1: an earlier claim\'s range across a bare "but"', 'Last year we won between 80 and 250 new subscribers but the starter tier would win about 150 new subscribers.'],
+    ['BUDDY-A B1: last year\'s range across an em dash', 'Last year we won between 80 and 250 new subscribers — the starter tier would win about 150 new subscribers.'],
+    ['an earlier claim\'s range across a bare comma', 'Earlier campaigns won between 80 and 250 new subscribers, the starter tier would win about 150 new subscribers.'],
   ] as const)('KEPT NEGATIVE: %s → asked, nothing proposed or stored', async (_name, said) => {
     await expectAsked(D1[0], switchArgs(D1[1], D1[2], 150), said, 'unclear_figure');
   });

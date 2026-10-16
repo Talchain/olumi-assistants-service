@@ -554,7 +554,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // ⭐ G1b answer door: the range the user wrote around their figure in the quoted sentence (`centreRangeOfQuote`, the
   // door's own reading, bound by the reading token through the quote) is carried exactly as construction carries the same
   // sentence from a brief (`natural_effect.stated_range`, `end: 'centre'`), so the chat and the brief size it alike.
-  const centre = centreRangeOfQuote(params.quote, effect);
+  const centre = centreRangeOfQuote(params.quote, effect, { source: String(sourceNode.label), target: String(targetNode.label) });
   const sizing = sizeLink(
     { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true,
       ...(centre !== undefined ? { stated_range: centre } : {}) },
