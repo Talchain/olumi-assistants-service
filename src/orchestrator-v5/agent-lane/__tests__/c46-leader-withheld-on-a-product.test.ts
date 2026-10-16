@@ -403,8 +403,8 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
     const { registered } = await build(additive());
     const fact = await runOn(registered, [{ id: 'raise_pro_to_59', label: 'Raise Pro to £59', win: 0.94 }, KEEP]);
     expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
-    // The discriminating half: on this path the headline DOES name the leader, so its absence above is the stamp's.
-    expect(fact.result.summary).toMatch(/Raise Pro to £59/);
+    // The discriminating half: the public block names the permitted leader; the withheld twin above does not.
+    expect(buildAnalysisResultBlock(fact).leading_option_id).toBe('raise_pro_to_59');
     expect(stateFor(fact, registered).state.leader_claim).toEqual({ permitted: true, separation: 'separated' });
   });
 
@@ -426,7 +426,7 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
     for (const n of old.nodes) delete n.nonlinear_identity;
     const fact = await runOn(old, [RAISE, KEEP]);
     expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
-    expect(fact.result.summary).toMatch(/Raise Pro to £59/);
+    expect(buildAnalysisResultBlock(fact).leading_option_id).toBe('raise_pro_to_59');
     expect(stateFor(fact, old).state.leader_claim).toEqual({ permitted: true, separation: 'separated' });
   });
 
@@ -543,7 +543,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
     expect(nodeById(registered, 'mrr')).toHaveProperty('nonlinear_identity');
     const fact = await runOn(registered, [DISCOUNT, SQ]);
     expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
-    expect(fact.result.summary).toMatch(/Offer annual discount/);
+    expect(buildAnalysisResultBlock(fact).leading_option_id).toBe('offer_annual_discount');
   });
 
   it('RED (P4): £59 lifting Pro MRR and, through refunds, lowering MRR is withheld against keeping £49', async () => {
@@ -558,7 +558,7 @@ describe('(b) rule 7 on the Run: a leader whose routes through and around the pr
     const { registered } = await build(refunds('positive'));
     const fact = await runOn(registered, [RAISE, KEEP]);
     expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
-    expect(fact.result.summary).toMatch(/Raise Pro to £59/);
+    expect(buildAnalysisResultBlock(fact).leading_option_id).toBe('raise_pro_to_59');
   });
 });
 

@@ -1,7 +1,7 @@
+import { runChanceHeadline } from '../../coaching/run-chance-headline.js';
 import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
 import { launchWindowGapWords, launchWindowOf } from '../../goal-target/goal-target-basis.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
-import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
 import { withGoalLevelInGoalUnits } from '../../agent-lane/goal-level-in-goal-units.js';
 import { goalOrderedLinks } from '../../admission/target-testability.js';
 /**
@@ -210,8 +210,7 @@ import {
   partitionScaffoldedByAnalysisPresence,
 } from '../../coaching/scaffold-disclosure.js';
 import {
-  buildAnalysisResultHeadline,
-  describeAnalysisHeadline,
+  buildAnalysisResultHeadlineParts,
   describeGoalFrame,
 } from '../../coaching/analysis-result-headline.js';
 // ⭐ THE WITHHELD-SEPARABILITY DISCLOSURE. See its module docstring: the
@@ -222,7 +221,7 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
-import { assessRunQuestionScope, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2301,9 +2300,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
     // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
-    const evaluatedQuestionScope = typeof snapshot.goal_node_id === 'string'
-      ? assessRunQuestionScope(snapshot.rawPersistedGraph ?? graphForAnalysis, plotPayload, snapshot.goal_node_id) : undefined;
-    if (evaluatedQuestionScope?.status === 'invalid') {
+    const evaluatedQuestion = deriveRunQuestion({ runEvidence: { runId, ...(runInputSnapshot === null ? {} : { inputSnapshot: runInputSnapshot }),
+      ...(frozenRevision === undefined ? {} : { occurrence: { evaluated_scenario_revision: frozenRevision } }) },
+      ...(frozenRevision === undefined ? {} : { historicalModel: { revision: frozenRevision, graph: snapshot.rawPersistedGraph ?? graphForAnalysis } }),
+      dispatchedRequest: plotPayload });
+    const evaluatedQuestionScope = evaluatedQuestion.scope;
+    // Missing target/direction already have their precise option-scoped owner; do not replace them with a conflicting cause.
+    const missingTargetOrDirection = evaluatedQuestionScope.reasons.some(reason =>
+      reason === 'saved_target_not_recorded' || reason === 'saved_comparator_not_recorded');
+    if (evaluatedQuestionScope.status === 'invalid' || (evaluatedQuestionScope.status === 'unverified'
+      && !missingTargetOrDirection
+      && sentGoalThresholdOf(undefined, undefined, snapshot.goal_node_id, undefined, { sentRun: plotPayload })?.frame === 'level')) {
       const scopedIds = goalFigureOptions(response).scored;
       response = withholdOptionGoalFigures(response, new Set(scopedIds), {
         code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning',
@@ -2763,8 +2770,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⛔ L4 (DL condition 2): a compared capacity-ratio option's run-by-run comparison is distorted (its link is drawn beside
     // the team part), so no leader or win share is said; the licence's note says why (`CAPACITY_RATIO_COMPARISON_NOTE`).
     const ratioOptionCompared = capacityRatioOptionIds(snapshot.rawPersistedGraph ?? snapshot.graph).some(id => analysedOptionIds.has(id));
+    const headlineParts = buildAnalysisResultHeadlineParts(headlineInput);
     const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared
-      ? null : buildAnalysisResultHeadline(headlineInput);
+      ? null : headlineParts.text;
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
     // this headline has withdrawn it, nor assert attainment while the frame is
@@ -2969,7 +2977,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
-      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedQuestionScope, perLimit: constraintVerdict.perLimit,
+      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedQuestion, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
@@ -3047,7 +3055,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // The telemetry site below reuses THIS descriptor rather than computing a
     // second one: two derivations of one verdict is how two surfaces end up
     // disagreeing inside one response (trap 12).
-    const headlineDescriptor = describeAnalysisHeadline(headlineInput);
+    const headlineDescriptor = headlineParts.descriptor;
     // ⭐⭐ THE REASON, ON THE RUN TURN. Empty on every path but
     // `options_not_separable`, so every other run is byte-identical.
     //
@@ -3105,12 +3113,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id, runIdentityEvaluations);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
-    const disclosedHeadline = headline !== null
-      ? appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure) : null;
+    const chanceHeadline = runChanceHeadline({ ...response, run_id: runId, input_snapshot: runInputSnapshot }, graphForAnalysis);
+    // A comparison share remains supporting data. No licensed chance means the truthful completion/caution template.
+    const summaryHeadline = chanceHeadline === null ? null
+      : chanceHeadline + (samplesReduced || statusOutcome.kind !== 'ok' ? ` ${template}` : '');
+    const headlineDisclosures = headlineParts.disclosures;
     const composedSummary = (() => {
-      const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
-      return disclosedHeadline !== null && headline !== null
-        ? disclosedHeadline + summary.slice(headline.length) : summary;
+      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+      return summary;
     })();
     const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
 

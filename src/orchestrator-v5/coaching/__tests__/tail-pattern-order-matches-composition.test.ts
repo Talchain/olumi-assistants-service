@@ -57,7 +57,7 @@ function tailSuffixFamilies(): string[] {
 
 /** The suffix variables, in the order `run-analysis.ts` concatenates them. */
 function compositionOrder(): string[] {
-  const line = RUN_ANALYSIS_SRC.split('\n').find((l) => l.includes('const summary = `${headline'));
+  const line = RUN_ANALYSIS_SRC.split('\n').find((l) => l.includes('const summary = `${summaryHeadline ?? template}'));
   if (line === undefined) return [];
   return [...line.matchAll(/\$\{([a-zA-Z]+Disclosure)\}/g)].map((m) => m[1] as string);
 }

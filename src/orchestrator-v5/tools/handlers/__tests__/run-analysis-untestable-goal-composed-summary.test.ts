@@ -369,7 +369,8 @@ describe('wiring — run-analysis.ts feeds the tail the headline builder\'s own 
 
   it('derives the frame from the SAME headline input the headline was built from', () => {
     // C46 stage 1: the same input, with the product withhold beside it.
-    expect(source).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared\n      ? null : buildAnalysisResultHeadline(headlineInput);');
+    expect(source).toContain('const headlineParts = buildAnalysisResultHeadlineParts(headlineInput);');
+    expect(source).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared\n      ? null : headlineParts.text;');
     expect(source).toContain('const goalFrame = describeGoalFrame(headlineInput);');
   });
 

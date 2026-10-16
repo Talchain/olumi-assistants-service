@@ -1,3 +1,4 @@
+import { runChanceHeadline } from '../coaching/run-chance-headline.js';
 /**
  * Default V5 handler validation registry.
  *
@@ -125,8 +126,7 @@ const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
  *     leading option, and the fallback is a WITHHELD shape (G-CEE-1);
  *   - a family added to the array is salvaged here with NO edit to this file.
  */
-const TEMPLATE_SUFFIX_EXTRACT_RES: ReadonlyArray<RegExp> =
-  TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ source }) => new RegExp(source));
+
 /** Rebuild the Science sentence from the handler's graph and recorded link ids, never from reply prose. */
 function legacyFiguresDisclosureOf(outcome: unknown): string {
   const source = (outcome as { __legacy_figures_source?: unknown }).__legacy_figures_source;
@@ -149,11 +149,25 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   // ⭐ The goal-reading tail is REBUILT here from the handler's own graph, never taken from its text (AIQ 5895590866).
   const goalReadingTail = goalReadingTailOf(outcome);
   const legacyFiguresDisclosure = legacyFiguresDisclosureOf(outcome);
+  // Exact existing fact/input reader, not a new prose grammar: neither a made-up figure nor a changed negative is admitted.
+  const source = outcome as { handler_facts?: unknown; __run_graph_snapshot?: unknown };
+  const fact = (Array.isArray(source.handler_facts) ? source.handler_facts : []).find((f: unknown) => f !== null
+    && typeof f === 'object' && 'fact_type' in f && f.fact_type === 'run_analysis' && 'noop' in f && f.noop === false);
+  const recorded = fact !== undefined && 'result' in fact && fact.result !== null && typeof fact.result === 'object' ? fact.result : undefined;
+  const chance = runChanceHeadline(recorded, source.__run_graph_snapshot);
+  const comparisonPermitted = recorded !== undefined && 'summary' in recorded && recorded.summary === candidate
+    && 'constraint_verdict' in recorded && recorded.constraint_verdict !== null && typeof recorded.constraint_verdict === 'object'
+    && 'may_name_leading_option' in recorded.constraint_verdict && recorded.constraint_verdict.may_name_leading_option === true;
+  if (chance !== null && typeof candidate === 'string' && candidate.startsWith(chance) && recorded !== undefined
+    && 'summary' in recorded && recorded.summary === candidate
+    && (isAllowedRunAnalysisAssistantText(RUN_ANALYSIS_FALLBACK_TEXT + candidate.slice(chance.length), goalReadingTail, legacyFiguresDisclosure, comparisonPermitted)
+      || isAllowedRunAnalysisAssistantText(candidate.slice(chance.length).trimStart(), goalReadingTail, legacyFiguresDisclosure, comparisonPermitted))) return candidate;
+
   if (legacyFiguresDisclosure === '') {
-    if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {
+    if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, '', comparisonPermitted)) {
       return candidate as string;
     }
-  } else if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, legacyFiguresDisclosure)) {
+  } else if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, legacyFiguresDisclosure, comparisonPermitted)) {
     return candidate as string;
   }
   // Review fix B6 (honesty floor): if the rejected composed summary carried a
@@ -169,12 +183,13 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
     // Salvage in the handler's own append order, taken from the registry array
     // itself, so the combined text is a shape the allowlist's template branch
     // recognises. Any, none, or all may be present.
-    const slices = TEMPLATE_SUFFIX_EXTRACT_RES.map((re) => candidate.match(re)?.[0] ?? '');
+    const slices = TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.filter(family => !family.requiresComparisonPermission || comparisonPermitted)
+      .map(({ source: pattern }) => candidate.match(new RegExp(pattern))?.[0] ?? '');
     // Olumi's goal readings survive the fallback too: the goal's chance still shows, and it rests on them.
     const tail = goalReadingTail !== '' && candidate.includes(goalReadingTail) ? goalReadingTail : '';
     if (slices.some((slice) => slice.length > 0)) {
       const combined = RUN_ANALYSIS_FALLBACK_TEXT + tail + slices.join('');
-      if (isAllowedRunAnalysisAssistantText(combined, tail)) return combined;
+      if (isAllowedRunAnalysisAssistantText(combined, tail, '', comparisonPermitted)) return combined;
       // A poisoned slice in one disclosure must not cost us the others: retry
       // with each alone before giving up on disclosure entirely.
       //
@@ -189,7 +204,7 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
       for (const only of [...slices].reverse()) {
         if (only.length === 0) continue;
         const single = RUN_ANALYSIS_FALLBACK_TEXT + tail + only;
-        if (isAllowedRunAnalysisAssistantText(single, tail)) return single;
+        if (isAllowedRunAnalysisAssistantText(single, tail, '', comparisonPermitted)) return single;
       }
     }
     if (tail !== '' && isAllowedRunAnalysisAssistantText(RUN_ANALYSIS_FALLBACK_TEXT + tail, tail)) return RUN_ANALYSIS_FALLBACK_TEXT + tail;

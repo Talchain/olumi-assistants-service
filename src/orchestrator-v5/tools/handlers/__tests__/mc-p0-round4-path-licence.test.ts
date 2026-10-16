@@ -86,7 +86,7 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
         // Science 393023 LICENCE (a)/(b), 7 Oct: preserve the endpoint-name check on the new warning.
         if (d === 1) expect(warning.message).toContain('Starter support cost');
         // Science 393023 LICENCE (a)/(b), 7 Oct: without a leader, the existing generic summary replaces legacy prose.
-        expect(r.summary.startsWith('Ran analysis on your current scenario.')).toBe(true);
+        expect(r.summary).not.toMatch(/was supported by|gave the highest|gave the lowest/);
       }
       measurements.push({ draw: d, tag, leading_option_id: r.leading_option_id, paths, warnings, result: r }); outputs.push(r.leading_option_id);
     }

@@ -24,7 +24,6 @@ import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
-import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
 import { convertingOlumiEstimate, scoredGoalIdOf, notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
@@ -108,15 +107,17 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(leaderOf(F.plot_body_at_least)).toBe('more_reliable_courier');
   });
 
-  it('row 1 (served Run 2, "at most 400"): every share is the minimise body\'s, by option id, and the lead says "gave the lowest"', async () => {
+  it('row 1 (served Run 2, "at most 400"): every share is the minimise body\'s, with a completion lead and the provisional disclosure', async () => {
     const { result } = await runOn(F.graph_with_target);
     expect(resultShares(result)).toEqual(sharesById(F.plot_body_minimise.option_comparison));
     expect(result.leading_option_id).toBe('15_loyalty_discount');
     const headline = headlineOf(result.summary);
-    expect(headline).toBe('15% Loyalty Discount gave the lowest monthly cancellations in 71% of runs of this model, but treat this as provisional: the result is sensitive to Pauses taken instead of cancellations.');
-    // The egress cage admits it, and the leader detectors see it (so a withheld leader cannot leave through this verb).
+    expect(headline).toBe('Ran analysis on your current scenario.');
+    expect(result.summary).toContain('Treat this as provisional: the result is sensitive to Pauses taken instead of cancellations.');
+    expect(result.constraint_verdict?.may_name_leading_option).toBe(true);
+    // The completion is admitted without presenting a win share as a goal chance.
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
-    expect(textNamesLeadingOption(headline)).toBe(true);
+    expect(result.summary).not.toMatch(/71%|gave the lowest/);
     // Only the claims against the target go.
     expect(goalChanceKeys(result)).toBe(0);
   });
@@ -192,11 +193,14 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(withoutTarget.sent.goal_direction).toBe('minimise');
     expect(withoutTarget.result.leading_option_id).toBe('15_loyalty_discount');
     expect(withTarget.result.leading_option_id).toBe(withoutTarget.result.leading_option_id);
-    expect(textNamesLeadingOption(headlineOf(withTarget.result.summary))).toBe(true);
-    // Ladder rung 2 (Science d5 #87 6008589328): an aim-verb label ("Reduce monthly cancellations") has its verb
-    // stripped, so the lead names the quantity on BOTH graphs, and never carries the verb.
-    expect(withTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
-    expect(withoutTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
+    expect(withTarget.result.constraint_verdict?.may_name_leading_option).toBe(true);
+    expect(withoutTarget.result.constraint_verdict?.may_name_leading_option).toBe(true);
+    expect(resultShares(withTarget.result)).toEqual(sharesById(F.plot_body_minimise.option_comparison));
+    expect(resultShares(withoutTarget.result)).toEqual(sharesById(F.plot_body_minimise.option_comparison));
+    expect(headlineOf(withTarget.result.summary)).toBe('Ran analysis on your current scenario.');
+    expect(headlineOf(withoutTarget.result.summary)).toBe('Ran analysis on your current scenario.');
+    expect(withTarget.result.summary).toContain('Treat this as provisional:');
+    expect(withoutTarget.result.summary).toContain('Treat this as provisional:');
     expect(withTarget.result.summary).not.toMatch(/lowest reduce|came out lowest/i);
   });
 });
