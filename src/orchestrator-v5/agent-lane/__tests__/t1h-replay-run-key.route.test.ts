@@ -339,7 +339,7 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     expect(table.filter(r => r.turn_id === request.turn_id)).toHaveLength(1);
   });
 
-  it('coverage: an answer that carries offers AND narration (Explain) records both on its row through the narrated path', async () => {
+  it('coverage: an AI-narrated Explain records its own narration without fabricated offers or an offer run key', async () => {
     const { live } = await runA();
     originalLoop = false;
     const turnId = randomUUID();
@@ -350,9 +350,8 @@ describe('T1h: a replay names its own answer’s Run (real route, real write →
     const row = table.find(r => r.turn_id === turnId)!;
     expect(row.run_narration).toEqual(body.narration);
     expect(rpcCalls.filter(n => n.startsWith('append_agent_answer')).at(-1)).toBe('append_agent_answer_narrated');
-    // The narration and exact-row RPC assertions above still execute while the legacy menu setup remains RED.
-    expect(row.suggested_actions?.length, 'precondition: durable next-step offers').toBeGreaterThan(0);
-    expect(row.suggested_actions_run_key).toBe(live.narration.run_key);
+    expect(row.suggested_actions ?? null).toBeNull();
+    expect(row.suggested_actions_run_key ?? null).toBeNull();
   });
   it('default result-first Run press: the row stores its narration, and a cold replay of a still-current Run returns the same narration, words and shape', async () => {
     originalLoop = false;

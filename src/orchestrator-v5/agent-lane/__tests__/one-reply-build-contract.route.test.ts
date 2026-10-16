@@ -254,6 +254,25 @@ describe('ONE reply contract through the build route', () => {
     await expectStoredAndReplayed(body, lastBuildPayload);
   });
 
+  it('S4 R3: an AI-written build retains the inert risk exclusion once, without handing its sentence to the narrator', async () => {
+    currentRead = structuredClone(FX.read);
+    currentRead.graph.nodes.push(
+      { id: 'transition_workload', kind: 'factor', label: 'Transition workload', provenance: 'from_brief' },
+      { id: 'transition_risk', kind: 'risk', label: 'Transition risk', provenance: 'ai_inferred' },
+    );
+    currentRead.graph.edges.push({ from: 'transition_workload', to: 'transition_risk' });
+    const goal = currentRead.graph.nodes.find(node => node.kind === 'goal')!;
+    const line = `"Transition risk" (with "Transition workload", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "${goal.label}".`;
+    narrator = 'Check evidence for the causal assumptions.';
+    const body = await buildTurn();
+    expect((body as Body & { _diagnostic_trace: { reply_author: string } })._diagnostic_trace.reply_author).toBe('ai');
+    expect(body._agent.tool_calls.map(call => call.name)).toContain('build_model_from_brief');
+    expect(count(body.assistant_text, narrator)).toBe(1);
+    expect(count(body.assistant_text, line)).toBe(1);
+    expect(sentText()).not.toContain(line);
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
   it('S4: a useful AI move does not acquire the host’s three generic activities', async () => {
     useNumericChanceRead();
     currentRead.analysis_state.usable_for_chips = true;

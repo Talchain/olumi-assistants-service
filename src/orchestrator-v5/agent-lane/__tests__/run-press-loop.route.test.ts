@@ -430,10 +430,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(body._provider_calls ?? []).toEqual([]);
     expect(runs).toHaveLength(1); expect(bodies).toHaveLength(callCount);
     expect(store.append).not.toHaveBeenCalled(); expect(rows).toEqual(savedRows);
-    // Keep the legacy menu precondition RED after exercising every unchanged replay/no-extra-work negative.
-    expect(body.suggested_actions.map((a: Rec) => a.id)).toEqual([
-      'agent-next-pre-mortem', 'agent-next-what-would-change', 'agent-next-strengthen',
-    ]);
+    // A replay remembers this live answer's offers; it never invents the retired generic menu.
+    expect(body.suggested_actions.map((a: Rec) => a.id)).toEqual(live.suggested_actions
+      .filter((a: Rec) => !a.id.startsWith('agent-explain-run:')).map((a: Rec) => a.id));
   });
 
   it('a moved AI Run-loop resend preserves its committed words without current blocks or Explain', async () => {

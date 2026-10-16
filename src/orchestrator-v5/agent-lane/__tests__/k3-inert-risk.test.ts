@@ -90,6 +90,24 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     }
   });
 
+  it('AI reply selection keeps the inert exclusion without restoring relies-on, recorded unsized or missing-input prose', async () => {
+    const { graph } = await build();
+    const option = (graph.nodes as Rec[]).find(n => n.kind === 'option')!;
+    const mixed = { ...graph, nodes: [...graph.nodes, { id: 'option_condition', kind: 'risk', label: 'Option condition',
+      relies_on: { option_id: option.id } }] };
+    const ctx = { restingText: 'Check the assumptions.', questionsToggle: false, awaitingApproval: false, builtOrRan: true,
+      omittedRisks: [{ node_id: 'unsized_risk', label: 'Recorded unsized risk', reason: 'unsized_olumi_risk' as const }] };
+    const all = decisionInputLines(mixed, ctx);
+    expect(all).toContain(LEFT_OUT_RUN);
+    expect(all.some(line => line.includes('Option condition'))).toBe(true);
+    expect(all.some(line => line.includes('Recorded unsized risk'))).toBe(true);
+    expect(decisionInputLines(mixed, ctx, { onlyRiskKind: 'inert' })).toEqual([LEFT_OUT_RUN]);
+    expect(decisionInputLines(mixed, { ...ctx, builtOrRan: false }, { onlyRiskKind: 'inert' })).toEqual([]);
+    const goalId = (graph.nodes as Rec[]).find(n => n.kind === 'goal')!.id;
+    const connected = { ...graph, edges: [...graph.edges, { from: riskId(graph), to: goalId }] };
+    expect(decisionInputLines(connected, ctx, { onlyRiskKind: 'inert' })).toEqual([]);
+  });
+
   it('RED (CODEX P2): A7 is restored after the gate by its OWN words — never mistaken for the left-out line', () => {
     const goal = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')).goal_after_build as Rec;
     const g = { nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }, { id: 'f_x', kind: 'factor', label: 'Founder hours' }, { id: 'r_b', kind: 'risk', label: 'Founder burnout' }], edges: [{ from: 'f_x', to: 'r_b' }] };
