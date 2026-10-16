@@ -49,7 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { edgeProvenanceDisplay, hasUserStatedSize, settingDisplayOf } from "../provenance/provenance-of.js";
-import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { findStatedAmounts, readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
 import { readUnitParts, sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
@@ -393,34 +393,15 @@ function countUnitWord(literal: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-/**
- * The forms a unit word might be written in, so "month"/"months" and
- * "people"/"person" compare equal.
- *
- * ⚠ RETURNS A SET, NOT A SINGLE STEM. A single crude stem got this wrong in the
- * obvious direction: "hires" -> "hir" (the `es` branch) while "hire" -> "hire",
- * so a factor declared in `hires` never matched a brief written in `hire`.
- * Comparing candidate SETS removes the need for the stemmer to pick correctly.
- */
-function unitForms(word: string): Set<string> {
-  const w = word.toLowerCase().trim();
-  const forms = new Set<string>([w]);
-  if (w.endsWith("ies")) forms.add(`${w.slice(0, -3)}y`);
-  if (w.endsWith("es")) forms.add(w.slice(0, -2));
-  if (w.endsWith("s")) forms.add(w.slice(0, -1));
-  forms.add(`${w}s`);
-  if (w === "people" || w === "person") {
-    forms.add("people");
-    forms.add("person");
-  }
-  return forms;
-}
-
-/** Do two unit words name the same family? */
-function sameUnitFamily(a: string, b: string): boolean {
-  const fa = unitForms(a);
-  for (const f of unitForms(b)) if (fa.has(f)) return true;
-  return false;
+/** Compound units retain their period/denominator through the existing unit owner. */
+function countUnitOf(q: Quantity): string | null {
+  if (q.unit === null) return null;
+  const amount = findStatedAmounts(q.literal)[0];
+  const tail = amount?.index === 0 ? q.literal.slice(amount.matchedText.length).trim() : '';
+  const parts = readUnitParts(tail);
+  // A rate cannot degrade into its final time word (950 MWh/year is never 950 years).
+  return parts !== null && (parts.period !== null || parts.per !== null)
+    ? tail : q.unit;
 }
 
 export function extractStatedQuantities(text: string): Quantity[] {
@@ -565,6 +546,7 @@ const PROSE_KEYS: ReadonlySet<string> = new Set([
   "fix_hint",
   "commentary",
   "source_quote", // the user's own words, carried verbatim; nothing computes with it
+  "user_statements", // retained source evidence is not proof that its figures parameterise the model
 ]);
 
 /**
@@ -1870,7 +1852,7 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
       if (q.unit === null || c.declaredUnit === null) return false;
       // A receipt-located count belongs only to the edge that verified it, with its full noun/period unit.
       if (c.receiptedQuantity === q) return sameUnit(q.unit, c.declaredUnit);
-      return sameUnitFamily(q.unit, c.declaredUnit);
+      return sameUnit(countUnitOf(q), c.declaredUnit);
     }
     default:
       // Dates and periods carry no magnitude; they match on text only.
@@ -2298,7 +2280,7 @@ function observedValueOf(graph: Record<string, unknown>, nodeId: string): number
  * genuine observation be withdrawn. It is also not bare numeric equality:
  * `4%`, `4 people` and `£4` share a number and state nothing in common, so the
  * kind must match, money must share its currency symbol, and a count must share
- * its unit family (`sameUnitFamily`, so "month"/"months" agree).
+ * its unit family (`sameUnit`, so "month"/"months" agree).
  *
  * Dates and periods carry no magnitude at all (`value === null`); for those the
  * only honest comparison left is what was written.
@@ -2315,7 +2297,7 @@ function sameStatedQuantity(a: Quantity, b: Quantity): boolean {
   if (a.kind === "money") return a.unit === b.unit;
   if (a.kind === "count") {
     if (a.unit === null || b.unit === null) return a.unit === b.unit;
-    return sameUnitFamily(a.unit, b.unit);
+    return sameUnit(countUnitOf(a), countUnitOf(b));
   }
   return true;
 }
