@@ -20,6 +20,8 @@ import {
 } from '../withheld-leader-fail-closed.js';
 import { PROVISIONAL_FIGURES_CAVEAT } from '../../compose/leading-option-wire-enforcement.js';
 import { unsizedLinkSentence, unsizedLinkStatement } from '../unsized-path-cause.js';
+import { STATED_RANGE_NEXT_STEP } from '../goal-certainty.js';
+import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { checkProvisionalView } from '../provisional-view.js';
 
 describe('c6: an appointed lead is a staffing role, with option labels still guarded', () => {
@@ -231,6 +233,31 @@ describe('c6: the closing states a refused unsized link without re-inviting it',
     const out = enforceAgentLaneLeaderClaimsAtWire(response(true, links), opts(refusal));
     expect(out.response.assistant_text).toContain(unsizedLinkStatement(links));
     expect(out.response.assistant_text).not.toMatch(/Set (?:it|them)/);
+  });
+
+  /**
+   * ⭐ ITEM 3 (PL 19:07Z; G3 VERIFY-1a1a7907 re-ask classes 2–3): the host Run reply says the warning's own words
+   * (`unsizedLinkWords`), so a link the user stated a range for is never invited again here either.
+   */
+  const QUOTE = 'Our ops lead reckons merging the routes would cut returns by somewhere between 2 and 4 percentage points.';
+  const ranged = (): Record<string, unknown> => {
+    const subject = { kind: 'link' as const, id: link.from, to_id: link.to, field: 'effect' as const };
+    const st = { speaker: 'user', reading: 'olumi', quote: QUOTE, source: QUOTE, subject: { quantity: `link|${link.from}|${link.to}||effect` },
+      unit: 'percentage points', form: 'range', low: 2, high: 4 };
+    return withUserStatement(graph as never, userStatementRecord(subject, [st as never], '2026-10-16T00:00:00.000Z', CONSTRUCTION_ATTEST), subject) as Record<string, unknown>;
+  };
+  // The sentence fallback (no recorded cause, so no placeholderAskWords message ahead of it); the no-range CONTROL rows above
+  // keep today's invitation byte for byte.
+  it('ITEM 3: a link with the user\'s stated range is stated, never invited; the AIE\'s next step instead', () => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(response(false), { ...opts('What do we do first?'), graph: ranged() });
+    expect(out.response.assistant_text).toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkStatement([link])} ${STATED_RANGE_NEXT_STEP}`);
+    expect(out.response.assistant_text).not.toMatch(/Set (?:it|them)/);
+  });
+  it('ITEM 3 NEGATIVE: a negated range statement is not the user\'s range; the invitation stays', () => {
+    const g = ranged() as { nodes: Array<Record<string, any>> };
+    for (const n of g.nodes) for (const r of Object.values(n.user_statements ?? {}) as Array<Record<string, any>>) for (const st of r.statements ?? []) st.negated = true;
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), { ...opts('What do we do first?'), graph: g }).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
   });
 });
 
