@@ -1,6 +1,10 @@
 /** Saved-model corrections: real canonical adapters → own card → one native CAS registration → whole readback. */
 import { applyGoalSteadyEdit } from '../../orchestrator-v5/goal-target/goal-steady-write.js';
 import { horizonSteadyAttested } from '../../orchestrator-v5/goal-target/horizon-basis.js';
+import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { guardAnalysisParticipation } from '../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js';
+import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
+import { boundNodeDescriptionForContext } from '../../orchestrator/context/graph-compact.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -296,6 +300,10 @@ describe('one native governing-outcome correction', () => {
     expect(w.writes).toHaveLength(0);
     const proposal = w.proposals.get(String(offered.proposal_id))!;
     expect(proposal.operations).toHaveLength(1); expect(proposal.operations[0]!.op).toBe('repoint_goal');
+    const chips = approvalChipsFor([{ name: 'propose_goal_target', ...offered } as never], () => ({ proposal, result: offered }));
+    expect(chips.map(c => c.label)).toEqual(['Change the goal', 'At most instead', 'Change something first']);
+    expect(offered.public_label).toContain('(at least £1,300,000)');
+    expect(offered.public_label).not.toContain('>=');
     const cold = restoreCard(proposal, offered, w.ctx);
     expect(await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: 'Yes, at least' }, { proposal_id: proposal.proposal_id })).toMatchObject({ ok: false, mutated: false });
     const saved = await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
@@ -309,6 +317,8 @@ describe('one native governing-outcome correction', () => {
     const old = graph.nodes.find((n: Rec) => n.id === 'large_fund');
     expect(old).toMatchObject({ kind: 'outcome', goal_threshold_raw: 1300000, goal_horizon: { deadline: '2027-12-31' } });
     expect(old.description).toContain(ambition);
+    expect(boundNodeDescriptionForContext(old.description)).toContain('at least £1,300,000');
+    expect(boundNodeDescriptionForContext(old.description)).toContain('later ambition');
     expect(old.description).toContain('Earlier saved bound: at least £1,300,000');
     expect(old.description).toContain('Earlier saved source quote');
     expect(old.description).toContain('not kept as current target controls');
@@ -342,10 +352,11 @@ describe('one native governing-outcome correction', () => {
     expect(result).toMatchObject({ ok: false, mutated: false }); expect(result).not.toHaveProperty('proposal_id');
     expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
   });
-  it('refuses the entire card when a requested removal cannot be prepared', async () => {
+  it('names the native removal refusal while offering the valid goal change', async () => {
     const w = await make();
     const result = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, remove_mechanisms: [{ kind: 'risk', label: 'Missing risk', quote: source }] }), w.ctx, w.caps());
-    expect(result).toMatchObject({ ok: false, mutated: false }); expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0);
+    expect(result).toMatchObject({ ok: true, mutated: false, not_included: [{ part: 'removal of Missing risk', refusal: 'subject_not_found' }] });
+    expect(result.public_label).toContain('Missing risk'); expect(w.proposals.size()).toBe(1); expect(w.writes).toHaveLength(0);
   });
   it('a concurrent native edit refuses without saving any part of the goal change', async () => {
     const w = await make(true, { race: true });
@@ -371,12 +382,16 @@ describe('one native governing-outcome correction', () => {
     expect(w.graph().nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon).toEqual({ deadline: '2027-12-31' });
     expect(w.writes).toHaveLength(1);
   });
-  it.each(['level', 'deadline'])('an unsupported %s refuses the whole bundle, including the otherwise valid goal', async missing => {
+  it.each(['level', 'deadline'])('an unsupported %s is explicitly left out without losing the valid goal card', async missing => {
     const w = await make();
     const extra = missing === 'level' ? { current_level: { value: 200, unit: '£' } } : { deadline_words: 'tomorrow' };
     const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, ...extra }), w.ctx, w.caps());
-    expect(offered).toMatchObject({ ok: false, mutated: false }); expect(offered).not.toHaveProperty('proposal_id');
-    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    expect((offered.not_included as Rec[])).toHaveLength(1); expect(offered.public_label).toContain('Not included on this card');
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw).toBe(250000);
   });
   it('requested factor removal shows its option-setting consequence and saves it with the goal', async () => {
     const w = await make(); const quote = 'Remove the factor “Founder effort”.';
@@ -480,6 +495,90 @@ describe('one native governing-outcome correction', () => {
     expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal')).not.toHaveProperty('horizon_basis');
     expect(horizonSteadyAttested(w.graph())).toBe(false);
     if (state !== 'none') { expect(earlier.description).toContain('8 months'); expect(earlier.description).toContain('user_stated'); }
+    expect(w.writes).toHaveLength(1);
+  });
+
+  it('switching back never revives the earlier goal deadline or its former role', async () => {
+    const graph = funding(); Object.assign(graph.nodes.find((n: Rec) => n.id === 'large_fund')!,
+      { goal_horizon_months: 15, goal_horizon_reference_date: '2026-10-16', goal_horizon_stated_months: 15, goal_period: 'month' });
+    const w = await world({ graph, brief: ambition, message: source }); w.ctx.verified_user_messages = [ambition, source];
+    const first = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    const firstId = String(first.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: firstId }, { proposal_id: firstId })).toMatchObject({ ok: true, applied: true });
+    const back = 'Make the larger fund of at least £1,500,000 the current goal again.';
+    const current = { ...w.ctx, turn_id: randomUUID(), user_turn_text: back, user_text: back, verified_user_messages: [ambition, source, back] };
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ governing_outcome: 'Larger fund secured', goal_change_quote: back,
+      constraint_type: 'at_least', value: 1500000, unit: '£', rationale: back }), current, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id), cold = restoreCard(w.proposals.get(pid)!, offered, current);
+    expect(await w.caps(cold).authoriseChange({ ...current, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
+    for (const key of ['goal_horizon', 'goal_horizon_months', 'goal_deadline_as_stated', 'horizon_basis',
+      'goal_horizon_reference_date', 'goal_horizon_stated_months', 'goal_period']) expect(goal).not.toHaveProperty(key);
+    expect(goal.description).toMatch(/^Current governing goal/);
+    expect(goal.description).toContain('31 December 2027');
+    expect(goal.description).toContain('16 October 2026'); expect(goal.description).toContain('15 months');
+    expect(goal.description).toContain('per month');
+    expect(w.writes).toHaveLength(2);
+  });
+
+  it('retains the earlier aim outside this analysis so a ready chain stays ready', async () => {
+    const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' });
+    const g = { nodes: [
+      { id: 'dec', kind: 'decision', label: 'How to split time' },
+      { id: 'large_fund', kind: 'goal', label: 'Larger fund secured', goal_threshold_raw: 1300000, goal_threshold: 0.8, goal_threshold_cap: 1625000, goal_threshold_unit: '£',
+        goal_threshold_frame: 'level', goal_direction: '>=', threshold_source: 'brief_extraction', description: ambition },
+      { id: 'angel_fund', kind: 'outcome', label: 'Angel funding secured' },
+      { id: 'focus', kind: 'option', label: 'Investor-led', interventions: { effort: { value: 0.8 } } },
+      { id: 'spread', kind: 'option', label: 'Balanced', interventions: { effort: { value: 0.4 } } },
+      { id: 'effort', kind: 'factor', label: 'Investor outreach time', category: 'controllable', observed_state: { value: 0.5, baseline: 0.5, source: 'brief_extraction' } },
+    ], edges: [e('dec', 'focus'), e('dec', 'spread'), e('focus', 'effort'), e('spread', 'effort'), e('effort', 'angel_fund'), e('angel_fund', 'large_fund')],
+      goal_constraints: [{ constraint_id: 'original-target', node_id: 'large_fund', operator: '>=', value: 1300000, unit: '£', value_frame: 'level', role: 'goal_target', source_quote: ambition, provenance: 'explicit' }] };
+    const w = await world({ graph: g, brief: ambition, message: source }); w.ctx.verified_user_messages = [ambition, source];
+    expect(assessCanonicalAnalysisReadiness(w.graph()).safeToAnalyse).toBe(true);
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('left out of this analysis');
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    const after = w.graph(), read = assessCanonicalAnalysisReadiness(after);
+    expect(read.blockingIssues).toEqual([]); expect(read.safeToAnalyse).toBe(true);
+    expect(after.nodes.find((n: Rec) => n.id === 'large_fund')).toMatchObject({ kind: 'outcome', analysis_participation: 'retained_excluded' });
+    const wire = guardAnalysisParticipation(after, { goalNodeId: 'angel_fund', optionInterventionTargetIds: ['effort'], submittedOptionIds: ['focus', 'spread'] });
+    expect(wire.refusals).toEqual([]); expect(wire.excludedNodeIds).toEqual(['large_fund']);
+    expect((wire.graph as Rec).nodes.some((n: Rec) => n.id === 'large_fund')).toBe(false);
+    expect((wire.graph as Rec).edges.some((e: Rec) => e.from === 'large_fund' || e.to === 'large_fund')).toBe(false);
+    const ordinary = structuredClone(after); delete ordinary.nodes.find((n: Rec) => n.id === 'large_fund').analysis_participation;
+    expect(assessCanonicalAnalysisReadiness(ordinary).safeToAnalyse).toBe(false);
+    expect(validateGraphStructure(GraphV3.parse(ordinary), { leaveOutInertRisks: true }).violations.some(i => i.code === 'NO_PATH_TO_GOAL' && i.detail.includes('Larger fund'))).toBe(true);
+    const changed = structuredClone(after); changed.nodes.find((n: Rec) => n.id === 'focus').interventions.large_fund = { value: 0.2 };
+    expect(assessCanonicalAnalysisReadiness(changed).safeToAnalyse).toBe(false);
+    const limited = structuredClone(after); limited.goal_constraints.push({ constraint_id: 'held-limit', node_id: 'large_fund', operator: '<=', value: 2000000, unit: '£', provenance: 'explicit' });
+    limited.edges = limited.edges.filter((e: Rec) => e.from !== 'large_fund' && e.to !== 'large_fund');
+    expect(assessCanonicalAnalysisReadiness(limited).safeToAnalyse).toBe(false);
+    expect(validateGraphStructure(GraphV3.parse(limited), { leaveOutInertRisks: true }).violations.some(i => i.code === 'ORPHAN_NODE' && i.detail.includes('Larger fund'))).toBe(true);
+    expect(w.writes).toHaveLength(1);
+  });
+
+  it('the recorded founder words still offer a goal card when earlier level and removal cannot be included', async () => {
+    const recorded = fixture('funding-247ae5b4-before-target.json');
+    const noFunding = "I feel like you're going down the wrong route. We have no funding. I cannot carry on as I am now. I need to get funding as soon as possible. I probably need a PoC as soon as I have an interview/meeting with an investor, but I obviously need to get investors to ask to speak to me first.";
+    const job = "The job specification is just the work I would be doing if I was focusing on that, so I'm not sure we should be focusing on it. The question I'm trying to answer is how to best divide my time.";
+    const update = "I feel like we're going around in circles. Can you just update the model to reflect our conversation so I can actually decide what to spend my time on?";
+    const w = await world({ graph: recorded.graph, brief: recorded.brief_text, message: update });
+    w.ctx.verified_user_messages = [noFunding, job, source, update]; w.ctx.user_text = w.ctx.verified_user_messages.join('\n');
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, later_ambition_quote: undefined,
+      current_level: { value: 0, unit: '£' }, remove_mechanisms: [{ kind: 'factor', label: 'Founder job-spec time', quote: job }] }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const omitted = offered.not_included as Rec[];
+    expect(omitted).toHaveLength(2); expect(omitted.every(p => p.refusal && p.detail)).toBe(true);
+    expect(omitted.find(p => p.part.includes('removal'))).toMatchObject({ refusal: 'not_current_removal' });
+    expect(offered.public_label).toContain('Not included on this card'); expect(offered.public_label).toContain('today’s level');
+    expect(w.writes).toHaveLength(0);
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw).toBe(250000);
+    expect(w.graph().nodes.some((n: Rec) => n.id === 'founder_job_spec_time')).toBe(w.original.nodes.some((n: Rec) => n.id === 'founder_job_spec_time'));
     expect(w.writes).toHaveLength(1);
   });
 

@@ -23,13 +23,17 @@ export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuo
   if (!old || !held) return undefined;
   const rows = (Array.isArray(before.goal_constraints) ? before.goal_constraints : []).filter((r): r is Rec => rec(r) && r.node_id === oldId);
   const figure = (value: number, unit: unknown) => sayFigureWithoutRounding(value, typeof unit === 'string' ? unit : '');
-  const lines = [typeof old.description === 'string' ? old.description : '',
+  const earlierFigure = held.target?.raw === undefined ? '' : sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
+    ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`;
+  const lines = [`Earlier aim (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}. No longer governing.`,
+    typeof old.description === 'string' ? old.description : '',
     `Earlier aim, retained for context and no longer the governing goal: “${held.label}”.`,
     ...(laterAmbitionQuote === undefined ? [] : [`Later ambition, as Olumi reads your words: “${laterAmbitionQuote}”. Your source stays yours; the later role is a modelling interpretation.`]),
     ...(held.target?.raw === undefined ? [] : [`Earlier model target: ${sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
       ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`}.`]),
     ...(held.horizon === null ? [] : [`Earlier timing: ${[held.horizon.as_stated, held.horizon.deadline === undefined ? undefined : sayDate(held.horizon.deadline),
       held.horizon.months === undefined ? undefined : `${held.horizon.months} months`].filter(Boolean).join('; ')}. This does not set the current goal’s deadline.`]),
+    ...(held.period === undefined || held.period === 'none' ? [] : [`Earlier figures were per ${held.period}; this does not set the current goal’s period.`]),
     ...(held.horizon_basis === undefined ? [] : [`Earlier timing basis, recorded but not verified: ${held.horizon_basis.basis}. Earlier source: ${held.horizon_basis.source}; bound period: ${held.horizon_basis.bound_months} months. This earlier judgement does not validate the current goal.`]),
     ...rows.map(row => `Earlier saved bound: ${sayGoalChange(row.value_frame, Number(row.value), typeof row.unit === 'string' ? row.unit : undefined, figure, statedOperatorOf(row))
       ?? `${statedOperatorOf(row) === undefined ? String(row.operator) : LIMIT_OPERATOR_WORDS[statedOperatorOf(row)!]} ${figure(Number(row.value), row.unit)}`}.`
@@ -66,12 +70,12 @@ export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: 
   const old = before.nodes.find((n): n is Rec => rec(n) && n.id === oldId && n.kind === 'goal');
   const kept = candidate.nodes.find((n): n is Rec => rec(n) && n.id === oldId);
   const goals = candidate.nodes.filter(n => rec(n) && n.kind === 'goal');
-  if (!old || !kept || kept.kind !== 'outcome' || goals.length !== 1 || !rec(goals[0]) || goals[0].id !== newId) return false;
+  if (!old || !kept || kept.analysis_participation !== 'retained_excluded' || kept.kind !== 'outcome' || goals.length !== 1 || !rec(goals[0]) || goals[0].id !== newId) return false;
   // Match the native writer: demotion retires old server proof, never transfers it to the new goal.
   const prepared = structuredClone(candidate);
   prepareHorizonBasisForWrite(prepared, before, scenarioId);
   if (!isDeepStrictEqual(prepared, candidate)) return false;
-  const earlier: { nodes: Rec[] } = { nodes: [{ ...old, kind: 'outcome' }] };
+  const earlier: { nodes: Rec[] } = { nodes: [{ ...old, kind: 'outcome', analysis_participation: 'retained_excluded' }] };
   prepareHorizonBasisForWrite(earlier, before, scenarioId);
   const { kind: _oldKind, ref: _oldRef, description: _oldDescription, ...oldFields } = earlier.nodes[0]!;
   const { kind: _newKind, ref: _newRef, description, ...keptFields } = kept;
@@ -79,6 +83,8 @@ export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: 
   // The prior aim is informational: leaving its target in the active array would turn it into a second goal/limit.
   if ((Array.isArray(candidate.goal_constraints) ? candidate.goal_constraints : []).some(r => rec(r) && r.node_id === oldId)) return false;
   // Every untouched node, edge, non-goal constraint and top-level member must survive, not only the option roster.
+  const formerlyOutcome = before.nodes.find((n): n is Rec => rec(n) && n.id === newId);
+  if (formerlyOutcome !== undefined && goals[0].description !== promotedOutcome(formerlyOutcome).description) return false;
   const otherNodes = (nodes: unknown[]) => nodes.filter(n => rec(n) && n.id !== oldId && n.id !== newId);
   if (!isDeepStrictEqual(otherNodes(before.nodes), otherNodes(candidate.nodes))) return false;
   const rest = (graph: Rec) => Object.fromEntries(Object.entries(graph).filter(([k]) =>
@@ -87,4 +93,22 @@ export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: 
   const otherRows = (graph: Rec) => (Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
     .filter(r => rec(r) && r.node_id !== oldId && r.node_id !== newId);
   return isDeepStrictEqual(otherRows(before), otherRows(candidate));
+}
+
+/** Promotion never silently reactivates an earlier goal's timing or exclusion. Its recorded words stay historical. */
+export function promotedOutcome(node: Rec): Rec {
+  const goal: Rec = { ...node, kind: 'goal', analysis_participation: 'included' };
+  const held = readGoalRecord({ nodes: [goal] }, String(node.id));
+  const timing = held?.horizon;
+  const lines = ['Current governing goal proposed on this card. Earlier role and timing notes below are history; they do not set this goal’s deadline or period.',
+    typeof node.description === 'string' ? node.description : '',
+    ...(timing === null || timing === undefined ? [] : [`Earlier recorded timing: ${[timing.as_stated,
+      timing.deadline === undefined ? undefined : sayDate(timing.deadline), timing.months === undefined ? undefined : `${timing.months} months`].filter(Boolean).join('; ')}.`]),
+    ...(typeof node.goal_horizon_reference_date === 'string' ? [`Earlier timing reference: ${sayDate(node.goal_horizon_reference_date)}.`] : []),
+    ...(typeof node.goal_horizon_stated_months === 'number' ? [`Earlier stated duration: ${node.goal_horizon_stated_months} months.`] : []),
+    ...(held?.period === undefined || held.period === 'none' ? [] : [`Earlier figures were per ${held.period}.`])];
+  goal.description = lines.filter(Boolean).join('\n');
+  for (const key of ['goal_horizon', 'goal_horizon_months', 'goal_deadline_as_stated', 'horizon_basis',
+    'goal_horizon_reference_date', 'goal_horizon_stated_months', 'goal_period']) delete goal[key];
+  return goal;
 }

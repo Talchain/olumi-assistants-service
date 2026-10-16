@@ -1,5 +1,5 @@
 {
-  "source_sha": "bcabe418468fbc48723bc925859d9c24048bd90c",
+  "source_sha": "184b428065ca1c3c6bab026db36b9051b0c6f6d0",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -157,6 +157,7 @@
     "goal_deadline_as_stated": {
       "src/orchestrator-v5/agent-lane/deadline-card.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 2,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/schemas/cee-v3.ts": 1
@@ -203,6 +204,7 @@
       "src/orchestrator-v5/agent-lane/proposal-object/record.ts": 1,
       "src/orchestrator-v5/agent-lane/proposal.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/selector-signals.ts": 3,
@@ -224,6 +226,7 @@
       "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
       "src/orchestrator-v5/context/graph-hash.ts": 1,
       "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 2,
@@ -321,6 +324,7 @@
       "src/schemas/ceeResponses.ts": 1
     },
     "goal_period": {
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 3,
       "src/schemas/cee-v3.ts": 1
     },
@@ -829,13 +833,13 @@
     "goalKindOf": 30,
     "goalUnitOf": 5,
     "goal_constraints": 447,
-    "goal_deadline_as_stated": 11,
+    "goal_deadline_as_stated": 12,
     "goal_direction": 104,
-    "goal_horizon": 47,
-    "goal_horizon_months": 43,
+    "goal_horizon": 48,
+    "goal_horizon_months": 44,
     "goal_level_reading": 20,
     "goal_node_id": 288,
-    "goal_period": 4,
+    "goal_period": 5,
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
@@ -857,7 +861,7 @@
     "threshold_source": 40,
     "unit_reading": 79
   },
-  "total_references": 2479,
+  "total_references": 2483,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

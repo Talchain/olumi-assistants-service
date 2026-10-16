@@ -1,6 +1,6 @@
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
-import { priorAimDescription, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
+import { priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { carriesQuoteConfirmation, verbatimSourceLine } from '../quote-confirmation.js';
@@ -3850,8 +3850,8 @@ export function createAgentCapabilities(
     if (priorDescription === undefined) return invalid('goal_not_readable', 'The earlier aim could not be read completely. Nothing was prepared.');
     let candidate = structuredClone(before.raw);
     const newId = matched[0]?.id ?? `outcome_${constructionOperationId(ctx.scenario_id, `${before.graph_identity_hash}:${label}`)}`;
-    candidate.nodes = (candidate.nodes as Record<string, unknown>[]).map(n => n.id === old.id ? { ...n, kind: 'outcome', description: priorDescription }
-      : n.id === newId ? { ...n, kind: 'goal' } : n);
+    candidate.nodes = (candidate.nodes as Record<string, unknown>[]).map(n => n.id === old.id ? { ...n, kind: 'outcome', description: priorDescription, analysis_participation: 'retained_excluded' }
+      : n.id === newId ? promotedOutcome(n) : n);
     if (matched.length === 0) (candidate.nodes as Record<string, unknown>[]).push({ id: newId, kind: 'goal', label, provenance: 'ai_inferred' });
     if (Object.hasOwn(candidate, 'goal_node_id')) candidate.goal_node_id = newId;
     candidate.goal_constraints = (Array.isArray(candidate.goal_constraints) ? candidate.goal_constraints as Record<string, unknown>[] : [])
@@ -3892,44 +3892,62 @@ export function createAgentCapabilities(
     };
     const prepare = createAgentCapabilities(prepareDispatch, held, undefined, 'full', undefined, { turnAuthority: true });
     const details: string[] = [];
+    const notIncluded: { part: string; refusal: string; detail: string }[] = [];
+    const omit = (part: string, offered: ToolResult, fallback: string): void => {
+      notIncluded.push({ part, refusal: typeof offered.refusal === 'string' ? offered.refusal : 'not_prepared',
+        detail: typeof offered.detail === 'string' ? offered.detail : fallback });
+    };
     const removals: { removed_node_ids: string[]; removed_edges: { from: string; to: string }[] }[] = [];
     if (args.current_level !== undefined) {
       const offered = await prepare.proposeGoalCurrentLevel!(ctx, { goal_label: label, ...args.current_level, user_stated: true });
       const op = typeof offered.proposal_id === 'string' ? held.get(offered.proposal_id)?.operations[0] : undefined;
       const v = op?.value;
       if (!offered.ok || !isPlainRecord(v) || !isPlainRecord(v.goal_current_level)
-        || Object.keys(v).some(k => k !== 'goal_current_level' && k !== 'against')) return invalid('current_level_not_prepared',
-        'The native level adapter could not include the whole stated level without another change. Nothing was prepared.');
-      const node = (candidate.nodes as Record<string, unknown>[]).find(n => n.id === newId)!;
-      node.observed_state = { ...(isPlainRecord(node.observed_state) ? node.observed_state : {}), ...v.goal_current_level };
-      details.push(String(offered.public_label));
+        || Object.keys(v).some(k => k !== 'goal_current_level' && k !== 'against')) {
+        omit(`today’s level of ${label}`, offered, 'The level adapter could not include this without another change.');
+      } else {
+        const node = (candidate.nodes as Record<string, unknown>[]).find(n => n.id === newId)!;
+        node.observed_state = { ...(isPlainRecord(node.observed_state) ? node.observed_state : {}), ...v.goal_current_level };
+        details.push(String(offered.public_label));
+      }
     }
     if (args.deadline_words !== undefined) {
       const offered = await prepare.proposeGoalDeadline!(ctx, { deadline_words: args.deadline_words, rationale: source });
       const op = typeof offered.proposal_id === 'string' ? held.get(offered.proposal_id)?.operations[0] : undefined;
       const v = op?.value;
-      if (!offered.ok || op?.op !== 'set_goal_deadline' || !isPlainRecord(v) || typeof v.deadline !== 'string') return invalid('deadline_not_prepared',
-        'The complete stated deadline could not be included. Nothing was prepared.');
-      const result = applyGoalHorizonEdit(candidate, { goal_id: newId, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
-        ...(typeof v.reference === 'string' ? { reference_date: v.reference } : {}),
-        ...(typeof v.stated_months === 'number' ? { stated_months: v.stated_months } : {}) });
-      if (result.kind !== 'mutated') return invalid('deadline_not_prepared', 'The native deadline adapter refused this change. Nothing was prepared.');
-      candidate = result.mutatedGraph; details.push(String(offered.public_label));
+      if (!offered.ok || op?.op !== 'set_goal_deadline' || !isPlainRecord(v) || typeof v.deadline !== 'string') {
+        omit('deadline', offered, 'The complete stated deadline could not be included.');
+      } else {
+        const result = applyGoalHorizonEdit(candidate, { goal_id: newId, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
+          ...(typeof v.reference === 'string' ? { reference_date: v.reference } : {}),
+          ...(typeof v.stated_months === 'number' ? { stated_months: v.stated_months } : {}) });
+        if (result.kind !== 'mutated') omit('deadline', { ok: false, refusal: result.kind === 'refused' ? result.reason : result.kind }, 'The native deadline adapter refused this date.');
+        else { candidate = result.mutatedGraph; details.push(String(offered.public_label)); }
+      }
     }
     if (args.remove_mechanisms !== undefined) {
       if (!Array.isArray(args.remove_mechanisms) || args.remove_mechanisms.length > 6) return invalid('removal_not_prepared', 'This card supports up to six mechanism removals. Nothing was prepared.');
       for (const removal of args.remove_mechanisms) {
-        if (!ownSource(removal.quote)) return invalid('removal_not_prepared', 'The complete removal request could not be verified. Nothing was prepared.');
-        const offered = await prepare.proposeRemoval!({ ...ctx, user_turn_text: removal.quote }, removal);
+        if (!ownSource(removal.quote) || !(ctx.user_turn_text && wholeStatementIn(ctx.user_turn_text, removal.quote))) {
+          omit(`removal of ${removal.label}`, { ok: false, refusal: 'not_current_removal' }, 'A removal needs the user’s explicit request in this turn; an earlier statement is not current removal permission.');
+          continue;
+        }
+        const offered = await prepare.proposeRemoval!(ctx, removal);
         const op = typeof offered.proposal_id === 'string' ? held.get(offered.proposal_id)?.operations[0] : undefined;
-        if (!offered.ok || op === undefined || (op.op !== 'remove_node' && op.op !== 'remove_edge') || op.path === old.id || op.path === newId) return invalid('removal_not_prepared',
-          'One requested removal could not be included completely. Nothing was prepared.');
+        if (!offered.ok || op === undefined || (op.op !== 'remove_node' && op.op !== 'remove_edge') || op.path === old.id || op.path === newId) {
+          omit(`removal of ${removal.label}`, offered, 'This removal could not be included without losing one of the two aims.');
+          continue;
+        }
         const event = { kind: 'structural_delete' as const, removed_node_ids: op.op === 'remove_node' ? [op.path] : [],
           removed_edges: op.op === 'remove_edge' ? [{ from: op.path.split('::')[0]!, to: op.path.split('::')[1]! }] : [],
           base_graph_hash: computeAnalysisAffectingGraphHash(candidate as never)! };
         const result = applyStructuralDelete({ payload: { kind: 'system_event', scenario_id: ctx.scenario_id, turn_id: turn, stage: 'frame', event },
           event, requestId: ctx.request_id, persistedGraph: candidate });
-        if (result.kind !== 'mutated' || !isPlainRecord(result.mutatedGraph)) return invalid('removal_not_prepared', 'A removal was refused. Nothing was prepared.');
+        if (result.kind !== 'mutated' || !isPlainRecord(result.mutatedGraph)) {
+          omit(`removal of ${removal.label}`, result.kind === 'refused'
+            ? { ok: false, refusal: result.reason, detail: result.response.assistant_text } : { ok: false, refusal: result.kind }, 'The native removal adapter refused this part.');
+          continue;
+        }
         candidate = result.mutatedGraph; removals.push({ removed_node_ids: event.removed_node_ids, removed_edges: event.removed_edges });
         details.push(String(offered.public_label));
       }
@@ -3943,23 +3961,26 @@ export function createAgentCapabilities(
     if (hash === '') return invalid('goal_not_prepared', 'The complete proposed model could not be checked. Nothing was prepared.');
     const oldMeaning = readGoalRecord(before.raw, old.id);
     const hasIncoming = (Array.isArray(candidate.edges) ? candidate.edges as Record<string, unknown>[] : []).some(e => e.to === newId);
-    const earlierTarget = oldMeaning?.target?.raw === undefined ? '' : ` (${oldMeaning.target.comparator ?? ''} ${targetFigure(oldMeaning.target.raw, oldMeaning.target.unit ?? '')})`;
+    const earlierTarget = oldMeaning?.target?.raw === undefined ? '' : ` (${oldMeaning.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[oldMeaning.target.comparator]} ${targetFigure(oldMeaning.target.raw, oldMeaning.target.unit ?? '')})`;
     const said = comparatorTheUserWroteFor(source, args.value);
     const interpretation = said === null ? ` Olumi reads the target as ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}; this direction is a proposal, not a comparator the user stated.` : '';
     const public_label = `From your message: “${source}”. Olumi proposes making “${label}” the current goal: ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}.`
       + interpretation + (matched.length === 0 ? ' This adds a new outcome; its label is Olumi’s proposal.' : '')
-      + ` “${old.label}”${earlierTarget} stays as ${args.later_ambition_quote !== undefined ? `a later ambition, as Olumi reads “${args.later_ambition_quote}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal.`
+      + ` “${old.label}”${earlierTarget} stays as ${args.later_ambition_quote !== undefined ? `a later ambition, as Olumi reads “${args.later_ambition_quote}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal. The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below.`
       + ` Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.`
       + (!hasIncoming ? ' The new goal has no incoming causal relationships yet. This card does not establish how the options affect it; that remains to be modelled.' : '')
-      + (details.length ? `\n${details.join('\n')}` : '');
+      + (details.length ? `\n${details.join('\n')}` : '')
+      + (notIncluded.length ? `\nNot included on this card: ${notIncluded.map(p => `${p.part}: ${p.detail}`).join('; ')} The goal change on this card can be approved without those parts; they remain unresolved.` : '');
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
       operations: [{ op: 'repoint_goal', path: newId, value: { candidate, previous_goal_id: old.id, later_ambition_quote: args.later_ambition_quote, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
         brief_text: before.brief_text, goal_turn_id: turn, operation_id: constructionOperationId(ctx.scenario_id, `repoint_goal:${before.graph_identity_hash}:${hash}`) } }],
       provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label });
     proposals.put(proposal);
     return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label, base_revision: before.graph_hash,
+      ...(notIncluded.length ? { not_included: notIncluded } : {}),
       ...(said === null ? { direction_choice: { chosen: direction, alternative: inclusive === 'at_least' ? 'at_most' : 'at_least' } } : {}),
-      note: 'Show the complete card, including the interpretation and all retained/removed work. Only its own press saves the exact complete candidate. Approval never rewrites the original source authorship.' };
+      note: 'Show the complete card, including the interpretation and all retained/removed work. Only its own press saves the exact complete candidate. Approval never rewrites the original source authorship.'
+        + (notIncluded.length ? ' Offer the valid goal change, name each part left out and its reason, then coach or clarify that part. Do not say the omitted parts will be saved.' : '') };
   };
 
   /**
