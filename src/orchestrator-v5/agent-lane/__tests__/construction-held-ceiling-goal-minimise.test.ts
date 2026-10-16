@@ -130,18 +130,20 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
 
   it('⭐ RED row 2: held `<=` with a stated level ABOVE the target → the goal carries it (#1840 shape, the threshold\'s own cap), nothing says "not used", and the SAME request minimises', async () => {
     const { result, graph, goal } = await build(CLOUD_CEILING, draft('cloud-2'));
-    // Target 36 £k/month on the target-derived cap 45 (36 × 1.25): today's 45 is 45 / 45.
+    // TL 09:23Z: a ceiling's scale holds today's level AND the target, same headroom: max(45, 36) × 1.25 = 56.25 on today's
+    // level frame. Today's 45 is 0.8 of it (it was 45 / 45 = 1.0 on the target-derived 36 × 1.25, the top of the scale).
     expect(goal.goal_threshold_raw).toBe(36);
-    expect(goal.goal_threshold_cap).toBe(45);
+    expect(goal.goal_threshold_cap).toBe(56.25);
+    expect(goal.goal_threshold_cap_provenance).toBe('level_frame');
     expect(goal.observed_state).toStrictEqual({
-      value: 1, baseline: 1, unit: '£k/month', source: 'brief_extraction', raw_value: 45, cap: 45,
+      value: 0.8, baseline: 0.8, unit: '£k/month', source: 'brief_extraction', raw_value: 45, cap: 56.25,
     });
     // #2319: Olumi's product over the share (0 today) is refused and said; that line is not about the goal's level.
     expect(said(result).split(' · ').filter((l) => !l.includes('multiplied together, but')).join(' · '))
       .not.toMatch(/was not used|cannot be calculated correctly yet/);
     // One request: the level ISL reads AND the sense it reads it with (a level without `minimise` is the untruth).
     const req = await plotRequestFor(graph);
-    expect(goalOnWire(req, goal.id).observed_state).toMatchObject({ value: 1, baseline: 1, raw_value: 45, cap: 45 });
+    expect(goalOnWire(req, goal.id).observed_state).toMatchObject({ value: 0.8, baseline: 0.8, raw_value: 45, cap: 56.25 });
     expect(req.goal_direction).toBe('minimise');
   });
 
@@ -158,12 +160,52 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     }
   });
 
-  it('row 3b: held `<=` with a level OFF the target\'s cap scale (50 > cap 45) → withheld, and said (authored level variant)', async () => {
+  it('row 3b (TL 09:23Z, REVERSED): held `<=` with a level beyond the target-derived scale (50 > 36 × 1.25) → the user\'s level is used on its own frame, never refused (authored level variant)', async () => {
+    // Was: withheld as "outside the range the target of 36 is measured on (0 to 45)". A stated level never makes the model refuse:
+    // the scale is max(50, 36) × 1.25 = 62.5, today 0.8, the target 36 / 62.5.
     const brief = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £50k; we want to cut it to at most £36k a month without more than 2 weeks of migration downtime risk.';
-    const { result, goal } = await build(brief, withGoal('cloud-2', { baseline_value: 50 }));
+    const { result, graph, goal } = await build(brief, withGoal('cloud-2', { baseline_value: 50 }));
     expect(goal.goal_direction).toBe('<=');
+    expect(goal.goal_threshold_cap).toBe(62.5);
+    expect(goal.observed_state).toMatchObject({ value: 0.8, baseline: 0.8, raw_value: 50, cap: 62.5, source: 'brief_extraction' });
+    expect(said(result)).not.toMatch(/is outside the range the target of 36 is measured on/);
+    const req = await plotRequestFor(graph);
+    expect(goalOnWire(req, goal.id).observed_state).toMatchObject({ baseline: 0.8, raw_value: 50, cap: 62.5 });
+    expect(req.goal_direction).toBe('minimise');
+  });
+
+  it('row 3c (TL 09:23Z guard): an ESTIMATED level above the ceiling never sets the scale: the target-derived scale stays and the estimate is not used (authored provenance variant)', async () => {
+    const { goal } = await build(CLOUD_CEILING, withGoal('cloud-2', { baseline_provenance: 'inferred' }));
+    expect(goal.goal_direction).toBe('<=');
+    expect(goal.goal_threshold_cap).toBe(45);
+    expect(goal.goal_threshold_cap_provenance).toBe('target_derived_headroom');
     expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
-    expect(said(result)).toContain('The current level of "Monthly spend" (50) is outside the range the target of 36 is measured on (0 to 45)');
+  });
+
+  it('⭐ RED row G3 (VERIFY-ab3df4cb-unseen; TL 09:23Z): "9 weeks today, at most 5 weeks" → today\'s level is used and the Run minimises on a scale holding both; the floor contrast keeps its target scale (authored variant of the real cloud-2 draft; the unseen brief is not read)', async () => {
+    // The unseen shape: a lower-is-better LEVEL target with a stated starting level above it. The real cloud-2 draft, its goal
+    // re-labelled (and the one link into it re-pointed), in weeks.
+    const wait = 'Average wait for a first appointment';
+    const relabelled = (goal: Rec): Rec => {
+      const d = withGoal('cloud-2', goal);
+      return { ...d, links: (d.links as Rec[]).map((l) => (l.to === 'Monthly spend' ? { ...l, to: goal.metric } : l)) };
+    };
+    const brief = 'Should we switch our cloud provider from AWS to GCP? Average wait for a first appointment is 9 weeks; we want to cut it to at most 5 weeks without more than 2 weeks of migration downtime risk.';
+    const { graph, goal } = await build(brief, relabelled({ metric: wait, operator: '<=', value: 5, unit: 'weeks', baseline_value: 9 }));
+    expect(goal.goal_direction).toBe('<=');
+    expect(goal.goal_threshold_cap).toBe(11.25);
+    expect(goal.goal_threshold_cap_provenance).toBe('level_frame');
+    expect(goal.observed_state).toMatchObject({ value: 0.8, baseline: 0.8, raw_value: 9, cap: 11.25, source: 'brief_extraction' });
+    const req = await plotRequestFor(graph);
+    expect(goalOnWire(req, goal.id).observed_state).toMatchObject({ baseline: 0.8, raw_value: 9, cap: 11.25 });
+    expect(req.goal_direction).toBe('minimise');
+    // Contrast: a FLOOR keeps the target-derived scale, byte for byte (80 today, at least 100 → cap 125, today 0.64).
+    const capacity = 'Weekly support capacity';
+    const floorBrief = 'Should we switch our cloud provider from AWS to GCP? Weekly support capacity is 80 tickets per week; we want to raise it to at least 100 tickets per week without more than 2 weeks of migration downtime risk.';
+    const floor = await build(floorBrief, relabelled({ metric: capacity, operator: '>=', value: 100, unit: 'tickets per week', baseline_value: 80 }));
+    expect(floor.goal.goal_threshold_cap).toBe(125);
+    expect(floor.goal.goal_threshold_cap_provenance).toBe('target_derived_headroom');
+    expect(floor.goal.observed_state).toMatchObject({ value: 0.64, baseline: 0.64, raw_value: 80, cap: 125 });
   });
 
   it('row 6 (R1 S1, AIQ 5871459631; RT-10): held `<` → the level stays refused exactly as today, and the held ceiling on a level target still MINIMISES (Science 5 Oct (1): the sense is the comparator\'s, not the level\'s) (authored operator variant)', async () => {

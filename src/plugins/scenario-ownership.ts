@@ -277,7 +277,9 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
       return refuse(req, reply, scenarioId ?? '', 'scenario_ownership_unverifiable', true);
     }
     if (ownerUserId === undefined) return refuse(req, reply, scenarioId ?? '', 'scenario_not_found');
-    await admitOwner(ownerUserId, snapshot);
+    // An async hook only stops Fastify's chain when it RETURNS the reply: a refusal that returned undefined let the
+    // turn handler run and write for a refused caller (DL-3 16 Oct, scenario-ownership-refusal-stops-handler.test.ts).
+    if (!(await admitOwner(ownerUserId, snapshot))) return reply;
   });
   // Complete untouched responses synchronously. An unconditional async hook
   // delays reply.sent on admission refusals and can let the handler continue.

@@ -129,14 +129,14 @@
  *
  * Every GATE in this module is mutant-killed through the writer: deleting the
  * expected-label gate, the base-hash gate, the duplicate-id check, the
- * `options[]` propagation, the `label_authored` drop, the provenance stamp, the
+ * `options[]` propagation, the `label_authored` drop, the label-only authorship marker, the
  * trusted-base clone, or the applier's label write each REDs a named case.
  *
  * The three POSTCONDITIONS do not, and that is a true result about reachability
  * rather than missing coverage. `findStaleRenamedLabel`,
  * `findUnintendedStructuralChange` and `renameMovedAnalysisHash` all guard
  * against a change ONE SEAM PAST the applier: the applier writes `label` and
- * `provenance` and nothing else, and no projection pass rewrites a node label
+ * `label_authored` and nothing else, and no projection pass rewrites a node label
  * (`reconcile-top-level-options.ts:235` is an APPEND branch), so no input the
  * wire accepts can currently make any of the three fire. Bypassing them at the
  * CALL SITE therefore leaves the writer suite green.
@@ -424,7 +424,7 @@ export function buildRenameSafeSummary(previousLabel: string, newLabel: string):
  * there is a 409-at-rest, forever.
  *
  * ⚠ REACHABILITY, DISCLOSED. No input the wire accepts can currently make this
- * return true — the applier writes `label`/`provenance` and nothing else, and
+ * return true — the applier writes `label`/`label_authored` and nothing else, and
  * both are outside the projection. It is defence-in-depth against a change one
  * seam past it, and it is UNIT-pinned for exactly that reason: an integration
  * mutant that neuters it cannot be killed through the route, so pinning the
@@ -582,19 +582,14 @@ export function applyStructuralRename(
 
   // ── 5. the canonical PatchOperation train ────────────────────────────────
   // `applyUpdateNode` strips `id` from the update and `Object.assign`s the rest,
-  // so this changes `label` and `provenance` and touches nothing else.
-  //
-  // `provenance: 'user_set'` is the honest origin claim for a label the user
-  // typed themselves; the enum has exactly that member (`cee-v3.ts` NodeV3).
-  // ⚠ It is documented RESPONSE-ONLY (recomputed by `transformResponseToV3`),
-  // so it is advisory rather than load-bearing — the AUTHORITATIVE receipt is
-  // the `edit_graph` handler fact this module builds below, which is committed
-  // on the turn row and read by every downstream prior-facts consumer.
+  // so only the label changes. Renaming Olumi's suggestion never makes the
+  // whole suggestion human-authored. The existing label-only marker records
+  // whose wording this label is; the node keeps its original provenance.
   const operations: PatchOperation[] = [
     {
       op: 'update_node',
       path: event.node_id,
-      value: { label: event.label, provenance: 'user_set' },
+      value: { label: event.label, label_authored: false },
     },
   ];
 
@@ -618,30 +613,7 @@ export function applyStructuralRename(
     );
   }
 
-  // ── 5b. a stale `label_authored` is a FALSE CLAIM about the new label ────
-  // `NodeV3.label_authored` means "this label is OUR authored display string
-  // rather than the user's verbatim words", and its own doc says it is DERIVED
-  // from `label !== source_quote`, never hand-set, with absence meaning "the
-  // label IS the user's own text". After a user types their own name for the
-  // node, absence is exactly the true state — leaving a `true` behind would tell
-  // the inspector Olumi authored a string the user wrote.
-  //
-  // ⚠ `source_quote` is DELIBERATELY LEFT ALONE. It is the user's exact words
-  // from the brief — a historic record, append-only, and deleting it would
-  // destroy provenance to tidy a derived flag (the estate's rule: a dated
-  // capture is evidence, not a fixture to keep current).
-  //
-  // Done here rather than through the applier because `Object.assign`ing
-  // `label_authored: undefined` leaves the KEY present with an undefined value,
-  // which `structuredClone` preserves — "declared absent" and "absent" are
-  // different bytes, and only one of them is what the field's contract means.
-  //
-  // `applyPatchOperations` returns a fresh structuredClone of `{nodes, edges}`,
-  // so this mutates nothing the caller can observe.
-  const renamedNode = candidate.nodes.find((n) => n.id === event.node_id);
-  if (renamedNode !== undefined && 'label_authored' in renamedNode) {
-    delete (renamedNode as Record<string, unknown>).label_authored;
-  }
+  // The label-only marker is now false. The historical source quote and the node's origin are unchanged.
 
   // ── 6. put the rest of the graph back ────────────────────────────────────
   // `applyPatchOperations` returns ONLY `{nodes, edges}`. Persisting that

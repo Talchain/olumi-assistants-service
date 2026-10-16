@@ -1,12 +1,12 @@
 /** Real executor/HTTP/SSE paths; only the provider and persistence ports are doubles. */
-import Fastify,{ type FastifyInstance } from 'fastify';
-import { afterEach,beforeEach,expect,it,vi } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
+import type { SessionStore } from '../session/store.js';
 import { createMockSessionStore } from '../../../tests/utils/mock-session-store.js';
-import { installOwnershipHarness,verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
+import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
 import { ceeOrchestratorRouteV2 } from '../../orchestrator/route-v2.js';
 import streamRoute from '../../routes/orchestrate.v2.turn-stream.js';
-import type { SessionStore } from '../session/store.js';
 
 const state = vi.hoisted(() => ({ store: undefined as SessionStore | undefined }));
 vi.mock('../session/index.js', async load => ({
@@ -38,25 +38,23 @@ vi.mock('../../config/index.js', async load => {
 });
 
 import { readFileSync } from 'node:fs';
-import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
-import { runFencedInProcessWrite } from '../../orchestrator/turn-fence-prehandler.js';
-import { agentV1TurnRoute } from '../../routes/agent-v1-turn.js';
-import graphRoute from '../../routes/assist.v1.scenario-graph.js';
-import { log } from '../../utils/telemetry.js';
-import { approvalChipIdFor } from '../agent-lane/approval-chips.js';
-import { proposalPendingAction } from '../agent-lane/durable-proposal.js';
-import { agentProposals } from '../agent-lane/held-approval-offers.js';
-import { computeProposalId,type StructuredProposal } from '../agent-lane/proposal.js';
-import { authorisationTurnId } from '../agent-lane/runtime/agent-capabilities.js';
-import { markDraftGraphWriteFailed } from '../build-turn-context.js';
-import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
-import { assertDoorOwnership,bindWriteCaller,readSuccessfulDoorEntries,readWriteRefusal } from '../ownership/door-ownership.js';
 import { appendCheckedGraphWrite } from '../persist-graph-write.js';
 import { ANALYSIS_REREAD_TIMEOUT_MS } from '../session/analysis-read-deadline.js';
-import { runWithTurnFence } from '../session/turn-fence.js';
+import { agentV1TurnRoute } from '../../routes/agent-v1-turn.js';
+import graphRoute from '../../routes/assist.v1.scenario-graph.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { computeProposalId, type StructuredProposal } from '../agent-lane/proposal.js';
+import { proposalPendingAction } from '../agent-lane/durable-proposal.js';
+import { approvalChipIdFor } from '../agent-lane/approval-chips.js';
+import { agentProposals } from '../agent-lane/held-approval-offers.js';
 import * as adoption from '../system-events/olumi-option-adoption.js';
-const provider = vi.hoisted(() => ({ draft: vi.fn() }));
-
+import { assertDoorOwnership, bindWriteCaller, readWriteRefusal, readSuccessfulDoorEntries } from '../ownership/door-ownership.js';
+import { runFencedInProcessWrite } from '../../orchestrator/turn-fence-prehandler.js';
+import { runWithTurnFence } from '../session/turn-fence.js';
+import { authorisationTurnId } from '../agent-lane/runtime/agent-capabilities.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
+import { markDraftGraphWriteFailed } from '../build-turn-context.js';
+import { log } from '../../utils/telemetry.js';
 vi.mock('../../orchestrator/plot-client.js', async load => ({
   ...await load<typeof import('../../orchestrator/plot-client.js')>(), createPLoTClient: () => ({
     run: async () => JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')),
@@ -142,8 +140,6 @@ beforeEach(() => {
   // The process-wide proposal store memoises an approved operation by (scenario, turn, proposal): this file reuses one
   // fixed request id and proposal across apps, so each test starts with that proposal's memo forgotten (isolation only).
   agentProposals.discard(adoptionProposal().proposal_id);
-  provider.draft.mockResolvedValue({ blocks: [], assistantText: 'A shared model.', latencyMs: 0, strengthenItems: [],
-    coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null, draftWarnings: [], graphOutput: GRAPH });
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed',
     output: [{ type: 'message', content: [{ type: 'output_text', text: 'Consider the assumptions together.' }] }] }), { status: 200 })));
 });
@@ -152,6 +148,41 @@ function inject(h: Awaited<ReturnType<typeof harness>>, family: string) {
   return h.app.inject({ method: 'POST', url: family === 'sse' ? '/orchestrate/v2/turn/stream'
     : family === 'agent' || family === 'adoption' ? '/agent/v1/turn' : '/orchestrate/v2/turn', headers: { 'x-request-id': 'prop-request' }, payload: payload(family) });
 }
+it.each(['system_event', 'chip', 'adoption', 'agent', 'sse'])('refusal propagation: %s', async family => {
+  const warn = vi.spyOn(log, 'warn');
+  const adoptionDoor = vi.spyOn(adoption, 'commitOlumiOptionAdoptionInProcess');
+  const h = await harness(family);
+  try {
+    const r = await inject(h, family);
+    process.stdout.write(`PROP_BYTES ${family} ${r.statusCode} ${JSON.stringify(r.payload)}\n`);
+    if (family === 'adoption') {
+      process.stdout.write(`PROP_ADOPTION_CALLS ${adoptionDoor.mock.calls.length} ${JSON.stringify(await adoptionDoor.mock.results[0]?.value)}\n`);
+      expect(adoptionDoor).toHaveBeenCalledOnce();
+      await expect(adoptionDoor.mock.results[0]!.value).resolves.toEqual({ status: 'unconfirmed' });
+    }
+    let bytes = r.payload;
+    if (family === 'sse') {
+      expect(r.statusCode).toBe(200);
+      const frames = r.payload.split('\n\n').filter(f => f.startsWith('event: stage\n')).map(f => JSON.parse(f.split('\ndata: ')[1]!));
+      const terminal = frames.filter(f => f.stage === 'COMPLETE');
+      expect(terminal).toHaveLength(1); expect(terminal[0].status_code).toBe(403);
+      bytes = JSON.stringify(terminal[0].payload);
+    } else expect(r.statusCode, r.payload).toBe(403);
+    // Adoption publishes session history before its final refusal; it cannot claim no save.
+    expect(bytes).toBe(family === 'adoption' ? CODE_ONLY : BYTES.not_owner);
+    expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));
+    // The approved literal itself says "saved". Forbid success claims and flattened outcomes, not that refusal sentence.
+    expect(bytes.replace('Nothing was saved.', '')).not.toMatch(/saved|revision|unconfirmed/i);
+    expect(h.append).not.toHaveBeenCalled(); expect(h.appendIfLatest).not.toHaveBeenCalled();
+    expect(h.getScenarioOwner).toHaveBeenCalled();
+    if (family !== 'agent') {
+      expect(h.fence.rows[0]).toMatchObject({ scenario_id: SID,
+        turn_id: family === 'adoption' ? authorisationTurnId(adoptionProposal().proposal_id) : TID, graph_write_failed_at: expect.any(String), graph_loss_disclosable_at: null,
+        graph_write_failure_reason: 'model_write_ownership_refused' });
+      await expect(state.store!.hasOtherAdmittedLiveTurn!(SID, 'another')).resolves.toBe(false);
+    }
+  } finally { await h.app.close(); }
+}, 30_000);
 it('after-commit exception keeps the existing catch bytes and logs the event', async () => {
   const warn = vi.spyOn(log, 'warn');
   const h = await harness('system_event', true);

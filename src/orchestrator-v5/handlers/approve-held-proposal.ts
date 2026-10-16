@@ -218,7 +218,7 @@ export async function commitHeldProposalInProcess(payload: MessageTurnPayload, r
       await markDraftGraphWriteFailed(payload.scenario_id, payload.turn_id, error.code, requestId, 'turn_dead_only');
       return { status: 403, json: MODEL_WRITE_OWNERSHIP_REFUSAL_BODY[error.reason] };
     }
-    if (!run.telemetry.commit_performed) { const failure = failedTurnReply(run, payload.stage, requestId); return { status: failure.status, json: failure.json as unknown as Record<string, unknown> }; }
+    if (!run.telemetry.commit_performed) { const failure = failedTurnReply(run, payload.stage, requestId); return { status: failure.status, json: { ...failure.json } }; }
     const supersession = resolveScenarioAnalysisSupersession({ windowFreshness: run.freshness, scenarioFreshness: run.scenarioFreshness,
       ...(run.analysisReady ? { readiness: run.analysisReady } : {}) });
     return { status: 200, json: finaliseV5Response(run.response, { analysisReady: run.analysisReady, freshness: run.freshness,

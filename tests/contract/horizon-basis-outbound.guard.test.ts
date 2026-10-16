@@ -13,7 +13,7 @@ const SINK_MANIFEST: Sink[] = [
   {"file": "src/orchestrator-v5/compose/applied-graph-emit.ts", "symbol": "buildCanonicalCommittedGraphReceipt", "assignments": []},
   {"file": "src/routes/assist.v1.scenario-graph.ts", "symbol": "route", "assignments": ["graph", "graph", "graph", "graph"]},
   {"file": "src/orchestrator-v5/model-management/mutation-receipt.ts", "symbol": "toModelVersionMutationReceiptV1", "assignments": ["graph"]},
-  {"file": "src/orchestrator-v5/tools/handlers/run-analysis.ts", "symbol": "runAnalysisHandler", "assignments": ["graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph"]},
+  {"file": "src/orchestrator-v5/tools/handlers/run-analysis.ts", "symbol": "runAnalysisHandler", "assignments": ["graph", "graph", "graph", "graph", "graph", "graph", "graph"]},
   {"file": "src/orchestrator/tools/edit-graph.ts", "symbol": "handleEditGraph", "assignments": ["applied_graph"]},
   {"file": "src/routes/assist.share.ts", "symbol": "route", "assignments": ["graph", "graph", "graph"]},
   {"file": "src/routes/assist.v1.draft-graph-staged.ts", "symbol": "onStage", "assignments": ["graph"]},

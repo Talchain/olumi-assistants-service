@@ -33,7 +33,7 @@
  * Mocking strategy mirrors `route-v2-signature-loop.test.ts`; the GM hold
  * fixture mirrors `gm-held-execute-route-level.test.ts`.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
@@ -512,5 +512,57 @@ describe('POST /orchestrate/v2/turn — held proposal survives the confirm turn 
     // Nothing applied, nothing drafted.
     const writes = appendMock.mock.calls.map((c) => c[0] as Record<string, unknown>);
     for (const w of writes) expect(w.graph).toBeUndefined();
+  });
+});
+
+// Moved from the retired free-text specs (orchestrate-v2-fail-closed, turn-fence-hoisted-conflict-mapping,
+// scenario-revision-conflict-wire): the held-card approval is now the only ingress that reaches this executor exit.
+describe('held-card approval — a failed approval write maps to the typed conflict/outage envelope, never a 200', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
+    _resetConfigCache();
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => { await app.close(); vi.unstubAllEnvs(); _resetConfigCache(); });
+  beforeEach(() => {
+    dispatchEditGraphMock.mockReset();
+    appendMock.mockReset();
+    chatWithToolsMock.mockClear();
+    pendingActionsForRead = [gmHeldPending()];
+  });
+  afterEach(() => { appendMock.mockReset(); appendMock.mockResolvedValue({ id: 'mock-row-id' }); });
+  const approve = () => app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
+    payload: payload({ message: HELD_CHIP_MESSAGE, source: 'chip_click' }) });
+  it('graph CAS conflict (OLGC1) → 409 GRAPH_DIVERGED refresh_and_reconfirm, no model call', async () => {
+    const { GraphStaleWriteError } = await import('../../orchestrator-v5/session/store.js');
+    appendMock.mockRejectedValue(new GraphStaleWriteError('stale (OLGC1)',
+      { conflict_category: 'rpc_cas_conflict', expected_base_graph_hash: 'deadbeefcafe0001' }));
+    const res = await approve();
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'GRAPH_DIVERGED', details: { reason: 'graph_write_conflict',
+      failure_type: 'GRAPH_DIVERGED', recovery_action: 'refresh_and_reconfirm', conflict_category: 'rpc_cas_conflict',
+      expected_base_graph_hash: 'deadbeefcafe0001' } });
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+  it.each([['stopped', 'start_new_draft'], ['unavailable', 'retry_later']] as const)(
+    'turn fence refusal (%s) → 409 GRAPH_DIVERGED with fence_verdict and %s', async (verdict, recovery) => {
+      const { TurnFenceRejectedError } = await import('../../orchestrator-v5/session/turn-fence.js');
+      appendMock.mockRejectedValue(new TurnFenceRejectedError(`fence (${verdict})`,
+        { verdict, generation: verdict === 'stopped' ? 1 : null, maxGeneration: verdict === 'stopped' ? 2 : null }));
+      const res = await approve();
+      expect(res.statusCode).toBe(409);
+      expect(JSON.parse(res.body).details).toMatchObject({ failure_type: 'GRAPH_DIVERGED', fence_verdict: verdict,
+        conflict_category: `turn_fence_${verdict}`, recovery_action: recovery });
+    });
+  it('a plain commit outage stays a typed retryable 500 — commit_performed:false never ships as 200', async () => {
+    const err = new Error('append_turn_atomic RPC failed: simulated persistence outage'); err.name = 'StateCommitFailedError';
+    appendMock.mockRejectedValue(err);
+    const res = await approve();
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'INTERNAL_ERROR', retryable: true,
+      details: { reason: 'state_commit_failed_or_turn_runtime_failure' } });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRunQuestionScope, deriveRunQuestion, sentGoalThresholdOf, assessRunQuestionReadiness } from '../goal-chance-licence.js';
+import { withEvaluatedGoalChanceInputs, deriveRunQuestion, sentGoalThresholdOf } from '../goal-chance-licence.js';
 import { sentDigest } from '../../tools/handlers/run-input-snapshot.js';
 
 const saved = () => ({ nodes: [
@@ -19,15 +19,16 @@ const evidence = (sent: unknown = request()) => ({ runId: 'run-N', occurrence: {
 } });
 
 describe('Run question: evaluated inputs and saved revision, never today’s model or result percentiles', () => {
-  it('capacity is a supported static level calculation; its March question remains explicitly unanswered', () => {
+  it('the licence validates static capacity; the descriptive record cannot grant a chance before it exists', () => {
     const q = deriveRunQuestion({ runEvidence: evidence(), historicalModel: { revision: 12, graph: saved() }, dispatchedRequest: request() });
     expect(q.run_id).toBe('run-N');
     expect(q.evaluated_scenario_revision).toBe(12);
     expect(q.asked).toMatchObject({ target: 100, comparator: '>=', frame: 'level', unit: 'tickets per week', reference: 'today', horizon: { as_stated: 'by March' } });
-    expect(q.calculated).toMatchObject({ target: 100, baseline: 80, encoded_target: 0.2, frame: 'level', comparator: '>=', scope: 'static' });
-    expect(q.scope.status).toBe('supported_static');
-    expect(q.scope.note).toBe('Static model; not a forecast to a date.');
-    expect(q.omitted).toContainEqual({ field: 'horizon', reason: 'not_calculated', asked: q.asked!.horizon });
+    expect(q.calculated).toMatchObject({ target: 100, baseline: 80, encoded_target: 0.2, frame: 'level', comparator: '>=' });
+    expect(q.scope.can_show_goal_chance).toBe(false);
+    expect(withEvaluatedGoalChanceInputs({}, saved(), 'capacity', request()).scope).toMatchObject({
+      status: 'supported_static', note: 'Static model; not a forecast to a date.' });
+    expect(q.omitted).toContainEqual({ field: 'horizon', reason: 'not_verified', asked: q.asked!.horizon });
   });
 
   it.each(['wrong_frame', 'missing_baseline', 'reversed_comparator'] as const)('%s cannot be rescued by a static caveat', mutant => {
@@ -35,9 +36,11 @@ describe('Run question: evaluated inputs and saved revision, never today’s mod
     if (mutant === 'wrong_frame') sent.graph.nodes[0]!.goal_threshold_frame = 'delta';
     if (mutant === 'missing_baseline') delete (sent.graph.nodes[0] as Record<string, unknown>).observed_state;
     if (mutant === 'reversed_comparator') Object.assign(sent, { goal_direction: 'minimise' });
-    const q = deriveRunQuestion({ runEvidence: evidence(sent), historicalModel: { revision: 12, graph: saved() }, dispatchedRequest: sent });
-    expect(q.scope.status).toBe('invalid');
-    expect(q.scope.can_show_goal_chance).toBe(false);
+    const checked = withEvaluatedGoalChanceInputs({ option_comparison: [{ option_id: 'hire', probability_of_goal: 0.6 }] },
+      saved(), 'capacity', sent);
+    expect(checked.scope.status).toBe('invalid');
+    expect(checked.scope.can_show_goal_chance).toBe(false);
+    expect(JSON.stringify(checked.response)).not.toContain('probability_of_goal');
   });
 
   it('a later revision never supplies run N’s missing asked question', () => {
@@ -58,16 +61,10 @@ describe('Run question: evaluated inputs and saved revision, never today’s mod
     expect(q.scope.can_show_goal_chance).toBe(false);
   });
 
-  it('readiness and the producer use the same scope assessment; an unsupported horizon does not prohibit static work', () => {
-    expect(assessRunQuestionScope(saved(), request(), 'capacity').status).toBe('supported_static');
-    expect(assessRunQuestionReadiness(saved())).toMatchObject({ can_show_goal_chance: false, reasons: ['not_yet_evaluated'],
-      note: 'Static model; not a forecast to a date.' });
-  });
-
   it('an existing temporal calculation outside this capability is never labelled static or said to have ignored its horizon', () => {
     const historical = saved(); Object.assign(historical.nodes[0]!, { nonlinear_identity: { operation: 'accumulation' } });
     const q = deriveRunQuestion({ runEvidence: evidence(), historicalModel: { revision: 12, graph: historical }, dispatchedRequest: request() });
-    expect(q.scope.status).toBe('outside_static_scope');
+    expect(withEvaluatedGoalChanceInputs({}, historical, 'capacity', request()).scope.status).toBe('outside_static_scope');
     expect(q.calculated?.scope).toBeUndefined();
     expect(q.omitted).toContainEqual({ field: 'horizon', reason: 'not_verified', asked: q.asked!.horizon });
   });

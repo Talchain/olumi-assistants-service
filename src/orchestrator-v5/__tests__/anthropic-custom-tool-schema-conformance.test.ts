@@ -43,21 +43,29 @@
  * matches the registry's files. A third tool added tomorrow goes RED here
  * rather than shipping unguarded.
  */
-import { readdirSync,readFileSync,statSync } from 'node:fs';
-import { join,relative,sep } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe,expect,it } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
-
-
+import {
+  buildProposeStructuralEditTool,
+  buildStructuralEditGrounding,
+  type StructuralEditGrounding,
+} from '../tools/propose-structural-edit.js';
 
 const SRC_ROOT = join(fileURLToPath(new URL('../../', import.meta.url)));
 
 /** A grounded add-option model, so its tool schema is built the way it is served. */
-
-
-
+const GROUNDING: StructuralEditGrounding = buildStructuralEditGrounding({
+  nodes: [
+    { id: 'dec_mrr', kind: 'decision', label: 'MRR Growth Strategy' },
+    { id: 'goal_mrr', kind: 'goal', label: 'Reach £250,000 MRR' },
+    { id: 'fac_churn', kind: 'factor', label: 'Monthly churn' },
+  ],
+  edges: [{ from: 'dec_mrr', to: 'goal_mrr' }],
+})!;
 
 /**
  * Every custom tool schema this service can send to Anthropic, taken from the
@@ -74,7 +82,16 @@ const SRC_ROOT = join(fileURLToPath(new URL('../../', import.meta.url)));
  * throws rather than silently covering a different schema.
  */
 
+const SERVED_TOOL_SCHEMAS: readonly {
+  readonly label: string;
+  readonly schema: unknown;
+}[] = [
+  {
+    label: 'propose_structural_edit',
+    schema: buildProposeStructuralEditTool(GROUNDING).input_schema,
+  },
 
+];
 
 /**
  * Every file that constructs a tool `input_schema`. Cross-checked against the
@@ -148,11 +165,88 @@ function tsFilesUnder(dir: string): string[] {
 }
 
 describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-conformant', () => {
+  it('the walker reaches into the schemas (positive control: it is not vacuous)', () => {
+    // If the walker silently returned [], every assertion below would pass by
+    // testing nothing. Each served schema must contribute at least one
+    // `type:"object"` node, and the aggregate must be plural.
+    const perTool = SERVED_TOOL_SCHEMAS.map((t) => ({
+      label: t.label,
+      count: objectNodesIn(t.schema).length,
+    }));
+    for (const { label, count } of perTool) {
+      expect(count, `${label} contributed no object nodes to the sweep`).toBeGreaterThan(0);
+    }
+    expect(perTool.reduce((n, t) => n + t.count, 0)).toBeGreaterThan(
+      SERVED_TOOL_SCHEMAS.length,
+    );
+  });
 
+  it.each(SERVED_TOOL_SCHEMAS.map((t) => [t.label, t.schema] as const))(
+    '⭐ %s — every object declares `additionalProperties: false`',
+    (label, schema) => {
+      const offenders = objectNodesIn(schema).filter((n) => n.additionalProperties !== false);
+      expect(
+        offenders.map((o) => `${o.path} (${o.declaresKey ? 'declared as ' : 'key OMITTED, '}${String(o.additionalProperties)})`),
+        `Anthropic rejects this tool outright: "For 'object' type, ` +
+          `'additionalProperties' must be explicitly set to false". ` +
+          `OMITTING the key fails exactly as ${'`true`'} does — #835 removed the ` +
+          `${'`true`'} and left the key off, and the composer 400'd for another day.`,
+      ).toEqual([]);
+      void label;
+    },
+  );
 
+  it('⭐ no object is closed to nothing (a tool that can only ever emit `{}`)', () => {
+    // The other way to satisfy the assertion above is `additionalProperties:
+    // false` on an object that declares NO properties. That is worse than the
+    // 400: the call succeeds and the model is told the only legal payload is
+    // the empty object, so the composer would compose nothing while every
+    // request looked healthy. Strictly harder to notice than a crash.
+    // ⭐⭐ TWO QUESTIONS UNDER ONE PREDICATE (CLAUDE.md trap 21), NAMED APART.
+    //
+    // The harm above is a tool that SHOULD carry fields being closed to silence
+    // a 400 — the model is then told to send nothing and the composer composes
+    // nothing, while every request looks healthy. Real, and worse than a crash.
+    //
+    // But the predicate that detects it — "permits only `{}`" — is also TRUE OF
+    // A TOOL THAT GENUINELY TAKES NO ARGUMENTS, where `{}` is the correct and
+    // only sensible payload and no field is being suppressed. Those are
+    // different facts and the predicate cannot separate them, so the separation
+    // is declared here, by name, with the reason.
+    //
+    // ⛔ NOT A WIDENING: the set is asserted to be EXACTLY these three below, so
+    // it REDs if it grows OR shrinks. A fourth entry is a review question, not a
+    // line someone can quietly add. And the remedy for a genuinely parameterless
+    // tool must never be to invent a decorative field — that would satisfy this
+    // guard by lying to the model about what the tool accepts.
+    const PARAMETERLESS_BY_DESIGN: readonly string[] = []; // All three parameterless replacement tools were deleted.
 
+    const closedToNothing = SERVED_TOOL_SCHEMAS.flatMap((t) =>
+      objectNodesIn(t.schema)
+        .filter((n) => n.additionalProperties === false && n.propertyCount === 0)
+        .map((n) => `${t.label} ${n.path}`),
+    ).filter((entry) => !PARAMETERLESS_BY_DESIGN.includes(entry));
 
+    // The exempt set is pinned exactly, so it cannot drift in either direction.
+    const exemptSeen = SERVED_TOOL_SCHEMAS.flatMap((t) =>
+      objectNodesIn(t.schema)
+        .filter((n) => n.additionalProperties === false && n.propertyCount === 0)
+        .map((n) => `${t.label} ${n.path}`),
+    ).filter((entry) => PARAMETERLESS_BY_DESIGN.includes(entry));
+    expect(
+      [...exemptSeen].sort(),
+      'The parameterless-by-design exemption must match reality exactly. If a ' +
+        'tool here gained a field, remove it from the list; if a NEW tool is ' +
+        'closed to nothing, that is a review question, not a list entry.',
+    ).toEqual([...PARAMETERLESS_BY_DESIGN].sort());
 
+    expect(
+      closedToNothing,
+      'These objects forbid every field AND declare none, so the only payload ' +
+        'they permit is `{}`. Closing an open bag is not a fix for the 400 — ' +
+        'declare the fields it legitimately carries instead.',
+    ).toEqual([]);
+  });
 
   it('the closed-to-nothing screen can SEE a violation (positive control)', () => {
     // Without this, the assertion above would pass on a walker that never

@@ -17,8 +17,21 @@
  * Everything downstream of ingress (frame contract, identity invariant, emitter
  * context) is the shared transport already pinned by `streamed-turn-sse.test.ts`;
  * this suite covers what is UNIQUE to the browser ingress: origin validation, the
- * CORS response, the internally-injected service key, and that the commit still
- * lands and reads back.
+ * CORS response, and the internally-injected service key.
+ *
+ * ── #3283: THE DRAFT ROWS MOVED TO THE SERVED TARGET ────────────────────────
+ * This suite builds the whole server, whose default browser target is the
+ * conventional `/orchestrate/v2/turn`, and #3283 retired that route's free-text
+ * conversation (410 `conventional_conversation_retired`). The rows that needed a
+ * DRAFT — "the streamed draft commits and reads back" and "GRAPH_READY's graph,
+ * provenance and option identity are what was persisted" — and the GRAPH_READY
+ * half of the first row now run on the path the browser is served,
+ * `/proxy/v5/turn/stream` → `/agent/v1/turn`, in
+ * `proxy-v5-turn-stream-served.test.ts`. The first row's other half, "the
+ * injected service key authenticates the inner turn", needs the real auth plugin,
+ * so it stays here on a shape the conventional route still serves (a canvas
+ * system event). The CORS rows below assert the outer reply's headers, which do
+ * not depend on what the inner turn answers.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
@@ -129,6 +142,17 @@ function draftTurnPayload(scenarioId: string, turnId: string) {
   };
 }
 
+/** A canvas system event — a shape `/orchestrate/v2/turn` still serves after #3283. */
+function systemEventPayload(scenarioId: string, turnId: string) {
+  return {
+    kind: "system_event",
+    turn_id: turnId,
+    scenario_id: scenarioId,
+    event: { kind: "patch_accepted", patch_id: "proxy-stream-suite" },
+    stage: "analyse",
+  };
+}
+
 interface StageFrame {
   stage: string;
   seq: number;
@@ -145,76 +169,6 @@ function parseStageFrames(body: string): StageFrame[] {
     frames.push(JSON.parse(line.slice("data: ".length)) as StageFrame);
   }
   return frames;
-}
-
-interface PersistedGraphView {
-  readonly nodes: unknown[];
-  readonly edges: unknown[];
-  readonly options: unknown[];
-  readonly goal_node_id: unknown;
-}
-
-function graphOf(value: unknown): PersistedGraphView | null {
-  if (!value || typeof value !== "object") return null;
-  const g = value as {
-    nodes?: unknown;
-    edges?: unknown;
-    options?: unknown;
-    goal_node_id?: unknown;
-  };
-  if (!Array.isArray(g.nodes)) return null;
-  return {
-    nodes: g.nodes,
-    edges: Array.isArray(g.edges) ? g.edges : [],
-    options: Array.isArray(g.options) ? g.options : [],
-    goal_node_id: g.goal_node_id,
-  };
-}
-
-function interventionIdentity(value: unknown) {
-  if (!value || typeof value !== "object") return [];
-  return Object.entries(value as Record<string, unknown>)
-    .map(([key, intervention]) => {
-      const body = intervention as Record<string, unknown>;
-      const target = body.target_match as Record<string, unknown> | undefined;
-      return { key, target_node_id: target?.node_id };
-    })
-    .sort((a, b) => a.key.localeCompare(b.key));
-}
-
-function persistentProjection(value: PersistedGraphView) {
-  const nodes = value.nodes
-    .map((candidate) => {
-      const node = candidate as Record<string, unknown>;
-      return {
-        id: node.id,
-        label: node.label,
-        kind: node.kind ?? node.type,
-        provenance: node.provenance,
-        is_baseline: node.is_baseline,
-        interventions: interventionIdentity(node.interventions),
-      };
-    })
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  const edges = value.edges
-    .map((candidate) => {
-      const edge = candidate as Record<string, unknown>;
-      return { id: edge.id, from: edge.from, to: edge.to };
-    })
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  const options = value.options
-    .map((candidate) => {
-      const option = candidate as Record<string, unknown>;
-      return {
-        id: option.id,
-        label: option.label,
-        provenance: option.provenance,
-        is_baseline: option.is_baseline,
-        interventions: interventionIdentity(option.interventions),
-      };
-    })
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  return { nodes, edges, options, goal_node_id: value.goal_node_id };
 }
 
 describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () => {
@@ -240,13 +194,18 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
   // ═══════════════════════════════════════════════════════════════════════════
 
   it("is registered, and a browser with NO service key gets a real streamed turn", async () => {
+    const scenarioId = nextScenarioId();
     const res = await app.inject({
       method: "POST",
       url: PROXY_STREAMED_TURN_ROUTE,
       // Deliberately NO x-olumi-assist-key: that is the whole point of this
       // route. A browser cannot hold one.
       headers: { "content-type": "application/json", origin: ALLOWED_ORIGIN },
-      payload: draftTurnPayload(nextScenarioId(), nextTurnId()),
+      // A shape the conventional target still serves (#3283): the real auth
+      // plugin must admit the inner turn on the key the proxy injected. The
+      // GRAPH_READY half of this row is on the served target in
+      // proxy-v5-turn-stream-served.test.ts.
+      payload: systemEventPayload(scenarioId, nextTurnId()),
     });
 
     expect(res.statusCode).toBe(200);
@@ -262,7 +221,13 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
       complete.status_code,
       `inner turn refused the injected service key: ${JSON.stringify(complete.payload).slice(0, 300)}`,
     ).toBe(200);
-    expect(frames.some((f) => f.stage === "GRAPH_READY")).toBe(true);
+    // Positive control: the inner turn ran the system event, not a refusal that
+    // happens to carry 200.
+    expect((complete.payload as { response_version?: unknown }).response_version).toBe(2);
+    expect(
+      appendWrites.filter((w) => w.scenario_id === scenarioId).length,
+      "the inner turn committed nothing for this scenario",
+    ).toBeGreaterThan(0);
   }, 90_000);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -416,81 +381,6 @@ describe("POST /proxy/v5/turn/stream — the browser-facing streamed turn", () =
     // of the reason it was refused.
     expect(badCt.headers["access-control-allow-origin"]).toBe(ALLOWED_ORIGIN);
   }, 60_000);
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // COMMIT SEMANTICS — the browser route must persist exactly like the rest
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  it("a browser-streamed draft COMMITS, and the read-back path sees it", async () => {
-    const scenarioId = nextScenarioId();
-    const headers = { "content-type": "application/json", origin: ALLOWED_ORIGIN };
-
-    await app.inject({
-      method: "POST",
-      url: PROXY_STREAMED_TURN_ROUTE,
-      headers,
-      payload: draftTurnPayload(scenarioId, nextTurnId()),
-    });
-
-    const committed = graphOf(persistedGraphs.get(scenarioId));
-    expect(committed, "browser-streamed draft wrote no graph").not.toBeNull();
-    expect(committed!.nodes.length).toBeGreaterThan(0);
-
-    // The same read `run_analysis` depends on: a second explicit-generate turn
-    // must SEE the model and decline to draft over it.
-    loadGraphCalls.length = 0;
-    appendWrites.length = 0;
-    const second = await app.inject({
-      method: "POST",
-      url: PROXY_STREAMED_TURN_ROUTE,
-      headers,
-      payload: draftTurnPayload(scenarioId, nextTurnId()),
-    });
-    expect(second.statusCode).toBe(200);
-    expect(
-      loadGraphCalls.filter((s) => s === scenarioId).length,
-      "the follow-up turn never read the scenario graph",
-    ).toBeGreaterThan(0);
-    expect(
-      appendWrites.filter((w) => w.scenario_id === scenarioId && w.graph).length,
-      "the follow-up turn re-drafted — it did not see the committed graph",
-    ).toBe(0);
-  }, 120_000);
-
-  it("persists the GRAPH_READY frame's canonical graph, provenance and option identity", async () => {
-    const scenarioId = nextScenarioId();
-    const res = await app.inject({
-      method: "POST",
-      url: PROXY_STREAMED_TURN_ROUTE,
-      headers: { "content-type": "application/json", origin: ALLOWED_ORIGIN },
-      payload: draftTurnPayload(scenarioId, nextTurnId()),
-    });
-
-    const frame = parseStageFrames(res.body).find((f) => f.stage === "GRAPH_READY");
-    expect(frame, "no GRAPH_READY frame on the browser route").toBeDefined();
-
-    const early = graphOf(frame!.graph);
-    const committed = graphOf(persistedGraphs.get(scenarioId));
-    // Trap-13 controls: two empty node lists compare equal and prove nothing.
-    expect(early?.nodes.length ?? 0).toBeGreaterThan(0);
-    expect(committed?.nodes.length ?? 0).toBeGreaterThan(0);
-
-    const frameGraph = frame!.graph as Record<string, unknown>;
-    expect(Array.isArray(frameGraph.options), "GRAPH_READY did not carry canonical options").toBe(true);
-    expect((frameGraph.options as unknown[]).length).toBeGreaterThan(0);
-    expect(early?.options.length ?? 0, "GRAPH_READY options were not projected").toBeGreaterThan(0);
-    expect(committed?.options.length ?? 0, "persisted options were lost").toBeGreaterThan(0);
-    expect(typeof early?.goal_node_id, "GRAPH_READY goal identity was lost").toBe("string");
-    expect(typeof committed?.goal_node_id, "persisted goal identity was lost").toBe("string");
-
-    // Values may settle only in terminal graph-data-integrity; every durable
-    // graph/option/goal identity and provenance relation must survive the
-    // streamed V5 commit exactly.
-    const projectedEarly = persistentProjection(early!);
-    const projectedCommitted = persistentProjection(committed!);
-    expect(projectedEarly.edges.length).toBeGreaterThan(0);
-    expect(projectedEarly).toEqual(projectedCommitted);
-  }, 90_000);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // THE SERVICE KEY MUST NEVER REACH THE BROWSER

@@ -83,6 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
+import { figuresWritten, goalTargetSentences } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -3984,7 +3985,21 @@ function admitOnce(
          * withholds it.
          */
         const raw = model.goal.value;
-        const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
+        // ⭐ S2 C4 (TL 6208664188 rules 1–2; DL-3 09:05Z): a figure the USER wrote is this goal's target only where the AI bound one of
+        // the user's sentences as the goal's target with it. A figure the user wrote for something else (a budget, a headcount) is
+        // never auto-bound: no target is written, and it is said, so the goal-target card can offer it as Olumi's reading. A figure
+        // the user never wrote ("break even" read as 0) is Olumi's reading, as before. A recorded pre-SYSTEM-2 draft is as before.
+        const boundSentences = typeof brief === 'string' && typeof raw === 'number' ? goalTargetSentences(model, brief, raw) : undefined;
+        const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundSentences?.length === 0
+          && figuresWritten(brief ?? '').some((f) => f.low === Math.abs(raw));
+        if (unbound) {
+          loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].goal_target_unbound`,
+            before: { value: raw, unit: model.goal.unit ?? null }, after: null, severity: 'warn',
+            reason: `No target was set for "${model.goal.metric}": you wrote ${raw}${model.goal.unit ? ` ${model.goal.unit}` : ''}, but not as `
+              + 'this goal’s target, so it is not used as yours. Olumi can offer it as its reading of the target, for you to use, '
+              + 'change or reject.' } as RepairEntry);
+        }
+        const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && !unbound;
         if (!stated) {
           // GEN #3: the user's stated level holds no figure without a target's scale, and is ASKED, never dropped silently.
           const unscaled = untargetedGoalLevelAsk(model.goal, goalLevelStated, brief);
@@ -4030,7 +4045,17 @@ function admitOnce(
         const signedLevel = model.goal.baseline_value;
         const signedScale = typeof signedLevel === 'number' && Number.isFinite(signedLevel) && signedLevel < 0 && raw >= signedLevel
           && (model.goal.operator === '>=' || model.goal.operator === '>') ? -signedLevel : undefined;
-        const resolved = resolveGoalThresholdCapWithProvenance(undefined, raw, model.goal.unit, undefined)
+        // ⭐ TL 09:23Z (G3 unseen, VERIFY-ab3df4cb-unseen.md): a CEILING's scale holds BOTH today's level and the target. A
+        // lower-is-better goal's stated level sits above its target by definition ("9 weeks today, at most 5 weeks"), so the scale
+        // from the target alone (5 × 1.25 = 6.25) put today off it and the user's own level was refused (`baseline_off_cap_scale`).
+        // With the user's level above the target it is that level's frame, same headroom: max(level, target) × 1.25, `level_frame`
+        // (D3 step 1). A floor, an estimated level, a % scale and an inherited cap are unchanged.
+        const fromTarget = resolveGoalThresholdCapWithProvenance(undefined, raw, model.goal.unit, undefined);
+        const todayLevel = model.goal.baseline_value;
+        const ceilingScale = (model.goal.operator === '<=' || model.goal.operator === '<') && !goalLevelIsEstimated(model.goal)
+          && fromTarget?.provenance === 'target_derived_headroom' && typeof todayLevel === 'number' && Number.isFinite(todayLevel) && todayLevel > raw
+          ? { cap: Math.max(todayLevel, raw) * 1.25, provenance: 'level_frame' as const } : undefined;
+        const resolved = ceilingScale ?? fromTarget
           ?? (signedScale !== undefined ? { cap: signedScale, provenance: 'level_frame' as const } : null);
         /**
          * ⛔ A LEVEL FRAME WITH NO BASELINE HAS NO GOAL FIT. ISL reads the level

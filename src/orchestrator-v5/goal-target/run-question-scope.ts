@@ -1,4 +1,4 @@
-/** The licence owner's scope kernel. Only thin record/transport readers; safe on the readiness import path. */
+/** Numerical input validation for the licence owner, with descriptive readers for the Run question. */
 import { readGoalRecord } from './goal-record.js';
 import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 import type { RunQuestionSide, RunQuestionScope } from './run-question.js';
@@ -73,14 +73,6 @@ export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequ
     || (savedGoal?.nonlinear_identity !== undefined && (!isRec(savedGoal.nonlinear_identity) || savedGoal.nonlinear_identity.operation !== 'sum'))
     || questionGoal(savedGraph, goalId)?.quantity_frame === 'change'
     || asked.frame !== 'level') return { status: 'outside_static_scope', can_show_goal_chance: false, reasons: ['outside_verified_static_level_scope'] };
-  if (dispatchedRequest === undefined) {
-    const missing = [asked.target === undefined ? 'target' : undefined, asked.comparator === undefined ? 'comparator' : undefined,
-      asked.unit === undefined ? 'unit' : undefined, asked.baseline === undefined ? 'baseline' : undefined].filter((v): v is string => v !== undefined);
-    // Readiness inspects the same saved question, but has no evaluated request and grants no figure permission.
-    return { status: missing.length > 0 ? 'invalid' : 'unverified', can_show_goal_chance: false,
-      reasons: missing.length > 0 ? missing.map(field => `missing_saved_${field}`) : ['not_yet_evaluated'],
-      ...(missing.length === 0 ? { note: STATIC_MODEL_SCOPE_NOTE } : {}) };
-  }
   if (calculated === null) return { status: 'unverified', can_show_goal_chance: false, reasons: ['dispatched_inputs_not_recorded'] };
   // Existing missing-target/direction owners keep their precise refusal; no second generic reason is minted.
   if (asked.target === undefined || asked.comparator === undefined) return { status: 'unverified', can_show_goal_chance: false,
@@ -112,11 +104,3 @@ export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequ
   if (reasons.length > 0) return { status: 'invalid', can_show_goal_chance: false, reasons };
   return { status: 'supported_static', can_show_goal_chance: true, reasons: [], note: STATIC_MODEL_SCOPE_NOTE, capability: STATIC_LEVEL_CAPABILITY };
 }
-
-/** Internal readiness classification; never an evaluated Run record or a new execution gate. */
-export function assessRunQuestionReadiness(graph: unknown): RunQuestionScope {
-  const goals = questionNodes(graph).filter(n => n.kind === 'goal' && typeof n.id === 'string');
-  return goals.length === 1 ? assessEvaluatedQuestionScope(graph, undefined, String(goals[0]!.id))
-    : { status: 'unverified', can_show_goal_chance: false, reasons: ['one_saved_goal_required'] };
-}
-

@@ -13,7 +13,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { userStatementsOn } from '../../statement-door/statements.js';
+import { userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
@@ -30,7 +30,11 @@ import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js'
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
 import { applyStructuralRename } from '../../system-events/structural-rename.js';
 import { applyStructuralDelete } from '../../system-events/structural-delete.js';
+import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+/** Prepared target corrections use the existing operation and the saved-candidate registration contract. */
+const isPreparedSavedCorrection = (op: ProposalOperation | undefined): boolean => op?.op === 'apply_saved_correction'
+  || (op?.op === 'set_goal_target' && isPlainRecord(op.value) && isPlainRecord(op.value.candidate));
 /** What binds a user's statement to one subject beside their words: their canvas selection, Olumi's preceding question, its asks. */
 const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => ({ ...(ctx.grounded_selection !== undefined ? { selection: ctx.grounded_selection } : {}),
   ...(ctx.preceding_assistant_text !== undefined ? { preceding_ask: ctx.preceding_assistant_text } : {}),
@@ -4248,7 +4252,7 @@ export function createAgentCapabilities(
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
       goal_turn_id?: unknown; operation_id?: unknown; bound_turn_ids?: unknown; draft_context_identity?: unknown };
-    const targeted = parent.operations[0]!.op === 'apply_saved_correction';
+    const targeted = isPreparedSavedCorrection(parent.operations[0]);
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -6224,6 +6228,10 @@ export function createAgentCapabilities(
       const nodes = Array.isArray(raw.nodes) ? raw.nodes : [];
       const edges = Array.isArray(raw.edges) ? raw.edges : [];
       const labelOf = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? id);
+      const named = kind === 'link' ? [labelOf(resolved.subject.id), labelOf(resolved.subject.to_id)] : [resolved.label];
+      if (named.some(label => quoteSpansIn(quote.toLocaleLowerCase('en-GB'), label.toLocaleLowerCase('en-GB')).length === 0)) return {
+        ok: false, mutated: false, refusal: 'not_asked',
+        detail: 'The removal quote must name the part, or both ends of the link, being removed. Nothing was prepared.' };
       // AIE 6188873084's cards, exact.
       const said = `From your message: “${quote}”. `;
       const listed = (xs: readonly string[]): string => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)!}`;
@@ -6496,10 +6504,8 @@ export function createAgentCapabilities(
           detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
       }
       const measures = typeof args.measures === 'string' ? args.measures.trim() : '';
-      if (measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
-        && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
-        return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
-      }
+      const restatedQuantity = measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
+        && norm(ctx.user_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_text);
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
       if (isEventShareForecast(g.raw)) {
@@ -6525,6 +6531,76 @@ export function createAgentCapabilities(
       // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.
       const trio = pickGoalThresholdTrio(goal as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
       const goalUnit = (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit ?? factorUnitOf(g.raw, goal);
+      // A restatement corrects THIS saved goal, never redrafts the options. Source verification proves the human
+      // figure, not its role: the uncertain goal/measurement binding is disclosed and stays inferred after approval.
+      // The request-owned ordinary lane binds turn authority and the durable native registration ledger. Older
+      // in-process callers retain their existing draft contract; production target corrections never use that fallback.
+      if (restatedQuantity && opts.turnAuthority !== true && norm(ctx.user_turn_text).includes(norm(measures))
+        && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
+        return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
+      }
+      if (restatedQuantity && opts.turnAuthority === true) {
+        const lines = [ctx.user_text, ctx.user_turn_text].flatMap(t => typeof t === 'string' ? t.split('\n') : []);
+        const source = [...lines].reverse().find(line => figureTheUserWrote(derived?.base ?? value, unit, line));
+        if (source === undefined || source.trim() === '' || source.length > 200 || derived !== null || ctx.user_text_complete === false
+          || quoteIsNotTheUsersClaim(source, source)) {
+          // No redraft fallback (#3279 BUDDY-A r2): a redraft from here saved 4 options → 1 (founder). A restatement this
+          // card can't carry is refused truthfully; the full-redraft correction path is retired (DRASTIC CUT C5).
+          return { ok: false, mutated: false, refusal: 'target_source_not_supported',
+            detail: 'The complete source and its interpretation could not be retained on this target card. Nothing was prepared; keep the original statement available.' };
+        }
+        const event = { kind: 'goal_target_edit' as const, goal_node_id: goal.id, constraint_type: inclusiveType,
+          raw_value: value, unit, base_graph_hash: g.graph_hash };
+        const turn = ctx.turn_id ?? ctx.request_id;
+        const result = await runWithStatedGoalOperator({ scenario_id: ctx.scenario_id, goal_node_id: goal.id, turn_id: turn,
+          operator: TARGET_OPERATOR[type] }, () => applyGoalTargetEdit({ payload: { kind: 'system_event', scenario_id: ctx.scenario_id,
+          turn_id: turn, stage: 'frame', event }, event, requestId: ctx.request_id, persistedGraph: g.raw, priorFacts: [] }));
+        if (result.kind !== 'mutated') return { ok: false, mutated: false, refusal: 'target_not_prepared',
+          detail: 'The saved goal could not take this target correction. Nothing was prepared or changed.' };
+        const preparedGoal = (result.mutatedGraph.nodes as Array<Record<string, unknown>>).find(n => n.id === goal.id);
+        const targetFields = new Set(['goal_threshold', 'goal_threshold_raw', 'goal_threshold_unit', 'goal_threshold_cap',
+          'goal_threshold_cap_provenance', 'goal_threshold_frame', 'success_threshold', 'threshold_source', 'goal_direction', 'observed_state']);
+        const otherGoalWork = (node: Record<string, unknown>) => Object.fromEntries(Object.entries(node).filter(([key]) => !targetFields.has(key)));
+        if (preparedGoal === undefined || !isDeepStrictEqual(otherGoalWork(goal), otherGoalWork(preparedGoal))) return {
+          ok: false, mutated: false, refusal: 'target_would_change_other_work',
+          detail: 'The target adapter would also change the goal’s retained reasoning. No card was offered and nothing changed.' };
+        const subject = { kind: 'goal' as const, id: goal.id, field: 'target' as const };
+        const record = userStatementRecord(subject, [{ speaker: 'user', quote: source, source,
+          subject: { quantity: measures }, form: 'describes', unit, reading: 'olumi' }], new Date().toISOString());
+        const candidate = withUserStatement(result.mutatedGraph as Record<string, unknown> & { nodes: unknown[] }, record, subject);
+        if (candidate === undefined) return { ok: false, mutated: false, refusal: 'target_not_prepared' };
+        const targetNode = (candidate.nodes as Array<Record<string, unknown>>).find(n => n.id === goal.id)!;
+        const rows = Array.isArray(candidate.goal_constraints) ? candidate.goal_constraints as Array<Record<string, unknown>> : [];
+        const targetRow = rows.find(r => r.node_id === goal.id && r.operator === (inclusiveType === 'at_least' ? '>=' : '<='));
+        if (targetRow === undefined) return { ok: false, mutated: false, refusal: 'target_not_prepared' };
+        // The canonical adapter may refuse or retire incompatible science. It may not silently alter other saved work
+        // on a target-only card, including fields an older GraphV3 parse would strip.
+        const others = (raw: Record<string, unknown>) => ({ ...raw,
+          nodes: (raw.nodes as Array<Record<string, unknown>>).filter(n => n.id !== goal.id),
+          goal_constraints: (Array.isArray(raw.goal_constraints) ? raw.goal_constraints as Array<Record<string, unknown>> : []).filter(r => r.node_id !== goal.id) });
+        if (!isDeepStrictEqual(others(g.raw), others(candidate))) return { ok: false, mutated: false, refusal: 'target_would_change_other_work',
+          detail: 'The target adapter would also change other saved work. No card was offered and nothing changed; retain the complete saved model.' };
+        targetNode.threshold_source = 'cee_inference';
+        targetRow.provenance = 'inferred'; targetRow.source_quote = source;
+        const candidateHash = identityHashOf(computeGraphIdentityHash(candidate as never));
+        if (candidateHash === '') return { ok: false, mutated: false, refusal: 'target_not_prepared' };
+        const operation_id = constructionOperationId(ctx.scenario_id, `saved_goal_target:${g.graph_identity_hash}:${candidateHash}`);
+        const measurement = typeof goalUnit === 'string' && unitComparisonKey(goalUnit) !== unitComparisonKey(unit)
+          ? ` This changes the goal’s measurement from ${goalUnit} to ${unit}.` : '';
+        const heldTarget = readGoalRecord(g.raw, goal.id)?.target;
+        const replaces = typeof heldTarget?.raw !== 'number' ? '' : ` This replaces the saved target ${heldTarget.comparator ?? ''} ${targetFigure(heldTarget.raw, heldTarget.unit ?? '')}.`;
+        const levelLeftOut = args.current_level === undefined ? '' : ' This card changes only the target; it does not record today’s level.';
+        const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+          base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_goal_target', path: goal.id, value: {
+            constraint_type: type, raw_value: value, unit, candidate, base_identity: g.graph_identity_hash,
+            brief_text: g.brief_text, goal_turn_id: turn, operation_id, confirmation: { source, quote: source } } }],
+          provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] },
+          public_label: `From your message: “${source}”. Olumi read ${DIRECTION_WORDS[type]} ${figure} as the target for “${goal.label}”.`
+            + measurement + replaces + levelLeftOut + ' Your figure and source stay yours; binding it to this goal is Olumi’s reading, including after approval. All saved options and their settings stay in this model. Use this target, or correct the reading.' });
+        proposals.put(proposal);
+        return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+          note: 'Show this complete target card. Only its own approval saves the prepared correction to the existing model; no redraft is offered.' };
+      }
       if (unitsConflict(unit, goalUnit) !== null) {
         return { ok: false, mutated: false, refusal: 'target_unit_mismatch',
           detail: `The goal "${goal.label}" is measured in ${String(goalUnit)}, and ${figure} is a different kind of figure, so nothing was prepared. `
@@ -8167,7 +8243,7 @@ export function createAgentCapabilities(
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // A lost response may leave this exact prepared correction committed while its card is still pending. Recover only
       // from its native registration operation AND the whole approved postimage; another writer's equal graph is no receipt.
-      const correction = pendingAdoption?.operations.length === 1 && pendingAdoption.operations[0]!.op === 'apply_saved_correction'
+      const correction = pendingAdoption?.operations.length === 1 && isPreparedSavedCorrection(pendingAdoption.operations[0])
         ? pendingAdoption.operations[0]!.value as { operation_id?: unknown; candidate?: unknown; brief_text?: unknown } : undefined;
       const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string'
         && correction.brief_text === before.brief_text && approvedGraphHeld(correction.candidate, before.raw)
@@ -8196,7 +8272,7 @@ export function createAgentCapabilities(
       });
       if (decision.status === 'already_applied') {
         const op = decision.proposal.operations.length === 1 ? decision.proposal.operations[0] : undefined;
-        if (op?.op === 'apply_saved_correction' && !correctionSaved) return {
+        if (isPreparedSavedCorrection(op) && !correctionSaved) return {
           ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
           follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
         };
@@ -8562,6 +8638,9 @@ export function createAgentCapabilities(
           note: 'The last analysis no longer reflects the options compared. Offer to run the analysis again.' };
       }
 
+      if (ops.length === 1 && ops[0]!.op === 'set_goal_target' && isPreparedSavedCorrection(ops[0])) {
+        return applyReplaceDraft(ctx, decision.proposal, before);
+      }
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
         const v = op.value as { constraint_type: TargetDirection; raw_value: number; unit: string };

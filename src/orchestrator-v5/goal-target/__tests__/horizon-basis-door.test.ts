@@ -25,6 +25,7 @@ import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js'
 import { GraphV3,NodeV3 } from '../../../schemas/cee-v3.js';
 import { parseRequestExtensions } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import * as graphHashes from '../../context/graph-hash.js';
 import { computeGraphIdentityHash,computeVersionAnalysisAffectingHashRecord } from '../../context/graph-identity.js';
 import { buildReadyGraph,frameFor,hashOf,makeEnvelope } from '../../graph-management/__tests__/fixtures.js';
 import { checkFieldSafety,stripPipelineOwnedFromAddOperations } from '../../graph-management/field-safety.js';
@@ -1175,5 +1176,36 @@ describe('S5 r9 outbound receipt and graph identity', () => {
     expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(graph).horizon_basis);
     expect(horizonSteadyAttested(w.read())).toBe(true);
     expect(JSON.stringify(graph)).toBe(graphBytes);
+  });
+});
+describe('R5 unavailable read drops basis without nulling hash candidates', () => {
+  it.each(['edit-early-question'])('%s retains its graph and hashes after dropping submitted basis', async () => {
+    const g = attested(), w = world(null);
+    activeStore = new Proxy(w.store, { get(target, key) {
+      if (key === 'loadGraph' || key === 'loadGraphAndBriefText') {
+        return async () => { throw new Error('Unavailable stored provenance'); };
+      }
+      return Reflect.get(target, key);
+    } });
+    vi.stubEnv('ENABLE_V5_ORCHESTRATOR', 'true');
+    vi.stubEnv('CEE_PIPELINE_V4_ENABLED', 'false');
+    vi.stubEnv('CEE_REPLACEMENT_COACH_ENABLED', 'false');
+    _resetConfigCache();
+    const hashes: { graph: unknown; hash: string | null }[] = [];
+    const realHash = graphHashes.computeAnalysisAffectingGraphHash;
+    const spy = vi.spyOn(graphHashes, 'computeAnalysisAffectingGraphHash').mockImplementation(graph => {
+      const hash = realHash(graph);
+      hashes.push({ graph: graph == null ? null : clone(graph), hash });
+      return hash;
+    });
+    try {
+        await dispatchEditGraph({ payload: payload('Add delays as a risk'), requestId: 'r5-drop',
+          request: {} as never, graphState: g as never, analysisState: null });
+      const candidates = hashes.filter(h => h.graph != null);
+      expect(candidates.length).toBeGreaterThan(0);
+      expect(candidates.some(h => h.hash === realHash(seed() as never))).toBe(true);
+      for (const candidate of candidates) expect(goalOf(candidate.graph as Rec)).not.toHaveProperty('horizon_basis');
+      expect(goalOf(g)).toHaveProperty('horizon_basis');
+    } finally { spy.mockRestore(); }
   });
 });

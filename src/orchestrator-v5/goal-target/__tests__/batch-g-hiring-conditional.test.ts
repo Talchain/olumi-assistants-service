@@ -45,8 +45,7 @@ const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than 
 /** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
  * status-quo row is the AIE's generic line (no figures: the LEVEL line is for a level goal's held level and target only). */
 // Plain words (Paul's principle review, 14 Oct): the generic line's new wording, same meaning.
-const DOING_NOTHING = 'This Run can’t give a chance for carrying on as now, because it treats ‘productivity’ as unchanged from today. '
-  + 'Worth checking: how ‘productivity’ could change over the goal period if nothing is done, including any forecast or range already in the model.';
+const DOING_NOTHING = 'This Run can’t give a chance for carrying on as now, because it treats ‘productivity’ as unchanged from today.';
 const SQ_ASSUMED = 'This assumes carrying on as now leaves ‘productivity’ unchanged through month three; each option is measured against that.';
 const SQ_MOVED = 'Not shown: this run’s result for carrying on as now doesn’t match ‘productivity’ as it stands today in the model, so it needs checking first.';
 const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
