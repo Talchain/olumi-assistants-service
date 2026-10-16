@@ -1586,25 +1586,30 @@ export function linkEffectFigureNotAChange(
  * 250" write the size as a point INSIDE a range: `{ low, high, text, end: 'centre' }`, the amount kept as the stated point.
  * Read only from the sentence that bound the link, at the bound amount:
  *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
- *  · or, where the caller gives where the amount starts, written BEFORE it in the same clause, with no other figure between
- *    ("between 4 and 7 points, probably about 5"; "somewhere between 4 and 7 points, call it 5": item 3 2a, TL 16:18Z ACK of
- *    #94 6219775036: the user's figure inside their range is theirs whichever side they write it);
+ *  · or, where the caller gives where the amount starts AND how the link's claim is named (`namesClaim`), written BEFORE it
+ *    in the same clause with no other figure between, and only where the words before the range name that claim ("The
+ *    starter tier would win between 80 and 250 …, probably about 150"; item 3 2a, TL 16:18Z / AIE ACK of #94 6219775036).
+ *    ⛔ BUDDY-A #3311 B1: "Earlier campaigns won between 80 and 250 … — the starter tier would win about 150" states that
+ *    range for ANOTHER claim; its words never name the starter tier, so the range is not this link's, whatever the
+ *    punctuation. A caller that gives no `namesClaim` (construction's binder) reads a range written after the amount only;
  *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
  *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
  *    written after the range ("between 1 and 4 months" is a time);
  * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
  */
-export function centreRangeAt(sentence: string, amountSpan: { readonly start?: number; readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
+export function centreRangeAt(sentence: string, amountSpan: { readonly start?: number; readonly end: number }, amount: number, amountUnit: string,
+  namesClaim?: (wordsBeforeRange: string) => boolean): StatedRangeEnd | undefined {
   if ((sentence.match(/\bbetween\b/giu) ?? []).length !== 1) return undefined;
   const written = extractStatedLikelyRange(sentence.slice(amountSpan.end));
-  const before = written === undefined && amountSpan.start !== undefined ? extractStatedLikelyRange(sentence.slice(0, amountSpan.start)) : undefined;
+  const before = written === undefined && amountSpan.start !== undefined && namesClaim !== undefined
+    ? extractStatedLikelyRange(sentence.slice(0, amountSpan.start)) : undefined;
   const range = written ?? before;
   if (range === undefined) return undefined;
   const at = before === undefined ? sentence.indexOf(range.text, amountSpan.end) : sentence.lastIndexOf(range.text, amountSpan.start);
   if (at < 0) return undefined;
   const between = before === undefined ? sentence.slice(amountSpan.end, at) : sentence.slice(at + range.text.length, amountSpan.start);
   if (/\d/u.test(between)) return undefined;
-  if (before !== undefined && !sameCoordinateClause(sentence, at, amountSpan.start!)) return undefined;
+  if (before !== undefined && (!sameCoordinateClause(sentence, at, amountSpan.start!) || !namesClaim!(sentence.slice(0, at)))) return undefined;
   // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
   // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
   // Up to three words after it, to the next punctuation ("between 1 and 4 calendar months"; Codex buddy r2 F3).
@@ -1683,6 +1688,17 @@ function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], 
     && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
 }
 
+type LinkEnds = { readonly source: string; readonly target: string };
+/**
+ * Whether these words name END by a word of its own (one the OTHER end's label does not share), read as the door reads a
+ * named end (`linkEffectInOneSentence`'s `named`). An end with no word of its own is never named here (fail-closed). Pure.
+ */
+function namesOwnWords(text: string, end: string, other: string): boolean {
+  const own = wordsOf(end).filter(w => !wordsOf(other).some(o => sameWord(w, o)));
+  const said = wordsOf(text);
+  return own.some(w => said.some(t => sameWord(w, t)));
+}
+
 /**
  * ⭐ THE USER'S FIGURE INSIDE THE RANGE THEY WROTE, AS AN ANSWER (G1b answer door; construction's own reading,
  * `centreRangeAt`: Science d5 #87 6009282279, a8's shape ruling). "The starter tier would win about 150 new subscribers,
@@ -1695,12 +1711,13 @@ function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], 
  * ANOTHER unit is a separate claim, set aside with it ("…, and it costs £5k to £7k a year": item 3 2a, AIE 16 Oct). Its `at`
  * is where the range text starts in the sentence. Pure.
  */
-function centreRangeInSentence(sentence: string, effect: LinkEffectFigures): { readonly range: StatedRangeEnd; readonly at: number } | undefined {
+function centreRangeInSentence(sentence: string, effect: LinkEffectFigures, ends?: LinkEnds): { readonly range: StatedRangeEnd; readonly at: number } | undefined {
   const own = literalLinkAmounts(sentence, findLinkEffectAmounts(sentence), effect.amount, effect.amount_unit);
   if (own.length !== 1) return undefined;
   const start = own[0]!.index;
   const after = start + own[0]!.matchedText.length;
-  const range = centreRangeAt(sentence, { start, end: after }, effect.amount, effect.amount_unit);
+  const range = centreRangeAt(sentence, { start, end: after }, effect.amount, effect.amount_unit,
+    ends === undefined ? undefined : (words) => namesOwnWords(words, ends.source, ends.target));
   const at = range === undefined ? -1 : sentence.indexOf(range.text, after) >= 0 ? sentence.indexOf(range.text, after) : sentence.lastIndexOf(range.text, start);
   if (range === undefined || at < 0) return undefined;
   const setAside = sentence.slice(0, at) + ' '.repeat(range.text.length) + sentence.slice(at + range.text.length);
@@ -1734,8 +1751,8 @@ function withoutOtherUnitRanges(sentence: string, amountUnit: string): string {
  * door's own reading), for the writer to carry exactly as construction carries it; undefined when no sentence, or more
  * than one, writes one.
  */
-export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): StatedRangeEnd | undefined {
-  const found = sentencesOf(quote.trim()).flatMap(s => { const c = centreRangeInSentence(s, effect); return c === undefined ? [] : [c.range]; });
+export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures, ends?: LinkEnds): StatedRangeEnd | undefined {
+  const found = sentencesOf(quote.trim()).flatMap(s => { const c = centreRangeInSentence(s, effect, ends); return c === undefined ? [] : [c.range]; });
   return found.length === 1 ? found[0] : undefined;
 }
 
@@ -1761,7 +1778,7 @@ function linkEffectInOneSentence(
 ): LinkEffectStatementMiss | null {
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
   if (negatedOutsideEnds(q, ends)) return 'denied';
-  const centre = hasLinkEffectRange(q) ? centreRangeInSentence(q, effect) : undefined;
+  const centre = hasLinkEffectRange(q) ? centreRangeInSentence(q, effect, ends) : undefined;
   if (hasLinkEffectRange(q) && centre === undefined) return 'unclear_figure';
   const amounts = findLinkEffectAmounts(q);
   // Link magnitudes are literal raw amounts, never the fraction fallback used for other node readers.
