@@ -222,7 +222,7 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
     expect(route).toContain('const askNow = identityAskLineFor(state.analysisResult, state.graph);');
     // ONE reply: the typed reason is owed after the gate only if the gate did not already say it.
     expect(route).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
-    expect(route).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
+    expect(route).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines, { missingSentencesOnly: aiRunTurn })');
     expect(route).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
   });
   it('R13 MUTANT: replacing the scoped owed owner with raw tool results is caught', () => {

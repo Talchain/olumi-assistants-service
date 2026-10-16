@@ -143,8 +143,8 @@ describe('the route actually carries it to the user', () => {
     // unknown current state) it is `owed` itself; on the AI's own reply, only the lines the AI lacks (the AI holds the values).
     expect(ROUTE).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     expect(ROUTE).toContain('const owedShown = hostProse || stateFacts.current_state_unknown === true ? owed');
-    expect(ROUTE).toContain('withDisclosures(narrationText, owedShown)');
-    expect(ROUTE).toContain('withDisclosures(narrationText, [...owedShown, ...decisionLines])');
+    expect(ROUTE).toContain('withDisclosures(narrationText, owedShown, { missingSentencesOnly: aiRunTurn })');
+    expect(ROUTE).toContain('withDisclosures(narrationText, [...owedShown, ...decisionLines], { missingSentencesOnly: aiRunTurn })');
   });
 
   it('⛔⛔ AND `current_state_unknown` SUPPRESSES THE OTHER DISCLOSURES ENTIRELY — the composition order is what decides it', () => {
