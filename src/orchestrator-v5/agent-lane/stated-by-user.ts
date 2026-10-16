@@ -1586,22 +1586,29 @@ export function linkEffectFigureNotAChange(
  * 250" write the size as a point INSIDE a range: `{ low, high, text, end: 'centre' }`, the amount kept as the stated point.
  * Read only from the sentence that bound the link, at the bound amount:
  *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
+ *  · or, where the caller gives where the amount starts, written BEFORE it in the same clause, with no other figure between
+ *    ("between 4 and 7 points, probably about 5"; "somewhere between 4 and 7 points, call it 5": item 3 2a, TL 16:18Z ACK of
+ *    #94 6219775036: the user's figure inside their range is theirs whichever side they write it);
  *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
  *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
  *    written after the range ("between 1 and 4 months" is a time);
  * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
  */
-export function centreRangeAt(sentence: string, amountSpan: { readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
+export function centreRangeAt(sentence: string, amountSpan: { readonly start?: number; readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
   if ((sentence.match(/\bbetween\b/giu) ?? []).length !== 1) return undefined;
-  const tail = sentence.slice(amountSpan.end);
-  const range = extractStatedLikelyRange(tail);
+  const written = extractStatedLikelyRange(sentence.slice(amountSpan.end));
+  const before = written === undefined && amountSpan.start !== undefined ? extractStatedLikelyRange(sentence.slice(0, amountSpan.start)) : undefined;
+  const range = written ?? before;
   if (range === undefined) return undefined;
-  const at = tail.indexOf(range.text);
-  if (at < 0 || /\d/u.test(tail.slice(0, at))) return undefined;
+  const at = before === undefined ? sentence.indexOf(range.text, amountSpan.end) : sentence.lastIndexOf(range.text, amountSpan.start);
+  if (at < 0) return undefined;
+  const between = before === undefined ? sentence.slice(amountSpan.end, at) : sentence.slice(at + range.text.length, amountSpan.start);
+  if (/\d/u.test(between)) return undefined;
+  if (before !== undefined && !sameCoordinateClause(sentence, at, amountSpan.start!)) return undefined;
   // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
   // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
   // Up to three words after it, to the next punctuation ("between 1 and 4 calendar months"; Codex buddy r2 F3).
-  const afterWords = tail.slice(at + range.text.length).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
+  const afterWords = sentence.slice(at + range.text.length).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
   if (afterWords.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== unitPhraseFamily(amountUnit); })) return undefined;
   const pounds = range.text.includes('£');
   if (pounds && unitPhraseFamily(amountUnit) !== 'currency') return undefined;
@@ -1610,7 +1617,9 @@ export function centreRangeAt(sentence: string, amountSpan: { readonly end: numb
   const high = range.high / scale;
   const point = Math.abs(amount);
   if (!(low < point && point < high)) return undefined;
-  return { low, high, text: range.text, end: 'centre' };
+  // The figure reader's digits take a following comma as a thousands mark ("between 80 and 250, and …"): the range as
+  // written ends at its last digit.
+  return { low, high, text: range.text.replace(/,+$/u, ''), end: 'centre' };
 }
 
 /** The user's own count forecast, not another quantity's range or a prior. Shared by construction and registration. */
@@ -1658,6 +1667,8 @@ export function statedCountInterventionRange(
     const range = centreRangeAt(sentence, span, value, unit);
     if (range === undefined) continue;
     const at = sentence.indexOf(range.text, span.end);
+    // A count forecast's receipt reads only a range written after its count, as before (`centreRangeAt` also reads one before).
+    if (at < 0) continue;
     if (!countPhrase(sentence.slice(span.end, at)) || !countPhrase(sentence.slice(at + range.text.length))) continue;
     receipts.push({ low: range.low, high: range.high, text: sentence });
   }
@@ -1679,18 +1690,43 @@ function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], 
  * (`natural_effect.stated_range`, `end: 'centre'`); as an ANSWER the door refused it as "a range" and asked "What single
  * change … rather than a range?", the figure the user had just given (served g1-2633t d1 @c787820). Read only where
  * construction reads it: the ONE written figure that IS the stated amount, the sentence's ONE "between a and b" written
- * after it (`centreRangeAt`), and no other range shape left once that range is set aside ("about 150 or 200, between 80
- * and 250" still asks). Its `at` is where the range text starts in the sentence. Pure.
+ * after it, or before it in the same clause (`centreRangeAt`), and no other range of the same quantity left once that
+ * range is set aside ("about 150 or 200, between 80 and 250" and "…, or 6-9 in a good year" still ask). A range written in
+ * ANOTHER unit is a separate claim, set aside with it ("…, and it costs £5k to £7k a year": item 3 2a, AIE 16 Oct). Its `at`
+ * is where the range text starts in the sentence. Pure.
  */
 function centreRangeInSentence(sentence: string, effect: LinkEffectFigures): { readonly range: StatedRangeEnd; readonly at: number } | undefined {
   const own = literalLinkAmounts(sentence, findLinkEffectAmounts(sentence), effect.amount, effect.amount_unit);
   if (own.length !== 1) return undefined;
-  const after = own[0]!.index + own[0]!.matchedText.length;
-  const range = centreRangeAt(sentence, { end: after }, effect.amount, effect.amount_unit);
-  const at = range === undefined ? -1 : sentence.indexOf(range.text, after);
+  const start = own[0]!.index;
+  const after = start + own[0]!.matchedText.length;
+  const range = centreRangeAt(sentence, { start, end: after }, effect.amount, effect.amount_unit);
+  const at = range === undefined ? -1 : sentence.indexOf(range.text, after) >= 0 ? sentence.indexOf(range.text, after) : sentence.lastIndexOf(range.text, start);
   if (range === undefined || at < 0) return undefined;
   const setAside = sentence.slice(0, at) + ' '.repeat(range.text.length) + sentence.slice(at + range.text.length);
-  return hasLinkEffectRange(setAside) ? undefined : { range, at };
+  return hasLinkEffectRange(withoutOtherUnitRanges(setAside, effect.amount_unit)) ? undefined : { range, at };
+}
+
+/** "£5k to £7k", "3-6 months": a figure-to-figure span, its ends' own currency marks and scales kept for the unit check. */
+const RANGE_SPAN = /([£$€])?\s?\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn)?\s*(?:-|–|—|\bto\b)\s*([£$€])?\s?\d[\d,]*(?:\.\d+)?\s*(?:k|m|bn)?\b/giu;
+/**
+ * The sentence with every range written in ANOTHER unit than the effect's blanked: money ends when the effect is not money,
+ * or a unit word after the high end (up to three words, to the next punctuation, as `centreRangeAt` reads one) of another
+ * family. A range with no unit of its own ("or 6-9 in a good year") is the same quantity's and stays. Pure.
+ */
+function otherUnitRangeSpans(sentence: string, amountUnit: string): readonly { readonly start: number; readonly end: number }[] {
+  const family = unitPhraseFamily(amountUnit);
+  return [...sentence.matchAll(RANGE_SPAN)].flatMap((m) => {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    const words = sentence.slice(end).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
+    const other = m[1] !== undefined || m[2] !== undefined ? family !== 'currency'
+      : words.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== family; });
+    return other ? [{ start, end }] : [];
+  });
+}
+function withoutOtherUnitRanges(sentence: string, amountUnit: string): string {
+  return otherUnitRangeSpans(sentence, amountUnit).reduce((s, { start, end }) => s.slice(0, start) + ' '.repeat(end - start) + s.slice(end), sentence);
 }
 
 /**
@@ -1754,7 +1790,11 @@ function linkEffectInOneSentence(
    *  · a figure written as money or a percentage only in a target unit of that kind: "costs about £6 a month" is never
    *    6 subscribers, even on a link the user selected (a unit nobody classifies takes any kind elsewhere, `amountIs`).
    */
-  const outsideRange = amounts.filter(a => centre === undefined || a.index < centre.at || a.index >= centre.at + centre.range.text.length);
+  // A range written in another unit ("…, and it costs £5k to £7k a year") is a separate claim (item 3 2a, AIE 16 Oct): its
+  // ends are not figures of this effect. A single figure in another unit still counts, as before.
+  const separateClaims = centre === undefined ? [] : otherUnitRangeSpans(q, effect.amount_unit);
+  const outsideRange = amounts.filter(a => (centre === undefined || a.index < centre.at || a.index >= centre.at + centre.range.text.length)
+    && !separateClaims.some(s => a.index >= s.start && a.index < s.end));
   const kindFits = (a: StatedAmount): boolean => (a.kind !== 'currency' || unitPhraseFamily(effect.amount_unit) === 'currency')
     && (a.kind !== 'percent' || unitPhraseFamily(effect.amount_unit) === 'percent');
   const switchOne = perFigures.length === 0 && effect.per_source_change_unit === 'switch' && Math.abs(effect.per_source_change) === 1
