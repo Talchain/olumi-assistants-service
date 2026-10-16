@@ -1876,12 +1876,15 @@ export const BASE_OWNER_UNESTABLISHED_REASON = 'base_owner_unestablished';
  * yet (ISL B1a's `level_anchor_source` is the planned carrier for the first). {@link STRICT_THRESHOLD_PIN_REASON} is
  * CEE's own and ranks after every other code.
  */
+// ⛔ BOOT (aaf70d6a crashed on Render: "Cannot access 'PLACEHOLDER_PARTS_REASON' before initialization"): this table is
+// evaluated at module load, and placeholder-parts.js sits in an import cycle with this module, so its constants may not be
+// initialised yet. Literals here; `satisfies typeof` keeps each one bound to its constant at compile time (no runtime read).
 export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['threshold_unframed', 1],
   ['target_unanchored', 2],
-  [PLACEHOLDER_PARTS_REASON, 2],
-  [PARTS_IDENTITY_UNMODELLED_REASON, 2],
-  [OLUMI_GUESS_LIMIT_REASON, 2],
+  ['parts_links_placeholder' satisfies typeof PLACEHOLDER_PARTS_REASON, 2],
+  ['parts_identity_unmodelled' satisfies typeof PARTS_IDENTITY_UNMODELLED_REASON, 2],
+  ['limit_rests_on_olumi_guess' satisfies typeof OLUMI_GUESS_LIMIT_REASON, 2],
   ['threshold_clamped', 3],
   ['CONSTRAINT_NOT_CONVERTIBLE', 4],
   ['CONSTRAINT_OUT_OF_DOMAIN', 4],
