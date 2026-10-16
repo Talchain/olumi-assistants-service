@@ -1157,7 +1157,7 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  * The typed approval card is the consent to the reading; no movement vocabulary is required here.
  */
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
-  | 'not_one_statement' | 'unclear_figure' | 'source_figure_a_level' | 'target_figure_a_level' | 'no_change_stated'
+  | 'not_one_statement' | 'unclear_figure' | 'range_without_working_figure' | 'source_figure_a_level' | 'target_figure_a_level' | 'no_change_stated'
   | 'figure_counts_another_unit' | 'figure_of_another_quantity';
 /**
  * `target_units`: the link target's OWN units, read from its stored node (`ownUnitsOf`). Only these make a figure's
@@ -1739,6 +1739,47 @@ export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): St
   return found.length === 1 ? found[0] : undefined;
 }
 
+/** A range the user wrote for a link's effect with no working figure inside it, as written. */
+export interface BareEffectRange { readonly low: number; readonly high: number; readonly text: string }
+/**
+ * ⭐ ITEM 3 2b (TL 16:18Z / AIE 16 Oct ACK of #94 6219775036): a RANGE the user wrote for the effect with no working figure
+ * inside it ("would win between 80 and 250 new subscribers"; "something like 3 to 4 points of margin") IS their statement.
+ * It sizes nothing here (no end, midpoint or point is taken: Science C1), and it is never refused as "not the user's".
+ * Only a JOINED range ("between a and b", "a to b", "a–b") of the effect's own quantity: the sentence's ONE such range once
+ * a range in another unit is set aside as a separate claim, no unit of another family written after it, no other range
+ * shape or fraction left, and every other figure the source change's own. "About 2, maybe 3" (two candidate figures), a
+ * second range and a figure beside the range stay `unclear_figure`. Pure.
+ */
+function bareEffectRangeInSentence(sentence: string, effect: LinkEffectFigures): BareEffectRange | undefined {
+  const own = withoutOtherUnitRanges(sentence, effect.amount_unit);
+  const between = extractStatedLikelyRange(own);
+  const joined = [...own.matchAll(RANGE_SPAN)];
+  if ((between !== undefined ? 1 : 0) + joined.length !== 1) return undefined;
+  const amounts = findLinkEffectAmounts(own);
+  const span = between !== undefined
+    ? { start: own.indexOf(between.text), end: own.indexOf(between.text) + between.text.replace(/,+$/u, '').length }
+    : { start: joined[0]!.index ?? 0, end: (joined[0]!.index ?? 0) + joined[0]![0].length };
+  if (span.start < 0) return undefined;
+  const ends = amounts.filter(a => a.index >= span.start && a.index < span.end);
+  if (ends.length !== 2 || !(ends[0]!.magnitude < ends[1]!.magnitude)) return undefined;
+  const family = unitPhraseFamily(effect.amount_unit);
+  if ((ends[0]!.kind === 'currency' || ends[1]!.kind === 'currency') && family !== 'currency') return undefined;
+  const afterWords = own.slice(span.end).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
+  if (afterWords.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== family; })) return undefined;
+  const rest = own.slice(0, span.start) + ' '.repeat(span.end - span.start) + own.slice(span.end);
+  if (hasLinkEffectRange(rest)) return undefined;
+  const restAmounts = findLinkEffectAmounts(rest);
+  const per = literalLinkAmounts(rest, restAmounts, effect.per_source_change, effect.per_source_change_unit);
+  if (!restAmounts.every(a => per.some(p => p.index === a.index))) return undefined;
+  return { low: ends[0]!.magnitude, high: ends[1]!.magnitude, text: own.slice(span.start, span.end) };
+}
+
+/** The bare effect range the one sentence of a quote writes (`bareEffectRangeInSentence`); undefined when none, or more than one. */
+export function bareEffectRangeOf(quote: string, effect: LinkEffectFigures): BareEffectRange | undefined {
+  const found = sentencesOf(quote.trim()).flatMap(s => { const r = bareEffectRangeInSentence(s, effect); return r === undefined ? [] : [r]; });
+  return found.length === 1 ? found[0] : undefined;
+}
+
 /**
  * Whether two places in one sentence sit in the same coordinated clause. "Hiring a Tech lead would raise productivity by
  * about 8%, and each additional developer by about 3%" sizes two links: the developer's link is the 3%, never the Tech
@@ -1762,7 +1803,7 @@ function linkEffectInOneSentence(
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
   if (negatedOutsideEnds(q, ends)) return 'denied';
   const centre = hasLinkEffectRange(q) ? centreRangeInSentence(q, effect) : undefined;
-  if (hasLinkEffectRange(q) && centre === undefined) return 'unclear_figure';
+  if (hasLinkEffectRange(q) && centre === undefined) return bareEffectRangeInSentence(q, effect) !== undefined ? 'range_without_working_figure' : 'unclear_figure';
   const amounts = findLinkEffectAmounts(q);
   // Link magnitudes are literal raw amounts, never the fraction fallback used for other node readers.
   const literalAmount = (value: number, unit: string) => literalLinkAmounts(q, amounts, value, unit);
