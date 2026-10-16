@@ -84,14 +84,16 @@ describe('Q4 presence: the snapshot records analysis membership, not a structura
 });
 
 describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', () => {
+  // ⭐ BUDDY-B #3253 r4 (flips the r3 exemption): every case here holds a named change or a record that cannot say what changed,
+  // so the record LEADS in all of them; only a complete, empty record ("Nothing you entered changed.") may follow the finding.
   const cases = [
-    ['all skipped', { input_changes: [UNKNOWN] }, false],
+    ['all skipped', { input_changes: [UNKNOWN] }, true],
     ['one named and one skipped', { input_changes: [NAMED, UNKNOWN] }, true],
-    ['partial coverage with no named row', { input_changes: [], input_coverage: 'partial' }, false],
+    ['partial coverage with no named row', { input_changes: [], input_coverage: 'partial' }, true],
     ['partial coverage beside a named row', { input_changes: [NAMED], input_coverage: 'partial' }, true],
-    ['unrecorded coverage', { input_changes: [], input_coverage: 'not_recorded' }, false],
-    ['an older delta with no row record', {}, false],
-    ['a malformed row record', { input_changes: [null] }, false],
+    ['unrecorded coverage', { input_changes: [], input_coverage: 'not_recorded' }, true],
+    ['an older delta with no row record', {}, true],
+    ['a malformed row record', { input_changes: [null] }, true],
   ] as const;
   const paraphrases = [
     'Nothing else was altered.', 'No other inputs moved.', 'The rest stayed the same.',
@@ -101,7 +103,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     'Unchanged were the other inputs.', 'As they were, the other inputs stayed.',
     'The inputs did not move.', 'The inputs never altered.',
   ];
-  // Explicit policy cases: a named change leads; unknown/no-change records may follow the finding.
+  // Explicit policy cases: a named change or an unknown record leads; only a complete, empty record may follow the finding.
   for (const [name, delta, recordFirst] of cases) {
     it.each([
       'Nothing changed.', 'Nothing else changed.', 'Nothing else has been changed.',
@@ -130,7 +132,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     expect(plan({ input_changes: [null] }).codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
   });
 
-  // Explicit policy cases: a named change leads; unknown/no-change records may follow the finding.
+  // Explicit policy cases: a named change or an unknown record leads; only a complete, empty record may follow the finding.
   for (const [name, delta, recordFirst] of cases) {
     it.each([
       'Olumi cannot confirm that nothing else changed.',
