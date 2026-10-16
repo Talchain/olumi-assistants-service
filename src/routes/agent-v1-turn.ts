@@ -4574,11 +4574,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `PLACEHOLDER_STRENGTH_DISCLOSURE` describes what the model NOW HOLDS, which
      * is precisely the thing we could not observe.
      */
-    /**
-     * ⭐ A FIRST ANALYSIS THAT DID NOT RUN IS SAID BY OLUMI, NEVER LEFT TO THE MODEL (Paul: "never a
-     * silent skip"). One deterministic sentence naming what is missing, or that the turn ran out of
-     * time; the control beside it (next step, or Run) is added to the chips below.
-     */
+    /** The existing first_analysis tool record reaches the interpreting AI. Its deterministic sentence remains
+     * the host fallback when no usable AI answer is returned; both paths retain the same repair controls below. */
     const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
@@ -4690,8 +4687,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // The typed identity ask owns the unconfirmed reading; no second goal-chance explanation is produced.
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
-    // BYPASS1: the owed lines the AI holds as typed facts (rescaled/ranges/resized values, `identity_ask_say`).
-    const owedHeldByAi = new Set([...valueChangeDisclosures(stateFacts),
+    // Typed tool/context facts belong to the AI's answer; the host fallback keeps every owed line.
+    const owedHeldByAi = new Set([...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []), ...valueChangeDisclosures(stateFacts),
       ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null)]);
     // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
     // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
@@ -5340,9 +5337,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
-    // BYPASS1: on the AI's reply only the value changes and the identity ask it holds as typed facts are not restated. Every
-    // other owed line (receipts, what was left out, the first analysis, open questions, the methods note, the Run lines) is
-    // server truth and stays, and so does every line when the current state is unknown (the no-present-claim rule).
+    // The AI already received the typed first_analysis, value changes and identity ask. Other factual receipts and
+    // bound Run safeguards remain owed, as does every line when current state is unknown (the no-present-claim rule).
     // An interpreting call cannot issue the figure-confirm tool. Its existing card survives, and the exact
     // confirmation question remains owed if the AI omitted it; the asked-once pass above still owns repeats.
     const identityAskStillOwed = aiRunTurn ? identityAskLineOwed(result.tool_results, narrationText) : null;

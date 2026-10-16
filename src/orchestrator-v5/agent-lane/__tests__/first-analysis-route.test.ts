@@ -125,6 +125,7 @@ const candidate = {
 let script: Array<Record<string, unknown>> = [];
 let modelBodies: Record<string, unknown>[] = [];
 let hostReplyOnly = false;
+let finalReply: string | undefined;
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${modelBodies.length}`, arguments: JSON.stringify(args) }] });
 
@@ -139,7 +140,7 @@ function installFetch() {
     if (runCall) return runCall;
     if (hostReplyOnly && script.length === 0) return new Response(JSON.stringify({ status: 'incomplete', output: [] }), { status: 200 });
     const next = body['tool_choice'] === 'none' ? undefined : script.shift();
-    return new Response(JSON.stringify(next ?? say('Here is where the model stands.')), { status: 200 });
+    return new Response(JSON.stringify(next ?? say(finalReply ?? 'Here is where the model stands.')), { status: 200 });
   }));
 }
 
@@ -415,21 +416,49 @@ describe('the Agent route runs the first analysis itself, once', () => {
   });
 
   it('RED: NOT admissible → 0 PLoT calls, one server sentence naming what is missing, and a repair chip (test 3)', async () => {
+    hostReplyOnly = true;
+    try {
+      knobs.graph = BLOCKED_GRAPH;
+      const b = await buildTurn(app);
+      expect(st(SID).inProcessRuns).toHaveLength(0);
+      expect(st(SID).injectRuns).toBe(0);
+      expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
+      const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
+      const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
+      // With no usable AI answer, the host fallback must still state every factual missing-step sentence.
+      for (const sentence of missing.split(/(?<=[.?!])\s+/)) expect(b.assistant_text, 'server-authored, whatever the model said').toContain(sentence);
+      // The gap is Olumi's to fill (Option B's level: `olumi_can_offer`, nothing owed by the user), so the repair chip is
+      // the specific one, "Suggest starting assumptions" (DL item 5, #2367), in place of the general next step.
+      const ids = b.suggested_actions.map((c) => c.id);
+      expect(ids).toContain('agent-suggest-starting-assumptions');
+      expect(ids).not.toContain('agent-suggest-what-it-needs');
+    } finally { hostReplyOnly = false; }
+  });
+
+  it('the AI receives the blocked first-analysis record and says it once; saved replay adds no second writer or Run', async () => {
     knobs.graph = BLOCKED_GRAPH;
-    const b = await buildTurn(app);
-    expect(st(SID).inProcessRuns).toHaveLength(0);
-    expect(st(SID).injectRuns).toBe(0);
-    expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
-    const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
-    const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
-    // S6 (#3237): the AI-written reply is shaped like any other, so the ask may sit in its own bullet; every sentence of the
-    // server's missing step is still said, word for word.
-    for (const sentence of missing.split(/(?<=[.?!])\s+/)) expect(b.assistant_text, 'server-authored, whatever the model said').toContain(sentence);
-    // The gap is Olumi's to fill (Option B's level: `olumi_can_offer`, nothing owed by the user), so the repair chip is
-    // the specific one, "Suggest starting assumptions" (DL item 5, #2367), in place of the general next step.
-    const ids = b.suggested_actions.map((c) => c.id);
-    expect(ids).toContain('agent-suggest-starting-assumptions');
-    expect(ids).not.toContain('agent-suggest-what-it-needs');
+    const narration = 'The model is saved, but this first analysis needs a starting setting. Which value should we use?';
+    const turnId = 'c720bb71-bff7-4aa2-8fbd-736882989874';
+    finalReply = narration;
+    try {
+      const b = await buildTurn(app, { turn_id: turnId });
+      // Actual serialized interpreter request, not just the producer's local object.
+      expect(buildOutputSeenByModel()?.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
+      expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
+      expect(b.assistant_text).toContain(narration);
+      expect(b.assistant_text.split(narration)).toHaveLength(2);
+      expect(b.assistant_text).not.toContain('The first analysis could not run yet');
+      expect(st(SID).inProcessRuns).toHaveLength(0);
+      expect(st(SID).injectRuns).toBe(0);
+      expect(rows.get(`${SID}:${turnId}`)?.assistant_message).toBe(b.assistant_text);
+      const calls = modelBodies.length;
+      const replay = await buildTurn(app, { turn_id: turnId });
+      expect(replay._agent.replayed).toBe(true);
+      expect(replay.assistant_text).toBe(b.assistant_text);
+      expect(modelBodies).toHaveLength(calls);
+      expect(st(SID).inProcessRuns).toHaveLength(0);
+      expect(st(SID).injectRuns).toBe(0);
+    } finally { finalReply = undefined; }
   });
 
   // R2 T2 (friction audit row T2) re-pins this row: "Suggest what it still needs" produced nothing approvable when only the
@@ -705,12 +734,30 @@ describe('RED: no time left in the proxy budget → skip, say so, offer Run (tes
   });
 
   it('RED: 0 PLoT calls, reason no_time, one sentence, and the Run chip', async () => {
-    const b = await buildTurn(app);
-    expect(st(SID).inProcessRuns).toHaveLength(0);
-    expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'no_time' });
-    expect(b.suggested_actions.filter((c) => c.id === RUN_CHIP_ID)).toEqual([expect.objectContaining({ action_type: 'run_analysis' })]);
-    const { firstAnalysisSentence } = await import('../first-analysis.js');
-    expect(b.assistant_text).toContain(firstAnalysisSentence({ ran: false, reason: 'no_time' })!);
+    hostReplyOnly = true;
+    try {
+      const b = await buildTurn(app);
+      expect(st(SID).inProcessRuns).toHaveLength(0);
+      expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'no_time' });
+      expect(b.suggested_actions.filter((c) => c.id === RUN_CHIP_ID)).toEqual([expect.objectContaining({ action_type: 'run_analysis' })]);
+      const { firstAnalysisSentence } = await import('../first-analysis.js');
+      expect(b.assistant_text).toContain(firstAnalysisSentence({ ran: false, reason: 'no_time' })!);
+    } finally { hostReplyOnly = false; }
+  });
+
+  it('the actual interpreter receives no_time and owns its one explanation while the Run control stays', async () => {
+    const narration = 'The model is saved. There was not enough time to run the first analysis; you can run it now.';
+    finalReply = narration;
+    try {
+      const b = await buildTurn(app);
+      expect(buildOutputSeenByModel()?.first_analysis).toMatchObject({ ran: false, reason: 'no_time' });
+      expect(b.assistant_text).toContain(narration);
+      expect(b.assistant_text.split(narration)).toHaveLength(2);
+      expect(b.assistant_text).not.toContain('Building the model used most of this turn');
+      expect(st(SID).inProcessRuns).toHaveLength(0);
+      expect(st(SID).injectRuns).toBe(0);
+      expect(b.suggested_actions.filter(c => c.id === RUN_CHIP_ID)).toEqual([expect.objectContaining({ action_type: 'run_analysis' })]);
+    } finally { finalReply = undefined; }
   });
 });
 
