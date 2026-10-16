@@ -529,6 +529,12 @@ jobs:
         run: pnpm openapi:generate
       - name: Typecheck drift ratchet (full tsc; baseline-tolerant)
         run: bash scripts/ci/typecheck-ratchet.sh
+      # Boot smoke (TL 09:50Z 16 Oct): aaf70d6a passed every test and crashed at start-up on Render (import-cycle TDZ).
+      # Inside this required job so a server that cannot load its modules never merges.
+      - name: Build (as Render does)
+        run: rm -rf dist && pnpm exec tsc -p tsconfig.build.json
+      - name: Boot smoke (built server loads every module)
+        run: bash scripts/ci/boot-smoke.sh
 
   # Architecture counts: ADVISORY (not in staging's required contexts; Paul's lean-deploy rule,
   # CLAUDE.md §7: census and ratchet guards never block). A red here is a WARNING the DL reads on
