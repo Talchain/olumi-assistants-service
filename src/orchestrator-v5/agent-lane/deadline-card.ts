@@ -25,26 +25,17 @@ export interface DeadlineTurnStart {
 export function firstAgentTurnAfterDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): boolean {
   return buildAnswersSinceDraft(start, scenarioId, brief) !== undefined;
 }
+/** The build turn's own answer: its user message is the stored brief (the typed message keeps its whitespace; the brief is trimmed). */
+const builtTheDraft = (r: SessionTurnWithContent, brief: string): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim();
 /**
  * The Agent answers since the draft, when they are at most the ONE answer to the turn that built it; otherwise undefined (closed).
  * The build turn is identified by its user message being the stored brief (the typed message keeps its whitespace, the stored brief
  * is trimmed), never by anything the answer SAYS: no reply prose decides this (DL github-6d, #2948 r6-r9).
  */
 function buildAnswersSinceDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): readonly SessionTurnWithContent[] | undefined {
-  if (!start || !start.rowId || brief.trim() === '') return undefined;
-  const rows = start.rows;
-  if (rows[0]?.id !== start.rowId) return undefined;
-  const draftTurnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
-  const at = rows.findIndex(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
-    && (r.turn_id === draftTurnId && r.request_hash.startsWith('graph_registration:')
-      || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief
-        && !r.request_hash.startsWith('agent_turn:')));
-  if (at < 0) return undefined;
-  const newer = rows.slice(0, at);
-  if (!newer.every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string')) return undefined;
-  const answers = newer.filter(r => r.request_hash.startsWith('agent_turn:'));
-  const builtTheDraft = (r: SessionTurnWithContent): boolean => typeof r.user_message === 'string' && r.user_message.trim() === brief.trim();
-  return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!)) ? answers : undefined;
+  const answers = answersSinceDraft(start, scenarioId, brief);
+  if (answers === undefined) return undefined;
+  return answers.length === 0 || (answers.length === 1 && builtTheDraft(answers[0]!, brief)) ? answers : undefined;
 }
 /** One committed pending action that carries a proposal to set the goal's deadline (the `propose_goal_deadline` card's own operation). */
 const carriesDeadlineProposal = (entry: unknown): boolean => {
@@ -71,15 +62,54 @@ export async function buildTurnAlreadyOfferedDeadline(start: DeadlineTurnStart |
     return !Array.isArray(pending) || pending.some(entry => !record(entry) || carriesDeadlineProposal(entry));
   } catch { return true; }
 }
+/** The most Agent answers since the draft the offer stays open across (each costs one committed-row read). */
+export const DEADLINE_OFFER_ANSWERS_MAX = 6;
 /**
- * Cheap pre-read gate: more than ONE Agent answer newer than the newest construction registration is never a first
- * offer (the offer was already possible, or the card was already carried/answered), so nothing is read for it.
+ * The Agent answers newer than this brief's construction row, newest first, when the turn-start identity holds: the newest row is
+ * the one the strict pending read named, the construction row is found, and every newer row is this scenario's; otherwise undefined.
  */
-export function moreThanOneAnswerSinceDraft(start: DeadlineTurnStart | undefined): boolean {
-  const rows = start?.rows ?? [];
-  const reg = rows.findIndex(r => typeof r.request_hash === 'string' && r.request_hash.startsWith('graph_registration:'));
-  return (reg < 0 ? rows : rows.slice(0, reg))
-    .filter(r => typeof r.request_hash === 'string' && r.request_hash.startsWith('agent_turn:')).length > 1;
+function answersSinceDraft(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): readonly SessionTurnWithContent[] | undefined {
+  if (!start || !start.rowId || brief.trim() === '') return undefined;
+  const rows = start.rows;
+  if (rows[0]?.id !== start.rowId) return undefined;
+  const draftTurnId = registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief));
+  const at = rows.findIndex(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string'
+    && (r.turn_id === draftTurnId && r.request_hash.startsWith('graph_registration:')
+      || r.turn_class === 'direct_answer' && r.handler_id === null && r.response_emitted === true && r.user_message === brief
+        && !r.request_hash.startsWith('agent_turn:')));
+  if (at < 0) return undefined;
+  const newer = rows.slice(0, at);
+  if (!newer.every(r => r.scenario_id === scenarioId && typeof r.request_hash === 'string')) return undefined;
+  return newer.filter(r => r.request_hash.startsWith('agent_turn:'));
+}
+/**
+ * ⭐ A HELD CARD NEVER LOSES THE DEADLINE OFFER FOR GOOD (DL-3 ruling 16 Oct, hiring s2: turn 01 offered the starting-figures card,
+ * which was still held at turn 02, so the deadline card was not issued (`pending.length > 0`), and the one-answer window then closed
+ * it permanently). The offer is open on this turn when, since the draft:
+ *  · the first Agent answer is the build turn's own (as `buildAnswersSinceDraft`), or there is none;
+ *  · every LATER answer was given while another card was held: the answer before it committed a pending action (the live holds);
+ *  · no answer committed a `set_goal_deadline` proposal (offered once, never again: a declined card is not re-offered);
+ *  · every committed row reads (UNKNOWN fails closed), and there are at most `DEADLINE_OFFER_ANSWERS_MAX` answers.
+ * Still one card at a time: a card held NOW blocks the issue itself (`deadlineCardToIssue`, `pending`). With one answer this is
+ * exactly `firstAgentTurnAfterDraft` and not `buildTurnAlreadyOfferedDeadline`, as before. Nothing the answers SAY decides it.
+ */
+export async function deadlineOfferOpen(start: DeadlineTurnStart | undefined, scenarioId: string, brief: string): Promise<boolean> {
+  const answers = answersSinceDraft(start, scenarioId, brief);
+  if (answers === undefined || answers.length > DEADLINE_OFFER_ANSWERS_MAX) return false;
+  // At most one answer: exactly the first-turn rule, as before.
+  if (answers.length <= 1) return firstAgentTurnAfterDraft(start, scenarioId, brief) && !(await buildTurnAlreadyOfferedDeadline(start, scenarioId, brief));
+  const oldestFirst = [...answers].reverse();
+  if (!builtTheDraft(oldestFirst[0]!, brief)) return false;
+  const read = start?.committedPending;
+  if (read === undefined) return false;
+  const committed: (readonly unknown[])[] = [];
+  for (const answer of oldestFirst) {
+    let pending: readonly unknown[] | null | undefined;
+    try { pending = await read(answer.turn_id); } catch { return false; }
+    if (!Array.isArray(pending) || pending.some(entry => !record(entry) || carriesDeadlineProposal(entry))) return false;
+    committed.push(pending);
+  }
+  return committed.slice(0, -1).every(pending => pending.length > 0);
 }
 const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
 const escaped = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -21,14 +21,14 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool, type ToolResult } from '../runtime/agent-tools.js';
 import { constructionOperationId } from '../runtime/build-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
-import { ProposalStore } from '../proposal.js';
+import { ProposalStore, createProposal } from '../proposal.js';
 import { proposalPendingAction } from '../durable-proposal.js';
 import { proposalRecord } from '../proposal-object/record.js';
 import { approvalChipsFor, approvalChipIdFor, DEADLINE_CHANGE_CHIP } from '../approval-chips.js';
 import { commitOptionLevelsInProcess } from '../../system-events/dispatch.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
-import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
+import { buildTurnAlreadyOfferedDeadline, deadlineCardToIssue, deadlineOfferOpen, DEADLINE_OFFER_ANSWERS_MAX, firstAgentTurnAfterDraft, type DeadlineIssueInput } from '../deadline-card.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
@@ -445,6 +445,76 @@ describe('R4 durable first-Agent-turn gate', () => {
  * and nothing after it) reached it. The ONE answer to the turn that built the draft — the Agent row whose user message
  * IS the stored brief — is not an offer; any second Agent answer still closes it.
  */
+/**
+ * ⭐ R10 A HELD CARD NEVER LOSES THE DEADLINE OFFER FOR GOOD (DL-3 ruling 16 Oct; hiring s2 aa63b55c on ca0714a8: turn 01 offered the
+ * starting-figures card, still held at turn 02, so the deadline card was not issued (`pending.length > 0`), and the one-answer window
+ * then closed it permanently). Once the other card is pressed, declined or lapses, the next turn offers the deadline card: still one
+ * card at a time, and a deadline card offered once is never offered again.
+ */
+describe('R10 a held card never loses the deadline offer for good (DL-3 16 Oct)', () => {
+  const buildAnswer = (w: ReturnType<typeof world>, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(),
+    request_hash: 'agent_turn:build', turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: d2.brief, assistant_message: 'Here is the model.', ...over });
+  const answer = (w: ReturnType<typeof world>, request_hash: string, pending: Rec[], over: Rec = {}) => ({ ...makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid,
+    turn_id: randomUUID(), request_hash, turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: 'Yes, use those.', assistant_message: 'Done.', ...over }),
+    pending_actions: pending } as SessionTurnWithContent);
+  /**
+   * Real held cards for THIS world: the deadline card the door makes, and another card built from it with a different change (the
+   * "starting figures" card): a valid content id and this scenario, so the route reads it as a live hold.
+   */
+  const heldCards = async (w: ReturnType<typeof world>): Promise<{ deadline: Rec[]; other: Rec[] }> => {
+    const offered = await w.caps.proposeGoalDeadline!(w.ctx('My deadline is ten months'), { deadline_words: 'ten months', rationale: '' }) as Rec;
+    expect(offered.ok, JSON.stringify(offered)).toBe(true);
+    const base = w.proposals.get(offered.proposal_id)!;
+    const carrier = (p: Rec) => [proposalPendingAction(p as never, { id: approvalChipIdFor(p.proposal_id), label: 'Yes', message: 'Yes, use those.' } as never,
+      { scenario_id: w.sid, emitted_at_iso: new Date().toISOString() }) as unknown as Rec];
+    const { proposal_id: _id, ...content } = base as Rec;
+    const other = createProposal({ ...content, operations: [{ op: 'set_factor_value', path: '/nodes/registered_riders_today/observed_state', value: { value: 1400 } }],
+      public_label: 'Use these starting figures' } as never);
+    return { deadline: carrier(base as Rec), other: carrier(other as Rec) };
+  };
+  const proposed = (b: Rec) => b._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline');
+  it('⭐ RED→GREEN (s2 shape): turn 01 holds another card, turn 02 presses it, turn 03 is offered the deadline card, once', async () => {
+    const w = world(), { other } = await heldCards(w); w.rows.unshift(answer(w, 'agent_turn:press', []), buildAnswer(w, { pending_actions: other }));
+    expect(w.rows.map((r) => r.request_hash), 'newest first').toEqual(['agent_turn:press', 'agent_turn:build', 'graph_registration:draft']);
+    const turn = await route(w), third = await turn();
+    card(third);
+    const fourth = await turn({ agent_session_id: third._agent.session_id });
+    expect(proposed(fourth), 'offered once, never repeated').toEqual([]);
+  });
+  it('NEGATIVE (one card at a time): while the other card is still held, no deadline card is offered beside it', async () => {
+    const w = world(), { other } = await heldCards(w);
+    w.rows.unshift(answer(w, 'agent_turn:chat', other, { user_message: 'Why that?' }), buildAnswer(w, { pending_actions: other }));
+    expect(proposed(await (await route(w))())).toEqual([]);
+  });
+  it('NEGATIVE: a deadline card already offered on a later turn (then declined) is not offered again', async () => {
+    // Newest first: the decline, the turn that offered the deadline card, the build turn that held the other card.
+    const w = world(), { other, deadline } = await heldCards(w); w.rows.unshift({ ...makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(), request_hash: 'system_event:decline',
+        turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, assistant_message: null }), pending_actions: [] } as SessionTurnWithContent,
+      answer(w, 'agent_turn:press', deadline), buildAnswer(w, { pending_actions: other }));
+    expect(proposed(await (await route(w))())).toEqual([]);
+  });
+  it('the window itself: open only across answers given while a card was held; an unreadable row, a deadline offer or too many answers close it', async () => {
+    const { other, deadline } = await heldCards(world());
+    const { sid, brief } = { sid: randomUUID(), brief: d2.brief };
+    const row = (request_hash: string, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: randomUUID(), request_hash,
+      turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: null, ...over });
+    const construction = row('graph_registration:draft', { turn_id: registrationTurnId(sid, constructionOperationId(sid, brief)), response_emitted: false });
+    const built = row('agent_turn:build', { user_message: brief }), a1 = row('agent_turn:a1'), a2 = row('agent_turn:a2');
+    const startWith = (pending: Record<string, readonly unknown[] | null | 'throw'>, rows = [a2, a1, built, construction]) => ({ rowId: rows[0]!.id, rows,
+      committedPending: async (id: string) => { const p = pending[id]; if (p === 'throw') throw new Error('unreadable'); return p ?? []; } });
+    expect(await deadlineOfferOpen(startWith({ [built.turn_id]: other, [a1.turn_id]: other, [a2.turn_id]: [] }), sid, brief), 'held, held, resolved').toBe(true);
+    expect(await deadlineOfferOpen(startWith({ [built.turn_id]: other, [a1.turn_id]: [], [a2.turn_id]: [] }), sid, brief), 'a1 had nothing held').toBe(false);
+    expect(await deadlineOfferOpen(startWith({ [built.turn_id]: other, [a1.turn_id]: deadline, [a2.turn_id]: [] }), sid, brief), 'already offered').toBe(false);
+    expect(await deadlineOfferOpen(startWith({ [built.turn_id]: other, [a1.turn_id]: 'throw', [a2.turn_id]: [] }), sid, brief), 'unreadable').toBe(false);
+    expect(await deadlineOfferOpen(startWith({ [built.turn_id]: other, [a1.turn_id]: null, [a2.turn_id]: [] }), sid, brief), 'missing row').toBe(false);
+    expect(await deadlineOfferOpen({ ...startWith({ [built.turn_id]: other }), committedPending: undefined } as never, sid, brief), 'no reader').toBe(false);
+    const notBuilt = row('agent_turn:chat', { user_message: 'What do you think?' });
+    expect(await deadlineOfferOpen(startWith({ [notBuilt.turn_id]: other, [a1.turn_id]: [] }, [a1, notBuilt, construction]), sid, brief), 'first answer is not the build answer').toBe(false);
+    const many = Array.from({ length: DEADLINE_OFFER_ANSWERS_MAX }, (_, i) => row(`agent_turn:m${i}`));
+    expect(await deadlineOfferOpen({ rowId: many[0]!.id, rows: [...many, built, construction], committedPending: async () => other }, sid, brief), 'too many answers').toBe(false);
+  });
+});
+
 describe('R6 the draft was built inside an Agent turn', () => {
   const buildAnswer = (w: ReturnType<typeof world>, over: Rec = {}) => makeSessionTurnRow({ id: randomUUID(), scenario_id: w.sid, turn_id: randomUUID(),
     request_hash: 'agent_turn:build', turn_class: 'direct_answer', handler_id: null, response_emitted: true, user_message: d2.brief, assistant_message: 'Here is the model.', ...over });
