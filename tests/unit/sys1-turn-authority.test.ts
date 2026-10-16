@@ -22,6 +22,7 @@ import { strictForTheDrafter, type CallStructuredModel } from '../../src/orchest
 import { budgetFor, callEffortFor, type CallBudget } from '../../src/orchestrator-v5/agent-lane/model-budgets.js';
 import type { CallModel } from '../../src/orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { conversationPromptAlias } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
+import { pairProviderInput } from '../../src/orchestrator-v5/agent-lane/provider-input-pairing.js';
 const sha = (v: string) => createHash('sha256').update(v).digest('hex');
 const jsonSha = (v: unknown) => sha(JSON.stringify(v));
 // Golden baselines captured before the production edit (SYS1-RUN1); evidence dumps write only when SYS1_EVIDENCE is set.
@@ -468,7 +469,7 @@ describe('S1T2 R2 actual resend receipts', () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   type Site = 'callStructured' | 'callModel';
   const contractDependencies = () => ({
-    ...policyModule, postResponses: adapter.postResponses, agentRequestIdentity, onceMoreOnTransportFailure,
+    ...policyModule, postResponses: adapter.postResponses, agentRequestIdentity, onceMoreOnTransportFailure, pairProviderInput,
     strictForTheDrafter, CONSTRUCTION_TIMEOUT_REASON: 'construction_timeout',
     isConstructionTimeout: routeContract<(err: unknown) => boolean>('isConstructionTimeout', {}),
     log: { warn: vi.fn(), error: vi.fn() }, conversationPromptAlias, callEffortFor,

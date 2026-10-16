@@ -12,6 +12,7 @@ import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
+import { pairProviderInput } from '../orchestrator-v5/agent-lane/provider-input-pairing.js';
 import { currentLevelAskForAnswerRow } from '../orchestrator-v5/agent-lane/current-level-ask-carry.js';
 import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/answer-offers-envelope.js';
 /**
@@ -1933,7 +1934,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const plainBody: Record<string, unknown> = {
         model: budget.model,
         instructions: req.instructions,
-        input: req.input,
+        input: pairProviderInput(req.input),
         tools: req.tools,
         // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
         ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
