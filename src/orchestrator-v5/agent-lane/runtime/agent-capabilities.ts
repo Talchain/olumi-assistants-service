@@ -1208,6 +1208,8 @@ interface GraphRead {
     id: string;
     kind: string;
     label: string;
+    /** Stored widening conditions, projected without deriving new claims. */
+    draft_widening?: unknown;
     description?: string;
     display_value?: unknown;
     scale_frame?: unknown;
@@ -1630,10 +1632,11 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     // ⭐ S-E GOALS (C6): the deadline the goal holds, in British words, and a goal measured as a chance said as such, so the
     // Agent never re-asks a recorded deadline and never treats the chance as a quantity.
     const deadline = goalDeadlineFromRecord(g.raw, n.id);
+    const horizon = readGoalRecord(g.raw, n.id)?.horizon?.months;
     return {
       id: n.id,
       label: n.label,
-      ...(typeof n.goal_horizon_months === 'number' ? { horizon_months: n.goal_horizon_months } : {}),
+      ...(horizon === undefined ? {} : { horizon_months: horizon }),
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
