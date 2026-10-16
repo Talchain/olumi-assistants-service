@@ -2527,7 +2527,7 @@ export function createAgentCapabilities(
      * finding wins, at most 3, verbatim). Absent or throwing ⇒ none; the canonical state is then byte-identical to before.
      */
     readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
-    /** B restated goal: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`), read only to offer or apply a revised draft. */
+    /** The scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`): draft context and exact-operation recovery. */
     readonly readCommittedTurnLedger?: (scenarioId: string) => Promise<CommittedTurnLedger>;
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
@@ -4288,7 +4288,7 @@ export function createAgentCapabilities(
      * OPERATION_ID_REUSED, SHARE_BY_DATE_SERVER_OWNED …, each "nothing written"), so it is said as not replaced, exactly as
      * the hiring-times apply above says its STALE. Only an AMBIGUOUS failure reads the model back (AIE 6122431786 §4).
      */
-    if (reg.status === 409) {
+    if (reg.status === 409 || (targeted && reg.status >= 400 && reg.status < 500)) {
       const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
       return /STALE/.test(code)
         ? notApplied('superseded', targeted ? 'The model changed just before this correction was written, so nothing was saved. Prepare an updated card.'
@@ -8164,6 +8164,15 @@ export function createAgentCapabilities(
       }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // A lost response may leave this exact prepared correction committed while its card is still pending. Recover only
+      // from its native registration operation AND the whole approved postimage; another writer's equal graph is no receipt.
+      const correction = pendingAdoption?.operations.length === 1 && pendingAdoption.operations[0]!.op === 'apply_saved_correction'
+        ? pendingAdoption.operations[0]!.value as { operation_id?: unknown; candidate?: unknown; brief_text?: unknown } : undefined;
+      const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string'
+        && correction.brief_text === before.brief_text && approvedGraphHeld(correction.candidate, before.raw)
+        && opts.readCommittedTurnLedger !== undefined
+        && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
+          registrationTurnId(ctx.scenario_id, correction.operation_id as string)), () => false);
       const recovery = proposals.partialProgressOf(args.proposal_id);
       const recoveryDeadline = proposals.get(args.proposal_id)?.operations.find(op => op.op === 'set_goal_deadline');
       if (recovery?.expected_postimage !== undefined && !(recoveryDeadline !== undefined
@@ -8181,10 +8190,15 @@ export function createAgentCapabilities(
         // E5: likewise a hiring-times card, while its own parts, carriers and deadline stand (the team time landing never stales it).
         // A deadline card, while its goal holds the date it was made against (hiring witness 35a66525: link strengths moved the
         // model). The same rule decides its lapse (`heldCardStillApplies`, `lifecycle.ts`).
-        scoped_precondition_holds: (p) => heldCardStillApplies(p, before.raw),
+        scoped_precondition_holds: (p) => (correctionSaved && p.proposal_id === pendingAdoption?.proposal_id)
+          || heldCardStillApplies(p, before.raw),
       });
       if (decision.status === 'already_applied') {
         const op = decision.proposal.operations.length === 1 ? decision.proposal.operations[0] : undefined;
+        if (op?.op === 'apply_saved_correction' && !correctionSaved) return {
+          ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
+          follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
+        };
         if (op?.op === 'set_goal_deadline') {
           const committed = opts.readCommittedTurnLedger !== undefined
             && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
@@ -8209,6 +8223,11 @@ export function createAgentCapabilities(
       }
       if (decision.status !== 'execute') {
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
+      }
+      if (correctionSaved) {
+        proposals.markApplied(decision.proposal.proposal_id, []);
+        return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: decision.proposal.proposal_id, receipts: [],
+          follow_up: 'The changes on that card are already saved in the model. Nothing was applied twice.' };
       }
 
       const scopeRevision = pendingAdoption?.operations.find(op => op.op === 'update_node')?.value as { reconciliation_key?: string } | undefined;

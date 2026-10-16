@@ -32,7 +32,7 @@ const graph = () => ({
 });
 const rename = { op: 'rename', kind: 'option', id: 'launch', label: 'Launch now', new_label: 'Launch in stages', quote: 'Rename “Launch now” to “Launch in stages”.' };
 const remove = { op: 'remove', kind: 'risk', id: 'delay', label: 'Supplier delay', quote: 'Remove the supplier delay risk.' };
-function world(opts: { conflict?: boolean; wrongReadback?: boolean } = {}) {
+function world(opts: { conflict?: boolean; wrongReadback?: boolean; refusalStatus?: number } = {}) {
   let saved = graph();
   let writes = 0;
   const proposals = new ProposalStore();
@@ -41,7 +41,7 @@ function world(opts: { conflict?: boolean; wrongReadback?: boolean } = {}) {
       graph_hash: computeAnalysisAffectingGraphHash(saved), graph_identity_hash: computeGraphIdentityHash(saved), brief_text: 'Improve service while preserving uncertainty and existing reasoning.' } };
     if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
     if (path.endsWith('/graph/register')) {
-      if (opts.conflict) return { status: 409, json: { code: 'GRAPH_STALE' } };
+      if (opts.conflict || opts.refusalStatus) return { status: opts.refusalStatus ?? 409, json: { code: opts.conflict ? 'GRAPH_STALE' : 'BAD_INPUT' } };
       expect((body as any).expected_graph_hash).toBe(computeAnalysisAffectingGraphHash(saved));
       expect((body as any).expected_graph_identity_hash).toBe(computeGraphIdentityHash(saved)?.value);
       writes += 1;
@@ -117,5 +117,10 @@ describe('one bounded targeted correction on the saved model', () => {
     const w = world(opts); const offered = await prepare(w, [rename, remove]); const pid = String(offered.proposal_id);
     expect(await w.caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: false, applied: false });
     expect(w.writes()).toBe(opts.conflict ? 0 : 1);
+  });
+  it.each([400, 403, 422])('a definite native refusal (%s) reports zero mutation and leaves the whole saved model unchanged', async refusalStatus => {
+    const w = world({ refusalStatus }); const offered = await prepare(w, [rename, remove]); const pid = String(offered.proposal_id);
+    expect(await w.caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false, applied: false });
+    expect(w.writes()).toBe(0); expect(w.graph()).toEqual(graph());
   });
 });
