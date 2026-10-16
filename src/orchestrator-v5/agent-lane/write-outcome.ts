@@ -75,6 +75,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   model_too_large: 'it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most',
   no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
   construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
+  construction_needs_redraft: 'Olumi could not prepare a draft that keeps your aim and conditions — continue with the question in this reply',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
   registration_refused: 'it could not be saved to this scenario — ask me to try again',
   option_name_ambiguous: 'the model uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved — tell me what the option changes, in different words, and ask me to build it again',
