@@ -12,12 +12,12 @@
  * - hiring: the T1H negative r3 capture's read after its approval.
  */
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { RUN_EXPLANATION_MESSAGE, recentRunExplanationConversation } from '../run-explanation.js';
-import { BRIEF_LABEL } from '../turn-context.js';
+import { BRIEF_LABEL, REASONING_CONTEXT_LABEL, MODEL_RECORD_LABEL } from '../turn-context.js';
 import { TODAY_PREFIX } from '../runtime/agent-loop.js';
 import { OLDER_WORDS_LABEL, olderWordsItem } from '../history-store.js';
 
@@ -29,6 +29,9 @@ const BRIEFS: Record<string, Json> = {
   hiring: served('hiring-t1h-negative-r3-served-read-20261014.json'),
 };
 
+const founder = JSON.parse(readFileSync(new URL('./fixtures/founder-79d4da30-typed-turns.json', import.meta.url), 'utf8')) as Json;
+// Context projection control: vary ONLY the brief; retain the same recorded Run to isolate its transport.
+const CONTEXT_BRIEFS = { capacity: BRIEFS.capacity!, founder: { ...BRIEFS.capacity!, brief_text: founder.brief_text } };
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -56,10 +59,32 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
   let app: FastifyInstance;
   let READ: Json = BRIEFS.capacity!;
   const bodies: Json[] = [];
+  let probeContinuation = false;
+  const countInstruction = (value: unknown, instruction: string): number => {
+    if (typeof value === 'string') {
+      // Tool outputs and the seeded state are JSON encoded INSIDE a text field on the actual wire.
+      const json = value.startsWith('CURRENT MODEL STATE') ? value.slice(value.indexOf('{')) : value;
+      try { const decoded: unknown = JSON.parse(json); if (decoded !== null && typeof decoded === 'object') return countInstruction(decoded, instruction); } catch { /* prose */ }
+      return value.split(instruction).length - 1;
+    }
+    return Array.isArray(value) ? value.reduce((n, v) => n + countInstruction(v, instruction), 0)
+      : value !== null && typeof value === 'object' ? Object.values(value).reduce<number>((n, v) => n + countInstruction(v, instruction), 0) : 0;
+  };
+  const priorReplies: string[] = [];
+  const contextOf = (body: Json): Json => {
+    const item = body.input.find((i: Json) => textOf(i).startsWith(REASONING_CONTEXT_LABEL));
+    expect(item, 'shared context reached the actual provider request').toBeDefined();
+    return JSON.parse(textOf(item).slice(REASONING_CONTEXT_LABEL.length).trim());
+  };
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       bodies.push(body);
+      if (probeContinuation && Array.isArray(body.tools) && body.tools.length > 0) {
+        probeContinuation = false;
+        return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'get_canonical_state',
+          call_id: 's1_second_carrier', arguments: '{}' }] }), { status: 200 });
+      }
       return runPressToolResponse(body) ?? new Response(JSON.stringify({ output: [
         { type: 'message', content: [{ type: 'output_text', text: 'In this model the result rests on the figures shown.' }] },
       ] }), { status: 200 });
@@ -78,18 +103,20 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); bodies.length = 0; });
+  beforeEach(() => { rows.clear(); bodies.length = 0; probeContinuation = false; });
 
   /** Press Run, then the Explain control it offers; return the interpret call's request (the tool-less one). */
   const explainRequest = async (read: Json, prior: readonly string[] = []): Promise<Json> => {
     READ = read;
     const scenario = read.scenario_id as string;
     const session = randomUUID();
+    priorReplies.length = 0;
     for (const message of prior) {
       const correction = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
         kind: 'message', scenario_id: scenario, agent_session_id: session, turn_id: randomUUID(), message,
       } });
       expect(correction.statusCode, correction.body).toBe(200);
+      priorReplies.push(correction.json().assistant_text);
     }
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', agent_session_id: session, scenario_id: scenario, message: 'Run analysis.',
@@ -109,6 +136,69 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     expect(interpret, 'exactly one interpreting call').toHaveLength(1);
     return interpret[0]!;
   };
+
+  it.each(Object.keys(CONTEXT_BRIEFS))('S1 %s: hop-2 SENT request has one instruction and retains every canonical fact', async (name) => {
+    READ = CONTEXT_BRIEFS[name as keyof typeof CONTEXT_BRIEFS];
+    const session = randomUUID();
+    probeContinuation = true;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: READ.scenario_id, agent_session_id: session, turn_id: randomUUID(),
+      message: 'Explain the assumptions in the model without changing it.',
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(bodies).toHaveLength(2);
+    const { RUN_FACTS_USE } = await import('../run-facts.js');
+    expect(countInstruction(bodies[1], RUN_FACTS_USE), 'seed plus tool continuation has exactly ONE instruction').toBe(1);
+    const hop2 = bodies[1]!;
+    const stateText = hop2.input.map(textOf).find((t: string) => t.startsWith('CURRENT MODEL STATE'))!;
+    const state = JSON.parse(stateText.slice(stateText.indexOf('{')));
+    const output = hop2.input.find((i: Json) => i.type === 'function_call_output' && i.call_id === 's1_second_carrier');
+    const actual = JSON.parse(output.output);
+    expect(state.run_facts).toBeDefined();
+    expect(actual.run_facts).toEqual(state.run_facts);
+    expect(actual.run_facts.use).toBeUndefined();
+    expect(hop2.input.map(textOf).join('\n')).toContain(READ.brief_text);
+    expect(contextOf(hop2).verified_user_statements).toEqual([{ speaker: 'user', source: 'typed',
+      text: 'Explain the assumptions in the model without changing it.' }]);
+    // Negative control: the checker rejects the exact former second carrier, without weakening its expectation.
+    const mutant = structuredClone(hop2);
+    const carrier = mutant.input.find((i: Json) => i.type === 'function_call_output' && i.call_id === 's1_second_carrier');
+    const doubled = JSON.parse(carrier.output);
+    doubled.run_facts.use = RUN_FACTS_USE;
+    carrier.output = JSON.stringify(doubled);
+    expect(countInstruction(mutant, RUN_FACTS_USE)).toBe(2);
+    if (process.env.S1_CAPTURE_SENT === '1') writeFileSync(`recovery-notes/s1-${name}-hop2-sent.json`, JSON.stringify(hop2, null, 2));
+  }, 60_000);
+
+  it.each(Object.keys(CONTEXT_BRIEFS))('S1 %s: Run-Explain SENT context retains ordered corrections, answered pairs and origin', async (name) => {
+    const brief = CONTEXT_BRIEFS[name as keyof typeof CONTEXT_BRIEFS];
+    const corrections = name === 'founder' ? [
+      'Revenue was £2m as of 2026-09-01. My available time is 60 hours per week.',
+      'My current funding target is £250k; £1.3m is the eventual ambition.',
+      'Correction: 55 hours per week for now; the 60-hour figure is earlier context.',
+    ] : [
+      'Revenue was £2m as of 2026-09-01. Capacity is 80 tickets per week today.',
+      'The target is at least 100 tickets per week, with no forecast date.',
+      'Correction: capacity is 85 tickets per week today; 80 is earlier context.',
+    ];
+    // More than the former 3-turn window: the earliest reply/answer pair must still be available.
+    const prior = [...corrections, 'What uncertainties remain?', 'Which assumptions need evidence?'];
+    const request = await explainRequest(brief, prior);
+    const context = contextOf(request);
+    expect(context.current_request_origin).toBe('product control');
+    expect(context.verified_user_statements).toEqual(prior.map(text => ({ speaker: 'user', source: 'typed', text })));
+    expect(context.verified_user_statements.map((s: Json) => s.text)).not.toContain('Run analysis.');
+    expect(context.verified_user_statements.map((s: Json) => s.text)).not.toContain(RUN_EXPLANATION_MESSAGE);
+    expect(context.order).toContain('Later explicit corrections supersede earlier framing');
+    const pair = context.answered_pairs.find((p: Json) => p.response.text === corrections[1]);
+    expect(pair.olumi).toEqual({ speaker: 'olumi', source: "Olumi's reply, not a user statement",
+      text: priorReplies[0] });
+    expect(pair.response).toEqual({ speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: corrections[1] });
+    const last = JSON.parse(textOf(request.input.at(-1)));
+    expect(last.model_origin).toBe(MODEL_RECORD_LABEL);
+    expect(last.canonical_state.entities.length).toBeGreaterThan(0);
+    if (process.env.S1_CAPTURE_SENT === '1') writeFileSync(`recovery-notes/s1-${name}-explain-sent.json`, JSON.stringify(request, null, 2));
+  }, 60_000);
 
   it('B1: one coaching instruction and retained corrections, with unsaved changes still distinguished', async () => {
     const corrections = [
