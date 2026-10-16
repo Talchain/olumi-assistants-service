@@ -43,11 +43,30 @@ describe('A2i9 B4 bound card basis', () => {
     const r = combined ? await w.caps.proposeStartingPoint(ctx, args) : await w.caps.proposeAssumptions(ctx, args);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const p = w.store.get(String(r.proposal_id))!;
-    const expected = `Adopt 1 starting assumption: Campaign effectiveness = 0.2 proportion\n${basisLine(basis)}`
+    const expected = (combined ? 'Review these 2 starting figures. ' : '')
+      + `Adopt 1 starting assumption: Campaign effectiveness = 0.2 proportion\n${basisLine(basis)}`
       + (combined ? '; Continue campaign sets Pro plan price to £55' : '');
     expect(p.public_label).toBe(expected);
     expect(w.chips(combined ? 'propose_starting_point' : 'propose_assumptions', r)[0].detail).toBe(expected);
     expect(p.operations[0].value).toMatchObject({ basis, authored_by: 'model_proposed', unit: 'proportion' });
+    w.unchanged();
+  });
+  it.each(['value', 'level'])('the heading and chip retain one human %s beside Olumi’s estimate', async human => {
+    const w = product();
+    const words = human === 'value' ? 'Campaign effectiveness is 0.2.' : 'Continue campaign sets Pro plan price to £55.';
+    const basis = 'An uncertain response; only if funding holds.';
+    const r = await w.caps.proposeStartingPoint({ ...ctx, user_text: words, user_turn_text: words }, {
+      assumptions: [assumption(basis, human === 'value')], option_levels: [level(human === 'level')],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const p = w.store.get(String(r.proposal_id))!;
+    expect(p.operations).toHaveLength(2);
+    expect(p.operations.filter(o => (o.value as { authored_by?: string }).authored_by === 'user_stated')).toHaveLength(1);
+    expect(p.operations[0].value).toMatchObject({ basis });
+    const card = w.chips('propose_starting_point', r)[0];
+    expect(card.label).toBe('Record 2 figures (1 Olumi estimate)');
+    expect(card.detail).toMatch(/^Review these 2 figures \(1 Olumi estimate\)\./);
+    expect(card.detail).toBe(p.public_label);
     w.unchanged();
   });
   it('each item carries its own full basis on the same card', async () => {

@@ -325,7 +325,7 @@ import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -7751,7 +7751,6 @@ export function createAgentCapabilities(
         });
       }
       const operations = [...halves[0].operations, ...halves[1].operations];
-      const figureCount = operations.filter(op => op.op === 'set_factor_value' || op.op === 'set_option_intervention').length;
       const compound = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -7759,7 +7758,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: STARTING_POINT_BASIS },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Review these ${figureCount} starting figures. ${halves[0].public_label}; ${halves[1].public_label}`,
+        public_label: `${figureApprovalWords(operations).heading} ${halves[0].public_label}; ${halves[1].public_label}`,
       });
       replaceEarlierStartingPoints(ctx);
       proposals.put(compound);

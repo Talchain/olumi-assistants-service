@@ -147,7 +147,8 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
     expect(out.ok).toBe(false);
     expect(out.mutated).toBe(false);
-    expect(out.refusal).toBe('not_applied');
+    expect(out.refusal).toBe('http 422');
+    expect(out.outcome).toBe('level_refused:internal_trial:team_size');
     expect(out.parts).toEqual([
       { part: 'links', ok: false, recorded_count: 0, requested_count: 1 },
       { part: 'option_levels', ok: false, recorded_count: 0, requested_count: 1 },

@@ -656,6 +656,15 @@ function readingShownFor(tool: string, source: ApprovalLabelSource | undefined):
  */
 export const APPROVAL_LABEL_MAX = 40;
 const FIGURE_OPS: ReadonlySet<string> = new Set(['set_factor_value', 'set_option_intervention']);
+/** One authorship/count rule for a bundle's approval label and review heading. */
+export function figureApprovalWords(operations: StructuredProposal['operations']): { label: string; heading: string } {
+  const figures = operations.filter(o => FIGURE_OPS.has(o.op));
+  const yours = figures.filter(o => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated').length;
+  const olumi = figures.length - yours;
+  const words = yours === 0 ? `${figures.length} starting figures`
+    : `${figures.length} figures (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
+  return { label: yours === 0 ? `Use these ${words}` : `Record ${words}`, heading: `Review these ${words}.` };
+}
 const CURRENCY_UNIT = /^(?:gbp|usd|eur|£|\$|€)$/i;
 const MIN_ENTITY_CHARS = 6;
 
@@ -734,10 +743,7 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
     // A figure the user WROTE is recorded as theirs, a revision or a first value alike (DL ruling, X8): never a starting
     // figure or assumption. All theirs: recorded as theirs; some: named with how many are Olumi's (as a mixed level batch
     // is, above); none: Olumi's starting figures.
-    const yours = ops.filter((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated').length;
-    const olumi = ops.length - yours;
-    return usersOwn ? ownFallback : yours === 0 ? `Use these ${ops.length} starting figures`
-      : `Record ${ops.length} figures (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
+    return usersOwn ? ownFallback : figureApprovalWords(ops).label;
   }
   const op = ops[0]!;
   const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown };

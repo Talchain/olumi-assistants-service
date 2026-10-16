@@ -173,6 +173,37 @@ describe('the dead end this closes — two proposals, one approval', () => {
 });
 
 describe('propose_starting_point', () => {
+  it('names the refused middle value rather than the last, retaining the complete bundle and writing nothing', async () => {
+    const p = fakeProduct({ base: [...BASE,
+      { id: 'capacity_support', kind: 'factor', label: 'Capacity support', category: 'observable', scale_frame: 100 },
+      { id: 'morale', kind: 'factor', label: 'Morale', category: 'observable', scale_frame: 100 },
+    ] });
+    const store = new ProposalStore();
+    let calls = 0;
+    const caps = createAgentCapabilities(p.d, store, undefined, 'full', undefined, { commitOptionLevels: async input => {
+      calls++;
+      expect(input.values?.map(v => v.factor_id)).toEqual(['capacity_support', 'coordination_load', 'morale']);
+      expect(input.levels).toHaveLength(6);
+      return { status: 'refused', reason: 'value_scope_mismatch', value: { factor_id: 'coordination_load' } };
+    } });
+    const r = await caps.proposeStartingPoint(ctx, { assumptions: [...ASSUMPTIONS,
+      { user_stated: false, factor_label: 'Capacity support', value: 10, unit: 'index points (0-100)', basis: 'uncertain support' },
+      { user_stated: false, factor_label: 'Morale', value: 70, unit: 'index points (0-100)', basis: 'uncertain morale' },
+    ], option_levels: [...LEVELS, ...LEVELS.flatMap(level => [
+      { option_label: level.option_label, factor_label: 'Capacity support', value: 10, basis: 'support held unchanged' },
+      { option_label: level.option_label, factor_label: 'Morale', value: 70, basis: 'morale held unchanged' },
+    ])] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const id = String(r.proposal_id), approved = JSON.stringify(store.get(id)!.operations);
+    expect(store.get(id)!.operations).toHaveLength(9);
+    const out = await caps.authoriseChange({ ...ctx, typed_approval_of: id }, { proposal_id: id });
+    expect(out).toMatchObject({ ok: false, mutated: false, applied: false, refusal: 'value_scope_mismatch', outcome: 'value_refused:coordination_load' });
+    expect(out.detail).toContain('the value for Coordination load was refused');
+    expect(calls).toBe(1);
+    expect(p.posted).toEqual([]);
+    expect(JSON.stringify(store.get(id)!.operations)).toBe(approved);
+    expect(store.outstanding(SCENARIO, USER).map(q => q.proposal_id)).toEqual([id]);
+  });
   it('leaves exactly ONE proposal awaiting approval, carrying both values and levels', async () => {
     const p = fakeProduct();
     const store = new ProposalStore();
