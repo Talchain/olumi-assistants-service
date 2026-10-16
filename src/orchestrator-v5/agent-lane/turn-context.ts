@@ -65,13 +65,12 @@ export function turnContextItems(args: {
   if (brief !== '' && !args.conversation.some((item) => textOf(item).includes(brief))) {
     items.push({ role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] });
   }
-  // Chat already forwards its whole window. Explain keeps its existing three-turn window; pairs supply only dropped replies.
+  // Chat already forwards its whole window. Explain keeps its three-turn window, including ordered reasoning/tool chains.
   // The store's re-made items (the older words; the dropped replies beside Olumi's questions) are carried whole, as chat carries them.
   const older = args.conversation.filter(isOlderWordsItem);
   const forwardedConversation = args.request === undefined ? args.conversation
     : [...older,
-      ...trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), 3)]
-      .filter(item => ['user', 'assistant'].includes(String(record(item)?.role)));
+      ...trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), 3)];
   const forwarded = new Set(forwardedConversation);
   let preceding: { item: unknown; text: string } | undefined;
   const answeredPairs: unknown[] = [];
