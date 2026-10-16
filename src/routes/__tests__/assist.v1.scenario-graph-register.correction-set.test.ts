@@ -18,6 +18,7 @@ vi.mock('../../orchestrator/user-identity.js', async original => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
+import { tryStructureOriginAnswer } from '../../cee/context-integrity/structure-origin-answer.js';
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -68,7 +69,7 @@ function restoreCard(proposal: StructuredProposal, result: Rec, ctx: AgentToolCo
   return store;
 }
 
-async function world(row: (typeof cases)[number], options: { race?: boolean; loseAcknowledgement?: boolean; hideLedger?: boolean } = {}) {
+async function world(row: { readonly graph: Rec; readonly brief: string; readonly message: string }, options: { race?: boolean; loseAcknowledgement?: boolean; hideLedger?: boolean } = {}) {
   let graph = structuredClone(row.graph) as Rec;
   const original = structuredClone(graph);
   const writes: Rec[] = [];
@@ -121,6 +122,25 @@ describe.each(cases)('native $name correction retains the saved model', row => {
     expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
     expect(w.sent[0]!.expected_graph_identity_hash).toBe(computeGraphIdentityHash(w.original as never)?.value);
     expect(approvedGraphHeld(w.sent[0]!.graph, w.graph())).toBe(true);
+    // Whole readback above must also contain EVERY requested change, not merely equal a candidate that omitted one.
+    for (const requested of row.ops) {
+      if (requested.op === 'rename') {
+        const changed = w.graph().nodes.find((n: Rec) => n.id === requested.id);
+        expect(changed.label).toBe(requested.new_label);
+        expect(changed.label_authored).toBe(false);
+        expect(changed.provenance).toBe(w.original.nodes.find((n: Rec) => n.id === requested.id).provenance);
+        if (changed.provenance === 'ai_inferred') expect(tryStructureOriginAnswer(`Why is ${requested.new_label} in my model?`, w.graph())).toContain('was my suggestion, not something you wrote.');
+      } else if (requested.op === 'remove') {
+        expect(w.graph().nodes.some((n: Rec) => n.id === requested.id)).toBe(false);
+        expect(w.graph().edges.some((e: Rec) => e.from === requested.id || e.to === requested.id)).toBe(false);
+      } else if (requested.op === 'set_zero') {
+        expect(w.graph().edges.some((e: Rec) => e.from === requested.id && e.to === requested.to_id)).toBe(false);
+      } else {
+        const statements = w.graph().nodes.find((n: Rec) => n.id === requested.id).user_statements;
+        expect(statements).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'lead',
+          statements: expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: requested.quote, reading: 'olumi', low: 2, high: 2 })]) })]));
+      }
+    }
     const options = (g: Rec) => g.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id).sort();
     expect(options(w.graph())).toEqual(options(w.original));
     const stripRef = ({ ref: _ref, ...n }: Rec): Rec => n;
@@ -166,4 +186,12 @@ describe.each(cases)('native $name correction retains the saved model', row => {
     }
     expect(w.writes).toHaveLength(1); expect(w.sent).toHaveLength(1);
   });
+});
+
+it.each(cases.slice(0, 2))('rename-only source cannot smuggle a removal on the $name native correction card', async row => {
+  const message = row.ops[0].quote;
+  const w = await world({ ...row, message });
+  const out = await dispatchTool('propose_change', JSON.stringify({ ops: [row.ops[0], { ...row.ops[1], quote: message }] }), w.ctx, w.caps());
+  expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'not_asked' });
+  expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
 });

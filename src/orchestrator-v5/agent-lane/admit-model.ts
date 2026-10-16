@@ -825,7 +825,7 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
-}, verifiedCurrentLevel?: boolean, userMaterialUnverified = false): Record<string, unknown> {
+}, verifiedCurrentLevel?: boolean, userMaterialUnverified = false, verifiedHumanSource = false): Record<string, unknown> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
   // eng-hiring (`2d0df14`) left salary spend and both headcounts unauthored: "I supplied N values" skipped them and
@@ -846,7 +846,10 @@ export function framedObservedState(f: {
     // trusted affine conversion of a verified receipt) proved this exact quantity. Everything else keeps its staging bytes.
     ...(verifiedCurrentLevel ? { source: 'brief_extraction', extractionType: 'explicit' }
       : !userMaterialUnverified && f.unit === TODAY_UNIT && raw === TODAY_LEVEL ? {}
-        : { source: 'cee_inference', ...(userMaterialUnverified || f.provenance === 'ai_proposed' || f.provenance === 'inferred' ? { extractionType: 'inferred' } : {}) }),
+        // A verified literal source and a verified current-level role are separate. Keep the human source even when
+        // the existing unverified-role marker must remain; this does not confirm the value as today's measured level.
+        : { source: verifiedHumanSource ? 'brief_extraction' : 'cee_inference',
+          ...(userMaterialUnverified || f.provenance === 'ai_proposed' || f.provenance === 'inferred' ? { extractionType: 'inferred' } : {}) }),
     ...(userMaterialUnverified ? { user_material_unverified: true as const } : {}),
   };
   const cap = f.plausible_max;
@@ -4159,7 +4162,7 @@ function admitOnce(
         // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
         ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
           ? { observed_state: withStatedLevelRange(framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
-            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f) }
+            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f)), quotesBrief(f)), f) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
