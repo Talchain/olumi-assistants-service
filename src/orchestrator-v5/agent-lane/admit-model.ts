@@ -35,7 +35,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
-import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
+import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly, targetTypedAsALevel } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, InterventionV3T } from '../../schemas/cee-v3.js';
@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figuresWritten, goalTargetSentences } from './construction-source-map.js';
+import { figuresWritten, goalTargetStatements } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -2865,12 +2865,19 @@ export function admitStatedGoalLevel(args: {
   readonly heldComparator?: unknown;
   /** The target's unit: a `<=` level is admitted beside a held ceiling only where it may be a level (AIQ 5872082179). */
   readonly targetUnit?: unknown;
+  /**
+   * ⭐ G3 (RT-10, Science ruling (1)): the target is TYPED as a level (`targetTypedAsALevel`, the wire's own rule for a held
+   * ceiling in any unit, percent included), so its `%` is no longer a possible change. Absent ⇒ the unit rule alone.
+   */
+  readonly targetFrame?: unknown;
   /** S4 2b: the level is negative and `cap` is its own magnitude (F = |level|); the floor reading admits it at −1. */
   readonly signedLevel?: true;
 }): StatedGoalLevelVerdict {
   const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap, heldComparator } = args;
   const heldCeiling = heldComparatorSense(heldComparator) === 'minimise';
-  if (operator === '<=' && heldComparator === '<=' && heldCeiling && ceilingTargetUnitMayBeALevel(args.targetUnit)) {
+  const mayBeALevel = ceilingTargetUnitMayBeALevel(args.targetUnit)
+    || (args.targetFrame !== undefined && targetTypedAsALevel(args.targetFrame, args.targetUnit));
+  if (operator === '<=' && heldComparator === '<=' && heldCeiling && mayBeALevel) {
     const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap, ceiling: true });
     if (admission.admitted) return { admitted: true, normalised: admission.normalised };
     if (admission.reason === 'baseline_off_cap_scale') return { admitted: false, reason: offCapScaleSentence(metric, baselineRaw, raw, cap) };
@@ -3989,8 +3996,8 @@ function admitOnce(
         // the user's sentences as the goal's target with it. A figure the user wrote for something else (a budget, a headcount) is
         // never auto-bound: no target is written, and it is said, so the goal-target card can offer it as Olumi's reading. A figure
         // the user never wrote ("break even" read as 0) is Olumi's reading, as before. A recorded pre-SYSTEM-2 draft is as before.
-        const boundSentences = typeof brief === 'string' && typeof raw === 'number' ? goalTargetSentences(model, brief, raw) : undefined;
-        const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundSentences?.length === 0
+        const boundStatements = typeof brief === 'string' && typeof raw === 'number' ? goalTargetStatements(model, brief, raw) : undefined;
+        const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundStatements?.length === 0
           && figuresWritten(brief ?? '').some((f) => f.low === Math.abs(raw));
         if (unbound) {
           loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].goal_target_unbound`,
@@ -4117,9 +4124,17 @@ function admitOnce(
           );
         } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
           // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
+          // ⭐ G3 (TL 10:49Z): the ceiling the goal will HOLD (`holdStatedGoalAttributes`, the same AI reading: its verified target
+          // statement reads the user's sentence as an upper bound) is the comparator this level is read against, so a stated
+          // level beside "4% or lower" is admitted on the ceiling rule instead of refused for a direction the goal lacks.
+          const ceilingRead = (model.goal.operator === '<=' || model.goal.operator === '<')
+            && boundStatements?.some((st) => st.form === 'upper_bound') === true;
           const verdict = admitStatedGoalLevel({
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
             targetUnit: model.goal.unit, ...(signedScale !== undefined && resolved.provenance === 'level_frame' ? { signedLevel: true as const } : {}),
+            ...(ceilingRead ? { heldComparator: model.goal.operator } : {}),
+            // The AI typed this target as a level, as the run will score it (`goal_threshold_frame`).
+            ...(ceilingRead && model.goal.frame === 'level' && model.goal.quantity_frame !== 'change' ? { targetFrame: 'level' } : {}),
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).

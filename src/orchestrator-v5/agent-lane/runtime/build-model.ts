@@ -87,7 +87,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { draftStatements, goalTargetSentences, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { draftStatements, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -2447,7 +2447,7 @@ export async function buildModelFromBrief(
       .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
     const goalValue = candidate.goal?.value;
     let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, goalTargetQuotes,
-      typeof goalValue === 'number' ? goalTargetSentences(candidate, brief, goalValue) : undefined);
+      typeof goalValue === 'number' ? goalTargetStatements(candidate, brief, goalValue) : undefined);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {

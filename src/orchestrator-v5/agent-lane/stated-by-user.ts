@@ -342,7 +342,8 @@ export interface HeldGoalAttributes {
  *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
  *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
  *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k"). EXCEPT a CEILING on a level
- *    target (RT-10): held only where the brief writes that figure as a ceiling (`ceilingTheUserWroteFor`).
+ *    target (RT-10): held only where the AI's verified target statement reads the user's sentence as an upper bound (G3),
+ *    or, for a draft without statements, where the brief writes that figure as a ceiling (`ceilingTheUserWroteFor`).
  *  · horizon → `goal_horizon_months`: the drafter's month count, held only when MG's `attestHorizon` finds the brief
  *    writing that deadline ("within 12 months", "over the next year"; never "12 subscribers"). Its verdict is returned
  *    as `horizon` whatever it is, so an unresolved deadline's own words ("by Q3") reach the caller, not the node.
@@ -353,9 +354,13 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
   brief: string,
   governing?: readonly string[],
-  /** The user's sentences the AI bound as this goal's target with its figure (`goalTargetSentences`); absent only for a recorded pre-SYSTEM-2 draft. */
-  targetSentences?: readonly string[],
+  /**
+   * The user's sentences the AI bound as this goal's target with its figure, each with the AI's reading of it
+   * (`goalTargetStatements`); absent only for a recorded pre-SYSTEM-2 draft (and direct calls), which keep their bytes.
+   */
+  targetStatements?: readonly { readonly quote: string; readonly form: string }[],
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
+  const targetSentences = targetStatements?.map((s) => s.quote);
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
   const goals = nodes.filter((n) => n.kind === 'goal');
   // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
@@ -389,16 +394,19 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const typed = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   // ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1)): a held CEILING on a LEVEL target is the run's sense in any
-  // unit (`goal-direction.ts`), so it is held only where the brief WRITES that figure as a ceiling
-  // (`ceilingTheUserWroteFor`): the drafter must type some comparator, and one it chose is not the user's. A change
+  // unit (`goal-direction.ts`), so the drafter's comparator alone never holds it: one it chose is not the user's. A change
   // target keeps its verb's sign as before; a floor is held exactly as before.
+  // ⭐ G3 (TL 10:49Z; unseen 1663fe34): the direction comes from the AI's own reading of the user's target sentence. With
+  // the AI's verified target statements, a ceiling is held where one reads that sentence as an upper bound ("I want to
+  // bring it down to 4% or lower…"); the host's ceiling word reader dropped exactly that one, and the user's stated level
+  // was then refused. A draft without statements keeps the word reader, byte for byte.
   const ceilingOnALevel = !isChange && (typed === '<' || typed === '<=');
   const figure = Math.round((written.figure as number) * 1e9) / 1e9;
-  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(figure, written.unit, brief,
-    quantityScope(nodes, (node as { readonly label?: unknown }).label),
-    typeof goal.baseline_value === 'number' && same(goal.baseline_value, figure))
-    ? undefined
-    : typed;
+  const ceilingStated = (): boolean => (targetStatements !== undefined
+    ? targetStatements.some((st) => st.form === 'upper_bound')
+    : ceilingTheUserWroteFor(figure, written.unit, brief, quantityScope(nodes, (node as { readonly label?: unknown }).label),
+      typeof goal.baseline_value === 'number' && same(goal.baseline_value, figure)));
+  const operator = ceilingOnALevel && !ceilingStated() ? undefined : typed;
   const direction = operator !== undefined;
   // ⭐ SCIENCE (AIE MA3; DL 16:43Z 14 Oct): a goal read over the window from LAUNCH holds its period in that reading
   // (`goal_target_basis`). A month count stamped here reads as months FROM NOW (Oct → Jan), a different window from the

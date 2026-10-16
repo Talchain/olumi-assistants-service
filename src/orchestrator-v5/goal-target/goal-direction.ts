@@ -196,10 +196,16 @@ const CHANGE_UNIT = /(?:%|\bper\s?cent(?:age)?(?:\s+points?)?|\bpp\b|\bpoints?\b
 function heldTargetIsATypedLevel(graph: unknown, goalNodeId: unknown): boolean {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
   const node = readNodes(graph).find((n) => n.id === goalNodeId);
-  if (node?.goal_threshold_frame !== 'level') return false;
-  const raw = node.goal_threshold_raw;
-  const unit = node.goal_threshold_unit;
-  return typeof raw === 'number' && Number.isFinite(raw) && !(typeof unit === 'string' && CHANGE_UNIT.test(unit));
+  const raw = node?.goal_threshold_raw;
+  return typeof raw === 'number' && Number.isFinite(raw) && targetTypedAsALevel(node?.goal_threshold_frame, node?.goal_threshold_unit);
+}
+
+/**
+ * The ONE typed-level rule (RT-10, Science ruling (1)), for the wire above and for admission of a stated level beside a
+ * ceiling (`admitStatedGoalLevel`, G3): a target typed `'level'` in a unit that does not itself name a change.
+ */
+export function targetTypedAsALevel(frame: unknown, unit: unknown): boolean {
+  return frame === 'level' && !(typeof unit === 'string' && CHANGE_UNIT.test(unit));
 }
 
 /**

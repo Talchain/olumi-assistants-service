@@ -168,6 +168,14 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
  * `undefined` only for a draft recorded before SYSTEM 2 (no `statements`; the sent schema requires them), which keeps its bytes.
  */
 export function goalTargetSentences(model: unknown, brief: string, figure: number): readonly string[] | undefined {
+  return goalTargetStatements(model, brief, figure)?.map((s) => s.quote);
+}
+
+/**
+ * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
+ * a ceiling's direction from that reading, never from a host word reader.
+ */
+export function goalTargetStatements(model: unknown, brief: string, figure: number): readonly UserStatement[] | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown; goal?: { metric?: unknown } } : {};
   if (!Array.isArray(m.statements)) return undefined;
   const metric = typeof m.goal?.metric === 'string' ? m.goal.metric : '';
@@ -181,8 +189,7 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
   // Olumi's reading for one click wherever they compete, so the user's figure is never lost and never mis-authored.
   const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
     && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
-  return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote))
-    .map((s) => s.quote);
+  return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote));
 }
 
 /**
