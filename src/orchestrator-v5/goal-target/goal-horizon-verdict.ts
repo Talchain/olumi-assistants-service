@@ -188,7 +188,7 @@ export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, sto
 
 /** Pure projection of the supplied Run record. No graph/horizon lookup or second scope decision. */
 export function withRecordedRunQuestion<R>(result: R, question: RunQuestion | undefined): R {
-  if (question?.scope.status === 'supported_static') return withRunQuestionScope(result, question);
+  if (question?.scope.can_show_goal_chance === true) return withRunQuestionScope(result, question);
   return hasRecordedLevelCalculation(result) ? withChanceReadbackWithheld(result, undefined, true) : result;
 }
 

@@ -11,6 +11,8 @@ export function recordedStaticLevelEvidence(result: unknown): {
   readonly goal_id: string; readonly label?: string; readonly target: number; readonly unit: string; readonly comparator: string;
   readonly encoded_target: number; readonly baseline: number; readonly encoded_baseline: number;
   readonly option_ids: readonly string[];
+  /** The licence owner's existing scope declaration; a level threshold alone is not a static declaration. */
+  readonly static_scope_declared: boolean;
 } | undefined {
   const r = rec(result), snapshot = rec(r?.input_snapshot), goal = rec(snapshot?.goal);
   // sent_threshold is the existing request-evidence carrier, not the licence's prose/form/target decision.
@@ -48,7 +50,8 @@ export function recordedStaticLevelEvidence(result: unknown): {
     || !options.some(o => o?.is_baseline === true && o.option_id === sent.status_quo_option_id)) return undefined;
   return { goal_id: goal.node_id, ...(typeof goal.label === 'string' ? { label: goal.label } : {}),
     target: goal.target_raw, unit: goal.unit, comparator: goal.operator as string,
-    encoded_target: sent.value, baseline: base.raw, encoded_baseline: sent.baseline, option_ids: ids };
+    encoded_target: sent.value, baseline: base.raw, encoded_baseline: sent.baseline, option_ids: ids,
+    static_scope_declared: Array.isArray(carriers[0]!.notes) && carriers[0]!.notes.includes(STATIC_MODEL_SCOPE_NOTE) };
 }
 
 /** Classify a recorded level calculation for fail-closed readers; this never verifies or licenses it. */

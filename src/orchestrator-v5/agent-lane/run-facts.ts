@@ -137,7 +137,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
   const question = analysisResult == null && state.runEvidence === undefined ? undefined
     : deriveRunQuestion({ runEvidence: state.runEvidence, storedResult: analysisResult });
-  const unverifiedLevel = hasRecordedLevelCalculation(analysisResult) && question?.scope.status !== 'supported_static';
+  const unverifiedLevel = hasRecordedLevelCalculation(analysisResult) && question?.scope.can_show_goal_chance !== true;
   analysisResult = withRecordedRunQuestion(analysisResult, question);
   const licence = current ? goalChanceLicenceForAgent(analysisResult) : undefined;
   const chances = goalChanceFactsForAgent(analysisResult, graph, current);

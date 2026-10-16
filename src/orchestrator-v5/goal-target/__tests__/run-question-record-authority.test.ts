@@ -7,6 +7,7 @@ import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
+import { buildAnalysisResultBlock } from '../../compose.js';
 
 const stored = () => ({ ...structuredClone(captured.result), run_id: captured.evidence.run_id,
   input_snapshot: structuredClone(captured.evidence.input_snapshot), graph_hash_at_run: 'saved-capture' });
@@ -14,10 +15,12 @@ const evidence = () => ({ runId: captured.evidence.run_id, inputSnapshot: struct
   occurrence: captured.evidence.occurrence });
 
 describe('S3 single evaluated-input authority — independent capacity capture247ae5b4', () => {
-  it('the exact saved input record supports80 /100 /level /≥ /tickets per week without licence prose', () => {
+  it('the saved80 /100 /level /≥ /tickets per week inputs survive without inventing an unrecorded scope', () => {
     const run = stored();
     const q = deriveRunQuestion({ storedResult: run, runEvidence: evidence() });
-    expect(q.scope).toMatchObject({ status: 'supported_static', can_show_goal_chance: true, note: STATIC_MODEL_SCOPE_NOTE });
+    expect(q.scope).toMatchObject({ status: 'outside_static_scope', can_show_goal_chance: true });
+    expect(q.scope.note).toBeUndefined();
+    expect(q.omitted).toContainEqual({ field: 'calculation_scope_at_evaluated_revision', reason: 'not_recorded' });
     expect(q.calculated).toMatchObject({ quantity: { node_id: 'weekly_support_capacity' }, target: 100, baseline: 80,
       encoded_target: 0.2, encoded_baseline: 0.16, frame: 'level', comparator: '>=', unit: 'tickets per week' });
     expect(q.evaluated_scenario_revision).toBe(2);
@@ -39,8 +42,8 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     expect(facts.chances.goal_chance_display?.add_one_specialist).toBe('about 40%');
     const cell = view.options.find(row => row.option_id === 'add_one_specialist')!.cell;
     expect(cell.kind).toBe('figure');
-    expect('face' in cell && cell.face).toContain(STATIC_MODEL_SCOPE_NOTE);
-    expect('face' in cell && cell.face).toContain('100 tickets per week');
+    expect('face' in cell && cell.face).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+    expect(view.question?.calculated).toMatchObject({ target: 100, baseline: 80, unit: 'tickets per week' });
     expect(JSON.stringify(run)).toBe(before);
   });
 
@@ -126,12 +129,12 @@ describe('S3 single evaluated-input authority — independent capacity capture24
       assistant_text: outcome.assistant_text + ' This includes every risk.' })).not.toContain('includes every risk');
   });
 
-  it('one over-period level-threshold Run without its date check stays outside static scope on stored readback', async () => {
+  it.each([false, true])('over-period level threshold, period-end reading=%s: existing licence owns the chance, never the static label', async supported => {
     const graph = structuredClone(captured.graph);
     const goal = graph.nodes.find(n => n.kind === 'goal')!;
     Object.assign(goal, { goal_horizon_months: 3, goal_target_basis: { quantity_frame: 'level', target_frame: 'level', target_raw: 100,
       reference: 'launch', period_months: 3, period_kind: 'over_period', effect_unit: 'tickets over the first three months',
-      effects_at_period_end: false, source: 'olumi_reading' } });
+      effects_at_period_end: supported, source: 'olumi_reading' } });
     const snapshot = await loadScenarioSnapshotForRunAnalysis('bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', 's3-period', {
       loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: captured.brief, revision: 2 })),
       readMostRecentPendingActions: vi.fn(async () => []),
@@ -148,8 +151,35 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     ]) }) });
     const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
     if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected stored over-period Run');
-    const q = deriveRunQuestion({ storedResult: fact.result });
+    const selectedEvidence = { runId: fact.result.run_id, inputSnapshot: fact.result.input_snapshot, occurrence: { evaluated_scenario_revision: 2 } };
+    const q = deriveRunQuestion({ storedResult: fact.result, runEvidence: selectedEvidence });
+    expect(q.evaluated_scenario_revision).toBe(2);
     expect(q.scope.status).not.toBe('supported_static');
+    expect(q.scope.note).toBeUndefined();
+    expect(q.scope.capability).toBeUndefined();
+    expect(q.run_id).toBe(fact.result.run_id);
+    const recorded = JSON.parse(JSON.stringify(fact.result));
+    expect(deriveRunQuestion({ storedResult: recorded }).scope).toEqual(q.scope);
+    if (supported) {
+      expect(recorded.enrichment.inference_warnings.find((w: { code: string }) => w.code === 'GOAL_CHANCE_LICENSED')?.pct_by_option.add_one_specialist).toBe(40);
+      expect(recorded.enrichment.option_comparison).toEqual(expect.arrayContaining([
+        expect.objectContaining({ option_id: 'add_one_specialist', probability_of_goal: 0.3951 }),
+      ]));
+      expect(q.scope.can_show_goal_chance).toBe(true);
+      expect(fact.result.summary).toContain('about 40%');
+      expect(fact.result.summary).toContain('over the first three months after launch');
+      expect(fact.result.summary).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+      const facts = runFactsOf(recorded, graph, true, { runEvidence: selectedEvidence });
+      expect(facts.question?.scope).toEqual(q.scope);
+      expect(facts.chances.goal_chance_display?.add_one_specialist).toBe('about 40%');
+      expect(facts.must_say).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+      const view = projectCanonicalAnalysisView({ graph, runFact: { ...fact, result: recorded },
+        analysisState: { run_state: { kind: 'complete_current' } } as never, currentResult: buildAnalysisResultBlock(fact) });
+      expect(view.question?.scope).toEqual(q.scope);
+      expect(view.options.find(row => row.option_id === 'add_one_specialist')?.cell.kind).toBe('figure');
+      expect(JSON.stringify(view)).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+      return;
+    }
     expect(q.scope.can_show_goal_chance).toBe(false);
     expect(fact.result.summary).not.toContain(STATIC_MODEL_SCOPE_NOTE);
     expect(runFactsOf(fact.result, graph, true).chances.goal_chance_display).toBeUndefined();
@@ -157,7 +187,7 @@ describe('S3 single evaluated-input authority — independent capacity capture24
       code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', detail: expect.objectContaining({ reason: 'HORIZON_NOT_TESTED' }),
     }));
     const view = projectCanonicalAnalysisView({ graph, runFact: fact,
-      analysisState: { run_state: { kind: 'complete_current' } } as never, currentResult: fact.result as never });
+      analysisState: { run_state: { kind: 'complete_current' } } as never, currentResult: buildAnalysisResultBlock(fact) });
     expect(view.question?.scope.can_show_goal_chance).toBe(false);
     expect(view.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(false);
   });

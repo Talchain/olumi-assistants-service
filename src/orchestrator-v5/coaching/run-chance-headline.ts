@@ -5,7 +5,7 @@ import { goalChanceScreenLinesForAgent } from '../agent-lane/goal-chance-screen-
 
 export function runChanceHeadline(result: unknown, graph: unknown): string | null {
   const question = deriveRunQuestion({ storedResult: result });
-  if (hasRecordedLevelCalculation(result) && question.scope.status !== 'supported_static') return null;
+  if (hasRecordedLevelCalculation(result) && !question.scope.can_show_goal_chance) return null;
   const lines = goalChanceScreenLinesForAgent(withRunQuestionScope(result, question), graph, true);
   return lines.length === 0 ? null : lines.map(line => line.chance).join(' ');
 }

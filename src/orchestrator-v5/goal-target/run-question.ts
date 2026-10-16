@@ -122,7 +122,7 @@ export function deriveRunQuestion(input: {
   const exact = requestBound ? dispatchedQuestionOf(input.dispatchedRequest) : null;
   const evaluatedInputs: RunQuestionSide | null = exact ?? (recorded === undefined ? null : {
     ...recordedAsked!, option_ids: recorded.option_ids, baseline: recorded.baseline, encoded_baseline: recorded.encoded_baseline,
-    encoded_target: recorded.encoded_target, horizon: undefined, scope: 'static' as const,
+    encoded_target: recorded.encoded_target, horizon: undefined,
   }) ?? (goal === undefined || goalId === undefined ? null : {
     quantity: { node_id: goalId, ...(questionText(goal.label) === undefined ? {} : { label: String(goal.label) }) },
     target: questionNumber(goal.target_raw), unit: questionText(goal.unit), frame: questionText(goal.frame), comparator: questionText(goal.operator),
@@ -131,12 +131,16 @@ export function deriveRunQuestion(input: {
   // Retained evaluated inputs attest the calculation; they cannot recover an original horizon/reference never retained.
   if (saved === undefined) missing.push('asked_horizon_and_reference_at_evaluated_revision', 'asked_options_at_evaluated_revision');
   if (exact === null && recorded === undefined) missing.push('dispatched_goal_threshold', 'dispatched_goal_baseline');
+  if (exact === null && recorded !== undefined && !recorded.static_scope_declared) missing.push('calculation_scope_at_evaluated_revision');
   const scope: RunQuestionScope = identityMismatch || runId === null
     ? { status: 'unverified' as const, can_show_goal_chance: false, reasons: [identityMismatch ? 'selected_run_identity_mismatch' : 'selected_run_identity_not_recorded'] }
     : goalId !== undefined && exact !== null ? { ...assessRunQuestionScope(saved ?? (input.dispatchedRequest as Rec).graph, input.dispatchedRequest, goalId),
       dispatched_input_digest: questionText(snapshot?.sent_digest) }
-    : recorded !== undefined ? { status: 'supported_static' as const, can_show_goal_chance: true, reasons: [], note: STATIC_MODEL_SCOPE_NOTE, capability: STATIC_LEVEL_CAPABILITY,
-      dispatched_input_digest: questionText(snapshot?.sent_digest) }
+    : recorded !== undefined ? recorded.static_scope_declared
+      ? { status: 'supported_static' as const, can_show_goal_chance: true, reasons: [], note: STATIC_MODEL_SCOPE_NOTE, capability: STATIC_LEVEL_CAPABILITY,
+        dispatched_input_digest: questionText(snapshot?.sent_digest) }
+      : { status: 'outside_static_scope' as const, can_show_goal_chance: true, reasons: ['static_scope_not_declared_by_licence'],
+        dispatched_input_digest: questionText(snapshot?.sent_digest) }
     : { status: 'unverified' as const, can_show_goal_chance: false, reasons: ['evaluated_question_not_fully_recorded'] };
   const calculated = evaluatedInputs === null || scope.status !== 'supported_static' ? evaluatedInputs
     : { ...evaluatedInputs, scope: 'static' as const };
