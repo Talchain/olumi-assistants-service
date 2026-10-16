@@ -650,13 +650,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'op option_timing: when ONE option\u2019s effect would be fully in place, as the user said it ("live about two months after we '
       + 'commit; full effect in about 4 months"): kind option, quote their complete statement, reading_words their own words that state '
       + 'the month(s). It goes through the same card as propose_statement\u2019s lead. '
-      + 'op revise_model: only an explicit request to rebuild or a different governing question, offered alone. A factual correction uses the existing targeted value or statement tool; it never requires a new draft. Quote the request from THIS '
-      + 'message (kind and label: the goal). Olumi prepares ONE revised model from their brief and everything they have said since, on '
-      + 'ONE card; only their press replaces the saved model. Never for one part\u2019s figure, and never ask them to repeat what they said. '
+      + 'For quantities and statements, use their existing targeted tools. Preserve every requested goal, condition and source. '
+      + 'Where a part cannot be changed with the supported operations, explain that specific limitation and continue useful qualitative reasoning; never claim it was saved. '
       + 'Never a part the user did not ask to change, and never a name or figure of your own.',
     parameters: obj({
       ops: { type: 'array', minItems: 1, maxItems: 6, items: obj({
-        op: { type: 'string', enum: ['remove', 'set_zero', 'rename', 'option_timing', 'revise_model'] },
+        op: { type: 'string', enum: ['remove', 'set_zero', 'rename', 'option_timing'] },
         kind: { type: 'string', enum: ['goal', 'option', 'factor', 'risk', 'link'] },
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
         to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
@@ -1075,8 +1074,6 @@ export interface AgentCapabilities {
     /** op set_zero: the card shows that "zero" is read as removing the direct link (AIE 6188873084). */
     zero?: boolean;
   }): Promise<ToolResult>;
-  /** Optional: propose_change's revise_model op (demo): ONE revised-draft card from the user's correction to the model as a whole. */
-  proposeRevision?(ctx: AgentToolContext, args: { quote: string }): Promise<ToolResult>;
   /** Several existing correction adapters, prepared on one saved graph and approved as one candidate. */
   proposeChangeSet?(ctx: AgentToolContext, args: { ops: readonly unknown[] }): Promise<ToolResult>;
   /** Optional: propose_change's rename op (S5): the user's own new name for ONE option, factor or risk. */
@@ -1274,15 +1271,11 @@ async function dispatchToolUnbounded(
           statements: [{ quote: op.quote, ...(op.reading_words !== undefined ? { reading_words: op.reading_words } : {}),
             ...(op.answering !== undefined ? { answering: op.answering } : {}) }] } as never);
       }
-      // ⭐ DEMO op revise_model: the existing revised-draft prepare/approve/save path (`proposeRevision`).
-      if (op?.op === 'revise_model' && caps.proposeRevision !== undefined) {
-        return caps.proposeRevision(ctx, { quote: op.quote } as never);
-      }
       if (op?.op === 'rename' && caps.proposeRename !== undefined) {
         return caps.proposeRename(ctx, { kind: op.kind, label: op.label, id: op.id, new_label: op.new_label, quote: op.quote } as never);
       }
       return { ok: false, mutated: false, refusal: 'unsupported_change',
-        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link; rename; option_timing for an option; revise_model). Nothing was prepared.' };
+        detail: 'No whole-model replacement or unsupported edit was prepared. Retain the complete correction and its context. Use the existing targeted value, statement, goal, deadline or structural operations for supported parts; explain any remaining limitation and continue useful qualitative reasoning without claiming a save or asking for retained facts again.' };
     }
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined

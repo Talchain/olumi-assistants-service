@@ -222,3 +222,34 @@ describe.each(['goal_direction', 'goal_horizon'] as const)('a correction cannot 
     expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
   });
 });
+
+
+describe('retired full-redraft correction has no writer', () => {
+  it.each([false, true])('unsupported revise_model (mixed: %s) offers no card or write', async mixed => {
+    const row = cases[0], w = await world(row);
+    const legacy = { op: 'revise_model', kind: 'goal', label: 'Goal', quote: row.message };
+    const ops = mixed ? [row.ops[0], legacy] : [legacy];
+    const result = await dispatchTool('propose_change', JSON.stringify({ ops }), w.ctx, w.caps());
+    expect(result).toMatchObject({ ok: false, mutated: false });
+    expect(result).not.toHaveProperty('proposal_id');
+    expect(w.proposals.size()).toBe(0); expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    expect(w.graph()).toEqual(w.original);
+  });
+
+  it('a cold historic replace_draft card has no execution path, including its own press', async () => {
+    const row = cases[0], w = await world(row);
+    const offered = await dispatchTool('propose_change', JSON.stringify({ ops: row.ops }), w.ctx, w.caps());
+    const prepared = w.proposals.get(String(offered.proposal_id))!;
+    const operations = structuredClone(prepared.operations);
+    operations[0]!.op = 'replace_draft';
+    const historic = createProposal({ scenario_id: prepared.scenario_id, user_id: prepared.user_id,
+      base_graph_identity_hash: prepared.base_graph_identity_hash, operations, provenance: prepared.provenance,
+      validation: prepared.validation, public_label: prepared.public_label });
+    const cold = restoreCard(historic, { ...offered, proposal_id: historic.proposal_id }, w.ctx);
+    const typed = await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: 'Yes.' }, { proposal_id: historic.proposal_id });
+    expect(typed.ok).toBe(false);
+    const pressed = await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: historic.proposal_id }, { proposal_id: historic.proposal_id });
+    expect(pressed).toMatchObject({ ok: false, applied: false, mutated: false, refusal: 'retired_correction' });
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+  });
+});
