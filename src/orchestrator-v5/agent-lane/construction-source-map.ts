@@ -20,6 +20,8 @@ import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardina
 import { STATEMENT_FORMS, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
+import { authorshipOf } from '../../cee/provenance/provenance-of.js';
+import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -185,6 +187,36 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
  * Which subject and role the figure has stays the AI's reading.
  */
 export type FigureSource = 'user' | 'unverified' | 'unclaimed';
+/** Qualitative introduction uses the SAME verified source map, not the drafter's provenance flag. */
+export function subjectSource(model: unknown, brief: string | undefined, subject: DraftedSubject): {
+  readonly author: ReturnType<typeof authorshipOf>;
+  readonly statements: readonly { readonly field: StatementField; readonly statement: UserStatement }[];
+  readonly claimed: readonly GivenStatement[];
+} {
+  const entries = draftStatements(model);
+  const unknown = (claimed: readonly GivenStatement[] = []) => ({ author: authorshipOf({ words: { verified: false, unknown: true } }), statements: [], claimed });
+  if (!Array.isArray(entries) || typeof brief !== 'string') return unknown();
+  const keyOf = (s: DraftedSubject) => subjectKey(s, 'level');
+  const claims = entries.filter((entry): entry is Record<string, unknown> => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const sub = subjectOf((entry as Record<string, unknown>).subject);
+    return sub !== undefined && keyOf(sub) === keyOf(subject);
+  });
+  const claimed = claims.map(givenOf);
+  if (claims.length === 0) return { author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed };
+  const map = sourceMapOf(entries, brief);
+  const ownKeys = new Set(STATEMENT_FIELDS.map(field => subjectKey(subject, field)));
+  const statements = STATEMENT_FIELDS.flatMap(field => (map.verified.get(subjectKey(subject, field)) ?? []).map(statement => ({ field, statement })));
+  if (statements.some(({ statement: st }) => !quoteIsNotTheUsersClaim(st.source, st.quote)
+    && ![...map.verified].some(([key, other]) => !ownKeys.has(key) && other.some(o => o.quote === st.quote)))) {
+    return { author: authorshipOf({ words: { verified: true, unknown: false } }), statements, claimed };
+  }
+  // Known human words with an unverified field/figure remain human material, never an Olumi estimate.
+  return claims.some(c => typeof c.quote === 'string' && wholeStatementIn(brief, c.quote)
+    && !quoteIsNotTheUsersClaim(brief, c.quote))
+    ? { author: authorshipOf({ nodeTag: 'unverified_brief' }), statements, claimed } : unknown(claimed);
+}
+
 export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
   if (!Array.isArray(m.statements)) return undefined;
@@ -311,6 +343,10 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     const drafted = subjectOf(r['subject']);
     const field = STATEMENT_FIELDS.find((f) => f === r['field']);
     if (drafted === undefined || field === undefined) continue;
+    if (drafted.kind === 'risk') {
+      const source = subjectSource({ statements: entries }, brief, drafted);
+      if (source.author.origin !== 'human' || source.author.role === 'unverified') continue;
+    }
     const verified = [...sourceMapOf([entry], brief).verified.values()].flat();
     if (verified.length === 0) continue;
     const ref = drafted.kind === 'option' && drafted.factor_label !== undefined

@@ -1,7 +1,6 @@
 export { reencodedSiblingDiff } from './level-batch-frame.js';
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
-import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 import { readProductIdentityCarrier as readCarrier } from '../admission/identity-evaluations.js';
 /**
@@ -83,7 +82,8 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -4320,22 +4320,34 @@ function admitOnce(
     // ⛔ STRUCTURE IS NEVER REMOVED TO SATISFY A FIGURE RULE (DL 5916217417): a risk kept out of the calculation keeps its
     // node, its words and its link; the run guard hands PLoT the model without it, and says so. One `node` for both.
     ...model.risks.map((r) => {
+      const source = subjectSource(model, brief, { kind: 'risk', label: r.label });
+      const author = source.author;
+      if (author.origin === 'unknown' || author.role === 'unverified') loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE, layer: 'cee', field_path: `nodes[${slugId(r.label)}].provenance`,
+        before: { risk: r, claimed_statements: source.claimed }, after: author.origin === 'human' ? 'unverified_human' : 'unknown',
+        reason: 'The risk’s claimed source could not be verified for this field. Its complete claimed words are retained here; it is not an Olumi estimate.',
+        severity: 'info',
+      });
+      const holdsNow = author.origin === 'human' && author.role !== 'unverified'
+        ? source.statements.find(s => s.field === 'holds_now' && s.statement.form === 'holds_now' && s.statement.negated !== true)?.statement : undefined;
       const node = {
         ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
-        ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
-        ...(r.draft_widening !== undefined ? { draft_widening: r.draft_widening, proposed_by: 'olumi' as const,
+        provenance: author.origin === 'human' ? author.role === 'unverified' ? 'unverified_brief' as const : 'from_brief' as const
+          : author.origin === 'ai' ? 'ai_inferred' as const : undefined,
+        ...(author.origin === 'ai' && r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
+        ...(author.origin === 'ai' && r.draft_widening !== undefined ? { draft_widening: r.draft_widening, proposed_by: 'olumi' as const,
           analysis_participation: 'retained_excluded' as const } : {}),
-        // ⭐ S2 holds now, from the brief (DL 14 Oct): kept only when it is a WHOLE sentence of the brief (T2A5's one check); any
-        // other words are dropped, so the risk keeps today's ask. Not a level: only the user's press on its card records it.
-        ...(typeof r.already_true_evidence?.quote === 'string' && typeof brief === 'string' && wholeStatementIn(brief, r.already_true_evidence.quote)
-          ? { already_true_quote: r.already_true_evidence.quote.trim() } : {}),
+        // Only the source owner's bound statement can carry today's condition; the draft's legacy receipt grants nothing.
+        ...(holdsNow !== undefined ? { already_true_quote: holdsNow.quote } : {}),
       };
-      return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
+      return { label: r.label, kind: 'risk' as const, provenance: author.origin === 'ai' ? 'ai_proposed'
+        : author.origin === 'human' && author.role !== 'unverified' ? 'explicit' : 'unverified', node };
     }),
     ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance, ...framedByRange(o) })),
     ...(widened.proposed_options ?? []).map((o) => ({ label: o.label, kind: 'option' as const, provenance: 'ai_proposed' })),
     ...(widened.proposed_factors ?? []).map((f) => ({ label: f.label, kind: 'factor' as const, provenance: 'ai_proposed' })),
-    ...(widened.proposed_risks ?? []).map((r) => ({ label: r.label, kind: 'risk' as const, provenance: 'ai_proposed' })),
+    ...(widened.proposed_risks ?? []).map((r) => ({ label: r.label, kind: 'risk' as const, provenance: 'ai_proposed',
+      node: { provenance: 'ai_inferred' as const } })),
     ...(widened.proposed_outcomes ?? []).map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: 'ai_proposed' })),
   ];
 
@@ -4391,7 +4403,7 @@ function admitOnce(
     const id = ids.get(e.label)!;
     if (seen.has(id)) continue;
     seen.add(id);
-    inference_classes[id] = inferenceClassFor(e.provenance);
+    if (e.kind !== 'risk' || e.provenance !== 'unverified') inference_classes[id] = inferenceClassFor(e.provenance);
     // A factor with NO baseline value gets no observed_state at all — an absent
     // value is the honest record; a zero would be a measurement. (An ESTIMATED
     // value is kept, stamped as Olumi's: `estimatedObservedState`.)
@@ -4415,8 +4427,8 @@ function admitOnce(
       kind: e.kind,
       label,
       ...(label !== shown ? { description: shown } : {}),
-      provenance: isUnverifiedUserMaterial(e.node?.observed_state)
-        ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance),
+      ...(e.kind === 'risk' ? {} : { provenance: isUnverifiedUserMaterial(e.node?.observed_state)
+        ? nodeProvenanceDisplay(undefined, e.node?.observed_state) : displayProvenanceFor(e.provenance) }),
       ...(e.node ?? {}),
     });
   }
@@ -5961,8 +5973,9 @@ function admitOnce(
     ? levers.nodes
     : levers.nodes.map((n) => (carriers.has(n.id) ? { ...atZero(n), nonlinear_identity: carriers.get(n.id)! } : atZero(n)));
 
+  const retainedRisks = retainUnsizedOlumiRisks({ nodes: admittedNodes, edges: finalEdges, goal_constraints: constraintResult.constraints });
   return {
-    nodes: admittedNodes,
+    nodes: retainedRisks.nodes,
     inference_classes,
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
