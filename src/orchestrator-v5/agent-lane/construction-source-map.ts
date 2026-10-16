@@ -263,7 +263,11 @@ export function linkEffectStatedRange(model: unknown, brief: string, from: strin
   const low = Math.min(Math.abs(st.low!), Math.abs(st.high!));
   const high = Math.max(Math.abs(st.low!), Math.abs(st.high!));
   if (!(low < high) || Math.sign(st.low!) !== Math.sign(st.high!)) return null;
-  return { low, high, text: rangeTextAsWritten(st, low, high), end: 'whole', reported: st.quote, ...(st.unit !== undefined && st.unit !== '' ? { unit: st.unit } : {}) };
+  // "between 4 and 7 …" is said as written: the joined reader's text starts at the low figure.
+  const text = rangeTextAsWritten(st, low, high);
+  const at = st.quote.indexOf(text);
+  const between = at >= 0 && /\bbetween\s+$/iu.test(st.quote.slice(0, at)) ? 'between ' : '';
+  return { low, high, text: `${between}${text}`, end: 'whole', reported: st.quote, ...(st.unit !== undefined && st.unit !== '' ? { unit: st.unit } : {}) };
 }
 /** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
 export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high' | 'whole'; readonly reported: string; readonly unit?: string };
