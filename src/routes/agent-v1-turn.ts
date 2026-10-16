@@ -3433,19 +3433,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (editsForThisCard !== undefined && approvedProposal.startsWith('prop_')) {
         const current = await readBackState(dispatch, scenarioId);
         const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
-        if (!record || !original) editsFailure = 'not_held';
-        // Bound to the model the card was SHOWN on (the current one, or its own base) and still applying NOW by the one rule
-        // the turn showed it by (#3031 buddy: a card shown after an unrelated approval was refused here by its base hash).
-        else if (record.revision !== editsForThisCard.revision || record.digest !== editsForThisCard.digest
-          || (editsForThisCard.graph_hash !== current.graphHash && editsForThisCard.graph_hash !== record.base_graph_hash)
-          || originalCarrier === undefined || !heldRecordAppliesAt(originalCarrier, record, current.graph, current.graphHash)) editsFailure = 'stale';
-        else if (record.approve_action.id !== (body['chip'] as { id?: unknown })?.id || record.approve_action.message !== message) editsFailure = 'refused';
-        else {
-          if (editsForThisCard.fields.length > 0) {
-            edited = amendAgentProposal(record, original, editsForThisCard.fields);
-            if (!edited.ok) editsFailure = 'refused';
-            else if (edited.proposal.proposal_id !== approvedProposal) { proposals.put(edited.proposal); proposals.discard(approvedProposal); }
-            else edited = undefined;
+        const settled = proposals.get(approvedProposal);
+        // A plain re-press has no edits to bind. Its applied deadline goes through the capability's own
+        // committed-operation + native readback proof; a memory flag alone never earns an already-saved receipt.
+        const recoveringAppliedDeadline = editsForThisCard.fields.length === 0 && proposals.isApplied(approvedProposal)
+          && settled?.operations.length === 1 && settled.operations[0]?.op === 'set_goal_deadline';
+        if (!recoveringAppliedDeadline) {
+          if (!record || !original) editsFailure = 'not_held';
+          // Bound to the model the card was SHOWN on (the current one, or its own base) and still applying NOW by the one rule
+          // the turn showed it by (#3031 buddy: a card shown after an unrelated approval was refused here by its base hash).
+          else if (record.revision !== editsForThisCard.revision || record.digest !== editsForThisCard.digest
+            || (editsForThisCard.graph_hash !== current.graphHash && editsForThisCard.graph_hash !== record.base_graph_hash)
+            || originalCarrier === undefined || !heldRecordAppliesAt(originalCarrier, record, current.graph, current.graphHash)) editsFailure = 'stale';
+          else if (record.approve_action.id !== (body['chip'] as { id?: unknown })?.id || record.approve_action.message !== message) editsFailure = 'refused';
+          else {
+            if (editsForThisCard.fields.length > 0) {
+              edited = amendAgentProposal(record, original, editsForThisCard.fields);
+              if (!edited.ok) editsFailure = 'refused';
+              else if (edited.proposal.proposal_id !== approvedProposal) { proposals.put(edited.proposal); proposals.discard(approvedProposal); }
+              else edited = undefined;
+            }
           }
         }
       }

@@ -9,13 +9,14 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/run4-deadline-turn14-plain-approval.json', import.meta.url), 'utf8')) as Rec;
 const SCENARIO = FX.scenario_id as string;
 
 type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null;
-  llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
+  llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string; writes_graph: boolean };
 const rows = new Map<string, Row>();
 const order: string[] = [];
 const graphOf = new Map<string, unknown>();
@@ -43,6 +44,7 @@ const store = {
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
+  readCommittedTurnLedger: vi.fn(async (sid: string) => ({ write_turn_ids: [...rows.values()].filter(r => r.scenario_id === sid && r.writes_graph).map(r => r.turn_id), user_message_turn_ids: [], first_user_message: null, complete: true })),
   append: vi.fn(async (w: Rec) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
@@ -50,7 +52,7 @@ const store = {
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
-        handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[], created_at: new Date().toISOString() });
+        handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[], created_at: new Date().toISOString(), writes_graph: w.graph !== undefined && w.graph !== null });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) {
         graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
@@ -141,19 +143,27 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
    * the stored link, the raw ones and the pace beside them, and the same link on the engine's input. Turn 14's "Yes" to the
    * same card (served then as "Those values could not be applied") writes nothing a second time.
    */
-  it('turn 7 → the deadline saves and reads back (the limited link reaches the engine input); turn 14, the same card again → no second write', async () => {
+  it('after_write interruption → exact deadline commit/readback → same card says already saved, no second write; foreign or unproved outcomes stay unknown', async () => {
     const { extraShareMoments } = await import('../../goal-target/event-by-date-share.js');
     const { toOutboundGraph } = await import('../../goal-target/outbound-graph.js');
     const { withShareByDateFrame } = await import('../../goal-target/share-by-date-run.js');
     const { withoutStatedLevelRanges } = await import('../../routing/add-factor-transaction.js');
     const raw = extraShareMoments(0.35, 6, 2, 4);
-    const r7 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX.request_turn7 });
-    expect(r7.statusCode, r7.body.slice(0, 400)).toBe(200);
-    const b7 = r7.json() as Rec;
-    expect(b7._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true,
-      proposal_id: 'prop_b9ca206131b318f52cb6df4d85f9b4e9' }));
-    expect(b7.assistant_text).not.toContain('Those values could not be applied');
-    expect(b7.assistant_text).not.toContain('nothing on the model changed');
+    const was = { env: process.env.OLUMI_ENV, seam: process.env.CEE_RECOVERY_FAULT_SEAM };
+    process.env.OLUMI_ENV = 'staging'; process.env.CEE_RECOVERY_FAULT_SEAM = 'on';
+    const r7 = await (async () => { try {
+      return await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { ...FX.request_turn7,
+        _recovery_fault: { scenario_id: SCENARIO, point: 'after_write' } } });
+    } finally {
+      if (was.env === undefined) delete process.env.OLUMI_ENV; else process.env.OLUMI_ENV = was.env;
+      if (was.seam === undefined) delete process.env.CEE_RECOVERY_FAULT_SEAM; else process.env.CEE_RECOVERY_FAULT_SEAM = was.seam;
+    } })();
+    expect(r7.statusCode, r7.body.slice(0, 400)).toBe(503);
+    expect(r7.json()).toEqual({ error: 'RECOVERY_FAULT_INJECTED', point: 'after_write' });
+    expect(rows.has(`${SCENARIO}:${FX.request_turn7.turn_id}`), 'receipt/answer was not written').toBe(false);
+    const { authorisationTurnId } = await import('../runtime/agent-capabilities.js');
+    expect(rows.get(`${SCENARIO}:${authorisationTurnId('prop_b9ca206131b318f52cb6df4d85f9b4e9#deadline')}`)?.writes_graph,
+      'the exact approved operation committed before the interruption').toBe(true);
     expect(graphWrites.get(SCENARIO)).toBe(1);
     const held = graphOf.get(SCENARIO) as Rec;
     expect((held.nodes as Rec[]).find((n) => n.id === 'event_goal')!.goal_horizon).toMatchObject({ deadline: '2027-04-12' });
@@ -174,11 +184,34 @@ describe('E-tail (a): run 4 deadline turns 7 and 14, the plain "Yes" the writer 
     const r14 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: FX.request });
     expect(r14.statusCode, r14.body.slice(0, 400)).toBe(200);
     const b14 = r14.json() as Rec;
-    expect(b14._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }));
-    // The existing words for a card already used (pinned so any change shows; their accuracy is raised with the DL).
-    expect(b14.assistant_text).toBe('Nothing changed. That card is out of date: the change it shows has been replaced. Use the newest card for it.');
+    expect(b14._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: false }));
+    // Its exact write is committed and the saved deadline still holds: report that outcome, never superseded.
+    expect(b14.assistant_text).toBe("That change was already saved; nothing was written again. The analysis can't run yet. How long would next feature launch take with the team you have now?");
     expect(b14.assistant_text).not.toContain('Those values could not be applied');
     expect(graphWrites.get(SCENARIO), 'no second write').toBe(1);
     expect(providerCalls).toBe(0);
+    // An applied-memory flag is not proof of the current saved field, nor of this operation's durable commit.
+    const unknown = async () => {
+      const before = JSON.stringify(graphOf.get(SCENARIO));
+      const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { ...FX.request,
+        turn_id: randomUUID() } });
+      const body = res.json() as Rec;
+      expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
+        mutated: false, refusal: 'not_confirmed' }));
+      expect(body.assistant_text).toContain('The save could not be confirmed.');
+      expect(body.assistant_text).not.toContain('already saved');
+      expect(body.assistant_text).not.toContain('could not read the model back');
+      expect(JSON.stringify(graphOf.get(SCENARIO))).toBe(before);
+      expect(graphWrites.get(SCENARIO)).toBe(1);
+    };
+    const moved = structuredClone(held);
+    moved.nodes.find((n: Rec) => n.id === 'event_goal').goal_horizon = { deadline: '2027-05-12' };
+    graphOf.set(SCENARIO, moved);
+    await unknown();
+    graphOf.set(SCENARIO, structuredClone(held));
+    store.readCommittedTurnLedger.mockResolvedValueOnce({ write_turn_ids: [], user_message_turn_ids: [], first_user_message: null, complete: true });
+    await unknown();
+    expect(providerCalls).toBe(0);
+
   }, 120_000);
 });

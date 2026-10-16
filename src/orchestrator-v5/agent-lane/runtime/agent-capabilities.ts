@@ -314,7 +314,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
+import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
@@ -8101,6 +8101,16 @@ export function createAgentCapabilities(
         scoped_precondition_holds: (p) => heldCardStillApplies(p, before.raw),
       });
       if (decision.status === 'already_applied') {
+        const op = decision.proposal.operations.length === 1 ? decision.proposal.operations[0] : undefined;
+        if (op?.op === 'set_goal_deadline') {
+          const committed = opts.readCommittedTurnLedger !== undefined
+            && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
+              authorisationTurnId(`${decision.proposal.proposal_id}#deadline`)), () => false);
+          if (!committed || !appliedDeadlineHolds(op, before.raw)) return {
+            ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
+            detail: LINK_SET_SAVE_NOT_CONFIRMED, follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
+          };
+        }
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
         // the retry is bound to the same proposal by identity, and the ORIGINAL
         // receipts, so the Agent can say which version it already became.

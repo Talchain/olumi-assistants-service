@@ -28,6 +28,7 @@ import { goalDeadlineFromRecord } from '../../goal-target/goal-kind.js';
 import { goalReadingProjectionOf } from '../../goal-target/goal-reading-write.js';
 import { riskOccurrenceCardHolds, SET_RISK_OCCURRENCE_OP } from '../risk-occurrence.js';
 import { asMemberOp } from '../../statement-door/door.js';
+import { applyGoalHorizonEdit } from '../../goal-target/goal-horizon-write.js';
 import { cohortForecastCardHolds, statementRecordCardHolds, SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP } from '../../goal-target/cohort-forecast-write.js';
 
 type Rec = Record<string, unknown>;
@@ -49,6 +50,21 @@ export function deadlineSubjectHolds(op: StructuredProposal['operations'][number
   if (!isRec(v?.expected_goal)) return undefined;
   if (typeof v.deadline !== 'string' || (v.expected_deadline !== null && typeof v.expected_deadline !== 'string')) return false;
   return deadlineGoalStillBound(graph, op.path, v.expected_deadline, v.expected_goal);
+}
+
+/** Readback only. An applied deadline needs its own committed operation as well as this native unchanged verdict. */
+export function appliedDeadlineHolds(op: StructuredProposal['operations'][number], graph: unknown): boolean {
+  const v = op.value;
+  if (op.op !== 'set_goal_deadline' || !isRec(v) || typeof v.deadline !== 'string'
+    || (v.expected_deadline !== null && typeof v.expected_deadline !== 'string')
+    || (v.reference !== undefined && typeof v.reference !== 'string')
+    || (v.stated_months !== undefined && typeof v.stated_months !== 'number')
+    || (v.answers_question !== undefined && typeof v.answers_question !== 'string')) return false;
+  return applyGoalHorizonEdit(graph, { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline,
+    ...(v.reference === undefined ? {} : { reference_date: v.reference }),
+    ...(v.stated_months === undefined ? {} : { stated_months: v.stated_months }),
+    ...(v.answers_question === undefined ? {} : { answers_question: v.answers_question }),
+  }).kind === 'unchanged';
 }
 
 /**
