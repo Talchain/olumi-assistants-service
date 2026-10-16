@@ -248,6 +248,13 @@ export interface LinkStatement {
    * target's unit. Said with the range wherever the size is said, and carried on the edge (`natural_effect.stated_range`).
    */
   readonly stated_range?: StatedRangeEnd;
+  /**
+   * ⭐ ITEM 3 (AIE 16 Oct range contract; TL 16:48Z, AIE-amended): the range the USER stated for this link when nobody gave
+   * it a single size ("…could add somewhere between 5 and 9 occupancy points"). It sizes nothing (a bare range gives no
+   * mean, spread or tails), so the link keeps Olumi's placeholder; but the user HAS said something, so no "Nobody has
+   * said" question is asked of it (the caller discloses the placeholder against the range instead).
+   */
+  readonly source_range?: { readonly low: number; readonly high: number; readonly text: string };
 }
 
 /**
@@ -632,6 +639,8 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
       return `${who} ${statement}, which runs the other way from the link's own direction, so it was not used: ${standIn} stands in `
         + `for it. Which way, and by how much, does "${source.label}" change "${target.label}"?`;
     }
+    // The user stated a range for this link: it is never "Nobody has said", and the range is not asked again (AIE 16 Oct).
+    if (link.source_range !== undefined) return undefined;
     return `${HOW_MUCH(source, target)} Nobody has said, so Olumi uses ${standIn} until you do.`;
   })();
   const said = {

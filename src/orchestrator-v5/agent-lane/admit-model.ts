@@ -58,7 +58,7 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 export { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, statementWords, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, type FigureSource } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -3773,6 +3773,26 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
   return { ...model, nodes, loss: [...model.loss, ...loss] };
 }
 
+/**
+ * ⭐ ITEM 3 (AIE 16 Oct range contract, in its own words): the one disclosure for a link whose effect the USER stated as a
+ * range while nobody gave it a size. The user's whole attributed sentence is recorded on the link (construction's statement
+ * record); the model holds Olumi's provisional size, which that range does not supply. Said once (`not_represented`), never
+ * asked: the range is not requested again, and no figure is chosen from it. Always "is not taken from" it, never "conflicts
+ * with": ⛔ BUDDY-A #3312 B1, a statement records no source-change basis ("adding 10 support staff … between 40 and 55 points"
+ * against Olumi's 5 per 1 staff = 50 per 10, inside it), so no comparison between the two is proven. Pure.
+ */
+function statedRangeUnsizedEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
+  const ne = sized.natural_effect;
+  const held = ne === undefined ? undefined
+    : statementWords(ne.amount, ne.per_source_change, source, target, resolveMagnitudeFrame(source), resolveMagnitudeFrame(target));
+  const said = range.reported.trim();
+  const reason = `The recorded source for "${source.label}" → "${target.label}" is: "${said}"${/[.!?]$/u.test(said) ? "" : "."} `
+    + `The model currently holds Olumi's provisional ${held === undefined ? 'value' : `size (${held})`} for this effect, `
+    + `which is not taken from the stated "${range.text}". I cannot justify that value from this source.`;
+  return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_unsized`,
+    before: { low: range.low, high: range.high, text: range.text }, after: ne?.amount ?? null, reason, severity: 'warn' } as RepairEntry;
+}
+
 function admitOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions,
@@ -5038,6 +5058,10 @@ function admitOnce(
         severity: 'info',
       } as RepairEntry);
     }
+    // ⭐ ITEM 3 (AIE 16 Oct range contract): a link nobody sized whose effect the USER stated as a range keeps Olumi's
+    // placeholder (a bare range gives no mean, spread or tails), said once against that range, never asked again.
+    const sourceRange = !user_stated && typeof l.effect_amount !== 'number' && typeof brief === 'string'
+      ? linkEffectStatedRange(model, brief, source.label, target.label) ?? undefined : undefined;
     const statement = {
       // A corrected estimate sign cannot prove the drafter's original definition.
       definitional: l.definitional === true && !signed.resolved,
@@ -5046,11 +5070,15 @@ function admitOnce(
       effect_per_source_change: signed.per,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
+      ...(sourceRange !== undefined ? { source_range: sourceRange } : {}),
     };
     // F5: on a goal framed only to normalise, the frame is seen by the user's size and by a definition that CHECKS
     // (`definitionalLink`); every other link into it is sized exactly as before, on no frame.
     const unframed = l.to === normalisingFrameGoalId ? { ...target, scale_frame: undefined } : target;
     const framed = sizeLink(statement, source, target);
+    if (sourceRange !== undefined && framed.outcome !== 'user_stated' && framed.outcome !== 'estimate') {
+      loss.push(statedRangeUnsizedEntry(l, sourceRange, framed, source, target));
+    }
     sizing.set(`${l.from}::${l.to}`, l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
       ? framed : sizeLink(statement, source, unframed));
   }
