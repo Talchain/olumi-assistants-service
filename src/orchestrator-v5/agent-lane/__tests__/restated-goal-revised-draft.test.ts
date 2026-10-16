@@ -850,13 +850,14 @@ const AIE_NOT_HELD = 'This goal change was not applied. The model needs quantiti
 
 describe('the gates refuse, and nothing is drafted or written', () => {
   // Marketing's turn-2 request (L20): neither conversion nor new customers is on the canvas, so the canvas step does not
-  // exist; the AIE's words name what is missing, from the call's own target. The gate's findings are no longer said
-  // (the AIE's sentence replaces them): each row below changes ONE input from the CONTROL, which is offered.
-  const refusedAtOffer = async (s: ReturnType<typeof server>) => {
+  // exist; the AIE's words name what is missing, from the call's own target. Hard gate findings now say WHY plainly: each row below changes ONE input from the CONTROL, which is offered.
+  const refusedAtOffer = async (s: ReturnType<typeof server>, reason: string) => {
     const { caps, drafts } = lane(s);
     const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
-    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018conversion rate\u2019 above 15%.`);
+    expect(String(r.detail)).toContain(`${AIE_NOT_HELD} Missing: \u2018conversion rate\u2019 above 15%.`);
+    expect(String(r.detail)).toContain(reason);
+    expect(String(r.detail)).toContain('Nothing was changed.');
     expect(drafts()).toBe(0);
     expect(s.commits).toHaveLength(0);
   };
@@ -868,25 +869,35 @@ describe('the gates refuse, and nothing is drafted or written', () => {
   });
 
   it('G3 (unknown): a later message whose text this read does not return still refuses, typed or chip alike', async () => {
-    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }));
+    await refusedAtOffer(server({ ledger: { user_message_turn_ids: [FX.l1.turn_id, 'chip-turn-run-analysis'] } }), 'some earlier conversation could not be read');
   });
 
-  it('G2 (unknown): a ledger with no record that the draft is the one built from the brief still refuses', async () => {
-    await refusedAtOffer(server({ ledger: { write_turn_ids: ['d920b614-9d04-413f-a047-dab6bcf807ac'] } }));
+  it('G2 (DL/TL 03:58): missing construction record is flagged on the card, then one approval/CAS/readback', async () => {
+    const s = server({ ledger: { write_turn_ids: ['d920b614-9d04-413f-a047-dab6bcf807ac'] } });
+    const { caps } = lane(s);
+    const offered = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('saved history does not confirm the original construction');
+    expect(s.commits).toHaveLength(0);
+    s.said(FX.l20.turn_id);
+    expect(await caps.authoriseChange(pressed(String(offered.proposal_id)), { proposal_id: offered.proposal_id } as never))
+      .toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    expect((s.graph().goal_constraints as Rec[]).some(r => r.value === 20 && r.unit === 'customers')).toBe(true);
   });
 
   it('a target for the goal the user set still refuses (PL 07:32Z: the human-goal-target refusal is kept)', async () => {
     const g = structuredClone(FX.graph);
     Object.assign((g.nodes as Rec[]).find((n) => n.kind === 'goal')!, { threshold_source: 'user' });
     expect(humanMaterialAfterTheDraft(g)).toEqual(['your target for \u2018product feature launch\u2019']);
-    await refusedAtOffer(server({ graph: g }));
+    await refusedAtOffer(server({ graph: g }), 'your target for');
   });
 
   it('a colleague\'s figure (`elicited_from`) is never carried, so no card calls it the user\'s: it refuses (buddy round 3)', async () => {
     const g = structuredClone(FX.graph);
     Object.assign((g.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { provenance: 'user_set',
       observed_state: { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'panel_elicited', elicited_from: { participant_id: 'p-grace' } } });
-    await refusedAtOffer(server({ graph: g }));
+    await refusedAtOffer(server({ graph: g }), 'your figure for');
     // CONTRAST: the user's own typed figure, the same bytes without `elicited_from`, is carried (offered).
     const own = structuredClone(FX.graph);
     Object.assign((own.nodes as Rec[]).find((n) => n.id === 'advertising_spend')!, { provenance: 'user_set',
@@ -898,7 +909,7 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const g = structuredClone(FX.graph);
     g.goal_constraints = [...(g.goal_constraints ?? []), { node_id: 'advertising_spend', operator: '<=', value: 50000, unit: 'GBP/year', provenance: 'user' }];
     expect(humanMaterialAfterTheDraft(g)).toEqual(['your limit or target on \u2018Advertising spend\u2019']);
-    await refusedAtOffer(server({ graph: g }));
+    await refusedAtOffer(server({ graph: g }), 'your limit or target on');
   });
 
   it('objections that cannot be read still refuse', async () => {
@@ -989,7 +1000,7 @@ describe('the gates refuse, and nothing is drafted or written', () => {
   });
 
   it('unknown authority refuses: a ledger that cannot be read', async () => {
-    await refusedAtOffer(server({ ledgerFails: true }));
+    await refusedAtOffer(server({ ledgerFails: true }), 'the saved history could not be read');
   });
 
   it('no approval, no write: the Agent\'s own authorise_change (no pressed card) is refused', async () => {
@@ -1038,7 +1049,9 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
     // At the press: the targets the card carried, neither on the canvas, named as missing (AIE 6128697025, row 10).
-    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018New customers\u2019 at least 20 customers and \u2018Conversion rate\u2019 above 15%.`);
+    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018New customers\u2019 at least 20 customers and \u2018Conversion rate\u2019 above 15%.`
+      + ' Olumi could not safely replace it because it found some earlier conversation could not be read; '
+      + 'the conversation changed after this card was offered; ask for an updated card. Nothing was changed.');
     expect(s.commits).toHaveLength(0);
   });
 });
@@ -1054,7 +1067,7 @@ describe('AIE 6128697025 (row 10): the canvas step is said ONLY when every targe
   });
   it('one target off the canvas: the AIE\'s words, naming only the missing one (never the canvas step)', () => {
     expect(draftGateDetail(found, 'offered', [{ words: '\u2018New customers\u2019 at least 20 customers', onCanvas: true },
-      { words: '\u2018Conversion rate\u2019 above 15%', onCanvas: false }])).toBe(`${AIE_NOT_HELD} Missing: \u2018Conversion rate\u2019 above 15%.`);
+      { words: '\u2018Conversion rate\u2019 above 15%', onCanvas: false }])).toBe(`${AIE_NOT_HELD} Missing: \u2018Conversion rate\u2019 above 15%. Olumi could not safely replace it because it found 1 saved change since the draft. Nothing was changed.`);
   });
 });
 
@@ -1069,7 +1082,8 @@ describe('AIE 0452 amendments: unknown authority, quantity-bound limits and targ
     expect(humanMaterialAfterTheDraft(g)).toEqual(['a value for \u2018Advertising spend\u2019 whose author is not recorded']);
     const r = await offerOn(s);
     expect(r).toMatchObject({ ok: false, refusal: 'draft_holds_your_work' });
-    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018conversion rate\u2019 above 15%.`);
+    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018conversion rate\u2019 above 15%.`
+      + ' Olumi could not safely replace it because it found a value for ‘Advertising spend’ whose author is not recorded. Nothing was changed.');
     expect(s.commits).toHaveLength(0);
   });
 
@@ -1638,4 +1652,85 @@ describe('a correction to a model whose goal has NO numeric target (the founder 
     expect(String(out.note)).toContain(MEANING_FLAG_NOTE.trim());
     expect(s.commits).toHaveLength(0);
   });
+});
+
+
+describe('S2 turn-2 construction: history meaning on the one card', () => {
+  const capture = JSON.parse(readFileSync(new URL('./fixtures/funding-16d51e1b-turn2-brief.json', import.meta.url), 'utf8')) as {
+    scenario_id: string; brief_text: string; messages: { turn_id: string; user_message: string }[];
+  };
+  it.each(['target', 'correction'] as const)('%s: a saved brief extended by turn 2 offers a flagged card, then one approval/CAS/whole readback', async mode => {
+    // Captured brief/conversation bytes; existing admitted marketing candidate and local CAS store are scripted.
+    const first = capture.messages[0]!;
+    const second = capture.messages[1]!;
+    const s = server({ brief: capture.brief_text, ledger: {
+      first_user_message: first.user_message, user_message_turn_ids: [first.turn_id, second.turn_id],
+      later_user_messages: [{ turn_id: second.turn_id, text: second.user_message }],
+      write_turn_ids: [registrationTurnId(SID, constructionOperationId(SID, capture.brief_text))],
+    } });
+    const { caps, proposals } = lane(s);
+    const offered = mode === 'target' ? await caps.proposeGoalTarget!(l20Turn, conversion as never)
+      : await caps.proposeRevision!(l20Turn, { quote: L20 } as never);
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    expect(s.commits).toHaveLength(0);
+    expect(offered.public_label).toContain('saved brief does not match your first message');
+    expect(offered.public_label).toContain('Keep your current model');
+    const approved = proposals.get(String(offered.proposal_id))!.operations[0]!.value as Rec;
+    const unpressed = await caps.authoriseChange({ ...pressed(String(offered.proposal_id)), typed_approval_of: undefined }, { proposal_id: offered.proposal_id } as never);
+    expect(unpressed).toMatchObject({ ok: false, mutated: false });
+    expect(s.commits).toHaveLength(0);
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offered.proposal_id)), { proposal_id: offered.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(s.commits).toHaveLength(1);
+    expect(s.graph()).toEqual(GraphV3.parse(approved.candidate));
+  });
+  it.each(['incomplete', 'unreadable', 'objections', 'new first message'] as const)('%s after a flagged offer refuses the press, no write', async kind => {
+    const s = server({ ledger: { write_turn_ids: [] } });
+    const readLedger = s.readCommittedTurnLedger;
+    let changed = false;
+    const caps = createAgentCapabilities(s.dispatch, new ProposalStore(), (async () => ({ text: JSON.stringify(candidate()) })) as unknown as CallStructuredModel, 'full', undefined, {
+      readCommittedTurnLedger: async () => {
+        if (changed && kind === 'unreadable') throw new Error('unreadable');
+        const l = await readLedger();
+        return { ...l, ...(changed && kind === 'incomplete' ? { complete: false } : {}),
+          ...(changed && kind === 'new first message' ? { first_user_message: 'A different message with the same turn id' } : {}) };
+      },
+      readStatedObjections: async () => changed && kind === 'objections' ? [{ statement: 'A new recorded objection' }] as never : [],
+    });
+    const offered = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('original construction');
+    changed = true; s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offered.proposal_id)), { proposal_id: offered.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
+    expect(String(applied.detail)).toContain(kind === 'incomplete' ? 'saved history is incomplete'
+      : kind === 'unreadable' ? 'saved history could not be read' : 'changed after this card');
+    expect(s.commits).toHaveLength(0);
+  });
+
+  it('an incomplete ledger at offer still refuses with a plain reason before preparation', async () => {
+    const s = server({ ledger: { complete: false } });
+    const { caps, drafts } = lane(s);
+    const offered = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
+    expect(offered.detail).toContain('saved history is incomplete');
+    expect(drafts()).toBe(0); expect(s.commits).toHaveLength(0);
+  });
+
+  it.each(['CAS conflict', 'wrong readback'] as const)('%s on the flagged card never claims a confirmed save', async kind => {
+    const s = server({ ledger: { write_turn_ids: [] },
+      ...(kind === 'CAS conflict' ? { refuse: 'GRAPH_STALE' } : { beforeAck: (g: Rec) => { g.nodes[0].label += ' changed'; } }),
+    });
+    const { caps } = lane(s);
+    const offered = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('original construction');
+    s.said(FX.l20.turn_id);
+    const applied = await caps.authoriseChange(pressed(String(offered.proposal_id)), { proposal_id: offered.proposal_id } as never);
+    expect(applied).toMatchObject({ ok: false, applied: false,
+      refusal: kind === 'CAS conflict' ? 'superseded' : 'not_confirmed', mutated: kind !== 'CAS conflict' });
+    expect(s.commits).toHaveLength(kind === 'CAS conflict' ? 0 : 1);
+  });
+
 });

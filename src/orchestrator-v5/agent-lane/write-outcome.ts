@@ -645,7 +645,8 @@ export function notAdoptedLine(
 }
 
 export function withWriteOutcome(body: string, status: string | null): string {
-  if (status === null) return body;
+  // A fast approval already said this exact server-owned status. Preserve complementary text.
+  if (status === null || body.trim() === status.trim()) return body;
   return body.trim().length > 0 ? `${body}\n\n${status}` : status;
 }
 

@@ -21,6 +21,11 @@ describe('meaning flags open the card, said once', () => {
         + 'revised model. Approve only if that is what you meant; otherwise say which goal it is for.');
   });
 
+  it('draft_history: states the earlier-work warning and an explicit keep/use choice', () => {
+    expect(meaningFlagWords({ kind: 'draft_history', findings: ['Your model has saved changes after the draft.'] }))
+      .toBe('Your model has saved changes after the draft. Keep your current model by leaving this card unapproved, or use Olumi’s revision by approving it.');
+  });
+
   it('the flag comes first, once, before the card’s own words', () => {
     const card = 'Replace the early draft with a revised one. Check the targets, limits and options on this card before choosing.';
     expect(cardWithMeaningFlags(card, [DROPPED, { ...DROPPED }])).toBe(`${meaningFlagWords(DROPPED)} ${card}`);

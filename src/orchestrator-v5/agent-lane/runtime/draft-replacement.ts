@@ -6,17 +6,12 @@
  * target row can land. The remedy offered is a REVISED DRAFT prepared by C's own construction from the stored brief and
  * the typed goal, shown as one card and written only on approval.
  *
- * ⛔ THE GATE IS "AN UNREVIEWED AI SCAFFOLD, ALL ORIGINAL HUMAN MATERIAL PRESERVED", NOT "NOTHING THE USER AUTHORED".
- * The brief's own facts, goals and limits are the user's, and the revised draft is built from that same brief, so they
- * are kept (and checked kept: {@link limitsKeptBy}). What may NOT exist is any LATER human contribution, which a
- * replacement would discard. Three existing records are read, at the offer AND again at the approval:
- *   · G1 — the model's own authorship stamps ({@link humanMaterialAfterTheDraft}): a value, review, adopted estimate,
- *     stated level, link, target, limit or attested horizon the user set after the draft. An unknown stamp refuses.
- *   · G2 — the committed-write ledger ({@link writesBesidesTheConstruction}): the construction's own registration is the
- *     ONLY committed write. Guests have no model versions, but every commit row carries `model_version_mutation_id`.
- *   · G3 — the messages ({@link messagesBesidesTheBrief}): only the brief and the typed goal exist (DL: there is no other
- *     durable record of dissent or evidence, and chip or unknown-origin rows count as messages), and the S8 durable
- *     objections reader is empty.
+ * The saved model and retained conversation are read before preparing a replacement. Known human material is carried
+ * by identity; unknown authors and material the canonical carry cannot preserve still refuse with a plain reason.
+ * Complete history that no longer looks like an untouched first-message draft is disclosed on the one card instead
+ * (DL/TL 16 Oct 03:58): later messages, a different saved brief, later writes or an absent construction row. The user
+ * may keep the current model or approve the revision. Unreadable history/objections and incomplete ledgers remain hard.
+ * Approval binds the exact earlier history and objections as well as the model identity; newer work needs a new card.
  * ⚠ KNOWN GAP (DL condition 2): other database sinks that write a scenario's graph (`apply_patch_and_log`,
  * `store_draft_graph`, `create_model_version*`, `restore_*`, `append_turn_atomic` v1–v4) do not set the mutation id and
  * are not proven uncalled; G1's stamps are the backstop for a human edit through any of them.
@@ -313,6 +308,41 @@ export function messagesBesidesTheBrief(
   const extra = rest.filter((id) => !allowed.includes(id)).length;
   if (extra > 0) return [`${extra} other message${extra === 1 ? '' : 's'} since your brief`];
   return rest.length === allowed.length && rest.every((id, i) => id === allowed[i]) ? [] : ['a message this offer was made on is missing'];
+}
+
+/**
+ * Complete history can disagree with the early-draft assumption without making its author unknown. These are card
+ * warnings (DL/TL 16 Oct 03:58); an unreadable/incomplete record or missing conversation text is still a hard refusal.
+ * At approval, exclude the correction's own answer row and require the exact earlier conversation the card bound.
+ */
+export function draftHistory(ledger: CommittedTurnLedger, scenarioId: string, brief: string, currentTurnId?: string,
+  approval?: { readonly bound: readonly string[]; readonly goalTurnId: string }): {
+    found: string[]; warnings: string[]; bound: string[]; messages: string[]; context: unknown; later: boolean;
+  } {
+  const found: string[] = [];
+  const warnings: string[] = [];
+  const turns = ledger.user_message_turn_ids.filter(id => id !== currentTurnId && id !== approval?.goalTurnId);
+  const bound = turns.slice(1);
+  const later = (ledger.later_user_messages ?? []).filter(m => bound.includes(m.turn_id));
+  const messages = bound.flatMap(id => later.filter(m => m.turn_id === id).map(m => m.text));
+  if (!ledger.complete) found.push('the saved history is incomplete, so Olumi cannot check all earlier work');
+  if (bound.some(id => later.filter(m => m.turn_id === id && m.text.trim() !== '').length !== 1)) {
+    found.push('some earlier conversation could not be read');
+  }
+  if (approval !== undefined && (bound.length !== approval.bound.length || bound.some((id, i) => id !== approval.bound[i]))) {
+    found.push('the conversation changed after this card was offered; ask for an updated card');
+  }
+  if (ledger.complete) {
+    const writes = laterWritesThan(ledger, scenarioId, brief);
+    if (typeof writes === 'string') warnings.push('The saved history does not confirm the original construction of this draft.');
+    else if (writes > 0) warnings.push('Your model has saved changes after the draft; check what this revision keeps and replaces.');
+    if (turns.length === 0 || ledger.first_user_message !== brief.trim()) {
+      warnings.push('The saved brief does not match your first message; this revision uses the saved brief and the retained conversation.');
+    }
+    if (bound.length > 0) warnings.push('There are later messages in this conversation; check that this revision reflects them.');
+  }
+  return { found, warnings, bound, messages, later: warnings.length > 0,
+    context: [ledger.write_turn_ids, turns, ledger.first_user_message, later] };
 }
 
 /**
