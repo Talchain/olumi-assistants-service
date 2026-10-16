@@ -4251,16 +4251,18 @@ export function createAgentCapabilities(
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
-      return notApplied('not_applied', 'This revised draft is replaced only by pressing its own card, so nothing was changed.');
+      return notApplied('not_applied', targeted ? 'These changes are saved only by pressing their own card, so nothing was changed.'
+        : 'This revised draft is replaced only by pressing its own card, so nothing was changed.');
     }
     if (before.graph_identity_hash !== v.base_identity) {
-      return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
+      return notApplied('superseded', targeted ? 'The model changed after this correction was offered, so nothing was saved. Prepare an updated card.'
+        : 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
     }
     // The messages the offer bound (read as its context), then the typed goal's turn; any other message refuses.
     const bound = Array.isArray(v.bound_turn_ids) ? v.bound_turn_ids.filter((t): t is string => typeof t === 'string') : [];
     // Targeted candidates compose canonical adapters on the saved graph. They do not replace the user's other work
     // with a new draft; own-card approval, both base hashes and whole-postimage readback below still apply.
-    const { found, flags, contextIdentity } = targeted ? { found: [], flags: [], contextIdentity: undefined }
+    const { found, flags, contextIdentity }: { found: string[]; flags: MeaningFlag[]; contextIdentity?: string } = targeted ? { found: [], flags: [] }
       : await unreviewedDraftGate(ctx, before, { bound, goalTurnId: v.goal_turn_id });
     if (typeof v.draft_context_identity === 'string') {
       if (contextIdentity !== v.draft_context_identity && found.length === 0) found.push('the saved history or objections changed after this card was offered; ask for an updated card');
@@ -4289,8 +4291,10 @@ export function createAgentCapabilities(
     if (reg.status === 409) {
       const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
       return /STALE/.test(code)
-        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
-        : notApplied('not_applied', 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
+        ? notApplied('superseded', targeted ? 'The model changed just before this correction was written, so nothing was saved. Prepare an updated card.'
+          : 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
+        : notApplied('not_applied', targeted ? 'The correction was refused before anything was written, so the model is unchanged.'
+          : 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
     }
     /**
      * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
@@ -4307,7 +4311,8 @@ export function createAgentCapabilities(
       && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
     if (!landed) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
-        detail: 'The revised draft was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+        detail: targeted ? 'The correction was sent, but the complete saved change could not be confirmed. Offer to check the model again; do not claim it was saved or that it failed.'
+          : 'The revised draft was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
           + 'offer to check the model again, and never say it was replaced or that it was not.' };
     }
     // The receipt as the construction's and the goal level's registrations read it (guests get none: no versions).
@@ -6345,7 +6350,7 @@ export function createAgentCapabilities(
             stage: 'frame' as const, event };
           const params = { payload, requestId: ctx.request_id, persistedGraph: candidate };
           const result = event.kind === 'structural_rename' ? applyStructuralRename({ ...params, event }) : applyStructuralDelete({ ...params, event });
-          if (result.kind !== 'mutated') return invalid('One correction was refused by the saved model, so nothing was prepared.');
+          if (result.kind !== 'mutated' || !isPlainRecord(result.mutatedGraph)) return invalid('One correction was refused by the saved model, so nothing was prepared.');
           candidate = result.mutatedGraph;
         } else {
           const member = asMemberOp(op);
