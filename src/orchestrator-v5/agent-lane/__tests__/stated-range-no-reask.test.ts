@@ -8,7 +8,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
-import { placeholderGoalWarning, STATED_RANGE_NEXT_STEP, unsizedLeaderGoalPaths } from '../goal-certainty.js';
+import { placeholderAskWords, placeholderGoalWarning, STATED_RANGE_NEXT_STEP, unsizedLeaderGoalPaths } from '../goal-certainty.js';
+import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
+import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { guidedSizingActions, guidedSizingFromWarning, linkSizeQuestion } from '../guided-sizing.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../orchestrator/context/option-result-source.js';
 
@@ -115,5 +117,69 @@ describe('a Run never asks again for a link whose effect the user stated as a ra
     expect(chips.map((c) => c.label)).toContain(linkSizeQuestion('Corporate deal active', 'weekday attendance'));
     expect(w.message).toMatch(/Set them to see how much they matter\.$/); // no range anywhere: today's sentence
     expect(chips).toHaveLength(3);
+  });
+});
+
+/**
+ * ⭐ ITEM 3, case (C) of the no-dead-end asks (DL-3 lease re-grant): a mediator measured in its sized parent's unit is asked
+ * "Roughly how much does … change …, in £/month?" (placeholder-first-ask.test.ts (C)). A link the user stated a range for is
+ * never asked that way either: it is said, with the AIE's next step; the withhold is unchanged. The (C) graph, verbatim.
+ */
+describe('case (C): a mediator link the user stated a range for is not asked in its parent\'s unit', () => {
+  const GOAL = { id: 'mrr', kind: 'goal', label: 'MRR', observed_state: { value: 0.5, raw_value: 100000, cap: 200000, unit: '£/month', source: 'user_override' } };
+  function sizedParentGraph(): Rec {
+    const beta = convertLinkEffect(250, 1000, 5000, 10000)!;
+    return { goal_node_id: 'mrr', nodes: [structuredClone(GOAL),
+      { id: 'budget', kind: 'factor', label: 'Support budget', observed_state: { value: 0.5, raw_value: 5000, cap: 10000, unit: '£/month', source: 'user_override' } },
+      { id: 'cost', kind: 'factor', label: 'Support cost', scale_frame: 5000 },
+      { id: 'o-spend', kind: 'option', label: 'Spend more', interventions: { budget: { value: 0.6, raw_value: 6000 } } }],
+    edges: [{ from: 'budget', to: 'cost', strength: { mean: beta, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
+      provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 250, amount_unit: '£/month',
+        per_source_change: 1000, per_source_change_unit: '£/month', strength_mean: beta, strength_mean_frame: 'edge_strength' } } },
+    { from: 'cost', to: 'mrr', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative', defaulted: true,
+      provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }] };
+  }
+  const QUOTE = 'Our finance lead reckons each extra £1,000 of support cost takes between £500 and £900 a month off MRR.';
+  const ranged = (g: Rec): Rec => {
+    const subject = { kind: 'link' as const, id: 'cost', to_id: 'mrr', field: 'effect' as const };
+    const st = { speaker: 'user', reading: 'olumi', quote: QUOTE, source: QUOTE, subject: { quantity: 'link|cost|mrr||effect' }, unit: '£/month', form: 'range', low: 500, high: 900 };
+    return withUserStatement(g as never, userStatementRecord(subject, [st as never], '2026-10-16T00:00:00.000Z', CONSTRUCTION_ATTEST), subject) as Rec;
+  };
+  const warn = (g: Rec): Rec => placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, ['o-spend']), GOAL_FIGURES_PLACEHOLDER_PATH) as Rec;
+  it('⭐ the user\'s range on the mediator link: no parent-unit ask, no first ask; the link is said, with the AIE\'s next step', () => {
+    const g = ranged(sizedParentGraph());
+    const w = warn(g);
+    expect(w.option_ids).toEqual(['o-spend']);
+    expect(w.first_ask).toBeUndefined();
+    expect(w.acceptable_links).toBeUndefined();
+    expect(w.message).not.toMatch(/Roughly how much|Set (?:it|them)/);
+    expect(w.message).toContain('‘Support cost’ to ‘MRR’');
+    expect(w.message.endsWith(` ${STATED_RANGE_NEXT_STEP}`)).toBe(true);
+    // The host Run reply's recorded-cause words come from the same producer.
+    expect(placeholderAskWords(g, [{ from: 'cost', to: 'mrr' }])?.message ?? '').not.toMatch(/Roughly how much/);
+  });
+  it('MIXED: case (C) still asks its own link; another link the user stated a range for is only said, never invited', () => {
+    // Short labels, so today's words (C's question + "Set it …") fit the 400 carrier and the difference is visible.
+    const g = sizedParentGraph();
+    for (const [id, label] of [['mrr', 'MRR'], ['budget', 'Budget'], ['cost', 'Cost']] as const) g.nodes.find((n: Rec) => n.id === id).label = label;
+    g.nodes.push({ id: 'promo', kind: 'factor', label: 'Promo', observed_state: { value: 0, raw_value: 0, cap: 1, unit: '0/1', source: 'user_override' } },
+      { id: 'o-promo', kind: 'option', label: 'Run a promotion', interventions: { promo: { value: 1, raw_value: 1 } } });
+    g.edges.push({ from: 'promo', to: 'mrr', strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', defaulted: true,
+      provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+    const subject = { kind: 'link' as const, id: 'promo', to_id: 'mrr', field: 'effect' as const };
+    const PROMO = 'Marketing thinks a promotion would add between £2,000 and £5,000 a month to MRR.';
+    const st = { speaker: 'user', reading: 'olumi', quote: PROMO, source: PROMO, subject: { quantity: 'link|promo|mrr||effect' }, unit: '£/month', form: 'range', low: 2000, high: 5000 };
+    const withPromoRange = withUserStatement(g as never, userStatementRecord(subject, [st as never], '2026-10-16T00:00:00.000Z', CONSTRUCTION_ATTEST), subject) as Rec;
+    const w = placeholderGoalWarning(withPromoRange, unsizedLeaderGoalPaths(withPromoRange, ['o-spend', 'o-promo']), GOAL_FIGURES_PLACEHOLDER_PATH) as Rec;
+    expect(w.first_ask).toEqual({ kind: 'link', from: 'cost', to: 'mrr' });
+    expect(w.message).toMatch(/Roughly how much does .* change ‘MRR’, in £\/month\? This comparison turns on the link from ‘Promo’ to ‘MRR’, whose strength isn't sized in the model yet\.$/);
+    expect(w.message).not.toMatch(/Set (?:it|them)/);
+    expect(w.message.length).toBeLessThanOrEqual(400);
+  });
+  it('CONTRAST: with no stated range, case (C) still asks it in the parent\'s unit (first ask = that link)', () => {
+    const w = warn(sizedParentGraph());
+    expect(w.first_ask).toEqual({ kind: 'link', from: 'cost', to: 'mrr' });
+    expect(w.message).toMatch(/Roughly how much does .* change ‘MRR’, in £\/month\?/);
+    expect(w.message).not.toContain(STATED_RANGE_NEXT_STEP);
   });
 });

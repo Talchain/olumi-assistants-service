@@ -539,13 +539,16 @@ export function userStatedRangeOn(graph: unknown, l: { readonly from: string; re
 /**
  * ⭐ ITEM 3 (PL 19:07Z: "bind invitations to genuinely missing inputs while retaining the complete limitation"): the words
  * for unsized links on the way to the goal, said by the Run's withhold AND the host Run reply. The limitation names EVERY
- * link; the invitation names only the links the user has not stated a range for. All stated: the AIE's next step instead.
- * None stated: today's sentence, byte for byte. A mixed sentence that cannot fit the 400 carrier keeps today's sentence.
+ * link; the invitation names only the links the user has not stated a range for. All stated: the AIE's next step instead
+ * (`nextStep: false` after another ask: only said). None stated: today's sentence, byte for byte. A mixed sentence that
+ * cannot fit the 400 carrier keeps today's sentence.
  */
-export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink[]): string {
+export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink[], opts: { readonly nextStep?: false } = {}): string {
   const missing = links.filter((l) => !userStatedRangeOn(graph, l));
   if (missing.length === links.length) return unsizedLinkSentence(links);
   if (missing.length === 0) {
+    // After another ask (the no-dead-end words' own question), that ask is the next step: the links are only said.
+    if (opts.nextStep === false) return unsizedLinkStatement(links);
     const stated = unsizedLinkStatement(links, 400 - STATED_RANGE_NEXT_STEP.length - 1);
     return stated === '' ? '' : `${stated} ${STATED_RANGE_NEXT_STEP}`;
   }
@@ -759,6 +762,9 @@ export function noDeadEndAsks(
     const r = readings.get(l.from);
     // FA1-3 (DL, 6 Oct): a product source is measured in its operands' composed unit, the same reading the writer takes.
     if ((r?.via !== 'sized_parents' && r?.via !== 'product') || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
+    // ⭐ ITEM 3 (AIE: never "the range again"): a link the user stated a range for is not asked in its parent's unit either;
+    // it is said with the other links below (`unsizedLinkWords`).
+    if (userStatedRangeOn(graph, l)) continue;
     // FA1 (Science d5): a child with no unit of its own that is a definitional part of its total is asked in that unit,
     // the same reading the writer takes the answer in.
     const partOf = readings.get(l.to);
@@ -782,7 +788,7 @@ export function noDeadEndAsks(
   }
   if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;
   const rest = links.filter((l) => !covered.has(key(l.from, l.to)));
-  if (rest.length > 0) sentences.push(unsizedLinkSentence(rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
+  if (rest.length > 0) sentences.push(unsizedLinkWords(graph, rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), { nextStep: false }));
   return { message: fit(sentences) || sentences[0]!, gaugeLinks, first: first! };
 }
 
