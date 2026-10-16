@@ -1,5 +1,5 @@
 import { draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
-import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
+import { linkList, unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence, type UnsizedPathLink } from './unsized-path-cause.js';
 import { NOT_SIZED } from './reply/words.js';
 import { compactWordLabel } from './reply/labels.js';
 /**
@@ -530,6 +530,30 @@ export type PlaceholderFirstAsk =
 /** The AIE's words (16 Oct, 6219775036) after a link whose effect the user stated as a range: no question, the next step. */
 export const STATED_RANGE_NEXT_STEP = 'We can also continue comparing the mechanisms and conditions qualitatively.';
 
+/** A link whose effect the USER stated as a range: construction's record on it (`userStatementFor`), never a word reader. */
+export function userStatedRangeOn(graph: unknown, l: { readonly from: string; readonly to: string }): boolean {
+  return userStatementFor(graph, { kind: 'link', id: l.from, to_id: l.to, field: 'effect' })
+    ?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
+}
+
+/**
+ * ⭐ ITEM 3 (PL 19:07Z: "bind invitations to genuinely missing inputs while retaining the complete limitation"): the words
+ * for unsized links on the way to the goal, said by the Run's withhold AND the host Run reply. The limitation names EVERY
+ * link; the invitation names only the links the user has not stated a range for. All stated: the AIE's next step instead.
+ * None stated: today's sentence, byte for byte. A mixed sentence that cannot fit the 400 carrier keeps today's sentence.
+ */
+export function unsizedLinkWords(graph: unknown, links: readonly UnsizedPathLink[]): string {
+  const missing = links.filter((l) => !userStatedRangeOn(graph, l));
+  if (missing.length === links.length) return unsizedLinkSentence(links);
+  if (missing.length === 0) {
+    const stated = unsizedLinkStatement(links, 400 - STATED_RANGE_NEXT_STEP.length - 1);
+    return stated === '' ? '' : `${stated} ${STATED_RANGE_NEXT_STEP}`;
+  }
+  const invite = `Set the ${linkList(missing)} to see how much ${missing.length > 1 ? 'they matter' : 'it matters'}.`;
+  const stated = unsizedLinkStatement(links, 400 - invite.length - 1);
+  return stated === '' ? unsizedLinkSentence(links) : `${stated} ${invite}`;
+}
+
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
  * UI's "Not shown." register (400-character explanation budget; complete question labels take precedence).
@@ -576,18 +600,12 @@ export function placeholderGoalWarning(
   // ⭐ ITEM 3 (AIE 16 Oct amended range contract: "do not repeatedly ask for the already-supplied range"; G3 1a1a7907 re-ask
   // classes 2–3): a link whose effect the USER stated as a range is never asked to be sized again (no chip, no first ask):
   // the range is held on it (construction's record), and construction disclosed Olumi's placeholder against it once.
-  const statedRange = (l: { from: string; to: string }): boolean => userStatementFor(graph, { kind: 'link', id: l.from, to_id: l.to, field: 'effect' })
-    ?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
+  const statedRange = (l: { from: string; to: string }): boolean => userStatedRangeOn(graph, l);
   const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && !statedRange(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
-  // ⭐ ITEM 3: nor when every link it names already holds the user's stated range (AIE: never "the range again"). Its one next
-  // step is the AIE's own qualitative continuation (6219775036), so the withhold is never a dead end.
-  const rangesOnly = !productBlocks && ordered.length > 0 && ordered.every(statedRange);
-  const said = productBlocks ? unsizedLinkStatement : rangesOnly ? (ls: Parameters<typeof unsizedLinkStatement>[0]): string => {
-    const stated = unsizedLinkStatement(ls, 400 - STATED_RANGE_NEXT_STEP.length - 1);
-    return stated === '' ? '' : `${stated} ${STATED_RANGE_NEXT_STEP}`;
-  } : unsizedLinkSentence;
+  // ⭐ ITEM 3: the invitation names only links with no stated range (`unsizedLinkWords`, shared with the host Run reply).
+  const said = productBlocks ? unsizedLinkStatement : (ls: readonly UnsizedPathLink[]): string => unsizedLinkWords(graph, ls);
   const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
