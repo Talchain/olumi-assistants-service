@@ -135,6 +135,8 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     // The BINDING is said ON THE CARD before the press, and its button adopts a reading, never "Record … as your figure".
     const words = 'Record the current level of "Funding secured" as £0, Olumi\'s reading of your words “We have no funding.” (target £250,000)';
     expect(w.card).toMatchObject({ label: 'Use this reading', message: 'Yes, use this reading.', detail: words });
+    // DL-3 ruling (#3325 B1): the reading card offers Use this reading / Change / Reject, with the full quote shown.
+    expect((w.b.suggested_actions as Dict[]).map((c) => c.label)).toEqual(expect.arrayContaining(['Use this reading', 'Change something first', 'Reject']));
     expect(toolResults.find((r) => typeof r.public_label === 'string')!.public_label).toBe(words);
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
     const { cold, goal } = await pressAndReopen(w, w.card);
@@ -160,6 +162,19 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, unit: '%', source_quote: said, figure_origin: 'read_from_words' });
     expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
     expect(w.card).toBeUndefined();
+    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+  }, 30_000);
+
+  // ⚠ DOCUMENTED LIMIT (BUDDY-A #3325 B1; DL-3 ruling (a)): no reader separates "none" from "unknown" without a phrase list, so an
+  // AI that still reads "don't know" as none reaches a reading card. The card quotes the full sentence as Olumi's reading, nothing
+  // is written before the press, and Reject writes nothing. The tool text tells the AI to leave such a level unknown (Founder's hunk).
+  it('LIMIT: "We don\'t know whether we have any funding." misread as none shows the full quote as Olumi\'s reading; Reject writes nothing', async () => {
+    const said = 'We don\'t know whether we have any funding.';
+    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, source_quote: said, figure_origin: 'read_from_words' });
+    expect(w.card?.detail).toBe(`Record the current level of "Funding secured" as £0, Olumi's reading of your words “${said}” (target £250,000)`);
+    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+    const reject = (w.b.suggested_actions as Dict[]).find((c) => c.label === 'Reject')!;
+    const declined = await w.turn(reject.message, reject); expect(declined.statusCode, declined.body).toBe(200);
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
   }, 30_000);
 

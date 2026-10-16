@@ -165,6 +165,16 @@ export const AMEND_CHIP: SuggestedAction = {
 };
 
 /**
+ * A level READ from the user's words (`user_confirmed`) is declined in plain words (DL-3 ruling on #3325 B1): nothing is written,
+ * and today's level stays unknown. Not bound to the proposal, so its press is a message the AI answers (it withdraws the card).
+ */
+export const READING_REJECT_CHIP: SuggestedAction = {
+  id: 'agent-reject-reading',
+  label: 'Reject',
+  message: 'No, that is not what I meant. Leave today’s level unknown.',
+};
+
+/**
  * ⭐ S5 (DL 15 Oct): the ONE rename card a committed edit's receipt offers when the option's name counts what its level no
  * longer holds (`optionRenameCardOf`). Minted by the route, not by a tool call, so its chip is built here, card-only: only its
  * press renames. Its words ride in `detail`.
@@ -379,7 +389,7 @@ export function approvalChipsFor(
     const result = labelSourceFor?.(proposalId)?.result;
     const card = result?.ok === true && result.proposal_id === stored!.proposal_id && result.public_label === stored!.public_label ? stored!.public_label : undefined;
     if (inputOriginOf(levelOp.goal_current_level) === 'ai_accepted') {
-      return card === undefined ? [] : [{ id: approvalChipIdFor(proposalId), ...DOOR_DERIVED_APPROVE, detail: card }, AMEND_CHIP];
+      return card === undefined ? [] : [{ id: approvalChipIdFor(proposalId), ...DOOR_DERIVED_APPROVE, detail: card }, AMEND_CHIP, READING_REJECT_CHIP];
     }
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) }, AMEND_CHIP];
   }
