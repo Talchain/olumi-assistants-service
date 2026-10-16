@@ -509,8 +509,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
       + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
       + 'decision with the other direction beside it, and the user chooses. '
-      + 'Give measures whenever the user names what the target is a figure of. Call this once per target the user stated; '
-      + 'never build the model yourself.' + ' This tool changes one current saved goal target; it never constructs or replaces the model. Keep every additional requested goal and condition in context, explain any part the supported operations cannot represent, and never claim that all goals were saved or modelled by this one target card.',
+      + 'Give measures whenever the user names what the target is a figure of. '
+      + 'Use this tool for the target of the one current saved goal; it never constructs or replaces the model. '
+      + 'Do not use successive calls to represent additional goals or a full AND objective. '
+      + 'Retain every requested goal, condition and source; show exactly which target this card changes and which parts remain unsaved or unsupported.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
