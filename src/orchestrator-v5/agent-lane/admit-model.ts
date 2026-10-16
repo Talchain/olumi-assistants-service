@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, type FigureSource, type StatedRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -3780,7 +3780,7 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
  * asked: the range is not requested again, and no figure is chosen from it. "Conflicts" only where the two are read in the
  * same unit and the size lies outside the range; otherwise it is "not taken from" it. Pure.
  */
-function statedRangeUnsizedEntry(l: CandidateLink, range: StatedRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
+function statedRangeUnsizedEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const ne = sized.natural_effect;
   const held = ne === undefined ? undefined
     : statementWords(ne.amount, ne.per_source_change, source, target, resolveMagnitudeFrame(source), resolveMagnitudeFrame(target));

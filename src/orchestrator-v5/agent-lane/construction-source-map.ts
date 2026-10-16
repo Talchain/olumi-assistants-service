@@ -253,7 +253,7 @@ function rangeTextAsWritten(st: UserStatement, low: number, high: number): strin
  * figure. Magnitudes; the link's own direction is the sign. One verified range only (two ranges for one link say nothing
  * single). `null`: none; `undefined`: a draft without statements. Pure.
  */
-export function linkEffectStatedRange(model: unknown, brief: string, from: string, to: string): StatedRangeOfLink | null | undefined {
+export function linkEffectStatedRange(model: unknown, brief: string, from: string, to: string): StatedWholeRangeOfLink | null | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
   if (!Array.isArray(m.statements)) return undefined;
   const said = (sourceMapOf(m.statements, brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [])
@@ -270,7 +270,9 @@ export function linkEffectStatedRange(model: unknown, brief: string, from: strin
   return { low, high, text: `${between}${text}`, end: 'whole', reported: st.quote, ...(st.unit !== undefined && st.unit !== '' ? { unit: st.unit } : {}) };
 }
 /** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
-export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high' | 'whole'; readonly reported: string; readonly unit?: string };
+export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };
+/** The range the user stated for a link nobody sized, as a WHOLE (never one of its ends as the size), with its own unit. */
+export type StatedWholeRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'whole'; readonly reported: string; readonly unit?: string };
 
 /**
  * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
