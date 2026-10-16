@@ -126,6 +126,8 @@ describe('one provider input pairing projection', () => {
     };
     visit(tree);
     if (body === undefined) throw new Error('Native callModelFor request body is unavailable');
+    // The REAL route source carries the hook (reverting it must turn this row red).
+    expect(body).toContain('input: pairProviderInput(req.input)');
     const original = body.replace('input: pairProviderInput(req.input)', 'input: req.input');
     const candidate = original.replace('input: req.input', 'input: pairProviderInput(req.input)');
     expect(candidate).not.toBe(original);
@@ -142,6 +144,15 @@ describe('one provider input pairing projection', () => {
     expect(refusalFor(JSON.parse(JSON.stringify(after)).input)).toBeNull();
     const paired = { ...req, input: [user, rs('rs_valid_hook'), message('msg_valid_hook')] };
     expect(JSON.stringify(encode(candidate, paired))).toBe(JSON.stringify(encode(original, paired)));
+  });
+
+  it('keeps reasoning with a tool-call continuation that has no assistant message (user → reasoning → call → output)', () => {
+    const continuation = [user, rs('rs_tool_turn'), call('tool-turn'),
+      { type: 'function_call_output', call_id: 'call_tool-turn', output: '{"ok":true}' }];
+    expect(refusalFor(continuation)).toBeNull();
+    expect(pairProviderInput(continuation)).toBe(continuation);
+    const withDeveloper = [...continuation, { role: 'developer', content: 'Explain the Run; do not change the model.' }];
+    expect(pairProviderInput(withDeveloper)).toBe(withDeveloper);
   });
 
   it('is idempotent and never mutates its deeply frozen input', () => {
