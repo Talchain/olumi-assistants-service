@@ -181,6 +181,45 @@ describe('THE RANGE READING ON A PER-ONE LINK (T1b F2, served g1-2633t d3 turn 4
   });
 });
 
+describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their range lands beside a range in another unit; a range written first is asked', () => {
+  /** The same press as MUST-FIX: card, approval, and the real writer storing the user's figure with its range. */
+  async function landsWithRange(said: string) {
+    const graph = graphOf(D1[0]);
+    const { caps, store, commits } = world(graph);
+    const f = idOf(graph, D1[1]); const t = idOf(graph, D1[2]);
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...switchArgs(D1[1], D1[2], 150), quote: said }) as Json;
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, link: { effect: { amount: 150, per_source_change: 1 }, your_words: said } });
+    expect(JSON.stringify(r)).not.toMatch(/rather than a range|in figures\?/);
+    const card = cardFor(store, r);
+    const out = await caps.authoriseChange(ctxPressing(String(r.proposal_id), card.message), { proposal_id: String(r.proposal_id) }) as Json;
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(commits).toHaveLength(1);
+    expect(linkOf(graph, f, t).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', source_quote: said,
+      natural_effect: { amount: 150, per_source_change: 1, per_source_change_unit: 'switch',
+        stated_range: { low: 80, high: 250, text: 'between 80 and 250', end: 'centre' } } });
+  }
+  it('⭐ a money range in the SAME sentence is a separate claim ("…, and it would cost £2k to £3k a month to run")', async () => {
+    await landsWithRange('The starter tier would win about 150 new subscribers, between 80 and 250, and it would cost £2k to £3k a month to run.');
+  });
+  it.each([
+    // ⛔ R3 (BUDDY-A B1 ×2; TL 17:18Z split-after-two): no host reading binds a range written BEFORE the figure to its claim;
+    // until Olumi's card proposes a reading (AIE-gated), it is asked, never stored with a borrowed range.
+    ['the range written FIRST, the figure after (until the card)', 'The starter tier would win between 80 and 250 new subscribers, probably about 150.'],
+    ['"somewhere between 80 and 250 …, call it 150" (until the card)', 'The starter tier would win somewhere between 80 and 250 new subscribers, call it 150.'],
+    ['a range BEFORE the figure in another clause', 'Last year it was between 80 and 250, and the starter tier would win about 150 new subscribers.'],
+    ['BUDDY-A R2: an earlier claim\'s range after a source word', 'We discussed the starter tier — earlier campaigns won between 80 and 250 new subscribers — the starter tier would win about 150 new subscribers.'],
+    ['a second range of the same quantity, the range first', 'The starter tier would win between 80 and 250 new subscribers, or 100-300 in a good year, probably about 150.'],
+    ['a range in another unit written first, and no range of its own', 'Between 1 and 4 months after launch, the starter tier would win about 150 new subscribers.'],
+    // ⛔ BUDDY-A #3311 B1: a range stated for ANOTHER claim, whose words never name the starter tier, is never this link's.
+    ['BUDDY-A B1: an earlier claim\'s range across an em dash', 'Earlier campaigns won between 80 and 250 new subscribers — the starter tier would win about 150 new subscribers.'],
+    ['BUDDY-A B1: an earlier claim\'s range across a bare "but"', 'Last year we won between 80 and 250 new subscribers but the starter tier would win about 150 new subscribers.'],
+    ['BUDDY-A B1: last year\'s range across an em dash', 'Last year we won between 80 and 250 new subscribers — the starter tier would win about 150 new subscribers.'],
+    ['an earlier claim\'s range across a bare comma', 'Earlier campaigns won between 80 and 250 new subscribers, the starter tier would win about 150 new subscribers.'],
+  ] as const)('KEPT NEGATIVE: %s → asked, nothing proposed or stored', async (_name, said) => {
+    await expectAsked(D1[0], switchArgs(D1[1], D1[2], 150), said, 'unclear_figure');
+  });
+});
+
 describe('CONTROLS: where Olumi cannot read one figure, it still asks', () => {
   it.each([
     ['a range with no figure inside it', 'The starter tier would win between 80 and 250 new subscribers.', 150, 'unclear_figure', 'not_the_users_statement'],

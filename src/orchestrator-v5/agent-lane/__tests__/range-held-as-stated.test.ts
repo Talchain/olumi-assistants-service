@@ -162,17 +162,41 @@ describe('the answer door’s reading of a restated range (pure; the proposer re
     const q = said('between 4 and 7 percentage points to weekday attendance.');
     for (const a of [4, 5.5, 7]) expect(linkEffectTheUserStated(q, fx(a), ends, scope)).toBe('unclear_figure');
   });
-  // ── KNOWN LOSSES (step 2): the user wrote their figure INSIDE the range and it is refused as "a range". ──
-  it.fails('KNOWN LOSS: the range written FIRST, the figure after ("between 4 and 7 …, probably about 5")', () => {
+  // ── R3 (BUDDY-A #3311 B1 ×2; TL 17:18Z): a range written BEFORE the figure is never bound by a host reading; it is asked
+  // (Olumi's card proposes a reading once the AIE accepts its basis). Still a known loss, not a protection. ──
+  it.fails('KNOWN LOSS (until the card): the range written FIRST, the figure after ("between 4 and 7 …, probably about 5")', () => {
     const q = said('between 4 and 7 percentage points to weekday attendance, probably about 5.');
     expect(linkEffectTheUserStated(q, fx(5), ends, scope)).toBeNull();
   });
-  it.fails('KNOWN LOSS: "somewhere between 4 and 7 …, call it 5"', () => {
+  it.fails('KNOWN LOSS (until the card): "somewhere between 4 and 7 …, call it 5"', () => {
     const q = said('somewhere between 4 and 7 percentage points to weekday attendance, call it 5.');
     expect(linkEffectTheUserStated(q, fx(5), ends, scope)).toBeNull();
   });
-  it.fails('KNOWN LOSS: a money range in the SAME sentence ("…, between 4 and 7, and it costs £5k to £7k a year")', () => {
+  it('⭐ a money range in the SAME sentence is a separate claim ("…, between 4 and 7, and it costs £5k to £7k a year")', () => {
     const q = said('about 5 percentage points to weekday attendance, between 4 and 7, and it costs £5k to £7k a year.');
     expect(linkEffectTheUserStated(q, fx(5), ends, scope)).toBeNull();
+    expect(centreRangeOfQuote(q, fx(5))).toMatchObject({ low: 4, high: 7, end: 'centre' });
+  });
+  it('NEGATIVE: a range before the figure in ANOTHER clause is not its range ("Last year it was between 2 and 4, and … about 3")', () => {
+    // No unit word after the range, so only the clause rule tells it apart (a unitless range in the figure's clause is its own).
+    const q = 'Last year it was between 2 and 4, and the corporate deal active would add about 3 percentage points to weekday attendance.';
+    expect(centreRangeOfQuote(q, fx(3))).toBeUndefined();
+    expect(linkEffectTheUserStated(q, fx(3), ends, scope)).toBe('unclear_figure');
+  });
+  it('NEGATIVE (BUDDY-A #3311 B1): a range written first for ANOTHER claim is never this link\'s, whatever joins them', () => {
+    for (const join of [' —', ' but', ',']) {
+      const q = `Earlier campaigns won between 4 and 7 percentage points${join} the corporate deal active would add about 5 percentage points to weekday attendance.`;
+      expect(centreRangeOfQuote(q, fx(5)), join).toBeUndefined();
+      expect(linkEffectTheUserStated(q, fx(5), ends, scope), join).toBe('unclear_figure');
+    }
+  });
+  it('NEGATIVE: a figure that IS an end of the range written first is never a centre ("between 4 and 7 …, about 4")', () => {
+    const q = said('between 4 and 7 percentage points to weekday attendance, about 4.');
+    expect(centreRangeOfQuote(q, fx(4))).toBeUndefined();
+  });
+  it('NEGATIVE: a range in another unit written first ("Between 1 and 4 months …") gives no centre, and a lone time range is still asked', () => {
+    const q = 'Between 1 and 4 months after launch, the corporate deal active would add about 5 percentage points to weekday attendance.';
+    expect(centreRangeOfQuote(q, fx(5))).toBeUndefined();
+    expect(linkEffectTheUserStated(q, fx(5), ends, scope)).toBe('unclear_figure');
   });
 });
