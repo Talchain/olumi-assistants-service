@@ -1751,6 +1751,18 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
        * two real placeholders. It is no longer projected; a link that holds by definition is arithmetic and carries none.
        */
       ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? {} : { sizing: linkSizing(e) }),
+      // The figure belongs to this directed link, with its recorded units/range/quote. Drawing a link and sizing it
+      // are different authorship questions; ask the existing provenance authority about the size.
+      ...((): Record<string, unknown> => {
+        const p = isPlainRecord(e.provenance) ? e.provenance : undefined;
+        if (linkSizing(e) === 'placeholder' || !isPlainRecord(p?.natural_effect)) return {};
+        return { natural_effect: {
+          ...pickKeys(p.natural_effect, ['amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'stated_range']),
+          ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? {}
+            : { whose: whoseOf(provenanceOf({ link: e, context: { fromKind: kindOf.get(e.from) } })) }),
+          ...(str(p.source_quote) ? { source_quote: p.source_quote } : {}),
+        } };
+      })(),
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
@@ -10441,7 +10453,7 @@ export function createAgentCapabilities(
         // get_canonical_state, so the first reply never contradicts the Run control.
         // ⭐ S7 B2 (capacity e2e c1e944a4 turn 01, judge item 4): the risks the Run leaves out, WITH their typed reason, as
         // get_canonical_state gives them. Without it the build turn's AI saw `relies_on` and no reason, and invented one.
-        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness', 'left_out_of_run']),
+        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'links', 'readiness', 'left_out_of_run']),
         // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
         ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
