@@ -175,14 +175,11 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
   const states = (n: number | undefined): boolean => typeof n === 'number' && Math.abs(n) === Math.abs(figure);
   const map = sourceMapOf(m.statements, brief);
   const key = subjectKey({ kind: 'goal', label: metric }, 'target');
-  // TL 09:18Z (2): a sentence whose figure the AI ALSO read as another subject's or field's ("We have a budget of £40,000." as the
-  // budget's level and the goal's target) has a competing reading; it is not the user's target, and the card offers Olumi's.
-  // Only for ONE written amount (BUDDY-A B1 on #3284): "We currently have 10,000 customers and need monthly revenue of at least
-  // £10,000." writes two amounts, so the customers' reading of one is no rival to the target the other states. A net loss's
-  // signed reading is the same written amount (`figuresWritten` lists it straight after it).
-  const timesWritten = (quote: string): number => figuresWritten(quote).filter((f, k, all) =>
-    (states(f.low) || states(f.high)) && !(k > 0 && f.low < 0 && all[k - 1]!.low === -f.low)).length;
-  const rivalled = (quote: string): boolean => timesWritten(quote) < 2 && [...map.verified.entries()].some(([other, statements]) => other !== key
+  // TL 09:18Z (2), AMENDED 10:49Z: a rival is ONLY another of the AI's own verified statements on the same sentence that gives
+  // that figure to another subject or field ("We have a budget of £40,000." as the budget's level and the goal's target). No
+  // unit comparison, mention count or text scan (BUDDY-A B1 R1/R2 on #3284): the AI's own labels decide, and the card offers
+  // Olumi's reading for one click wherever they compete, so the user's figure is never lost and never mis-authored.
+  const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
     && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
   return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote))
     .map((s) => s.quote);

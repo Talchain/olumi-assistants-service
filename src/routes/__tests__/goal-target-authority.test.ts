@@ -143,26 +143,38 @@ it('a figure the brief writes as another quantity is not the user’s target, th
   expect(goalNode(out.graph).threshold_source, 'not stamped as the user’s target').toBeUndefined();
 });
 
-describe('BUDDY-A B1 on #3284: a competing reading is of ONE written amount, never of a different quantity with the same number', () => {
+describe('BUDDY-A B1 R1/R2 on #3284, TL 10:49Z: a rival is the AI\u2019s own verified statement giving the figure another field', () => {
   const metric = 'Monthly revenue';
   const goalSaid = (quote: string) => statement('goal', metric, 'target', 'lower_bound', 10000, 'GBP/month', quote);
   const customersSaid = (quote: string) => statement('factor', 'Customers served', 'level', 'point', 10000, 'customers', quote);
-  it('positive: 10,000 customers and a £10,000 monthly revenue target are two amounts; the target stays the user\u2019s', async () => {
-    const brief = 'We currently have 10,000 customers and need monthly revenue of at least £10,000.';
-    const out = await construct(brief, [draft(brief, metric, 10000, 'GBP/month', null, [goalSaid(brief), customersSaid(brief)])]);
+  const brief = 'We currently have 10,000 customers and need monthly revenue of at least £10,000.';
+  it('control: the goal statement alone keeps the user\u2019s target', async () => {
+    const out = await construct(brief, [draft(brief, metric, 10000, 'GBP/month', null, [goalSaid(brief)])]);
     expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
     expect(goalRecord(out.graph)?.target).toMatchObject({ raw: 10000, source: 'brief_extraction' });
     expect(saidUnbound(out.result)).toBe(false);
   });
-  it('control: the goal statement alone keeps the same target', async () => {
-    const brief = 'We currently have 10,000 customers and need monthly revenue of at least £10,000.';
-    const out = await construct(brief, [draft(brief, metric, 10000, 'GBP/month', null, [goalSaid(brief)])]);
-    expect(goalRecord(out.graph)?.target).toMatchObject({ raw: 10000, source: 'brief_extraction' });
+  it('R1 (TL 10:49Z): the AI ALSO gave 10,000 to the customers\u2019 level, so its labels compete: the figure goes to the card, said, never dropped or authored', async () => {
+    const out = await construct(brief, [draft(brief, metric, 10000, 'GBP/month', null, [goalSaid(brief), customersSaid(brief)])]);
+    expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
+    expect(goalNode(out.graph).threshold_source, 'not stamped as the user\u2019s target').toBeUndefined();
+    expect(saidUnbound(out.result), 'the figure is said, so the card can offer Olumi\u2019s reading').toBe(true);
   });
-  it('NEGATIVE: one written amount read as both the customers\u2019 level and the revenue target is still a competing reading', async () => {
-    const brief = 'We need 10,000 a month. We want to grow the business.';
+  it('NEGATIVE R2: a budget written twice is still one budget; the AI\u2019s budget-level reading competes, never "your target"', async () => {
+    const repeated = 'Our budget is £40,000, and that £40,000 is all we can spend. We want to complete the PoC and explore ways to grow the product.';
+    const sentence = 'Our budget is £40,000, and that £40,000 is all we can spend.';
+    const out = await construct(repeated, [draft(repeated, 'Complete the PoC', 40000, 'GBP', 'event_by_date', [
+      statement('factor', 'Available budget', 'level', 'point', 40000, 'GBP', sentence),
+      statement('goal', 'Complete the PoC', 'target', 'lower_bound', 40000, 'GBP', sentence)])]);
+    expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
+    expect(goalRecord(out.graph)?.target?.raw).toBeUndefined();
+    expect(goalNode(out.graph).threshold_source).toBeUndefined();
+    expect(saidUnbound(out.result)).toBe(true);
+  });
+  it('NEGATIVE: one written amount read as both the customers\u2019 level and the revenue target is a competing reading', async () => {
+    const once = 'We need 10,000 a month. We want to grow the business.';
     const sentence = 'We need 10,000 a month.';
-    const out = await construct(brief, [draft(brief, metric, 10000, 'GBP/month', null, [goalSaid(sentence), customersSaid(sentence)])]);
+    const out = await construct(once, [draft(once, metric, 10000, 'GBP/month', null, [goalSaid(sentence), customersSaid(sentence)])]);
     expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
     expect(goalRecord(out.graph)?.target?.raw).toBeUndefined();
     expect(saidUnbound(out.result)).toBe(true);
