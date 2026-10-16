@@ -1,0 +1,13 @@
+{
+ "source_ref": "#94 6215225530 (Lane A request) → AIE disposition 16 Oct (inbox/LANE-A.md, \"AIE explicit central figure in a range\"); TL 12:18Z meaning ACK",
+ "path": "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+ "constant": "STATEMENTS_INSTRUCTION",
+ "status": "AIE AMEND: the exact clause, after the form sentence (capacity cfa31dfb: \"about 20, between 10 and 30\" drafted as range with value null)",
+ "changes": [
+  {
+   "id": "Q2",
+   "old": "form uses the schema's point, range, lower_bound, upper_bound, holds_now or describes.",
+   "replacement": "form uses the schema's point, range, lower_bound, upper_bound, holds_now or describes. When the source explicitly states a central or representative figure together with a range for the same quantity, unit, reference, window and conditions, retain one entry: form range, low and high the stated ends, and value that explicitly stated figure. Preserve its qualifier, such as ‘about’ or ‘likely’; never infer a midpoint or choose an endpoint. If no central figure is stated, value remains null. Do not merge different claims or turn a likely bound into a central value."
+  }
+ ]
+}
