@@ -76,6 +76,8 @@ export interface ProposalOperation {
      * Written only through the product's typed target writer (`goal_target_edit` → `add_constraint`).
      */
     | 'set_goal_target'
+    /** ONE prepared governing-outcome/target/horizon/removals card; exact whole-candidate CAS registration. */
+    | 'repoint_goal'
     /**
      * ⭐ THE USER'S STATED EFFECT ON ONE LINK (DL 5882763151; Canonical's `applyLinkEffectEdit`) — `path` is
      * `from::to`, `value` is `{from, to, effect, quote, edge_token}`: the user's two figures in the ends' units, their
@@ -340,7 +342,7 @@ export function hasCardOnlyOperations(operations: readonly ProposalOperation[]):
   // AIE #94 6132054663: never a typed yes without the current permission binding, a reseeded message or another card).
   if (operations.some(carriesQuoteConfirmation)) return true;
   // G: the answer to the goal's open question about its reading is the user's choice on the card that shows that reading.
-  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'apply_saved_correction' || op.op === 'confirm_goal_reading'
+  return operations.some(op => op.op === 'attest_goal_steady' || op.op === 'replace_draft' || op.op === 'apply_saved_correction' || op.op === 'repoint_goal' || op.op === 'confirm_goal_reading'
     // Olumi's range for a risk is applied ONLY by the press on the card that shows it (never a typed yes the Agent reads).
     || op.op === 'set_risk_occurrence' || op.op === 'set_cohort_forecast' || op.op === 'set_statement_record' || op.op === 'set_option_capacity_change'
     // An option's name is the user's: Olumi's proposed rename is applied ONLY by the press on its card.

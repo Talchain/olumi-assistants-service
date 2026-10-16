@@ -1,4 +1,5 @@
 /** Saved-model corrections: real canonical adapters → own card → one native CAS registration → whole readback. */
+import { GraphV3 } from '../../schemas/cee-v3.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
@@ -21,7 +22,7 @@ vi.mock('../../orchestrator/user-identity.js', async original => ({
 import { tryStructureOriginAnswer } from '../../cee/context-integrity/structure-origin-answer.js';
 import { constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import registerRoute from '../assist.v1.scenario-graph-register.js';
-import { createAgentCapabilities, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { createAgentCapabilities, projectModelContext, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { ProposalStore, createProposal, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { proposalPendingAction, rehydrateProposals } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
@@ -84,7 +85,8 @@ async function world(row: { readonly graph: Rec; readonly brief: string; readonl
   };
   const app = Fastify(); await registerRoute(app); await app.ready(); close.push(() => app.close());
   const dispatch: InternalDispatch = async (path, body) => {
-    if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(graph), brief_text: row.brief,
+    if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
+    if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(graph), brief_text: row.brief, scenario_created_at: '2026-10-16T00:00:00.000Z',
       graph_hash: computeAnalysisAffectingGraphHash(graph as never), graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     if (path.endsWith('/graph/register')) {
       sent.push(structuredClone(body as Rec));
@@ -99,8 +101,8 @@ async function world(row: { readonly graph: Rec; readonly brief: string; readonl
   const caps = (store = proposals) => createAgentCapabilities(dispatch, store, undefined, 'full', undefined, { turnAuthority: true,
     readCommittedTurnLedger: async () => ({ first_user_message: row.brief, write_turn_ids: options.hideLedger ? [] : writes.map(w => w.turn_id),
       messages: [], complete: true }) as never });
-  const ctx: AgentToolContext = { scenario_id: sid, authenticated_user_id: null, request_id: 'native-correction', turn_id: randomUUID(),
-    user_turn_text: row.message, user_text: row.message, user_text_complete: true, verified_user_messages: [row.message] };
+  const ctx = { scenario_id: sid, authenticated_user_id: null, request_id: 'native-correction', turn_id: randomUUID(),
+    user_turn_text: row.message, user_text: row.message, user_text_complete: true, verified_user_messages: [row.message] } satisfies AgentToolContext;
   return { graph: () => graph, original, writes, sent, proposals, caps, ctx };
 }
 
@@ -252,4 +254,203 @@ describe('retired full-redraft correction has no writer', () => {
     expect(pressed).toMatchObject({ ok: false, applied: false, mutated: false, refusal: 'retired_correction' });
     expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
   });
+});
+
+
+describe('one native governing-outcome correction', () => {
+  const source = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+  const ambition = 'The larger fund of at least £1.3 million remains my later ambition, if the evidence supports it.';
+  const args = { governing_outcome: 'Angel funding secured', goal_change_quote: source, later_ambition_quote: ambition,
+    constraint_type: 'at_least', value: 250000, unit: '£', rationale: source };
+  function funding(existing = true) {
+    return { nodes: [
+      { id: 'large_fund', kind: 'goal', label: 'Larger fund secured', goal_threshold_raw: 1300000, goal_threshold: 0.8,
+        goal_threshold_cap: 1625000, goal_threshold_unit: '£',
+        goal_threshold_frame: 'level', goal_direction: '>=', threshold_source: 'brief_extraction',
+        goal_horizon: { deadline: '2027-12-31' }, goal_deadline_as_stated: 'by the end of next year',
+        description: ambition },
+      ...(existing ? [{ id: 'angel_fund', kind: 'outcome', label: 'Angel funding secured', description: 'Conditional on investor interest' }] : []),
+      { id: 'focus', kind: 'option', label: 'Focus on the PoC', interventions: { effort: { value: 0.8 } } },
+      { id: 'effort', kind: 'factor', label: 'Founder effort', observed_state: { value: 0.8, baseline: 0.8, source: 'brief_extraction' } },
+      { id: 'rejected', kind: 'risk', label: 'Job-spec focus', description: 'Retained source: not the intended mechanism' },
+    ], edges: [{ from: 'focus', to: 'effort', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      ...(existing ? [{ from: 'effort', to: 'angel_fund', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive' }] : []),
+      { from: 'effort', to: 'large_fund', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive' }],
+      goal_constraints: [{ constraint_id: 'original-target', node_id: 'large_fund', operator: '>=', value: 1300000,
+        unit: '£', value_frame: 'level', role: 'goal_target', source_quote: ambition, provenance: 'explicit' }] };
+  }
+  const make = async (existing = true, options = {}) => {
+    const parsed = GraphV3.safeParse(funding(existing)); expect(parsed.success, JSON.stringify(parsed)).toBe(true);
+    const w = await world({ graph: funding(existing), brief: ambition, message: source }, options);
+    w.ctx.verified_user_messages = [ambition, source]; return w;
+  };
+  it.each([true, false])('prepares, cold-restores, presses and reads back the whole goal change (existing outcome %s)', async existing => {
+    const w = await make(existing);
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('Olumi reads the target as');
+    expect(offered.public_label).toContain('later ambition');
+    expect(offered.public_label).toContain('1,300,000');
+    expect(w.writes).toHaveLength(0);
+    const proposal = w.proposals.get(String(offered.proposal_id))!;
+    expect(proposal.operations).toHaveLength(1); expect(proposal.operations[0]!.op).toBe('repoint_goal');
+    const cold = restoreCard(proposal, offered, w.ctx);
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: 'Yes, at least' }, { proposal_id: proposal.proposal_id })).toMatchObject({ ok: false, mutated: false });
+    const saved = await w.caps(cold).authoriseChange({ ...w.ctx, user_turn_text: '', typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(w.sent).toHaveLength(1);
+    const graph = w.graph(); const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.label).toBe(args.governing_outcome); expect(goal.goal_threshold_raw).toBe(250000);
+    expect(goal.goal_threshold_unit).toBe('£'); expect(goal.goal_direction).toBe('>=');
+    expect(goal.threshold_source).toBe('cee_inference');
+    expect(goal.user_statements[0].statements[0]).toMatchObject({ quote: source, source, reading: 'olumi' });
+    const old = graph.nodes.find((n: Rec) => n.id === 'large_fund');
+    expect(old).toMatchObject({ kind: 'outcome', goal_threshold_raw: 1300000, goal_horizon: { deadline: '2027-12-31' } });
+    expect(old.retained_aim.constraints).toEqual(w.original.goal_constraints);
+    expect(graph.goal_constraints.some((r: Rec) => r.node_id === 'large_fund')).toBe(false);
+    expect(graph.nodes.find((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.find((n: Rec) => n.kind === 'option'));
+    const reopened = projectModelContext({ nodes: graph.nodes, edges: graph.edges, raw: graph } as never) as Rec;
+    expect(reopened.goal.label).toBe(args.governing_outcome);
+    expect(reopened.earlier_aims[0]).toMatchObject({ label: 'Larger fund secured', later_ambition_quote: ambition,
+      goal: { target: { raw: 1300000, comparator: '>=' } }, constraints: w.original.goal_constraints });
+    expect(computeAnalysisAffectingGraphHash(graph as never)).not.toEqual(computeAnalysisAffectingGraphHash(w.original as never));
+  });
+  it('composes a requested removal on the same prepared card and one native save', async () => {
+    const w = await make(); const quote = 'Remove the risk “Job-spec focus”.';
+    w.ctx.user_turn_text = quote; w.ctx.user_text += '\n' + quote; w.ctx.verified_user_messages = [ambition, source, quote];
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, remove_mechanisms: [{ kind: 'risk', label: 'Job-spec focus', quote }] }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('does not mean it cannot happen'); expect(w.writes).toHaveLength(0);
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(w.graph().nodes.some((n: Rec) => n.id === 'rejected')).toBe(false);
+  });
+  it.each(['figure', 'source', 'reported', 'unit', 'ambition'] as const)('refuses unsupported %s with no proposal/write', async fault => {
+    const w = await make(); const input = { ...args };
+    if (fault === 'figure') input.value = 280000;
+    if (fault === 'source') input.goal_change_quote = 'We need £250,000.';
+    if (fault === 'reported') { input.goal_change_quote = 'Olumi suggested £250,000, but I reject that figure.'; w.ctx.verified_user_messages = [input.goal_change_quote]; }
+    if (fault === 'unit') input.unit = 'customers';
+    if (fault === 'ambition') input.later_ambition_quote = 'This is definitely the later ambition.';
+    const result = await dispatchTool('propose_goal_target', JSON.stringify(input), w.ctx, w.caps());
+    expect(result).toMatchObject({ ok: false, mutated: false }); expect(result).not.toHaveProperty('proposal_id');
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+  });
+  it('refuses the entire card when a requested removal cannot be prepared', async () => {
+    const w = await make();
+    const result = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, remove_mechanisms: [{ kind: 'risk', label: 'Missing risk', quote: source }] }), w.ctx, w.caps());
+    expect(result).toMatchObject({ ok: false, mutated: false }); expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0);
+  });
+  it('a concurrent native edit refuses without saving any part of the goal change', async () => {
+    const w = await make(true, { race: true });
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true });
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+  });
+  it('includes the stated current level and modelled deadline on the same card/save', async () => {
+    const w = await make();
+    const quote = 'Angel funding secured is £0 today. I need at least £250,000 in angel funding by 30 June 2027.';
+    w.ctx.user_text = quote; w.ctx.user_turn_text = quote; w.ctx.verified_user_messages = [ambition, quote];
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, goal_change_quote: quote,
+      current_level: { value: 0, unit: '£' }, deadline_words: '30 June 2027' }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('£0'); expect(offered.public_label).toContain('2027'); expect(w.writes).toHaveLength(0);
+    const pid = String(offered.proposal_id), cold = restoreCard(w.proposals.get(pid)!, offered, w.ctx);
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.observed_state).toMatchObject({ raw_value: 0, unit: '£', cap: goal.goal_threshold_cap, source: 'user_override' });
+    expect(goal.goal_horizon).toEqual({ deadline: '2027-06-30' }); expect(goal.goal_horizon_months).toBeGreaterThan(0);
+    expect(w.graph().nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon).toEqual({ deadline: '2027-12-31' });
+    expect(w.writes).toHaveLength(1);
+  });
+  it.each(['level', 'deadline'])('an unsupported %s refuses the whole bundle, including the otherwise valid goal', async missing => {
+    const w = await make();
+    const extra = missing === 'level' ? { current_level: { value: 200, unit: '£' } } : { deadline_words: 'tomorrow' };
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, ...extra }), w.ctx, w.caps());
+    expect(offered).toMatchObject({ ok: false, mutated: false }); expect(offered).not.toHaveProperty('proposal_id');
+    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+  });
+  it('requested factor removal shows its option-setting consequence and saves it with the goal', async () => {
+    const w = await make(); const quote = 'Remove the factor “Founder effort”.';
+    w.ctx.user_turn_text = quote; w.ctx.user_text += '\n' + quote; w.ctx.verified_user_messages = [ambition, source, quote];
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, remove_mechanisms: [{ kind: 'factor', label: 'Founder effort', quote }] }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('no longer sets it');
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.some((n: Rec) => n.id === 'effort')).toBe(false);
+    expect(w.graph().nodes.find((n: Rec) => n.id === 'focus').interventions).not.toHaveProperty('effort'); expect(w.writes).toHaveLength(1);
+  });
+  it.each(['row', 'deadline', 'factor', 'new_target', 'new_source'] as const)('a prepared complete candidate cannot lose an untouched %s before minting', async missing => {
+    const w = await make(); const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true });
+    const original = w.proposals.get(String(offered.proposal_id))!, operations = structuredClone(original.operations);
+    const value = operations[0]!.value as Rec, graph = value.candidate;
+    if (missing === 'row') graph.nodes.find((n: Rec) => n.id === 'large_fund').retained_aim.constraints = [];
+    if (missing === 'deadline') delete graph.nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon;
+    if (missing === 'new_target') graph.nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw = 280000;
+    if (missing === 'new_source') delete graph.nodes.find((n: Rec) => n.kind === 'goal').user_statements;
+    if (missing === 'factor') graph.nodes.find((n: Rec) => n.id === 'effort').observed_state.value = 0.2;
+    value.operation_id = constructionOperationId(w.ctx.scenario_id, 'broken-goal:' + computeGraphIdentityHash(graph as never)!.value);
+    const broken = createProposal({ scenario_id: original.scenario_id, user_id: original.user_id,
+      base_graph_identity_hash: original.base_graph_identity_hash, operations, provenance: original.provenance,
+      validation: original.validation, public_label: original.public_label });
+    w.proposals.put(broken);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: broken.proposal_id }, { proposal_id: broken.proposal_id })).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' });
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+  it('cold retry confirms the exact recorded operation and whole candidate without a second write', async () => {
+    const w = await make(true, { loseAcknowledgement: true });
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true });
+    const pid = String(offered.proposal_id), proposal = w.proposals.get(pid)!;
+    const press = { ...w.ctx, typed_approval_of: pid };
+    expect(await w.caps().authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: false, refusal: 'not_confirmed' });
+    const cold = restoreCard(proposal, offered, w.ctx);
+    expect(await w.caps(cold).authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, mutated: false, applied: true, already_applied: true });
+    expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
+  });
+
+  it('preserves the complete existing funding model while adding a new governing outcome', async () => {
+    const recorded = fixture('funding-247ae5b4-before-target.json');
+    const w = await world({ graph: recorded.graph, brief: recorded.brief_text, message: source });
+    w.ctx.verified_user_messages = [source];
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, later_ambition_quote: undefined }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
+    expect(w.graph().edges).toEqual(w.original.edges); expect(w.writes).toHaveLength(1);
+  });
+
+  it('cannot silently rescale an existing outcome’s old-unit current level during re-goal', async () => {
+    const quote = 'I want at least 250000 customers to be our current aim.';
+    const graph: Rec = funding(); graph.nodes.find((n: Rec) => n.id === 'angel_fund')!.observed_state = { value: 0.1, baseline: 0.1, raw_value: 10, cap: 100, unit: '£', source: 'user_override' };
+    const w = await world({ graph, brief: ambition, message: quote });
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, unit: 'customers', goal_change_quote: quote, later_ambition_quote: undefined }), w.ctx, w.caps());
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'current_level_unit_change' });
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+  });
+
+  it('keeps the existing science restriction on a newly selected forecast-chance outcome', async () => {
+    const quote = 'I want the probability of launch on time to be at least 0.8.';
+    const w = await world({ graph: funding(), brief: ambition, message: quote });
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ governing_outcome: 'On-time launch',
+      goal_change_quote: quote, constraint_type: 'at_least', value: 0.8, unit: 'probability of launch on time', rationale: quote }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: false, mutated: false, refusal: 'goal_measures_a_forecast' });
+    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+  });
+
+  it('resolves an existing outcome id to the saved human label on its bound card', async () => {
+    const w = await make();
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, governing_outcome: 'angel_fund' }), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('Angel funding secured'); expect(offered.public_label).not.toContain('angel_fund');
+    const pid = String(offered.proposal_id);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').label).toBe('Angel funding secured'); expect(w.writes).toHaveLength(1);
+  });
+
 });

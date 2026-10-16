@@ -84,6 +84,7 @@ const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
   // event_risk.v1 slice 2a: pipeline-owned occurrence.
   'event_risk',
   'relies_on', // RC3: server-authored precondition stamp.
+  'retained_aim', // Historical aim/source rows are authored only by the approved re-goal adapter.
   'cohort_forecast', // Science PR-4: an option's same-cohort forecast, written only by its one writer.
   // src/schemas/cee-v3.ts — NodeV3
   'provenance',
@@ -200,6 +201,7 @@ const SMUGGLE_NAMES = [
   'relies_on',
   // Science PR-4 (AIE same-cohort law): an option's cohort forecast, never a producer's to write.
   'cohort_forecast',
+  'retained_aim', // The old goal is history, never an AI-authored claim or active constraint.
 ] as const;
 
 describe('corpus B — the 27 smuggle names, hand-written', () => {

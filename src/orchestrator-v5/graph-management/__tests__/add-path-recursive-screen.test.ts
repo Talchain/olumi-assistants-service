@@ -130,6 +130,7 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
       'provenance',
       'provenance_display',
       'relies_on', // RC3: host-authored option precondition, never producer-writable.
+      'retained_aim', // Re-goal: only the approved host adapter may retain historical goal rows.
       'starterid',
       'startertitle',
       'std_defaulted',
@@ -149,7 +150,8 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
     // 27 CEE-owned smuggle names include the three new S4 pipeline-owned fields and three horizon-basis stamps; add five J2 names and event_risk.
     // Batch C: ruling 4 — +1 smuggle name (`goal_target_basis`), so 34 in all; the six non-smuggle names are unchanged.
     // Science PR-4 — +1 smuggle name (`cohort_forecast`), so 35 in all; the six non-smuggle names are unchanged.
-    expect(all.length).toBe(35);
+    // Re-goal adds one historical carrier; all existing nested negatives remain and now exercise this field too.
+    expect(all.length).toBe(36);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

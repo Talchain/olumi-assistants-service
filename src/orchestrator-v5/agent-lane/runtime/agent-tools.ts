@@ -510,7 +510,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
       + 'decision with the other direction beside it, and the user chooses. '
       + 'Give measures whenever the user names what the target is a figure of. '
-      + 'Use this tool for the target of the one current saved goal; it never constructs or replaces the model. '
+      + 'Without governing_outcome, change only the current saved goal’s target. When the user changes the governing outcome, identify it and quote the complete verified source in goal_change_quote. Propose ONE card showing that outcome, its bound target, any stated deadline and explicitly requested mechanism removals, including their consequences. Keep options/settings except the changes shown. Retain earlier aims in history and any explicitly later ambition with its original values, source and uncertainty; do not turn a rejected aim into an operative or automatically later goal. Show what changes, remains and cannot be represented. Governing-outcome binding is Olumi’s reading until this card’s approval; approval does not rewrite source authorship. No invented figure, comparator, current level or deadline, silent partial change or whole-model rebuild. A new outcome label remains Olumi’s proposal unless supplied by the user. '
       + 'Do not use successive calls to represent additional goals or a full AND objective. '
       + 'Retain every requested goal, condition and source; show exactly which target this card changes and which parts remain unsaved or unsupported.',
     parameters: obj({
@@ -519,6 +519,15 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
       measures: { type: 'string', description: 'What the figure is a figure OF, in the user\u2019s own words from this message (for example "conversion rate", "new customers").' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      governing_outcome: { type: 'string', description: 'Only when changing WHICH outcome governs: the existing outcome label/id, or a proposed new outcome label. This is Olumi’s interpretation for review.' },
+      goal_change_quote: { type: 'string', description: 'The COMPLETE verified human message supporting this goal change, verbatim, including conditions and uncertainty. A reported or disowned figure is not their target.' },
+      later_ambition_quote: { type: 'string', description: 'The complete verified source that makes the prior aim a later ambition. Without it the prior aim stays history, never automatically a later goal.' },
+      deadline_words: { type: 'string', description: 'The exact deadline words for the new governing outcome, when stated. Include them in this same card, preserving their source/reference.' },
+      remove_mechanisms: { type: 'array', maxItems: 6, items: obj({
+        kind: { type: 'string', enum: ['factor', 'risk', 'link'] },
+        id: { type: 'string' }, label: { type: 'string' }, to_id: { type: 'string' }, to_label: { type: 'string' },
+        quote: { type: 'string', description: 'The complete verified user request to remove this mechanism, naming it (or both link ends). Include all consequences on this card.' },
+      }, ['kind', 'quote']) },
       derived_from: obj({
         base: { type: 'number', description: 'The figure the user wrote that the target is derived from, in their units (100000 for "£100,000").' },
         multiplier: { type: 'number', description: 'The multiple they asked for: 2 for "double that", 3 for "triple", 0.5 for "halve".' },
@@ -1056,6 +1065,11 @@ export interface AgentCapabilities {
     current_level?: { value: number; unit: string };
     /** What the figure is a figure OF, in the user's words; a restatement corrects the saved goal on its own card. */
     measures?: string;
+    governing_outcome?: string;
+    goal_change_quote?: string;
+    later_ambition_quote?: string;
+    deadline_words?: string;
+    remove_mechanisms?: readonly { kind: 'factor' | 'risk' | 'link'; id?: string; label?: string; to_id?: string; to_label?: string; quote: string }[];
   }): Promise<ToolResult>;
   /** SYSTEM 1: the user's own statement about ONE subject, read, bound and verified by the ONE door, as ONE card. */
   proposeStatement?(ctx: AgentToolContext, args: { subject?: unknown; statements?: unknown }): Promise<ToolResult>;
