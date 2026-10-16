@@ -5,6 +5,22 @@ import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { capture, captureDir, findState, expected, keysDeep, object, valueAt, seedOf, type Turn, type Witness } from './provider-harness.js';
 
 describe('Explain uses the canonical assembly (serialized provider bytes)', () => {
+  it.each<Turn>(['Run-explanation', 'ordinary-converse', 'tool-continuation'])(
+    'S4: %s receives the record-first coaching direction once, with the record’s factual limits', async turn => {
+      const w = await capture(turn, 'run2');
+      for (const c of w.calls) {
+        const sent = `${String(c.body.instructions)}\n${JSON.stringify(c.payloads)}`;
+        expect(sent.split('If that record names a change or cannot establish what changed, lead once')).toHaveLength(2);
+        expect(sent).toContain('With no preceding Run, or with a complete unchanged-input record, lead with the current supported finding');
+        expect(sent).toContain('Keep each endpoint’s Run, scope and qualifications');
+        expect(sent).not.toContain('Lead with the current supported finding, then explain the recorded change');
+        const record = object(findState(c.payloads).rerun_record);
+        expect(record.code_line).toBeDefined();
+        expect(record.use).toContain('Never say nothing changed when code_line names a change.');
+        expect(record.use).toContain('Unless attribution_case is C1_attributable, never say which change caused the difference.');
+      }
+    }, 60000);
+
   it('S3: the selected Run evidence reaches the serialized interpreter body; absent history is not filled from the graph', async () => {
     const w = await capture('Run-explanation', 'run2', { readSnapshot: async snapshot => {
       const g = object(snapshot.graph), nodes = Array.isArray(g.nodes) ? g.nodes.map(object) : [];
@@ -231,8 +247,10 @@ describe('Explain scoped assembly safety', () => {
       // B1 buddy repair: standing safeguards prefix restored; consolidated RUN_FACTS_USE kept once.
       // AIE-04: the exact disclosure/comparison rules below, prefix safeguards retained.
       // B2: evaluated-question scope sentence only; SENT instructions reverse byte-for-byte to AIE-04.
-      // 44906 UTF-8 bytes; Claude challenge required. LANE-B-B2-SENT-PIN-PROOF.json.
-      .toBe('8a4e5fda17989f710773af8b04618a32d4d4d131a29a922a490a63bcb73a69c8');
+      // S4: two competing finding-first copies removed; record-first ordering owned once by RUN_FACTS_USE.
+      // AIE exact single replacement, #94 6206574562, with factual checks retained.
+      // 46781 UTF-8 bytes; Claude challenge required. LANE-B-S4-AIE-SENT-PIN-PROOF.json.
+      .toBe('666b4c08c972a8f3c2977cea06fbb747c5d19460b24497bdc2768bd581259530');
   },60000);
 });
 

@@ -415,7 +415,6 @@ export function rerunExplanationPlan(
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
     'Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.',
-    "Lead with the current supported finding, then explain the recorded change and its supplied before-and-after result once. Preserve each endpoint's identity, quantity, uncertainty and attribution limits; do not repeat a change already presented in this response.",
     `Run record: "${codeLine}"`,
     ...(goalChanceChanges.length === 0 ? [] : [`${GOAL_CHANCE_CHANGES_LEAD} ${goalChanceChanges.map((c) => `‘${c.option_label}’: ${c.prior} → ${c.current}.`).join(' ')}`]),
     priorWithheld && goalChanceChanges.length === 0
@@ -466,7 +465,6 @@ export interface RerunRecordForModel {
 export const TYPED_RERUN_RECORD_RULE =
   'Olumi\u2019s own record of what changed between the Run before the latest one and the latest Run. '
   + 'When the user asks what changed since the last run, or why the result is different, answer from it: '
-  + "Lead with the current supported finding, then explain the recorded change and its supplied before-and-after result once. Preserve each endpoint's identity, quantity, uncertainty and attribution limits; do not repeat a change already presented in this response. "
   + '\u201cSince the last run\u201d means the latest Run against the one before it; say any edit made after the latest Run separately. '
   + 'Never say nothing changed when code_line names a change. '
   + 'If prior_withheld is true, never say anything rose, fell or moved, except a chance listed in goal_chance_changes, as recorded there. '

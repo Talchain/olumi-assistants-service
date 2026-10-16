@@ -166,7 +166,8 @@ describe('the record\'s rule: how the typed answer uses it', () => {
   it('reads "since the last run" as the latest Run against the one before, and never lets "nothing changed" stand beside a named change', () => {
     expect(TYPED_RERUN_RECORD_RULE).toContain('“Since the last run” means the latest Run against the one before it');
     expect(TYPED_RERUN_RECORD_RULE).toContain('Never say nothing changed when code_line names a change.');
-    expect(TYPED_RERUN_RECORD_RULE).toContain('Lead with the current supported finding, then explain the recorded change and its supplied before-and-after result once.');
+    // S4: reply order belongs to RUN_FACTS_USE, checked on the actual sent body; this record keeps its factual limits.
+    expect(TYPED_RERUN_RECORD_RULE).not.toContain('Lead with the current supported finding');
     // S9 (PL 07:50Z): prior_withheld is the earlier Run's shares; a goal chance recorded in both Runs may be said to move.
     expect(TYPED_RERUN_RECORD_RULE).toContain('If prior_withheld is true, never say anything rose, fell or moved, except a chance listed in goal_chance_changes, as recorded there.');
     expect(TYPED_RERUN_RECORD_RULE).toContain('Unless attribution_case is C1_attributable, never say which change caused the difference.');
