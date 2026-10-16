@@ -341,7 +341,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(line.olumi_estimate_link_count).toBe(1);
     const canonical = [line.chance, line.depends].filter(Boolean).join(' ');
     const narration = `${canonical} Olumi's estimates feed 99 links.`;
-    expect(checkScreenLineClaims(narration, [line])).not.toContain('99 links');
+    expect(checkScreenLineClaims(narration, [line], [], undefined, { links: 1 })).not.toContain('99 links');
     const b = await turn(run(narration), 'Run it');
     expect(b.assistant_text).not.toContain('99 links');
     expect(b.assistant_text).toContain(line.chance);

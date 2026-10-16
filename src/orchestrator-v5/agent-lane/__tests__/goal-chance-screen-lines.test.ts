@@ -137,7 +137,7 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
 describe('the retained count check adds no host finding or coaching move', () => {
   it('scrubs the captured fabricated narrator count without appending a chance or another question', () => {
     expect(B4_RUN1.assistant_text.startsWith(B4_1_NARRATOR_COUNT)).toBe(true);
-    const out = checkScreenLineClaims(B4_RUN1.assistant_text, linesOf(B4_RUN1));
+    const out = checkScreenLineClaims(B4_RUN1.assistant_text, linesOf(B4_RUN1), [], undefined, { values: 6, links: 6 });
     expect(out).toBe(B4_RUN1.assistant_text.replace(B4_1_NARRATOR_COUNT, ''));
   });
 

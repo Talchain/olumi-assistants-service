@@ -386,13 +386,22 @@ describe("the reload keeps each answer's own Run's words", () => {
     user_message: r.user_message, assistant_message: r.assistant_message }));
   const stored = (id: string): string => (FX.rows as Record<string, any>[]).find(r => r.turn_id === id)!.assistant_message;
   const RUN1 = "a3e3933c-47c5-4eda-9779-a471dd170bc5", RUN2 = "8ac9acfa-e312-425b-850e-47f8d1540bf1", BUILT = "3db16588-be9b-4257-9157-323bf2797ddd";
-  const reloadOnRun2 = async (storedRows = rows) => {
-    estimateAnalysis.value = { ...FX.run2, analysis_constraint_verdict_state: null };
+  const boundRun2 = async () => {
+    const run = structuredClone(FX.run2);
+    const { computeAnalysisAffectingGraphHash } = await import('../../orchestrator-v5/context/graph-hash.js');
+    run.analysis_result.computed_against_hash = computeAnalysisAffectingGraphHash(run.graph);
+    return run;
+  };
+  const reloadOnRun2 = async (storedRows = rows, run = FX.run2) => {
+    estimateAnalysis.value = { ...run, analysis_constraint_verdict_state: null };
     scenarioExists.mockResolvedValue(true);
-    loadGraphAndBriefText.mockResolvedValue({ graph: FX.run2.graph, briefText: "capacity" });
+    loadGraphAndBriefText.mockResolvedValue({ graph: run.graph, briefText: "capacity" });
     readRecent.mockResolvedValue([...storedRows].reverse());
+    const { runExplanationKeyForRecord } = await import('../../orchestrator-v5/agent-lane/run-explanation.js');
+    const currentKey = runExplanationKeyForRecord(SID, run.analysis_state, run.analysis_result);
     readCommittedTurn.mockImplementation(async (_s: string, t: string) =>
-      ({ run_narration: (FX.rows as Record<string, any>[]).find(r => r.turn_id === t)?.run_narration ?? null }));
+      ({ run_narration: run !== FX.run2 && t === RUN2 ? { run_key: currentKey }
+        : (FX.rows as Record<string, any>[]).find(r => r.turn_id === t)?.run_narration ?? null }));
     const app = await buildApp();
     const res = await read(app, SID, { include_conversation_turns: true });
     await app.close();
@@ -434,5 +443,46 @@ describe("the reload keeps each answer's own Run's words", () => {
     expect(shown.get(RUN2)).toContain("about 64% chance of meeting your goal");
     expect(shown.get(RUN2)).not.toContain("about 50%");
     expect(shown.get(RUN1)).toBe(stored(RUN1));
+  });
+
+  it("a fabricated census on the current answer cannot borrow the recorded producer's count", async () => {
+    const wrong = stored(RUN2).replace("Olumi's estimates: 2,", "Olumi's estimates: 99,");
+    expect(wrong).not.toBe(stored(RUN2));
+    const shown = await reloadOnRun2(rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: wrong } : r), await boundRun2());
+    expect(shown.get(RUN2)).not.toContain("Olumi's estimates: 99,");
+    expect(shown.get(RUN2)).toContain('about 64% chance of meeting your goal');
+    expect(shown.get(RUN1)).toBe(stored(RUN1));
+  });
+
+  it("reopen uses the producer census including an Olumi setting on a withheld option", async () => {
+    const run = await boundRun2();
+    const licence = run.analysis_result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_CHANCE_LICENSED');
+    licence.option_ids.push('add_half_time_specialist');
+    licence.withheld_option_ids.push('add_half_time_specialist');
+    const { checkEstimatesOf } = await import('../../orchestrator-v5/agent-lane/actions/state.js');
+    const { runExplanationKeyForRecord } = await import('../../orchestrator-v5/agent-lane/run-explanation.js');
+    const census = checkEstimatesOf({ scenarioId: SID, graph: run.graph,
+      graphHash: run.analysis_result.computed_against_hash, analysisResult: run.analysis_result });
+    expect(census).toMatchObject({ count: 3 });
+    expect(census!.values.map(v => v.id)).toContain('add_half_time_specialist:additional_specialists');
+    expect(runExplanationKeyForRecord(SID, run.analysis_state, run.analysis_result)).not.toBeNull();
+    const ownText = stored(RUN2).replace("Olumi's estimates: 2,", "Olumi's estimates: 3,");
+    expect(ownText).not.toBe(stored(RUN2));
+    const withText = (text: string) => rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: text } : r);
+    const shown = (await reloadOnRun2(withText(ownText), run)).get(RUN2);
+    expect(shown).toBe(ownText);
+    const wrong = ownText.replace("Olumi's estimates: 3,", "Olumi's estimates: 99,");
+    expect((await reloadOnRun2(withText(wrong), run)).get(RUN2)).not.toContain('estimates: 99');
+  });
+
+  it("reopen keeps the producer census when the licence omits the census fields", async () => {
+    const run = await boundRun2();
+    const licence = run.analysis_result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_CHANCE_LICENSED');
+    delete licence.olumi_estimate_link_count;
+    const shown = await reloadOnRun2(rows, run);
+    expect(shown.get(RUN2)).toBe(stored(RUN2));
+    const wrong = stored(RUN2).replace("Olumi's estimates: 2,", "Olumi's estimates: 99,");
+    const poisoned = rows.map(r => r.turn_id === RUN2 ? { ...r, assistant_message: wrong } : r);
+    expect((await reloadOnRun2(poisoned, run)).get(RUN2)).not.toContain('estimates: 99');
   });
 });
