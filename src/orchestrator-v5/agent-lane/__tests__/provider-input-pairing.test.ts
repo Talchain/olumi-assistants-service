@@ -103,17 +103,16 @@ describe('one provider input pairing projection', () => {
     expect(JSON.stringify(pairProviderInput(input))).toBe(JSON.stringify(input));
   });
 
-  it('the existing interpretation context projection reproduces the orphan and the boundary repairs only its API identity', () => {
+  // The interpretation projection used to drop reasoning items while keeping the answer's provider id (the orphan this
+  // boundary was built for). turn-context.ts now forwards the ordered chain at source, so the boundary has nothing to repair.
+  it('the existing interpretation context projection keeps the reasoning with its answer, so the boundary returns it untouched', () => {
     const answer = message('msg_projection');
     const projected = turnContextItems({ now: new Date('2026-10-16T21:00:00Z'), briefText: '',
       conversation: [user, rs('rs_projection'), answer], request: 'Explain this Run; do not change the model.',
       canonicalState: { goal: 'Retain human reasoning', unit: 'GBP', user_words: 'Our range is 40–55; I disagree with that estimate.' } }) as Item[];
-    expect(projected).toContain(answer); expect(projected.some(i => i.id === 'rs_projection')).toBe(false);
-    expect(refusalFor(projected)).not.toBeNull();
-    const output = pairProviderInput(projected) as Item[];
-    expect(refusalFor(output)).toBeNull();
-    expect(output.filter(i => i.role !== 'assistant')).toEqual(projected.filter(i => i.role !== 'assistant'));
-    expect(output.find(i => i.role === 'assistant')).toEqual({ role: 'assistant', content: answer.content });
+    expect(projected).toContain(answer); expect(projected.some(i => i.id === 'rs_projection')).toBe(true);
+    expect(refusalFor(projected)).toBeNull();
+    expect(pairProviderInput(projected)).toBe(projected);
   });
 
   it('the banked callModelFor input hook preserves the native request settings/tools and accepts the orphan shape', () => {
