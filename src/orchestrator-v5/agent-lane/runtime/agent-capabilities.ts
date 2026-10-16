@@ -4114,7 +4114,7 @@ export function createAgentCapabilities(
       }
     }
     if (v.retained_aim_description !== undefined) {
-      const expected = priorAimDescription(before.raw, parent.operations[0]!.path, typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined);
+      const expected = priorAimDescription(before.raw, parent.operations[0]!.path, typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined, 'target');
       const node = isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) ? v.candidate.nodes.find(n => isPlainRecord(n) && n.id === parent.operations[0]!.path) : undefined;
       if (expected === undefined || v.retained_aim_description !== expected || !isPlainRecord(node) || node.description !== expected) return notApplied('incomplete_goal_postimage', 'This card would lose the earlier aim or its complete source. Nothing was saved.');
     }
@@ -6333,7 +6333,7 @@ export function createAgentCapabilities(
           || typeof held?.raw !== 'number' || !figureTheUserWrote(held.raw, held.unit ?? '', quote)
           || quoteIsNotTheUsersClaim(quote, quote)) return { ok: false, mutated: false, refusal: 'ambition_not_verified',
             detail: 'The later ambition could not be bound to the saved target and its complete source. Nothing was prepared; retain the original statement.' };
-        retainedAim = priorAimDescription(g.raw, goal.id, quote);
+        retainedAim = priorAimDescription(g.raw, goal.id, quote, 'target');
         if (retainedAim === undefined) return { ok: false, mutated: false, refusal: 'ambition_not_retained' };
       }
       if (restatedQuantity || retainedAim !== undefined) {
@@ -6390,7 +6390,7 @@ export function createAgentCapabilities(
         const measurement = typeof goalUnit === 'string' && unitComparisonKey(goalUnit) !== unitComparisonKey(unit)
           ? ` This changes the goal’s measurement from ${goalUnit} to ${unit}.` : '';
         const heldTarget = readGoalRecord(g.raw, goal.id)?.target;
-        const replaces = typeof heldTarget?.raw !== 'number' ? '' : ` This replaces the saved target ${heldTarget.comparator ?? ''} ${targetFigure(heldTarget.raw, heldTarget.unit ?? '')}.`;
+        const replaces = typeof heldTarget?.raw !== 'number' ? '' : ` This replaces the saved target ${heldTarget.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[heldTarget.comparator]} ${targetFigure(heldTarget.raw, heldTarget.unit ?? '')}.`;
         const ambitionKept = retainedAim === undefined ? '' : ` The earlier target remains as history and later ambition, with its original source and conditions: “${args.later_ambition_quote}”. It does not constrain the current target.`;
         const levelLeftOut = args.current_level === undefined ? '' : ' This card changes only the target; it does not record today’s level.';
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,

@@ -85,8 +85,9 @@ describe('a packet must be projection-shaped before the tool is omitted', () => 
     const r = run({ entities: [projected] });
     expect(r.freshness.kind).toBe('fresh'); // non-vacuity
     expect(names(r)).not.toContain(TOOL);
-    // A populated model also withholds the build it would refuse (PJ-C1, given-state-lean.test.ts), on the same evidence.
-    expect(r.omitted.map((o) => o.name)).toEqual([TOOL, 'build_model_from_brief']);
+    // A populated model keeps the constructor for a CURRENT requested replacement; only the equivalent fetch is omitted.
+    expect(names(r)).toContain('build_model_from_brief');
+    expect(r.omitted.map((o) => o.name)).toEqual([TOOL]);
   });
 
   it('⛔ KEEPS the tool when entities are present but carry NO id', () => {

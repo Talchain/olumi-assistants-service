@@ -625,8 +625,13 @@ describe('one native governing-outcome correction', () => {
     expect(held.operations[0]!.op).toBe('set_goal_target');
     const goal = value.candidate.nodes.find((n: Rec) => n.kind === 'goal');
     expect(goal.id).toBe('large_fund'); expect(goal.goal_threshold_raw).toBe(250000);
+    expect(goal.goal_horizon).toEqual({ deadline: '2027-12-31' });
+    expect(goal.description).not.toContain('governing aim before');
+    expect(goal.description).not.toContain('does not set the current goal’s deadline');
+    expect(goal.description).not.toContain('Earlier timing');
+    expect(offered.public_label).toContain('saved target at least £1,300,000');
     expect(goal.description).toContain(graph.nodes[0].description);
-    expect(boundNodeDescriptionForContext(goal.description)).toContain('Earlier aim');
+    expect(boundNodeDescriptionForContext(goal.description)).toContain('Earlier target');
     expect(boundNodeDescriptionForContext(goal.description)).toContain('£1,300,000');
     expect(boundNodeDescriptionForContext(goal.description)).toContain('Priya disputes');
     expect(w.writes).toHaveLength(0);
