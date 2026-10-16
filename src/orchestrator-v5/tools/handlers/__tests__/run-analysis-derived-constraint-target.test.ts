@@ -246,6 +246,6 @@ describe('r1225 — a constraint on a DERIVED target still consumes the producer
 
     expect(v.constraint_verdict_state).toBe('not_applicable');
     expect(v.may_name_leading_option).toBe(true);
-    expect(v.summary).toContain('was supported by');
+    expect(v.summary).toBe('Ran analysis on your current scenario.');
   });
 });

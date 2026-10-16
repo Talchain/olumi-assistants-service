@@ -874,7 +874,7 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
     const outcome = await handler(makeInvocation());
     // A single-option comparison share cannot stand in for a licensed goal chance.
     expect(outcome.assistant_text).toBe(
-      'Ran analysis on your current scenario.',
+      'Ran analysis on your current scenario. Run the follow-up checks before treating this as final.',
     );
   });
 
@@ -1156,7 +1156,7 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_only');
     // The single-option share remains exactly1 in data; no licensed goal chance exists.
-    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario.');
+    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario. Run the follow-up checks before treating this as final.');
     expect(fact.result.win_probabilities).toEqual({ 'Only Option': 1 });
   });
 

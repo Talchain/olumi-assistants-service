@@ -77,7 +77,7 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     expect(runFactsOf(run, captured.graph, false, { runEvidence: evidence() }).chances.goal_chance_display).toBeUndefined();
   });
 
-  it.each(['normal', 'reduced', 'partial'] as const)('the actual handler stores the record-owned chance and retains the %s caution through the registry', async mode => {
+  it.each(['normal', 'reduced', 'partial', 'provisional'] as const)('the actual handler stores the record-owned chance and retains the %s caution through the registry', async mode => {
     const snapshot = await loadScenarioSnapshotForRunAnalysis('bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', 's3-capture', {
       loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(captured.graph), briefText: captured.brief, revision: 2 })),
       readMostRecentPendingActions: vi.fn(async () => []),
@@ -86,6 +86,9 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     let outbound: unknown;
     const transport = vi.fn(async (request: unknown) => { outbound = request; return { ...structuredClone(minimal),
       option_comparison: structuredClone(captured.result.enrichment.option_comparison),
+      ...(mode === 'provisional' ? { robustness: { level: 'moderate', fragile_edges: [
+        { from_label: 'Additional specialist capacity', to_label: 'Weekly support capacity', switch_probability: 0.45 },
+      ] } } : {}),
       ...(mode === 'reduced' ? { inference_warnings: [{ code: 'SAMPLES_REDUCED_FOR_COMPLEXITY' }] } : {}),
       ...(mode === 'partial' ? { analysis_status: 'partial' } : {}) }; });
     const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
@@ -113,6 +116,7 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     expect(outcome.assistant_text).toBe(fact.result.summary);
     if (mode === 'reduced') expect(outcome.assistant_text).toContain('analysis ran fewer simulations');
     if (mode === 'partial') expect(outcome.assistant_text).toContain('Some results may be incomplete — treat with caution.');
+    if (mode === 'provisional') expect(outcome.assistant_text).toContain('Treat this as provisional:');
     const confirm = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
     if (typeof confirm !== 'function') throw new Error('Expected existing Run confirmation function');
     expect(confirm(outcome)).toBe(outcome.assistant_text);
@@ -120,5 +124,41 @@ describe('S3 single evaluated-input authority — independent capacity capture24
       assistant_text: outcome.assistant_text.replace('40%', '99%') })).not.toContain('99%');
     expect(confirm({ ...outcome,
       assistant_text: outcome.assistant_text + ' This includes every risk.' })).not.toContain('includes every risk');
+  });
+
+  it('one over-period level-threshold Run without its date check stays outside static scope on stored readback', async () => {
+    const graph = structuredClone(captured.graph);
+    const goal = graph.nodes.find(n => n.kind === 'goal')!;
+    Object.assign(goal, { goal_horizon_months: 3, goal_target_basis: { quantity_frame: 'level', target_frame: 'level', target_raw: 100,
+      reference: 'launch', period_months: 3, period_kind: 'over_period', effect_unit: 'tickets over the first three months',
+      effects_at_period_end: false, source: 'olumi_reading' } });
+    const snapshot = await loadScenarioSnapshotForRunAnalysis('bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', 's3-period', {
+      loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: captured.brief, revision: 2 })),
+      readMostRecentPendingActions: vi.fn(async () => []),
+    } as never);
+    const transport = vi.fn(async (_request: unknown) => ({ ...structuredClone(minimal),
+      option_comparison: structuredClone(captured.result.enrichment.option_comparison) }));
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: transport, validatePatch: vi.fn() } as never });
+    const outcome = await handler({ payload: { scenario_id: 'bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', turn_id: 's3-period' }, requestId: 's3-period',
+      context: {}, signal: new AbortController().signal, orientationText: '' } as never);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]![0]).toMatchObject({ graph: expect.objectContaining({ nodes: expect.arrayContaining([
+      expect.objectContaining({ id: 'weekly_support_capacity', goal_threshold: 0.2, goal_threshold_frame: 'level' }),
+    ]) }) });
+    const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+    if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected stored over-period Run');
+    const q = deriveRunQuestion({ storedResult: fact.result });
+    expect(q.scope.status).not.toBe('supported_static');
+    expect(q.scope.can_show_goal_chance).toBe(false);
+    expect(fact.result.summary).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+    expect(runFactsOf(fact.result, graph, true).chances.goal_chance_display).toBeUndefined();
+    expect(fact.result.enrichment?.inference_warnings).toContainEqual(expect.objectContaining({
+      code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', detail: expect.objectContaining({ reason: 'HORIZON_NOT_TESTED' }),
+    }));
+    const view = projectCanonicalAnalysisView({ graph, runFact: fact,
+      analysisState: { run_state: { kind: 'complete_current' } } as never, currentResult: fact.result as never });
+    expect(view.question?.scope.can_show_goal_chance).toBe(false);
+    expect(view.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(false);
   });
 });

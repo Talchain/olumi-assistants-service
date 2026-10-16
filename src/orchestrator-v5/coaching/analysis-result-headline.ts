@@ -931,14 +931,17 @@ export interface HeadlineDescriptor {
 
 interface HeadlineResult {
   readonly text: string | null;
+  /** Warranted qualifiers without the comparison lead or status already carried by the completion template. */
+  readonly disclosures: string;
   readonly descriptor: HeadlineDescriptor;
 }
 
-/**
- * Returns a deterministic headline sentence, or null when fallback to the
- * locked template is the safe choice. The handler should treat null as
- * "use the existing template" — never invent a string from nothing.
- */
+/** One owner for the comparison permission and the disclosures retained when its lead is retired. */
+export function buildAnalysisResultHeadlineParts(input: AnalysisResultHeadlineInput): HeadlineResult {
+  return computeHeadline(input);
+}
+
+/** Returns the existing comparison sentence, or null when it is not supported. */
 export function buildAnalysisResultHeadline(
   input: AnalysisResultHeadlineInput,
 ): string | null {
@@ -1027,6 +1030,10 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     unvaluedFactorIds,
   } = input;
 
+  const goalFrame = resolveGoalFrame(enrichment, input.goal_points_up_as_held === true);
+  const goalUntestedSuffix = (input.goal_direction_correctable === true
+    ? GOAL_FRAME_SENTENCE : GOAL_FRAME_SENTENCE_UNCORRECTABLE)[goalFrame];
+
   // Same-source resolution: the winner label, winner probability, and
   // runner-up probability ALL come from the SAME source array — one of
   // option_comparison[], results[], decision_brief.options[] (and the nested
@@ -1044,6 +1051,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     // same.
     return {
       text: null,
+      disclosures: goalUntestedSuffix,
       descriptor: {
         case: null,
         reason: 'unsafe_label',
@@ -1079,6 +1087,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   if (input.intake_options_missing === true || input.intake_identity_unverified === true) {
     return {
       text: null,
+      disclosures: goalUntestedSuffix,
       descriptor: {
         case: null,
         reason: input.intake_options_missing === true
@@ -1105,6 +1114,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   if (input.constraint_infeasible === true) {
     return {
       text: null,
+      disclosures: goalUntestedSuffix,
       descriptor: {
         case: null,
         reason: 'constraint_infeasible',
@@ -1132,6 +1142,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   if (input.constraint_unevaluated === true) {
     return {
       text: null,
+      disclosures: goalUntestedSuffix,
       descriptor: {
         case: null,
         reason: 'constraint_unevaluated',
@@ -1158,6 +1169,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   if (input.constraint_identity_unresolved === true) {
     return {
       text: null,
+      disclosures: goalUntestedSuffix,
       descriptor: {
         case: null,
         reason: 'constraint_identity_unresolved',
@@ -1201,9 +1213,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // sentence says why, the one the run's own data makes true; it rides FIRST of
   // the tails, on every emitted case, budgeted on top like its siblings. It
   // never decides a case: see `leadCap`.
-  const goalFrame = resolveGoalFrame(enrichment, input.goal_points_up_as_held === true);
-  const goalUntestedSuffix = (input.goal_direction_correctable === true
-    ? GOAL_FRAME_SENTENCE : GOAL_FRAME_SENTENCE_UNCORRECTABLE)[goalFrame];
+  const disclosureSuffix = `${goalUntestedSuffix}${narrationTail}`;
   const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
   const lengthCap =
     MAX_HEADLINE_CHARS + goalUntestedSuffix.length + narrationTail.length + reducedSamplesSuffix.length;
@@ -1388,12 +1398,14 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (runnerUpPct > leaderPct && disambig.length <= lengthCap) {
         return {
           text: disambig,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('LT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
         };
       }
     }
     return {
       text: null,
+      disclosures: disclosureSuffix,
       descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
     };
   }
@@ -1443,6 +1455,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseA.length <= leadCap) {
         return {
           text: caseA,
+          disclosures: ` Treat this as provisional: ${cautionReasonText(caution)}.${disclosureSuffix}`,
           descriptor: buildDescriptor('A', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1450,6 +1463,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseC.length <= plainCap) {
         return {
           text: caseC,
+          disclosures: ` Treat this as provisional: ${cautionReasonText(caution)}.${disclosureSuffix}`,
           descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1463,6 +1477,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseBMargin.length <= leadCap) {
         return {
           text: caseBMargin,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1470,6 +1485,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseB.length <= plainCap) {
         return {
           text: caseB,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1481,6 +1497,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseDMargin.length <= leadCap) {
         return {
           text: caseDMargin,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1504,6 +1521,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseD.length <= leadCap) {
         return {
           text: caseD,
+          disclosures: ` Run the follow-up checks before treating this as final.${disclosureSuffix}`,
           descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1526,6 +1544,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // do not claim a lead at all; fall back to the locked template.
       return {
         text: null,
+        disclosures: disclosureSuffix,
         descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
       };
     }
@@ -1552,6 +1571,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseTied.length <= (tieReason === 'override' ? leadCap : lengthCap)) {
         return {
           text: caseTied,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1562,6 +1582,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseClose.length <= leadCap) {
         return {
           text: caseClose,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1575,6 +1596,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     // template (no lead claim) instead of a confident headline.
     return {
       text: null,
+      disclosures: disclosureSuffix,
       descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
     };
   }
@@ -1615,6 +1637,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (caseTied.length <= leadCap) {
         return {
           text: caseTied,
+          disclosures: disclosureSuffix,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1624,6 +1647,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     // claim) when the tie copy does not fit or the leader is not actually ahead.
     return {
       text: null,
+      disclosures: disclosureSuffix,
       descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
     };
   }
@@ -1696,6 +1720,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (marginText !== null && scWithMargin.length <= leadCap) {
         return {
           text: scWithMargin,
+          disclosures: ` Treat this as provisional: ${scReason}.${disclosureSuffix}`,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1708,6 +1733,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       if (scNoMargin.length <= plainCap) {
         return {
           text: scNoMargin,
+          disclosures: ` Treat this as provisional: ${scReason}.${disclosureSuffix}`,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
         };
       }
@@ -1785,6 +1811,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   if (separability.unseparable) {
     return {
       text: null,
+      disclosures: disclosureSuffix,
       descriptor: buildDescriptor(
         null,
         'options_not_separable',
@@ -1813,12 +1840,14 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const reason = deriveCaseEReason(winner, driverLabel, hasFragility);
   if (winner.runnerUpProb !== null
     && Math.round((winner.winnerProb - winner.runnerUpProb) * 100) < Math.round(MIN_LEAD_MARGIN * 100)) {
-    return { text: null, descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }) };
+    return { text: null,
+      disclosures: disclosureSuffix, descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }) };
   }
   const caseE = hasMeaningfulLead(winner) ? `${winnerLabel} ${LEADS_PLAIN}.${suffix}` : `${winnerLabel} ${leadClause}.${suffix}`;
   if (caseE.length <= (hasMeaningfulLead(winner) ? plainCap : leadCap)) {
     return {
       text: caseE,
+      disclosures: disclosureSuffix,
       descriptor: buildDescriptor('E', reason, { hasDriver, hasFragility, marginBucket }),
     };
   }
@@ -1827,6 +1856,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // Fall back to the locked template.
   return {
     text: null,
+    disclosures: disclosureSuffix,
     descriptor: buildDescriptor(null, 'length_cap', { hasDriver, hasFragility, marginBucket }),
   };
 }
@@ -2663,7 +2693,7 @@ const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${[
 // The failure mode of a wrong binding is silent (the summary collapses to the
 // locked template), so both directions are pinned in
 // `run-analysis-untestable-goal-composed-summary.test.ts`.
-const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
+export const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
   `(?:(?<!${GOAL_FRAME_WITHDRAWN_RE_SRC}.*)(?:${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.attainmentFramed}|${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.directionalFramed})` +
   `|(?<=${GOAL_FRAME_WITHDRAWN_RE_SRC}.*)${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.directionalUnframed})`;
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
@@ -2697,7 +2727,18 @@ export function appendLegacyFiguresAfterLeaderSentence(headline: string, disclos
 }
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
+const CAUTION_REASON_PATTERN =
+  '(?:the result is sensitive to .+?|it rests heavily on how much .+? changes .+?|the result is not highly stable)';
+const HEADLINE_DISCLOSURE_PARTS = [
+  `(?: Treat this as provisional: ${CAUTION_REASON_PATTERN}\\.| Run the follow-up checks before treating this as final\\.)`,
+  GOAL_FRAME_WITHDRAWN_RE_SRC, NOT_ROBUST_RE_SRC, ELIMINATED_RE_SRC,
+];
+/** Non-empty ordered qualifiers emitted by the same headline owner; no win-share lead is admitted. */
+export const HEADLINE_DISCLOSURES_RE_SRC = `(?:${HEADLINE_DISCLOSURE_PARTS.map((part, i) =>
+  `(?:${part})${HEADLINE_DISCLOSURE_PARTS.slice(i + 1).map(next => `(?:${next})?`).join('')}`).join('|')})`;
+
 export interface TemplateSuffixDisclosureGrammar {
+  readonly requiresComparisonPermission?: true;
   /**
    * The exported symbol name in `src/orchestrator-v5/coaching/`. Not decoration:
    * the completeness guard resolves this name back to its own module's export
@@ -2750,9 +2791,11 @@ export interface TemplateSuffixDisclosureGrammar {
  * shape this regex recognises.
  */
 export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclosureGrammar[] = [
+  { name: 'HEADLINE_DISCLOSURES_RE_SRC', source: HEADLINE_DISCLOSURES_RE_SRC },
   { name: 'SCAFFOLD_ANY_DISCLOSURE_RE_SRC', source: SCAFFOLD_ANY_DISCLOSURE_RE_SRC },
   { name: 'CONSTRAINT_GAP_DISCLOSURE_RE_SRC', source: CONSTRAINT_GAP_DISCLOSURE_RE_SRC },
   { name: 'INTAKE_OPTION_DISCLOSURE_RE_SRC', source: INTAKE_OPTION_DISCLOSURE_RE_SRC },
+  { name: 'OBJECTIVE_CONTRADICTION_BOUND_RE_SRC', source: OBJECTIVE_CONTRADICTION_BOUND_RE_SRC, requiresComparisonPermission: true },
   // ⭐ THE UNSET-OPTION-EFFECT TAIL *IS* REGISTERED, and the contrast with
   // OBJECTIVE_CONTRADICTION_RE_SRC in the exclusion list below is the whole
   // reason both are spelled out. (Reasoning preserved verbatim from #1179,
@@ -2760,8 +2803,8 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   //
   // The test for this branch is not "does the tail name an option?" but "does
   // the tail make a claim the withhold just denied?". The objective-contradiction
-  // tail asserts a LEADER, so `template + tail` is a composition the handler can
-  // never emit. This one asserts only that a value the user did not set was not
+  // tail asserts a LEADER, so it requires the recorded comparison permission
+  // even when the host uses a completion lead. This one asserts only that a value the user did not set was not
   // set — true on a withheld turn, and the withheld turn is exactly where a user
   // who ran past unset option effects most needs to be told.
   //
@@ -2844,35 +2887,7 @@ export interface TemplateSuffixDisclosureExclusion {
  * missing when three families silently missed the salvage.
  */
 export const TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS: readonly TemplateSuffixDisclosureExclusion[] = [
-  {
-    name: 'OBJECTIVE_CONTRADICTION_RE_SRC',
-    reason:
-      // ⚠⚠ THE OBJECTIVE-CONTRADICTION TAIL IS DELIBERATELY *NOT* REGISTERED,
-      // and adding it was a real defect caught by independent review.
-      //
-      // This branch is the TEMPLATE path — the shape a turn takes when NO
-      // headline was composed, i.e. when the analysis is not entitled to name a
-      // leading option. The tail NAMES OPTIONS and only ships when `headline !==
-      // null` (run-analysis.ts passes exactly that as the leader permission), so
-      // `template + tail` is a composition the handler can never emit.
-      // Registering it bought nothing and cost the one thing this branch exists
-      // to protect: it made the WITHHELD egress path ADMIT a leader-naming tail,
-      // reopening the G-CEE-1 class at the allowlist itself.
-      //
-      // The same reasoning excludes it from the SALVAGE, whose output is the
-      // locked fallback — a withheld shape. Appending a leader-naming tail there
-      // would assert the very leader the withhold denied.
-      //
-      // The tail belongs ONLY in TAIL_PATTERN, which is reached via a headline.
-      // `run-analysis-objective-contradiction-wiring.test.ts` pins `template +
-      // tail` as REJECTED, and
-      // `validation-registry-disclosure-salvage.test.ts` pins that the salvage
-      // never emits it, so this cannot be "helpfully" re-added in either place.
-      'NAMES A LEADING OPTION and ships only when `headline !== null`. The template ' +
-      'branch and the salvage are both WITHHELD shapes, so admitting it there would ' +
-      'assert a leader the withhold denied — the G-CEE-1 defect class. It belongs in ' +
-      'TAIL_PATTERN only, which is reached via a headline.',
-  },
+  { name: 'OBJECTIVE_CONTRADICTION_RE_SRC', reason: 'The unbound arms are composed into OBJECTIVE_CONTRADICTION_BOUND_RE_SRC, registered only with actual comparison permission.' },
   // The five scaffold sub-grammars below are not separate families: each is
   // composed INTO SCAFFOLD_ANY_DISCLOSURE_RE_SRC, which IS registered above, so
   // registering them individually would double-admit the same sentences.
@@ -2915,15 +2930,12 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS: readonly TemplateSuffixDiscl
  * remainder after the template literal is non-empty (`text.length >
  * template.length`), so an empty match cannot admit a bare template twice.
  */
-const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
-  `^${TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ source }) => `(?:${source})?`).join('')}$`,
+const templateSuffixPattern = (comparisonPermitted: boolean): RegExp => new RegExp(
+  `^${TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.filter(family => !family.requiresComparisonPermission || comparisonPermitted)
+    .map(({ source }) => `(?:${source})?`).join('')}$`,
 );
-
-// Mission A caution-reason alternation (provisional_doctrine_v0): the three
-// claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
-// improvised "provisional" prose cannot ride through the caution shapes.
-const CAUTION_REASON_PATTERN =
-  '(?:the result is sensitive to .+?|it rests heavily on how much .+? changes .+?|the result is not highly stable)';
+const TEMPLATE_SUFFIX_ONLY_REGEX = templateSuffixPattern(false);
+const TEMPLATE_COMPARISON_SUFFIX_REGEX = templateSuffixPattern(true);
 
 /**
  * Grammar source for the lead clause emitted by `leadClause` in
@@ -3105,7 +3117,7 @@ function matchesHeadlineGrammar(text: string, legacyFiguresDisclosure = ''): boo
  *        - no ID-prefix tokens (opt_, fac_, …)
  *        - no raw decimal numbers (only integer % allowed)
  */
-export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = '', legacyFiguresDisclosure = ''): boolean {
+export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = '', legacyFiguresDisclosure = '', comparisonPermitted = false): boolean {
   if (typeof text !== 'string') return false;
   // ⭐ OLUMI'S GOAL READINGS, BY EXACT EQUALITY (AIQ 5895590866 (2); DL lease 5895635885): `goalReadingTail` is the
   // forwarder's own rebuild of `buildGoalReadingDisclosure` for the graph this Run analysed. The reply may carry that
@@ -3115,10 +3127,17 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
     const at = text.indexOf(goalReadingTail);
     if (at > 0 && text.indexOf(goalReadingTail, at + 1) === -1) {
       const base = text.slice(0, at);
-      return isAllowedRunAnalysisAssistantText(base, '', legacyFiguresDisclosure)
-        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length), '', legacyFiguresDisclosure)
+      return isAllowedRunAnalysisAssistantText(base, '', legacyFiguresDisclosure, comparisonPermitted)
+        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length), '', legacyFiguresDisclosure, comparisonPermitted)
         && passesAssistantTextContentDefences(goalReadingTail);
     }
+  }
+  // A completion can carry the exact authored-figures disclosure too. Its trusted source is rebuilt by the registry.
+  if (legacyFiguresDisclosure !== '' && [...RUN_ANALYSIS_LOCKED_TEMPLATES].some(template => text.startsWith(template + legacyFiguresDisclosure))) {
+    const at = text.indexOf(legacyFiguresDisclosure);
+    return text.indexOf(legacyFiguresDisclosure, at + 1) === -1
+      && passesAssistantTextContentDefences(legacyFiguresDisclosure)
+      && isAllowedRunAnalysisAssistantText(text.slice(0, at) + text.slice(at + legacyFiguresDisclosure.length), goalReadingTail, '', comparisonPermitted);
   }
   // Length rule: base headline stays within MAX_HEADLINE_CHARS by
   // construction; the outer registry cap adds the Mission B tail budget
@@ -3138,7 +3157,7 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
     if (
       text.length > template.length &&
       text.startsWith(template) &&
-      TEMPLATE_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
+      (comparisonPermitted ? TEMPLATE_COMPARISON_SUFFIX_REGEX : TEMPLATE_SUFFIX_ONLY_REGEX).test(text.slice(template.length))
     ) {
       return passesAssistantTextContentDefences(text);
     }

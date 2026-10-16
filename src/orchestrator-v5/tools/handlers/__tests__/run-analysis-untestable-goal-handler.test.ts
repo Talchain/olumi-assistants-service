@@ -1,3 +1,4 @@
+import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 /**
  * ⭐ R3-3 — THE EXECUTED WIRING PIN for the untestable-goal summary.
  *
@@ -196,7 +197,7 @@ async function runHandler(
   data: DataShape,
   holdAtToday = false,
   goalFields: Json = {},
-): Promise<{ summary: string; assistantText: string; leadingOptionId: string | null; plotCalls: number; holdEarned: unknown }> {
+): Promise<{ summary: string; assistantText: string; leadingOptionId: string | null; plotCalls: number; holdEarned: unknown; confirmed: string; withoutPermission: string; winShares: unknown }> {
   const { client, run } = plotClient(codes, data);
   const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: scenarioReader(graph(goalLabel, holdAtToday, goalFields)) });
   const outcome = await handler(invocation());
@@ -204,7 +205,12 @@ async function runHandler(
   if (fact === undefined || fact.fact_type !== 'run_analysis') {
     throw new Error(`expected a run_analysis fact, got ${String(fact?.fact_type)}`);
   }
+  const confirm = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+  if (typeof confirm !== 'function') throw new Error('Expected native Run confirmation');
   return {
+    confirmed: confirm(outcome), winShares: fact.result.win_probabilities,
+    withoutPermission: confirm({ ...outcome, handler_facts: outcome.handler_facts.map(f => f === fact
+      ? { ...fact, result: { ...fact.result, constraint_verdict: { ...fact.result.constraint_verdict, may_name_leading_option: false } } } : f) }),
     summary: fact.result.summary ?? '',
     assistantText: (outcome as unknown as { assistant_text?: string }).assistant_text ?? '',
     leadingOptionId: fact.result.leading_option_id,
@@ -219,8 +225,8 @@ async function runHandler(
 // The user-facing bytes, spelled here (never imported)
 // ============================================================================
 
-const FRAMED_LEAD = 'Hold at £49 Per Seat was supported by 71% of runs of this model.';
-const WITHDRAWN_LEAD = 'Hold at £49 Per Seat was supported by 71% of runs of this model.';
+const FRAMED_LEAD = 'Ran analysis on your current scenario.';
+const WITHDRAWN_LEAD = 'Ran analysis on your current scenario.';
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
   ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
@@ -316,13 +322,18 @@ describe('⭐ R3-3 — the EXECUTED run_analysis handler composes the untestable
 
   for (const [goal, data, codes, expected] of ROWS) {
     it(`${goal === M ? 'metric goal' : 'lever aim'} · data ${data} · codes ${codes}`, async () => {
-      const { summary, assistantText, leadingOptionId, plotCalls } = await runHandler(goal, CODE_SETS[codes], data);
+      const { summary, assistantText, leadingOptionId, plotCalls, confirmed, withoutPermission, winShares } = await runHandler(goal, CODE_SETS[codes], data);
       // Positive controls: PLoT was reached once and a leader was named.
       expect(plotCalls).toBe(1);
       expect(leadingOptionId).toBe('opt_hold');
       expect(summary).toBe(expected);
       expect(assistantText).toBe(summary);
-      expect(isAllowedRunAnalysisAssistantText(summary), `egress rejected: ${summary}`).toBe(true);
+      expect(confirmed, `native egress changed: ${summary}`).toBe(summary);
+      if (goal === L) {
+        expect(summary).toContain('was supported by the most runs without moving');
+        expect(withoutPermission).not.toContain('was supported by the most runs without moving');
+      }
+      expect(winShares).toMatchObject({ 'Hold at £49 Per Seat': 0.7067 });
       if (codes !== 'none') {
         expect(summary).not.toMatch(/against\s+your\s+goal/i);
         expect(summary).not.toMatch(/more likely to reach your stated target/);

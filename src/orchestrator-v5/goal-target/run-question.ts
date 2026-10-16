@@ -1,3 +1,4 @@
+import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
 import { goalKindOf } from './goal-kind.js';
 /** Read-only question/scope projection owned by the goal-chance licence. No store or output-statistic inference. */
 import type { GoalRecord } from './goal-record.js';
@@ -158,7 +159,7 @@ export function withRunQuestionScope<R>(result: R, question: RunQuestion | undef
   if (q === null) return result;
   const boundWords: Readonly<Record<string, string>> = { '>=': 'at least', '>': 'above', '<=': 'at most', '<': 'below' };
   const words = q.quantity.label !== undefined && q.target !== undefined && q.unit !== undefined && q.comparator !== undefined
-    ? `chance of ‘${q.quantity.label}’ being ${boundWords[q.comparator]} ${q.target.toLocaleString('en-GB')}${q.unit === '%' ? '%' : ` ${q.unit}`}` : undefined;
+    ? `chance of ‘${q.quantity.label}’ being ${boundWords[q.comparator]} ${sayFigureAsWritten(q.target, q.unit)}` : undefined;
   const project = (warnings: unknown): unknown => !Array.isArray(warnings) ? warnings : warnings.map(w => {
     if (!isRec(w) || w.code !== 'GOAL_CHANCE_LICENSED' || (Array.isArray(w.notes) && w.notes.includes(STATIC_MODEL_SCOPE_NOTE))) return w;
     return { ...w, notes: [...(Array.isArray(w.notes) ? w.notes : []), STATIC_MODEL_SCOPE_NOTE],

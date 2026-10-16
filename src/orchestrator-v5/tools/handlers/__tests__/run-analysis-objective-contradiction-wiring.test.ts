@@ -145,7 +145,7 @@ describe('wiring — the run_analysis handler consumes the objective-contradicti
     // and the user would silently receive the locked template with no error
     // anywhere in the system.
     expect(source).toContain(
-      '${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}',
+      '${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}',
     );
   });
 

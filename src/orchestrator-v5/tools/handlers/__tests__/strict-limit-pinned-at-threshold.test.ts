@@ -364,7 +364,8 @@ describe('contrasts — unchanged', () => {
     const r = await plotLimit([atMostRow], { option: 'opt_raise', level: 0.1 });
     expect({ state: r.state, mayName: r.mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
     expect(r.perLimit).toEqual(SCORED);
-    expect(r.summary).toMatch(/Raise to 59 was supported by/);
+    expect(r.summary).toMatch(/^Ran analysis on your current scenario\./);
+    expect(r.summary).toContain('In this model I’ve assumed a higher value is better for your goal.');
   });
 
   it('CONTROL: a strict limit with the option at 9.9% → unchanged (evaluated_feasible, scored)', async () => {
