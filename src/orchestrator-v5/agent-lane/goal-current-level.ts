@@ -69,7 +69,7 @@ import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
-import { unitPhraseFamily, unitPhraseHead, unitPhraseTail } from './unit-conflict.js';
+import { unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from './unit-conflict.js';
 import { ratePeriodOf, unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
@@ -169,7 +169,8 @@ interface GoalObservedState {
   readonly unit?: string;
   readonly source: string;
   readonly raw_value: number;
-  readonly cap: number;
+  /** The frame the level is read on; none for a level of none (0) recorded before any target frames the goal. */
+  readonly cap?: number;
   readonly provenance_unit_normalised?: UnitNormalised;
 }
 
@@ -875,8 +876,17 @@ export async function proposeGoalCurrentLevel(
   // on ITS OWN frame here too — the apply then (re)pairs the ceiling on that frame in the same write. A paired ceiling's
   // earlier cap is today's earlier level's frame: a new level renormalises it, never refused against the old one.
   const ceilingTakesTheLevelFrame = !isChange && node.goal_threshold_frame === 'level' && holdsPairableCeiling(g.raw, goal.id);
-  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame;
-  if (!isChange && !levelOnItsOwnFrame && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
+  /**
+   * ⭐ TODAY'S LEVEL DOES NOT DEPEND ON THE TARGET (TL 21:30Z; G1 founder on 829a152b, turn 3: "We have no funding" refused
+   * `no_target` beside a target held as 1.3 "million (currency unspecified)" with no cap, so the goal never got a level). A goal
+   * on the level frame whose target cannot frame a level yet (no cap, no raw figure) records today's level on its OWN frame, as a goal
+   * with no target does; the target is still said beside it and a later target write frames the goal as it does today.
+   */
+  const targetFramesLevel = num(target) && num(cap) && cap > 0 && node.goal_threshold_frame === 'level';
+  // A target on ANOTHER frame (`delta`) still gives nothing to read a level on; only the level frame's own gaps are lifted.
+  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame
+    || (!isChange && !targetFramesLevel && node.goal_threshold_frame === 'level');
+  if (!isChange && !levelOnItsOwnFrame && !targetFramesLevel) {
     return refuse(
       'no_target',
       `"${goal.label}" has no stated target to measure its current level against, so there is no chance of reaching ` +
@@ -886,10 +896,13 @@ export async function proposeGoalCurrentLevel(
   const storedUnit = typeof node.goal_threshold_unit === 'string' && node.goal_threshold_unit.trim() !== '' ? node.goal_threshold_unit : undefined;
   // ── A GOAL WHOSE UNIT NAMES NO CURRENCY TAKES THE ONE THE TYPED UNIT NAMES (`levelUnitForGoal`); every other goal keeps
   // its own unit. From here `goalUnit` is the unit the level is read, said and written in.
-  const forLevel = levelUnitForGoal(value, args?.unit, { label: goal.label, unit: storedUnit, heldUnit: unitAlreadyOnGoal(goal, g.raw, storedUnit) });
+  // Words that write no figure write no unit: none read from them is read in the goal's OWN unit — unless the Agent's unit is of
+  // another kind (`unitsConflict`), which says the words are about something else, refused as for a written figure.
+  const unitArg = origin === 'read_from_words' && storedUnit !== undefined && unitsConflict(args?.unit, storedUnit) === null ? storedUnit : args?.unit;
+  const forLevel = levelUnitForGoal(value, unitArg, { label: goal.label, unit: storedUnit, heldUnit: unitAlreadyOnGoal(goal, g.raw, storedUnit) });
   if (!forLevel.ok) return refuse(forLevel.refusal, forLevel.detail);
   // ── A GOAL HELD ONLY AS A PERCENTAGE CHANGE TAKES THE UNIT ITS LEVEL IS STATED IN (`levelUnitForChangeGoal`, A1).
-  const forChange = levelUnitForChangeGoal(args?.unit, node as Record<string, unknown>, g.raw);
+  const forChange = levelUnitForChangeGoal(unitArg, node as Record<string, unknown>, g.raw);
   if (!forChange.ok) return refuse(forChange.refusal, forChange.detail);
   const goalUnit = forChange.adopted ?? forLevel.unit;
   const adoptedUnit = forLevel.adopted ? forLevel.unit : forChange.adopted;
@@ -899,7 +912,7 @@ export async function proposeGoalCurrentLevel(
   const readingQuote = origin === 'read_from_words' ? quoted?.quote : undefined;
   const readFromWords = readingQuote !== undefined;
   const levelGoal = { label: goal.label, unit: goalUnit };
-  const inWords = readingQuote !== undefined ? goalLevelReadFromWords(value, args?.unit, levelGoal, readingQuote)
+  const inWords = readingQuote !== undefined ? goalLevelReadFromWords(value, unitArg, levelGoal, readingQuote)
     : statedGoalLevelInUsersWords(value, args?.unit, levelGoal, ctx.user_text);
   if (!inWords.ok) return refuse(inWords.refusal, inWords.detail);
   // A quoted written figure is written in THAT statement, by the same rule.
@@ -926,7 +939,7 @@ export async function proposeGoalCurrentLevel(
 
 
   let normalisedLevel: number;
-  let levelCap: number;
+  let levelCap: number | undefined;
   if (levelOnItsOwnFrame) {
     // ⛔ A ceiling the goal holds is never read as a floor (Codex buddy r1 on #2618 (c): the refusal the target path
     // applies, `admitStatedGoalLevel`, kept on the level's own frame): an "at least" reading would score it the wrong way round.
@@ -945,7 +958,8 @@ export async function proposeGoalCurrentLevel(
      * A level the rule cannot frame (0: no positive figure to scale from) still waits for a target, said so.
      */
     const own = resolveGoalThresholdCapWithProvenance(undefined, raw, goalUnit, undefined);
-    if (own === null) {
+    // ⭐ NONE NEEDS NO FRAME (TL 21:30Z): 0 is 0 on every frame, so it is recorded without one; a later target frames the goal.
+    if (own === null && raw !== 0) {
       return refuse(
         'no_target',
         `"${goal.label}" has no stated target yet, and ${sayFigureExactly(raw, goalUnit ?? '') ?? String(raw)} gives no range ` +
@@ -953,8 +967,8 @@ export async function proposeGoalCurrentLevel(
         'recorded with it.',
       );
     }
-    levelCap = own.cap;
-    normalisedLevel = raw / own.cap;
+    levelCap = own?.cap;
+    normalisedLevel = own === null ? 0 : raw / own.cap;
   } else {
     // (Checked above for a level goal; restated so the level path below reads them as numbers.)
     if (!num(target) || !num(cap)) return refuse('no_target', `"${goal.label}" has no stated target to measure its current level against. Nothing was prepared.`);
@@ -1010,7 +1024,7 @@ export async function proposeGoalCurrentLevel(
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
     source: levelSource,
     raw_value: raw,
-    cap: levelCap,
+    ...(levelCap !== undefined ? { cap: levelCap } : {}),
     ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
   };
   // As the user writes a figure ("£72,000 per month"), from the lane's one formatter (DL #72 5866282787: "72000 £ MRR").

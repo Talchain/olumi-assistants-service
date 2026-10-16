@@ -155,6 +155,14 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(1);
   }, 30_000);
 
+  it('NEGATIVE: a reading whose unit is of another kind (a percentage for a goal in pounds) is about something else: no card', async () => {
+    const said = 'We have no funding.';
+    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, unit: '%', source_quote: said, figure_origin: 'read_from_words' });
+    expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
+    expect(w.card).toBeUndefined();
+    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+  }, 30_000);
+
   it('CONTRAST: an explicit "We have £0 funding today." is the user\'s own figure in the same readers', async () => {
     const said = 'We have £0 funding today.';
     const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, source_quote: said, figure_origin: 'written' });
@@ -213,7 +221,6 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     ['a written figure is in its quote', 'We do about 80 a week today. We hope for 90.', { value: 90, source_quote: 'We do about 80 a week today.' }, 'figure_not_in_quote'],
     ['a shortened quote', 'We have no orders yet.', { value: 0, source_quote: 'We have no', figure_origin: 'read_from_words' }, 'statement_not_found'],
     ['Olumi\'s own words are never the source', 'Nothing yet.', { value: 0, source_quote: 'What is today\'s level of Order volume, in orders per week?', figure_origin: 'read_from_words' }, 'statement_not_found'],
-    ['a reading in another unit', 'We have no orders yet.', { value: 0, unit: 'GBP', source_quote: 'We have no orders yet.', figure_origin: 'read_from_words' }, undefined],
     ['an unknown origin label', 'We have no orders yet.', { value: 0, source_quote: 'We have no orders yet.', figure_origin: 'guessed' }, 'statement_malformed'],
   ] as const)('NEGATIVE (%s): no card, nothing written', async (_name, answer, given, refusal) => {
     const w = await answered('Order volume', 'orders per week', 100, 200, answer, given);
@@ -221,6 +228,54 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     if (refusal !== undefined) expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal }));
     expect(w.card).toBeUndefined();
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+  }, 30_000);
+});
+
+describe('TL 21:30Z: today\'s level does not depend on the target (G1 founder 829a152b turn 3 shape)', () => {
+  // The served goal: a target held as 1.3 "million (currency unspecified)", on the level frame, with NO cap.
+  const halfWritten = (): Dict => projectGraphForPersistence({ nodes: [
+    { id: 'goal', kind: 'goal', label: 'Funding secured', goal_threshold_raw: 1.3, goal_threshold_unit: 'million (currency unspecified)', goal_threshold_frame: 'level' },
+    { id: 'pilot', kind: 'option', label: 'Pilot' }, { id: 'effort', kind: 'factor', label: 'Effort' },
+  ], edges: [{ from: 'effort', to: 'goal', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }] }) as Dict;
+  async function turnOn(g: Dict, answer: string, given: Dict) {
+    question = 'What is today\'s level of Funding secured?';
+    args = { goal_label: 'Funding secured', user_stated: true, ...given };
+    const w = await world(g);
+    await w.turn('Help me understand what is missing.');
+    phase = 'propose'; emitted = false;
+    const b = (await w.turn(answer)).json();
+    return { ...w, b, card: b.suggested_actions?.find((c: Dict) => String(c.id).startsWith('agent-approve-proposal:')) };
+  }
+  it('⭐ "We have no funding." beside the unframed target: offered as Olumi\'s reading, saved as 0 with no frame, the target untouched', async () => {
+    const said = 'We have no funding.';
+    const w = await turnOn(halfWritten(), said, { value: 0, unit: 'GBP', source_quote: said, figure_origin: 'read_from_words' });
+    expect(w.card, JSON.stringify(toolResults)).toMatchObject({ label: 'Use this reading', detail: expect.stringContaining('Olumi\'s reading of your words “We have no funding.”') });
+    const { cold, goal } = await pressAndReopen(w, w.card);
+    expect(goal.observed_state).toMatchObject({ raw_value: 0, value: 0, baseline: 0, source: 'user_confirmed' });
+    expect(goal.observed_state).not.toHaveProperty('cap');
+    expect(goal).toMatchObject({ goal_threshold_raw: 1.3, goal_threshold_unit: 'million (currency unspecified)', goal_threshold_frame: 'level' });
+    expect(goal.observed_state.unit).toBe('million (currency unspecified)'); // none, in the goal's own unit: the words wrote no unit
+    expect(levelRecord(cold)?.statements[0]).toMatchObject({ quote: said, form: 'describes' });
+  }, 30_000);
+  // A target held in pounds but not yet framed (no cap): the "currency unspecified" placeholder is a separate unit reading.
+  const halfWrittenGbp = (): Dict => { const g = halfWritten(); Object.assign(g.nodes.find((n: Dict) => n.id === 'goal'), { goal_threshold_raw: 250000, goal_threshold_unit: 'GBP' }); return g; };
+  it('the explicit "We have £0 funding today." beside an unframed target is no longer refused no_target: saved as the user\'s 0', async () => {
+    const said = 'We have £0 funding today.';
+    const w = await turnOn(halfWrittenGbp(), said, { value: 0, unit: 'GBP' });
+    expect(toolResults).not.toContainEqual(expect.objectContaining({ refusal: 'no_target' }));
+    expect(w.card, JSON.stringify(toolResults)).toBeDefined();
+    const { goal } = await pressAndReopen(w, w.card);
+    expect(goal.observed_state).toMatchObject({ raw_value: 0, value: 0, source: 'user_override' });
+  }, 30_000);
+  it('a positive level beside the unframed target is recorded on its own frame, as with no target', async () => {
+    const said = 'We have £50,000 secured today.';
+    const w = await turnOn(halfWrittenGbp(), said, { value: 50000, unit: 'GBP' });
+    expect(toolResults).not.toContainEqual(expect.objectContaining({ refusal: 'no_target' }));
+    expect(w.card, JSON.stringify(toolResults)).toBeDefined();
+    const { goal } = await pressAndReopen(w, w.card);
+    expect(goal.observed_state).toMatchObject({ raw_value: 50000, source: 'user_override' });
+    expect(goal.observed_state.cap).toBeGreaterThan(50000);
+    expect(goal.observed_state.value).toBeCloseTo(50000 / goal.observed_state.cap, 12);
   }, 30_000);
 });
 
