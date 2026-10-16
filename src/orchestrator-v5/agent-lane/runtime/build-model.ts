@@ -43,7 +43,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { carriesStatements, verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { carriesStatements, verifiedFactorLevel, verifiedGoalLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -2487,8 +2487,16 @@ export async function buildModelFromBrief(
     // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
     // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
     // The same goal admission read: the total of the user's own sum is their level (`goalLevelOfStatedSum`).
-    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, goalLevelOfStatedSum(candidate, brief).goal, admitted.loss,
-      (value, unit) => figureTheUserWrote(value, unit, brief) && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief));
+    // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z; BUDDY-A #3290 r2): for a draft with statements, whether the user wrote this level is
+    // the owner's verdict or its existing proofs (a verified factor level, the user's declared sum), never a figure the host
+    // finds in the brief; the host reader decides only for a draft recorded before SYSTEM 2.
+    const sumGoal = goalLevelOfStatedSum(candidate, brief).goal;
+    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, sumGoal, admitted.loss, (value, unit) => {
+      const own = figureSource(candidate, brief, { kind: 'goal', label: candidate.goal.metric }, 'level', value);
+      const wrote = own === undefined ? figureTheUserWrote(value, unit, brief)
+        : own === 'user' || (own === 'unclaimed' && (sumGoal.level_derivation !== undefined || verifiedGoalLevel(candidate, brief)));
+      return wrote && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief);
+    });
     if (ceilingLevel.loss !== admitted.loss) admitted = { ...admitted, loss: ceilingLevel.loss };
     // ⛔ R3-B 5893233864 / AIQ 5893340150: a target typed as a DECREASE, the drafter's own comparator a ceiling and none of
     // the user's held → Olumi's reading of the sense, typed on the goal (`goal-sense-reading.ts`) and said below.

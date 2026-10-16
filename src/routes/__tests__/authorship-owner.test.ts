@@ -113,7 +113,39 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
     const goal = out.graph!.nodes.find((n: Rec) => n.kind === 'goal');
     expect(goal.observed_state).toBeUndefined();
     expect(goal.goal_direction, 'the user\u2019s "at most" is still held').toBe('<=');
-    expect(JSON.stringify(out.result.not_represented)).toContain('The current level of \\"scrap rate on Line 2\\" (7) is not one you stated');
+    expect(JSON.stringify(out.result.not_represented)).toContain('The current level of \\"scrap rate on Line 2\\" (7) could not be confirmed from your brief');
+  });
+  const noLevelStatement = (m: Rec): Rec => ({ ...m, statements: (m.statements as Rec[]).filter((st) => !(st.subject.kind === 'goal' && st.field === 'level')) });
+  it('NEGATIVE (BUDDY-A #3290 r2, same native family): with NO goal-level statement at all, the drafted 7% is not stamped theirs by its `explicit` flag', async () => {
+    const m = noLevelStatement(draftOf(SCRAP));
+    m.goal.baseline_value = 7;
+    expect(figureSource(m, SCRAP.brief_text, { kind: 'goal', label: 'scrap rate on Line 2' }, 'level', 7)).toBe('unclaimed');
+    const out = await construct(SCRAP.brief_text, [m as unknown as CandidateModel]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toBeUndefined();
+    expect(JSON.stringify(out.result.not_represented)).toContain('The current level of \\"scrap rate on Line 2\\" (7) could not be confirmed from your brief');
+  });
+  it('the same omission on the user\u2019s real 6.5%: no proof, so it is not stamped theirs either; the user is asked to confirm it (the drafter\u2019s statement is the proof)', async () => {
+    const out = await construct(SCRAP.brief_text, [noLevelStatement(draftOf(SCRAP)) as unknown as CandidateModel]);
+    expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toBeUndefined();
+    expect(JSON.stringify(out.result.not_represented)).toContain('Confirm the current level of \\"scrap rate on Line 2\\"');
+  });
+  it('CONTROL (served capacity cfa31dfb, row 5d0a23b7): a goal level with no goal-level statement but the existing proof (a verified factor level) is still theirs', async () => {
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/capacity-cfa31dfb-first-draft.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
+    const m = JSON.parse(fx.raw_text) as Rec;
+    expect(figureSource(m, fx.brief, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 80)).toBe('unclaimed');
+    const out = await construct(fx.brief, [m as unknown as CandidateModel]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+  });
+  it('NEGATIVE (settings, same rule): a cost flagged `explicit` with no statement for it is UNKNOWN; a 0/1 switch makes no figure claim and keeps its path', async () => {
+    const m = draftOf(COSTS);
+    m.statements = (m.statements as Rec[]).filter((st) => !(st.subject.kind === 'option' && st.subject.label === 'Route-planning software'));
+    (m.options as Rec[]).find((o) => o.label === 'Route-planning software')!.interventions.find((i: Rec) => i.factor_label === 'Total financial-year spend').provenance = 'explicit';
+    const out = await construct(COSTS.brief_text, [m as unknown as CandidateModel]);
+    expect(settingOf(out.graph, 'Route-planning software', SPEND)).toMatchObject({ raw_value: 60000, source: 'cee_hypothesis', user_material_unverified: true });
+    expect(settingOf(out.graph, 'Route-planning software', 'route_planning_software_deployed')).toMatchObject({ value: 1, source: 'brief_extraction' });
+    expect(settingOf(out.graph, 'Route-planning software', 'route_planning_software_deployed').user_material_unverified).toBeUndefined();
   });
   it('⭐ OWNER OVER FLAGS: the user\u2019s 6.5%, which a verified statement states, is theirs even where the draft marks it an estimate', async () => {
     const m = draftOf(SCRAP);
