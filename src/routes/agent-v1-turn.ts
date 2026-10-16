@@ -2946,7 +2946,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // The builder we raced may have stored its answer while the fact/readback checks were in flight.
               let recordedAnswer: CommittedTurnRecord | null;
               try { recordedAnswer = await readAnswer(); } catch {
-                return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not check whether this turn already ran. Nothing was run — please try again.' });
+                return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not confirm whether the reply was recorded. Nothing was run again — please try again.' });
               }
               if (recordedAnswer !== null) {
                 if (!sameAgentTurnRequest(recordedAnswer.request_hash, requestHash, chiplessRetry)) {

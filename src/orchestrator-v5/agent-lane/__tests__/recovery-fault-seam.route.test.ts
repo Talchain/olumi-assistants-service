@@ -275,6 +275,29 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
     expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
   });
 
+  it('an unreadable answer after the Run proof stays unconfirmed, never says the recorded Run did not happen', async () => {
+    const { turnId } = await runPress(armed());
+    const read = store.readCommittedTurn.getMockImplementation()!;
+    let sawRun = false;
+    store.readCommittedTurn.mockImplementation(async (sid, id) => {
+      if (id === nativeTurnIds[0]) sawRun = true;
+      if (sawRun && id === turnId) throw new Error('answer read unavailable');
+      return read(sid, id);
+    });
+    const before = providerCalls;
+    try {
+      const unknown = await retry(turnId);
+      expect(unknown.statusCode, unknown.body).toBe(503);
+      expect(unknown.json().error).toBe('TURN_STATE_UNVERIFIABLE');
+      expect(unknown.json().detail).toBe('Could not confirm whether the reply was recorded. Nothing was run again — please try again.');
+      expect(providerCalls).toBe(before); expect(runs).toBe(1);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
+    } finally { store.readCommittedTurn.mockImplementation(read); }
+    const recovered = await retry(turnId);
+    expect(recovered.statusCode, recovered.body).toBe(200);
+    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1); expect(runs).toBe(1);
+  });
+
   it('an answer append failure releases only the active request: a further retry recovers from durable Run proof', async () => {
     const { turnId } = await runPress(armed());
     const append = store.append.getMockImplementation()!;
