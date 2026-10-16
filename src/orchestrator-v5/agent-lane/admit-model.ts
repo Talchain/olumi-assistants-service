@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, type FigureSource } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, type FigureSource } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -5004,12 +5004,13 @@ function admitOnce(
     const user_stated = userSizeEarned(l);
     // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
     // The bound sentence's range AROUND the figure first ("about 150, between 80 and 250"; d5 6009282279), else A4's end.
+    // ⭐ G3 (TL 10:49Z): else the range the AI's own verified statement gives THIS link, when the size is one of its ends.
     const range = user_stated && l.provenance_source !== 'user_specified'
       ? centreByLink.get(l) ?? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
         source: source.label,
         sourceUnit: source.unit,
         others: quantityLabels.filter((q) => q !== source.label),
-      })
+      }) ?? (typeof brief === 'string' ? linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount as number) ?? null : null)
       : null;
     // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
     // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside

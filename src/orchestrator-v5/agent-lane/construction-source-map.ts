@@ -15,7 +15,7 @@
  * reason, never dropped and never turned into Olumi's estimate. Figures come only from the quote's own words (`figuresIn`),
  * never from the drafter's value. `statements` is optional: a missing or malformed list never fails a draft. Pure.
  */
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { findJoinedRanges, findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { STATEMENT_FORMS, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
@@ -100,10 +100,10 @@ function subjectOf(v: unknown): DraftedSubject | undefined {
 
 /**
  * The figures a sentence writes: every single figure, in digits or spelled ("six mid-weight developers", by the one cardinal
- * parser). No two figures are paired into a range here: "cut legacy 25% to 15%" or "six developers and 25% legacy" are not
- * ranges, and literal membership cannot tell them apart (AIE 6180604131). Step 2's clause-governed subject/frame check
- * (factorLevelSpans + sameFrame, DL-adopted) decides which figure, or which pair, governs a subject; until then a range is not
- * verified and stays unknown, retained.
+ * parser), and every range it writes as one (`findJoinedRanges`: two figures JOINED as a range, low below high).
+ * ⭐ G3 (TL 11:18Z; supersedes AIE 6180604131's "unknown until step 2" for construction): that join is a provenance check of
+ * the quote, not a meaning reader. "Cut legacy 25% to 15%" is high to low and "six developers and 25% legacy" is not joined,
+ * so neither is a range; whether a joined pair is a range or a change is the AI's own `form`. Unjoined figures never pair.
  */
 export function figuresWritten(quote: string): readonly { readonly low: number; readonly high: number }[] {
   const spelled = [...quote.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) => {
@@ -111,8 +111,9 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
     return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
   });
   const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
-  return amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
-    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]);
+  return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
+    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
+    ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
 }
 
 /**
@@ -207,6 +208,42 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
     && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
     ? 'user' : 'unverified';
 }
+
+/**
+ * ⭐ G3 (TL 10:49Z: ranges are a kept protection; unseen 1663fe34): the range the AI's own VERIFIED statement gives a directed
+ * link's effect ("…reckons it would cut scrap by 1.5 to 2.5 percentage points"), when the link's size is one of its ends, so
+ * the size is said WITH that range (A4: one end, read as a floor or ceiling), never as a single figure. The host's range
+ * reader missed it there (the figure reads as about "scrap", the goal, not the camera). The text is the range as the
+ * sentence writes it, else its ends; the A4 sentence quotes it as written and names the end the model uses. `null`: no such
+ * statement; `undefined`: a draft without statements.
+ */
+export function linkEffectRangeEnd(model: unknown, brief: string, from: string, to: string, amount: number): StatedRangeOfLink | null | undefined {
+  const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
+  if (!Array.isArray(m.statements)) return undefined;
+  if (!Number.isFinite(amount) || amount === 0) return null;
+  const size = Math.abs(amount);
+  const said = sourceMapOf(m.statements, brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [];
+  for (const st of said) {
+    if (st.form !== 'range' || st.negated === true || typeof st.low !== 'number' || typeof st.high !== 'number') continue;
+    const low = Math.min(Math.abs(st.low), Math.abs(st.high));
+    const high = Math.max(Math.abs(st.low), Math.abs(st.high));
+    const end = size === low ? 'low' : size === high ? 'high' : null;
+    if (end === null || !(low < high)) continue;
+    const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === low && r.high.magnitude === high);
+    // The words the sentence writes, with the unit it writes straight after them ("1.5 to 2.5 percentage points").
+    const after = joined === undefined ? '' : st.quote.slice(joined.high.index + joined.high.matchedText.length);
+    const unitAfter = st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`)
+      ? after.slice(0, st.unit.length + 1) : '';
+    const text = joined === undefined ? `${low} to ${high}${st.unit ? ` ${st.unit}` : ''}` : `${joined.text}${unitAfter}`;
+    // ⛔ BUDDY-A #3297 B1: the WHOLE verified quote, never a clause cut at punctuation. A shorter "clause" dropped its speaker
+    // and condition ("The supplier estimates that, if the pilot succeeds, …" became only the numbers' clause) and was still
+    // said "as the brief puts it"; the AIE disposition keeps the full attributed range with its speaker and conditions.
+    return { low, high, text, end, reported: st.quote };
+  }
+  return null;
+}
+/** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
+export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };
 
 /**
  * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds

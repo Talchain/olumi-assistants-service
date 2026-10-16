@@ -813,17 +813,25 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
   const unit = JSON.stringify(readUnitParts(factor.unit));
   if (unit === 'null') return false;
   // R1 (DL 05:46Z, capacity e2e): a point the drafter stated INSIDE a range ("about 20 tickets per week, between 10 and 30";
-  // form range, value 20, low 10, high 30) is refused by the map, which never pairs figures. Its point is checked here as a
-  // point of the same sentence, and its pair only by the existing clause-governed range reader (`briefStatedLevelRange`, the
-  // reader that already credits that range): both ends must be exactly the ones it reads, and they are then set aside so the
-  // one figure left is the point.
-  const anchored = map.refused.filter((r) => r.key === key && r.refusal === 'figure_not_in_quote' && r.given.form === 'range'
-    && r.given.value === value && typeof r.given.low === 'number' && typeof r.given.high === 'number' && r.given.low < value && value < r.given.high)
+  // form range, value 20, low 10, high 30). Its point is checked here as a point of the same sentence, and its pair only by the
+  // existing clause-governed range reader (`briefStatedLevelRange`, the reader that already credits that range): both ends must
+  // be exactly the ones it reads, and they are then set aside so the one figure left is the point. Read from the drafter's own
+  // entry, whether the map verified its range (G3, TL 11:18Z: a joined range now verifies) or refused it.
+  const drafted = draftStatements(model);
+  const anchored = (Array.isArray(drafted) ? drafted : [])
+    .filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object' && !Array.isArray(e))
+    .filter((r) => {
+      const subject = r['subject'] as { kind?: unknown; label?: unknown } | null | undefined;
+      const low = r['low'], high = r['high'];
+      return subject?.kind === 'factor' && typeof subject.label === 'string' && subjectKey({ kind: 'factor', label: subject.label }, 'level') === key
+        && r['field'] === 'level' && r['form'] === 'range' && r['value'] === value && typeof r['quote'] === 'string'
+        && typeof low === 'number' && typeof high === 'number' && low < value && value < high;
+    })
     .flatMap((r) => {
       const range = briefStatedLevelRange(factor, brief);
-      if (range === undefined || range.quote !== r.quote || range.low !== r.given.low || range.high !== r.given.high) return [];
-      const point = sourceMapOf([{ ...r.given, form: 'point', low: null, high: null }], brief).verified.get(key) ?? [];
-      return point.map((s) => ({ statement: s, ends: [range.low, range.high] }));
+      if (range === undefined || range.quote !== r['quote'] || range.low !== r['low'] || range.high !== r['high']) return [];
+      const point = sourceMapOf([{ ...r, form: 'point', low: null, high: null }], brief).verified.get(key) ?? [];
+      return point.map((st) => ({ statement: st, ends: [range.low, range.high] }));
     });
   const candidates = [...(map.verified.get(key) ?? []).map((statement) => ({ statement, ends: [] as number[] })), ...anchored];
   return candidates.some(({ statement, ends }) => {

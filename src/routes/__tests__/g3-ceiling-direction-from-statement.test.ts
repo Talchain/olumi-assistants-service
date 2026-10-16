@@ -32,6 +32,7 @@ import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import type { CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
 import { resolveGoalDirection } from '../../orchestrator-v5/goal-target/goal-direction.js';
+import { figuresWritten } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
 
 type Rec = Record<string, any>;
 const SID = '00000000-0000-4000-8000-000000000063';
@@ -111,3 +112,54 @@ describe('G3: a ceiling goal\u2019s direction comes from the AI\u2019s verified 
     expect(goalNode(out.graph).observed_state, 'and its level is not read against a ceiling the goal does not hold').toBeUndefined();
   });
 });
+
+describe('G3: a link size that is one end of the user\u2019s range is said with that range (TL 10:49Z: ranges are kept)', () => {
+  const camera = (graph: Rec | null): Rec => graph!.edges.find((e: Rec) => e.from === 'camera_retrofit_installed' && e.to === 'scrap_rate_on_line_2');
+  /** The served draft with the AI's reading of the camera's effect sentence changed. */
+  const withCameraEffect = (patch: Rec): CandidateModel => {
+    const m = served() as unknown as Rec;
+    Object.assign((m.statements as Rec[]).find((s) => s.subject.kind === 'link' && s.subject.to_label === 'scrap rate on Line 2' && s.field === 'effect')!, patch);
+    return m as unknown as CandidateModel;
+  };
+  it('⭐ RED→GREEN: the AI read "1.5 to 2.5 percentage points" as a range; the camera link keeps it, its size the low end, numbers as before', async () => {
+    const out = await construct(BRIEF, [served()]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    const edge = camera(out.graph);
+    expect(edge.provenance.natural_effect.stated_range, 'both ends kept as written; the reported clause is words only, not stored').toEqual({ low: 1.5, high: 2.5, text: '1.5 to 2.5 percentage points', end: 'low' });
+    expect(edge.provenance.natural_effect.amount).toBe(-1.5);
+    expect(edge.strength, 'Science C1: a range sets no spread; the stated size stays the mean').toEqual({ mean: -0.015, std: 0.0075 });
+    // AIE range disposition (16 Oct): said as the brief reports it, speaker and "reckons" kept, and the calculation's own figure
+    // named as a separate approximation; never the user's single figure, never "the low end" or a floor.
+    const said = JSON.stringify(out.result);
+    // BUDDY-A #3297 B1: the WHOLE verified sentence, never a clause cut at its punctuation.
+    expect(said).toContain('"Camera retrofit installed\\" → \\"scrap rate on Line 2\\": \\"The options on the table are: retrofit the filler with new vision inspection cameras '
+      + '(the supplier quotes £180k and reckons it would cut scrap by 1.5 to 2.5 percentage points), run a structured operator retraining programme on the night shift, '
+      + 'where most of the rejects happen, or switch to a lighter preform supplier whose bottles are cheaper but whose defect rates we haven\'t tested properly.\\", as the brief puts it. '
+      + 'The current calculation uses a separate approximation, a change of \u22121.5 percentage points per switch, not that range.');
+    expect(said).not.toContain('low end of your');
+    expect(said).not.toMatch(/floor: at least|ceiling: at most/);
+  });
+  it('NEGATIVE (BUDDY-A #3297 B1): a range said with its speaker and condition keeps both: the whole sentence, never the numbers\u2019 clause', async () => {
+    const sentence = 'The supplier estimates that, if the pilot succeeds, the camera retrofit would cut scrap by 1.5 to 2.5 percentage points.';
+    const out = await construct(`${BRIEF} ${sentence}`, [withCameraEffect({ quote: sentence })]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(camera(out.graph).provenance.natural_effect.stated_range).toMatchObject({ low: 1.5, high: 2.5 });
+    const said = JSON.stringify(out.result);
+    expect(said).toContain(`\\"${sentence}\\", as the brief puts it.`);
+    expect(said).not.toContain('\\"the camera retrofit would cut scrap by 1.5 to 2.5 percentage points.\\"');
+  });
+  it('AIE 6180604131 kept: only figures JOINED as a range, low below high, pair; a change or two separate figures never do', () => {
+    const ranges = (q: string) => figuresWritten(q).filter((f) => f.low < f.high);
+    expect(ranges('it would cut scrap by 1.5 to 2.5 percentage points')).toEqual([{ low: 1.5, high: 2.5 }]);
+    expect(ranges('between 3 and 5 weeks')).toEqual([{ low: 3, high: 5 }]);
+    expect(figuresWritten('cut legacy from 25% to 15%'), 'a change, high to low: two figures, no pair').toEqual([{ low: 25, high: 25 }, { low: 15, high: 15 }]);
+    expect(ranges('six developers and 25% legacy')).toEqual([]);
+    expect(ranges('12 engineers, 20 contractors')).toEqual([]);
+  });
+  it('NEGATIVE: the same sentence read as a single figure invents no range', async () => {
+    const out = await construct(BRIEF, [withCameraEffect({ form: 'point', value: 1.5, low: null, high: null })]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(camera(out.graph).provenance.natural_effect.stated_range).toBeUndefined();
+  });
+});
+

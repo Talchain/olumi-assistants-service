@@ -31,7 +31,7 @@ vi.mock('../../orchestrator-v5/drafter-raw/index.js', () => ({
 
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
-import { figureSource } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
+import { draftStatements, figureSource, sourceMapOf, subjectKey } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
 import { goalLevelOwner, type CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
 
 type Rec = Record<string, any>;
@@ -165,6 +165,14 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
     expect(figureSource(m, COSTS.brief_text, { kind: 'goal', label: 'On-time delivery rate' }, 'target', 94)).toBe('user');
     expect(figureSource(m, COSTS.brief_text, { kind: 'factor', label: 'Evening sort shift deployed' }, 'level', 1)).toBe('unclaimed');
     expect(figureSource({ ...m, statements: undefined }, COSTS.brief_text, option, 'level', 90000), 'a draft before SYSTEM 2').toBeUndefined();
+  });
+  it('the owner and a stated RANGE (AIE range disposition): neither end of the user\u2019s verified "1.5 to 2.5" is their single figure', () => {
+    const m = draftOf(SCRAP);
+    const link = { kind: 'link', label: 'Camera retrofit installed', to_label: 'scrap rate on Line 2' } as const;
+    // Positive control: the joined range IS verified as the user's statement (so the refusal below is the end rule, not a miss).
+    expect((sourceMapOf(draftStatements(m), SCRAP.brief_text).verified.get(subjectKey(link, 'effect')) ?? []).map((st) => [st.form, Math.abs(st.low!), Math.abs(st.high!)]))
+      .toEqual([['range', 1.5, 2.5]]);
+    for (const end of [1.5, 2.5, -1.5, -2.5]) expect(figureSource(m, SCRAP.brief_text, link, 'effect', end), String(end)).toBe('unverified');
   });
   it('CONTROL: the user\u2019s own 6.5% is still their current level', async () => {
     const out = await construct(SCRAP.brief_text, [draftOf(SCRAP) as unknown as CandidateModel]);
