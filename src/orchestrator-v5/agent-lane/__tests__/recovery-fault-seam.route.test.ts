@@ -73,6 +73,7 @@ let runs = 0;
 let selectedRun = '';
 let hideFact = false;
 let interpretations = 0;
+let providerCalls = 0;
 let holdInterpretation: { entered: () => void; wait: Promise<void> } | undefined;
 const nativeTurnIds: string[] = [];
 const store = {
@@ -126,6 +127,7 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      providerCalls += 1;
       if (Array.isArray(body.tools) && body.tools.length === 0 && body.tool_choice === 'none') {
         interpretations += 1;
         const hold = holdInterpretation; holdInterpretation = undefined;
@@ -143,7 +145,7 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
     wait.totalMs = savedWait; wait.everyMs = savedEvery; await app.close(); vi.unstubAllGlobals(); restoreEnv();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; runs = 0; selectedRun = ''; hideFact = false; interpretations = 0; holdInterpretation = undefined; nativeTurnIds.length = 0; setEnv({ OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }); });
+  beforeEach(() => { rows.length = 0; runs = 0; selectedRun = ''; hideFact = false; interpretations = 0; providerCalls = 0; holdInterpretation = undefined; nativeTurnIds.length = 0; setEnv({ OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }); });
   afterEach(restoreEnv);
 
   const runPress = (extra: Record<string, unknown> = {}) => {
@@ -187,8 +189,10 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
     expect(res.statusCode).toBe(503);
     const original = selectedRun;
     await coldReopen();
+    const callsBefore = providerCalls;
     const recovered = await runPress({ turn_id: turnId });
     expect(recovered.res.statusCode, recovered.res.body).toBe(200);
+    expect(providerCalls - callsBefore, 'one interpretation, no new Run tool-selection call').toBe(1);
     expect(recovered.res.json().assistant_text).toContain('The result depends on the assumptions in your model.');
     expect(recovered.res.json().blocks).toContainEqual(BLOCK);
     expect(rows.find(r => r.turn_id === turnId)?.assistant_message).toBe(recovered.res.json().assistant_text);
@@ -206,11 +210,46 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
   it('two concurrent retries recover one recorded Run and return the one committed answer', async () => {
     const { turnId } = await runPress(armed());
     const before = interpretations;
-    const replies = await Promise.all([retry(turnId), retry(turnId)]);
-    expect(interpretations - before, 'concurrent duplicate waits/reads: one recovered interpretation').toBe(1);
-    expect(replies.map(r => r.statusCode)).toEqual([200, 200]);
-    expect(replies[0]!.json().assistant_text).toBe(replies[1]!.json().assistant_text);
-    expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+    const nativeId = nativeTurnIds[0]!;
+    const read = store.readCommittedTurn.getMockImplementation()!;
+    let probes = 0;
+    let secondEntered!: () => void;
+    let firstFinished!: () => void;
+    const bothReading = new Promise<void>(r => { secondEntered = r; });
+    const answerWon = new Promise<void>(r => { firstFinished = r; });
+    // Both saw no answer. Hold the second durable Run lookup until the first reply has been stored and returned.
+    store.readCommittedTurn.mockImplementation(async (sid, id) => {
+      if (id === nativeId) {
+        probes += 1;
+        if (probes === 1) await bothReading;
+        else if (probes === 2) { secondEntered(); await answerWon; }
+      }
+      return read(sid, id);
+    });
+    try {
+      const complete = (res: Awaited<ReturnType<typeof retry>>) => { firstFinished(); return res; };
+      const replies = await Promise.all([retry(turnId).then(complete), retry(turnId).then(complete)]);
+      expect(probes).toBe(2);
+      expect(interpretations - before, 'concurrent duplicate waits/reads: one recovered interpretation').toBe(1);
+      expect(replies.map(r => r.statusCode)).toEqual([200, 200]);
+      expect(replies[0]!.json().assistant_text).toBe(replies[1]!.json().assistant_text);
+      expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
+    } finally { secondEntered(); firstFinished(); store.readCommittedTurn.mockImplementation(read); }
+  });
+
+  it('an unavailable interpreter still returns and stores the recorded result without another science Run', async () => {
+    const { turnId } = await runPress(armed());
+    const fetchMock = vi.mocked(fetch), original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: 'interpretation unavailable' }), { status: 500 }));
+    try {
+      const recovered = await retry(turnId);
+      expect(recovered.statusCode, recovered.body).toBe(200);
+      expect(recovered.json().blocks).toContainEqual(BLOCK);
+      expect(recovered.json().assistant_text.length).toBeGreaterThan(20);
+      expect(recovered.json().assistant_text).not.toContain('The analysis did not run');
+      expect(rows.find(r => r.turn_id === turnId)?.assistant_message).toBe(recovered.json().assistant_text);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1); expect(runs).toBe(1);
+    } finally { fetchMock.mockImplementation(original); }
   });
 
   it('a concurrent original Run owns its in-flight answer: duplicate waits and reads, without recovery interpretation', async () => {
@@ -253,12 +292,28 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
     expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1); expect(runs).toBe(1);
   });
 
+  it('preview cannot resume a full-mode Run operation or gain a tool/interpretation permission', async () => {
+    const { turnId } = await runPress(armed());
+    const before = providerCalls;
+    process.env.AGENT_LANE_PREVIEW = 'true';
+    try {
+      await coldReopen();
+      const recovered = await retry(turnId);
+      expect(recovered.statusCode, recovered.body).toBe(409);
+      expect(recovered.json().error).toBe('TURN_OUTCOME_UNKNOWN');
+      expect(providerCalls).toBe(before); expect(runs).toBe(1);
+      expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
+    } finally { process.env.AGENT_LANE_PREVIEW = 'false'; await coldReopen(); }
+  });
+
   it.each(['foreign selected Run', 'missing own fact'])('%s cannot recover or execute science again', async reason => {
     const { turnId } = await runPress(armed());
     if (reason === 'foreign selected Run') selectedRun = randomUUID(); else hideFact = true;
+    const before = providerCalls;
     const recovered = await retry(turnId);
     expect(recovered.statusCode, recovered.body).toBe(409);
     expect(recovered.json().error).toBe('TURN_OUTCOME_UNKNOWN');
+    expect(providerCalls).toBe(before);
     expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
   });
 

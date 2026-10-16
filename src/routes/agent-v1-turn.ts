@@ -2939,7 +2939,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             return reply.code(200).send(await replayed(answer));
           }
           // A concurrent original/recovery request finishes its reply first. No duplicate interpreting call here.
-          if (!recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
+          if (mode === 'full' && !recoveryAttempted && !activeRunTurns.has(runKey) && (typedRunOf(body) || chiplessRetry)) {
             const recorded = await readRecordedRun(store, scenarioId, turnId, () => readBackState(
               (path, body) => readCache.dispatch(path, { ...(body as Record<string, unknown>), ...FRESH_READ }), scenarioId));
             if (recorded !== undefined && takeActiveRun(runKey)) {
@@ -4112,6 +4112,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const loopStartedAt = Date.now();
     let runPressProviderMs = 0;
     let runPressProviderCalls = 0;
+    if (result === undefined && mode === 'full' && recoveredRun !== undefined && runPress) {
+      // The operation already ran. Reuse its proven capability result directly; only its existing interpreter calls AI.
+      const started = Date.now();
+      const recorded = await loopCapabilities.runAnalysis(toolCtx, { reason: message, effects_timing: null });
+      const ms = Date.now() - started;
+      fastPath = 'run';
+      result = { assistant_text: RUN_RESULT_READY_TEXT,
+        items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] }],
+        tool_calls: [{ name: 'run_analysis', ok: recorded.ok === true, mutated: false }], tool_results: [recorded],
+        mutated: false, hops: 1, stopped_reason: 'answered', reply_author: 'host',
+        timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0,
+          provider_calls: 0, tool_calls: 1, hops: 1 } };
+    }
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
