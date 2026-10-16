@@ -40,6 +40,7 @@ import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.j
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
 import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
+import { userStatementFor } from '../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
 
@@ -526,6 +527,9 @@ export type PlaceholderFirstAsk =
   | { readonly kind: 'gauge'; readonly from: string; readonly through: string; readonly to: string }
   | { readonly kind: 'link'; readonly from: string; readonly to: string };
 
+/** The AIE's words (16 Oct, 6219775036) after a link whose effect the user stated as a range: no question, the next step. */
+export const STATED_RANGE_NEXT_STEP = 'We can also continue comparing the mechanisms and conditions qualitatively.';
+
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
  * UI's "Not shown." register (400-character explanation budget; complete question labels take precedence).
@@ -569,10 +573,21 @@ export function placeholderGoalWarning(
   const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
   // S-E GOALS §2: no link into a chance goal is offered or asked (its sentence above asks nothing).
   const chanceGoal = nodes.some((n) => n.kind === 'goal' && goalKindOf(n) === 'chance_of_event');
-  const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
+  // ⭐ ITEM 3 (AIE 16 Oct amended range contract: "do not repeatedly ask for the already-supplied range"; G3 1a1a7907 re-ask
+  // classes 2–3): a link whose effect the USER stated as a range is never asked to be sized again (no chip, no first ask):
+  // the range is held on it (construction's record), and construction disclosed Olumi's placeholder against it once.
+  const statedRange = (l: { from: string; to: string }): boolean => userStatementFor(graph, { kind: 'link', id: l.from, to_id: l.to, field: 'effect' })
+    ?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
+  const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && !statedRange(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
-  const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
+  // ⭐ ITEM 3: nor when every link it names already holds the user's stated range (AIE: never "the range again"). Its one next
+  // step is the AIE's own qualitative continuation (6219775036), so the withhold is never a dead end.
+  const rangesOnly = !productBlocks && ordered.length > 0 && ordered.every(statedRange);
+  const said = productBlocks ? unsizedLinkStatement : rangesOnly ? (ls: Parameters<typeof unsizedLinkStatement>[0]): string => {
+    const stated = unsizedLinkStatement(ls, 400 - STATED_RANGE_NEXT_STEP.length - 1);
+    return stated === '' ? '' : `${stated} ${STATED_RANGE_NEXT_STEP}`;
+  } : unsizedLinkSentence;
   const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
