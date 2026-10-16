@@ -81,7 +81,7 @@ import {
 
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
-import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
+import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
@@ -4320,8 +4320,18 @@ function admitOnce(
     // ⛔ STRUCTURE IS NEVER REMOVED TO SATISFY A FIGURE RULE (DL 5916217417): a risk kept out of the calculation keeps its
     // node, its words and its link; the run guard hands PLoT the model without it, and says so. One `node` for both.
     ...model.risks.map((r) => {
-      const source = subjectSource(model, brief, { kind: 'risk', label: r.label });
-      const author = source.author;
+      // The drafter's live holds-now receipt (`already_true_evidence`, the AIE's prompt line) is ONE more claim of this risk's source,
+      // read by the same owner as a statements entry: verified, bound and never lent by a sentence another subject claims.
+      // With no statements list, the receipt is this risk's one claim (a risk without one stays unknown).
+      const receipt = typeof r.already_true_evidence?.quote === 'string'
+        ? [{ subject: { kind: 'risk', label: r.label }, field: 'holds_now', form: 'holds_now', quote: r.already_true_evidence.quote }] : [];
+      const listed = (model as { statements?: unknown }).statements;
+      const source = subjectSource(receipt.length === 0 ? model : { ...model, statements: [...(Array.isArray(listed) ? listed : []), ...receipt] },
+        brief, { kind: 'risk', label: r.label });
+      // The drafter's OWN tag saying the risk is Olumi's is honoured where no claim settles its source: it can only keep the risk
+      // Olumi's, never make it the user's (T4f, AIE 6177505214 T9). A human tag still needs the owner's verified source.
+      const author = source.author.origin === 'unknown' && (r.provenance === 'inferred' || r.provenance === 'ai_proposed')
+        ? authorshipOf({ nodeTag: 'ai_inferred' }) : source.author;
       if (author.origin === 'unknown' || author.role === 'unverified') loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE, layer: 'cee', field_path: `nodes[${slugId(r.label)}].provenance`,
         before: { risk: r, claimed_statements: source.claimed }, after: author.origin === 'human' ? 'unverified_human' : 'unknown',

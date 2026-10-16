@@ -196,6 +196,8 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
   const entries = draftStatements(model);
   const unknown = (claimed: readonly GivenStatement[] = []) => ({ author: authorshipOf({ words: { verified: false, unknown: true } }), statements: [], claimed });
   if (!Array.isArray(entries) || typeof brief !== 'string') return unknown();
+  // A list with an entry that names no subject is not a complete source: its claims are unknown, never "nobody claimed it".
+  if (entries.some((e) => e === null || typeof e !== 'object' || Array.isArray(e) || subjectOf((e as Record<string, unknown>).subject) === undefined)) return unknown();
   const keyOf = (s: DraftedSubject) => subjectKey(s, 'level');
   const claims = entries.filter((entry): entry is Record<string, unknown> => {
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;

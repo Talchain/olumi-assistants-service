@@ -56,12 +56,12 @@ const riskStatement = (quote: string, changes: Rec = {}) => ({ subject: { kind: 
   field: 'holds_now', form: 'describes', quote, ...changes });
 function admitted(model: Rec, brief = BASE) {
   const out = admitCandidateModel(model as CandidateModel, {}, brief, (v, u) => figureTheUserWrote(v, u, brief));
-  const graph = withConstructionStatements({ nodes: out.nodes, edges: out.edges, goal_constraints: out.goal_constraints },
+  const graph = withConstructionStatements({ nodes: [...out.nodes], edges: out.edges, goal_constraints: out.goal_constraints },
     model.statements, brief, '2026-10-16T21:30:00Z') as Rec;
   const risk = graph.nodes.find((n: Rec) => n.kind === 'risk' && n.label === RISK)!;
   return { out, graph, risk };
 }
-const issuesFor = (graph: Rec, id: string) => (resolveRunAdmission(graph).assessment.issues as Rec[])
+const issuesFor = (graph: Rec, id: string) => (resolveRunAdmission(graph).assessment.issues as unknown as Rec[])
   .filter(issue => issue.factor_id === id || issue.node_id === id);
 
 describe('draft source → risk admission → retained participation → readiness', () => {
@@ -142,7 +142,23 @@ describe('draft source → risk admission → retained participation → readine
     const model = draft(); model.risks[0].already_true_evidence = { quote: 'Our budget is £2 million as of 2026-09-01.' };
     model.statements.push(entry('Budget', 'factor', 'level', model.risks[0].already_true_evidence.quote, 2000000, 'GBP'));
     const { risk } = admitted(model, `${BASE} ${model.risks[0].already_true_evidence.quote} Our deadline is six months.`);
-    expect(risk.provenance).toBe('ai_inferred'); expect(risk.already_true_quote).toBeUndefined();
+    // The receipt is a claim the owner reads like any statement: a sentence another subject claims lends no credit (no
+    // already-true quote, never from_brief), and claimed human words stay unverified human material, never Olumi's.
+    expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
+  });
+
+  it('the drafter\'s live holds-now receipt, a whole sentence nobody else claims, is the user\'s: kept whole, from_brief', () => {
+    const quote = 'The specialist role is already unfilled, and the team disagrees about its impact.';
+    const model = draft(); model.risks[0].already_true_evidence = { quote };
+    const { risk } = admitted(model, `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('from_brief'); expect(risk.already_true_quote).toBe(quote);
+  });
+
+  it('a malformed statements list is no complete source: the risk is unknown, as with no list', () => {
+    const model = draft(); model.statements = [...model.statements, null, 7];
+    const { risk } = admitted(model);
+    expect(authorshipOf({ nodeTag: risk.provenance }).origin).toBe('unknown');
+    expect(risk.analysis_participation).toBeUndefined();
   });
 
   it('a quote claimed for a different subject cannot lend its human credit to the risk’s qualitative claim', () => {
