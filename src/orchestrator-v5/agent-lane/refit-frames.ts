@@ -296,7 +296,7 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
     const Fold = frameOf(target);
     if (target === undefined || Fold === undefined) { refused.push({ link: key(e), reason: 'no_frame' }); continue; }
     const F = niceFrameAtLeast(Math.abs(e.strength.mean) * Fold);
-    const why = widenRefusal(g, target, Fold, F, opts);
+    const why = widenRefusal(g, target, Fold, F, { ...opts, statedEffect: true });
     if (why !== undefined) { refused.push({ link: key(e), reason: why }); continue; }
     let next = reframed(g, target.id, F);
     const chain: FrameRefit[] = [{ node: target.id, from: Fold, to: F, for_link: key(e) }];
@@ -319,7 +319,7 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
       if (down === undefined || Fd === undefined || chain.some((c) => c.node === down.id) || !chain.some((c) => c.node === newCut!.from)) break;
       const into = fresh.filter((x) => x.to === down.id);
       const Fn = niceFrameAtLeast(Math.max(...into.map((x) => Math.abs(x.strength.mean))) * Fd);
-      if (widenRefusal(next, down, Fd, Fn, opts) !== undefined) break;
+      if (widenRefusal(next, down, Fd, Fn, { ...opts, statedEffect: true }) !== undefined) break;
       next = reframed(next, down.id, Fn);
       chain.push({ node: down.id, from: Fd, to: Fn, for_link: key(into[0]!) });
     }
@@ -327,6 +327,13 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
     // `cuts` reads framed pairs only: no frame there to widen, so the whole chain is refused rather than cut at persist.
     newCut ??= outOfContract(next).find((x) => !outOfContract(g).some((y) => key(y) === key(x)));
     if (newCut !== undefined) { refused.push({ link: key(e), reason: 'new_cut', detail: key(newCut) }); continue; }
+    // ⛔ BUDDY-A #3313 B1 (DL-3 18:2xZ): a FACTOR widen leaves every OTHER link's analysed size where it was, read as it is
+    // persisted (`clampForPersist`): an Olumi estimate already clamped into the factor (stored 1, recorded 30 per contractor
+    // on a frame of 100) would otherwise act on the doubled frame (10 → 20 per contractor). Else the move is refused, and
+    // the user's link stays clamped as before.
+    const kindOf = new Map((next.nodes as Rec[]).map((n) => [n.id, n.kind]));
+    if (chain.some((c) => kindOf.get(c.node) === 'factor')
+      && !refitKeepsOtherLinks(clampForPersist(g), clampForPersist(next), new Set([key(e)]))) { refused.push({ link: key(e), reason: 'new_cut' }); continue; }
     g = next;
     refits.push(...chain);
   }
@@ -410,15 +417,24 @@ export function refitFramesForOlumiEstimates(graph: Rec): {
   return { graph: g, fitted, refused };
 }
 
+/** A node that holds exactly 0 today with no spread of its own: nothing a wider frame could move (`spreadWouldMove` reads 0 as exact). */
+const heldAtZero = (n: Rec): boolean => num(n.observed_state?.value) && n.observed_state.value === 0
+  && !(num(n.observed_state?.std) && n.observed_state.std > 0);
+
 /** Why `target` may not be widened from `Fold` to `F` (v1's guards, one per node, the cascade's included), else undefined. */
-function widenRefusal(g: Rec, target: Rec, Fold: number, F: number, opts: { readonly goalOwnRows?: boolean }): FrameRefusal['reason'] | undefined {
+function widenRefusal(g: Rec, target: Rec, Fold: number, F: number, opts: { readonly goalOwnRows?: boolean; readonly statedEffect?: true }): FrameRefusal['reason'] | undefined {
   // ⛔ PR Review CR on #2314 @ 72b9daed: a FACTOR's frame is never widened. A factor's level with no `std` is sampled by
   // PLoT with a normal spread (`max(0.1, 0.15·|value|)` of its frame), so widening a factor would move its natural
   // uncertainty while holding its link size; a factor target stays clamped.
   // ⭐ A4f (R3 #75 5923240262, DL 5923244548): an OUTCOME or a RISK is computed from its parents, so widening one is a pure
   // change of units. Served paul-1 (`d23f5df1`): the user's £1,000,000 per deal landed on "Investment-firm funding
   // secured" (frame £5m, deals frame 10), β 2, cut, and the reply said the run could not use it at full size.
-  if (target.kind === 'factor') return 'not_the_goal';
+  // ⭐ TL 17:51Z (G2 capacity c9e07d83, a CLASS): a frame must hold every value the USER's stated effects imply. A factor that
+  // holds exactly 0 today with no spread of its own ("Additional specialist capacity", computed from the specialists the
+  // option adds) has no natural uncertainty to move, so the STATED pass widens it to fit the user's size ("20 tickets a week
+  // per specialist" × 10 on a drafted frame of 100) instead of clamping it. Every other factor target stays as PR Review's CR
+  // set it, and Olumi's own estimates never widen a factor.
+  if (target.kind === 'factor' && !(opts.statedEffect === true && heldAtZero(target))) return 'not_the_goal';
   const setByOption = (g.nodes as Rec[]).some((n) => n.kind === 'option' && n.interventions !== null && typeof n.interventions === 'object'
     && Object.prototype.hasOwnProperty.call(n.interventions, target.id));
   const namedByLimit = !(opts.goalOwnRows === true && target.kind === 'goal')
