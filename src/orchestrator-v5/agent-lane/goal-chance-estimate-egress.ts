@@ -9,6 +9,9 @@ import { rankingCodesIn, rankingLabelContext } from './withheld-leader-fail-clos
 import { isLicensedChanceLine, licensedChancesOf } from './licensed-chance-lines.js';
 import { goalChanceWithheldForAgent } from './goal-chance-withheld.js';
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from './run-explanation.js';
+import { checkEstimatesOf } from './actions/state.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import type { EstimateCountRecord } from './olumi-estimates-feeding-result.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -44,13 +47,31 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const sourceTexts = authoredSlicesOf(context.userAuthoredTexts ?? []);
   const screenLines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, context.current);
   const counted = goalChanceLicenceForAgent(context.analysisResult);
+  const hasRecordedCounts = context.current && counted !== undefined
+    && (counted.olumi_estimate_link_count !== undefined || counted.olumi_estimate_value_count !== undefined
+      || counted.olumi_estimate_settings_by_option !== undefined);
+  const values = (counted?.olumi_estimate_value_count ?? 0)
+    + Object.values(counted?.olumi_estimate_settings_by_option ?? {}).reduce((sum, count) => sum + count, 0);
+  // A withheld option may own settings absent from the display licence. Without the full hash-bound
+  // producer record, its total/value count is unknown, never the smaller displayed subtotal.
+  const partialCensus = (counted?.withheld_option_ids?.length ?? 0) > 0;
+  const licenceCounts: EstimateCountRecord | null = hasRecordedCounts
+    ? { count: partialCensus ? undefined : values + (counted!.olumi_estimate_link_count ?? 0),
+      values: partialCensus ? undefined : values, links: counted!.olumi_estimate_link_count ?? 0 } : null;
+  // The stored face used the panel's census, including withheld options and joint-event inputs. Read that SAME
+  // producer only when this graph hashes to this Run; the displayed licence's subset cannot replace it on reopen.
+  const producerCensus = context.current ? checkEstimatesOf({ scenarioId: '', graph: context.graph,
+    graphHash: computeAnalysisAffectingGraphHash(context.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) ?? undefined,
+    analysisResult: context.analysisResult }) : null;
+  const counts: EstimateCountRecord | null = producerCensus === null ? licenceCounts
+    : { count: producerCensus.count, values: producerCensus.values.length, links: producerCensus.links.length };
   const staticScope = counted?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
   const chanceFacts = goalChanceFactsForAgent(context.analysisResult, context.graph, context.current);
   const legacyScopeLine = staticScope ? chanceFacts.goal_horizon_line : undefined;
   const finish = (value: T): T => {
     if (typeof value.assistant_text !== 'string') return value;
     // Correct a bound figure first; the count guard then sees the producer's complete authorised sentence.
-    let countedText = checkScreenLineClaims(value.assistant_text, screenLines, sourceTexts, context.narrator);
+    let countedText = checkScreenLineClaims(value.assistant_text, screenLines, sourceTexts, context.narrator, counts);
     if (context.current && context.narrator === 'olumi') {
       const firstRow = countedText.trimStart().split('\n')[0] ?? '';
       const head = firstRow.match(/^.*?[.!?]["'”’`*_)]*(?=\s|$)/)?.[0] ?? firstRow;

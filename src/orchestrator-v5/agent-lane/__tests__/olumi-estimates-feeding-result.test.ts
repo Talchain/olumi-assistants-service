@@ -280,38 +280,36 @@ describe('RC4: licensed top-three order and exact shared words', () => {
   });
 });
 
-describe('RC4: narrator count egress guard', () => {
-  it('MUTANT: narrator-invented N → RED; Nine is removed when count is not 9', () => {
-    const sentence = "Nine underlying values are Olumi's assumptions.";
-    expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
+// TL 20:48 replaces the blanket narrator-count ban: this boundary proves a contradiction, not a wording violation.
+describe('the one record-grounded narrator count check', () => {
+  it.each([
+    'Olumi supplied 1 value.', 'Olumi supplied 8 links.', 'Olumi supplied 9 figures.',
+    'I supplied 1 value.', 'I estimated 8 links.', 'Olumi’s estimates: 9, see Check estimates.',
+  ])('keeps a matching recorded count and its exact bytes: %s', text => {
+    const wrapped = `  ${text}  `;
+    expect(narratorCountGuard(wrapped, olumiEstimatesFeedingResult(paul()), 'olumi')).toEqual({ text: wrapped, removed: [] });
   });
 
-  it('Nine underlying values is removed for Paul’s N=9 of one value and eight links too', () => {
-    const sentence = "Nine underlying values are Olumi's assumptions.";
-    expect(narratorCountGuard(`  ${sentence}  `, olumiEstimatesFeedingResult(paul()))).toEqual({ text: '', removed: [sentence] });
+  it.each([
+    'Olumi supplied 9 underlying values.', 'Olumi supplied 99 links.', 'Olumi supplied 6 figures.',
+    'I supplied 4 of the values behind this.', 'I supplied 99 links.', 'I estimated 3 of the links.',
+    'Olumi’s estimates: 99, see Check estimates.', 'Olumi supplied 9.5 values.',
+  ])('removes only a proved count/kind contradiction: %s', sentence => {
+    expect(narratorCountGuard(sentence, olumiEstimatesFeedingResult(paul()), 'olumi')).toEqual({ text: '', removed: [sentence] });
   });
 
-  it('without a producer removes Six underlying values were supplied by Olumi, not you', () => {
-    const sentence = 'Six underlying values were supplied by Olumi, not you.';
-    expect(narratorCountGuard(sentence, null)).toEqual({ text: '', removed: [sentence] });
-  });
-
-  it('leaves Olumi estimated the price and every sentence without an attributed count untouched', () => {
-    const text = 'Olumi estimated the price. You supplied 6 values. Several assumptions remain unresolved.';
-    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
-  });
-
-  it.each([1, 2])('R16 K_WORDS: a narrated %i-relationship attribution still needs the producer', k => {
-    const sentence = `Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates).`;
-    expect(narratorCountGuard(sentence, null)).toEqual({ text: '', removed: [sentence] });
+  it('an equal total cannot license the wrong kind: one value plus eight links is not nine values', () => {
+    const sentence = 'Olumi supplied nine underlying values.';
+    expect(narratorCountGuard(sentence, olumiEstimatesFeedingResult(paul()))).toEqual({ text: '', removed: [sentence] });
+    expect(narratorCountGuard('Olumi supplied nine figures.', olumiEstimatesFeedingResult(paul())).removed).toEqual([]);
   });
 
   it.each([
     'values', 'figures', 'inputs', 'assumptions', 'estimates', 'numbers', 'links', 'relationships', 'sizes', 'strengths',
     'value', 'figure', 'input', 'assumption', 'estimate', 'number', 'link', 'relationship', 'size', 'strength', 'link sizes',
-  ])('digits and %s work with Olumi before or after the count', noun => {
-    for (const sentence of [`Olumi supplied 6 ${noun}.`, `6 ${noun} came from Olumi.`]) {
-      expect(narratorCountGuard(sentence, census(9))).toEqual({ text: '', removed: [sentence] });
+  ])('retains the count-kind negative at an evidenced zero: %s', noun => {
+    for (const sentence of [`Olumi supplied 6 ${noun}.`, `6 ${noun} were supplied by Olumi.`]) {
+      expect(narratorCountGuard(sentence, census(0))).toEqual({ text: '', removed: [sentence] });
     }
   });
 
@@ -319,117 +317,55 @@ describe('RC4: narrator count egress guard', () => {
     'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
     'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
     'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
-    'hundred', 'hundreds', 'dozen', 'dozens', 'twenty-one', 'thirty-five', 'ninety-nine',
-  ])('number word %s is recognised in both directions', word => {
-    const sentences = [`${word} underlying figures are Olumi’s estimates.`, `Olumi supplied ${word} assumptions.`];
-    for (const sentence of sentences) expect(narratorCountGuard(sentence, null).removed).toEqual([sentence]);
+    'twenty-one', 'thirty-five', 'ninety-nine', '9.0', '1,000', '**9**', '_nine_',
+  ])('a known count still contradicts recorded zero: %s', word => {
+    const sentence = `Olumi supplied ${word} assumptions.`;
+    expect(narratorCountGuard(sentence, census(0))).toEqual({ text: '', removed: [sentence] });
   });
 
-  it('digits above twenty, optional of the, wrapped sentences, and an unterminated last sentence', () => {
-    for (const sentence of [
-      'Olumi supplied 21 figures.', 'Olumi supplied 21 of the figures.',
-      'Olumi supplied 21 of the underlying values.',
-      'Nine underlying\nvalues are Olumi’s assumptions.', 'Olumi supplied 21 assumptions',
-    ]) expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
-  });
-
-  it('removes every attributed count sentence, including matching counts, but keeps ordinary text', () => {
-    const first = "Nine underlying values are Olumi's assumptions.";
-    const second = 'Olumi supplied 8 figures!';
-    const last = 'Four assumptions were supplied by Olumi';
-    const matching = 'Olumi supplied 1 value.';
-    const text = `Olumi estimated the price. ${first} Olumi supplied 1 value. ${second} ${last}`;
-    expect(narratorCountGuard(text, census(1))).toEqual({
-      text: 'Olumi estimated the price.', removed: [first, matching, second, last],
-    });
-  });
-
-  it('a sentence containing both a correct count and an unsupported count is removed as a whole', () => {
-    const sentence = 'Olumi supplied 9 values and 4 assumptions.';
-    expect(narratorCountGuard(sentence, census(9))).toEqual({ text: '', removed: [sentence] });
-  });
-
-  it.each([
-    'Olumi supplied thirty values.', "Twenty-one values were Olumi's estimates.",
-    "Nine of Olumi's values feed this result.", 'Nine of Olumi’s values feed this result.',
-    'Olumi supplied 99 link sizes.', 'Olumi supplied dozens of link strengths.',
-    'Olumi supplied nine of its own values.', 'Olumi supplied nine of their own values.',
-    'Olumi supplied nine of these starting values.', 'Olumi supplied nine of those estimated values.',
-  ])('expanded count attribution is removed: %s', sentence => {
-    expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
-  });
-
-  it.each([', and', ';', ':', '—', 'and', 'but', 'while', 'whereas'])('scopes unrelated user counts across %s', separator => {
-    for (const text of [
-      `You supplied 6 values ${separator} Olumi estimated the price.`,
-      `Olumi estimated the price ${separator} you supplied six values.`,
-    ]) expect(narratorCountGuard(text, olumiEstimatesFeedingResult(paul()))).toEqual({ text, removed: [] });
-  });
-
-  it('keeps the exact buddy unrelated-count sentence byte-for-byte', () => {
-    const text = 'You supplied 6 values, and Olumi estimated the price.';
-    expect(narratorCountGuard(text, olumiEstimatesFeedingResult(paul()))).toEqual({ text, removed: [] });
-  });
-
-  it.each([
-    'You supplied six values and Olumi suggests the price.',
-    'You supplied six values and Olumi’s estimate was useful.',
-    'You wrote six values while Olumi estimated the price.',
-    'Olumi likes the price and you wrote six values.',
-    'Olumi and you supplied six values.',
-  ])('explicit subjects distinguish clauses from coordinated subjects: %s', text => {
-    const out = narratorCountGuard(text, null);
-    if (text.startsWith('Olumi and')) expect(out).toEqual({ text: '', removed: [text] });
-    else expect(out).toEqual({ text, removed: [] });
-  });
-
-  it.each([
-    'Six underlying values were supplied by Olumi, not you.',
-    'You supplied 6 values, and Olumi supplied thirty links.',
-    'Olumi supplied values and 6 link sizes.',
-    'Olumi-generated six values feed this result.',
-  ])('one attributed clause removes the entire sentence: %s', sentence => {
-    expect(narratorCountGuard(sentence, census(6))).toEqual({ text: '', removed: [sentence] });
-  });
-
-  it('splits coordinated clauses beginning with count+noun+predicate', () => {
-    const text = "Olumi estimated the price and six values were yours.";
-    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
-  });
-
-  it('limits filler skipping to three tokens', () => {
-    const text = 'Olumi supplied nine of the underlying estimated values.';
-    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
-  });
-
-  it('buddy r2: grouped, decimal and emphasised figures are still counts of Olumi\'s figures, so they are removed', () => {
-    for (const text of ['Olumi supplied 9.0 values.', 'Olumi supplied 1,000 values.', 'Olumi supplied **9** values.', 'Olumi supplied _nine_ values.']) {
-      expect(narratorCountGuard(text, null).removed, text).toEqual([text])
+  it('grouping and decimal notation retain the numeric value, rather than manufacturing 90 from 9.0', () => {
+    for (const text of ['Olumi supplied 9.0 values.', 'Olumi supplied **9** values.']) {
+      expect(narratorCountGuard(text, census(9))).toEqual({ text, removed: [] });
     }
   });
 
-  it('a kept sentence keeps its original bytes (emphasis and separators untouched)', () => {
-    const text = 'Olumi estimated **£1,000** for the price.';
-    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
+  it.each([
+    'I supplied 99 links.', 'Olumi supplied 6 values.', "Olumi's estimates: 99, see Check estimates.",
+  ])('missing evidence never becomes a contradiction: %s', text => {
+    expect(narratorCountGuard(text, null, 'olumi')).toEqual({ text, removed: [] });
   });
 
-  it('20,000-char whitespace input runs in less than 50 ms', () => {
-    const text = ' '.repeat(20_000);
-    const start = performance.now();
-    const out = narratorCountGuard(text, null);
-    const elapsed = performance.now() - start;
-    process.stdout.write(`20,000-char whitespace timing: ${elapsed.toFixed(3)} ms\n`);
-    expect(out).toEqual({ text, removed: [] });
-    if (timingGated) { expect(elapsed).toBeLessThan(50); }
+  it.each([
+    'Shall I save the £50,000 assumption for Hire PA?', 'I have set the £45,000 figure for Hire PA.',
+    "Olumi's £50,000 assumption for Hire PA is a starting value.", 'Olumi supplied £50,000 as a starting value.',
+    'I need 2 values for this worksheet.', 'Can I check your two assumptions?', 'I supplied 99 links?', 'Olumi used 3 figures you gave.',
+    'Olumi assumed 3 hours per week for onboarding.', 'Olumi estimated a 2.5% churn rate.', 'Olumi set 12 months as the horizon.',
+    'Paul said I supplied 99 links.', '“I supplied 99 links.”', 'I did not supply 4 values.', 'I have not supplied 4 values.',
+    'Olumi supplied dozens of values.', 'Olumi supplied hundreds of values.', 'Olumi supplied nine of the underlying estimated values.',
+    'You supplied 6 values.', 'You supplied 6 values and Olumi estimated the price.',
+    'Olumi estimated the price and six values were yours.',
+  ])('non-claims, requests, quantities, reported/negated or unknown claims keep their bytes: %s', text => {
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text, removed: [] });
   });
 
-  it('20,000-char repeated Olumi nine of the input runs in less than 50 ms', () => {
-    const text = 'Olumi nine of the '.repeat(Math.ceil(20_000 / 'Olumi nine of the '.length)).slice(0, 20_000);
+  it('correct and contradicted clauses do not erase an unrelated kept sentence', () => {
+    const falseClaim = 'Olumi supplied 8 links!';
+    const text = `Olumi estimated the price. Olumi supplied 1 value. ${falseClaim}`;
+    expect(narratorCountGuard(text, census(1))).toEqual({
+      text: 'Olumi estimated the price. Olumi supplied 1 value.', removed: [falseClaim],
+    });
+  });
+
+  it('a later contradictory coordinated clause is still checked against its own count kind', () => {
+    const sentence = 'Olumi supplied 1 value and 4 links.';
+    expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
+    const independent = 'You supplied 6 values and Olumi supplied 30 links.';
+    expect(narratorCountGuard(independent, census(1))).toEqual({ text: '', removed: [independent] });
+  });
+
+  it.each([' '.repeat(20_000), 'Olumi nine of the '.repeat(1250)])('bounded scan retains unknown long text', text => {
     const start = performance.now();
-    const out = narratorCountGuard(text, null);
-    const elapsed = performance.now() - start;
-    process.stdout.write(`20,000-char repeated Olumi nine of the timing: ${elapsed.toFixed(3)} ms\n`);
-    expect(out).toEqual({ text, removed: [] });
-    if (timingGated) { expect(elapsed).toBeLessThan(50); }
+    expect(narratorCountGuard(text, census(1))).toEqual({ text, removed: [] });
+    if (timingGated) expect(performance.now() - start).toBeLessThan(50);
   });
 });
