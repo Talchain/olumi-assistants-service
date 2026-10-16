@@ -1,3 +1,4 @@
+import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
@@ -314,7 +315,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
+import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
@@ -2491,6 +2492,10 @@ export function createAgentCapabilities(
     /** Absolute end of this turn's drafter call, shared with optional draft widening. */
     /** Ordinary agent-turn authority cut; legacy callers remain inventoried separately. */
     readonly turnAuthority?: boolean;
+    /** Route-only, proven from this operation’s durable Run and the canonical current read. */
+    readonly recoveredRun?: RecoveredRun;
+    /** Only a typed Run press: other tool sequences may contain distinct Run operations. */
+    readonly runOperationId?: string;
     readonly deadlineAt?: number;
     readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
     /**
@@ -8062,6 +8067,16 @@ export function createAgentCapabilities(
         scoped_precondition_holds: (p) => heldCardStillApplies(p, before.raw),
       });
       if (decision.status === 'already_applied') {
+        const op = decision.proposal.operations.length === 1 ? decision.proposal.operations[0] : undefined;
+        if (op?.op === 'set_goal_deadline') {
+          const committed = opts.readCommittedTurnLedger !== undefined
+            && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
+              authorisationTurnId(`${decision.proposal.proposal_id}#deadline`)), () => false);
+          if (!committed || !appliedDeadlineHolds(op, before.raw)) return {
+            ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
+            detail: LINK_SET_SAVE_NOT_CONFIRMED, follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
+          };
+        }
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
         // the retry is bound to the same proposal by identity, and the ORIGINAL
         // receipts, so the Agent can say which version it already became.
@@ -11727,9 +11742,9 @@ export function createAgentCapabilities(
       };
     },
 
-    async runAnalysis(ctx, args, opts): Promise<ToolResult> {
+    async runAnalysis(ctx, args, runOptions): Promise<ToolResult> {
       // The Agent never runs an analysis as part of an approval; the route's automatic Run after a committed change does.
-      if (approvalAppliedThisRequest && opts?.afterCommittedChange !== true) {
+      if (approvalAppliedThisRequest && runOptions?.afterCommittedChange !== true) {
         return {
           ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
           detail:
@@ -11749,12 +11764,10 @@ export function createAgentCapabilities(
           return firstAnalysisThisRequest.result;
         }
       }
-      const r = await dispatch('/orchestrate/v2/turn', {
+      const r = opts.recoveredRun ?? await dispatch('/orchestrate/v2/turn', {
         kind: 'message',
-        // Deliberately NOT derived, unlike the authorised write above: asking
-        // for the analysis twice is two operations the user actually made, and
-        // collapsing them onto one identity would suppress the second.
-        turn_id: randomUUID(),
+        // A fresh press has a fresh parent id; a retry can recover THIS operation's stored Run.
+        turn_id: opts.runOperationId ?? randomUUID(),
         scenario_id: ctx.scenario_id,
         stage: 'analyse',
         turn_class: 'decide',
