@@ -22,7 +22,7 @@ vi.mock('../../orchestrator/user-identity.js', async original => ({
 import { tryStructureOriginAnswer } from '../../cee/context-integrity/structure-origin-answer.js';
 import { constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import registerRoute from '../assist.v1.scenario-graph-register.js';
-import { createAgentCapabilities, projectModelContext, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { createAgentCapabilities, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { ProposalStore, createProposal, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { proposalPendingAction, rehydrateProposals } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
@@ -306,13 +306,17 @@ describe('one native governing-outcome correction', () => {
     expect(goal.user_statements[0].statements[0]).toMatchObject({ quote: source, source, reading: 'olumi' });
     const old = graph.nodes.find((n: Rec) => n.id === 'large_fund');
     expect(old).toMatchObject({ kind: 'outcome', goal_threshold_raw: 1300000, goal_horizon: { deadline: '2027-12-31' } });
-    expect(old.retained_aim.constraints).toEqual(w.original.goal_constraints);
+    expect(old.description).toContain(ambition);
+    expect(old.description).toContain('Earlier saved bound: at least £1,300,000');
+    expect(old.description).toContain('Earlier saved source quote');
+    expect(old.description).toContain('not kept as current target controls');
     expect(graph.goal_constraints.some((r: Rec) => r.node_id === 'large_fund')).toBe(false);
     expect(graph.nodes.find((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.find((n: Rec) => n.kind === 'option'));
-    const reopened = projectModelContext({ nodes: graph.nodes, edges: graph.edges, raw: graph } as never) as Rec;
+    const reopened = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
     expect(reopened.goal.label).toBe(args.governing_outcome);
-    expect(reopened.earlier_aims[0]).toMatchObject({ label: 'Larger fund secured', later_ambition_quote: ambition,
-      goal: { target: { raw: 1300000, comparator: '>=' } }, constraints: w.original.goal_constraints });
+    const earlier = reopened.entities.find((n: Rec) => n.id === 'large_fund');
+    expect(earlier.full_label).toBe(old.description);
+    expect(earlier.full_label).toContain(ambition);
     expect(computeAnalysisAffectingGraphHash(graph as never)).not.toEqual(computeAnalysisAffectingGraphHash(w.original as never));
   });
   it('composes a requested removal on the same prepared card and one native save', async () => {
@@ -383,12 +387,12 @@ describe('one native governing-outcome correction', () => {
     expect(w.graph().nodes.some((n: Rec) => n.id === 'effort')).toBe(false);
     expect(w.graph().nodes.find((n: Rec) => n.id === 'focus').interventions).not.toHaveProperty('effort'); expect(w.writes).toHaveLength(1);
   });
-  it.each(['row', 'deadline', 'factor', 'new_target', 'new_source'] as const)('a prepared complete candidate cannot lose an untouched %s before minting', async missing => {
+  it.each(['ambition', 'deadline', 'factor', 'new_target', 'new_source'] as const)('a prepared complete candidate cannot lose an untouched %s before minting', async missing => {
     const w = await make(); const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
     expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true });
     const original = w.proposals.get(String(offered.proposal_id))!, operations = structuredClone(original.operations);
     const value = operations[0]!.value as Rec, graph = value.candidate;
-    if (missing === 'row') graph.nodes.find((n: Rec) => n.id === 'large_fund').retained_aim.constraints = [];
+    if (missing === 'ambition') delete graph.nodes.find((n: Rec) => n.id === 'large_fund').description;
     if (missing === 'deadline') delete graph.nodes.find((n: Rec) => n.id === 'large_fund').goal_horizon;
     if (missing === 'new_target') graph.nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw = 280000;
     if (missing === 'new_source') delete graph.nodes.find((n: Rec) => n.kind === 'goal').user_statements;

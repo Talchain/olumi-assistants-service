@@ -3,26 +3,41 @@ import { isDeepStrictEqual } from 'node:util';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { applyStructuralDelete } from '../../system-events/structural-delete.js';
 import type { AgentToolContext } from './agent-tools.js';
+import { sayFigureWithoutRounding } from '../say-figure.js';
+import { sayGoalChange } from '../limit-frame.js';
+import { sayDate } from '../../goal-target/deadline-date.js';
+import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../limit-operator-words.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** Earlier target rows are history on their original node, never active constraints in the next Run.
- * NodeV3 declares the historical carrier explicitly. The original node fields, sources and statements stay verbatim.
- * This projection is also exposed to the reasoning input on warm reads and cold reopen.
+/** Keep the earlier aim in the existing human-readable description, with the original words and recorded uncertainty.
+ * No new carrier or numerical authority: the existing entity reader exposes description as full_label on cold read.
+ * Structured target-row controls are explicitly left out; no silent claim that historical rows are still operative.
  */
-export function retainedAimOf(node: unknown): Rec | undefined {
-  if (!rec(node) || !rec(node.retained_aim) || !Array.isArray(node.retained_aim.constraints)
-    || typeof node.retained_aim.change_quote !== 'string') return undefined;
-  const held = node.retained_aim;
-  return { id: node.id, label: node.label, role: typeof held.later_ambition_quote === 'string' ? 'later ambition (Olumi’s reading)' : 'earlier aim, retained as history',
-    goal: readGoalRecord({ nodes: [{ ...node, kind: 'goal' }], goal_constraints: held.constraints }, String(node.id)),
-    constraints: held.constraints, change_quote: held.change_quote,
-    ...(typeof held.later_ambition_quote === 'string' ? { later_ambition_quote: held.later_ambition_quote } : {}),
-    user_statements: node.user_statements ?? [],
-    ...(held.previous !== undefined ? { previous: held.previous } : {}),
-    use: 'Historical aim, not a current goal or limit. Original provenance and uncertainty remain; approval does not reauthor them.' };
+export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuote?: string): string | undefined {
+  const old = Array.isArray(before.nodes) ? before.nodes.find((n): n is Rec => rec(n) && n.id === oldId && n.kind === 'goal') : undefined;
+  const held = readGoalRecord(before, oldId);
+  if (!old || !held) return undefined;
+  const rows = (Array.isArray(before.goal_constraints) ? before.goal_constraints : []).filter((r): r is Rec => rec(r) && r.node_id === oldId);
+  const figure = (value: number, unit: unknown) => sayFigureWithoutRounding(value, typeof unit === 'string' ? unit : '');
+  const lines = [typeof old.description === 'string' ? old.description : '',
+    `Earlier aim, retained for context and no longer the governing goal: “${held.label}”.`,
+    ...(laterAmbitionQuote === undefined ? [] : [`Later ambition, as Olumi reads your words: “${laterAmbitionQuote}”. Your source stays yours; the later role is a modelling interpretation.`]),
+    ...(held.target?.raw === undefined ? [] : [`Earlier model target: ${sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
+      ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`}.`]),
+    ...(held.horizon === null ? [] : [`Earlier timing: ${[held.horizon.as_stated, held.horizon.deadline === undefined ? undefined : sayDate(held.horizon.deadline),
+      held.horizon.months === undefined ? undefined : `${held.horizon.months} months`].filter(Boolean).join('; ')}. This does not set the current goal’s deadline.`]),
+    ...(held.horizon_basis === undefined ? [] : [`Earlier timing basis, recorded but not verified: ${held.horizon_basis.basis}. Earlier source: ${held.horizon_basis.source}.`]),
+    ...rows.map(row => `Earlier saved bound: ${sayGoalChange(row.value_frame, Number(row.value), typeof row.unit === 'string' ? row.unit : undefined, figure, statedOperatorOf(row))
+      ?? `${statedOperatorOf(row) === undefined ? String(row.operator) : LIMIT_OPERATOR_WORDS[statedOperatorOf(row)!]} ${figure(Number(row.value), row.unit)}`}.`
+      + (typeof row.source_quote === 'string' ? ` Earlier saved source quote: “${row.source_quote}”.` : '')
+      + (typeof row.provenance === 'string' ? ` Origin recorded by the earlier model: ${row.provenance}.` : '')
+      + (typeof row.confidence === 'number' ? ` Earlier extraction confidence: ${row.confidence}; this is not a forecast chance.` : '')
+      + (rec(row.retained_unresolved_limit) && typeof row.retained_unresolved_limit.question === 'string' ? ` Unresolved: ${row.retained_unresolved_limit.question}` : '')),
+    'The earlier structured target rows and their remaining metadata are not kept as current target controls. Their figures, quoted words and recorded extraction confidence are retained here as text for context; they do not constrain the current goal.'];
+  return lines.filter(Boolean).join('\n');
 }
 
 /** Compute the retained work through the SAME deletion adapter, including option settings/links that go with a factor. */
@@ -45,17 +60,15 @@ export function repointRetainedBase(before: Rec, removals: unknown, ctx: AgentTo
 }
 
 /** The repoint card must retain the whole old aim and all options, before the one native registration. */
-export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: string, newId: string): boolean {
+export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: string, newId: string, expectedDescription: string): boolean {
   if (!rec(candidate) || !Array.isArray(before.nodes) || !Array.isArray(candidate.nodes)) return false;
   const old = before.nodes.find((n): n is Rec => rec(n) && n.id === oldId && n.kind === 'goal');
   const kept = candidate.nodes.find((n): n is Rec => rec(n) && n.id === oldId);
   const goals = candidate.nodes.filter(n => rec(n) && n.kind === 'goal');
   if (!old || !kept || kept.kind !== 'outcome' || goals.length !== 1 || !rec(goals[0]) || goals[0].id !== newId) return false;
-  const { kind: _oldKind, ref: _oldRef, retained_aim: _oldHistory, ...oldFields } = old;
-  const { kind: _newKind, ref: _newRef, retained_aim: history, ...keptFields } = kept;
-  const oldRows = (Array.isArray(before.goal_constraints) ? before.goal_constraints : []).filter(r => rec(r) && r.node_id === oldId);
-  if (!isDeepStrictEqual(oldFields, keptFields) || !rec(history) || !isDeepStrictEqual(history.constraints, oldRows)
-    || !isDeepStrictEqual(history.previous, old.retained_aim) || retainedAimOf(kept) === undefined) return false;
+  const { kind: _oldKind, ref: _oldRef, description: _oldDescription, ...oldFields } = old;
+  const { kind: _newKind, ref: _newRef, description, ...keptFields } = kept;
+  if (!isDeepStrictEqual(oldFields, keptFields) || description !== expectedDescription) return false;
   // The prior aim is informational: leaving its target in the active array would turn it into a second goal/limit.
   if ((Array.isArray(candidate.goal_constraints) ? candidate.goal_constraints : []).some(r => rec(r) && r.node_id === oldId)) return false;
   // Every untouched node, edge, non-goal constraint and top-level member must survive, not only the option roster.

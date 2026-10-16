@@ -208,8 +208,6 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   // and the approved answer to its open question (`goal-reading-write.ts`, which removes that one member).
   'goal_target_basis',
   'goal_scope',
-  // Only the approved re-goal adapter retains historical target rows; an AI add/edit cannot forge earlier user aims.
-  'retained_aim',
   'goal_horizon_months',
   // The S4 deadline door and the one-off door are the only writers of these pipeline-owned fields.
   'goal_horizon_reference_date',

@@ -37,8 +37,6 @@ import {
   adjudicate as contractAdjudicate,
 } from "../contract-field-guard.js";
 import { z } from "zod";
-import { NodeV3, CEEGraphResponseV3 } from "../cee-v3.js";
-import { GoalConstraintSchema } from "../assist.js";
 
 const SITES = deriveValueSites();
 const FINDINGS = runWarrantDetectors(SITES);
@@ -138,25 +136,12 @@ describe("the nested walk is the capability, and the flat guard does not have it
     const ids = SITES.map((s) => s.id);
     expect(ids).toContain("cee.EdgeV3::strength.std"); // nested object
     expect(ids).toContain("cee.NodeV3::observed_state.value"); // nested object
-    expect(ids).toContain("cee.NodeV3::retained_aim.constraints[].value"); // array element
+    expect(ids).toContain("cee.CEEGraphResponseV3::goal_constraints[].value"); // array element
     expect(
       ids,
     ).toContain(
-      "cee.NodeV3::retained_aim.constraints[].provenance_unit_normalised.original_value",
+      "cee.CEEGraphResponseV3::goal_constraints[].provenance_unit_normalised.original_value",
     ); // array element, then nested again
-  });
-
-  it("attributes the unchanged constraint schema to its first live path without adding or waiving a decision", () => {
-    expect(NodeV3.shape.retained_aim.unwrap().shape.constraints.element).toBe(GoalConstraintSchema);
-    expect(CEEGraphResponseV3.shape.goal_constraints.unwrap().element).toBe(GoalConstraintSchema);
-    // The guard documents first-root attribution. Adding this alias moves the address, not the numeric contract.
-    expect(SITES.find(s => s.id === "cee.NodeV3::retained_aim.constraints[].confidence")).toMatchObject({
-      bounds: "min=0 max=1", verdict: "LEVEL_SHARED", numericsAtLevel: 2,
-    });
-    expect(SITES.some(s => s.id === "cee.CEEGraphResponseV3::goal_constraints[].confidence")).toBe(false);
-    const decision = WARRANT_DECISIONS.find(d => d.id === "scope-ambiguous:cee.NodeV3::retained_aim.constraints[].confidence");
-    expect(decision?.status).toBe("ACCEPTED");
-    expect(decision?.decision).toContain("`value` has its own field-scoped `value_frame`");
   });
 
   it("the roots are the SAME six surfaces the sibling guard names — pinned, not coincidental", () => {

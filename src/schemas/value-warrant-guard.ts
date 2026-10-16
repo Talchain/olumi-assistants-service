@@ -761,7 +761,7 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "regress to dismiss: it is the same question one level down.",
   },
   {
-    id: "scope-ambiguous:cee.NodeV3::retained_aim.constraints[].confidence",
+    id: "scope-ambiguous:cee.CEEGraphResponseV3::goal_constraints[].confidence",
     status: "ACCEPTED",
     decision:
       "ACCEPTED — no warrant is owed, and the level-scoped credit is again an " +

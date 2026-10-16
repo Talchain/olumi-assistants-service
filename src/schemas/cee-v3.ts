@@ -775,16 +775,6 @@ export const NodeV3 = z.object({
    * in the analysis hash. Malformed on read degrades to absence.
    */
   user_statements: z.array(z.record(z.string(), z.unknown())).optional().catch(undefined),
-  /** A prior governing aim, retained on the same outcome after an approved re-goal.
-   * These exact rows are HISTORY, outside active goal_constraints: never scored as extra limits.
-   * Original node fields/statements remain; this carries row-only sources and uncertainty through all parse hops.
-   */
-  retained_aim: z.object({
-    constraints: z.array(GoalConstraintSchema),
-    change_quote: z.string().min(1),
-    later_ambition_quote: z.string().min(1).optional(),
-    previous: z.record(z.string(), z.unknown()).optional(),
-  }).strict().optional(),
   /**
    * ⭐ AIE LAWS RULING, SAME COHORT (option nodes only; science PR-4, `goal-target/cohort-forecast.ts`). This option's forecast
    * of the goal window's ONE cohort: the people it reaches over the window (a point, its own uncertainty excluded and said so)

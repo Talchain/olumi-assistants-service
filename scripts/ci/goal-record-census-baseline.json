@@ -1,5 +1,5 @@
 {
-  "source_sha": "44a49ade41ab4a3c378567f8a1ed0a2a801abb33",
+  "source_sha": "8e95d1652fdaaa21775e371214c7c4f628f03f6d",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -89,9 +89,9 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 3,
       "src/orchestrator-v5/agent-lane/model-budgets.ts": 1,
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 3,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 40,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 38,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 16,
-      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 8,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 7,
       "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": 15,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 1,
@@ -149,9 +149,9 @@
       "src/routes/agent-v1-turn.ts": 2,
       "src/routes/assist.v1.scenario-graph-register.ts": 7,
       "src/schemas/assist.ts": 2,
-      "src/schemas/cee-v3.ts": 4,
+      "src/schemas/cee-v3.ts": 3,
       "src/schemas/graph.ts": 2,
-      "src/schemas/value-warrant-guard.ts": 1,
+      "src/schemas/value-warrant-guard.ts": 2,
       "src/validators/structural-reconciliation.ts": 4
     },
     "goal_deadline_as_stated": {
@@ -828,7 +828,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 30,
     "goalUnitOf": 5,
-    "goal_constraints": 450,
+    "goal_constraints": 447,
     "goal_deadline_as_stated": 11,
     "goal_direction": 104,
     "goal_horizon": 47,
@@ -857,7 +857,7 @@
     "threshold_source": 40,
     "unit_reading": 79
   },
-  "total_references": 2482,
+  "total_references": 2479,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

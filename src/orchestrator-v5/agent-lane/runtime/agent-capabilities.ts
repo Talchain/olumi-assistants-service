@@ -1,5 +1,5 @@
 import { assignEntityRefs } from '../../graph/entity-refs.js';
-import { retainedAimOf, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
+import { priorAimDescription, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { carriesQuoteConfirmation, verbatimSourceLine } from '../quote-confirmation.js';
@@ -1678,7 +1678,6 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       }),
     };
   });
-  const earlierAims = g.nodes.filter(n => n.kind !== 'goal').flatMap(n => { const aim = retainedAimOf(n); return aim === undefined ? [] : [aim]; });
   const limits = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
     .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object')
     .filter((c) => str(c.operator) && num(c.value))
@@ -1788,7 +1787,6 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   return {
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
-    ...(earlierAims.length > 0 ? { earlier_aims: earlierAims } : {}),
     ...(hiringTimes.length === 0 ? {} : { hiring_times: { use: HIRING_TIMES_USE, options: hiringTimes } }),
     links,
     ...(leftOut.length === 0 ? {} : { left_out_of_run: leftOut }),
@@ -3847,15 +3845,11 @@ export function createAgentCapabilities(
     if (args.current_level === undefined && typeof levelUnit === 'string' && unitComparisonKey(levelUnit) !== unitComparisonKey(args.unit)) {
       return invalid('current_level_unit_change', `The outcome holds today's level in ${levelUnit}; this target is in ${args.unit}. The native target adapter cannot silently rescale that earlier level. Nothing was prepared; retain the stated level and resolve its measurement explicitly.`);
     }
-    const oldRows = (Array.isArray(before.raw.goal_constraints) ? before.raw.goal_constraints as Record<string, unknown>[] : [])
-      .filter(r => r.node_id === old.id);
-    // Retain the original node/source bytes, including row-only targets, independently from active Run constraints.
+    const priorDescription = priorAimDescription(before.raw, old.id, args.later_ambition_quote);
+    if (priorDescription === undefined) return invalid('goal_not_readable', 'The earlier aim could not be read completely. Nothing was prepared.');
     let candidate = structuredClone(before.raw);
     const newId = matched[0]?.id ?? `outcome_${constructionOperationId(ctx.scenario_id, `${before.graph_identity_hash}:${label}`)}`;
-    candidate.nodes = (candidate.nodes as Record<string, unknown>[]).map(n => n.id === old.id ? { ...n, kind: 'outcome',
-      retained_aim: { constraints: structuredClone(oldRows), change_quote: source,
-        ...(args.later_ambition_quote !== undefined ? { later_ambition_quote: args.later_ambition_quote } : {}),
-        ...(n.retained_aim !== undefined ? { previous: n.retained_aim } : {}) } }
+    candidate.nodes = (candidate.nodes as Record<string, unknown>[]).map(n => n.id === old.id ? { ...n, kind: 'outcome', description: priorDescription }
       : n.id === newId ? { ...n, kind: 'goal' } : n);
     if (matched.length === 0) (candidate.nodes as Record<string, unknown>[]).push({ id: newId, kind: 'goal', label, provenance: 'ai_inferred' });
     if (Object.hasOwn(candidate, 'goal_node_id')) candidate.goal_node_id = newId;
@@ -3941,7 +3935,7 @@ export function createAgentCapabilities(
     }
     candidate = assignEntityRefs(candidate, before.raw).graph;
     const retained = repointRetainedBase(before.raw, removals, ctx);
-    if (retained === undefined || !repointRetainsSavedWork(retained, candidate, old.id, newId)) return invalid('incomplete_goal_postimage',
+    if (retained === undefined || !repointRetainsSavedWork(retained, candidate, old.id, newId, priorDescription)) return invalid('incomplete_goal_postimage',
       'The earlier aim or an option would be lost by this change. Nothing was prepared.');
     const hash = identityHashOf(computeGraphIdentityHash(candidate as never));
     if (hash === '') return invalid('goal_not_prepared', 'The complete proposed model could not be checked. Nothing was prepared.');
@@ -3952,12 +3946,12 @@ export function createAgentCapabilities(
     const interpretation = said === null ? ` Olumi reads the target as ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}; this direction is a proposal, not a comparator the user stated.` : '';
     const public_label = `From your message: “${source}”. Olumi proposes making “${label}” the current goal: ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}.`
       + interpretation + (matched.length === 0 ? ' This adds a new outcome; its label is Olumi’s proposal.' : '')
-      + ` “${old.label}”${earlierTarget} stays as ${args.later_ambition_quote !== undefined ? `a later ambition, as Olumi reads “${args.later_ambition_quote}”` : 'an earlier aim in history'}, with its original source and uncertainty; it is no longer an active goal or limit.`
+      + ` “${old.label}”${earlierTarget} stays as ${args.later_ambition_quote !== undefined ? `a later ambition, as Olumi reads “${args.later_ambition_quote}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal.`
       + ` Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.`
       + (!hasIncoming ? ' The new goal has no incoming causal relationships yet. This card does not establish how the options affect it; that remains to be modelled.' : '')
       + (details.length ? `\n${details.join('\n')}` : '');
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
-      operations: [{ op: 'repoint_goal', path: newId, value: { candidate, previous_goal_id: old.id, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
+      operations: [{ op: 'repoint_goal', path: newId, value: { candidate, previous_goal_id: old.id, later_ambition_quote: args.later_ambition_quote, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
         brief_text: before.brief_text, goal_turn_id: turn, operation_id: constructionOperationId(ctx.scenario_id, `repoint_goal:${before.graph_identity_hash}:${hash}`) } }],
       provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label });
     proposals.put(proposal);
@@ -3976,7 +3970,7 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
-      goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown };
+      goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown };
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (!isPreparedSavedCorrection(parent.operations[0]) || ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -3989,7 +3983,10 @@ export function createAgentCapabilities(
     // candidate == readback would confirm that loss. Check the saved goal contract BEFORE the native write as well.
     const repoint = parent.operations[0]!.op === 'repoint_goal';
     const retained = repoint ? repointRetainedBase(before.raw, v.removals, ctx) : before.raw;
-    if (repoint && (retained === undefined || typeof v.previous_goal_id !== 'string' || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path))) {
+    const priorDescription = repoint && typeof v.previous_goal_id === 'string' ? priorAimDescription(before.raw, v.previous_goal_id,
+      typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined) : undefined;
+    if (repoint && (retained === undefined || priorDescription === undefined || typeof v.previous_goal_id !== 'string'
+      || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription))) {
       return notApplied('incomplete_goal_postimage', 'The complete earlier aim or an option would be lost by this card. Nothing was saved.');
     }
     if (repoint && (!isDeepStrictEqual(readGoalRecord(v.candidate, parent.operations[0]!.path), v.expected_goal)
