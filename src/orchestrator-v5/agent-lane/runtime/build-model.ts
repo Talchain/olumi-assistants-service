@@ -43,7 +43,7 @@ import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPendi
 
 import { createHash } from 'node:crypto';
 import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
-import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
+import { carriesStatements, verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -1034,9 +1034,11 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
         // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
         // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
-        // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): whether the setting is the user's is the owner's verdict (`verifiedOptionSetting`
-        // reads `figureSource`), whatever the factor's baseline; a known or zero baseline no longer decides it.
-        if (intervention.provenance === 'explicit' && unknownBaseline && !verifiedOptionSetting(model, option, intervention, brief)) {
+        // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): for a draft with statements, whether the setting is the user's is the owner's verdict
+        // (`verifiedOptionSetting` reads `figureSource`), whatever the factor's baseline. A draft recorded before SYSTEM 2 keeps its
+        // recorded rule (credited only over a zero baseline).
+        if (intervention.provenance === 'explicit' && unknownBaseline
+          && !((carriesStatements(model) || factors[0]!.baseline_value === 0) && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
         } else {

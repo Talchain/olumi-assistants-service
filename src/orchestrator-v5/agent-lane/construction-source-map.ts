@@ -196,12 +196,12 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
   });
   if (!claimed) return 'unclaimed';
   if (typeof brief !== 'string' || !Number.isFinite(value)) return 'unverified';
-  const size = Math.abs(value);
   // A point holds both ends equal and a bound one end; an end of a stated RANGE is never the user's single figure (AIE range
-  // disposition), so a figure the drafter took from one end stays unverified.
+  // disposition), so a figure the drafter took from one end stays unverified. SIGNED: the verifier owns the sign ("losing a net
+  // 15" verifies −15; "we lose 15" does not, #3243), so a figure whose sign differs from the verified one is never theirs.
   const states = (st: UserStatement): boolean => st.negated !== true
-    && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && Math.abs(st.low) === size
-      : typeof st.low === 'number' ? Math.abs(st.low) === size : typeof st.high === 'number' && Math.abs(st.high) === size);
+    && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && st.low === value
+      : typeof st.low === 'number' ? st.low === value : typeof st.high === 'number' && st.high === value);
   const map = sourceMapOf(drafted, brief);
   return (map.verified.get(key) ?? []).some((st) => states(st)
     && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
