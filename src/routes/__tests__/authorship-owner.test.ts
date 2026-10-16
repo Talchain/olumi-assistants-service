@@ -101,7 +101,7 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
   });
   it('NEGATIVE: a figure the AI claimed for the user that no verified statement states is UNKNOWN, never theirs and never Olumi\u2019s', async () => {
     const m = draftOf(COSTS);
-    (m.options as Rec[]).find((o) => o.label === 'Route-planning software').interventions.find((i: Rec) => i.factor_label === 'Total financial-year spend').value = 65000;
+    (m.options as Rec[]).find((o) => o.label === 'Route-planning software')!.interventions.find((i: Rec) => i.factor_label === 'Total financial-year spend').value = 65000;
     const out = await construct(COSTS.brief_text, [m as unknown as CandidateModel]);
     expect(settingOf(out.graph, 'Route-planning software', SPEND)).toMatchObject({ raw_value: 65000, source: 'cee_hypothesis', user_material_unverified: true });
   });
