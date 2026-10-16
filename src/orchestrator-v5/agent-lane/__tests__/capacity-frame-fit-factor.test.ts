@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
-import { frameOf, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../refit-frames.js';
+import { clampForPersist, frameOf, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../refit-frames.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 
 type Rec = Record<string, any>;
@@ -82,6 +82,42 @@ describe('a stated effect into a factor that holds nothing yet widens its frame 
     const g = servedShape(100);
     node(g, 'capacity').observed_state = { ...node(g, 'capacity').observed_state, std: 0.05 };
     expect(refitFramesForStatedEffects(g, { goalOwnRows: true }).refused).toEqual([{ link: 'specialists→capacity', reason: 'not_the_goal' }]);
+  });
+  /**
+   * ⛔ BUDDY-A #3313 B1 (R1, its own synthetic contrast): ANOTHER link into the same factor, Olumi's estimate already clamped
+   * (stored 1 on frames 10 → 100, recorded 30 tickets a week per contractor, `clamped_from: 3`). Widening the factor to 200
+   * would make that link act at 20 per contractor instead of 10; the factor move is refused and nothing changes.
+   */
+  const withContractors = (g: Rec, stored: number, recorded: number): Rec => {
+    g.nodes.push({ id: 'contractors', kind: 'factor', label: 'Contractors', observed_state: { value: 0, raw_value: 0, cap: 10, unit: 'contractors', source: 'cee_inference' } });
+    g.edges.push({ from: 'contractors', to: 'capacity', strength: { mean: stored, std: stored / 2 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate',
+      ...(recorded / 10 > 1 ? { clamped_from: recorded / 10 } : {}),
+      natural_effect: { amount: recorded, amount_unit: 'tickets per week', per_source_change: 1, per_source_change_unit: 'contractors', strength_mean: recorded / 10 } } });
+    return g;
+  };
+  const analysed = (g: Rec, from: string, to: string): number => {
+    const p = clampForPersist(g);
+    return link(p, from, to).strength.mean * frameOf(node(p, to))! / frameOf(node(p, from))!;
+  };
+  it('⛔ B1 (BUDDY-A R1): another link already clamped into the factor → the factor move is REFUSED, nothing changes', () => {
+    const g = withContractors(servedShape(100), 1, 30);
+    expect(analysed(g, 'contractors', 'capacity')).toBe(10);
+    const r = refitFramesForStatedEffects(g, { goalOwnRows: true });
+    expect(r.refits).toEqual([]);
+    expect(r.refused).toEqual([{ link: 'specialists→capacity', reason: 'new_cut' }]);
+    expect(frameOf(node(r.graph, 'capacity'))).toBe(100);
+    // As persisted: the other link still acts at 10 per contractor, and the user's link is clamped exactly as before.
+    expect(analysed(r.graph, 'contractors', 'capacity')).toBe(10);
+    expect(clampForPersist(r.graph)).toEqual(clampForPersist(g));
+  });
+  it('CONTROL (uncut other link): an Olumi link inside the contract is rescaled, its analysed size kept; the user\'s size fits', () => {
+    const g = withContractors(servedShape(100), 0.8, 8);
+    const r = refitFramesForStatedEffects(g, { goalOwnRows: true });
+    expect(r.refused).toEqual([]);
+    expect(r.refits).toEqual([{ node: 'capacity', from: 100, to: 200, for_link: 'specialists→capacity' }]);
+    expect(link(r.graph, 'contractors', 'capacity').strength.mean).toBeCloseTo(0.4, 12);
+    expect(analysed(r.graph, 'contractors', 'capacity')).toBeCloseTo(8, 12);
+    expect(link(r.graph, 'specialists', 'capacity').provenance.clamped_from).toBeUndefined();
   });
   it('NEGATIVE: Olumi\'s own estimates never widen a factor (the Olumi pass is unchanged)', () => {
     const g = servedShape(100);

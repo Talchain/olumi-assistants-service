@@ -327,6 +327,13 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
     // `cuts` reads framed pairs only: no frame there to widen, so the whole chain is refused rather than cut at persist.
     newCut ??= outOfContract(next).find((x) => !outOfContract(g).some((y) => key(y) === key(x)));
     if (newCut !== undefined) { refused.push({ link: key(e), reason: 'new_cut', detail: key(newCut) }); continue; }
+    // ⛔ BUDDY-A #3313 B1 (DL-3 18:2xZ): a FACTOR widen leaves every OTHER link's analysed size where it was, read as it is
+    // persisted (`clampForPersist`): an Olumi estimate already clamped into the factor (stored 1, recorded 30 per contractor
+    // on a frame of 100) would otherwise act on the doubled frame (10 → 20 per contractor). Else the move is refused, and
+    // the user's link stays clamped as before.
+    const kindOf = new Map((next.nodes as Rec[]).map((n) => [n.id, n.kind]));
+    if (chain.some((c) => kindOf.get(c.node) === 'factor')
+      && !refitKeepsOtherLinks(clampForPersist(g), clampForPersist(next), new Set([key(e)]))) { refused.push({ link: key(e), reason: 'new_cut' }); continue; }
     g = next;
     refits.push(...chain);
   }
