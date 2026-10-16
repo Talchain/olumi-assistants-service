@@ -298,6 +298,42 @@ describe('the one record-grounded narrator count check', () => {
     expect(narratorCountGuard(sentence, olumiEstimatesFeedingResult(paul()), 'olumi')).toEqual({ text: '', removed: [sentence] });
   });
 
+  it.each([
+    "Nine underlying values are Olumi's assumptions.", "Twenty-one values were Olumi's estimates.",
+    "Nine of Olumi's values feed this result.", "Olumi's estimates feed 99 links.", "Olumi's estimates fed 99 links.",
+    "I've supplied 99 links.", 'Olumi has provided 99 links.',
+    '- Olumi supplied 99 links.', '- **Olumi supplied 99 links.**', '• I supplied 99 links.',
+    '1. Olumi supplied 99 links.', '1) _Olumi supplied 99 links._',
+    'The analysis ran, but the links remain unsized, and 16 underlying values are Olumi’s assumptions, not yours.',
+  ])('the ruled possessive, inflected and list forms still require recorded agreement: %s', sentence => {
+    expect(narratorCountGuard(sentence, olumiEstimatesFeedingResult(paul()), 'olumi')).toEqual({ text: '', removed: [sentence] });
+  });
+
+  it.each([
+    'supply', 'supplies', 'supplying', 'supplied', 'estimate', 'estimates', 'estimating', 'estimated',
+    'provide', 'provides', 'providing', 'provided', 'give', 'gives', 'giving', 'gave', 'given', 'feed', 'feeds', 'feeding', 'fed',
+  ])('the five closed predicate families compare counts, never tense: %s', verb => {
+    const falseClaim = `Olumi ${verb} 99 links.`;
+    expect(narratorCountGuard(falseClaim, { links: 8 })).toEqual({ text: '', removed: [falseClaim] });
+    const matching = `Olumi ${verb} 8 links.`;
+    expect(narratorCountGuard(matching, { links: 8 })).toEqual({ text: matching, removed: [] });
+  });
+
+  it.each([
+    '- Olumi supplied 8 links.', '- **Olumi supplied 8 links.**', '• I supplied 8 links.',
+    '1. Olumi supplied 8 links.', '1) _Olumi supplied 8 links._',
+    "One underlying value is Olumi's assumption.", "Olumi's estimates feed 8 links.", "I've supplied 8 links.",
+  ])('format and possessive ownership cannot erase a matching count: %s', text => {
+    expect(narratorCountGuard(text, olumiEstimatesFeedingResult(paul()), 'olumi')).toEqual({ text, removed: [] });
+  });
+
+  it('a multiline list removes the contradicted item and keeps the matching item', () => {
+    const text = 'The figures are provisional.\n- Olumi supplied 99 links.\n- Olumi supplied 8 links.';
+    expect(narratorCountGuard(text, { links: 8 })).toEqual({
+      text: 'The figures are provisional.\n- Olumi supplied 8 links.', removed: ['- Olumi supplied 99 links.'],
+    });
+  });
+
   it('an equal total cannot license the wrong kind: one value plus eight links is not nine values', () => {
     const sentence = 'Olumi supplied nine underlying values.';
     expect(narratorCountGuard(sentence, olumiEstimatesFeedingResult(paul()))).toEqual({ text: '', removed: [sentence] });
@@ -340,7 +376,7 @@ describe('the one record-grounded narrator count check', () => {
     "Olumi's £50,000 assumption for Hire PA is a starting value.", 'Olumi supplied £50,000 as a starting value.',
     'I need 2 values for this worksheet.', 'Can I check your two assumptions?', 'I supplied 99 links?', 'Olumi used 3 figures you gave.',
     'Olumi assumed 3 hours per week for onboarding.', 'Olumi estimated a 2.5% churn rate.', 'Olumi set 12 months as the horizon.',
-    'Paul said I supplied 99 links.', '“I supplied 99 links.”', 'I did not supply 4 values.', 'I have not supplied 4 values.',
+    'Paul said I supplied 99 links.', 'Paul said Olumi supplies 99 links.', 'Paul said, “Olumi supplied 99 links.”', '“I supplied 99 links.”', 'I did not supply 4 values.', 'I have not supplied 4 values.', 'Olumi does not supply 99 links.', "I've not supplied 99 links.",
     'Olumi supplied dozens of values.', 'Olumi supplied hundreds of values.', 'Olumi supplied nine of the underlying estimated values.',
     'You supplied 6 values.', 'You supplied 6 values and Olumi estimated the price.',
     'Olumi estimated the price and six values were yours.',

@@ -114,8 +114,12 @@ const COUNT_KINDS = new Set([
   'size', 'sizes', 'strength', 'strengths',
 ]);
 const FILLERS = new Set(['of', 'the', 'olumi', 's', 'its', 'their', 'own', 'underlying', 'estimated', 'starting', 'these', 'those']);
-// TL 20:48: this closed definition belongs only to the one post-reply check.
-const COUNT_CLAIM_PREDICATES = new Set(['supplied', 'estimated', 'provided', 'gave', 'fed']);
+// TL 20:48 / DL 22:29: the same five closed predicate families, only in this post-reply check.
+const COUNT_CLAIM_PREDICATES = new Set([
+  'supply', 'supplies', 'supplying', 'supplied', 'estimate', 'estimates', 'estimating', 'estimated',
+  'provide', 'provides', 'providing', 'provided', 'give', 'gives', 'giving', 'gave', 'given',
+  'feed', 'feeds', 'feeding', 'fed',
+]);
 const CONJUNCTIONS = new Set(['and', 'but', 'while', 'whereas']);
 const isDigit = (code: number): boolean => code >= 48 && code <= 57;
 const isWord = (code: number): boolean => isDigit(code) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
@@ -127,7 +131,7 @@ export interface EstimateCountRecord {
   readonly links?: number;
 }
 type CountKind = keyof EstimateCountRecord;
-interface Token { readonly word: string; readonly start: number; readonly end: number; readonly clause: number }
+interface Token { readonly word: string; readonly start: number; readonly end: number; readonly clause: number; readonly quoted: boolean }
 interface CountClaim { readonly count: number; readonly kind: CountKind }
 
 function countNumber(word: string): number | undefined {
@@ -149,9 +153,20 @@ function attributedCount(sentence: string, speakerIsOlumi = false): CountClaim[]
   if (sentence.trimEnd().endsWith('?')) return [];
   const tokens: Token[] = [];
   let clause = 0;
+  let quote: string | undefined;
   for (let i = 0; i < sentence.length;) {
     if (!isWord(sentence.charCodeAt(i))) {
-      if ([',', ';', ':', '—'].includes(sentence[i]!)) clause += 1;
+      const char = sentence[i]!;
+      // Apostrophes inside a word belong to ownership/contractions, not reported speech.
+      const apostrophe = (char === "'" || char === '’')
+        && isWord(sentence.charCodeAt(i - 1)) && isWord(sentence.charCodeAt(i + 1));
+      if (!apostrophe) {
+        if (char === quote) quote = undefined;
+        else if (quote === undefined && ['"', "'", '“', '‘'].includes(char)) {
+          quote = char === '“' ? '”' : char === '‘' ? '’' : char;
+        }
+      }
+      if ([',', ';', ':', '—', '\n'].includes(char)) clause += 1;
       i += 1;
       continue;
     }
@@ -162,7 +177,7 @@ function attributedCount(sentence: string, speakerIsOlumi = false): CountClaim[]
       i += 1;
       while (i < sentence.length && isWord(sentence.charCodeAt(i))) i += 1;
     }
-    tokens.push({ word: sentence.slice(start, i).toLowerCase(), start, end: i, clause });
+    tokens.push({ word: sentence.slice(start, i).toLowerCase(), start, end: i, clause, quoted: quote !== undefined });
   }
   const joined = (a: Token, b: Token): boolean => a.clause === b.clause && a.end !== b.start
     && [...sentence.slice(a.end, b.start)].every(char => isSpace(char.charCodeAt(0)) || char === "'" || char === '’');
@@ -189,53 +204,61 @@ function attributedCount(sentence: string, speakerIsOlumi = false): CountClaim[]
     return undefined;
   };
   const sourceIsOlumi = (word: string | undefined): boolean => word === 'olumi' || (speakerIsOlumi && word === 'i');
+  const possessiveAt = (at: number): boolean => tokens[at]?.word === 'olumi' && !tokens[at]!.quoted
+    && tokens[at + 1]?.word === 's' && joined(tokens[at]!, tokens[at + 1]!);
   const claims: CountClaim[] = [];
-  // Unknown, quoted, reported, negated and requesting constructions establish no contradiction.
-  if (tokens[0] === undefined || sentence.slice(0, tokens[0].start).trim() !== '') return claims;
-  let at = 0;
-  while (at < tokens.length) {
+  // Start only at a direct clause boundary. Unknown lead-ins, reported and negated constructions are not claims.
+  for (let at = 0; at < tokens.length; at += 1) {
     const actor = tokens[at]!;
+    if (actor.quoted || (at === 0 ? sentence.slice(0, actor.start).trim() !== ''
+      : tokens[at - 1]!.clause === actor.clause && !CONJUNCTIONS.has(tokens[at - 1]!.word))) continue;
     let next = at + 1;
-    let ours = sourceIsOlumi(actor.word);
-    if (actor.word === 'olumi' && tokens[next]?.word === 's' && joined(actor, tokens[next]!)) {
-      const noun = tokens[next + 1], number = tokens[next + 2];
-      if (noun !== undefined && number !== undefined && COUNT_KINDS.has(noun.word)
-        && sentence.slice(noun.end, number.start).trim() === ':') {
-        const count = countNumber(number.word);
+    const ours = sourceIsOlumi(actor.word);
+    if (possessiveAt(at)) {
+      const noun = tokens[at + 2], following = tokens[at + 3];
+      if (noun === undefined || following === undefined || !COUNT_KINDS.has(noun.word)) continue;
+      if (sentence.slice(noun.end, following.start).trim() === ':') {
+        const count = countNumber(following.word);
         if (count !== undefined) claims.push({ count, kind: kindOf(noun.word) });
-        next += 3;
-      } else break;
+        continue;
+      }
+      // The possessive subject is still the same closed authorship-count claim, not a second authority.
+      if (!joined(tokens[at + 1]!, noun) || !joined(noun, following)
+        || !COUNT_CLAIM_PREDICATES.has(following.word)) continue;
+      next = at + 4;
     } else if (ours || actor.word === 'you') {
-      if (['have', 'has', 'had'].includes(tokens[next]?.word ?? '')) next += 1;
+      if (['have', 'has', 'had', 've', 'am', 'is', 'are', 'was', 'were'].includes(tokens[next]?.word ?? '')) next += 1;
       const predicate = tokens[next];
       if (predicate === undefined || !COUNT_CLAIM_PREDICATES.has(predicate.word)
-        || tokens.slice(at + 1, next + 1).some((token, i) => !joined(tokens[at + i]!, token))) break;
-      const object = objectAt(next + 1);
-      if (object === undefined) break;
-      if (ours) claims.push(object.claim);
-      next = object.end;
-      while (tokens[next]?.word === 'and') {
-        const extra = objectAt(next + 1);
-        if (extra === undefined) break;
-        if (ours) claims.push(extra.claim);
-        next = extra.end;
-      }
+        || tokens.slice(at + 1, next + 1).some((token, i) => !joined(tokens[at + i]!, token))) continue;
+      next += 1;
     } else {
       const object = objectAt(at);
-      if (object === undefined) break;
+      if (object === undefined) continue;
       next = object.end;
-      if (['is', 'are', 'was', 'were'].includes(tokens[next]?.word ?? '')) next += 1;
-      if (!COUNT_CLAIM_PREDICATES.has(tokens[next]?.word ?? '') || tokens[next + 1]?.word !== 'by') break;
-      ours = sourceIsOlumi(tokens[next + 2]?.word);
-      if (!ours && tokens[next + 2]?.word !== 'you') break;
-      if (ours) claims.push(object.claim);
-      next += 3;
+      const ownsSubject = tokens.slice(at + 1, next).some((_, i) => possessiveAt(at + 1 + i));
+      if (ownsSubject && COUNT_CLAIM_PREDICATES.has(tokens[next]?.word ?? '')) {
+        claims.push(object.claim);
+        continue;
+      }
+      if (!['is', 'are', 'was', 'were'].includes(tokens[next]?.word ?? '')) continue;
+      next += 1;
+      if (possessiveAt(next) && ['assumption', 'assumptions', 'estimate', 'estimates'].includes(tokens[next + 2]?.word ?? '')) {
+        claims.push(object.claim);
+      } else if (COUNT_CLAIM_PREDICATES.has(tokens[next]?.word ?? '') && tokens[next + 1]?.word === 'by'
+        && sourceIsOlumi(tokens[next + 2]?.word)) claims.push(object.claim);
+      continue;
     }
-    // Only another direct clause may follow; its unrecognised contents cannot become a claim by scanning ahead.
-    const coordinated = CONJUNCTIONS.has(tokens[next]?.word ?? '');
-    while (tokens[next] !== undefined && CONJUNCTIONS.has(tokens[next]!.word)) next += 1;
-    if (tokens[next] === undefined || (!coordinated && tokens[next]!.clause === tokens[next - 1]!.clause)) break;
-    at = next;
+    const object = objectAt(next);
+    if (object === undefined) continue;
+    if (ours) claims.push(object.claim);
+    next = object.end;
+    while (tokens[next]?.word === 'and') {
+      const extra = objectAt(next + 1);
+      if (extra === undefined) break;
+      if (ours) claims.push(extra.claim);
+      next = extra.end;
+    }
   }
   return claims;
 }
@@ -254,7 +277,7 @@ export function narratorCountGuard(text: string, e: OlumiEstimates | EstimateCou
     const sentence = text.slice(start, end);
     // Presentation cannot hide a claim; grouping and decimals retain their numeric value in the count lexer.
     // The kept text is always the original bytes.
-    const plain = sentence.replace(/[*_`~]/g, '');
+    const plain = sentence.replace(/[*_`~]/g, '').replace(/^[ \t]*(?:[-•]\s+|\d+[.)]\s+)/gm, '');
     if (attributedCount(plain, speaker === 'olumi').some(claim =>
       typeof record[claim.kind] === 'number' && claim.count !== record[claim.kind])) removed.push(sentence.trim());
     else kept.push(sentence);
@@ -266,8 +289,10 @@ export function narratorCountGuard(text: string, e: OlumiEstimates | EstimateCou
     if (char !== '.' && char !== '!' && char !== '?') continue;
     // A decimal point in a figure is not the end of its sentence.
     if (char === '.' && isDigit(text.charCodeAt(i - 1)) && isDigit(text.charCodeAt(i + 1))) continue;
+    // A numbered list marker belongs to its item, not a one-character sentence.
+    if (char === '.' && /^\s*\d+$/.test(text.slice(start, i)) && isSpace(text.charCodeAt(i + 1))) continue;
     let end = i + 1;
-    while (end < text.length && ['"', "'", '”', '’', ')', ']'].includes(text[end]!)) end += 1;
+    while (end < text.length && ['"', "'", '”', '’', ')', ']', '*', '_', '`', '~'].includes(text[end]!)) end += 1;
     append(end);
     i = end - 1;
   }
