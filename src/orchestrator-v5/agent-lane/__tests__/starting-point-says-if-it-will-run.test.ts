@@ -11,7 +11,12 @@
  *
  * FIXTURE: that run's own served first-turn `draft_graph`, verbatim.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// This file isolates response/readiness composition over a symbolic h0 fixture. Native preparation/save controls
+// run without this mock in system-events/__tests__/option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', () => ({
+  preOfferOptionInterventions: async () => ({ offer: true }),
+}));
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';

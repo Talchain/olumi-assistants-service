@@ -356,6 +356,7 @@ import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForeca
   SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import { approvedGraphHeld, draftHistory, prepareRequestedRebuild, revisedDraftBrief } from './draft-replacement.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
+import { preOfferOptionInterventions } from '../../system-events/option-intervention-preoffer.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -7478,12 +7479,66 @@ export function createAgentCapabilities(
         ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
         ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
       };
-      const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
-      if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
       // ⛔ A name that matched two entities travels to the joined result from EITHER half,
       // so the starting point never looks complete at the moment of consent.
       const ambiguousTargets = [a, b].flatMap((r) => (r !== null && Array.isArray(r.ambiguous_targets) ? r.ambiguous_targets : []));
       const ambiguity = ambiguousTargets.length > 0 ? { ambiguous_targets: ambiguousTargets, ambiguous_note: AMBIGUOUS_NOTE } : {};
+      const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
+      if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
+      // ONE whole native preparation covers both the single-half and joined starting-figure cards.
+      // Verdict/detail only: pre-offer never surfaces a prepared graph or adopts its authorship.
+      const offeredParts = made.map(r => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
+      const proposedOps = offeredParts.flatMap(p => [...p.operations]);
+      const beforeOffer = await readGraph(ctx.scenario_id);
+      const discardParts = () => { for (const p of offeredParts) proposals.discard(p.proposal_id); };
+      if (beforeOffer === null || offeredParts.length !== made.length || offeredParts.some(p => p.base_graph_identity_hash !== beforeOffer.graph_hash)) {
+        discardParts(); return { ok: false, mutated: false, refusal: 'model_changed_while_proposing', ...ambiguity, ...refused };
+      }
+      const gapsForOffer = parseOptionGapsOfLevelOps(proposedOps);
+      if (gapsForOffer.kind === 'invalid') { discardParts(); return { ok: false, mutated: false, refusal: gapsForOffer.reason, ...ambiguity, ...refused }; }
+      const valueOps = proposedOps.filter(o => o.op === 'set_factor_value');
+      const levelOps = proposedOps.filter(o => o.op === 'set_option_intervention');
+      const ownerOf = (o: ProposalOperation) => offeredParts.find(p => p.operations.includes(o))!;
+      const valuesForOffer = valueOps.map(o => {
+        const v = o.value as { value: number; unit?: string };
+        return { factorId: o.path, value: v.value, ...(v.unit === undefined ? {} : { unit: v.unit }), adopted: valueOpAuthor(o, ownerOf(o)) === 'model_proposed' };
+      });
+      const targetsForOffer = levelOps.map(o => {
+        const [optionId, factorId] = o.path.split('::') as [string, string];
+        const v = o.value as { normalised: number };
+        // Use the approval adapter's exact native figure, including capless points and full likely ranges.
+        return { optionId, factorId, modelValue: v.normalised, figure: levelFigureOf(o) };
+      });
+      const frameRowsForOffer = levelOps.flatMap(o => {
+        const factorId = o.path.split('::')[1]!, v = o.value as { derived_frame?: unknown };
+        return typeof v.derived_frame === 'number' && levelFrameOf(beforeOffer.nodes.find(n => n.id === factorId)) === null
+          ? [{ factorId, cap: v.derived_frame }] : [];
+      });
+      // A factor's identical shared frame is declared once; different declarations still reach the native conflict guard.
+      const framesForOffer = [...new Map(frameRowsForOffer.map(f => [`${f.factorId}::${f.cap}`, f])).values()];
+      const offeredLabel = offeredParts.length === 1 ? offeredParts[0]!.public_label
+        : `${figureApprovalWords(proposedOps).heading} ${offeredParts.map(p => p.public_label).join('; ')}`;
+      const inputForOffer: Parameters<typeof preOfferOptionInterventions>[0] = { scenarioId: ctx.scenario_id, turnId: ctx.turn_id ?? ctx.request_id,
+        requestId: ctx.request_id, requestHash: `preoffer:${ctx.request_id}`, expectedGraphHash: beforeOffer.graph_hash,
+        stage: 'frame', freshness: 'none', hasExistingAnalysis: false, targets: targetsForOffer,
+        values: valuesForOffer, frames: framesForOffer,
+        expectedLinks: proposedOps.filter(o => o.op === 'add_edge').map(o => o.path),
+        optionGaps: gapsForOffer.declarations.map(d => ({ ...d, operands: optionGapOperands(beforeOffer.raw, d.optionId)! })),
+        rangeLaws: rangeLawsOfCard({ public_label: offeredLabel, operations: proposedOps }, beforeOffer.raw) };
+      const bindingsForOffer = valueOps.flatMap(o => {
+        const binding = unverifiedValueBinding(o), value = (o.value as { value?: unknown } | undefined)?.value;
+        return binding !== undefined && typeof value === 'number' && valueOpAuthor(o, ownerOf(o)) === 'user_stated'
+          ? [{ scenarioId: ctx.scenario_id, proposalId: ownerOf(o).proposal_id, targetId: o.path, rawValue: value, unverifiedBinding: binding }] : [];
+      });
+      const preoffer = await runWithApprovedBindings(bindingsForOffer, () => preOfferOptionInterventions(inputForOffer, beforeOffer.raw, { briefText: beforeOffer.brief_text }));
+      if (!preoffer.offer) {
+        discardParts();
+        return { ok: false, mutated: false, refusal: preoffer.refusal.kind === 'refused' ? preoffer.refusal.reason : 'nothing_to_set',
+          ...ambiguity, ...refused, native_refusal: preoffer.refusal, detail: preoffer.refusal.kind === 'refused'
+            ? `The complete starting figures could not be prepared (${preoffer.refusal.reason}). No card was offered. Use the native refusal's item and scope; do not assume this is only a unit problem.`
+            : preoffer.detail };
+      }
+
       // Only one half could be proposed: it is an ordinary proposal already.
       if (made.length === 1) {
         const only = proposals.get(made[0].proposal_id as string);

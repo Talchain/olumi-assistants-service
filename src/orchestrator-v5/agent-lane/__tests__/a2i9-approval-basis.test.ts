@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+// These card-basis fixtures deliberately include an untyped proportion and symbolic revision; they do not certify native sizing.
+// Keep their exact copy/authorship pins. Real preparation/approval/save controls run unmocked in option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', () => ({
+  preOfferOptionInterventions: async () => ({ offer: true }),
+}));
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { ProposalStore } from '../proposal.js';

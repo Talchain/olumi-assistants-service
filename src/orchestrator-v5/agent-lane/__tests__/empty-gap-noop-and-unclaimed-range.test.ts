@@ -21,6 +21,11 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapterWithResolution: () => ({ adapter: { name: 'test', model: 'test-model', chat: llm, chatWithTools: llm },
     resolution: { task: 'narrate', resolved_model: 'test-model', resolution_source: 'task_default' } }), getMaxTokensFromConfig: () => undefined,
 }));
+// This byte-composition fixture deliberately varies noncanonical raw mirrors/empty fields under a fixed captured hash.
+// Keep its original pins; native gap/frame preparation and exact save parity run unmocked in option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', () => ({
+  preOfferOptionInterventions: async () => ({ offer: true }),
+}));
 let createAgentCapabilities: typeof import('../runtime/agent-capabilities.js').createAgentCapabilities;
 beforeAll(async () => { ({ createAgentCapabilities } = await import('../runtime/agent-capabilities.js')); });
 afterAll(() => { expect(llm).not.toHaveBeenCalled(); });

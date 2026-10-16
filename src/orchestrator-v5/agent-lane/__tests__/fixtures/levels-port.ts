@@ -6,6 +6,13 @@
  * ⚠ NOT ATOMIC: a refusal part-way leaves the fake's earlier commits in place. The port's all-or-nothing contract is
  * asserted by `whole-request-is-one-commit.test.ts` against a fake that commits the whole scope at once.
  */
+import { vi } from 'vitest';
+// These pre-native per-event fakes use symbolic h0/h1 revisions and intentionally do NOT model canonical preparation.
+// Isolate that boundary here; the real pre-offer -> native door integration is in option-intervention-preoffer.test.ts.
+vi.mock('../../../system-events/option-intervention-preoffer.js', () => ({
+  preOfferOptionInterventions: async () => ({ offer: true }),
+}));
+
 import { createAgentCapabilities, receiptSummaryOf, type InternalDispatch } from '../../runtime/agent-capabilities.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../../system-events/dispatch.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../../approved-adoption-context.js';

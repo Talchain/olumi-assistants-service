@@ -11,6 +11,8 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 
 const SCENARIO = '6b5a4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d';
@@ -25,7 +27,7 @@ const NODES = [
 const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' });
 // The option acts on Onboarding load only, so ONE level makes the starting point complete.
 const EDGES = [edge('hire_two', 'onboarding_load'), edge('onboarding_load', 'velocity'), edge('team_size', 'velocity'), edge('hiring_ramp_up_delay', 'velocity')];
-const read: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes: NODES, edges: EDGES }, graph_hash: 'h0' } });
+const read: InternalDispatch = async () => ({ status: 200, json: { graph: projectGraphForPersistence({ nodes: NODES, edges: EDGES }), graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence({ nodes: NODES, edges: EDGES }) as never) } });
 
 function caps() {
   const store = new ProposalStore();
@@ -112,7 +114,7 @@ describe('an INCOMPLETE starting point (both halves proposed) still reports what
   it('both halves succeed but a level is missing → incomplete, and not_a_factor travels with it (Codex 5807008891)', async () => {
     // hire_two now acts on TWO factors, and only one level is given → incomplete.
     const edges = [...EDGES, edge('hire_two', 'team_size')];
-    const rd: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes: NODES, edges }, graph_hash: 'h0' } });
+    const rd: InternalDispatch = async () => ({ status: 200, json: { graph: projectGraphForPersistence({ nodes: NODES, edges }), graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence({ nodes: NODES, edges }) as never) } });
     const c = createAgentCapabilities(rd, new ProposalStore(), undefined, 'full');
     const r = await c.proposeStartingPoint(ctx, { assumptions: [
       { user_stated: false, factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },

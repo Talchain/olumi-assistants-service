@@ -172,8 +172,8 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     expect((out.receipts as unknown[] | undefined)?.length, JSON.stringify(out.receipts)).toBe(1);
   });
 
-  it('RED: a refused level → NOTHING is written, the starting value included (never partially applied)', async () => {
-    const { caps, ctx } = agent();
+  it('a native-refused complete bundle leaves no card and writes NOTHING, including its starting value', async () => {
+    const { caps, store, ctx } = agent();
     const before = JSON.stringify(persisted);
     const p = await caps.proposeStartingPoint(ctx, {
       assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
@@ -182,11 +182,13 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
         { option_label: RAISE, factor_label: 'Word of mouth', value: 0.4, basis: 'a guess' },
       ],
     });
-    expect(p.ok, JSON.stringify(p)).toBe(true);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
-    expect(out.ok).toBe(false);
-    expect(out.mutated, JSON.stringify(out)).toBe(false);
-    expect(out.refusal).not.toBe('partially_applied');
+    // The same native refusal now happens before consent, rather than offering an impossible card.
+    // Native prepare/execute parity and refused-commit zero writes remain covered by option-intervention-preoffer.test.ts.
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'unresolved_effect_relationship',
+      native_refusal: { kind: 'refused', reason: 'unresolved_effect_relationship' } });
+    expect(p).not.toHaveProperty('proposal_id');
+    expect(store.outstanding(ctx.scenario_id, ctx.authenticated_user_id)).toHaveLength(0);
+    expect(store.size()).toBe(0);
     expect(rows.size).toBe(0);
     expect(JSON.stringify(persisted), 'the model is exactly as approved against').toBe(before);
   });

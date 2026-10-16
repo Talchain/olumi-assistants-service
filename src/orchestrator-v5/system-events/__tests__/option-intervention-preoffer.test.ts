@@ -180,6 +180,31 @@ describe('S5 complete native preparation before an offer', () => {
       expect(node(cold(), 'budget')).toEqual(node(before, 'budget'));
     });
 
+  it('one real level-only card carries the shared frame for two options, with no pre-offer write and one native commit', async () => {
+    delete node(persisted, 'staffing').scale_frame;
+    node(persisted, 'staffing').observed_state = { value: 0, raw_value: 0, unit: 'tech leads', source: 'cee_inference', extractionType: 'inferred' };
+    delete node(persisted, 'pilot').interventions;
+    persisted.nodes.push({ id: 'trial', kind: 'option', label: 'Trial' });
+    persisted.edges.push({ from: 'trial', to: 'staffing', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const proposals = new ProposalStore();
+    const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: cold(), graph_hash: hash() } }),
+      proposals, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-shared-frame') });
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-shared-frame', user_text: 'Explore staffing.', user_turn_text: 'Explore staffing.' };
+    const proposed = await caps.proposeStartingPoint(ctx, { assumptions: [], option_levels: [
+      { option_label: 'Pilot', factor_label: 'Staffing', value: 2, basis: 'Olumi’s pilot assumption', user_stated: false },
+      { option_label: 'Trial', factor_label: 'Staffing', value: 3, basis: 'Olumi’s trial assumption', user_stated: false },
+    ] });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true); expect(rows.size).toBe(0);
+    const pid = proposed.proposal_id as string;
+    expect(proposals.outstanding(SCENARIO, null)).toHaveLength(1);
+    const saved = await caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid });
+    expect(saved.ok, JSON.stringify(saved)).toBe(true); expect(rows.size).toBe(1);
+    expect(cell(cold())).toMatchObject({ raw_value: 2, unit: 'tech leads', source: 'cee_hypothesis' });
+    expect((node(cold(), 'trial').interventions as Dict).staffing).toMatchObject({ raw_value: 3, unit: 'tech leads', source: 'cee_hypothesis' });
+    expect(await caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
+    expect(rows.size).toBe(1);
+  });
+
   it.each(['tech leads', 'hires'])('binds the real %s proposer/card to the same preparation before a native approved save', async unit => {
     const proposals = new ProposalStore();
     const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: cold(), graph_hash: hash() } }),
@@ -191,7 +216,13 @@ describe('S5 complete native preparation before an offer', () => {
       option_levels: [{ option_label: 'Pilot', factor_label: 'Staffing', value: 2,
         basis: 'A provisional pilot level', unmodelled_mechanisms: ['Onboarding support'], user_stated: false }],
     });
+    if (unit === 'hires') {
+      expect(proposed).toMatchObject({ ok: false, mutated: false, refusal: 'value_scope_mismatch', native_refusal: { kind: 'refused', reason: 'value_scope_mismatch', valueIndex: 0 } });
+      expect(proposals.outstanding(SCENARIO, null)).toHaveLength(0); expect(rows.size).toBe(0);
+      return;
+    }
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed).not.toHaveProperty('prepared'); expect(proposed).not.toHaveProperty('prepared_graph');
     const card = proposals.get(proposed.proposal_id as string)!;
     expect(card.operations.filter(op => op.op === 'set_factor_value').map(op => [op.path, op.value])).toEqual([
       ['staffing', { value: 0, unit, authored_by: 'model_proposed', basis: 'A provisional starting point' }],
@@ -216,13 +247,6 @@ describe('S5 complete native preparation before an offer', () => {
         figure: { raw_value: level.raw, cap: level.cap, unit: level.unit } }], optionGaps: gaps.declarations };
     const offered = await inAdoption(input, () => preOfferOptionInterventions(input, cold()));
     expect(rows.size).toBe(0);
-    if (unit === 'hires') {
-      expect(offered.offer).toBe(false);
-      expect(offered).toMatchObject({ offer: false, refusal: { kind: 'refused', reason: 'value_scope_mismatch', valueIndex: 0 } });
-      expect(await execute(input)).toEqual(!offered.offer && offered.refusal);
-      expect(rows.size).toBe(0);
-      return;
-    }
     expect(offered.offer).toBe(true);
     if (!offered.offer) throw new Error('expected savable offered card');
     const unapproved = await caps.authoriseChange({ ...ctx, user_turn_text: 'Yes, use those.' } as never,

@@ -16,6 +16,8 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { ProposalStore } from '../proposal.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { levelsPortOver } from './fixtures/levels-port.js';
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown> | null; scale_frame?: number };
@@ -30,26 +32,26 @@ const F1S = { assumptions: [
 
 function product() {
   let nodes: Node[] = structuredClone(served.nodes);
-  let rev = 0;
+  // Native preparation reads the canonical saved shape and its actual hash, never a symbolic revision.
+  const graph = () => projectGraphForPersistence({ nodes, edges: served.edges });
+  const hash = () => computeAnalysisAffectingGraphHash(graph() as never);
   const writes: string[] = [];
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
     if (path.endsWith('/graph/register')) {
       writes.push('register');
-      if (typeof b.expected_graph_hash === 'string' && b.expected_graph_hash !== `h${rev}`) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+      if (typeof b.expected_graph_hash === 'string' && b.expected_graph_hash !== hash()) return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
       nodes = (b as { graph: { nodes: Node[] } }).graph.nodes;
-      rev += 1;
-      return { status: 200, json: { registered: true, graph_hash: `h${rev}` } };
+      return { status: 200, json: { registered: true, graph_hash: hash() } };
     }
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       // A per-value write the capability sends itself: the N-commit path this test forbids.
       writes.push(String((b.event as { kind?: unknown }).kind));
       const ev = b.event as { target_id?: string; value?: number };
       nodes = nodes.map((n) => (n.id === ev.target_id ? { ...n, observed_state: { ...(n.observed_state ?? {}), value: ev.value } } : n));
-      rev += 1;
-      return { status: 200, json: { graph_hash: `h${rev}` } };
+      return { status: 200, json: { graph_hash: hash() } };
     }
-    return { status: 200, json: { graph: { nodes, edges: served.edges }, graph_hash: `h${rev}` } };
+    return { status: 200, json: { graph: graph(), graph_hash: hash() } };
   };
   return { d, writes, nodes: () => nodes };
 }

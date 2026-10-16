@@ -6,6 +6,11 @@
  * The omission is composed by Olumi from the proposer's own result, whatever the model says.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+// This file isolates response/readiness composition over a symbolic h0 fixture. Native preparation/save controls
+// run without this mock in system-events/__tests__/option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', () => ({
+  preOfferOptionInterventions: async () => ({ offer: true }),
+}));
 import Fastify, { type FastifyInstance } from 'fastify';
 
 /** Records rows by (scenario, turn), so a turn_id-bearing turn takes the real claim → answer path. */
