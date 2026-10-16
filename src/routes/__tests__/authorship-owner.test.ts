@@ -33,6 +33,7 @@ import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { draftStatements, figureSource, sourceMapOf, subjectKey } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
 import { goalLevelOwner, type CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
+import { settingAuthorshipOf, settingDisplayOf } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, any>;
 const SID = '00000000-0000-4000-8000-000000000064';
@@ -74,6 +75,91 @@ const settingOf = (graph: Rec | null, optionLabel: string, factorId: string): Re
   return (option.data?.interventions ?? option.interventions)[factorId];
 };
 
+/**
+ * ⭐ G3 #4 (TL 14:17Z / DL-3 14:21Z; served a75de9cb, #3290 live): three stated option costs, one per year, one over the period, one
+ * one-off, drafted `inferred` with NO statement for them, were stored `cee_hypothesis` and said as "Olumi estimate". SYNTHETIC rows in
+ * those shapes (the brief's cost sentence rewritten here; never the unseen brief): the owner verifies each cost the AI states, and a
+ * cost it does not state is UNKNOWN, never Olumi's ("inferred" means read out of the brief); only `ai_proposed` is Olumi's own.
+ */
+describe('G3 #4: option costs written per year, over the period and one-off', () => {
+  const SHAPED = 'The evening shift would cost around £90k a year in wages. The software would cost about £60k over the two years of the licence. '
+    + 'The micro-hubs are a one-off £140k to set up.';
+  const ORIGINAL = 'The evening shift would cost around £90k a year in wages, the software about £60k, and the micro-hubs probably £140k to set up.';
+  const BRIEF = COSTS.brief_text.replace(ORIGINAL, SHAPED);
+  const SENTENCE: Readonly<Record<string, string>> = {
+    'Evening sort shift': 'The evening shift would cost around £90k a year in wages.',
+    'Route-planning software': 'The software would cost about £60k over the two years of the licence.',
+    'Micro-hubs and cargo bikes': 'The micro-hubs are a one-off £140k to set up.',
+  };
+  const COST = { 'Evening sort shift': 90000, 'Route-planning software': 60000, 'Micro-hubs and cargo bikes': 140000 } as const;
+  const shaped = (keep: 'statements' | 'none', provenance = 'inferred'): Rec => {
+    const m = draftOf(COSTS);
+    m.statements = (m.statements as Rec[]).flatMap((st) => {
+      const label = st.subject.kind === 'option' && st.subject.factor_label === 'Total financial-year spend' ? st.subject.label as string : undefined;
+      if (label === undefined) return [st];
+      return keep === 'none' ? [] : [{ ...st, quote: SENTENCE[label] }];
+    });
+    for (const o of m.options as Rec[]) for (const i of o.interventions as Rec[]) if (i.factor_label === 'Total financial-year spend') i.provenance = provenance;
+    return m;
+  };
+  it('precondition: the synthetic brief writes each cost in its own shape, and the original sentence is gone', () => {
+    expect(BRIEF).not.toContain(ORIGINAL);
+    for (const sentence of Object.values(SENTENCE)) expect(BRIEF).toContain(sentence);
+  });
+  it('⭐ the owner verifies each stated cost, a year / over the period / one-off: all three are the user\u2019s', async () => {
+    const out = await construct(BRIEF, [shaped('statements') as unknown as CandidateModel]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    for (const [label, raw] of Object.entries(COST)) {
+      const setting = settingOf(out.graph, label, SPEND);
+      expect(setting, label).toMatchObject({ raw_value: raw, source: 'brief_extraction' });
+      expect(setting.user_material_unverified, label).toBeUndefined();
+      expect(settingAuthorshipOf(setting), label).toBe('user');
+    }
+  });
+  it('⭐ RED→GREEN (the served shape): costs drafted `inferred` with no statement are UNKNOWN, never Olumi\u2019s, in store and display', async () => {
+    const out = await construct(BRIEF, [shaped('none') as unknown as CandidateModel]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    for (const [label, raw] of Object.entries(COST)) {
+      const setting = settingOf(out.graph, label, SPEND);
+      expect(setting, label).toMatchObject({ raw_value: raw, user_material_unverified: true });
+      expect(settingAuthorshipOf(setting), label).toBe('unknown');
+      expect(settingDisplayOf(setting), label).toBe('unverified_brief');
+    }
+  });
+  it('a total computed from an addition the draft read from the brief but did not state is UNKNOWN too, never Olumi\u2019s', async () => {
+    const m = shaped('none');
+    const factor = (m.factors as Rec[]).find((f) => f.label === 'Total financial-year spend')!;
+    const iv = (m.options as Rec[]).find((o) => o.label === 'Evening sort shift')!.interventions.find((i: Rec) => i.factor_label === 'Total financial-year spend');
+    Object.assign(iv, { value_kind: 'additional', unit: factor.unit });
+    const out = await construct(BRIEF, [m as unknown as CandidateModel]);
+    const setting = settingOf(out.graph, 'Evening sort shift', SPEND);
+    expect(setting, 'the derived total').toMatchObject({ raw_value: 90000, user_material_unverified: true });
+    expect(settingAuthorshipOf(setting)).toBe('unknown');
+  });
+  it('CONTRAST: the same costs drafted `ai_proposed` (the AI\u2019s own figures) are Olumi\u2019s', async () => {
+    const out = await construct(BRIEF, [shaped('none', 'ai_proposed') as unknown as CandidateModel]);
+    for (const label of Object.keys(COST)) {
+      const setting = settingOf(out.graph, label, SPEND);
+      expect(setting.user_material_unverified, label).toBeUndefined();
+      expect(settingAuthorshipOf(setting), label).toBe('olumi_estimate');
+    }
+  });
+  it('goal level: one the draft says it read from the brief (`inferred`), with no statement, is said as unconfirmed, never as Olumi\u2019s estimate', async () => {
+    const level = (baselineProvenance: string): Rec => {
+      const m = draftOf(SCRAP);
+      m.statements = (m.statements as Rec[]).filter((st) => !(st.subject.kind === 'goal' && st.field === 'level'));
+      m.goal.baseline_provenance = baselineProvenance;
+      return m;
+    };
+    const read = await construct(SCRAP.brief_text, [level('inferred') as unknown as CandidateModel]);
+    expect(read.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toBeUndefined();
+    expect(JSON.stringify(read.result.not_represented)).toContain('could not be confirmed from your brief');
+    expect(JSON.stringify(read.result.not_represented)).not.toContain('Olumi\'s own estimate of the current level');
+    const own = await construct(SCRAP.brief_text, [level('ai_proposed') as unknown as CandidateModel]);
+    expect(JSON.stringify(own.result.not_represented), 'CONTRAST: the AI\u2019s own level is Olumi\u2019s').toContain('Olumi\'s own estimate of the current level');
+  });
+});
+
 describe('the one authorship owner: a figure the user wrote is theirs, whatever the draft\u2019s own flags say', () => {
   it('precondition: the served draft marks the three costs "inferred", and its own statements quote the user for each', () => {
     const m = draftOf(COSTS);
@@ -95,6 +181,9 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
   it('CONTRAST: a figure the AI produced itself, with no statement claiming it, stays Olumi\u2019s', async () => {
     const m = draftOf(COSTS);
     m.statements = (m.statements as Rec[]).filter((s) => !(s.subject.kind === 'option' && s.subject.label === 'Micro-hubs and cargo bikes'));
+    // TL 14:17Z: the drafter's contract is "inferred for what you read out of the brief, ai_proposed for anything you added beyond
+    // it", so the AI's OWN figure is `ai_proposed` (was left `inferred` here, which claims the brief: see the G3 #4 rows below).
+    (m.options as Rec[]).find((o) => o.label === 'Micro-hubs and cargo bikes')!.interventions.find((i: Rec) => i.factor_label === 'Total financial-year spend').provenance = 'ai_proposed';
     const out = await construct(COSTS.brief_text, [m as unknown as CandidateModel]);
     expect(settingOf(out.graph, 'Micro-hubs and cargo bikes', SPEND)).toMatchObject({ raw_value: 140000, source: 'cee_hypothesis' });
     expect(settingOf(out.graph, 'Micro-hubs and cargo bikes', SPEND).user_material_unverified).toBeUndefined();
