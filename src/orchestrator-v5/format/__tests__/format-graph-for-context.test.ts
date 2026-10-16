@@ -26,22 +26,21 @@
  *     `structural_matches === 0` from `sanitiseAssistantTextProse`
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
-  NODE_DESCRIPTION_CONTEXT_MAX_CHARS,
+CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+NODE_DESCRIPTION_CONTEXT_MAX_CHARS,
 } from '../../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
-import {
-  bidirectedRelationshipPhrase,
-  formatGraphForContext,
-  relationshipPhrase,
-  type DisplaySafeGraph,
-} from '../format-graph-for-context.js';
-import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from '../influence-bands.js';
 import { CANVAS_BAND_WORD } from '../edge-strength-bands.js';
-import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
+import {
+bidirectedRelationshipPhrase,
+formatGraphForContext,
+relationshipPhrase
+} from '../format-graph-for-context.js';
+import { bandFromMagnitude,NEAR_ZERO_INFLUENCE_THRESHOLD } from '../influence-bands.js';
+
 
 function rawGraph(overrides: Partial<ContextPackGraph> = {}): ContextPackGraph {
   return {
@@ -819,14 +818,7 @@ describe('formatGraphForContext — relationship allowlist (negative test)', () 
   });
 });
 
-describe('Track 2A — display-safe graph yields zero structural matches', () => {
-  it('serialised display-safe graph contains no raw-edge prose patterns', () => {
-    const displaySafe: DisplaySafeGraph = formatGraphForContext(rawGraph());
-    const serialised = JSON.stringify(displaySafe, null, 2);
-    const result = sanitiseAssistantTextProse(serialised);
-    expect(result.structural_matches).toBe(0);
-  });
-});
+
 
 describe('formatGraphForContext — display_value (A2.2)', () => {
   it('passes through an existing display_value verbatim (handler-set)', () => {

@@ -10,16 +10,16 @@
  * CONTRAST: the same hold with its recorded cap stripped is declined with no
  * graph write — so the cap reaching the confirm is what the first case proves.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
+import type { ChatWithToolsArgs,ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { _resetConfigCache } from '../../config/index.js';
 import * as telemetry from '../../utils/telemetry.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 const SCENARIO_ID = randomUUID();
 
@@ -64,7 +64,13 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
+const { runHeldProposalApproval } = await import('../handlers/approve-held-proposal.js');
+const { resolveProposalRenderCopy } = await import('../compose/proposed-change.js');
+// Approval now names the stored card; all graph/source/receipt assertions below are unchanged.
+const runTurnExecutor = (p: MessageTurnPayload, requestId: string, options?: Parameters<typeof runHeldProposalApproval>[2] & { routingAdapter?: unknown }) => {
+  const held = pendingActionsForRead[0]!;
+  return runHeldProposalApproval({ ...p, source: 'chip', chip: { id: held.chip_id }, message: resolveProposalRenderCopy(held.action).message }, requestId, options);
+};
 const { dispatchAddOptionTransaction } = await import('../handlers/add-option-dispatch.js');
 
 const option = (label: string, effort: number, uplift: number) => ({

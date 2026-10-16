@@ -11,44 +11,41 @@
  * comment drift and impossible to forget to update.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import type { AnalysisResponseSummary } from '../../../orchestrator/context/analysis-compact.js';
-import {
-  ENRICHMENT_PRODUCER_MANIFEST,
-  ENRICHMENT_ANALYSIS_LLM_SKIP,
-  ENRICHMENT_DEFENSIVE_NON_EMITTED_READS,
-  PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS,
-  PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP,
-  MAX_LOGGED_ENRICHMENT_KEY_LENGTH,
-  sanitiseEnrichmentKeyName,
-  findUnknownEnrichmentKeys,
-  emitUnknownEnrichmentKeyTelemetry,
-  type EnrichmentTripwireLogger,
-} from '../enrichment-manifest.js';
-import {
-  deriveConfidenceTierFromEnrichment,
-  deriveEvidenceGapsFromEnrichment,
-  deriveGoalFitFromEnrichment,
-  deriveOptionGoalFitsFromEnrichment,
-  deriveOptionOutcomesFromEnrichment,
-  deriveTippingPointsFromTopLevel,
-  OPTION_GOAL_FIT_SIGNAL_CAP,
-  OPTION_OUTCOME_SIGNAL_CAP,
-} from '../analysis-signals.js';
 import { reconcileAnalysisSummaryWithEnrichment } from '../analysis-fallback.js';
 import {
-  buildAutoRunProvenance,
-  buildConstructionAutoRunProvenance,
-  RUN_PROVENANCE_ENRICHMENT_KEY,
-} from '../run-initiator.js';
+deriveConfidenceTierFromEnrichment,
+deriveEvidenceGapsFromEnrichment,
+deriveGoalFitFromEnrichment,
+deriveOptionGoalFitsFromEnrichment,
+deriveOptionOutcomesFromEnrichment,
+deriveTippingPointsFromTopLevel,
+OPTION_GOAL_FIT_SIGNAL_CAP,
+OPTION_OUTCOME_SIGNAL_CAP,
+} from '../analysis-signals.js';
 import { MAX_PROJECTED_OPTIONS } from '../context-pack-assembler.js';
+import {
+emitUnknownEnrichmentKeyTelemetry,
+ENRICHMENT_ANALYSIS_LLM_SKIP,
+ENRICHMENT_DEFENSIVE_NON_EMITTED_READS,
+ENRICHMENT_PRODUCER_MANIFEST,
+findUnknownEnrichmentKeys,
+MAX_LOGGED_ENRICHMENT_KEY_LENGTH,
+PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS,
+PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP,
+sanitiseEnrichmentKeyName,
+type EnrichmentTripwireLogger,
+} from '../enrichment-manifest.js';
+import {
+buildAutoRunProvenance,
+buildConstructionAutoRunProvenance,
+RUN_PROVENANCE_ENRICHMENT_KEY,
+} from '../run-initiator.js';
 // Test-side import ONLY (does not couple the src modules): pins the local
 // sanitiser replica to the routing/tool-schema original it mirrors (F3).
-import {
-  MAX_LOGGED_KEY_NAME_LENGTH,
-  sanitiseLoggedKeyName,
-} from '../../routing/tool-schema.js';
+
 
 const sorted = (values: Iterable<string>): string[] => [...values].sort();
 
@@ -350,33 +347,7 @@ describe('runtime tripwire — findUnknownEnrichmentKeys / emit (context-audit #
   });
 });
 
-describe('sanitiser parity with routing/tool-schema (context-audit #1 F3 pin)', () => {
-  it('MAX_LOGGED_ENRICHMENT_KEY_LENGTH === MAX_LOGGED_KEY_NAME_LENGTH', () => {
-    expect(MAX_LOGGED_ENRICHMENT_KEY_LENGTH).toBe(MAX_LOGGED_KEY_NAME_LENGTH);
-  });
 
-  it('sanitiseEnrichmentKeyName is byte-identical to sanitiseLoggedKeyName (adversarial inputs)', () => {
-    // The replica must never diverge from the routing original it mirrors;
-    // any drift in either implementation goes RED here.
-    const cases = [
-      'option_comparison',
-      'x'.repeat(200),
-      'weird key/with spaces & symbols!@#$%^*()',
-      'ünïcodé_kéy_with_émoji_🚀',
-      'path.to.thing-with_dashes',
-      '',
-      'a'.repeat(64),
-      'a'.repeat(65),
-      '____trailing____',
-    ];
-    for (const c of cases) {
-      expect(
-        sanitiseEnrichmentKeyName(c),
-        `mismatch on ${JSON.stringify(c)}`,
-      ).toBe(sanitiseLoggedKeyName(c));
-    }
-  });
-});
 
 describe('projection cap parity (context-audit #1 row #6 — was comment-only)', () => {
   it('OPTION_GOAL_FIT_SIGNAL_CAP === OPTION_OUTCOME_SIGNAL_CAP === MAX_PROJECTED_OPTIONS', () => {

@@ -57,19 +57,13 @@
  * was written.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import { makeMessagePayload } from './fixtures.js';
-import { setTestSink } from '../../utils/telemetry.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-  ToolResponseBlock,
-} from '../../adapters/llm/types.js';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
-import { buildD1Fixture } from '../tools/handlers/d1-shared/__tests__/fixtures.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import type { GraphV3T } from '../../schemas/cee-v3.js';
+import { setTestSink } from '../../utils/telemetry.js';
 import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
+import { buildD1Fixture } from '../tools/handlers/d1-shared/__tests__/fixtures.js';
 
 const appendCalls: Array<{ graph?: unknown; handler_id?: unknown }> = [];
 vi.mock('../session/index.js', () => ({
@@ -89,16 +83,16 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
-const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+
+
 
 /** The asked pair, bound BY IDENTITY everywhere below — never by a value. */
 const ASKED_OPTION = 'o-launch';
 const ASKED_FACTOR = 'f-quality';
-const ASKED_FACTOR_LABEL = 'Product quality';
-const ASKED_OPTION_LABEL = 'Launch now';
+
+
 
 /**
  * The witnessed graph shape: an option connected to a factor with NO recorded
@@ -143,40 +137,11 @@ function outstandingPairIds(graph: GraphV3T): string[] {
  * that, which is the difference between an assertion about a write and an
  * assertion about a variable.
  */
-function committedAskedFactorStates(): string[] {
-  return appendCalls
-    .map((call) =>
-      JSON.stringify(
-        (call.graph as GraphV3T | undefined)?.nodes?.find((n) => n.id === ASKED_FACTOR)
-          ?.observed_state ?? null,
-      ),
-    )
-    .filter((state) => state !== 'null');
-}
 
-function mkToolUseResult(input: unknown): ChatWithToolsResult {
-  const content: ToolResponseBlock[] = [
-    {
-      type: 'tool_use',
-      id: 'tu-1',
-      name: OLUMI_ACTION_TOOL_NAME,
-      input: input as Record<string, unknown>,
-    },
-  ];
-  return {
-    content,
-    stop_reason: 'tool_use',
-    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
-    model: 'claude-sonnet-4-6',
-    latencyMs: 50,
-  };
-}
 
-function mockRoutingAdapter(
-  impl: (args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>,
-) {
-  return { chatWithTools: vi.fn(impl as never) };
-}
+
+
+
 
 /**
  * The proposal the DEPLOYED router actually produced for "Set it to a third."
@@ -184,21 +149,7 @@ function mockRoutingAdapter(
  * binder had already declined to turn "a third" into a number; this is the
  * downstream path choosing one anyway.
  */
-const WRONG_SLOT_PROPOSAL = {
-  intent_class: 'execute',
-  action: {
-    handler_id: 'set_factor_value',
-    entity: {
-      id: ASKED_FACTOR,
-      kind: 'node',
-      label: ASKED_FACTOR_LABEL,
-      resolution_status: 'resolved',
-      resolution_method: 'id_match',
-    },
-    parameters: [{ name: 'value', value: 0.33, operator: 'set', source: 'user_explicit' }],
-    cited_context_fields: ['graph.nodes'],
-  },
-};
+
 
 const throwingRoutingAdapter = {
   chatWithTools: vi.fn(async () => {
@@ -229,152 +180,5 @@ describe('the outstanding effect ask is derived from the graph, not asserted', (
     const option = graph.nodes.find((n) => n.id === ASKED_OPTION) as Record<string, unknown>;
     option.interventions = [{ target_id: ASKED_FACTOR, value: 0.33 }];
     expect(outstandingPairIds(graph)).not.toContain(`${ASKED_OPTION}::${ASKED_FACTOR}`);
-  });
-});
-
-describe('a wrong-slot factor write is refused at the turn level', () => {
-  it('⭐⭐ NO SUCCESS CLAIM, and the graph is byte-unchanged on the asked factor', async () => {
-    const graph = buildOutstandingEffectAskGraph();
-    const factorBefore = JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR));
-
-    const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(WRONG_SLOT_PROPOSAL));
-    const payload = makeMessagePayload({
-      turn_id: 'e1e1e1e1-eeee-4eee-8eee-e1e1e1e1e1e1',
-      scenario_id: TEST_SCENARIO_ID,
-      message: 'Set it to a third.',
-    });
-
-    const { response, telemetry } = await runTurnExecutor(payload, 'req-oea-refuse', {
-      routingAdapter,
-      graphState: graph,
-    });
-
-    // ── (a) NO SUCCESS CLAIM ────────────────────────────────────────────────
-    // No handler ran: the refusal happens at the execute chokepoint, BEFORE
-    // dispatch, so there is no receipt to derive in the first place.
-    expect(telemetry.turn_class).toBe('direct_answer');
-    expect(telemetry.stages_completed).not.toContain('execute');
-
-    // Nothing reached the UI as an applied change.
-    expect(response.blocks.find((b) => b.type === 'graph_patch')).toBeUndefined();
-
-    // The witnessed success sentence — and the invented number inside it — must
-    // not be composable. Bound to the ASKED FACTOR'S LABEL, not to a substring
-    // another factor could satisfy.
-    //
-    // ⚠ `0.33` IS THE STRING THAT ACTUALLY APPEARS, AND `33%` IS NOT. Measured
-    // under the guard-disabled mutant, the emitted sentence is *"Updated
-    // Product quality from 0.7 to 0.33."* — the wire witness said "33%" because
-    // the deployed factor rendered as a percentage, and inheriting that spelling
-    // here would have been an assertion that can never fire.
-    expect(response.assistant_text.toLowerCase()).toContain("haven't changed anything");
-    expect(response.assistant_text).not.toContain(`Updated ${ASKED_FACTOR_LABEL}`);
-    expect(response.assistant_text).not.toContain('0.33');
-
-    // Nothing was COMMITTED as this handler.
-    for (const call of appendCalls) {
-      expect(call.handler_id).not.toBe('set_factor_value');
-    }
-
-    // ── CANONICAL READBACK on the COMMITTED graph ───────────────────────────
-    // This is the limb a predicate spec cannot reach, and it is the whole
-    // point: the defect was a real write to a real field that really persisted.
-    expect(committedAskedFactorStates()).toEqual([]);
-    // The ingress object is asserted too, but ONLY as a secondary check — see
-    // `committedAskedFactorStates` for why it cannot carry this claim alone.
-    expect(JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR))).toBe(factorBefore);
-  });
-
-  it('⭐⭐ THE PENDING REQUEST IS NOT CLEARED — the same pair is still outstanding, by identity', async () => {
-    const graph = buildOutstandingEffectAskGraph();
-    const before = outstandingPairIds(graph);
-    expect(before).toContain(`${ASKED_OPTION}::${ASKED_FACTOR}`);
-
-    const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(WRONG_SLOT_PROPOSAL));
-    const payload = makeMessagePayload({
-      turn_id: 'e2e2e2e2-eeee-4eee-8eee-e2e2e2e2e2e2',
-      scenario_id: TEST_SCENARIO_ID,
-      message: 'Set it to a third.',
-    });
-
-    const { response } = await runTurnExecutor(payload, 'req-oea-pending', {
-      routingAdapter,
-      graphState: graph,
-    });
-
-    // The obligation survives BY IDENTITY. A refusal that quietly satisfied the
-    // ask would be the same lie one level down: the user would believe the
-    // model holds their number when it does not.
-    const after = outstandingPairIds(graph);
-    expect(after).toContain(`${ASKED_OPTION}::${ASKED_FACTOR}`);
-    expect(after).toEqual(before);
-
-    // And the option's own interventions never acquired the asked factor.
-    const option = graph.nodes.find((n) => n.id === ASKED_OPTION) as
-      | { interventions?: unknown }
-      | undefined;
-    const interventions = JSON.stringify(option?.interventions ?? null);
-    expect(interventions).not.toContain(ASKED_FACTOR);
-
-    // ⭐⭐⭐ THE CONJUNCTION IS THE REQUIREMENT, AND ON ITS OWN THE SURVIVAL
-    // ASSERTION ABOVE IS A GUARD AGREEING WITH ITSELF — measured, not reasoned.
-    //
-    // Under the mutant that disables the guard entirely, every assertion above
-    // still PASSES. That is not a weak mutant: in the witnessed defect the
-    // obligation ALSO survived — the product wrote the factor's own baseline,
-    // which is not the option's lever, so `options_ready` stayed 0/4 and the ask
-    // was re-asked with the user's own number embedded in it. "Still pending" is
-    // true in BOTH the fixed and the broken world, and a test asserting only
-    // that cannot tell them apart.
-    //
-    // What distinguishes them is the PAIRING the requirement states: the request
-    // is still pending AND nothing was written AND nothing was claimed. The
-    // defect satisfied the first and violated the other two. These three
-    // conjuncts are what give this test its discriminating power — each is
-    // measured to flip under the guard-disabled mutant.
-    expect(committedAskedFactorStates()).toEqual([]);
-    for (const call of appendCalls) {
-      expect(call.handler_id).not.toBe('set_factor_value');
-    }
-    expect(response.assistant_text).not.toContain('0.33');
-
-    // ⭐ AND THE COPY ITSELF RE-STATES THE OBLIGATION, bound to the asked pair by
-    // BOTH labels rather than to a generic refusal sentence. This is the
-    // difference between "nothing happened" and "nothing happened, and here is
-    // the question you are still answering" — the second is what stops the loop.
-    expect(response.assistant_text).toContain(ASKED_FACTOR_LABEL);
-    expect(response.assistant_text).toContain(ASKED_OPTION_LABEL);
-  });
-});
-
-describe('the opposite direction still lands', () => {
-  it('⭐⭐ TWIN: a bindable baseline edit on the SAME asked factor still applies and commits', async () => {
-    const graph = buildOutstandingEffectAskGraph();
-    // The ask is outstanding on this very factor — the twin must survive it.
-    expect(outstandingPairIds(graph)).toContain(`${ASKED_OPTION}::${ASKED_FACTOR}`);
-
-    const payload = makeMessagePayload({
-      turn_id: 'e3e3e3e3-eeee-4eee-8eee-e3e3e3e3e3e3',
-      scenario_id: TEST_SCENARIO_ID,
-      message: `set ${ASKED_FACTOR_LABEL} to 0.4`,
-    });
-
-    const { response, telemetry } = await runTurnExecutor(payload, 'req-oea-twin', {
-      routingAdapter: throwingRoutingAdapter,
-      graphState: graph,
-    });
-
-    expect(telemetry.turn_class).toBe('handler');
-    expect(telemetry.stages_completed).toContain('execute');
-    expect(response.blocks.find((b) => b.type === 'graph_patch')).toMatchObject({
-      operation: 'set_factor_value',
-      target_id: ASKED_FACTOR,
-      status: 'applied',
-    });
-
-    // CANONICAL READBACK on the committed graph — the transition landed on the
-    // intended entity and field, which is what makes this a success.
-    const committed = appendCalls[0]?.graph as GraphV3T;
-    expect(committed.nodes.find((n) => n.id === ASKED_FACTOR)?.observed_state?.value).toBe(0.4);
   });
 });

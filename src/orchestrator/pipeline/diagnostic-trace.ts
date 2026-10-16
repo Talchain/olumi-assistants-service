@@ -186,3 +186,81 @@ export function emptyDiagnosticTrace(): DiagnosticTrace {
     fallback_trace: [],
   };
 }
+
+/** Retained diagnostic contracts; the conventional collector implementation was removed by C1. */
+export type AttributedPromptIdentity = Omit<PromptIdentity, 'is_staging'>;
+
+/** One recorded call. `hash` absent ⇒ the call is recorded, the prompt is not. */
+export interface PromptAttributionInput {
+  /** `prompt_identity[].task_id` — the CEE task, e.g. `validate_graph`. */
+  readonly taskId: string;
+  /** `llm_calls[].role` — how the call is labelled in the trace. */
+  readonly role: string;
+  readonly provider: string;
+  /**
+   * The resolved model. `undefined` ⇒ the adapter genuinely did not expose
+   * one, recorded as the estate's honest `'unknown'` sentinel rather than a
+   * fabricated id (same convention as the routing and edit_graph sites).
+   */
+  readonly model: string | undefined;
+  readonly inputTokens: number | undefined;
+  readonly outputTokens: number | undefined;
+  readonly latencyMs: number;
+  readonly stopReason: string | null;
+  /** Absent ⇒ no `prompt_identity` record is made. Never defaulted. */
+  readonly promptHash: string | undefined;
+  readonly promptVersion: string | undefined;
+  readonly promptId: string | undefined;
+  readonly promptSource: string | undefined;
+}
+
+/** Immutable read-out, shaped for direct replay into the trace collector. */
+export interface PromptAttributionSnapshot {
+  readonly llm_calls: readonly LLMCallTrace[];
+  readonly prompt_identity: readonly AttributedPromptIdentity[];
+}
+
+export class PromptAttributionCollector {
+  private readonly calls: LLMCallTrace[] = [];
+  private readonly identities: AttributedPromptIdentity[] = [];
+
+  record(input: PromptAttributionInput): void {
+    this.calls.push({
+      role: input.role,
+      provider: input.provider,
+      model: input.model ?? 'unknown',
+      input_tokens: input.inputTokens ?? 0,
+      output_tokens: input.outputTokens ?? 0,
+      // Not threaded by either recording site today. Recorded as `null`
+      // ("not measured here") rather than `0` ("measured, and it was zero").
+      cache_read_tokens: null,
+      cache_creation_tokens: null,
+      latency_ms: input.latencyMs,
+      stop_reason: input.stopReason,
+      thinking_enabled: false,
+      error: null,
+    });
+    if (input.promptHash) {
+      this.identities.push({
+        task_id: input.taskId,
+        prompt_id: input.promptId ?? input.promptVersion ?? 'unknown',
+        version: input.promptVersion ?? 'unknown',
+        hash: input.promptHash,
+        source: input.promptSource ?? 'unknown',
+      });
+    }
+  }
+
+  /** True when nothing was recorded — lets callers omit the key entirely. */
+  isEmpty(): boolean {
+    return this.calls.length === 0 && this.identities.length === 0;
+  }
+
+  /** Fresh copies each call; the collector stays usable afterwards. */
+  snapshot(): PromptAttributionSnapshot {
+    return {
+      llm_calls: [...this.calls],
+      prompt_identity: [...this.identities],
+    };
+  }
+}

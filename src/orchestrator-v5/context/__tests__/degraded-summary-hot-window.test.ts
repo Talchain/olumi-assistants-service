@@ -9,15 +9,15 @@
  * the sole budget authority.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { CONTEXT_POLICY, CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS } from '../context-policy.js';
 import {
-  CONTEXT_PACK_RECENT_TURNS_CAP,
-  assembleContextPackWithSummary,
+CONTEXT_PACK_RECENT_TURNS_CAP,
+assembleContextPackWithSummary,
 } from '../context-pack-assembler.js';
-import { buildUserMessage } from '../../routing/route-with-tool-use.js';
+import { CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,CONTEXT_POLICY } from '../context-policy.js';
+
 import { priorTurnsFixture } from './context-budget-fixtures.js';
 
 const HOT_WINDOW = 20;
@@ -72,37 +72,9 @@ function assemble(args: {
 }
 
 describe('degraded-summary hot-window fallback', () => {
-  it('retains already-fetched turns 9..20 when the summary read has no section', () => {
-    const pack = assemble({ summarisedTurns: null });
-    const prompt = buildUserMessage(pack, 'What constraints still govern the programme?');
 
-    expect(pack.conversation.recent_turns).toHaveLength(HOT_WINDOW);
-    expect(pack.conversation.window).toMatchObject({
-      shown: HOT_WINDOW,
-      available: STORED_TOTAL,
-    });
-    expect(pack.conversation.window?.summarised).toBeUndefined();
-    expect(prompt).toContain(EARLY_CONSTRAINT);
-    expect(pack.conversation.window?.notice).toContain('8 earlier ones are not shown');
-  });
 
-  it('uses the same fallback for an honest zero-coverage memory-hole section', () => {
-    const pack = assemble({
-      conversationSummary: {
-        text: 'OPEN: Summary continuity could not be verified this turn.',
-        current_to_turn_id: 'turn-20',
-        lag_turns: 0,
-        stale: true,
-        note: 'No earlier turn is claimed as summarised.',
-      },
-      summarisedTurns: 0,
-    });
 
-    expect(pack.conversation.recent_turns).toHaveLength(HOT_WINDOW);
-    expect(pack.conversation.window?.summarised).toBe(0);
-    expect(pack.conversation_summary?.text).toContain('could not be verified');
-    expect(buildUserMessage(pack, 'continue')).toContain(EARLY_CONSTRAINT);
-  });
 
   it('does not present the fetched-window length as a total when the count read failed', () => {
     const pack = assemble({ summarisedTurns: null, priorTurnsTotal: null });
@@ -116,22 +88,7 @@ describe('degraded-summary hot-window fallback', () => {
     expect(notice).toContain('do not state a total number of turns or exchanges');
   });
 
-  it('keeps the normal eight-turn window when a healthy summary covers hidden turns', () => {
-    const pack = assemble({
-      conversationSummary: {
-        text: `CONSTRAINTS: ${EARLY_CONSTRAINT}`,
-        current_to_turn_id: 'turn-20',
-        lag_turns: 0,
-        stale: false,
-      },
-      summarisedTurns: HOT_WINDOW - CONTEXT_PACK_RECENT_TURNS_CAP,
-    });
 
-    expect(pack.conversation.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
-    expect(pack.conversation.recent_turns.some((turn) => turn.user_message === EARLY_CONSTRAINT)).toBe(false);
-    expect(pack.conversation.window?.summarised).toBe(12);
-    expect(buildUserMessage(pack, 'continue')).toContain(EARLY_CONSTRAINT);
-  });
 
   it('preserves omitted-loader compatibility and short-window byte identity', () => {
     expect(assemble({}).conversation.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);

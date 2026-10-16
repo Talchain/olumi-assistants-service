@@ -5,27 +5,26 @@
  * structural compatibility with the production adapter's local mirror (enforced by
  * `pnpm typecheck`; the production adapter itself imports nothing from src/cee).
  */
-import { describe, it, expect } from 'vitest';
-import type { ProposalEnvelopeT } from '../../../cee/dual-draft/proposals.js';
+import { describe,expect,it } from 'vitest';
+
 import {
-  DUAL_DRAFT_PROPOSAL_TYPES,
-  mapProposalType,
-  dualDraftToCandidateEnvelope,
-  type DualDraftProposal,
-  type DualDraftProposalType,
+DUAL_DRAFT_PROPOSAL_TYPES,
+dualDraftToCandidateEnvelope,
+mapProposalType,
+type DualDraftProposal,
+type DualDraftProposalType,
 } from '../adapters/dual-draft.js';
 import { parseEnvelope } from '../parse-envelope.js';
-import { refereeMutation } from '../referee.js';
 import { ADD_OPTION_APPLY_UNWIRED } from '../reason-codes.js';
-import { buildReadyGraph, frameFor, hashOf } from './fixtures.js';
+import { refereeMutation } from '../referee.js';
 import type { CandidateKind } from '../types.js';
+import { buildReadyGraph,frameFor,hashOf } from './fixtures.js';
 
 const CTX = { candidate_id: '11111111-1111-4111-8111-111111111111', base_graph_hash: 'h', scenario_id: 'scn', turn_id: 't1' };
 
 // TYPE-LEVEL compat: the REAL producer envelope must be assignable to the local mirror.
 // (Verified by `pnpm typecheck`; a no-op at runtime.)
-const _compat = (real: ProposalEnvelopeT): DualDraftProposal => real;
-void _compat;
+
 
 describe('dual-draft adapter — exhaustive kind mapping', () => {
   const expected: Record<DualDraftProposalType, CandidateKind> = {

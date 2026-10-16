@@ -1,17 +1,16 @@
-import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 import { runPressToolResponse } from '../../orchestrator-v5/agent-lane/__tests__/fixtures/run-press-model.js';
+import { RUN_RESULT_READY_TEXT } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 /** Route harness follows agent-lane/__tests__/result-first-run.test.ts: real Run capability + final read. */
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import { RunAnalysisHandlerFactSchema, type RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
-import type { ConversationContent } from '../../orchestrator-v5/session/conversation-content.js';
+import { RunAnalysisHandlerFactSchema,type RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import Fastify,{ type FastifyInstance } from 'fastify';
+import { createHash,randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 import { reconciliationPending } from '../../orchestrator-v5/agent-lane/goal-scope.js';
-import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import type { LeaderFinalEgressOpts } from '../../orchestrator-v5/agent-lane/leader-final-egress.js';
-import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../../orchestrator-v5/agent-lane/run-explanation.js';
+import type { ConversationContent } from '../../orchestrator-v5/session/conversation-content.js';
+import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 
 const SCENARIO = '4d2c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const FACT = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8')) as RunAnalysisHandlerFact;
@@ -185,11 +184,7 @@ function useProducerCapture(capture: Json) {
     fact_row_id: 'captured-run', fact_created_at: fact!.result.computed_at }], total_count: 1 }));
 }
 
-function noViewBytes(value: unknown) {
-  const bytes = JSON.stringify(value);
-  expect({ key: bytes.includes('canonical_analysis_view'), face: bytes.includes('Chance not shown yet'),
-    why: bytes.includes(WHY) }, 'UI view bytes must not reach model input').toEqual({ key: false, face: false, why: false });
-}
+
 
 describe('canonical view on the same-page turn wire', () => {
   it('RUN TURN: carries exactly the final selected Run view, beside that Run analysis_state', async () => {
@@ -372,58 +367,7 @@ describe('canonical view on the same-page turn wire', () => {
     }
   });
 
-  it('MODEL INPUT: carrying the view never feeds its key, face or why to warm/cold history, AI or interpreter/pack input', async () => {
-    const first = (await run()).json();
-    expect(first.canonical_analysis_view).toEqual(finalRead.canonical_analysis_view);
-    expect(first.canonical_analysis_view.options[0].cell.why).toBe(WHY);
-    const answers = rows.filter(row => typeof row.assistantMessage === 'string');
-    expect(answers).toHaveLength(1);
-    noViewBytes(answers); // The actual persistence writer uses named fields, never the whole response.
-    // A future record carrying the additive root field must also be safe on cold reseed/pack assembly.
-    const carryingRows = answers.map(row => ({ ...row, canonical_analysis_view: first.canonical_analysis_view }));
-    const { historyFromDurableTurns } = await import('../../orchestrator-v5/agent-lane/history-store.js');
-    noViewBytes(historyFromDurableTurns(carryingRows));
-    rows[rows.length - 1].canonical_analysis_view = first.canonical_analysis_view;
-    const chip = first.suggested_actions.find((action: Json) => isRunExplanationChip(action.id));
-    expect(chip).toBeDefined();
-    for (const session of [first._agent.session_id, randomUUID()]) {
-      const explanation = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-        turn_id: randomUUID(), scenario_id: SCENARIO, agent_session_id: session,
-        message: RUN_EXPLANATION_MESSAGE, chip: { id: chip.id },
-      } });
-      expect(explanation.statusCode).toBe(200);
-      expect(explanation.json().narration.status).toBe('ready');
-    }
-    expect(modelBodies).toHaveLength(3); // Pre-tool Run interpretation, then warm and cold Explain.
-    for (const modelBody of modelBodies) noViewBytes(modelBody);
-    // Ordinary Agent AI projection + actual serialised provider input, using the same carrying read/rows.
-    const ordinary = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      turn_id: randomUUID(), scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'What does the model hold?',
-    } });
-    expect(ordinary.statusCode).toBe(200);
-    expect(modelBodies.length).toBeGreaterThan(2);
-    for (const modelBody of modelBodies) noViewBytes(modelBody);
-    const { assembleContextPack } = await import('../../orchestrator-v5/context/context-pack-assembler.js');
-    const { makeMessagePayload } = await import('../../orchestrator-v5/__tests__/fixtures.js');
-    const { projectModelFacingContextPack } = await import('../../orchestrator-v5/context/model-facing-context-pack.js');
-    const { buildUserMessage } = await import('../../orchestrator-v5/routing/route-with-tool-use.js');
-    const pack = assembleContextPack({ payload: makeMessagePayload(), priorTurns: carryingRows as never });
-    noViewBytes(projectModelFacingContextPack(pack));
-    noViewBytes(buildUserMessage(pack, 'Explain the current model.'));
-    // Explicit Run-delta spread seam: project selected data, never the carrying turn object.
-    const { selectedRunContextDelta } = await import('../../orchestrator-v5/agent-lane/__tests__/fixtures/selected-run-context-delta.js');
-    const { savedRunContextFacts } = await import('../../orchestrator-v5/agent-lane/saved-run-context-facts.js');
-    const { modelFacingToolResult } = await import('../../orchestrator-v5/agent-lane/licensed-run-view.js');
-    const { projectModelFacingRunDelta } = await import('../../orchestrator-v5/context/model-facing-run-delta.js');
-    const delta = selectedRunContextDelta(hash, first.analysis_state.run_state.computed_at);
-    const carryingRead = { ...first, analysis_result: first.blocks.find((b: Json) => b.type === 'analysis_result'),
-      run_delta: delta, raw: GRAPH };
-    const facts = savedRunContextFacts(SCENARIO, carryingRead, { leader_may_be_named: true });
-    expect(facts.run_delta).toEqual(projectModelFacingRunDelta(delta));
-    noViewBytes(facts);
-    noViewBytes(modelFacingToolResult('get_canonical_state', { analysis: facts }));
-    noViewBytes(projectModelFacingContextPack({ ...pack, run_delta: facts.run_delta } as never));
-  });
+
   it('Q2 PARITY: scope removal preserves the same snapshot revision and reload view', async () => {
     useProducerCapture(PRODUCER_CAPTURES[0][1]);
     const goal = snapshot.graph.nodes.find((node: Json) => node.kind === 'goal');

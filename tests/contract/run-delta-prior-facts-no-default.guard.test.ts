@@ -34,11 +34,11 @@
  *
  * Auto-enrols in the required CI gate by living under tests/contract/.
  */
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { describe,expect,it } from 'vitest';
 
-import { stripComments, stripCommentsFile } from '../../scripts/ci/strip-source-comments.mjs';
+import { stripComments,stripCommentsFile } from '../../scripts/ci/strip-source-comments.mjs';
 
 /**
  * A nullish/logical default applied to anything named `priorFacts`, on one
@@ -49,7 +49,7 @@ const PROHIBITED = /priorFacts[^;\n]*(\?\?|\|\|)/;
 
 /** The three seams the basis crosses, from producer of the value to consumer. */
 const SEAMS = [
-  'src/orchestrator-v5/turn-executor.ts',
+  'src/orchestrator-v5/handlers/approve-held-proposal.ts',
   'src/orchestrator/route-v2.ts',
   'src/orchestrator-v5/response-finaliser.ts',
 ] as const;

@@ -1,16 +1,16 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
-import {
-  AI_TASK_LIFECYCLE,
-  EXECUTABLE_DEDICATED_RUNTIME_TASKS,
-  getAiTaskRuntimeAvailability,
-  hasAiTaskExecutablePath,
-  RUNTIME_AI_TASK_AUTHORITY,
-  TASK_MODEL_DEFAULTS,
-} from '../../src/config/model-routing.js';
+import { describe,expect,it } from 'vitest';
 import { resolveModelAssignment } from '../../src/config/model-assignment.js';
+import {
+AI_TASK_LIFECYCLE,
+EXECUTABLE_DEDICATED_RUNTIME_TASKS,
+getAiTaskRuntimeAvailability,
+hasAiTaskExecutablePath,
+RUNTIME_AI_TASK_AUTHORITY,
+TASK_MODEL_DEFAULTS,
+} from '../../src/config/model-routing.js';
 import { CeeTaskIdSchema } from '../../src/prompts/schema.js';
 
 const SRC = join(process.cwd(), 'src');
@@ -106,8 +106,6 @@ describe('AI task lifecycle authority', () => {
       'draft_quality_review',
       'edit_graph',
       'explain_diff',
-      'm2_graph_review',
-      'orchestrator',
       'suggest_options',
       'validate_graph',
     ]);
@@ -135,14 +133,10 @@ describe('AI task lifecycle authority', () => {
         state: 'display_only',
         executableTask: 'explain_diff',
       },
-      routing: {
-        executable: false,
-        state: 'display_only',
-        executableTask: 'orchestrator',
-      },
+      routing: { executable: false, state: 'inert_compatibility' },
       m2_graph_review: {
         executable: false,
-        state: 'feature_gated',
+        state: 'inert_compatibility',
       },
       repair_graph: {
         executable: false,
@@ -154,16 +148,16 @@ describe('AI task lifecycle authority', () => {
   it('separates static executable paths from default-off feature availability', () => {
     expect(AI_TASK_LIFECYCLE.m2_graph_review).toMatchObject({
       executable: false,
-      state: 'feature_gated',
+      state: 'inert_compatibility',
     });
     expect(AI_TASK_LIFECYCLE.decision_review_decompose).toMatchObject({
       executable: false,
       state: 'feature_gated',
     });
-    expect(hasAiTaskExecutablePath('m2_graph_review')).toBe(true);
+    expect(hasAiTaskExecutablePath('m2_graph_review')).toBe(false); // Its producer was deleted by C1.
     expect(hasAiTaskExecutablePath('decision_review_decompose')).toBe(true);
     expect(getAiTaskRuntimeAvailability('m2_graph_review')).toBe(
-      'feature_gated_default_off',
+      'not_executable',
     );
     expect(getAiTaskRuntimeAvailability('decision_review_decompose')).toBe(
       'feature_gated_default_off',
@@ -188,7 +182,6 @@ describe('AI task lifecycle authority', () => {
       // it reaches the shared Anthropic chat boundary directly with its own
       // code-constant prompt — so it appears here and never in
       // LITERAL_ROUTER_TASKS.
-      'readiness_value_estimate',
       // The draft-seam option mapping re-ask (unified pipeline Stage 3b). Same
       // shape as the row above and here for the same reason: it reaches the
       // shared Anthropic chat boundary directly with its own code-constant
@@ -214,7 +207,6 @@ describe('AI task lifecycle authority', () => {
       // for a prompt it does not own. The call moved to the module that owns
       // VALUE_ESTIMATE_SYSTEM_PROMPT and VALUE_ESTIMATE_OUTPUT_SCHEMA, and the
       // authority row below is the declaration this guard exists to demand.
-      'orchestrator-v5/handlers/readiness-value-estimator.ts',
       'orchestrator-v5/rolling-summary/summariser.ts',
     ]);
     // Named negatively as well, because the exact-equality above states the
@@ -236,23 +228,8 @@ describe('AI task lifecycle authority', () => {
       promptAuthority: 'provider_specific_code_constant',
       promptIdentity: 'code_hash',
     });
-    expect(RUNTIME_AI_TASK_AUTHORITY.readiness_value_estimate).toMatchObject({
-      hasExecutablePath: true,
-      modelAuthority: 'dedicated_anthropic_chain',
-      promptAuthority: 'code_constant',
-      promptIdentity: 'code_hash',
-      // ⚠ PINNED AS null ON PURPOSE, and it is the one thing a later reader is
-      // most likely to "tidy up". The call passes no explicit model, so the
-      // resolver chain is the GLOBAL LLM_MODEL then FALLBACK_ANTHROPIC_MODEL.
-      // Writing a model id here would make the row describe behaviour the code
-      // does not have; giving the task its own env key is a behaviour change
-      // and belongs in its own lane.
-      checkedInModel: null,
-    });
-    // Unlike decision_review_decompose, this path is NOT behind a feature gate —
-    // it is reached on an ordinary readiness turn. Pinning the availability is
-    // what stops the row reading as "declared but dark".
-    expect(getAiTaskRuntimeAvailability('readiness_value_estimate')).toBe('available');
+    expect(RUNTIME_AI_TASK_AUTHORITY).not.toHaveProperty('readiness_value_estimate');
+    expect(getAiTaskRuntimeAvailability('readiness_value_estimate')).toBe('not_executable');
     expect(RUNTIME_AI_TASK_AUTHORITY.option_factor_map).toMatchObject({
       hasExecutablePath: true,
       modelAuthority: 'dedicated_anthropic_chain',
@@ -275,7 +252,6 @@ describe('AI task lifecycle authority', () => {
       'extraction',
       'rolling_summary',
       'decision_review_decompose',
-      'readiness_value_estimate',
       'option_factor_map',
     ]);
     for (const task of EXECUTABLE_DEDICATED_RUNTIME_TASKS) {

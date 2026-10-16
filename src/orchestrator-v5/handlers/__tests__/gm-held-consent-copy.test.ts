@@ -11,26 +11,23 @@
  * pre-amendment base.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  buildGmHeldAssistantText,
-  buildGmHeldPublicCopy,
-  describeHeldOperationsSubject,
-  GM_HELD_ASSISTANT_TEXT,
-  GM_HELD_CHIP_LABEL,
-  GM_HELD_CHIP_MESSAGE,
+buildGmHeldAssistantText,
+buildGmHeldPublicCopy,
+describeHeldOperationsSubject,
+GM_HELD_ASSISTANT_TEXT,
+GM_HELD_CHIP_LABEL,
+GM_HELD_CHIP_MESSAGE,
 } from '../edit-graph-referee-gate.js';
 import {
-  buildGmHeldAppliedReceipt,
-  GM_HELD_APPLIED_ASSISTANT_TEXT,
+buildGmHeldAppliedReceipt,
+GM_HELD_APPLIED_ASSISTANT_TEXT,
 } from '../gm-held-execute.js';
-import {
-  buildHeldAwareDegradeText,
-  HELD_AWARE_DEGRADE_TEXT,
-} from '../../coaching/coaching-output-postcheck.js';
+
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
-import { describeChangeset, clampLabel } from '../describe-changeset.js';
+import { clampLabel,describeChangeset } from '../describe-changeset.js';
 
 const GRAPH = {
   nodes: [
@@ -152,24 +149,7 @@ describe('buildGmHeldAppliedReceipt — receipts name what was confirmed', () =>
   });
 });
 
-describe('buildHeldAwareDegradeText — the degrade re-ask names the hold', () => {
-  it('names the restated hold and keeps the consent framing', () => {
-    const text = buildHeldAwareDegradeText("Update 'Marketing'");
-    expect(text).toContain("update 'Marketing'");
-    expect(text).toContain('Nothing in the model moves until you confirm');
-    expect(text).not.toContain('—');
-    expect(findForbiddenPhraseHit(text)).toBeNull();
-  });
 
-  it.each([
-    ['legacy GM chip label', 'Continue with this change'],
-    ['render-safe fallback', 'Apply this change'],
-    ['blank', '   '],
-    ['undefined', undefined],
-  ])('%s → the unnamed swept copy', (_kind, label) => {
-    expect(buildHeldAwareDegradeText(label)).toBe(HELD_AWARE_DEGRADE_TEXT);
-  });
-});
 
 describe('buildGmHeldPublicCopy — wave-2 ask #20: the chip label is CLAMPED, the message never is', () => {
   // The R8 live probe found the confirm chip label was the entire ~300-char

@@ -36,47 +36,42 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
-import {
-  buildCanonicalAnalysisReadyFromGraph,
-  computeStructuralReadiness,
-  mergeInterventionSources,
-} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
+import {
+buildCanonicalAnalysisReadyFromGraph,
+computeStructuralReadiness,
+mergeInterventionSources,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
+import { GraphV3,type GraphV3T } from '../../../schemas/cee-v3.js';
 import { extractQuantities } from '../../context/cqe/extract-quantities.js';
-import { buildGraphLookup, type GraphLookupWithOptions } from '../graph-lookup-adapter.js';
-import {
-  collectOptionGuardLabels,
-  impliesOptionInterventionEdit,
-} from '../option-intervention-guard.js';
 import { tryDeterministicValueUpdate } from '../deterministic-value-update.js';
+import { buildGraphLookup,type GraphLookupWithOptions } from '../graph-lookup-adapter.js';
 import {
-  MISSING_VALUE_ANSWER_KNOWN_DROPPED,
-  readMissingValueAnswer,
+MISSING_VALUE_ANSWER_KNOWN_DROPPED,
+readMissingValueAnswer,
 } from '../missing-value-answer.js';
 import {
-  deriveAskedEffectPair,
-  deriveMissingEffectPairs,
-  matchBareRepairValue,
-} from '../repair-value-binding.js';
-import {
-  ANSWERED_ASK_KNOWN_DROPPED,
-  buildOptionEffectRawOperation,
-  readCommittedOptionEffect,
-  resolveOptionEffectWrite,
+ANSWERED_ASK_KNOWN_DROPPED,
+buildOptionEffectRawOperation,
+readCommittedOptionEffect,
+resolveOptionEffectWrite,
 } from '../option-effect-write.js';
 import {
-  OUTSTANDING_ASK_CLARIFY_KNOWN_DROPPED,
-  buildOutstandingAskChipMessage,
-  buildOutstandingAskClarifyText,
-  resolveOutstandingAskClarifyRedirect,
-} from '../outstanding-ask-clarify.js';
-import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
+collectOptionGuardLabels,
+impliesOptionInterventionEdit,
+} from '../option-intervention-guard.js';
+import {
+deriveAskedEffectPair,
+deriveMissingEffectPairs,
+matchBareRepairValue,
+} from '../repair-value-binding.js';
+
+import { detectConfigureOptionIntent,projectOptionLabels } from '../configure-option-intent.js';
 
 interface RunBFixture {
   readonly ids: {
@@ -122,7 +117,7 @@ const SIBLING_FACTOR_ID = WITNESS.ids.sibling_factor_id;
 
 /** ⭐ THE TURN THE WITNESS RECORDS. Verbatim. Never composed here. */
 const R1 = WITNESS.wire.r1_user_message;
-const R2 = WITNESS.wire.r2_user_message;
+
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const graph = () => clone(WITNESS.draft_graph);
@@ -453,9 +448,9 @@ describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => 
 
 // ───────────────────────────────────────────────────────────────────────────
 describe('⭐⭐ RUN-B — the disambiguation chip must propose the OPTION EFFECT (sub-fixes 2+3)', () => {
-  const readiness = () => buildCanonicalAnalysisReadyFromGraph(graph());
-  const askedCandidate = [{ id: FACTOR_ID, label: FACTOR_LABEL }];
-  const setQuantity = { value: 0.8, unit: null, operator: 'set' };
+
+
+
 
   it('the witnessed chip wrote the FACTOR BASELINE — pinned so the flip is visible', () => {
     // Historic record, quoted from the witness (trap 14b: append, never edit).
@@ -463,279 +458,19 @@ describe('⭐⭐ RUN-B — the disambiguation chip must propose the OPTION EFFEC
     expect(WITNESS.wire.r1_chip_message).not.toContain("option's effect");
   });
 
-  it('⭐ the redirect fires on the asked factor and names the pair from the HEAD BLOCKER', () => {
-    const redirect = resolveOutstandingAskClarifyRedirect({
-      message: R1,
-      candidates: askedCandidate,
-      readiness: readiness(),
-      quantity: setQuantity,
-    });
-    expect(redirect).not.toBeNull();
-    expect([redirect!.pair.optionId, redirect!.pair.factorId]).toEqual([OPTION_ID, FACTOR_ID]);
-    expect(redirect!.modelUnitValueText).toBe('0.8');
-  });
 
-  it('⭐ the chip it produces ROUTES BACK — derived by running the shipped resolver on it', () => {
-    // Not asserted against a hand-written string: the emitted message is fed to
-    // the writer, and the writer must bind it to the same pair. A chip that
-    // cannot route is the dead end this seam exists to remove.
-    const redirect = resolveOutstandingAskClarifyRedirect({
-      message: R1,
-      candidates: askedCandidate,
-      readiness: readiness(),
-      quantity: setQuantity,
-    })!;
-    const chip = buildOutstandingAskChipMessage(redirect.pair, redirect.modelUnitValueText!);
-    const r = resolveOptionEffectWrite({ message: chip, graph: graph() });
-    expect(r.matched && r.kind === 'write' && [r.optionId, r.factorId, r.value]).toEqual([
-      OPTION_ID,
-      FACTOR_ID,
-      0.8,
-    ]);
-    // …and it is the OPTION EFFECT, not the factor baseline the witness got.
-    expect(chip).toContain("option's effect on");
-    expect(chip).not.toBe(WITNESS.wire.r1_chip_message);
-  });
 
-  it('⭐ P8 — the copy no longer asks a yes/no it cannot accept, and carries the value', () => {
-    // The witnessed sequence: "Did you mean <factor>?" → the user answered
-    // "Yes, that one — under the enterprise sales option." → "I couldn't use
-    // that as the value." and the 0.8 was gone. Both halves are pinned: the
-    // question is not a yes/no, and the user's own number survives the turn.
-    const redirect = resolveOutstandingAskClarifyRedirect({
-      message: R1,
-      candidates: askedCandidate,
-      readiness: readiness(),
-      quantity: setQuantity,
-    })!;
-    const text = buildOutstandingAskClarifyText(redirect);
-    expect(text).not.toContain("wasn't sure which factor");
-    expect(text).not.toContain('Did you mean');
-    expect(text).toContain(OPTION_LABEL);
-    expect(text).toContain(FACTOR_LABEL);
-    expect(text).toContain('0.8');
-    expect(text).toContain('I have not changed the model.');
-    // R2 is the answer the product could not accept. It is recorded here as the
-    // reason the question changed shape — this suite does not claim a bare
-    // free-text "Yes" now resumes (see the report's stated residual).
-    expect(R2.toLowerCase().startsWith('yes')).toBe(true);
-  });
 
-  it('NO NUMBER IS PUT IN THE USER\'S MOUTH when their figure is not model-unit', () => {
-    // CQE hands `80%` back as `{value: 0.8, unit: 'percentage'}`. Replaying
-    // that as "…to 0.8" would silently perform the unit conversion the writer
-    // explicitly refuses to perform (P5). The redirect still fires — the wrong
-    // QUESTION is still not asked — but it asks for a 0-1 number.
-    for (const quantity of [
-      { value: 0.8, unit: 'percentage', operator: 'set' },
-      { value: 25000, unit: 'GBP', operator: 'set' },
-      { value: 0.1, unit: null, operator: 'increment' },
-      { value: 40, unit: null, operator: 'set' },
-      { value: null, unit: null, operator: 'set' },
-    ]) {
-      const redirect = resolveOutstandingAskClarifyRedirect({
-        message: R1,
-        candidates: askedCandidate,
-        readiness: readiness(),
-        quantity,
-      });
-      expect(redirect, JSON.stringify(quantity)).not.toBeNull();
-      expect(redirect!.modelUnitValueText, JSON.stringify(quantity)).toBeNull();
-      expect(buildOutstandingAskClarifyText(redirect!)).toContain('Effect values run from 0 to 1');
-    }
-  });
 
-  it('⭐ A HEDGE IS NOT A FIGURE — and its NON-HEDGED TWIN still binds exactly', () => {
-    // ⚠⚠ THIS CLOSED A P5 PROVENANCE LIE FOUND BY ADVERSARIAL REVIEW, and the
-    // mechanism is CLAUDE.md trap 12: `OutstandingAskQuantity` is a
-    // HAND-DECLARED MIRROR of `QuantityExtractionResult`, and it had OMITTED
-    // `approximate`. So `readModelUnitEffectValue` could not see the hedge and
-    // "Set sales headcount to about 0.8." reached the chip as "Apply 0.8" —
-    // an approximation recorded as an exact user-stated figure.
-    //
-    // ⭐ REACHABLE IN ONE TURN, AND THE PIN NEXT DOOR IS WHY. A hedge is
-    // deliberately refused by `readMissingValueAnswer`
-    // (`MISSING_VALUE_ANSWER_KNOWN_DROPPED`: *"Set it to about 0.12." — a
-    // HEDGE… would record an approximation as an exact user-stated figure*),
-    // which is exactly what drops the turn through to THIS clarify.
-    //
-    // ⚠ THE QUANTITIES ARE DERIVED FROM CQE, NEVER HAND-AUTHORED (trap
-    // 16-inverse: a fixture you wrote yourself is not evidence about the
-    // producer). The two messages differ by ONE hedge word, so `approximate`
-    // is the only field that may differ — asserted, not assumed.
-    const HEDGED = 'Set sales headcount to about 0.8.';
-    const EXACT = 'Set sales headcount to 0.8.';
-    const quantityOf = (message: string) => {
-      const [q] = extractQuantities(message);
-      if (q === undefined) throw new Error(`CQE extracted nothing from ${message}`);
-      return q;
-    };
-    const hedged = quantityOf(HEDGED);
-    const exact = quantityOf(EXACT);
 
-    // PRECONDITION, PINNED IN-TEST (trap 13b): the producer's own verdict is
-    // what discriminates, and the two readings agree on everything else.
-    expect(hedged.approximate).toBe(true);
-    expect(exact.approximate).toBe(false);
-    expect([hedged.value, hedged.unit, hedged.operator]).toEqual([0.8, null, 'set']);
-    expect([exact.value, exact.unit, exact.operator]).toEqual([0.8, null, 'set']);
-    // …and the hedged turn really does fall through to this clarify, on the
-    // asked factor alone — the redirect's own conjunct (b).
-    expect(readMissingValueAnswer(HEDGED)).toBeNull();
-    // ⚠⚠ THE STATED REASON FOR THAT NULL CHANGED, AND THE OLD ONE IS CORRECTED
-    // RATHER THAN DELETED. This used to assert that a hedge was pinned as a
-    // refusal in `MISSING_VALUE_ANSWER_KNOWN_DROPPED` — and it WAS the reason at
-    // the time. It is not any more: ROADMAP P0a binds "Set it to about 0.12.",
-    // because a hedge qualifies the user's CONFIDENCE and this sentence's figure
-    // is still theirs. THIS message nonetheless still reads null, for a reason
-    // that has not moved and must not: it NAMES A FACTOR ("sales headcount"),
-    // which is outside the closed bare-referent set, so the edit lane owns the
-    // referent. Asserted directly instead of via a pinned list, so the guard
-    // cannot be satisfied by an unrelated member of that list.
-    expect(readMissingValueAnswer('Set it to about 0.8.')?.kind).toBe('numeric');
-    expect(readMissingValueAnswer('Set sales headcount to 0.8.')).toBeNull();
-    const factorIds = new Set(
-      graph().nodes.filter((n) => n.kind === 'factor').map((n) => n.id as string),
-    );
-    const dispatch = tryDeterministicValueUpdate(
-      HEDGED,
-      extractQuantities(HEDGED),
-      lookupOrThrow(),
-      [],
-      factorIds,
-      false,
-    );
-    expect(dispatch.matched && dispatch.dispatch).toBe('clarify');
-    expect(
-      dispatch.matched && dispatch.dispatch === 'clarify'
-        ? dispatch.candidates.map((c) => c.id)
-        : null,
-    ).toEqual([FACTOR_ID]);
 
-    // DIRECTION 1 — the hedge puts NO number in the user's mouth. The redirect
-    // still fires: the wrong QUESTION is still not asked.
-    const hedgedRedirect = resolveOutstandingAskClarifyRedirect({
-      message: HEDGED,
-      candidates: askedCandidate,
-      readiness: readiness(),
-      quantity: hedged,
-    });
-    expect(hedgedRedirect).not.toBeNull();
-    expect(hedgedRedirect!.modelUnitValueText).toBeNull();
-    const hedgedText = buildOutstandingAskClarifyText(hedgedRedirect!);
-    expect(hedgedText).toContain('Effect values run from 0 to 1');
-    expect(hedgedText).not.toContain('0.8');
 
-    // DIRECTION 2 — THE INVERSE-FAILURE CHECK. The non-hedged twin must bind
-    // EXACTLY as before; a fix that closes a lie by dropping the honest case
-    // has traded one silent failure for another (trap 22b).
-    const exactRedirect = resolveOutstandingAskClarifyRedirect({
-      message: EXACT,
-      candidates: askedCandidate,
-      readiness: readiness(),
-      quantity: exact,
-    });
-    expect(exactRedirect).not.toBeNull();
-    expect(exactRedirect!.modelUnitValueText).toBe('0.8');
-    expect(buildOutstandingAskClarifyText(exactRedirect!)).toContain('apply 0.8 to that pair');
-    // …and the witnessed R1 reading, which carries no hedge, is untouched.
-    expect(
-      resolveOutstandingAskClarifyRedirect({
-        message: R1,
-        candidates: askedCandidate,
-        readiness: readiness(),
-        quantity: quantityOf(R1),
-      })!.modelUnitValueText,
-    ).toBe('0.8');
-  });
 
-  it('⭐ OPPOSITE-DIRECTION TWINS — every conjunct withdraws the redirect', () => {
-    // (c) the baseline suppressor, imported from the writer rather than
-    //     re-spelled, so the two cannot disagree about one sentence.
-    expect(
-      resolveOutstandingAskClarifyRedirect({
-        message: `Change the ${FACTOR_LABEL} baseline, set it to 0.8.`,
-        candidates: askedCandidate,
-        readiness: readiness(),
-        quantity: setQuantity,
-      }),
-    ).toBeNull();
 
-    // (b) two candidates is a genuine factor ambiguity — picking the asked one
-    //     is the wrong-entity class on the factor axis (#1034's mutant M8).
-    expect(
-      resolveOutstandingAskClarifyRedirect({
-        message: R1,
-        candidates: [
-          { id: FACTOR_ID, label: FACTOR_LABEL },
-          { id: SIBLING_FACTOR_ID, label: WITNESS.ids.sibling_factor_label },
-        ],
-        readiness: readiness(),
-        quantity: setQuantity,
-      }),
-    ).toBeNull();
 
-    // (b) the sole candidate is a factor the product is NOT asking about.
-    expect(
-      resolveOutstandingAskClarifyRedirect({
-        message: R1,
-        candidates: [{ id: SIBLING_FACTOR_ID, label: WITNESS.ids.sibling_factor_label }],
-        readiness: readiness(),
-        quantity: setQuantity,
-      }),
-    ).toBeNull();
 
-    // (a) the product is not asking for an effect value at all.
-    expect(
-      resolveOutstandingAskClarifyRedirect({
-        message: R1,
-        candidates: askedCandidate,
-        readiness: { blockers: [] },
-        quantity: setQuantity,
-      }),
-    ).toBeNull();
-  });
 
-  it('⭐ M14 — the LABELS come from the PRODUCT\'S QUESTION, not from the clarify candidate', () => {
-    // ⚠ THIS TEST EXISTS BECAUSE A MUTANT SURVIVED, and a survivor is a claim in
-    // either direction that must be settled by execution, never asserted
-    // (trap 13c). The mutant rebuilt the returned pair as
-    //   { ...asked, factorId: candidates[0].id, factorLabel: candidates[0].label }
-    // and the whole battery stayed GREEN — because conjunct (b) already forces
-    // the two IDS equal, and in this fixture the two LABELS are the same string
-    // too. Nothing in the corpus distinguished the two SOURCES.
-    //
-    // They are not the same source. The candidate's label comes from the
-    // pre-route's graph lookup; the pair's label comes from the blocker, which
-    // is the element `readiness-recovery.ts:194,242` composed the sentence ON
-    // SCREEN from (P7). The copy and the chip must name what the QUESTION
-    // named. A caller handing a differently-spelled label must not be able to
-    // change what the user reads.
-    const redirect = resolveOutstandingAskClarifyRedirect({
-      message: R1,
-      candidates: [{ id: FACTOR_ID, label: 'A DIFFERENT SPELLING OF THE SAME FACTOR' }],
-      readiness: readiness(),
-      quantity: setQuantity,
-    });
-    expect(redirect).not.toBeNull();
-    expect(redirect!.pair.factorLabel).toBe(FACTOR_LABEL);
-    expect(redirect!.pair.optionLabel).toBe(OPTION_LABEL);
-    expect(buildOutstandingAskClarifyText(redirect!)).not.toContain('A DIFFERENT SPELLING');
-    expect(buildOutstandingAskChipMessage(redirect!.pair, '0.8')).not.toContain(
-      'A DIFFERENT SPELLING',
-    );
-    // …and the chip STILL routes, which is the point of using the blocker's
-    // label: the writer resolves labels against the same persisted graph.
-    const chip = buildOutstandingAskChipMessage(redirect!.pair, '0.8');
-    const r = resolveOptionEffectWrite({ message: chip, graph: graph() });
-    expect(r.matched && r.kind === 'write' && r.factorId).toBe(FACTOR_ID);
-  });
 
-  it('the known-dropped set is pinned as data, and every member has a reason', () => {
-    expect(OUTSTANDING_ASK_CLARIFY_KNOWN_DROPPED).toHaveLength(3);
-    for (const m of OUTSTANDING_ASK_CLARIFY_KNOWN_DROPPED) {
-      expect(m.shape.length).toBeGreaterThan(20);
-      expect(m.why.length).toBeGreaterThan(20);
-    }
-  });
+
+
 });

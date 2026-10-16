@@ -14,7 +14,7 @@
  * and would stay green if this call site never recorded; this file is the half
  * that can see that.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 import type { CallOpts } from '../../../src/adapters/llm/types.js';
 
 const SNAPSHOT_CONTENT = 'BOUND BYTES — resolved through getSystemPromptSnapshot.';
@@ -63,7 +63,7 @@ const { callValidateGraph } = await import(
   '../../../src/cee/validation-pipeline/validate-graph.js'
 );
 const { PromptAttributionCollector } = await import(
-  '../../../src/orchestrator/pipeline/prompt-attribution.js'
+  "../../../src/orchestrator/pipeline/diagnostic-trace.js"
 );
 const { getAdapter } = await import('../../../src/adapters/llm/router.js');
 

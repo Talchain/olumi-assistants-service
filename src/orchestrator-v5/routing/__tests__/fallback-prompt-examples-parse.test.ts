@@ -22,10 +22,10 @@
  * of "known good" shapes to forget to update.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { LOADED_PROMPT } from '../prompt-loader.js';
-import { parseToolCallResponse } from '../tool-schema.js';
+
 
 /**
  * Every fenced ```json block in the prompt, in document order, as raw strings.
@@ -65,32 +65,7 @@ describe('fallback routing prompt (v40) — every tool-call example parses under
   // repair removed (`resolution_method: "contextual"`, not a member of the
   // enforcing enum) MUST throw. Without this, a parser that accepted anything
   // would make the per-example loop below vacuously green.
-  it('parseToolCallResponse rejects the invalid vocabulary the fix removed', () => {
-    expect(() =>
-      parseToolCallResponse({
-        intent_class: 'execute',
-        action: {
-          handler_id: 'explain_from_structure',
-          entity: {
-            id: 'goal_ux',
-            kind: 'goal',
-            label: 'Improve Product UX',
-            resolution_status: 'resolved',
-            // `contextual` is NOT a ResolutionMethodSchema member — the exact
-            // defect the fallback examples used to teach.
-            resolution_method: 'contextual',
-          },
-        },
-      }),
-    ).toThrow();
-  });
 
-  it.each(rawBlocks.map((raw, index) => [index + 1, raw] as const))(
-    'tool-call example #%i is valid JSON and parses under parseToolCallResponse',
-    (_exampleNumber, raw) => {
-      // A malformed example fails here with a clear JSON error on THIS case.
-      const value: unknown = JSON.parse(raw);
-      expect(() => parseToolCallResponse(value)).not.toThrow();
-    },
-  );
+
+
 });

@@ -30,7 +30,7 @@
  *     they asked for.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
@@ -81,20 +81,18 @@ vi.mock('../../tools/registry.js', async () => {
   };
 });
 
-vi.mock('../../routing/route-with-tool-use.js', () => ({
-  routeWithToolUse: routeWithToolUseSpy,
-}));
+
 
 import {
-  dispatchChipClickRunAnalysis,
-  AUTO_RUN_PROVISIONAL_DISCLOSURE,
-  RUN_PROVENANCE_ENRICHMENT_KEY,
-} from '../chip-click-dispatch.js';
-import {
-  buildConstructionAutoRunProvenance,
-  hasUserSeenRunAnalysisResult,
-  isAutoInitiatedRunAnalysisFact,
+buildConstructionAutoRunProvenance,
+hasUserSeenRunAnalysisResult,
+isAutoInitiatedRunAnalysisFact,
 } from '../../context/run-initiator.js';
+import {
+AUTO_RUN_PROVISIONAL_DISCLOSURE,
+dispatchChipClickRunAnalysis,
+RUN_PROVENANCE_ENRICHMENT_KEY,
+} from '../chip-click-dispatch.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';

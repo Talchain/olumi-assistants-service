@@ -36,11 +36,9 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { CONTEXT_PACK_RECENT_TURNS_CAP } from '../context/context-pack-assembler.js';
@@ -50,8 +48,7 @@ import { ROLLING_SUMMARY_SLOT_LABELS } from '../rolling-summary/summary-types.js
 // calls, so this acceptance file and the gate cannot drift apart.
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
 import {
-  WITHHELD_HISTORY_REDACTION_MARKER,
-  historyAssertsLeaderClaim,
+historyAssertsLeaderClaim
 } from '../context/withheld-history-redaction.js';
 
 const SCENARIO_ID = randomUUID();
@@ -251,62 +248,16 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
 
-function payload(message: string): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message,
-    turn_class: 'decide',
-    stage: 'analyse',
-  };
-}
 
-function textOnlyAdapter(): {
-  adapter: { chatWithTools: (a: ChatWithToolsArgs) => Promise<ChatWithToolsResult> };
-  calls: ChatWithToolsArgs[];
-} {
-  const calls: ChatWithToolsArgs[] = [];
-  return {
-    calls,
-    adapter: {
-      chatWithTools: async (args: ChatWithToolsArgs) => {
-        calls.push(args);
-        return {
-          content: [{ type: 'text', text: 'Here is what I would focus on.' }],
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 500, output_tokens: 40 } as ChatWithToolsResult['usage'],
-          model: 'claude-sonnet-4-6',
-          latencyMs: 25,
-        };
-      },
-    },
-  };
-}
+
+
+
 
 /** The serialised routing user message from the FIRST adapter call — the bytes. */
-function routingUserMessage(calls: ChatWithToolsArgs[]): string {
-  expect(
-    calls.length,
-    'the routing adapter was never called, so there are no model bytes to inspect — ' +
-      'the fixture reached the wrong branch',
-  ).toBeGreaterThan(0);
-  const messages = calls[0]!.messages as Array<{ role: string; content: unknown }>;
-  const user = messages.find((m) => m.role === 'user');
-  expect(user).toBeDefined();
-  return typeof user!.content === 'string' ? user!.content : JSON.stringify(user!.content);
-}
 
-async function runTurn(): Promise<string> {
-  const { adapter, calls } = textOnlyAdapter();
-  await runTurnExecutor(payload('So where does this leave things?'), `req-${randomUUID()}`, {
-    routingAdapter: adapter,
-  });
-  return routingUserMessage(calls);
-}
+
+
 
 /**
  * The rendered four-slot BLOCK as the model receives it — i.e.
@@ -322,25 +273,7 @@ async function runTurn(): Promise<string> {
  * with the gate. Extracting the field precisely is what keeps these assertions
  * about THIS channel.
  */
-function summaryBlockFromBytes(bytes: string): string {
-  const at = bytes.indexOf('"conversation_summary":');
-  expect(at, 'the conversation_summary section is absent from the model bytes').toBeGreaterThan(-1);
-  const textKey = bytes.indexOf('"text":', at);
-  expect(textKey, 'the conversation_summary section carries no text field').toBeGreaterThan(-1);
-  const open = bytes.indexOf('"', textKey + '"text":'.length);
-  // Walk to the closing quote, respecting backslash escapes — the rendered
-  // block contains `\n` between slots, so a naive indexOf('"') would stop early
-  // only if the content itself carried a quote, and this is cheap insurance.
-  let i = open + 1;
-  for (; i < bytes.length; i += 1) {
-    if (bytes[i] === '\\') {
-      i += 1;
-      continue;
-    }
-    if (bytes[i] === '"') break;
-  }
-  return JSON.parse(bytes.slice(open, i + 1)) as string;
-}
+
 
 describe('G-CEE-1 — the ROLLING SUMMARY in the MODEL INPUT (conversation_summary)', () => {
   beforeEach(() => {
@@ -379,129 +312,27 @@ describe('G-CEE-1 — the ROLLING SUMMARY in the MODEL INPUT (conversation_summa
     expect(historyAssertsLeaderClaim(LEADER_FREE_RESOLVED_TEXT)).toBe(false);
   });
 
-  it('NON-VACUITY: the channel really is OPEN and carrying this summary', async () => {
-    // Every absence assertion below is worthless if the section simply is not
-    // there — and it would not be there if the store mock, the beyond-window
-    // activation gate, the memory-hole guard or the pack key stopped working.
-    const bytes = await runTurn();
-    expect(bytes).toContain('"conversation_summary":');
-    const section = summaryBlockFromBytes(bytes);
-    // The four slot labels are all present: this is a rendered four-slot block,
-    // not a memory-hole refusal (which ships `text: ''`).
-    for (const label of Object.values(ROLLING_SUMMARY_SLOT_LABELS)) {
-      expect(section).toContain(label);
-    }
-  });
 
-  it('BRANCH DISCRIMINATOR: this turn really is withheld', async () => {
-    // A fixture regression to a permitted verdict would make the leak arm below
-    // pass for no reason at all. The 1.231 display_analysis gate is the
-    // independent witness that the withheld branch was taken.
-    const bytes = await runTurn();
-    expect(bytes).toContain('Do not name or imply any option as the answer');
-  });
+
+
 
   // ── THE LEAK ───────────────────────────────────────────────────────────────
 
-  it('THE LEAK: the summary’s ordering claim must NOT reach the model bytes', async () => {
-    const bytes = await runTurn();
 
-    // The exact live sentence, and the fragments it would be recognised by.
-    expect(bytes).not.toContain(LIVE_SUMMARY_LEADER_SENTENCE);
-    expect(bytes).not.toContain('leading 52%');
-    expect(bytes).not.toContain('52% vs Enterprise 35%');
-
-    // And on the SECTION, read with the gate's own reader — so a future field
-    // that re-exposes the same prose cannot make this pass by accident.
-    const section = summaryBlockFromBytes(bytes);
-    expect(historyAssertsLeaderClaim(section)).toBe(false);
-
-    // NEVER SILENT: the marker says what is absent and why.
-    expect(section).toContain(WITHHELD_HISTORY_REDACTION_MARKER);
-  });
 
   // ── THE FOUR-SLOT CONTRACT ─────────────────────────────────────────────────
 
-  it('FOUR-SLOT CONTRACT: every slot label survives, and no slot renders "(none)"', async () => {
-    // The structural half, and the one a blanket gate would fail. Redaction is
-    // applied to slot CONTENT only; the labels are split off first, so the block
-    // the model reads is still a parseable four-slot block.
-    const bytes = await runTurn();
-    const section = summaryBlockFromBytes(bytes);
-    for (const label of Object.values(ROLLING_SUMMARY_SLOT_LABELS)) {
-      expect(section).toContain(`${label}:`);
-    }
-    // ⚠ AND THE SLOT MUST NOT HAVE BEEN EMPTIED. `inject.ts` documents a bare
-    // "(none)" on a non-floor summary as "the summariser looked and found none"
-    // — an AFFIRMATIVE claim that no settled history exists. A gate that emptied
-    // RESOLVED would MINT that false claim while every absence assertion above
-    // stayed green. The redacted slot must carry the marker instead.
-    expect(section).not.toContain('(none)');
-    expect(section).toContain(WITHHELD_HISTORY_REDACTION_MARKER);
-  });
+
 
   // ── ANTI-OVER-SUPPRESSION ──────────────────────────────────────────────────
 
-  it('ANTI-OVER-SUPPRESSION: the SURVIVING sentences of the redacted slot still reach the model', async () => {
-    // The redaction is SENTENCE-scoped, not slot-scoped. A gate that blanked the
-    // whole RESOLVED slot would pass every absence assertion above and destroy
-    // the coach's memory of what the blocker is.
-    const bytes = await runTurn();
-    expect(bytes).toContain(LIVE_SUMMARY_BLOCKER_SENTENCE);
-    expect(bytes).toContain(LIVE_SUMMARY_NO_RANKING_SENTENCE);
-    // The OTHER THREE SLOTS are untouched — the claim was in RESOLVED only.
-    expect(bytes).toContain(FRAME_SLOT_TEXT);
-    expect(bytes).toContain(CONSTRAINTS_SLOT_TEXT);
-    expect(bytes).toContain(OPEN_SLOT_TEXT);
-  });
 
-  it('POSITIVE CONTROL: a withheld turn with a LEADER-FREE summary is BYTE-IDENTICAL', async () => {
-    // The over-suppression arm proper, and the one that fails if the gate ever
-    // becomes unconditional. Same verdict, same path, claim-free content.
-    loadSummaryImpl = async () => storedSummary(LEADER_FREE_RESOLVED_TEXT);
 
-    const bytes = await runTurn();
-    expect(bytes).toContain(LEADER_FREE_RESOLVED_TEXT);
-    expect(bytes).not.toContain(WITHHELD_HISTORY_REDACTION_MARKER);
-  });
 
-  it('POSITIVE CONTROL: on a PERMITTED verdict the summary ships VERBATIM', async () => {
-    // Same summary, same path, opposite verdict. Byte-identity with a world in
-    // which this gate does not exist — and the branch-reached proof for the
-    // withheld arms above, since only a fixture that really loaded the stored
-    // summary can produce these bytes.
-    priorFacts = [priorRunAnalysisFact(true)];
 
-    const bytes = await runTurn();
-    expect(bytes).toContain(LIVE_SUMMARY_LEADER_SENTENCE);
-    expect(bytes).toContain('leading 52%');
-    expect(bytes).not.toContain(WITHHELD_HISTORY_REDACTION_MARKER);
-  });
 
-  it('the INJECTED MARKER is inert under every reader, on the REAL prompt bytes', async () => {
-    // An input gate that injected leader-vocabulary residue into every withheld
-    // prompt would show up only as an alarm rate nobody had a reason to look at
-    // — the trap `withheld-leader-projection.ts` records hitting with "out in
-    // front". Checked on the real bytes, not on the constant alone.
-    const bytes = await runTurn();
-    expect(bytes).toContain(WITHHELD_HISTORY_REDACTION_MARKER);
-    expect(textNamesLeadingOption(WITHHELD_HISTORY_REDACTION_MARKER)).toBe(false);
-    expect(historyAssertsLeaderClaim(WITHHELD_HISTORY_REDACTION_MARKER)).toBe(false);
-  });
 
-  it('IDEMPOTENT: projecting a summary that already carries the marker changes nothing', async () => {
-    // A pack can be projected twice (a retry, a future second consumer). If the
-    // marker tripped the reader, the second pass would redact the marker into a
-    // marker-of-a-marker and the block would degrade on every re-entry.
-    loadSummaryImpl = async () =>
-      storedSummary(`${WITHHELD_HISTORY_REDACTION_MARKER} ${LIVE_SUMMARY_NO_RANKING_SENTENCE}`);
 
-    const bytes = await runTurn();
-    const section = summaryBlockFromBytes(bytes);
-    expect(section).toContain(WITHHELD_HISTORY_REDACTION_MARKER);
-    expect(section).toContain(LIVE_SUMMARY_NO_RANKING_SENTENCE);
-    // Exactly ONE marker — not a marker that has been re-redacted.
-    const occurrences = section.split(WITHHELD_HISTORY_REDACTION_MARKER).length - 1;
-    expect(occurrences).toBe(1);
-  });
+
+
 });

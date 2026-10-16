@@ -46,17 +46,16 @@
  *   that would falsify the record of what was once offered.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  buildEditRejectionResponse,
-  type EditRejectionReason,
+buildEditRejectionResponse,
+type EditRejectionReason,
 } from '../../../../src/orchestrator-v5/handlers/edit-rejection-text.js';
-import { composeUnsupportedActionResponse } from '../../../../src/orchestrator-v5/compose/unsupported-action-response.js';
+
 import { composeHandlerFailureBody } from '../../../../src/orchestrator-v5/compose/handler-failure-responses.js';
-import { OVER_CAP_SPLIT_CHIPS } from '../../../../src/orchestrator/tools/edit-graph.js';
 import { HandlerInvocationFailedError } from '../../../../src/orchestrator-v5/tools/handler-errors.js';
-import type { ComposeContext } from '../../../../src/orchestrator-v5/compose/types.js';
+import { OVER_CAP_SPLIT_CHIPS } from '../../../../src/orchestrator/tools/edit-graph.js';
 
 // ───────────────────────────────────────────────────────────────────────────
 // The historic dead-end corpus. APPEND-ONLY. See the header.
@@ -182,21 +181,7 @@ describe('no-dead-end rule — buildEditRejectionResponse', () => {
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('no-dead-end rule — sibling composers', () => {
-  it('unsupported-action fallback chip names a move', () => {
-    // Empty registry → the text-prompt fallback, which is the chip that
-    // carried "Let's try a different approach.".
-    const ctx: ComposeContext = { handlerRegistry: {} };
-    const { response } = composeUnsupportedActionResponse({
-      handlerId: 'add_option',
-      context: ctx,
-      stage: 'frame',
-      hasAnalysis: false,
-    });
-    expect(response.suggested_actions).toHaveLength(1);
-    expect(response.suggested_actions[0]!.action_type).toBeUndefined();
-    expect(chipText(response.suggested_actions[0]!)).toBe("Show me what's in my model.");
-    assertNoHistoricDeadEnd(response.suggested_actions, 'composeUnsupportedActionResponse');
-  });
+
 
   it('handler-failure parameter_invalid_at_execute chip speaks in the USER voice', () => {
     const err = new HandlerInvocationFailedError('test', {

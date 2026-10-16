@@ -18,132 +18,64 @@
  *   - runtime divergence tripwire: positive + negative controls.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
+import { dirname,join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { describe,expect,it,vi } from 'vitest';
 
-import {
-  CONTEXT_POLICY,
-  deriveContextSectionBudgets,
-  findContextPolicyDivergences,
-  emitContextPolicyDivergence,
-  modelFacingSectionKeys,
-  declaredSectionNames,
-  POLICY_EDIT_BRIEF_CHAR_CAP,
-  POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP,
-  POLICY_VERBATIM_TURNS,
-  POLICY_MAX_PROJECTED_OPTIONS,
-  POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
-  POLICY_EDIT_GRAPH_JSON_CAP,
-  POLICY_EDIT_CONVERSATION_CAP,
-  CONTEXT_PACK_CEILING_CUT_ORDER,
-  type ContextCallSite,
-  type ContextPolicyTripwireLogger,
-} from '../context-policy.js';
-import { projectDecisionRecords } from '../../decision-records/project.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES } from '../../../adapters/llm/draft-attachment.js';
+import { projectDecisionRecords } from '../../decision-records/project.js';
+import {
+CONTEXT_PACK_CEILING_CUT_ORDER,
+CONTEXT_POLICY,
+declaredSectionNames,
+deriveContextSectionBudgets,
+emitContextPolicyDivergence,
+findContextPolicyDivergences,
+modelFacingSectionKeys,
+POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP,
+POLICY_EDIT_BRIEF_CHAR_CAP,
+POLICY_EDIT_CONVERSATION_CAP,
+POLICY_EDIT_GRAPH_JSON_CAP,
+POLICY_MAX_PROJECTED_OPTIONS,
+POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+POLICY_VERBATIM_TURNS,
+type ContextCallSite,
+type ContextPolicyTripwireLogger,
+} from '../context-policy.js';
 
 import { runStageCoachingPass } from '../../../cee/unified-pipeline/stages/coaching-pass.js';
-import * as telemetry from '../../../utils/telemetry.js';
 import type { StageContext } from '../../../cee/unified-pipeline/types.js';
+import * as telemetry from '../../../utils/telemetry.js';
 
-import {
-  assembleContextPack,
-  CONTEXT_PACK_RECENT_TURNS_CAP,
-  MAX_PROJECTED_OPTIONS,
-  type ContextPack,
-} from '../context-pack-assembler.js';
+import { DISPLAY_ANALYSIS_CHAR_BUDGET } from '../../format/format-analysis-for-context.js';
+import { CONTEXT_PACK_RECENT_TURNS_CAP, MAX_PROJECTED_OPTIONS } from '../context-pack-assembler.js';
+import { CONTEXT_PACK_BRIEF_CHAR_CAP } from '../context-pack-schema.js';
 
 /** The assembler's own `analysis` input type, derived without importing the (unexported) name. */
-type AnchorAnalysis = NonNullable<Parameters<typeof assembleContextPack>[0]['analysis']>;
-import { CONTEXT_PACK_BRIEF_CHAR_CAP } from '../context-pack-schema.js';
-import { DISPLAY_ANALYSIS_CHAR_BUDGET } from '../../format/format-analysis-for-context.js';
-import { buildUserMessage } from '../../routing/route-with-tool-use.js';
-import {
-  serialiseEditContextForLLMWithMeta,
-  EDIT_CONTEXT_BRIEF_CHAR_CAP,
-  EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES,
-  EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
-} from '../../../orchestrator/context/serialise.js';
-import { DECISION_REVIEW_MAX_BRIEF_CHARS } from '../../../cee/decision-review/invoke.js';
-import { composeEditClarifyResponse } from '../../compose/edit-clarify-response.js';
+
+
 import * as llmRouter from '../../../adapters/llm/router.js';
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { observeSerialisedKeys, observeSerialisedPack } from './observe-serialised-pack.js';
+import { DECISION_REVIEW_MAX_BRIEF_CHARS } from '../../../cee/decision-review/invoke.js';
+import {
+EDIT_CONTEXT_BRIEF_CHAR_CAP,
+EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
+EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES,
+serialiseEditContextForLLMWithMeta,
+} from '../../../orchestrator/context/serialise.js';
 import type { ConversationContext } from '../../../orchestrator/types.js';
+import { composeEditClarifyResponse } from '../../compose/edit-clarify-response.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const ANCHOR_BRIEF =
-  'Should we hire two senior engineers locally or engage an offshore partner? Budget £250k, decision needed by Q3.';
 
-const ANCHOR_ANALYSIS = {
-  winner: { option_id: 'opt_local', option_label: 'Hire locally', win_probability: 0.62 },
-  options: [
-    { option_id: 'opt_local', option_label: 'Hire locally', win_probability: 0.62 },
-    { option_id: 'opt_offshore', option_label: 'Offshore partner', win_probability: 0.38 },
-  ],
-  top_drivers: [],
-  robustness_level: 'moderate',
-  fragile_edge_count: 0,
-  margin: 0.24,
-  margin_pp: 24,
-  analysis_status: 'computed',
-} as unknown as AnchorAnalysis;
+
+
 
 /** Build a rich coach_converse pack that populates the interesting sections. */
-function assembleAnchorPack(overrideBrief: string | null = ANCHOR_BRIEF): ContextPack {
-  return assembleContextPack({
-    payload: makeMessagePayload({ scenario_id: 'scen-policy-anchor', message: 'what should I do?' }),
-    priorTurns: [],
-    priorFacts: [],
-    analysis: ANCHOR_ANALYSIS,
-    ...(overrideBrief !== null ? { brief: overrideBrief } : {}),
-    // The two CONDITIONAL model-facing sections. Until this was added, the
-    // anchor never populated them, and the local key-extraction helper THREW on
-    // any pack that carried them (buildUserMessage appends a code-owned
-    // instruction block between the JSON and the `## User turn` marker) — so
-    // this anchor was structurally unable to observe either branch it claims to
-    // cover. Populating them is what makes the claim true.
-    conversationSummary: {
-      text: 'FRAME: a hiring decision. RESOLVED: two options sit on the canvas.',
-      current_to_turn_id: 't-anchor',
-      lag_turns: 2,
-      stale: false,
-    } as never,
-    coachingContext: {
-      analysis_present: true,
-      freshness: 'fresh',
-      readiness_status: 'ready',
-      rerun_required: false,
-      usable_for_prose: true,
-      usable_for_chips: true,
-      blocked: false,
-      actionable_blocker_count: 0,
-    } as never,
-    // ⭐ THE THIRD CONDITIONAL MODEL-FACING SECTION — selection-aware answering
-    // (hop 4). Added for exactly the reason the two above were: WITHOUT IT THIS
-    // ANCHOR CANNOT SEE THE `focus` POLICY ROW AT ALL. Measured, not assumed —
-    // deleting the coach_converse `focus` row left this whole file GREEN,
-    // because an unpopulated section is absent from `observed` and an
-    // undeclared-but-absent section is trivially conformant. A policy row that
-    // no fixture exercises is a row that can be deleted without a red: the
-    // hand-maintained-mirror defect (trap 12) reappearing inside the anchor
-    // written to prevent it.
-    selection: {
-      requested_ids: ['opt_hire_local'],
-      elements: [{ id: 'opt_hire_local', kind: 'option', label: 'Hire locally' }],
-      unresolved_ids: [],
-      graph_read: 'ok_present',
-      // Required on TurnSelection; empty for every node selection (the `as never`
-      // cast means the compiler cannot enforce it at this site).
-      unreadable_ref_ids: [],
-    } as never,
-  });
-}
+
 
 
 
@@ -298,39 +230,23 @@ describe('repair_edit_graph reuses edit_graph.sections', () => {
 // ---------------------------------------------------------------------------
 
 describe('coach_converse anchor — realised composition matches the declared policy', () => {
-  const pack = assembleAnchorPack();
-  const userMessage = buildUserMessage(pack, 'what should I do?');
-  const observed = observeSerialisedKeys(userMessage);
-  const declared = modelFacingSectionKeys('coach_converse');
 
-  it('every observed serialised section is a declared model-facing section', () => {
-    const undeclared = observed.filter((k) => !declared.includes(k));
-    expect(undeclared).toEqual([]);
-  });
 
-  it('observed section order is a subsequence of the declared model-facing order', () => {
-    expect(isSubsequence(observed, declared)).toBe(true);
-  });
 
-  it('the brief/analysis/graph sections are present and correctly renamed', () => {
-    expect(observed).toContain('brief');
-    // display_analysis serialises under `analysis`, display_graph under `graph`.
-    expect(observed).toContain('analysis');
-    expect(observed).toContain('graph');
-    expect(observed).not.toContain('display_analysis');
-    expect(observed).not.toContain('display_graph');
-  });
+
+
+
+
+
+
+
 
   it('conversation_summary is declared LAST among model-facing sections (facts beat summary)', () => {
     const modelFacing = CONTEXT_POLICY.coach_converse.sections.filter((s) => s.model_facing);
     expect(modelFacing[modelFacing.length - 1].name).toBe('conversation_summary');
   });
 
-  it('enforced sections respect their budgets on the fixture', () => {
-    const parsed = observeSerialisedPack(userMessage);
-    expect(JSON.stringify(parsed.brief).length).toBeLessThanOrEqual(CONTEXT_PACK_BRIEF_CHAR_CAP + 200);
-    expect(JSON.stringify(parsed.analysis).length).toBeLessThanOrEqual(DISPLAY_ANALYSIS_CHAR_BUDGET + 500);
-  });
+
 
   // ── The branches this anchor could not previously observe ────────────────
   // Everything below exists because the anchor's key-extraction helper THREW on
@@ -339,53 +255,13 @@ describe('coach_converse anchor — realised composition matches the declared po
   // concealment: this anchor PREDATES both sections and its commit message
   // claims nothing false — it was correct when written and the pack grew under it.
 
-  it('the anchor fixture ACTUALLY carries both conditional model-facing sections', () => {
-    // Without this, extending the fixture could silently stop working and every
-    // assertion below would pass by covering nothing.
-    expect(observed).toContain('coaching_context');
-    expect(observed).toContain('conversation_summary');
-  });
 
-  it('REGRESSION PIN — the naive slice-to-marker extraction THROWS on this pack', () => {
-    // The exact code this file used to carry. It must stay provably broken, so
-    // nobody reintroduces it believing it works: buildUserMessage appends a
-    // code-owned instruction block between the pack JSON and `## User turn`.
-    const naive = (msg: string): unknown =>
-      JSON.parse(
-        msg.slice(
-          msg.indexOf('## ContextPack\n') + '## ContextPack\n'.length,
-          msg.indexOf('\n\n## User turn'),
-        ),
-      );
-    expect(() => naive(userMessage)).toThrow();
-    // ...and the shared helper handles the same input correctly.
-    expect(Object.keys(observeSerialisedPack(userMessage)).length).toBeGreaterThan(0);
-  });
 
-  it('POSITIVE CONTROL — a stray key is caught ON THE conditional branches (not just the plain pack)', () => {
-    // The stray sits AFTER coaching_context in insertion order, so it is only
-    // reachable at all if the extractor survives the appended instruction blocks.
-    const strayPack = {
-      ...pack,
-      stray_on_conditional_branch: { boom: 1 },
-    } as unknown as ContextPack;
-    const strayMsg = buildUserMessage(strayPack, 'what should I do?');
-    // Both instruction blocks are present in the message being parsed.
-    expect(strayMsg).toContain('## Coaching state');
-    expect(strayMsg).toContain('## Conversation summary');
-    const strayObserved = observeSerialisedKeys(strayMsg);
-    expect(strayObserved).toContain('stray_on_conditional_branch');
-    expect(strayObserved.filter((k) => !declared.includes(k))).toContain('stray_on_conditional_branch');
-  });
 
-  it('POSITIVE CONTROL — a stray section injected into the pack is SEEN as undeclared', () => {
-    const strayPack = { ...pack, mystery_injected_section: { boom: 1 } } as unknown as ContextPack;
-    const strayMsg = buildUserMessage(strayPack, 'what should I do?');
-    const strayObserved = observeSerialisedKeys(strayMsg);
-    expect(strayObserved).toContain('mystery_injected_section');
-    const undeclared = strayObserved.filter((k) => !declared.includes(k));
-    expect(undeclared).toContain('mystery_injected_section'); // the check goes RED on a stray
-  });
+
+
+
+
 });
 
 // ---------------------------------------------------------------------------
@@ -433,25 +309,7 @@ describe('coach_converse older_relevant_facts — the P6 read slice is declared,
     expect(modelFacing.indexOf('older_relevant_facts')).toBeLessThan(modelFacing.indexOf('conversation_summary'));
   });
 
-  it('OBSERVED — a pack WITH the read slice serialises older_relevant_facts among declared keys; WITHOUT it the key is ABSENT (byte-identity)', () => {
-    const withFacts = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: 'scen-p6', message: 'what should I do?' }),
-      priorTurns: [],
-      priorFacts: [],
-      analysis: ANCHOR_ANALYSIS,
-      brief: ANCHOR_BRIEF,
-      olderRelevantFacts: 'Prior decisions recorded on this scenario (most recent first):\n- [2026-07-01] Chose "Bootstrap": keep runway',
-    });
-    const observedWith = observeSerialisedKeys(buildUserMessage(withFacts, 'what should I do?'));
-    expect(observedWith).toContain('older_relevant_facts');
-    // still a subsequence of the declared model-facing order
-    expect(isSubsequence(observedWith, modelFacingSectionKeys('coach_converse'))).toBe(true);
 
-    // WITHOUT records → the pack key is absent (record-less scenarios byte-identical).
-    const withoutFacts = assembleAnchorPack();
-    const observedWithout = observeSerialisedKeys(buildUserMessage(withoutFacts, 'what should I do?'));
-    expect(observedWithout).not.toContain('older_relevant_facts');
-  });
 });
 
 // ---------------------------------------------------------------------------

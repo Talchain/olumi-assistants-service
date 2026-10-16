@@ -32,32 +32,32 @@
  * A widening whose twins were not written would trade one silent failure for
  * another and this suite would applaud.
  */
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeSurvivingPriorPendings } from '../../commit.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import {
-  deriveMissingEffectPairs,
-  resolveRecordedOptionEffectAnswer,
+deriveMissingEffectPairs,
+resolveRecordedOptionEffectAnswer,
 } from '../../routing/repair-value-binding.js';
-import { tryShortConfirmResume } from '../../routing/deterministic-short-confirm.js';
+
 import {
-  applyRecordedAskLifetimes,
-  clampRecordedAskWindow,
-  isPendingActionExpired,
-  isShortWindowBareNumberClaimant,
-  PENDING_ACTION_ASK_TURN_TTL,
-  PENDING_ACTION_ASK_WALL_TTL_MS,
-  PENDING_ACTION_DEFAULT_TURN_TTL,
-  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
-  PENDING_KIND_CLAIMS_BARE_NUMBER,
-  PENDING_KIND_IS_RECORDED_ASK,
-  recordedAskWindowMustClamp,
-  withRecordedAskLifetime,
-  type PendingAction,
-  type PendingActionAction,
-  type PendingActionKind,
+applyRecordedAskLifetimes,
+clampRecordedAskWindow,
+isPendingActionExpired,
+isShortWindowBareNumberClaimant,
+PENDING_ACTION_ASK_TURN_TTL,
+PENDING_ACTION_ASK_WALL_TTL_MS,
+PENDING_ACTION_DEFAULT_TURN_TTL,
+PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+PENDING_KIND_CLAIMS_BARE_NUMBER,
+PENDING_KIND_IS_RECORDED_ASK,
+recordedAskWindowMustClamp,
+withRecordedAskLifetime,
+type PendingAction,
+type PendingActionAction,
+type PendingActionKind,
 } from '../pending-action.js';
 
 // ── The measured sequence, to the second. ────────────────────────────────────
@@ -369,39 +369,7 @@ describe('dial B — a user who has genuinely moved on, at the same distance', (
     expect(resolveAnswer('0.3', [carried, competitor]).kind).toBe('ambiguous');
   });
 
-  it('TWIN — a bare "yes" never resolves a recorded ask, at any age', () => {
-    const carried = live();
-    const confirm = (pendingActions: readonly PendingAction[]) =>
-      tryShortConfirmResume({
-        message: 'yes',
-        pendingActions,
-        nowMs: ANSWERED_AT_MS,
-        currentTurnIndex: 7,
-      });
 
-    // POSITIVE CONTROL FIRST, or the refusal below proves nothing: a live OFFER
-    // in the same call, at the same instant, DOES resume. So the resumer is
-    // reachable here and the refusal is about the KIND, not about an inert call.
-    const liveOffer: PendingAction = {
-      ...carried,
-      id: '00000000-0000-4000-8000-0000000000d4',
-      action: { kind: 'run_analysis' } as PendingActionAction,
-    };
-    const control = confirm([liveOffer]);
-    expect(control.matched).toBe(true);
-    if (control.matched && control.dispatch === 'pending_action') {
-      expect(control.pending.id).toBe('00000000-0000-4000-8000-0000000000d4');
-    } else {
-      throw new Error('positive control: a live run_analysis offer must resume on "yes"');
-    }
-
-    // The recorded ask, live at 25 minutes, must NOT be what "yes" resolves.
-    const refused = confirm([carried]);
-    expect(isPendingActionExpired(carried, ANSWERED_AT_MS)).toBe(false);
-    if (refused.matched && refused.dispatch === 'pending_action') {
-      throw new Error('a recorded ask must never resolve through the bare-confirm resumer');
-    }
-  });
 
   it('TWIN — an offer at the same distance is still expired', () => {
     const offer: PendingAction = {

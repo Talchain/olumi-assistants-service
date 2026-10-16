@@ -1,12 +1,12 @@
 /** Real executor/HTTP/SSE paths; only the provider and persistence ports are doubles. */
-import Fastify, { type FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import Fastify,{ type FastifyInstance } from 'fastify';
+import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { claimingTurnFenceStore } from '../../../tests/utils/claiming-turn-fence-store.js';
-import type { SessionStore } from '../session/store.js';
 import { createMockSessionStore } from '../../../tests/utils/mock-session-store.js';
-import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
+import { installOwnershipHarness,verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
 import { ceeOrchestratorRouteV2 } from '../../orchestrator/route-v2.js';
 import streamRoute from '../../routes/orchestrate.v2.turn-stream.js';
+import type { SessionStore } from '../session/store.js';
 
 const state = vi.hoisted(() => ({ store: undefined as SessionStore | undefined }));
 vi.mock('../session/index.js', async load => ({
@@ -38,27 +38,25 @@ vi.mock('../../config/index.js', async load => {
 });
 
 import { readFileSync } from 'node:fs';
-import { appendCheckedGraphWrite } from '../persist-graph-write.js';
-import { ANALYSIS_REREAD_TIMEOUT_MS } from '../session/analysis-read-deadline.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
+import { runFencedInProcessWrite } from '../../orchestrator/turn-fence-prehandler.js';
 import { agentV1TurnRoute } from '../../routes/agent-v1-turn.js';
 import graphRoute from '../../routes/assist.v1.scenario-graph.js';
-import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
-import { computeProposalId, type StructuredProposal } from '../agent-lane/proposal.js';
-import { proposalPendingAction } from '../agent-lane/durable-proposal.js';
-import { approvalChipIdFor } from '../agent-lane/approval-chips.js';
-import { agentProposals } from '../agent-lane/held-approval-offers.js';
-import * as adoption from '../system-events/olumi-option-adoption.js';
-import { assertDoorOwnership, bindWriteCaller, readWriteRefusal, readSuccessfulDoorEntries } from '../ownership/door-ownership.js';
-import { runFencedInProcessWrite } from '../../orchestrator/turn-fence-prehandler.js';
-import { runWithTurnFence } from '../session/turn-fence.js';
-import { authorisationTurnId } from '../agent-lane/runtime/agent-capabilities.js';
-import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
-import { markDraftGraphWriteFailed } from '../build-turn-context.js';
 import { log } from '../../utils/telemetry.js';
+import { approvalChipIdFor } from '../agent-lane/approval-chips.js';
+import { proposalPendingAction } from '../agent-lane/durable-proposal.js';
+import { agentProposals } from '../agent-lane/held-approval-offers.js';
+import { computeProposalId,type StructuredProposal } from '../agent-lane/proposal.js';
+import { authorisationTurnId } from '../agent-lane/runtime/agent-capabilities.js';
+import { markDraftGraphWriteFailed } from '../build-turn-context.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { assertDoorOwnership,bindWriteCaller,readSuccessfulDoorEntries,readWriteRefusal } from '../ownership/door-ownership.js';
+import { appendCheckedGraphWrite } from '../persist-graph-write.js';
+import { ANALYSIS_REREAD_TIMEOUT_MS } from '../session/analysis-read-deadline.js';
+import { runWithTurnFence } from '../session/turn-fence.js';
+import * as adoption from '../system-events/olumi-option-adoption.js';
 const provider = vi.hoisted(() => ({ draft: vi.fn() }));
-vi.mock('../../orchestrator/tools/draft-graph.js', async load => ({
-  ...await load<typeof import('../../orchestrator/tools/draft-graph.js')>(), handleDraftGraph: provider.draft,
-}));
+
 vi.mock('../../orchestrator/plot-client.js', async load => ({
   ...await load<typeof import('../../orchestrator/plot-client.js')>(), createPLoTClient: () => ({
     run: async () => JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')),

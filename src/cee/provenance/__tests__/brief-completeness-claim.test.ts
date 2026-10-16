@@ -18,97 +18,19 @@
  * output is the weaker claim — here, silence.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe,expect,it } from "vitest";
 
-import { buildPostDraftNarrative } from "../../../orchestrator-v5/coaching/post-draft-narrative.js";
+
 import { assessBriefCompleteness } from "../../../orchestrator-v5/clarify-v2/rubric.js";
-import { BRIEF_TEXT_AS_PERSISTED } from "./fixtures/trace-captures.js";
 
-const GRAPH = {
-  nodes: [
-    { id: "goal", kind: "goal", label: "15% ARR growth without worse attrition" },
-    { id: "opt_copilot", kind: "option", label: "Build the AI copilot" },
-    { id: "opt_rewrite", kind: "option", label: "Do the platform rewrite" },
-    { id: "fac_eng_capacity", kind: "factor", label: "Engineering capacity" },
-    { id: "fac_llm_cost", kind: "factor", label: "LLM serving cost" },
-  ],
-} as any;
 
-function narrate(briefText: string | null, completeness: "thin" | "partial" | "complete") {
-  return buildPostDraftNarrative({
-    graph: GRAPH,
-    analysisReady: { status: "ready" },
-    wideningLog: { brief_completeness: completeness } as any,
-    briefText,
-  });
-}
 
-const THIN_SENTENCE = "Your brief was light on detail";
-const PARTIAL_SENTENCE = "Your brief covered the main points";
 
-describe("2.972(c) the brief-completeness advisory", () => {
-  it("withholds \"light on detail\" for B3, the brief it was measured making that claim about", () => {
-    const result = narrate(BRIEF_TEXT_AS_PERSISTED.B3, "thin");
-    expect(result.text).not.toContain(THIN_SENTENCE);
-    expect(result.telemetry.brief_completeness).toBe("thin"); // the enum is still reported honestly
-    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
-  });
 
-  it("withholds it for B1 and B2 too — every brief of the trace states amounts", () => {
-    for (const brief of ["B1", "B2"] as const) {
-      const result = narrate(BRIEF_TEXT_AS_PERSISTED[brief], "thin");
-      expect(result.text, `${brief} still told its author the brief was light on detail`).not.toContain(
-        THIN_SENTENCE,
-      );
-    }
-  });
 
-  it("KEEPS it when the brief genuinely states nothing quantitative (the discriminating positive)", () => {
-    // Without this case the guard could pass by suppressing the advisory
-    // unconditionally, which is a different behaviour and would delete a
-    // legitimate nudge.
-    const result = narrate("Should we go into Germany or push harder in the UK? Not sure.", "thin");
-    expect(result.text).toContain(THIN_SENTENCE);
-    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
-  });
 
-  it("KEEPS it when no brief text is available (behaviour is unchanged where evidence is absent)", () => {
-    const result = narrate(null, "thin");
-    expect(result.text).toContain(THIN_SENTENCE);
-  });
 
-  it("no longer spares the `partial` rung for B3 — its stated precondition was falsified on 2026-08-13", () => {
-    // ⚠ THIS PIN ASSERTED THE OPPOSITE UNTIL 2026-08-13, AND ITS REASONING IS
-    // KEPT HERE RATHER THAN DELETED, BECAUSE THE REASONING WAS SOUND AND THE
-    // PRECONDITION IS WHAT CHANGED. It read:
-    //
-    //     "leaves the `partial` rung alone — it makes no negative claim and
-    //      nothing measured it false"
-    //
-    // Two conditions were offered for sparing `partial`. The second one has
-    // now failed: see the `2.972(d)` block below for the witness. The first
-    // one — "makes no negative claim" — was never the governing rule. The rule
-    // is that the product may describe what IT did and may not tell the user
-    // what THEY said, and a false COMPLIMENT breaches it exactly as a false
-    // criticism does.
-    //
-    // This is NOT the trap-21 error the original comment guarded against. That
-    // trap warns against ALIGNING two predicates that answer DIFFERENT
-    // questions. These two arms answer the SAME question — "what was in the
-    // user's brief?" — from the SAME underived enum. They were always one
-    // question wearing two signs.
-    const result = narrate(BRIEF_TEXT_AS_PERSISTED.B3, "partial");
-    expect(result.text).not.toContain(PARTIAL_SENTENCE);
-    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
-  });
 
-  it("leaves `complete` alone — it surfaced nothing before and surfaces nothing now", () => {
-    const result = narrate(BRIEF_TEXT_AS_PERSISTED.B3, "complete");
-    expect(result.text).not.toContain(THIN_SENTENCE);
-    expect(result.text).not.toContain(PARTIAL_SENTENCE);
-    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
-  });
-});
 
 /**
  * ROADMAP 2.972(d) — THE COMPLIMENT IS THE SAME DEFECT AS THE CRITICISM.
@@ -182,53 +104,15 @@ describe("2.972(d) the `partial` compliment — a claim about the user's brief",
     expect(assessBriefCompleteness(RUBRIC_COMPLETE_BRIEF).complete).toBe(true);
   });
 
-  it("does not tell a 52-character brief it covered the main points (the witnessed case)", () => {
-    const result = narrate(WITNESSED_THIN_BRIEF, "partial");
-    expect(
-      result.text,
-      "the witnessed brief was complimented while the product's own rubric called it incomplete",
-    ).not.toContain(PARTIAL_SENTENCE);
-    expect(result.text).not.toContain("lighter areas");
-  });
 
-  it("withholds the compliment for a RICH brief too — the rule is about the subject, not the accuracy", () => {
-    // OPPOSITE-DIRECTION TWIN (trap 22b). Without this case the defect could be
-    // "fixed" by gating the compliment on brief length or on the rubric, which
-    // would leave an underived claim about the user's words shipping on every
-    // brief that happened to clear the gate — the same lie, less often.
-    const result = narrate(BRIEF_TEXT_AS_PERSISTED.B3, "partial");
-    expect(result.text).not.toContain(PARTIAL_SENTENCE);
-  });
 
-  it("withholds it when no brief text is available at all", () => {
-    // The `thin` arm deliberately KEEPS its advisory when evidence is absent
-    // (see the block above) because suppression there needs a refutation. This
-    // arm is different: there is no evidence that could establish it, so
-    // absence of brief text changes nothing.
-    const result = narrate(null, "partial");
-    expect(result.text).not.toContain(PARTIAL_SENTENCE);
-  });
 
-  it("still reports the enum honestly to ops — the signal is kept, only the claim is withheld", () => {
-    const result = narrate(WITNESSED_THIN_BRIEF, "partial");
-    expect(result.telemetry.brief_completeness).toBe("partial");
-    expect(result.telemetry.brief_completeness_surfaced).toBe(false);
-  });
 
-  it("leaves the rest of the narrative intact — this suppresses a sentence, not the message", () => {
-    // Guards the failure mode where "withhold the advisory" degrades into
-    // "return an empty or truncated narrative".
-    const result = narrate(WITNESSED_THIN_BRIEF, "partial");
-    expect(result.text).toContain("I've built a first decision model");
-    expect(result.text).toContain("Next, run the analysis");
-    expect(result.text.trim().length).toBeGreaterThan(80);
-  });
 
-  it("does not disturb the `thin` arm's measured discriminating positive (regression floor)", () => {
-    // 2.972(c) paid for this case with a live measurement. A change to the
-    // `partial` arm that also silenced `thin` would delete a legitimate nudge.
-    const result = narrate("Should we go into Germany or push harder in the UK? Not sure.", "thin");
-    expect(result.text).toContain(THIN_SENTENCE);
-    expect(result.telemetry.brief_completeness_surfaced).toBe(true);
-  });
+
+
+
+
+
+
 });

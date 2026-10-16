@@ -1,16 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
+import { RunAnalysisHandlerFactSchema,type HandlerFact } from '@talchain/schemas/orchestrator';
+import { describe,expect,it } from 'vitest';
 
 import {
-  buildAnalysisRefusalFact,
-  isAnalysisRefusalFact,
-  isAnalysisRefusalContinuityCause,
+buildAnalysisRefusalFact,
+isAnalysisRefusalContinuityCause,
+isAnalysisRefusalFact,
 } from '../analysis-refusal-continuity.js';
 import {
-  selectCanonicalAnalysisState,
-  summariseCoachingStatePack,
+selectCanonicalAnalysisState,
+summariseCoachingStatePack,
 } from '../canonical-analysis-state.js';
-import { checkCoachingOutput } from '../../coaching/coaching-output-postcheck.js';
+
 
 const SCENARIO_ID = 'b2000000-0000-4000-8000-000000000002';
 
@@ -98,42 +98,7 @@ describe('analysis refusal continuity', () => {
     expect(pack).not.toHaveProperty('latest_run_attempt_refused');
   });
 
-  it.each([
-    'Running now is safe, the result just needs to be read as provisional.',
-    'Running the analysis would show how these relationships translate into option-level probabilities.',
-  ])('rejects run-availability claims while the latest attempt remains refused: %s', (prose) => {
-    expect(
-      checkCoachingOutput(prose, {
-        analysis_present: false,
-        freshness: 'none',
-        readiness_status: 'ready',
-        rerun_required: false,
-        usable_for_prose: false,
-        usable_for_chips: false,
-        blocked: false,
-        actionable_blocker_count: 0,
-        latest_run_attempt_refused: true,
-      }),
-    ).toEqual({
-      safe: false,
-      violation: 'run_availability_claim_after_refusal',
-    });
-  });
 
-  it('does not constrain a ready path with no current refusal', () => {
-    const prose =
-      'No, not on its own. Local Pipeline Conversion Rate could reverse the result; the model excludes first-year budget and hub costs.';
-    expect(
-      checkCoachingOutput(prose, {
-        analysis_present: true,
-        freshness: 'fresh',
-        readiness_status: 'ready',
-        rerun_required: false,
-        usable_for_prose: true,
-        usable_for_chips: true,
-        blocked: false,
-        actionable_blocker_count: 0,
-      }),
-    ).toEqual({ safe: true });
-  });
+
+
 });

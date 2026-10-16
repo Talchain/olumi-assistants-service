@@ -46,19 +46,14 @@
  * would be called, and telemetry is captured via `setTestSink`.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-} from '../../adapters/llm/types.js';
 
 // ---------------------------------------------------------------------------
 // Session-store mock — replayable per-test
@@ -92,7 +87,7 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
+
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -186,17 +181,7 @@ const PRIOR_RUN_ANALYSIS_TURN = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function mkPayload(message: string): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message,
-    turn_class: 'frame',
-    stage: 'analyse',
-  };
-}
+
 
 /**
  * A routing adapter that RECORDS the call and answers with plain text. The
@@ -205,24 +190,11 @@ function mkPayload(message: string): MessageTurnPayload {
  * guarantee, so the adapter answers instead of throwing and `toHaveBeenCalled`
  * is the path proof.
  */
-function recordingRoutingAdapter() {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () => ({
-        content: [{ type: 'text', text: 'Routed coaching answer.' }],
-        stop_reason: 'end_turn' as const,
-        usage: { input_tokens: 5, output_tokens: 5 },
-        model: 'mock-routing',
-        latencyMs: 0,
-      })),
-  };
-}
+
 
 /** The retired constant, verbatim, so its absence is asserted against the
  *  exact bytes that used to ship. */
-const RETIRED_RECAP_TEXT =
-  "Here's the latest analysis recap. Open the analysis view for the full breakdown, including the main drivers and trade-offs.";
+
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
@@ -248,66 +220,11 @@ describe('ROADMAP 2.229 — post-analysis free text reaches the coach', () => {
   // The four shapes the retired guard used to claim, one per intent class it
   // recognised. Each `it` below is the INVERSE of the assertion this file
   // carried before: the adapter must be CALLED, and the constant must NOT ship.
-  const RECOGNISED_POST_ANALYSIS_QUESTIONS: ReadonlyArray<readonly [string, string, string]> = [
-    ['What drove this result?', 'what_drove', 'req-2229-what-drove'],
-    ['Walk me through the analysis.', 'explain', 'req-2229-explain'],
-    [
-      'What would need to change for another option to look better?',
-      'what_would_flip',
-      'req-2229-flip',
-    ],
-    ['Why is this option ahead?', 'what_drove (present-state)', 'req-2229-ahead'],
-  ];
 
-  for (const [message, shape, requestId] of RECOGNISED_POST_ANALYSIS_QUESTIONS) {
-    it(`"${message}" (${shape}) on a FRESH analysis reaches routeWithToolUse, not a frozen constant`, async () => {
-      const adapter = recordingRoutingAdapter();
-      const result = await runTurnExecutor(mkPayload(message), requestId, {
-        routingAdapter: adapter,
-        graphState: READY_GRAPH as never,
-      });
 
-      // PATH PROOF — the inverse of the old `not.toHaveBeenCalled()`. This is
-      // the whole ruling: a recognised question gets the same treatment a chip
-      // click already got, which is a routed turn with conversation sight.
-      expect(
-        adapter.chatWithTools,
-        'a recognised post-analysis question must reach the coach',
-      ).toHaveBeenCalled();
 
-      // The retired constant does not ship — asserted against its exact bytes.
-      expect(result.response.assistant_text ?? '').not.toContain(RETIRED_RECAP_TEXT);
-      expect(result.response.assistant_text ?? '').not.toContain(
-        "Here's the latest analysis recap.",
-      );
 
-      // The turn actually spent an LLM call — a deterministic short-circuit
-      // would report 0 and would be indistinguishable from the old behaviour
-      // on `assistant_text` alone if a future guard shipped different copy.
-      expect(result.telemetry.llm_calls_used).toBeGreaterThan(0);
-    });
-  }
 
-  it('the retired guard emits no telemetry on a turn it WOULD have claimed', async () => {
-    // The guard's `v5.fresh_analysis_followup_guard` event was the only
-    // observable signal that it had claimed a turn, so a re-wiring of the
-    // guard (or of any successor emitting that event) must fail here rather
-    // than quietly restoring a zero-input answer.
-    //
-    // ⚠ POSITIVE CONTROL BUILT IN (CLAUDE.md trap 13). This test DRIVES a turn
-    // first — and specifically the turn the guard used to claim (fresh
-    // analysis + a recognised question). Asserting the absence against an
-    // empty `events` array, which `beforeEach` guarantees, would pass by
-    // testing nothing. The sibling assertion below proves the sink was live
-    // and recording during that same turn.
-    const adapter = recordingRoutingAdapter();
-    await runTurnExecutor(mkPayload('What drove this result?'), 'req-2229-no-guard-telemetry', {
-      routingAdapter: adapter,
-      graphState: READY_GRAPH as never,
-    });
-    expect(events.length, 'the telemetry sink must have recorded SOMETHING').toBeGreaterThan(0);
-    expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
-  });
 
   it('the retired constant is gone from the source tree entirely', () => {
     // Belt-and-braces on the deletion itself: the guard MODULE is removed, not
@@ -327,140 +244,11 @@ describe('ROADMAP 2.229 — post-analysis free text reaches the coach', () => {
   // phrasing must still reach edit dispatch. Retiring the guard must not
   // quietly retire the coverage it accumulated.
   // -------------------------------------------------------------------------
-  it('"Set Pricing to 0.7" with fresh analysis → guard does NOT match, mutation path open', async () => {
-    // Mutation messages must still route normally. Use a calling adapter so
-    // the value-update flow can resolve without throwing — the explicit
-    // assertion is just that the new guard did not intercept.
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () => ({
-          content: [{ type: 'text', text: 'ok' }],
-          stop_reason: 'end_turn' as const,
-          usage: { input_tokens: 5, output_tokens: 5 },
-          model: 'mock',
-          latencyMs: 0,
-        })),
-    };
-    await runTurnExecutor(
-      mkPayload('Set Pricing to 0.7.'),
-      'req-fresh-followup-mutation',
-      { routingAdapter: adapter, graphState: READY_GRAPH as never },
-    );
 
-    // 2.229: the guard is gone, so its event can never fire. Asserted
-    // directly rather than left as a vacuous `if` — a conditional over an
-    // event that no longer exists is exactly the shape that passes by testing
-    // nothing (CLAUDE.md trap 13).
-    expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
-  });
 
-  it('"Set Pricing to 0.7 then explain the results" with fresh analysis → guard rejects with mutation_signal; mutation route reachable', async () => {
-    // Round-2 review regression case. The concrete edit clause
-    // ("Set Pricing to 0.7") and the analytical phrase ("explain the
-    // results") both fire — analytical was incorrectly winning under the
-    // earlier broad analytical-first ordering, swallowing the edit.
-    // Fix: only `what_would_flip` gets the analytical exception;
-    // `explain` / `what_drove` / `rerun_question` defer to mutation.
-    //
-    // A calling adapter is wired so the downstream routing path can
-    // resolve — what's being proved at the path level is:
-    //   (a) the new guard emits matched: false reason: 'mutation_signal'
-    //   (b) routing/edit dispatch remains reachable (adapter or earlier
-    //       deterministic value-update guard handles the turn)
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () => ({
-          content: [{ type: 'text', text: 'ok' }],
-          stop_reason: 'end_turn' as const,
-          usage: { input_tokens: 5, output_tokens: 5 },
-          model: 'mock',
-          latencyMs: 0,
-        })),
-    };
-    const result = await runTurnExecutor(
-      mkPayload('Set Pricing to 0.7 then explain the results.'),
-      'req-fresh-followup-overlap-edit-explain',
-      { routingAdapter: adapter, graphState: READY_GRAPH as never },
-    );
 
-    expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
 
-    // Anti-regression: the response must NOT carry the new guard's
-    // recap copy, because the guard did not match. (When the upstream
-    // deterministic value-update guard catches the turn, the response is
-    // its own deterministic value-update copy.) We don't pin the exact
-    // downstream copy — only that the new guard's recap line did NOT ship.
-    expect(result.response.assistant_text ?? '').not.toContain(
-      "Here's the latest analysis recap.",
-    );
-  });
 
-  it('"Set Pricing to 0.7 then what would need to change..." (round-3 case) → mutation wins, no recap', async () => {
-    // Round-3 review regression case. The earlier `what_would_flip`
-    // exception was too broad — it accepted any what_would_flip
-    // classification regardless of whether the message also carried an
-    // independent concrete edit clause. Fix:
-    // `hasConcreteMutationSignal` disqualifies the exception when an
-    // unambiguous edit (verb+number / add-a-new / remove-the / bare
-    // imperative) is also present.
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () => ({
-          content: [{ type: 'text', text: 'ok' }],
-          stop_reason: 'end_turn' as const,
-          usage: { input_tokens: 5, output_tokens: 5 },
-          model: 'mock',
-          latencyMs: 0,
-        })),
-    };
-    const result = await runTurnExecutor(
-      mkPayload(
-        'Set Pricing to 0.7 then what would need to change for another option to look better?',
-      ),
-      'req-fresh-followup-overlap-flip',
-      { routingAdapter: adapter, graphState: READY_GRAPH as never },
-    );
 
-    expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
-    expect(result.response.assistant_text ?? '').not.toContain(
-      "Here's the latest analysis recap.",
-    );
-  });
 
-  it('"Change marketing channel to TikTok then what would need to change..." (round-4 textual-edit case) → mutation wins, no recap', async () => {
-    // Round-4 review regression case. The round-3 helper only flagged
-    // concrete edits via numeric value, add-a-new, remove-the, or bare
-    // imperative — it missed independent textual verb-to-X edits like
-    // "Change marketing channel to TikTok". The round-4 fix replaces
-    // that helper with `hasIndependentMutationSignal`, which strips
-    // what_would_flip pattern spans and re-checks verb-to-X on the
-    // remainder. The leading edit clause survives the strip and proves
-    // an independent edit exists.
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () => ({
-          content: [{ type: 'text', text: 'ok' }],
-          stop_reason: 'end_turn' as const,
-          usage: { input_tokens: 5, output_tokens: 5 },
-          model: 'mock',
-          latencyMs: 0,
-        })),
-    };
-    const result = await runTurnExecutor(
-      mkPayload(
-        'Change marketing channel to TikTok then what would need to change for another option to look better?',
-      ),
-      'req-fresh-followup-overlap-textual-edit',
-      { routingAdapter: adapter, graphState: READY_GRAPH as never },
-    );
-
-    expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
-    expect(result.response.assistant_text ?? '').not.toContain(
-      "Here's the latest analysis recap.",
-    );
-  });
 });

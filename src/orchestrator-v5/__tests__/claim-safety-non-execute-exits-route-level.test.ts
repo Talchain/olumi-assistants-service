@@ -1,5 +1,5 @@
-import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
 import { withScenarioRevision } from '../../../tests/utils/revision-store-double.js';
+import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
 /**
  * G-CEE-1 — THE PERMISSION BELONGS TO THE DISPLAYED FACT, NOT TO WHETHER THIS
  * TURN RAN AN ANALYSIS (ROADMAP 1.233 finish-line criterion 2 + 1.349 P1-2).
@@ -46,17 +46,17 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
  * the mutation-check runs `blanket-false` explicitly.
  * ═══════════════════════════════════════════════════════════════════════════
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
+import { setTestSink,TelemetryEvents } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 // The production intercept's OWN constant, so this test and the intercept
 // cannot drift apart on the chip copy.
-import { SIMPLIFY_CHANGE_CHIP_PROMPT } from '../routing/chip-simplify-intercept.js';
+
 // The PRODUCER's own coaching copy, so the canary below cannot drift from the
 // sentence it exists to protect (CLAUDE.md trap #12).
 import { COACHING_TEXT } from '../signals/coaching-signals.js';
@@ -319,12 +319,7 @@ vi.mock('../handlers/chip-click-dispatch.js', async () => {
 });
 
 const routeWithToolUseMock = vi.fn();
-vi.mock('../routing/route-with-tool-use.js', async () => {
-  const actual = await vi.importActual<typeof import('../routing/route-with-tool-use.js')>(
-    '../routing/route-with-tool-use.js',
-  );
-  return { ...actual, routeWithToolUse: routeWithToolUseMock };
-});
+
 
 function converseTextOnly(text: string) {
   return {
@@ -465,14 +460,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     });
   });
 
-  describe('the CHIP-SIMPLIFY intercept exit', () => {
-    const MESSAGE = SIMPLIFY_CHANGE_CHIP_PROMPT;
 
-    it('BRANCH DISCRIMINATOR: this turn really reaches the intercept', async () => {
-      await postTurn(app, MESSAGE);
-      expect(routeWithToolUseMock).not.toHaveBeenCalled();
-    });
-  });
 
   describe('FAIL-CLOSED — the two situations where nothing can be read', () => {
 

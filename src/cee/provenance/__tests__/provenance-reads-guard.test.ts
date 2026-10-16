@@ -80,7 +80,6 @@ const RATCHET: Readonly<Record<string, Entry>> = {
     note: "stated-today shape of its own write; levelRangePointBasis's olumis (cee_inference, not user-material): provenanceOf has no cee_inference-only role and routing broadened it to every AI origin (recovery/bB/check-B-cee/CHECK-delta.md: raw 20, source 'inferred', brief range 10–30 became 'midpoint')" },
   'src/orchestrator-v5/routing/add-option-transaction.ts': { categories: { 'writer-readback': 2 }, feeds: 'neither',
     note: "stated-today shape of its own write: its stamp, and the door's own `explicit` attestation (DL 12 Oct)" },
-  'src/orchestrator-v5/routing/tool-schema.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: "a tool parameter's source" },
   'src/orchestrator-v5/system-events/edge-strength-edit.ts': { categories: { writer: 1 }, feeds: 'neither', note: 'edge strength writer' },
   'src/orchestrator-v5/system-events/link-effect-edit.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: 'a unit reading' },
   'src/orchestrator-v5/system-events/option-intervention-edit.ts': { categories: { 'different-field': 1, 'writer-readback': 1 }, feeds: 'neither',

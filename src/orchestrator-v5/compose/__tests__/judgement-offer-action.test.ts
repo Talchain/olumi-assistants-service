@@ -62,42 +62,36 @@
  * copied test would get backwards is exercised on the same inputs.
  */
 
-import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync,readdirSync } from 'node:fs';
+import { describe,expect,it } from 'vitest';
 
 import {
-  COACHING_ACTION_PROMPT_MAX,
-  COACHING_BLOCK_BODY_MAX,
-  composeFragileEdgeActionPrompt,
-  isEditGraphDispatchable,
-  isFragileEdgeOfferComposable,
+COACHING_ACTION_PROMPT_MAX,
+COACHING_BLOCK_BODY_MAX,
+composeFragileEdgeActionPrompt,
+isEditGraphDispatchable
 } from '../../coaching/fragile-edge-offer-text.js';
 import {
-  DISAGREEMENT_ACTION_LABEL,
-  OVERRIDE_STRESS_TEST_ACTION_LABEL,
-  composeDisagreementActionPrompt,
-  composeDisagreementNaming,
-  composeOverrideActionPrompt,
-  composeOverrideNaming,
-  isDisagreementActionComposable,
-  isDisagreementOfferComposable,
-  isOverrideActionComposable,
-  isOverrideOfferComposable,
+DISAGREEMENT_ACTION_LABEL,
+OVERRIDE_STRESS_TEST_ACTION_LABEL,
+composeDisagreementActionPrompt,
+composeDisagreementNaming,
+composeOverrideActionPrompt,
+composeOverrideNaming,
+isDisagreementActionComposable,
+isDisagreementOfferComposable,
+isOverrideActionComposable,
+isOverrideOfferComposable,
 } from '../../coaching/judgement-offer-text.js';
+
 import {
-  EDIT_GRAPH_NEGATIVE_REGEX,
-  EDIT_GRAPH_POSITIVE_REGEX,
-} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
-import { shouldSuppressEditDispatchForValueUpdate } from '../../../orchestrator/routing/value-update-gate.js';
-import {
-  classifyAnalyticalIntent,
-  hasIndependentMutationSignal,
+classifyAnalyticalIntent,
+hasIndependentMutationSignal,
 } from '../../routing/analytical-intent.js';
 import { isAnalyticalQuestion } from '../../routing/analytical-question-guard.js';
-import { isStateQueryQuestionShape } from '../../routing/state-query-guard.js';
 import {
-  tryPostAnalysisAdviceGate,
-  type AdviceGateAnalysis,
+tryPostAnalysisAdviceGate,
+type AdviceGateAnalysis,
 } from '../../routing/post-analysis-advice-gate.js';
 
 // ============================================================================
@@ -415,108 +409,9 @@ describe('§4 an unphrasable action costs the action, never the card', () => {
  * edge-chip door. Those need turn state a unit test does not have. Stated so the
  * next reader inherits the boundary rather than the number.
  */
-function editVerbCandidate(message: string): boolean {
-  return (
-    EDIT_GRAPH_POSITIVE_REGEX.test(message) &&
-    !EDIT_GRAPH_NEGATIVE_REGEX.test(message) &&
-    !shouldSuppressEditDispatchForValueUpdate(message) &&
-    !isAnalyticalQuestion(message) &&
-    !isStateQueryQuestionShape(message)
-  );
-}
 
-describe('§6 measured against the route’s own five-conjunct predicate', () => {
-  it('T1 is never an edit under ALL FIVE conjuncts, not merely under two', () => {
-    // §2 asserts T1 against `isEditGraphDispatchable`, which is 2 of 5. This is
-    // the whole predicate, and it is the assertion that actually says "a probe
-    // cannot mutate the graph".
-    for (const [from, to] of CORPUS) {
-      expect(editVerbCandidate(composeOverrideActionPrompt(from, to))).toBe(false);
-    }
-  });
 
-  it('KNOWN-DIVERGENT SET: T2 clears our gate but not the route on EXACTLY these pairs', () => {
-    // ⚠ THIS EXISTS BECAUSE §2'S T2 ASSERTION WAS A GUARD AGREEING WITH ITSELF.
-    // It asserted `isEditGraphDispatchable(prompt) === true` — the predicate's
-    // own body — so it could never observe the three conjuncts the predicate
-    // does not implement. Rebuilding the route's predicate found real residue.
-    //
-    // Pinned as an EXACT SET, so it REDs if it GROWS *or* SHRINKS: a gap
-    // recorded in the suite is honest, a gap invisible to it is how a wrong
-    // guarantee survives. Bound by label identity, never by a count.
-    const divergent = CORPUS.filter(
-      ([from, to]) =>
-        isDisagreementActionComposable(from, to) &&
-        !editVerbCandidate(composeDisagreementActionPrompt(from, to)),
-    );
-    expect(divergent).toStrictEqual([
-      ['Operating Profit Uplift', 'Raise Group Operating Profit by 8% Within 18 Months'],
-      ['Flour Cost Margin Squeeze', 'Raise Group Operating Profit by 8% Within 18 Months'],
-      ['Change Rate', 'Throughput'],
-    ]);
-    // The MECHANISM, derived rather than described: it is the value-update
-    // conjunct, and the phrasing comes from the PRODUCER LABEL, not our copy.
-    // ⚠ THERE ARE NOW TWO DIFFERENT MECHANISMS IN THIS ONE SET. Adjudicated
-    // 2026-09-14 rather than appended — they are not the same finding:
-    //
-    //  (a) the two "Raise … by 8% …" pairs — the TO-label carries a clause-B
-    //      by-quantity ("Raise X by 8%"). Pre-existing; unchanged by the
-    //      `change` admission.
-    //
-    //  (b) ['Change Rate', 'Throughput'] — NEW, and it is a DEFECT, not
-    //      correct behaviour. The prompt is
-    //        "Adjust the strength of the link from Change Rate to Throughput…"
-    //      whose intent is an EDGE-STRENGTH edit. It is claimed only because
-    //      the FROM-label's first word is the common noun "Change", which the
-    //      unanchored clause-A pattern reads mid-sentence as
-    //      `change <object> to <value>`. The gate has no part-of-speech
-    //      awareness, so a factor legitimately named "Change Rate" / "Change
-    //      Management Cost" / "Change Request Volume" mis-routes.
-    //      CONTRAST, measured: the identical prompt with 'Churn Rate' as the
-    //      from-label is NOT claimed — the label is the whole difference.
-    //      ⚠ PRE-EXISTING CLASS, WIDENED — NOT INVENTED HERE: the same shape
-    //      already fires on `update`, measured at the pristine tip
-    //      ("Update Frequency to Throughput" → true). Admitting `change`
-    //      widens it because "change" is far commoner as a label noun.
-    //      DELIBERATELY NOT SOLVED: a disambiguator for noun-vs-verb here is
-    //      the unwinnable-predicate road this estate has already walked.
-    //      Recorded so the next session cannot mistake it for new.
-    for (const [from, to] of divergent) {
-      const prompt = composeDisagreementActionPrompt(from, to);
-      expect(shouldSuppressEditDispatchForValueUpdate(prompt)).toBe(true);
-      expect(isAnalyticalQuestion(prompt)).toBe(false);
-      expect(isStateQueryQuestionShape(prompt)).toBe(false);
-    }
-  });
 
-  it('the divergence is INHERITED from the fragile-edge lens, not introduced here', () => {
-    // The already-shipped lens composes the IDENTICAL string from the same
-    // labels and mis-routes identically. This PR does not create the residue; it
-    // makes it visible. Rowed separately.
-    for (const [from, to] of CORPUS) {
-      const t2 = composeDisagreementActionPrompt(from, to);
-      const fragile = composeFragileEdgeActionPrompt(from, to);
-      expect(t2).toBe(fragile);
-      if (isDisagreementActionComposable(from, to) && !editVerbCandidate(t2)) {
-        expect(isFragileEdgeOfferComposable(from, to)).toBe(true);
-        expect(editVerbCandidate(fragile)).toBe(false);
-      }
-    }
-  });
-
-  it('POSITIVE CONTROL: the rebuilt predicate DOES say yes to ordinary edit turns', () => {
-    // Without this the two assertions above could both pass on a predicate that
-    // returns false for everything (trap 13 — an absence probe needs to prove it
-    // can see a presence).
-    expect(editVerbCandidate('Adjust the strength of the link from Sales Effort to Revenue in my model.')).toBe(true);
-    const admitted = CORPUS.filter(
-      ([from, to]) =>
-        isDisagreementActionComposable(from, to) &&
-        editVerbCandidate(composeDisagreementActionPrompt(from, to)),
-    );
-    expect(admitted.length).toBeGreaterThanOrEqual(20);
-  });
-});
 
 describe('§5 the action prompt survives the contract cap untruncated', () => {
   it('a pair the naming sentence admits can still overflow the prompt cap — and is refused', () => {

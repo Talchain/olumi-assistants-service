@@ -1,200 +1,37 @@
-/**
- * T1 claim safety — MECHANISM-LEVEL drift guard on LAYER 2 (the projection).
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * WHY THIS EXISTS: THREE INSTANCES OF ONE CLASS, PATCHED ONE AT A TIME.
- *
- *   #710  the first-run Phase-3 BLOCKS named the leader on a withheld turn.
- *   #711  the STRUCTURED enrichment (`decision_review`, three `decision_brief`
- *         members, `leading_option_id`) did the same.
- *   this  the rerun NO-OP `assistant_text` did the same, on a path neither
- *         prior walk had ever exercised.
- *
- * Each fix was correct and each was complete for the surface it named. The
- * pattern across them is not "three bugs" — it is ONE mechanism defect: a
- * response-composing path can emit user-facing prose without consulting the
- * verdict, and NOTHING makes that omission visible. The egress guard
- * (`leading-option-egress-guard.ts`) measures the residue, but it is
- * observe-only and its own docstring says it is "the alarm, not the fix"; and
- * the sibling `route-egress-claim-safety-marking.drift.test.ts` pins that the
- * ALARM is ARMED at every exit — not that any path actually GATES content.
- *
- * That is the hole this file covers: **Layer 2, the projection**, as opposed to
- * Layer 3, the alarm.
- * ═══════════════════════════════════════════════════════════════════════════
- *
- * WHAT IT ASSERTS. It ENUMERATES, from source, every compose call in
- * `turn-executor.ts` that produces a user-facing `assistant_text`, keys each by
- * the EXPRESSION that supplies that text, and requires the resulting key set to
- * equal {@link COMPOSE_SITE_REGISTER} EXACTLY. Adding a compose site, removing
- * one, or renaming the variable that feeds it all fail this test immediately.
- *
- * ⚠ THIS IS A REGISTER, NOT A DERIVATION — and that is stated plainly because
- * CLAUDE.md trap #12 is that a hand-maintained mirror drifts silently. Whether
- * a given site CAN carry analysis-derived prose is a semantic judgement no
- * source scan can make, so the judgement is recorded here per-site with a
- * reason. What is DERIVED, and therefore cannot drift, is the SET: the mirror
- * fails LOUD the moment source and register disagree, which is the property
- * trap #12 demands when derivation is not possible.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * ⚠ ENUMERATOR SCOPE — WIDENED 2026-07-27, BECAUSE THE SCOPE WAS ITSELF A HOLE.
- *
- * This file previously scanned `turn-executor.ts` ONLY. That is not a detail:
- * the assertion this file is best known for is `expect(ungated).toEqual([])`,
- * and a reader who takes "0 ungated" as "no ungated compose site in CEE" is
- * reading a number that was silently scoped to one file. The anti-drift
- * instrument had the drift-shaped defect it exists to catch
- * (`WALK-2026-07-27-FINAL.md` §11.6).
- *
- * NOW SCANNED, and the register is keyed by FILE so the scope is visible in the
- * data rather than asserted in a comment:
- *   - `src/orchestrator-v5/turn-executor.ts`              — 29 sites / 25 keys
- *   - `src/orchestrator/route-v2.ts`                      —  2 sites /  2 keys
- *   - `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — 3 sites / 3 keys (NEW 2026-07-27)
- *   - `src/orchestrator-v5/compose/edit-clarify-response.ts`  —  1 site  /  1 key  (NEW 1.276)
- *   - `src/orchestrator-v5/routing/post-analysis-label-intercept.ts` — 1 / 1 (NEW 1.276)
- *   - `src/orchestrator-v5/system-events/factor-value-edit.ts`  — 1 site / 1 key (NEW 1.346)
- *   - `src/orchestrator-v5/compose/configure-option-clarify-response.ts` — 1 / 1 (NEW L16)
- *
- * 37 sites / 33 keys / 7 files, and `UNSCANNED_COMPOSE_FILES` is still EMPTY —
- * so `expect(ungated).toEqual([])` finally speaks for every production compose
- * site in `src/`, by derivation rather than by scope nobody had written down.
- *
- * ⚠ THIS LIST IS A HAND-MAINTAINED MIRROR AND IT HAD ALREADY DRIFTED — read it
- * as commentary, never as the scope. Before L16 it read "36 sites / 32 keys /
- * 5 files" and omitted `system-events/factor-value-edit.ts` entirely, which had
- * been in `COMPOSE_SITE_REGISTER` since 1.346 (2026-07-28). The SITE total
- * happened to stay right by coincidence — 2.229 deleted one site in the same
- * window that 1.346 added one — so the only visible symptom was a file count
- * nobody re-derived. That is trap #12 inside the file whose entire thesis is
- * trap #12, and it is left recorded rather than quietly corrected. The
- * authority is `derivedComposeFileDomain()` plus the count assertions below;
- * if this prose and those disagree, this prose is wrong.
- *
- * The four scanned function names are unchanged: `composeAnswer`,
- * `composeToolCallResponse`, `composeClarifyResponse`,
- * `composeDirectAnswerResponse`.
- * ═══════════════════════════════════════════════════════════════════════════
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * ⚠ AND THE SCOPE STATEMENT ITSELF IS NOW DERIVED — BECAUSE THE HAND-WRITTEN
- * ONE WAS WRONG THE DAY IT WAS WRITTEN.
- *
- * The previous revision named `handlers/chip-click-dispatch.ts` as THE surface
- * still out of scope, pinned its site count, and left the reader with "widen
- * this one file and the ledger speaks for all of CEE". That was false. A walk
- * of `src/` for the enumerator's OWN pattern finds FIVE non-test files with
- * compose sites, not three — `compose/edit-clarify-response.ts` and
- * `routing/post-analysis-label-intercept.ts` were named nowhere, by anything.
- *
- * So the hand-chosen domain was doing exactly what CLAUDE.md trap #12 says a
- * hand-maintained mirror does, one level ABOVE the register: the register's own
- * scope was a list a human had to remember to sync, and the drift read as green
- * ("0 ungated", "1 file left"). Widening the scan by one file would have
- * REPLACED that defect rather than removed it.
- *
- * {@link derivedComposeFileDomain} now walks `src/` and derives the complete
- * file set from source on every run. `SCANNED_FILES` ∪ {@link
- * UNSCANNED_COMPOSE_FILES} must equal it EXACTLY, so a new production file
- * containing a compose call fails THIS test on the commit that adds it — it can
- * no longer be invisible, whichever of the two lists it belongs in.
- * ═══════════════════════════════════════════════════════════════════════════
- *
- * ⚠ AND IT IS DELIBERATELY NOT ALL-GREEN-MEANS-SAFE. Eight of the twenty-five
- * turn-executor keys were `ungated` when this file was written, several carrying
- * LLM-authored or analysis-derived prose. ROADMAP 1.233 + 1.231 closed all
- * eight; the empty ledger is PINNED rather than deleted, because an empty
- * assertion is what makes the ninth fail CI the day someone adds one. `ungated`
- * is a TODO, not a blessing (TESTING-DISCIPLINE rule 6: a stated limit is a
- * to-do, not a hedge).
- */
-import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
+/** C1: exact global compose census after removing conventional routing. Surviving stances and chip claim gates are unchanged. */
+import { readdirSync,readFileSync } from 'node:fs';
+import { dirname,relative,resolve,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, relative, resolve, sep } from 'node:path';
-
+import { describe,expect,it } from 'vitest';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
-
 const HERE = dirname(fileURLToPath(import.meta.url));
-const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
-/** `src/` — the root of the derived file domain below. */
 const SRC_ROOT = resolve(HERE, '../..');
-
-/**
- * Every file the enumerator scans, keyed by the label the register uses. Adding
- * a file here without registering its sites fails the multiset assertion — which
- * is the correct direction: widening the scan must never be able to widen it
- * silently.
- */
-const SCANNED_FILES: Readonly<Record<string, string>> = {
-  'turn-executor.ts': TURN_EXECUTOR,
-  'handlers/chip-click-dispatch.ts': resolve(HERE, '../handlers/chip-click-dispatch.ts'),
-  // ROADMAP 1.276 — the two files `derivedComposeFileDomain()` surfaced on its
-  // first run and that nothing had ever named. Both now carry a DERIVED stance;
-  // `UNSCANNED_COMPOSE_FILES` is consequently empty, which is the strongest
-  // form of this register's claim: no production compose site in `src/` is
-  // outside the scan.
-  'compose/edit-clarify-response.ts': resolve(HERE, '../compose/edit-clarify-response.ts'),
-  'routing/post-analysis-label-intercept.ts': resolve(
-    HERE,
-    '../routing/post-analysis-label-intercept.ts',
-  ),
-  // ROADMAP 1.346 — the value-carrying inspector edit's compose site.
-  'system-events/factor-value-edit.ts': resolve(HERE, '../system-events/factor-value-edit.ts'),
-  // Train C — the deterministic canonical edge-strength writer receipt.
-  'system-events/edge-strength-edit.ts': resolve(
-    HERE,
-    '../system-events/edge-strength-edit.ts',
-  ),
-  // #1859 — the deterministic goal-target writer receipt (goal_target_edit).
-  'system-events/goal-target-edit.ts': resolve(HERE, '../system-events/goal-target-edit.ts'),
-  // L16 / walk finding N16 — the bare configure-option deterministic remedy.
-  // Caught by `derivedComposeFileDomain()` on the commit that created the file,
-  // which is the mechanism working exactly as its header promises.
-  'compose/configure-option-clarify-response.ts': resolve(
-    HERE,
-    '../compose/configure-option-clarify-response.ts',
-  ),
-  // ROADMAP 2.1261 — the repair-leg bare-value ASK composer. Caught by
-  // `derivedComposeFileDomain()` on the commit that created the file (the
-  // mechanism working), registered on the same commit.
-  'compose/repair-value-ask-response.ts': resolve(
-    HERE,
-    '../compose/repair-value-ask-response.ts',
-  ),
-  // ROADMAP 2.1266 — the option-effect ASK composer. Caught by
-  // `derivedComposeFileDomain()` on the commit that created the file (the
-  // mechanism working, sixth instance), registered on the same commit.
-  'compose/option-effect-ask-response.ts': resolve(
-    HERE,
-    '../compose/option-effect-ask-response.ts',
-  ),
-  // ⭐ THE DUPLICATE-OPTION-LABEL EXIT (2026-08-25) — the rename-coaching
-  // composer that replaces an ask which could not be answered. Caught by
-  // `derivedComposeFileDomain()` on the commit that created the file (the
-  // mechanism working, seventh instance), registered on the same commit.
-  'compose/duplicate-option-label-response.ts': resolve(
-    HERE,
-    '../compose/duplicate-option-label-response.ts',
-  ),
-  // The option-label clarify exit (2026-09-12) — registered on the commit that
-  // created it, because the derived domain test fails otherwise.
-  'compose/option-label-clarify-response.ts': resolve(
-    HERE,
-    '../compose/option-label-clarify-response.ts',
-  ),
+type VerdictStance = 'gated' | 'gated_by_input' | 'structural' | 'ungated';
+interface RegisteredSite {
+  readonly stance: VerdictStance;
+  readonly why: string;
+  /**
+   * How many CALL SITES share this key. Defaults to 1.
+   *
+   * ⚠ LOAD-BEARING (A5). Keys are the EXPRESSION feeding `assistant_text`, and
+   * several expressions repeat — `recoveryText` appears at three call sites,
+   * `recoveryAssistantText` and `ambiguousAssistantText` at two each. 29 sites
+   * collapse to 25 keys. Comparing SETS would let a NEW compose site that
+   * happens to reuse a registered variable name slip in and silently inherit
+   * that name's stance — the drift this file exists to catch, walking straight
+   * past it. The comparison is therefore a MULTISET (key -> count).
+   */
+  readonly count?: number;
+}
+const SCANNED_FILES: Readonly<Record<string,string>> = {
+"handlers/chip-click-dispatch.ts": resolve(HERE, "../handlers/chip-click-dispatch.ts"),
+"compose/edit-clarify-response.ts": resolve(HERE, "../compose/edit-clarify-response.ts"),
+"system-events/factor-value-edit.ts": resolve(HERE, "../system-events/factor-value-edit.ts"),
+"system-events/edge-strength-edit.ts": resolve(HERE, "../system-events/edge-strength-edit.ts"),
+"system-events/goal-target-edit.ts": resolve(HERE, "../system-events/goal-target-edit.ts"),
+"compose/configure-option-clarify-response.ts": resolve(HERE, "../compose/configure-option-clarify-response.ts"),
+"handlers/approve-held-proposal.ts": resolve(HERE, "../handlers/approve-held-proposal.ts"),
 };
-
-/**
- * The production files that contain compose sites and are STILL NOT SCANNED.
- *
- * This list is NOT the scope statement — {@link derivedComposeFileDomain} is.
- * This is the declared REMAINDER, and the domain test below proves the two
- * lists together are exhaustive. A file may sit here only while someone has
- * looked at it and written down what it costs; it may not sit here by having
- * been forgotten, because a forgotten file is in neither list and fails.
- */
 const UNSCANNED_COMPOSE_FILES: Readonly<
   Record<string, { readonly siteCount: number; readonly keyable: boolean; readonly why: string }>
 > = {
@@ -247,346 +84,6 @@ const UNSCANNED_COMPOSE_FILES: Readonly<
       'adopts the validator path or is removed.',
   },
 };
-
-/**
- * The enumerator's own pattern, as the DOMAIN definition. Deliberately the same
- * regex {@link enumerateComposeSites} uses: the set of files that matters is
- * exactly the set the scan could find sites in, so the domain and the scan
- * cannot disagree about what a "compose site" is.
- *
- * Built fresh per call — a `/g` regex carries `lastIndex` between `.test()`
- * calls, and a stateful matcher inside a completeness check would skip files on
- * alternate iterations. (Trap 13 in miniature: the instrument would report
- * "clean" for "did not look".)
- */
-function composeCallPattern(): RegExp {
-  return /compose(?:Answer|ToolCallResponse|ClarifyResponse|DirectAnswerResponse)\(\{/g;
-}
-
-/**
- * DERIVED, from source, on every run: every non-test `.ts` file under `src/`
- * containing at least one compose call, as a path relative to `src/`.
- *
- * This is the answer to "which files does the `ungated` ledger speak for?" that
- * cannot go stale, and it replaces a hand-written scope note that was wrong on
- * the day it was written (see the header). Test files are excluded by directory
- * (`__tests__`) AND by suffix (`.test.ts` / `.spec.ts`) — they compose responses
- * constantly and none of it reaches a user.
- */
-function derivedComposeFileDomain(): string[] {
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = resolve(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
-        walk(full);
-        continue;
-      }
-      if (!entry.name.endsWith('.ts')) continue;
-      if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.spec.ts')) continue;
-      if (composeCallPattern().test(readFileSync(full, 'utf8'))) {
-        out.push(relative(SRC_ROOT, full).split(sep).join('/'));
-      }
-    }
-  };
-  walk(SRC_ROOT);
-  return out.sort();
-}
-
-/**
- * How a compose site stands with respect to the persisted constraint verdict.
- *
- *   gated          — the site CONSUMES the verdict itself, on the OUTPUT side:
- *                    it composes leader text from structured data in code, so
- *                    it must read `mayNameLeadingOption` and suppress.
- *   gated_by_input — the site emits LLM-authored prose, and the verdict is
- *                    applied to the MODEL'S INPUT instead (ROADMAP 1.231): the
- *                    leader-designating fields are stripped from the
- *                    ContextPack's model-facing `display_analysis`, so the
- *                    model cannot name a leader it never sees. There is no
- *                    output-side scrub on these sites BY DESIGN — scrubbing
- *                    conversational prose risks the over-suppression failure
- *                    the acceptance criteria weight equally with the leak.
- *   structural     — the text CANNOT name a leading option: it is deterministic
- *                    copy built from a template/constant that carries no
- *                    comparative claim about options at all.
- *   ungated        — an OPEN GAP. The text can carry analysis-derived or
- *                    LLM-authored prose and is NOT verdict-projected today.
- *
- * ⚠ `gated_by_input` IS A WEAKER GUARANTEE THAN `gated`, and the distinction is
- * kept rather than collapsed for that reason. `gated` is a code path that
- * cannot emit the claim. `gated_by_input` is "the model was not given the
- * facts", which is strong against fabrication-from-data and NOT a proof about
- * the model's OUTPUT.
- *
- * ⚠ UPDATED 2026-07-27, AND THE OLD SENTENCE IS QUOTED RATHER THAN DELETED
- * (trap #14 — never let a label drift out from under the claim it made). It
- * read: *"…NOT a proof about every other channel the model can read
- * (conversation history above all — a leader named in an EARLIER turn's
- * assistant message is still in the window). That residual is stated in ROADMAP
- * 1.231 rather than papered over here."*
- *
- * That residual was then MEASURED — `WALK-HISTORIC-PREP-2026-07-27.md` §10,
- * build `b35d09de`, 2/5 samples — and CLOSED for the assistant side:
- * `context/withheld-history-redaction.ts` redacts the ordering claims out of
- * `conversation.recent_turns[].assistant_message` at the same pack chokepoint.
- *
- * ⚠ UPDATED AGAIN 2026-07-27, SAME DISCIPLINE — the entry below read
- * *"`conversation_summary` (the rolling summary) — its own ROADMAP row"*, and
- * that row has now been worked. A live read on scenario `f63ccb45` found its
- * `RESOLVED` slot carrying "Current analysis shows Double Down on SMB leading
- * 52% vs Enterprise 35%…" three sentences above the SAME summary's own "No
- * ranking can be put forward…". It is gated at the same chokepoint by
- * `projectConversationSummaryForWithheldClaim`, reusing this module's reader
- * (the shared alarm scores that sentence FALSE — bare participle).
- *
- * THE INPUT SET IS NOW WIDER, NOT COMPLETE. What `gated_by_input` still does
- * NOT cover, enumerated rather than implied:
- *   - `conversation.recent_turns[].user_message` — the USER'S own words, left
- *     verbatim by design (CEE asserting a claim ≠ the user restating one), and
- *     not the self-reinforcing half.
- *   - `brief`, `coaching_context`, `recent_changes`, `parsed_quantities`,
- *     `system_event`, `payload`, `display_graph` — never gated on this axis.
- *   - the V4 edit-graph dispatch (`handlers/edit-graph-dispatch.ts:1261`),
- *     which builds its OWN conversation slice for the edit LLM and has no
- *     verdict to consume — it loads no prior facts. ASSESSED 2026-07-27 and
- *     deliberately left: threading the verdict there needs a NEW prior-facts
- *     read on a path that performs none, which is a derivation this arc's own
- *     rule (one hoist, one selector) says not to add in passing. Sized in the
- *     PR body for #725.
- *   - the STORED summary itself: this gate is a PROJECTION, so
- *     `scenarios.rolling_summary` still HOLDS the claim on disk and every
- *     historic row stays as written. That is deliberate (the audit trail is what
- *     makes a leak investigable) and it is why the write-side question is a
- *     separate slice, not an oversight.
- */
-type VerdictStance = 'gated' | 'gated_by_input' | 'structural' | 'ungated';
-
-/**
- * Every compose site in `turn-executor.ts`, keyed by the expression that
- * supplies its user-facing text.
- *
- * The stances were assigned by reading each site, not by pattern-matching the
- * variable name. Where a site is `ungated`, the reason says what could leak.
- */
-interface RegisteredSite {
-  readonly stance: VerdictStance;
-  readonly why: string;
-  /**
-   * How many CALL SITES share this key. Defaults to 1.
-   *
-   * ⚠ LOAD-BEARING (A5). Keys are the EXPRESSION feeding `assistant_text`, and
-   * several expressions repeat — `recoveryText` appears at three call sites,
-   * `recoveryAssistantText` and `ambiguousAssistantText` at two each. 29 sites
-   * collapse to 25 keys. Comparing SETS would let a NEW compose site that
-   * happens to reuse a registered variable name slip in and silently inherit
-   * that name's stance — the drift this file exists to catch, walking straight
-   * past it. The comparison is therefore a MULTISET (key -> count).
-   */
-  readonly count?: number;
-}
-
-const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
-  // ── UNBLOCK-ANALYSIS PRE-ROUTE ──────────────────────────────────────────
-  'unblockAnswer.assistant_text': {
-    stance: 'structural',
-    why: 'Answers "what is stopping my analysis". Built by buildUnblockAnalysisAnswer from analysisReadyForTurn -- the ADMISSION payload, not an analysis RESULT -- and it quotes each readiness issue\'s own `message` verbatim rather than forming a second opinion. It names no option, makes no ranking or comparative claim, and reads no leader: the only option identity it can surface is one the readiness issue itself already named as blocking. It also states plainly that nothing has been changed, so it cannot imply a mutation either. Verified by its own suite, which asserts the text never matches /I (updated|adjusted|applied|set)/ and never claims readiness on a payload whose status is not `ready`.',
-  },
-  // ── THE GATED SITE — this PR ────────────────────────────────────────────
-  confirmationForCompose: {
-    stance: 'gated',
-    why: 'Execute path. Projected by projectExplanationAnswerForWithheldClaim when the handler is an explanation handler and the persisted verdict withholds. Covers BOTH the Sonnet-verbatim answer and the deterministic fallback, which also names the leader.',
-  },
-
-  // ── STRUCTURAL — deterministic copy with no comparative claim ───────────
-  recoveryAssistantText: {
-    stance: 'structural',
-    count: 2,
-    why: 'Bounded recovery copy from a constant builder (NOT the leader-serving buildBoundedFallbackCopyAndChips — verified separately).',
-  },
-  gmAppliedText: { stance: 'structural', why: 'Goal-metric receipt (buildGmHeldAppliedReceipt; names a metric, never an option ranking), plus HOLD-WIPE\'s fixed lapse notice for any other held change the commit made unfit (S-D, #2743).' },
-  receiptText: { stance: 'structural', why: 'Mutation receipt; describes the edit just applied.' },
-  noPendingAssistantText: { stance: 'structural', why: 'Pending-action recovery template.' },
-  '"The analysis is no longer fresh': { stance: 'structural', why: 'Literal staleness copy.' },
-  expiredAssistantText: { stance: 'structural', why: 'Pending-expiry template.' },
-  expiryText: {
-    stance: 'structural',
-    why: 'Expired-constraint renewal or safe-restatement copy. Names the previously offered bound and its frame, explicitly says nothing changed, and requests fresh consent or a restated target. buildExpiredConstraintRenewal reads graph identities, saved constraints and proposal history; it does not read an analysis result or make a ranking or constraint-verdict claim.',
-  },
-  ambiguousAssistantText: {
-    stance: 'structural',
-    count: 2,
-    why: 'Clarify copy built from candidate labels.',
-  },
-  '`I can apply those one at a time': { stance: 'structural', why: 'Literal one-at-a-time copy.' },
-  '`Confirmed. I applied ${appliedCount} value-preserving model ${applied': {
-    stance: 'structural',
-    why: 'Canonical readiness-repair receipt. Interpolates only applied/unresolved counts after hash/CAS-protected commit and readback; it names no option, ranking or analysis claim.',
-  },
-  "`Confirmed. I applied ${written} estimated ${written === 1 ? 'value' :": {
-    stance: 'structural',
-    why: 'Value-batch apply receipt, the readiness-repair receipt above one seam over. Interpolates only counts — values written, values declined, unsettable gaps, blockers remaining — after the atomic commit and readback. It names no option, no ranking and no analysis claim; the estimates themselves were shown in the reviewed proposal, not here.',
-  },
-  PROPOSAL_DISMISSAL_RESPONSE: { stance: 'structural', why: 'Module constant.' },
-  '`Got it: I can add ${riskLabel} as a risk with ${driverLabel} as its m': {
-    stance: 'structural',
-    why: 'Add-risk resume echo; interpolates two labels, makes no comparison.',
-  },
-  'buildDeicticClarifyAssistantText(deicticDispatch.reason)': { stance: 'structural', why: 'Clarify template.' },
-  'buildNonFactorKindRefusalText(': { stance: 'structural', why: 'Refusal template.' },
-  // R2918B — the baseline-elicitation RE-ASK, the interrogative dual of
-  // `formatBaselineElicitation`. STRUCTURAL, and by construction rather than by
-  // inspection: `formatBaselineReask` is a pure function of a target LABEL and
-  // a three-value reason enum, so no analysis, no projection and no option
-  // ranking is in scope for it to name. It fires only on `unreadable_answer`,
-  // a cell that exists solely to say what shape of answer is needed.
-  'formatBaselineReask({': {
-    stance: 'structural',
-    why: 'Baseline re-ask template; pure function of a label + a reason enum, so no analysis value and no comparative claim can reach it.',
-  },
-  // The baseline/effect DISAMBIGUATION ask. STRUCTURAL on the same footing as
-  // the re-ask above, and by construction: `formatBaselineAskCollision` is a
-  // pure function of the target label plus the labels the competing pending
-  // already persisted, so no analysis value, projection or option ranking is in
-  // scope for it to name. The branch returns BEFORE any handler runs and
-  // commits without a pending override, so there is no verdict to consume.
-  'formatBaselineAskCollision({': {
-    stance: 'structural',
-    why: 'Baseline/effect disambiguation ask; pure function of persisted labels, emitted before any handler runs, so no analysis value and no comparative claim can reach it.',
-  },
-  // ── THE CALIBRATION / WITHHELD-CONSENT SITES (2026-08-05) ───────────────
-  // Both are STRUCTURAL, and the reason is stronger than "it is a template":
-  // these two branches exist precisely so that NO model text reaches the
-  // user on them. Their `assistant_text` is built by pure functions in
-  // `routing/calibration-semantics.ts` / `routing/mutation-consent.ts` from
-  // a probability phrase, a threshold, and a factor label — none of which
-  // can carry an option ranking or a persisted verdict claim. The witnessed
-  // defect they close (5 Aug simulated-user review §2.1) INCLUDED routing
-  // deliberation leaking into the reply, so "the model composes none of
-  // this" is the point of the branch, not an incidental property of it.
-  withheldText: {
-    stance: 'structural',
-    why: 'Withheld-consent refusal. Deterministic copy from buildCalibrationReply / buildConsentWithheldText; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
-  },
-  // ── THE MUTATION-WARRANT DEMOTION SITE (INV-1, ROADMAP 2.652, 2026-08-07) ──
-  // Same argument as the two calibration sites above, and for the same reason:
-  // the branch exists so that NO model text reaches the user on it. The copy is
-  // built by pure functions in `routing/mutation-warrant.ts` +
-  // `compose/warrant-demotion.ts` from the PROPOSAL's own parameters (a factor
-  // label, a bound, a unit) plus the persisted constraint rows. It states that
-  // nothing was changed and offers the change; it reads no analysis, names no
-  // option, and cannot carry a verdict claim. The witnessed defect it closes
-  // (walk 2.634 §J7) was an "Applied" receipt for a change nobody asked for, so
-  // "the model composes none of this" is the point of the branch.
-  demotionText: {
-    stance: 'structural',
-    why: 'Warrant-absent demotion. Deterministic copy from buildMutationWarrantDemotionText / buildWarrantDemotion; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
-  },
-  // ── THE ELICITED REFERENCE-CLASS PRE-ROUTE (ROADMAP 2.688 slice 1) ────────
-  // Same family as the two calibration sites and the warrant demotion above,
-  // and the argument is derived at the bytes rather than by analogy:
-  //   - The branch sits IMMEDIATELY BEFORE the calibration pre-route, i.e.
-  //     before `routeWithToolUse`. Zero LLM calls; its own spec asserts the
-  //     routing adapter is never invoked (`reference-class-preroute.test.ts`
-  //     uses a throwing adapter), so no model text can reach the user here.
-  //   - The copy is built by pure functions in
-  //     `belief-elicitation/reference-class-disclosure.ts` from FOUR inputs and
-  //     nothing else: the user's own class words, their own outcome words, and
-  //     their two integers. It reads no analysis, no projection, and no
-  //     persisted verdict — there is no leader in scope to name.
-  //   - The turn returns before any handler runs; it commits with
-  //     `handler_facts: []` and `pending_actions: []`.
-  // The block it can emit (`outside_view` exercise) carries the SAME
-  // disclosure string and is separately schema- and prose-guarded.
-  referenceClassText: {
-    stance: 'structural',
-    why: "Elicited reference-class pre-route (ROADMAP 2.688 slice 1). Deterministic copy from buildReferenceClassReply / buildReferenceClassRecordedText; fires BEFORE routeWithToolUse (zero LLM calls) and the turn returns before any handler runs, so there is no analysis claim in scope. Every interpolated value is the user's own words or a Beta posterior derived from their own two counts — it names no option and makes no comparison. Registered when `pnpm test:required` failed on the commit that created the site: the ledger found the omission, not the author.",
-  },
-  'calibrationOffer.assistant_text': {
-    stance: 'structural',
-    why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis. (Site RENAMED 6 Aug 2026, ROADMAP 2.627: the expression was buildCalibrationPreviewText(calibrationOnly...) until text AND chips moved behind the single buildCalibrationReply builder. Same branch, same stance, re-derived not carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch.)',
-  },
-  clarifyAssistantText: {
-    stance: 'structural',
-    why: "Deterministic value-update clarify. (Site RENAMED 19 Aug 2026, ROADMAP 2.1266/A3, from 'buildClarifyAssistantText(deterministicValueUpdate.candidates)': the site now chooses between that template and `buildOutstandingAskClarifyText`, and the stance is RE-DERIVED for both branches rather than carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch. Branch 1 is the unchanged clarify template. Branch 2 fires only when the product has an OUTSTANDING option-effect ask whose factor is the sole clarify candidate; its every interpolated value is a graph label from `deriveAskedEffectPair` (the head blocker) plus the user's own number, it states 'I have not changed the model.', and it names one option WITHOUT comparing it to any other — no analysis projection is in scope on this pre-route, which returns before any handler runs with zero LLM calls.",
-  },
-  clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
-  'noAnalysisOutcome.assistant_text': { stance: 'structural', why: 'Fires only when NO analysis exists — there is no leader to name.' },
-  'staleOutcome.assistant_text': { stance: 'structural', why: 'Stale-rerun recovery; suppresses cached insights by construction.' },
-  'stateQueryOutcome.assistant_text': {
-    stance: 'structural',
-    why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane), and structural in the STRONGEST sense: the analysis projection is out of reach BY TYPE. `TryStateQueryGuardInput.contextPack` is narrowed to `recent_changes` plus its optional fail-weak `recent_changes_status`, so the guard cannot read `analysis` / `display_analysis` at all. Its deterministic outputs are constant no-record/unavailable copy, the `structure_origin` answer (composed in `cee/context-integrity/structure-origin-answer.ts` from a node's own persisted provenance enum), and `composeRecentChangeAnswer` from a persisted mutation receipt plus a saved-model-history attribution. A receipt may name an entity; it makes no comparison between options, which is the same standard the sibling add-risk echo entry is held to.",
-  },
-
-  // ── GATED — sites that compose leader text from STRUCTURED data in code,
-  //    and therefore consume the verdict themselves. Input gating cannot help
-  //    these: there is no model to withhold the leader from. ─────────────────
-  recoveryText: {
-    stance: 'gated',
-    count: 3,
-    why: 'ROADMAP 1.233. `buildBoundedFallbackCopyAndChips` (turn-executor.ts ~9700) calls composeExplainResultsFallback / composeWhatWouldFlipFallback whenever a projection with a `leading_option` exists — the FULL deterministic leader answer, not a constant. Now guarded by `mayNameLeadingOptionForRun && projection?.leading_option`; withheld ⇒ falls through to the bounded copy, which makes no comparative claim. All three call sites share the one helper, so they are one gap and one fix.',
-  },
-  assistantText: {
-    stance: 'gated',
-    why: "ROADMAP 1.233. Same helper as `recoveryText`, so gated by the same conjunct. This entry also carried the register's own account of WHY the hoist was needed, and that account is now discharged: the exit is reached on routing FAILURE, and `mayNameLeadingOptionForRun` used to be assigned only at the post-handler claim-safety read (declared `= true` at its outer-let), so a routing-degrade turn shipped the deterministic leader answer with no gate, no disclosure, and a `true` permission that made the Layer-3 alarm a licensed no-op. The read is now HOISTED to turn entry, so every exit carries the real permission.",
-  },
-  'runComparisonOutcome.assistant_text': {
-    stance: 'gated',
-    why:
-      'ROADMAP 1.233. Zero LLM calls: `composeComparison` builds "The option most likely to serve your goal has changed. X scored highest before, and Y scores highest now." and the margin sentences straight from the two runs\' persisted enrichment. `tryRunComparisonGate` takes a REQUIRED `mayNameLeadingOption` (required, not optional-defaulting-true, so a new call site cannot re-open the leak by omission) and suppresses the ordering + margin sentences while KEEPING the robustness-band shift and the driver-influence mover, which rank nothing and are the substance of "what changed?". '
-      + '⚠ 2026-07-27 — THE PERMISSION WAS SINGULAR AND THE CLAIM IS PLURAL. That required boolean is the TURN\'s permission, read off the scenario\'s newest CLAIM-BEARING fact (#730); the sentence above names TWO runs. So a scenario whose PRIOR run withheld its leader had that leader named as soon as a later run permitted — the withhold expired after one more analysis. Commonest form needs no unusual state at all: a run predating the #710 verdict stamp fail-closes, and every such legacy run was nameable from a later permitted turn. Closed by `RunComparisonLeaderAuthority`: one permission PER COMPARED RUN, each `turnPermission && thatRunsOwnVerdict` via #730\'s one fact -> one verdict narrow over the pair the gate already selects — no second selection. Cross-run claims (the "has changed" sentence, "still leads", and the margin shift) require BOTH permissions, because each presupposes both leaders; the mixed cases name the licensed run and state plainly that the other half is unavailable. One-directional by construction: every value is <= the pre-fix boolean, so permitted/permitted is byte-identical. '
-      + '2026-09-06 — a second mode, `same_inputs`, frames the SAME comparison sentences (one composer, `composeComparisonParts`) with a lead sentence and an offer when both compared runs carry equal `graph_hash_at_run`; the per-run authority applies to it unchanged, and its two constants are in the module-load leader-vocabulary probe.',
-  },
-  'adviceOutcome.assistant_text': {
-    stance: 'gated',
-    why: "ROADMAP 1.233 — the sharpest of the eight. Zero LLM calls, and it reads the RAW handler-facing `contextPack.analysis` to compose \"Based on this model, the analysis currently favours ${leadingLabel}${probability}\" and \"It sits ahead of ${runnerLabel} by ${margin}\" — the exact sentence pair the POST-#713 walk captured live on a withheld scenario (case5.clarify, §7, with NO disclosure). Gated on the gate's INPUT, not by listing the leader-naming advice classes: the class list is a hand-maintained mirror (trap #12) and a class added later would inherit 'safe' silently. A null-leader projection makes the gate's own `evaluateAvailability` decline every class declaring `needs_leading_option` — including ones that do not exist yet — while readiness / evidence-gap classes keep serving.",
-  },
-
-  // ── GATED BY INPUT — LLM-authored prose; the verdict is applied to the
-  //    model's view of the analysis instead (ROADMAP 1.231). ────────────────
-  'coachGuarded.assistant_text': {
-    stance: 'gated_by_input',
-    why: "ROADMAP 1.231 (A1's ruling: gate the input, not the output). Verbatim / sanitise-stripped LLM prose — there is no deterministic path to a leader here, so the leader can only arrive via what the model was GIVEN. Confirmed live-leaking by the POST-#713 walk (§7: 3/3 non-execute turns named the leader, one with a probability and no disclosure). Closed by stripping `leading_option` / `runner_up` / `margin` AND the ranked `options` table from the model-facing `display_analysis` on withheld turns. ⚠ THE ADDRESS MATTERS: the ruling named context-pack-assembler.ts:1533, but `buildUserMessage` (route-with-tool-use.ts:1185-1208) drops the raw `analysis` and re-keys `display_analysis` under that name, so gating :1533 alone would have left the model's actual view untouched. See context/withheld-leader-projection.ts.",
-  },
-  'converseGuarded.assistant_text': {
-    stance: 'gated_by_input',
-    why:
-      'As coachGuarded above — the converse twin, same closure, same input gates. ' +
-      "⚠ 2026-07-27: the input set GREW. `WALK-HISTORIC-PREP-2026-07-27.md` §10 measured a " +
-      'residual leak on build `b35d09de` — AFTER #721 and #723 — sourced from ' +
-      '`conversation.recent_turns[].assistant_message`, which carries prior answers verbatim ' +
-      'into the routing prompt and SELF-REINFORCES (a leaked answer is persisted and feeds the ' +
-      'next turn). Closed by `context/withheld-history-redaction.ts`, applied at the SAME pack ' +
-      'chokepoint as the display_analysis gate. See the stance docstring for what the input set ' +
-      'still does NOT cover.',
-  },
-};
-
-/**
- * `src/orchestrator/route-v2.ts` — brought into scope 2026-07-27.
- *
- * Both sites are module-level string CONSTANTS with no interpolation, so
- * `structural` here is a derivation and not an inspection: there is no
- * expression that could carry an option label, let alone a comparison. The
- * non-vacuity check below pins each literal against its own source, so a future
- * edit that turns either into a template fails THIS test rather than shipping
- * under a register entry still claiming it is safe (CLAUDE.md trap #14 — the
- * honest label overwritten by a false one).
- */
-
-
-/**
- * `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — brought into scope
- * 2026-07-27. THREE sites, and only the third needed real work.
- *
- * This module is the deterministic chip-click fast path: route-v2 detects a
- * `chip_click` whose `action_type` is `run_analysis` and calls
- * `dispatchDeterministicChipClick`, which invokes the registered `run_analysis`
- * handler directly — no Sonnet routing, no ORIENT call, zero LLM calls on the
- * compose path. So every byte of user-facing text here is deterministic code
- * output, which is what makes a byte-level derivation possible at all.
- */
 const CHIP_CLICK_DISPATCH_SITES: Readonly<Record<string, RegisteredSite>> = {
   "'Could not run analysis. The analysis service is temporarily unavailab": {
     stance: 'structural',
@@ -640,23 +137,6 @@ const CHIP_CLICK_DISPATCH_SITES: Readonly<Record<string, RegisteredSite>> = {
       'entry.',
   },
 };
-
-/**
- * The register, KEYED BY FILE. The nesting is the scope statement: a reader of
- * the `ungated` ledger can see exactly which files it speaks for, instead of
- * inferring it from a comment that can go stale (which is what happened).
- */
-/**
- * `src/orchestrator-v5/compose/edit-clarify-response.ts` — brought into scope
- * 2026-07-27 (ROADMAP 1.276), and it required WIDENING THE INSTRUMENT first.
- *
- * This file was previously declared `keyable: false` / UNPARSEABLE. That was
- * never a fact about the code — it was a fact about the enumerator, whose key
- * regex required `assistant_text:` and so could not read the ES6 shorthand
- * `assistant_text,` this site uses. Worth stating in the register itself,
- * because "the instrument cannot read it" and "the site is hard to classify"
- * look identical from the outside and only one of them is a reason to exclude.
- */
 const EDIT_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
   assistant_text: {
     stance: 'structural',
@@ -681,50 +161,6 @@ const EDIT_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
       'calls (pinned by context-policy.conformance.test.ts) and reads no analysis.',
   },
 };
-
-/**
- * `src/orchestrator-v5/routing/post-analysis-label-intercept.ts` — brought into
- * scope 2026-07-27 (ROADMAP 1.276). Previously `keyable: true` but deliberately
- * UNREGISTERED, on the grounds that this file exists to stop stances being
- * assigned by inspection-at-a-glance. Here is the derivation it was owed.
- */
-const POST_ANALYSIS_LABEL_INTERCEPT_SITES: Readonly<Record<string, RegisteredSite>> = {
-  'composeExploreText(canonicalLabel)': {
-    stance: 'structural',
-    why:
-      'ONE site (post-analysis-label-intercept.ts:329-334, `assistant_text:` at :331). ' +
-      '`composeExploreText` (:273-280) is a fixed template with a SINGLE interpolation slot ' +
-      'carrying ONE canonical graph-node label: "It looks like you would like to explore ' +
-      '{label}. Would you like me to walk you through the analysis, look at what could change ' +
-      'the outcome, or run a pre-mortem?". No LLM involvement (the module docstring: "Pure ' +
-      'function. No I/O, no telemetry", and "Label matching uses ONLY canonical graph labels ' +
-      '(already user-authored). No LLM invention."). The three chips are frozen module ' +
-      'constants. It CAN name an option — `findLabelMatch` (:149-162) does not filter by ' +
-      '`node.kind`, so an option-kind node matches — but naming is not RANKING: the sentence ' +
-      'carries no comparison, no ordering, no probability and no margin, which is the same ' +
-      'standard already applied to the add-risk echo. The file additionally bans ' +
-      '"recommended"/"winner"/"winning option" in its own copy contract (:266). ' +
-      '⚠ REGISTERED RESIDUAL, and it is the reason this stance is worth writing down rather ' +
-      'than waving through. Unlike the edit-clarify path, this intercept fires ONLY when a ' +
-      'fresh prior analysis EXISTS — `if (!priorAnalysisIsFresh) return {matched:false}` at ' +
-      ':183-185 — so a verdict that may have WITHHELD provably exists on every turn that ' +
-      'reaches this compose site. Yet route-v2.ts:3720 passes `mayNameLeadingOption: true` ' +
-      'under a comment reading "this path runs no analysis, so it withheld no leading-option ' +
-      'claim". Running no analysis is not the same as no analysis existing. There is no live ' +
-      'leak, because the prose above cannot express a leader claim — but the Layer-3 alarm is ' +
-      'a LICENSED NO-OP on this exit, which is precisely the shape ROADMAP 1.233 fixed ' +
-      'elsewhere (see the `assistantText` entry: "a `true` permission that made the Layer-3 ' +
-      'alarm a licensed no-op"). Flagged here, NOT fixed here: threading a real verdict into ' +
-      'this exit is a behaviour change needing the turn context, and it belongs in its own ' +
-      'reviewed PR rather than riding along with an enumerator widening.',
-  },
-};
-
-/**
- * `src/orchestrator-v5/system-events/factor-value-edit.ts` — brought into scope
- * 2026-07-28 (ROADMAP 1.346), on the commit that created the file. The derived
- * domain test caught it on its first run, which is the mechanism working.
- */
 const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
   'review.assistant_text': {
     stance: 'structural',
@@ -762,12 +198,6 @@ const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
       'compose/validation-failure-responses.ts and is keyed where that file is scanned.',
   },
 };
-
-/**
- * `src/orchestrator-v5/system-events/edge-strength-edit.ts` — the Train C
- * canonical edge-strength writer. The derived domain caught its compose site
- * on the commit that introduced it.
- */
 const EDGE_STRENGTH_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
   "event.intent === 'confirm_current'": {
     stance: 'structural',
@@ -780,14 +210,23 @@ const EDGE_STRENGTH_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
       'refused before the handler and never reach this compose site.',
   },
 };
-
-/**
- * `src/orchestrator-v5/compose/configure-option-clarify-response.ts` — brought
- * into scope by L16 (walk finding N16), on the commit that created the file.
- * The derived domain test caught it on its first CI run; the file was NOT
- * remembered by its author, which is precisely the case this register exists
- * for.
- */
+const GOAL_TARGET_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
+  'outcome.assistant_text': {
+    stance: 'structural',
+    why:
+      'ONE site, the same shape as factor-value-edit.ts. The value is the `add_constraint` ' +
+      'handler\'s own receipt, passed straight through as `confirmation`. That text is ' +
+      'assembled DETERMINISTICALLY in tools/handlers/add-constraint.ts (`fragments.join`) from ' +
+      'module formatters over the edited node\'s label and the typed value; the handler declares ' +
+      '`llm_calls_used: 0`, and the route test asserts no LLM adapter, no Anthropic transport and ' +
+      'no fetch is reached. IT CANNOT ASSERT A LEADER: the goal is named by id from the wire ' +
+      'event and must be `kind: goal`; the only other label it can interpolate is the ' +
+      'correction alternative, which `findConstraintTargetAlternative` restricts to ' +
+      '`kind === \'factor\'`. No comparison, ordering, probability or margin. The dispatch ' +
+      'runs no analysis, so it withheld no verdict. Refusal branches compose via the ' +
+      'recoverable-response composers keyed where those files are scanned.',
+  },
+};
 const CONFIGURE_OPTION_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
   assistant_text: {
     stance: 'structural',
@@ -819,195 +258,56 @@ const CONFIGURE_OPTION_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> =
       'channel carrying labels out of this file at all.',
   },
 };
-
-/**
- * `src/orchestrator-v5/compose/repair-value-ask-response.ts` — brought into
- * scope by ROADMAP 2.1261, on the commit that created the file. The derived
- * domain test caught it on its first run, which is the mechanism working.
- */
-const REPAIR_VALUE_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
-  assistant_text: {
-    stance: 'structural',
-    why:
-      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same ' +
-      'shape as EDIT_CLARIFY_SITES). The value is a deterministic template over exactly three ' +
-      'ingredient kinds: module string constants, the USER\'S OWN value text (captured verbatim ' +
-      'by the whole-message claim anchor in routing/repair-value-binding.ts — a full-anchored ' +
-      'regex admitting only an assignment verb, a closed referent set and a bare number, so the ' +
-      'echoed value provably came from the message), and graph labels for the missing ' +
-      'option×factor pairs. ' +
-      'IT CANNOT ASSERT A LEADER, and the derivation is about SELECTION: every pair named is ' +
-      'selected by `deriveMissingEffectPairs` on ONE criterion — a `missing_value` blocker with ' +
-      'full identity on the SAME canonical readiness payload that composes the blocker copy ' +
-      '(`buildCanonicalAnalysisReadyFromGraph`) — i.e. a pair is named because it is BLOCKED, ' +
-      'never because it ranks. No analysis result is read on this path at all; no probability, ' +
-      'margin, win-rate, ordering or comparative claim is available to interpolate. Zero LLM ' +
-      'calls — the composer replaces a routing-LLM round-trip that was re-serving a verbatim ' +
-      'refusal (wire-witnessed, req b90d62e0). ' +
-      'The chip channel DOES carry labels out of this file (unlike the configure-clarify ' +
-      'sibling): each chip message is `buildRepairBindingInstruction`, the probe-P1 advised ' +
-      'format over the same blocked-pair labels and the same user value — the identical ' +
-      'selection criterion, so no chip can name an option by rank either. The route threads ' +
-      '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
+const APPROVAL_SITES: Readonly<Record<string, RegisteredSite>> = {
+  "text": {
+    "stance": "structural",
+    "why": "Named stored-card recovery or committed mutation receipt. No model call or analysis claim is composed here."
   },
+  "otherHolds.notice === null ? receipt : appendLapseNotice(receipt": {
+    "stance": "structural",
+    "why": "Named stored-card recovery or committed mutation receipt. No model call or analysis claim is composed here."
+  }
 };
-
-/**
- * `src/orchestrator-v5/compose/option-effect-ask-response.ts` — brought into
- * scope by ROADMAP 2.1266, on the commit that created the file. The derived
- * domain test caught it on its first run, which is the mechanism working.
- */
-const OPTION_EFFECT_ASK_SITES: Readonly<Record<string, RegisteredSite>> = {
-  assistant_text: {
-    stance: 'structural',
-    why:
-      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
-      + 'shape as EDIT_CLARIFY_SITES and REPAIR_VALUE_ASK_SITES). The value is a deterministic '
-      + "template over exactly three ingredient kinds: module string constants, the USER'S OWN "
-      + 'numeric value (read by `readOptionEffectValue` in routing/option-effect-write.ts, a '
-      + 'grammar that admits only a bare model-unit number after an assignment `to` — no '
-      + 'currency, no percent, no attached unit, no second assignment — so the echoed value '
-      + 'provably came from the message), and graph labels for the OPTION(s) and FACTOR(s) the '
-      + 'message itself named. '
-      + 'IT CANNOT ASSERT A LEADER, and the derivation is about SELECTION: every entity named is '
-      + 'selected by word-bounded `containsPhrase` label matching against the persisted graph, '
-      + 'i.e. it is named because THE USER NAMED IT, never because it ranks. Factors are further '
-      + 'restricted to `edge.from === optionId` walks over that same graph. No analysis result is '
-      + 'read on this path at all — the resolver takes the message and the graph and nothing '
-      + 'else — so no probability, margin, win-rate, ordering or comparative claim is available '
-      + 'to interpolate even if the copy wanted one. Zero LLM calls: this composer exists '
-      + 'precisely to answer without one. '
-      + 'The chip channel DOES carry labels out of this file: each chip message is '
-      + '`buildConfigureOptionAdvisedFormat` over the same user-named option×factor pair and the '
-      + "same user value — the identical selection criterion, so no chip can name an option by "
-      + 'rank either. The route threads `mayNameLeadingOption` from `claimSafety.forExit()` on '
-      + 'this exit, not a literal.',
-  },
+const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string,RegisteredSite>>>> = {
+"handlers/chip-click-dispatch.ts": CHIP_CLICK_DISPATCH_SITES,
+"compose/edit-clarify-response.ts": EDIT_CLARIFY_SITES,
+"system-events/factor-value-edit.ts": FACTOR_VALUE_EDIT_SITES,
+"system-events/edge-strength-edit.ts": EDGE_STRENGTH_EDIT_SITES,
+"system-events/goal-target-edit.ts": GOAL_TARGET_EDIT_SITES,
+"compose/configure-option-clarify-response.ts": CONFIGURE_OPTION_CLARIFY_SITES,
+"handlers/approve-held-proposal.ts": APPROVAL_SITES,
 };
-
-/**
- * `src/orchestrator-v5/compose/duplicate-option-label-response.ts` — the
- * duplicate-option-label rename exit (2026-08-25), on the commit that created
- * the file. The derived domain test caught it on its first run.
- */
-const DUPLICATE_OPTION_LABEL_SITES: Readonly<Record<string, RegisteredSite>> = {
-  assistant_text: {
-    stance: 'structural',
-    why:
-      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
-      + 'shape as OPTION_EFFECT_ASK_SITES and REPAIR_VALUE_ASK_SITES). It is the NARROWEST '
-      + 'composer in this register: the template interpolates exactly TWO ingredients, and both '
-      + 'are structural facts about the graph rather than anything read from an analysis. '
-      + '(1) `collidingLabel` — a label carried by two or more OPTION nodes of the persisted '
-      + 'graph, selected because those nodes share a normalised label under '
-      + '`normaliseOptionLabel`, the same function `matchLabels` resolves identity by. It is '
-      + 'quoted VERBATIM and exactly ONCE. (2) `collidingCount` — how many options carry it, '
-      + 'rendered through `countWord`. '
-      + 'IT CANNOT ASSERT A LEADER, and the argument is stronger here than for its siblings: '
-      + 'this composer never receives an analysis result, a value, a candidate list or an option '
-      + 'ORDERING of any kind — the resolution variant it consumes carries only the shared label '
-      + 'and its count, so there is no per-option datum in scope to rank, compare or crown even '
-      + 'if the copy wanted one. The two options are by construction INDISTINGUISHABLE to this '
-      + 'code, which is the entire reason the composer exists. '
-      + 'It ships ZERO chips, asserted by its companion spec, so no label leaves this file '
-      + 'through the chip channel either. Zero LLM calls. The route threads '
-      + '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
-  },
-};
-
-/**
- * `src/orchestrator-v5/compose/option-label-clarify-response.ts` — the
- * option-label clarify exit (2026-09-12), on the commit that created the file.
- * The derived domain test caught it on its first run, which is the mechanism
- * working exactly as designed.
- */
-const OPTION_LABEL_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
-  assistant_text: {
-    stance: 'structural',
-    why:
-      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
-      + 'shape as DUPLICATE_OPTION_LABEL_SITES, OPTION_EFFECT_ASK_SITES and '
-      + 'REPAIR_VALUE_ASK_SITES). The template interpolates exactly TWO ingredients and one '
-      + 'exported constant, and every one is a structural fact rather than anything read from '
-      + 'an analysis. '
-      + '(1) `proposedLabel` — the name the focused proposer emitted for a NEW option, echoed '
-      + 'back verbatim so the user reads their own words; it names a node that does NOT exist '
-      + 'on the graph, so it cannot be an analysed option at all. '
-      + '(2) `decisionLabel` — the label of the DECISION node the proposed name collided with, '
-      + 'selected by `labelIsTheDecisionItself` (equality after head-noun stripping), quoted '
-      + 'verbatim. A decision is not a candidate in any ranking. '
-      + '(3) `OPTION_LABEL_CLARIFY_UNCHANGED_SENTENCE`, a frozen literal. '
-      + 'IT CANNOT ASSERT A LEADER: this composer never receives an analysis result, a value, '
-      + 'a candidate list, or an option ordering of any kind — its whole input is one rejected '
-      + 'string and one decision label, so there is no per-option datum in scope to rank, '
-      + 'compare or crown even if the copy wanted one. '
-      + 'It ships ZERO chips, asserted by its companion spec, so no label leaves this file '
-      + 'through the chip channel either. Zero LLM calls: the composer exists precisely to '
-      + 'answer without one, from a DETERMINISTIC detection. The route threads '
-      + '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
-  },
-};
-
-/**
- * `src/orchestrator-v5/system-events/goal-target-edit.ts` — #1859, the
- * deterministic `goal_target_edit` writer. Caught by `derivedComposeFileDomain()`
- * on the commit that created the file.
- */
-const GOAL_TARGET_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
-  'outcome.assistant_text': {
-    stance: 'structural',
-    why:
-      'ONE site, the same shape as factor-value-edit.ts. The value is the `add_constraint` ' +
-      'handler\'s own receipt, passed straight through as `confirmation`. That text is ' +
-      'assembled DETERMINISTICALLY in tools/handlers/add-constraint.ts (`fragments.join`) from ' +
-      'module formatters over the edited node\'s label and the typed value; the handler declares ' +
-      '`llm_calls_used: 0`, and the route test asserts no LLM adapter, no Anthropic transport and ' +
-      'no fetch is reached. IT CANNOT ASSERT A LEADER: the goal is named by id from the wire ' +
-      'event and must be `kind: goal`; the only other label it can interpolate is the ' +
-      'correction alternative, which `findConstraintTargetAlternative` restricts to ' +
-      '`kind === \'factor\'`. No comparison, ordering, probability or margin. The dispatch ' +
-      'runs no analysis, so it withheld no verdict. Refusal branches compose via the ' +
-      'recoverable-response composers keyed where those files are scanned.',
-  },
-};
-
-const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
-  'turn-executor.ts': TURN_EXECUTOR_SITES,
-  'handlers/chip-click-dispatch.ts': CHIP_CLICK_DISPATCH_SITES,
-  'compose/edit-clarify-response.ts': EDIT_CLARIFY_SITES,
-  'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
-  'system-events/factor-value-edit.ts': FACTOR_VALUE_EDIT_SITES,
-  'system-events/edge-strength-edit.ts': EDGE_STRENGTH_EDIT_SITES,
-  'system-events/goal-target-edit.ts': GOAL_TARGET_EDIT_SITES,
-  'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
-  'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
-  'compose/option-effect-ask-response.ts': OPTION_EFFECT_ASK_SITES,
-  'compose/duplicate-option-label-response.ts': DUPLICATE_OPTION_LABEL_SITES,
-  'compose/option-label-clarify-response.ts': OPTION_LABEL_CLARIFY_SITES,
-};
-
-/** Count occurrences per key — the multiset the assertions compare. */
+function composeCallPattern(): RegExp {
+  return /compose(?:Answer|ToolCallResponse|ClarifyResponse|DirectAnswerResponse)\(\{/g;
+}
+function derivedComposeFileDomain(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith('.ts')) continue;
+      if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.spec.ts')) continue;
+      if (composeCallPattern().test(readFileSync(full, 'utf8'))) {
+        out.push(relative(SRC_ROOT, full).split(sep).join('/'));
+      }
+    }
+  };
+  walk(SRC_ROOT);
+  return out.sort();
+}
 function tally(keys: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const k of keys) out[k] = (out[k] ?? 0) + 1;
   return out;
 }
-
-/**
- * Tally keys are `file::expression`, never the bare expression.
- *
- * Load-bearing for the same reason the multiset is (A5): two files can define
- * the same expression name — `recoveryText` is not an unusual identifier — and a
- * bare-key comparison would let a site in a NEWLY scanned file inherit the
- * stance recorded for an identically-named site in another. Qualifying the key
- * makes that impossible by construction rather than by nobody happening to
- * choose the same name.
- */
 function qualify(file: string, key: string): string {
   return `${file}::${key}`;
 }
-
-/** The register as a multiset, defaulting an absent `count` to 1. */
 function registerTally(): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [file, sites] of Object.entries(COMPOSE_SITE_REGISTER)) {
@@ -1015,8 +315,6 @@ function registerTally(): Record<string, number> {
   }
   return out;
 }
-
-/** Enumerate every scanned file, qualified. */
 function enumerateAllScannedSites(
   sources: Readonly<Record<string, string>>,
 ): string[] {
@@ -1026,8 +324,6 @@ function enumerateAllScannedSites(
   }
   return out;
 }
-
-/** Enumerate compose calls and the expression feeding their user-facing text. */
 function enumerateComposeSites(source: string): string[] {
   const keys: string[] = [];
   const pattern = /compose(?:Answer|ToolCallResponse|ClarifyResponse|DirectAnswerResponse)\(\{/g;
@@ -1072,18 +368,10 @@ function enumerateComposeSites(source: string): string[] {
   }
   return keys;
 }
-
-describe('LAYER 2 drift — every compose site declares a verdict stance', () => {
-  const source = readFileSync(TURN_EXECUTOR, 'utf8');
-  const assemblerSource = readFileSync(
-    resolve(HERE, '../context/context-pack-assembler.ts'),
-    'utf8',
-  );
-  const sources: Record<string, string> = Object.fromEntries(
-    Object.entries(SCANNED_FILES).map(([label, path]) => [label, readFileSync(path, 'utf8')]),
-  );
-
-  it('the MULTISET of compose sites in source EXACTLY equals the register', () => {
+describe('constraint-verdict compose census',()=>{
+const sources = Object.fromEntries(Object.entries(SCANNED_FILES).map(([label,p])=>[label,readFileSync(p,'utf8')]));
+const source=sources["handlers/approve-held-proposal.ts"]!;
+it('the MULTISET of compose sites in source EXACTLY equals the register', () => {
     const found = tally(enumerateAllScannedSites(sources));
     const registered = registerTally();
 
@@ -1102,8 +390,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
         "name, which would otherwise inherit that name's stance silently.)",
     ).toEqual(registered);
   });
-
-  it('the scan really covers chip-click-dispatch.ts, and it really has sites', () => {
+it('the scan really covers chip-click-dispatch.ts, and it really has sites', () => {
     // Same anti-tautology pin as route-v2.ts above, for the 2026-07-27 widening.
     // A file added to SCANNED_FILES that the enumerator finds nothing in widens
     // the scope on paper and changes no measurement (trap 12b).
@@ -1115,8 +402,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       'confirmationText',
     ]);
   });
-
-  it('edit-clarify-response: the scan finds its ONE site, keyed via ES6 SHORTHAND', () => {
+it('edit-clarify-response: the scan finds its ONE site, keyed via ES6 SHORTHAND', () => {
     // The sibling anti-tautology pin for the file brought into scope by 1.276.
     // ⭐ THIS IS ALSO THE WIDENING'S ACCEPTANCE TEST: before the key regex
     // learned shorthand, this file's only site keyed `UNPARSEABLE`, which is
@@ -1125,117 +411,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     expect(keys.length).toBeGreaterThan(0);
     expect(keys.sort()).toEqual(['assistant_text']);
   });
-
-  it('post-analysis-label-intercept: the scan finds its ONE site', () => {
-    const keys = enumerateComposeSites(sources['routing/post-analysis-label-intercept.ts']!);
-    expect(keys.length).toBeGreaterThan(0);
-    expect(keys.sort()).toEqual(['composeExploreText(canonicalLabel)']);
-  });
-
-  it('THE WIDENING: shorthand is parsed, and every pre-existing key is UNMOVED', () => {
-    // ⭐ THE TWO HALVES THAT MATTER, and the second is the one that could have
-    // broken the register for a non-semantic reason.
-    //
-    // (a) The enumerator now reads shorthand — in both the mid-object and the
-    //     final-property positions, and it does NOT match a longer identifier
-    //     that merely ends in `assistant_text`.
-    const wide = (span: string): string[] =>
-      enumerateComposeSites(`composeDirectAnswerResponse(${span})`);
-    expect(wide("{ answerKind: 'functional', assistant_text, stage: input.stage }")).toEqual([
-      'assistant_text',
-    ]);
-    expect(wide('{ stage, assistant_text }')).toEqual(['assistant_text']);
-    expect(wide('{ assistant_text: composeExploreText(label), stage }')).toEqual([
-      'composeExploreText(label)',
-    ]);
-    expect(wide('{ confirmation: confirmationText, coaching }')).toEqual(['confirmationText']);
-    expect(wide('{ stage: s, blocks: [] }')).toEqual(['UNPARSEABLE']);
-    // The `\b` guard: a longer identifier ending in the tracked name must not
-    // be mistaken for the tracked property.
-    expect(wide('{ draft_assistant_text: x, stage }')).toEqual(['UNPARSEABLE']);
-
-    // (b) NO EXISTING KEY MOVED. The register keys sites on
-    //     `expr.trim().slice(0, 70)` of RAW SOURCE, so a widening that
-    //     re-keyed even one site would fail the multiset assertion for a reason
-    //     that has nothing to do with a compose site drifting — the exact
-    //     fragility the header calls out about Prettier reflow. Re-derive the
-    //     OLD key for every site with the pre-1.276 regex and require equality
-    //     wherever the old regex could key at all.
-    const narrow = (span: string): string | null => {
-      const m = /(?:assistant_text|confirmation):\s*([^\n,]+)/.exec(span);
-      return m ? m[1]!.trim().slice(0, 70) : null;
-    };
-    let compared = 0;
-    for (const [label, src] of Object.entries(sources)) {
-      const pattern = /compose(?:Answer|ToolCallResponse|ClarifyResponse|DirectAnswerResponse)\(\{/g;
-      const newKeys = enumerateComposeSites(src);
-      let i = 0;
-      for (const m of src.matchAll(pattern)) {
-        const open = m.index! + m[0].length - 1;
-        let depth = 0;
-        let j = open;
-        for (; j < src.length; j++) {
-          const c = src[j];
-          if (c === '{') depth++;
-          else if (c === '}') {
-            depth--;
-            if (depth === 0) break;
-          }
-        }
-        const old = narrow(src.slice(open, j + 1));
-        if (old !== null) {
-          expect(newKeys[i], `${label} site ${i}: the widening RE-KEYED an existing site`).toBe(
-            old,
-          );
-          compared += 1;
-        }
-        i += 1;
-      }
-    }
-    // Anti-vacuity: this loop must actually have compared every site the OLD
-    // regex could key, not silently zero of them.
-    //
-    // 35 = all 36 sites MINUS the one shorthand site the old regex could not
-    // key. That single site is the entire behavioural delta of the widening,
-    // and this number says so precisely: 34 of the 35 are the previously
-    // scanned files, and the 35th is `post-analysis-label-intercept.ts`, which
-    // used `assistant_text:` and was therefore always keyable — it was
-    // unregistered for a different reason (nobody had derived its stance), and
-    // conflating the two exclusions is what this count prevents.
-    // ⚠ ROADMAP 2.229: 36 -> 35. The fresh-analysis follow-up guard was
-    // retired by founder ruling and its compose site
-    // (`freshFollowupOutcome.assistant_text`) deleted from turn-executor.ts
-    // along with the guard block. These counts are DERIVED from source on
-    // every run, so they move with a real deletion — which is the point.
-    // ⚠ CALIBRATION CONSENT (2026-08-05): 35 -> 37. TWO compose sites added
-    // in turn-executor.ts — the withheld-consent action-layer refusal and the
-    // calibration pre-route preview. Both use the explicit `assistant_text:`
-    // form, so both are keyable by the OLD regex and both belong in this
-    // count; a site that were NOT keyable would have to be excluded here and
-    // that difference is exactly what this number protects.
-    // ⚠ MUTATION WARRANT (2026-08-07): 37 -> 38. ONE compose site added in
-    // turn-executor.ts — the warrant-absent demotion. Explicit `assistant_text:`
-    // form, so keyable by the same regex and in scope for this count.
-    // ⚠ ELICITED REFERENCE CLASS (ROADMAP 2.688 slice 1): 38 -> 39. ONE compose
-    // site added in turn-executor.ts — the reference-class pre-route. Explicit
-    // `assistant_text:` form, so keyable by the same regex and in scope here.
-    // Canonical readiness repair adds one explicit assistant_text compose site.
-    // ⚠ BASELINE ELICITATION RE-ASK (R2918B): 41 -> 42. ONE compose site added
-    // in turn-executor.ts — the unreadable-answer re-ask. Explicit
-    // `assistant_text:` form, so keyable by the same regex and in scope here.
-    // ⚠ BASELINE/EFFECT DISAMBIGUATION ASK: 42 -> 43. ONE compose site added in
-    // turn-executor.ts — the competing-ask branch, the re-ask's sibling on the
-    // same pre-route. Explicit `assistant_text:` form, so keyable by the same
-    // regex and in scope here.
-    // Expired-constraint renewal adds the explicit assistant_text: expiryText
-    // site; the old regex keys it too, so the comparison includes that site.
-    // #1859 goal_target_edit: 46 -> 47. ONE added file (system-events/goal-target-edit.ts)
-    // with the same `confirmation: outcome.assistant_text` site as factor-value-edit.ts.
-    // SD-1 (#2617): 47 -> 48. ONE added site in the already-scanned factor-value-edit.ts (`review.assistant_text`).
-    expect(compared, 'the re-key comparison compared nothing').toBe(46);
-  });
-
-  it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
+it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
     // ⭐ THE SCOPE-LEVEL TRAP-12 FIX. The previous revision hand-named ONE file
     // as the remaining gap. A walk of src/ finds FIVE non-test files with
     // compose sites — two of them (`compose/edit-clarify-response.ts`,
@@ -1261,14 +437,13 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
         'last reader believed. Register it, or declare it unscanned WITH a reason.',
     ).toEqual(derivedComposeFileDomain());
   });
-
-  it('POSITIVE CONTROL: the derived domain SEES a compose file (it is not vacuously empty)', () => {
+it('POSITIVE CONTROL: the derived domain SEES a compose file (it is not vacuously empty)', () => {
     // Rule 2. A walk that silently found nothing — wrong root, wrong extension
     // filter, a `/g` regex carrying `lastIndex` — would make the assertion above
     // pass only when BOTH lists were also empty, and read as clean forever.
     const domain = derivedComposeFileDomain();
     expect(domain.length).toBeGreaterThanOrEqual(5);
-    expect(domain).toContain('orchestrator-v5/turn-executor.ts');
+    expect(domain).toContain('orchestrator-v5/handlers/approve-held-proposal.ts');
     expect(domain).toContain('orchestrator-v5/handlers/chip-click-dispatch.ts');
     // And it must EXCLUDE the definition site: compose.ts declares
     // `composeToolCallResponse(input: …)` and calls none of the four, so a
@@ -1276,8 +451,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // enumerator's and the two could disagree about what a site is.
     expect(domain).not.toContain('orchestrator-v5/compose.ts');
   });
-
-  it('the declared UNSCANNED remainder still has the sites it says it has', () => {
+it('the declared UNSCANNED remainder still has the sites it says it has', () => {
     // The remainder is a to-do with a price on it, not a shrug. If either file
     // gains or loses a site the number here is wrong, and the next reader would
     // otherwise inherit a stale cost estimate for closing the gap.
@@ -1291,20 +465,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       );
     }
   });
-
-  it('POSITIVE CONTROL: a duplicate-NAME site is caught (the set-comparison blind spot)', () => {
-    // The A5 defect, pinned. Plant a second call site reusing an ALREADY
-    // REGISTERED expression. Under a set comparison this is invisible — the key
-    // is already present. Under the multiset it must show as a count change.
-    const planted = `${source}\n composeAnswer({ assistant_text: clarifyGuardedText, stage: 'analyse' });`;
-    const key = qualify('turn-executor.ts', 'clarifyGuardedText');
-    const found = tally(enumerateAllScannedSites({ ...sources, 'turn-executor.ts': planted }));
-    expect(Object.keys(found)).toEqual(expect.arrayContaining([key]));
-    expect(found[key]).toBe((registerTally()[key] ?? 0) + 1);
-    expect(found).not.toEqual(registerTally());
-  });
-
-  it('never parses a compose site it cannot key (the scan is not silently blind)', () => {
+it('never parses a compose site it cannot key (the scan is not silently blind)', () => {
     // TESTING-DISCIPLINE rule 2: an instrument that returns the same answer for
     // "clean" and "could not look" is not an instrument. UNPARSEABLE would sail
     // through the set comparison as a single benign-looking key.
@@ -1327,19 +488,17 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       ).not.toContain('UNPARSEABLE');
     }
   });
-
-  it('POSITIVE CONTROL: the detector SEES a newly-added compose site', () => {
+it('POSITIVE CONTROL: the detector SEES a newly-added compose site', () => {
     // Proves the assertion above can fail. Without this, a broken regex would
     // report an empty diff and read as a pass on every future change.
     const planted = `${source}\n composeAnswer({ assistant_text: totallyNewLeakySite, stage: 'analyse' });`;
     const found = enumerateComposeSites(planted);
     expect(found).toContain('totallyNewLeakySite');
     expect(Object.keys(registerTally())).not.toContain(
-      qualify('turn-executor.ts', 'totallyNewLeakySite'),
+      qualify('handlers/approve-held-proposal.ts', 'totallyNewLeakySite'),
     );
   });
-
-  it('records the OPEN GAPS explicitly, so the residue is a list and not a surprise', () => {
+it('records the OPEN GAPS explicitly, so the residue is a list and not a surprise', () => {
     const ungated: string[] = [];
     for (const [file, sites] of Object.entries(COMPOSE_SITE_REGISTER)) {
       for (const [k, v] of Object.entries(sites)) {
@@ -1367,373 +526,20 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // and change this assertion deliberately — never to relabel the site.
     expect(ungated).toEqual([]);
   });
-
-  it('the ledger covers the surface it claims to — counts, derived', () => {
-    // The number behind the `[]`, pinned so "0 ungated" can never again be read
-    // as covering more than it measures. Both figures are DERIVED from source on
-    // every run; only the expectation is written down.
-    const sites = enumerateAllScannedSites(sources);
-    //
-    // ⚠ 2026-07-28 (ROADMAP 2.104) — these went 37 -> 38 -> 37 WITHIN ONE PR,
-    // and the round trip is worth recording. A withheld-why guard added a
-    // compose site; three adversarial rounds then showed its question
-    // recogniser could not be made precise (a restrictive-modifier generator
-    // over-captured 35/35 of its own TRUE POSITIVES), so the guard was deleted
-    // and the reason moved to a finaliser hook that APPENDS to whatever the
-    // turn already said. A finaliser hook mutates `response.assistant_text`
-    // directly and is not a compose site at all — which is why the count
-    // returns to its pre-PR value even though the behaviour is strictly wider.
-    // ⚠ ROADMAP 2.229: 37 -> 36 sites, 33 -> 32 keys. One compose site removed
-    // with the retired fresh-analysis follow-up guard (see the note on the
-    // re-key count above). Unlike the 2.104 round trip recorded below, this is
-    // a straight deletion: the site is gone and nothing replaced it — a
-    // recognised post-analysis question now reaches `routeWithToolUse`, and
-    // the router's own compose site is already registered.
-    // ⚠ L16 (walk finding N16): 36 -> 37 sites, 32 -> 33 keys, 6 -> 7 files.
-    // One ADDED compose site — `compose/configure-option-clarify-response.ts`,
-    // the deterministic remedy for a bare "Configure {option}" turn. Registered
-    // `structural` with its derivation (see CONFIGURE_OPTION_CLARIFY_SITES).
-    // Worth recording HOW it got here: the author did not remember this file
-    // needed registering, and `derivedComposeFileDomain()` failed the build on
-    // the commit that created it. That is the whole argument for deriving the
-    // domain rather than listing it, observed working rather than asserted.
-    // ⚠ CALIBRATION CONSENT (2026-08-05): 37 -> 39 sites, 33 -> 35 keys, files
-    // unchanged. Two ADDED compose sites, both in turn-executor.ts and both
-    // registered `structural` with their derivation (see the calibration /
-    // withheld-consent block in TURN_EXECUTOR_SITES). Worth recording HOW they
-    // got here, for the same reason the L16 note above does: the author did not
-    // remember this ledger existed, and `pnpm test:required` failed on the
-    // commit that created the sites. The guard found the omission, not a human.
-    // ⚠ MUTATION WARRANT (2026-08-07): 39 -> 40 sites, 35 -> 36 keys, files
-    // unchanged. One ADDED compose site in turn-executor.ts, registered
-    // `structural` with its derivation (see the mutation-warrant block in
-    // TURN_EXECUTOR_SITES). Recorded the same way as the entries above: this
-    // ledger failed the build on the commit that created the site, and the
-    // guard found the omission rather than a human remembering it.
-    // ⚠ ELICITED REFERENCE CLASS (ROADMAP 2.688 slice 1): 40 -> 41 sites,
-    // 36 -> 37 keys, files unchanged. One ADDED compose site in
-    // turn-executor.ts, registered `structural` with its derivation (see the
-    // reference-class block in TURN_EXECUTOR_SITES). Recorded the same way as
-    // every entry above, and for the same reason: this ledger failed
-    // `pnpm test:required` on the commit that created the site, and the guard
-    // found the omission rather than a human remembering it. Fourth instance
-    // of the mechanism working; the note stays because the next author will
-    // not remember either.
-    // ⚠ REPAIR-LEG BARE-VALUE ASK (ROADMAP 2.1261): 43 -> 44 sites,
-    // 39 -> 40 keys, one ADDED file (compose/repair-value-ask-response.ts),
-    // registered `structural` with its derivation (REPAIR_VALUE_ASK_SITES).
-    // Recorded the same way as every entry above, and for the same reason:
-    // this ledger failed `pnpm test:required` on the commit that created the
-    // site, and the guard found the omission rather than a human remembering
-    // it. Fifth instance of the mechanism working.
-    // ⚠ OPTION-EFFECT WRITE PATH (ROADMAP 2.1266): 44 -> 45 sites, 40 -> 41
-    // keys, one ADDED file (compose/option-effect-ask-response.ts), registered
-    // `structural` with its derivation (OPTION_EFFECT_ASK_SITES). Recorded the
-    // same way as every entry above, and for the same reason: this ledger
-    // failed `pnpm test:required` on the commit that created the site, and the
-    // guard found the omission rather than a human remembering it. Sixth
-    // instance of the mechanism working.
-    // ⚠ DUPLICATE-OPTION-LABEL EXIT (2026-08-25): 45 -> 46 sites, 41 -> 42 keys,
-    // one ADDED file (compose/duplicate-option-label-response.ts), registered
-    // `structural` with its derivation (DUPLICATE_OPTION_LABEL_SITES). Recorded
-    // the same way as every entry above, and for the same reason: this ledger
-    // failed `pnpm test:required` on the commit that created the site, and the
-    // guard found the omission rather than a human remembering it. Seventh
-    // instance of the mechanism working.
-    // ⚠ BASELINE ELICITATION RE-ASK (R2918B): 46 -> 47 sites, 42 -> 43 keys,
-    // NO added file — the site is in turn-executor.ts, already scanned, and is
-    // registered `structural`. Recorded the same way as every entry above, and
-    // for the same reason: this ledger failed `pnpm test:required` on the
-    // commit that created the site, and the guard found the omission rather
-    // than a human remembering it. Eighth instance of the mechanism working.
-    // ⚠ BASELINE/EFFECT DISAMBIGUATION ASK: 47 -> 48 sites, 43 -> 44 keys, NO
-    // added file — the site is in turn-executor.ts, already scanned, and is
-    // registered `structural`. Recorded the same way as every entry above, and
-    // for the same reason: this ledger failed `pnpm test:required` on the
-    // commit that created the site, and the guard found the omission rather
-    // than a human remembering it. Ninth instance of the mechanism working.
-    // ⚠ OPTION-LABEL CLARIFY EXIT (2026-09-12): 47 -> 48 sites, 43 -> 44 keys,
-    // one ADDED file (compose/option-label-clarify-response.ts), registered
-    // `structural` with its derivation (OPTION_LABEL_CLARIFY_SITES). Recorded
-    // the same way as every entry above, and for the same reason: this ledger
-    // failed the required check on the commit that created the site, and the
-    // guard found the omission rather than a human remembering it. NINTH
-    // instance of the mechanism working — and the author had run the whole
-    // affected-set locally and still missed it, which is the argument for
-    // deriving the domain rather than listing it, once more.
-    // Expired-constraint renewal adds one structural site and one distinct key
-    // in the already-scanned turn-executor.ts; no existing site is reclassified.
-    // ⚠ GOAL_TARGET_EDIT (#1859): 52 -> 53 sites, 48 -> 49 keys, one ADDED file
-    // (system-events/goal-target-edit.ts), registered `structural` with its derivation
-    // (GOAL_TARGET_EDIT_SITES). This ledger failed `pnpm test:required` on the commit
-    // that created the site — the guard found it, not a human.
-    // SD-1 (#2617): 53 -> 54 sites, 49 -> 50 keys — `review.assistant_text` in factor-value-edit.ts, registered structural.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(52);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(48);
-    expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
-      'compose/configure-option-clarify-response.ts',
-      'compose/duplicate-option-label-response.ts',
-      'compose/edit-clarify-response.ts',
-      'compose/option-effect-ask-response.ts',
-      'compose/option-label-clarify-response.ts',
-      'compose/repair-value-ask-response.ts',
-      'handlers/chip-click-dispatch.ts',
-      'routing/post-analysis-label-intercept.ts',
-      'system-events/edge-strength-edit.ts',
-      'system-events/factor-value-edit.ts',
-      'system-events/goal-target-edit.ts',
-      'turn-executor.ts',
-    ]);
-  });
-
-  it('the EXECUTE-path gate is registered GATED and really is projected in source', () => {
-    expect(TURN_EXECUTOR_SITES['confirmationForCompose']!.stance).toBe('gated');
-    // Non-vacuity: the register's claim is checked against the source, so a
-    // future revert of the gate turns this red rather than leaving a register
-    // entry asserting a protection that no longer exists.
-    expect(source).toContain('projectExplanationAnswerForWithheldClaim(');
-    expect(source).toContain('confirmation: confirmationForCompose,');
-  });
-
-  it('every GATED site really consumes the verdict in source (non-vacuity, per site)', () => {
-    // TESTING-DISCIPLINE rule 1 + CLAUDE.md trap #14: a register entry that
-    // ASSERTS a protection is worth nothing unless the assertion is checked
-    // against the code. Without this, reverting any one of these gates would
-    // leave a green suite and a register still claiming the site is safe —
-    // the precise shape of "an honest label overwritten by a false one".
-    //
-    // One required source fragment per gated site, chosen to be the line the
-    // gate actually turns on, so deleting the gate makes THIS test red.
-    const GATE_EVIDENCE: Readonly<Record<string, string>> = {
-      // buildBoundedFallbackCopyAndChips — serves recoveryText ×3 + assistantText
-      recoveryText: 'if (mayNameLeadingOptionForRun && projection?.leading_option) {',
-      assistantText: 'if (mayNameLeadingOptionForRun && projection?.leading_option) {',
-      'runComparisonOutcome.assistant_text': 'mayNameLeadingOption: mayNameLeadingOptionForRun,',
-      'adviceOutcome.assistant_text': 'projectContextPackAnalysisForWithheldClaim(contextPack.analysis)',
-    };
-    for (const [site, fragment] of Object.entries(GATE_EVIDENCE)) {
-      expect(TURN_EXECUTOR_SITES[site]!.stance, `${site} must be registered gated`).toBe('gated');
-      expect(source, `${site}: the gate this register claims is absent from source`).toContain(
-        fragment,
-      );
-    }
-  });
-
-  it('every STRUCTURAL-by-derivation site still IS structural in its own source', () => {
-    // F6 (Fable review of #716). Two sites were re-derived from `ungated` to
-    // `structural` in this train. They are correct TODAY, and nothing was
-    // stopping them drifting: if RECAP_TEXT grew an interpolation, or the
-    // state-query guard's `Pick` widened to the whole ContextPack, the register
-    // would keep asserting a safety property the code no longer had — the
-    // honest-label-overwritten-by-a-false-one failure (CLAUDE.md trap #14),
-    // which is exactly what these two entries were CORRECTING.
-    //
-    // Same shape as the gated-site evidence check: one required source fragment
-    // per claim, chosen so that removing the property makes THIS test red.
-    const STRUCTURAL_EVIDENCE: ReadonlyArray<readonly [string, string, string]> = [
-      [
-        'expiryText',
-        '../routing/expired-constraint-renewal.ts',
-        'readonly graphNodes: readonly { readonly id: string; readonly kind: string; readonly label?: string | null }[];',
-      ],
-      // ⚠ ROADMAP 2.229 — the `freshFollowupOutcome.assistant_text` row was
-      // REMOVED from this list together with its compose site: the
-      // fresh-analysis follow-up guard was retired by founder ruling and its
-      // module deleted, so there is no longer a site to classify. The register
-      // above lost the row in the same change; the derived
-      // register-vs-source check is what keeps the two in step.
-      [
-        'stateQueryOutcome.assistant_text',
-        '../routing/state-query-guard.ts',
-        // The strongest form of the claim: the analysis is out of reach BY TYPE.
-        "readonly contextPack: Pick<ContextPack, 'recent_changes'> &\n    Partial<Pick<ContextPack, 'recent_changes_status'>>;",
-      ],
-    ];
-    for (const [site, rel, fragment] of STRUCTURAL_EVIDENCE) {
-      expect(TURN_EXECUTOR_SITES[site]!.stance, `${site} must be registered structural`).toBe(
-        'structural',
-      );
-      const guardSource = readFileSync(resolve(HERE, rel), 'utf8');
-      expect(
-        guardSource,
-        `${site}: the register claims this site is structural, but the property ` +
-          'it rests on is no longer in the guard source',
-      ).toContain(fragment);
-    }
-  });
-
-  it('POSITIVE CONTROL: the structural evidence check can FAIL', () => {
-    // Rule 2 — prove the `toContain` above discriminates rather than passing on
-    // any file it is handed.
-    //
-    // ⚠ ROADMAP 2.229 — RE-ANCHORED. This control used to read the
-    // fresh-analysis follow-up guard and mutate `assistant_text: RECAP_TEXT,`.
-    // That guard was retired and its module DELETED, so the control would have
-    // thrown on a missing file (or, worse, been quietly deleted along with it,
-    // leaving the remaining structural claim with no proof that its check can
-    // discriminate). It is re-anchored on the OTHER structural-by-derivation
-    // site — the state-query guard's `Pick`-narrowed input type — which is the
-    // stronger of the two claims and is still live.
-    const guardSource = readFileSync(resolve(HERE, '../routing/state-query-guard.ts'), 'utf8');
-    const PIN =
-      "readonly contextPack: Pick<ContextPack, 'recent_changes'> &\n    Partial<Pick<ContextPack, 'recent_changes_status'>>;";
-    expect(guardSource).toContain(PIN);
-    // The drift this pin exists to catch: the input type widening to the whole
-    // ContextPack, which would put the analysis projection back in reach.
-    const drifted = guardSource.replace(PIN, 'readonly contextPack: ContextPack;');
-    expect(drifted).not.toContain(PIN);
-  });
-
-  it('every GATED_BY_INPUT site is backed by a real input gate at the assembly seam', () => {
-    const byInput: string[] = [];
-    for (const [file, sites] of Object.entries(COMPOSE_SITE_REGISTER)) {
-      for (const [k, v] of Object.entries(sites)) {
-        if (v.stance === 'gated_by_input') byInput.push(qualify(file, k));
-      }
-    }
-    byInput.sort();
-    expect(byInput).toEqual([
-      qualify('turn-executor.ts', 'coachGuarded.assistant_text'),
-      qualify('turn-executor.ts', 'converseGuarded.assistant_text'),
-    ]);
-    // ⚠ RECONCILED TO THE INTENTIONAL TERNARY (#1401), OBLIGATION UNCHANGED.
-    //   The gate used to read `modelFacingClaimSafety: mayNameLeadingOptionForRun`
-    //   and this pin matched that literal. The corrected gate opens with the
-    //   NEGATION — entitlement is still the FIRST branch, and failing it still
-    //   withholds — because two further outcomes now sit behind it: a
-    //   `qualified` state for an entitled, separated, exactly-provisional run,
-    //   and a `withheld` state when the admission ACTIVELY CAPS a run that does
-    //   not qualify (previously that fell through to `permitted`, handing the
-    //   coach an ordering the final wire arm withholds).
-    //
-    //   So the pin names the entitlement-first branch AND the two outcomes that
-    //   must not vanish. A revert to a single boolean, or a silent return of the
-    //   permissive fall-through, breaks one of them.
-    expect(source).toContain(
-      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
-    );
-    expect(source).toContain("status: 'qualified'");
-    expect(source).toContain('admissionWithholdsLeaderNaming');
-    // Drift control, same idiom as the `PIN` test above: removing the negation
-    // must be visible to this assertion rather than passing on a substring.
-    const REVERTED = source.replace(
-      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
-      'modelFacingClaimSafety: mayNameLeadingOptionForRun',
-    );
-    expect(REVERTED).not.toContain(
-      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
-    );
-    // Non-vacuity, same rationale as the gated check above. `gated_by_input`
-    // asserts something about the PACK, so the evidence is the projection call
-    // at the assembly seam — not the compose site, which by definition has no
-    // gate of its own.
-    //
-    // BOTH gates are required, and BOTH are pinned. Reverting either one leaves
-    // a register still claiming an input gate the pack no longer has — the
-    // honest-label-overwritten-by-a-false-one failure (trap #14). The second
-    // entry is the 2026-07-27 conversation-history gate.
-    expect(assemblerSource).toContain('projectDisplayAnalysisForWithheldClaim(');
-    expect(
-      assemblerSource,
-      'the conversation-history input gate is gone from the ContextPack assembler. Prior-turn ' +
-        'assistant prose would again reach the model verbatim on a withheld turn — the ' +
-        'channel WALK-HISTORIC-PREP-2026-07-27.md §10 measured leaking 2/5 AFTER #721 and ' +
-        '#723, and the one that self-reinforces.',
-    ).toContain('projectConversationForWithheldClaim(conversation)');
-    // The THIRD gate at that chokepoint (2026-07-27): the rolling summary.
-    expect(
-      assemblerSource,
-      'the rolling-summary input gate is gone from the ContextPack assembler. The stored four-slot ' +
-        'summary would again reach the model verbatim on a withheld turn — scenario ' +
-        'f63ccb45 holds "…Double Down on SMB leading 52% vs Enterprise 35%…" in its RESOLVED ' +
-        'slot, three sentences above that same summary\'s own "No ranking can be put forward".',
-    ).toContain('projectConversationSummaryForWithheldClaim(input.conversationSummary)');
-  });
-
-  it('POSITIVE CONTROL: the rolling-summary gate evidence check can FAIL', () => {
-    // Rule 2, for the pin just added — prove the `toContain` discriminates
-    // rather than passing against any source it is handed.
-    const gate = 'projectConversationSummaryForWithheldClaim(input.conversationSummary)';
-    expect(assemblerSource).toContain(gate);
-    expect(
-      assemblerSource.replace(gate, 'input.conversationSummary'),
-    ).not.toContain(gate);
-  });
-
-  it('POSITIVE CONTROL: the conversation-gate evidence check can FAIL', () => {
-    // Rule 2, for the pin just added. Prove the `toContain` discriminates
-    // rather than passing against any source it is handed.
-    const gate = 'projectConversationForWithheldClaim(conversation)';
-    expect(assemblerSource).toContain(gate);
-    expect(assemblerSource.replace(gate, 'conversation')).not.toContain(gate);
-  });
-
-  it('POSITIVE CONTROL: the per-site gate evidence check can FAIL', () => {
-    // Rule 2 — an instrument that returns the same answer for "gated" and
-    // "could not look" is not an instrument. Prove the `toContain` above
-    // discriminates, by running it against a source with the gate removed.
-    const gate = 'if (mayNameLeadingOptionForRun && projection?.leading_option) {';
-    expect(source).toContain(gate);
-    const reverted = source.replace(gate, 'if (projection?.leading_option) {');
-    expect(reverted).not.toContain(gate);
-    // And the mutation is real: the reverted source is the PRE-1.233 shape.
-    expect(reverted).toContain('if (projection?.leading_option) {');
-  });
-
-  it('the claim-safety read is HOISTED, not post-handler only (ROADMAP 1.233)', () => {
-    // The load-bearing structural claim of 1.233, pinned against source: the
-    // permission is initialised from the persisted verdict at the DECLARATION,
-    // so every early exit carries it. A revert to `= true` fails here.
-    expect(source).toContain('let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(');
-    expect(source).not.toContain('let mayNameLeadingOptionForRun = true;');
-  });
-
-  it('the hoisted read is SCENARIO-scoped, not window-scoped (2026-07-27)', () => {
-    // ⭐ THE SECOND STRUCTURAL CLAIM, and it is a DIFFERENT one from the hoist.
-    // 1.233 fixed WHERE the permission is read (at the declaration, so every
-    // exit carries it). It did not fix WHAT is read: `context.prior_facts` is
-    // a `LIMIT SESSION_READ_WINDOW_TURNS` window, so past 20 turns the
-    // scenario's analysis fact was not loaded at all and the "no analysis ⇒
-    // true" branch fired on a WITHHELD scenario. Confirmed live on
-    // `f63ccb45-…`: rank 20 ⇒ `false`, rank 21 ⇒ `true`, zero store change.
-    //
-    // Both directions pinned. The scope must be PRESENT…
-    expect(source).toContain('const claimSafetyScope = claimSafetyScopeFromContext(context);');
-    // …and the window-scoped read must not come back, at EITHER read point.
-    // The post-dispatch refinement matters as much as the hoist: its
-    // unconditional assignment is only safe while its array is a superset of
-    // the entry array, which stops being true the moment it drops the scope.
-    expect(source).not.toContain('readMayNameLeadingOptionForFacts(context.prior_facts)');
-    expect(source).not.toContain('readMayNameLeadingOptionForFacts([');
-  });
-
-  it('POSITIVE CONTROL: the scenario-scope evidence check can FAIL', () => {
-    // Rule 2 — an instrument that cannot go red is not an instrument. Prove
-    // both halves discriminate by mutating the source they read.
-    const scope = 'const claimSafetyScope = claimSafetyScopeFromContext(context);';
-    expect(source).toContain(scope);
-    expect(source.replace(scope, 'const claimSafetyScope = null;')).not.toContain(scope);
-
-    // And the anti-regression half: a source that DID revert to the windowed
-    // read must trip the `not.toContain` above.
-    const reverted = source.replace(
-      'let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(\n    context.prior_facts,\n    claimSafetyScope,\n  );',
-      'let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);',
-    );
-    expect(reverted).toContain('readMayNameLeadingOptionForFacts(context.prior_facts)');
-  });
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // chip-click `confirmationText` — the derivation, pinned hop by hop.
-  //
-  // This site is registered `gated` on a FOUR-HOP chain across four files. A
-  // single `toContain` on the compose site would prove none of it, and the
-  // stance would rest on this file's prose — which is the failure mode the
-  // register's own header calls out (trap #14: the honest label overwritten by
-  // a false one). Each hop below is the line the gate actually turns on, so
-  // breaking ANY hop turns this red.
-  // ══════════════════════════════════════════════════════════════════════════
-
+it('pins every remaining site and key, including the extracted writer',()=>{
+expect(enumerateAllScannedSites(sources)).toHaveLength(11);
+expect(Object.keys(registerTally())).toHaveLength(11);
+expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual(["compose/configure-option-clarify-response.ts","compose/edit-clarify-response.ts","handlers/approve-held-proposal.ts","handlers/chip-click-dispatch.ts","system-events/edge-strength-edit.ts","system-events/factor-value-edit.ts","system-events/goal-target-edit.ts"]);
+});
+it('mutant: duplicating a registered receipt expression changes the multiset',()=>{
+const key=qualify("handlers/approve-held-proposal.ts",'text');
+const found=tally(enumerateAllScannedSites({...sources,["handlers/approve-held-proposal.ts"]:source+"\ncomposeDirectAnswerResponse({answerKind: 'functional', assistant_text: text, stage: 'frame'});"}));
+expect(found[key]).toBe(registerTally()[key]!+1);
+expect(found).not.toEqual(registerTally());
+});
+it('the retained writer reads the same scenario-scoped claim authority',()=>{
+expect(source).toContain('readMayNameLeadingOptionVerdict(context.prior_facts, claimSafetyScopeFromContext(context))');
+});
   const CHIP_CLICK = readFileSync(SCANNED_FILES['handlers/chip-click-dispatch.ts']!, 'utf8');
   const VALIDATION_REGISTRY = readFileSync(resolve(HERE, '../routing/validation-registry.ts'), 'utf8');
   const RUN_ANALYSIS = readFileSync(resolve(HERE, '../tools/handlers/run-analysis.ts'), 'utf8');

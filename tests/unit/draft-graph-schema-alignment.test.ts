@@ -13,10 +13,10 @@
  * - Diagnostic trace: llm_calls populated on error path
  */
 
-import { describe, it, expect } from "vitest";
-import { LLMDraftResponse, LLMEdge, LLMNode } from "../../src/adapters/llm/shared-schemas.js";
-import { GraphEvidenceSource, NodeKind, FactorCategory } from "../../src/schemas/graph.js";
+import { describe,expect,it } from "vitest";
+import { LLMDraftResponse,LLMEdge,LLMNode } from "../../src/adapters/llm/shared-schemas.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
+import { FactorCategory,GraphEvidenceSource,NodeKind } from "../../src/schemas/graph.js";
 
 // =============================================================================
 // Fixture: Real Sonnet 4.6 draft graph output (provenance values that caused failures)
@@ -369,96 +369,3 @@ describe("Regression — existing valid graph shapes", () => {
 // =============================================================================
 // 6. Diagnostic Trace — error path includes LLM telemetry
 // =============================================================================
-
-describe("Diagnostic trace — error path LLM telemetry", () => {
-  it("extractToolLLMTelemetry finds telemetry in error response with trace", async () => {
-    const { __test_only } = await import("../../src/orchestrator/tools/draft-graph.js");
-    const { extractToolLLMTelemetry } = __test_only;
-
-    // Simulate what mapPipelineError now produces on error responses
-    const errorBody: Record<string, unknown> = {
-      error: "CEE_LLM_VALIDATION_FAILED",
-      message: "LLM produced a response that does not match the expected graph schema",
-      trace: {
-        pipeline: {
-          llm_metadata: {
-            model: "claude-sonnet-4-6",
-            prompt_version: "v187",
-            prompt_hash: "abc123",
-            duration_ms: 4500,
-            finish_reason: "end_turn",
-            token_usage: {
-              prompt_tokens: 3000,
-              completion_tokens: 2000,
-              total_tokens: 5000,
-            },
-          },
-        },
-      },
-    };
-
-    const telemetry = extractToolLLMTelemetry(errorBody);
-    expect(telemetry).toBeDefined();
-    expect(telemetry!.model).toBe("claude-sonnet-4-6");
-    expect(telemetry!.input_tokens).toBe(3000);
-    expect(telemetry!.output_tokens).toBe(2000);
-    expect(telemetry!.latency_ms).toBe(4500);
-    expect(telemetry!.prompt_version).toBe("v187");
-    expect(telemetry!.prompt_hash).toBe("abc123");
-  });
-
-  it("extractToolLLMTelemetry returns undefined when no trace present", async () => {
-    const { __test_only } = await import("../../src/orchestrator/tools/draft-graph.js");
-    const { extractToolLLMTelemetry } = __test_only;
-
-    const errorBody: Record<string, unknown> = {
-      error: "CEE_TIMEOUT",
-      message: "Request timed out",
-    };
-
-    const telemetry = extractToolLLMTelemetry(errorBody);
-    expect(telemetry).toBeUndefined();
-  });
-
-  it("extractToolLLMTelemetry emits partial telemetry when model present but token_usage missing", async () => {
-    const { __test_only } = await import("../../src/orchestrator/tools/draft-graph.js");
-    const { extractToolLLMTelemetry } = __test_only;
-
-    const errorBody: Record<string, unknown> = {
-      trace: {
-        pipeline: {
-          llm_metadata: {
-            model: "claude-sonnet-4-6",
-            duration_ms: 3500,
-            // No token_usage — should still emit with zero tokens
-          },
-        },
-      },
-    };
-
-    const telemetry = extractToolLLMTelemetry(errorBody);
-    expect(telemetry).toBeDefined();
-    expect(telemetry!.model).toBe("claude-sonnet-4-6");
-    expect(telemetry!.input_tokens).toBe(0);
-    expect(telemetry!.output_tokens).toBe(0);
-    expect(telemetry!.latency_ms).toBe(3500);
-  });
-
-  it("extractToolLLMTelemetry returns undefined when neither model nor token_usage present", async () => {
-    const { __test_only } = await import("../../src/orchestrator/tools/draft-graph.js");
-    const { extractToolLLMTelemetry } = __test_only;
-
-    const errorBody: Record<string, unknown> = {
-      trace: {
-        pipeline: {
-          llm_metadata: {
-            // Neither model nor token_usage
-          },
-        },
-      },
-    };
-
-    const telemetry = extractToolLLMTelemetry(errorBody);
-    expect(telemetry).toBeUndefined();
-  });
-});

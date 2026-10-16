@@ -1,6 +1,7 @@
 /** Real Fastify ingress: retired conversation is rejected before admission or execution. */
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach,describe,expect,it,vi } from 'vitest';
+import { ceeOrchestratorRouteV2 } from '../../../src/orchestrator/route-v2.js';
 
 const probes = vi.hoisted(() => ({ admit: vi.fn(), executor: vi.fn(), system: vi.fn(), run: vi.fn() }));
 vi.mock('../../../src/orchestrator/route-v2-preflight.js', () => ({
@@ -11,7 +12,7 @@ vi.mock('../../../src/orchestrator/turn-fence-prehandler.js', () => ({
   turnFencePreHandler: (_req: unknown, _reply: unknown, next: () => void) => next(),
   admitCurrentTurnFence: probes.admit,
 }));
-vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({ runTurnExecutor: probes.executor }));
+
 vi.mock('../../../src/orchestrator-v5/system-events/dispatch.js', () => ({ dispatchSystemEvent: probes.system }));
 vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', () => ({
   dispatchDeterministicChipClick: probes.run,
@@ -21,7 +22,6 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', async importOrigin
   ...await importOriginal<typeof import('../../../src/orchestrator-v5/build-turn-context.js')>(),
   loadMostRecentPendingActionsStrict: async () => [],
 }));
-import { ceeOrchestratorRouteV2 } from '../../../src/orchestrator/route-v2.js';
 
 afterEach(() => vi.clearAllMocks());
 describe('the conventional conversation route is retired', () => {

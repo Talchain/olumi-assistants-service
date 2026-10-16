@@ -37,44 +37,22 @@
  * RED demanding fixture coverage — it never silently narrows its own scope.
  */
 
-import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { dirname,join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { describe,expect,it } from 'vitest';
 
 import {
-  assembleContextPack,
-  type ContextPack,
+assembleContextPack,
+type ContextPack,
 } from '../context-pack-assembler.js';
 import { ContextPackSchema } from '../context-pack-schema.js';
-import {
-  buildUserMessage,
-  COACHING_CONTEXT_INSTRUCTION,
-  SUMMARY_PRECEDENCE_INSTRUCTION,
-  FOCUS_INSTRUCTION,
-  FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION,
-  READINESS_INSTRUCTION,
-  GOAL_TARGET_INSTRUCTION,
-  BRIEF_INSTRUCTION,
-  GRAPH_CONTEXT_INSTRUCTION,
-  DISPLAY_GRAPH_INSTRUCTION,
-  ANALYSIS_CONTEXT_INSTRUCTION,
-  PROVISIONAL_FIGURES_INSTRUCTION,
-  MARGIN_MEANING_INSTRUCTION,
-  SIMULATION_SHARE_MEANING_INSTRUCTION,
-  CONTEXT_BUDGET_INSTRUCTION,
-  FACTOR_VALUES_INSTRUCTION,
-  OLDER_RELEVANT_FACTS_INSTRUCTION,
-  RECENT_CHANGES_INSTRUCTION,
-  RUN_DELTA_INSTRUCTION,
-  STATED_OBJECTIONS_INSTRUCTION,
-} from '../../routing/route-with-tool-use.js';
+
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 // ONE shared extractor. This gate and the context-policy conformance anchor read
 // the same serialised bytes; a private copy here would be a third variant of a
 // parser whose naive form was a real defect in the anchor (see the helper's note).
-import { observeSerialisedPack } from './observe-serialised-pack.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -137,116 +115,12 @@ function shortSha256(s: string): string {
  * EMISSION check in one edit; there is no way to gain sanctioning power without
  * also having to prove the prompt actually carries it.
  */
-const CODE_OWNED_INSTRUCTIONS = [
-  ['GRAPH_CONTEXT_INSTRUCTION', GRAPH_CONTEXT_INSTRUCTION],
-  // Display-safe Living Model structure. Emitted by the SAME condition that
-  // serialises the projected `graph`, so relationship identity, direction,
-  // sign, bidirected semantics and baseline meaning cannot drift from an
-  // operator-managed prompt.
-  ['DISPLAY_GRAPH_INSTRUCTION', DISPLAY_GRAPH_INSTRUCTION],
-  ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
-  ['PROVISIONAL_FIGURES_INSTRUCTION', PROVISIONAL_FIGURES_INSTRUCTION],
-  // Emitted by the same condition that serialises a non-null `analysis.margin`.
-  ['MARGIN_MEANING_INSTRUCTION', MARGIN_MEANING_INSTRUCTION],
-  // What a simulation SHARE is. Emitted by the SAME condition that
-  // serialises the shares — the sibling rule to `margin` above — and stood
-  // down on the provisional arm, where `PROVISIONAL_FIGURES_INSTRUCTION`
-  // already carries the identical ratified sentence.
-  ['SIMULATION_SHARE_MEANING_INSTRUCTION', SIMULATION_SHARE_MEANING_INSTRUCTION],
-  // Prompt coverage. Emitted by the SAME condition that serialises
-  // `context_budget`, so a reduced graph/analysis projection cannot be read as
-  // proof of absence. The maximal fixture reaches this through real graph
-  // budget enforcement, not a hand-authored disclosure object.
-  ['CONTEXT_BUDGET_INSTRUCTION', CONTEXT_BUDGET_INSTRUCTION],
-  ['RECENT_CHANGES_INSTRUCTION', RECENT_CHANGES_INSTRUCTION],
-  ['COACHING_CONTEXT_INSTRUCTION', COACHING_CONTEXT_INSTRUCTION],
-  ['SUMMARY_PRECEDENCE_INSTRUCTION', SUMMARY_PRECEDENCE_INSTRUCTION],
-  // Hop 4 (selection-aware answering). Emitted by the SAME condition that puts
-  // `focus` on the pack, so a field sanctioned only here is genuinely
-  // sanctioned — the same reasoning as its two siblings above.
-  ['FOCUS_INSTRUCTION', FOCUS_INSTRUCTION],
-  [
-    'FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION',
-    FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION,
-  ],
-  // Readiness. Emitted by the SAME condition that puts `readiness` on the pack
-  // — same reasoning as its three siblings above. The served PMS prompt cannot
-  // sanction it (it is operator-managed and not editable from this repo), which
-  // is precisely why the instruction is code-owned.
-  ['READINESS_INSTRUCTION', READINESS_INSTRUCTION],
-  // Success target. Emitted by the SAME condition that puts `goal_target` on
-  // the pack — same reasoning as its four siblings above. Like `readiness`, the
-  // served PMS prompt cannot sanction it (operator-managed, not editable from
-  // this repo), which is exactly why the instruction is code-owned.
-  ['GOAL_TARGET_INSTRUCTION', GOAL_TARGET_INSTRUCTION],
-  // Saved opening framing. Emitted by the SAME condition that puts `brief` on
-  // the pack. It licences continuity while keeping historical framing below
-  // the current Living Model and explicit current-user corrections.
-  ['BRIEF_INSTRUCTION', BRIEF_INSTRUCTION],
-  // ⛔ FOUND MISSING 2026-08-27, by the reviewer of the block below. This is
-  // emitted by `buildUserMessage` and was NOT registered here — so the very
-  // instruction whose header explains why hand-maintained sanction lists drift
-  // was itself outside the EMISSION check. That is the defect this gate exists
-  // to catch, live inside the gate. REGISTRATION_COMPLETENESS below now derives
-  // the emission set from the source, so this list cannot fall short again.
-  ['OLDER_RELEVANT_FACTS_INSTRUCTION', OLDER_RELEVANT_FACTS_INSTRUCTION],
-  // Standing objections. Emitted by the SAME condition that puts
-  // `stated_objections` on the pack. Code-owned for the reason every sibling
-  // above is: the served V5 routing prompt is an operator-managed PMS row, so
-  // this repo cannot sanction a new field there. The field is the user's OWN
-  // words about a finding they reject, and an unsanctioned field of that kind
-  // is the worst of the class — the model would be free to read an objection
-  // as a correction and quietly agree.
-  ['STATED_OBJECTIONS_INSTRUCTION', STATED_OBJECTIONS_INSTRUCTION],
-  // Factor value state. Emitted by the SAME condition that puts `factor_values`
-  // on the pack — same reasoning as its seven siblings above. PR #1122 shipped
-  // the FIELD with no instruction at all; registering here puts the block under
-  // the EMISSION check.
-  //
-  // ⚠ AND THE FIELD'S COVERAGE BY *THIS GATE* IS FIXTURE-CONTINGENT, NOT FREE.
-  // `proseLeaves` only collects strings of >= 4 words, so a `factor_values`
-  // fixture carrying only short labels scores ZERO prose leaves and THE GATE
-  // passes it by testing nothing. An earlier revision of this comment called
-  // that blindness STRUCTURAL, on the premise that "real factor labels are
-  // short". ⛔ THAT PREMISE IS FALSE and this file disproves it 200 lines up:
-  // `label` is `z.string().min(1)` with NO maximum, and the maximal fixture
-  // already carries `factor_label: 'Engineer salary in the local market'`.
-  // Measured: one six-word label is the whole difference between this gate
-  // being blind to the field and RED-ing on it by name. The fixture above now
-  // carries representative labels, and FACTOR_VALUES_PROSE_COVERAGE pins it.
-  ['FACTOR_VALUES_INSTRUCTION', FACTOR_VALUES_INSTRUCTION],
-  // Run-over-run consequence. ⚠ UNLIKE ITS TEN SIBLINGS THIS ONE IS EMITTED
-  // UNCONDITIONALLY, and that is deliberate: its load-bearing clause governs
-  // the turn where `run_delta` is ABSENT — the producer's DEFAULT path — so
-  // gating it on the field's presence would render the absence rule only on
-  // the turns that do not need it. See the constant's header. For THIS gate
-  // the difference is invisible (the maximal fixture populates the field
-  // either way), which is exactly why the property is pinned in
-  // run-delta-wire.route-level.test.ts instead of here.
-  //
-  // ⚠ AND THIS FIELD IS DELIBERATELY NON-PROSE, so THE GATE below does not
-  // fire on it and CANNOT be what covers it. `run_delta` carries only option
-  // ids, factor ids, enums and numbers — no free text at all — so `proseLeaves`
-  // scores it ZERO and the sanction check skips it. That is a SAFETY property,
-  // not a gap: there is no sentence in the block for a model to quote, so it
-  // must join ids against the `analysis` section to say anything at all. Do NOT
-  // "fix" this by padding the fixture with invented prose — that would
-  // manufacture the same false positive the `systemEvent` note above records.
-  // RUN_DELTA_IS_STRUCTURAL_NOT_PROSE in the wire suite pins it.
-  ['RUN_DELTA_INSTRUCTION', RUN_DELTA_INSTRUCTION],
-] as const satisfies ReadonlyArray<readonly [string, string]>;
 
-const MODEL_FACING_CORPUS = [
-  SERVED_PROMPT,
-  ...CODE_OWNED_INSTRUCTIONS.map(([, text]) => text),
-].join('\n\n');
+
+
 
 /** The same corpus composition, built from the v119 historical control prompt. */
-const HISTORICAL_V119_CORPUS = [
-  HISTORICAL_V119,
-  COACHING_CONTEXT_INSTRUCTION,
-  SUMMARY_PRECEDENCE_INSTRUCTION,
-].join('\n\n');
+
 
 /**
  * Waivers for divergences already FOUND and TRIAGED but not yet fixed (the
@@ -256,24 +130,14 @@ const HISTORICAL_V119_CORPUS = [
  * outlive the prompt it was granted for — and the gate is never permanently
  * red, which would make it an alarm everyone learns to ignore.
  */
-const KNOWN_UNSANCTIONED: ReadonlyArray<{
-  readonly field: string;
-  readonly promptSha: string;
-  readonly note: string;
-}> = [
-  {
-    field: 'analysis.staleness_reason',
-    promptSha: 'bec840a648800928',
-    note: 'FOUND BY THIS GATE (PHANTOM — the INVERSE drift), STILL OPEN AT v121. The served prompt tells the model to use "analysis.staleness_reason (acknowledge before citing results)", but state-trust phase 0 deliberately removed that field from the prompt-visible projection and ContextPackAnalysisSchema is .strict(), so it CANNOT reappear. A dead instruction on every turn. Carried v119 -> v120 -> v121. ⚠ RE-RATIFIED 2026-08-29, NOT rubber-stamped: the claim was re-derived at this tip before the sha was moved — ContextPackAnalysisSchema (context-pack-schema.ts:216) is .strict() and declares the omission deliberate at :207-209, and the three `staleness_reason` hits in context-pack-assembler.ts are TWO COMMENTS plus one STALE DOC-COMMENT on the `analysisStalenessReason` INPUT (:886) still claiming it is "passed through to ContextPackAnalysis.staleness_reason" — it is not. Contrast control in the same sweep: `freshness` 18 hits in the assembler, so the probe discriminates. NOT FIXED HERE ON PURPOSE: the v121 lane\'s mandate was the missing add_constraint / adjust_edge_strength handlers and the rule-citation ban, and this prompt fires on EVERY turn, so an unrelated behavioural edit to it belongs in its own reviewed change (routing has no eval pack — promotion-gate.ts:122 — so nothing else would catch a regression). THE FIX IS CHEAP: delete the 54-char clause "analysis.staleness_reason (acknowledge before citing results), " from Prompts/canonical/routing.txt:155 and drop this waiver. Next prompt lane should close it.',
-  },
-];
+
 
 // ---------------------------------------------------------------------------
 // Derivation
 // ---------------------------------------------------------------------------
 
 /** Keys `buildUserMessage` deliberately strips before serialising. */
-const STRIPPED_BY_SERIALISER = ['display_analysis', 'display_graph', 'analysis_state'] as const;
+
 
 /**
  * DERIVED severity discriminator: does this field's REALISED serialised value
@@ -282,19 +146,7 @@ const STRIPPED_BY_SERIALISER = ['display_analysis', 'display_graph', 'analysis_s
  * is control metadata the model never speaks; a field carrying sentences is
  * content the model must be told it may trust.
  */
-function proseLeaves(v: unknown): string[] {
-  const out: string[] = [];
-  const walk = (x: unknown): void => {
-    if (typeof x === 'string') {
-      if (x.trim().split(/\s+/).length >= 4) out.push(x.trim());
-      return;
-    }
-    if (Array.isArray(x)) return x.forEach(walk);
-    if (x && typeof x === 'object') Object.values(x as object).forEach(walk);
-  };
-  walk(v);
-  return out;
-}
+
 
 /**
  * A field is AT RISK only if it carries prose the model cannot ground anywhere
@@ -310,15 +162,10 @@ function proseLeaves(v: unknown): string[] {
  * has the user's message verbatim. `older_relevant_facts` and `brief` carry
  * prose that appears NOWHERE else, so they remain at risk.
  */
-function unsanctionableProse(v: unknown, userMessage: string): string[] {
-  const hay = userMessage.toLowerCase();
-  return proseLeaves(v).filter((leaf) => !hay.includes(leaf.toLowerCase()));
-}
+
 
 /** Whole-token match — `graph` must not be satisfied by `display_graph`. */
-function namedInCorpus(field: string, corpus = MODEL_FACING_CORPUS): boolean {
-  return new RegExp(`(?<![A-Za-z0-9_])${field}(?![A-Za-z0-9_])`).test(corpus);
-}
+
 
 // ---------------------------------------------------------------------------
 // The MAXIMAL fixture — every optional field populated (see FIXTURE_COMPLETENESS)
@@ -624,38 +471,10 @@ function assembleMaximalPack(
 // ---------------------------------------------------------------------------
 
 /** Model-facing fields carrying prose the corpus never names. */
-export function findUnsanctionedFields(
-  corpus: string,
-  serialised: Record<string, unknown>,
-  userMessage: string,
-): string[] {
-  return Object.keys(serialised)
-    .filter((k) => unsanctionableProse(serialised[k], userMessage).length > 0)
-    .filter((k) => !namedInCorpus(k, corpus));
-}
+
 
 /** ContextPack paths the prompt's <CONTEXT_PACK> zone names but the pack lacks. */
-export function findPhantomFields(
-  prompt: string,
-  serialised: Record<string, unknown>,
-): string[] {
-  const open = prompt.indexOf('<CONTEXT_PACK>');
-  const close = prompt.indexOf('</CONTEXT_PACK>');
-  if (open < 0 || close < 0) {
-    throw new Error('served prompt has no <CONTEXT_PACK> zone — the gate cannot locate the field sanctioning block');
-  }
-  const zone = prompt.slice(open, close);
-  const named = [...zone.matchAll(/(?<![A-Za-z0-9_.])([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)/g)].map((m) => m[1]!);
-  const exists = (path: string): boolean => {
-    let cur: unknown = serialised;
-    for (const seg of path.split('.')) {
-      if (!cur || typeof cur !== 'object' || !(seg in (cur as object))) return false;
-      cur = (cur as Record<string, unknown>)[seg];
-    }
-    return true;
-  };
-  return [...new Set(named)].filter((p) => !exists(p));
-}
+
 
 /**
  * Schema-declared keys the assembled pack does NOT carry. This is the gate's
@@ -675,11 +494,7 @@ function findUnpopulatedFieldsAcross(packs: readonly ContextPack[]): string[] {
 }
 
 /** Hash-keyed waivers, applied uniformly to both discriminators. */
-function applyWaivers(found: string[], promptSha: string): string[] {
-  return found.filter(
-    (f) => !KNOWN_UNSANCTIONED.some((w) => w.field === f && w.promptSha === promptSha),
-  );
-}
+
 
 // ---------------------------------------------------------------------------
 // The gate
@@ -710,12 +525,12 @@ const PROVISIONAL_PACK = assembleMaximalPack({
  * is why it could certify a field as sanctioned by an instruction the prompt
  * did not contain (see EMISSION below).
  */
-const RENDERED = buildUserMessage(PACK, USER_MESSAGE);
-const UNAVAILABLE_RENDERED = buildUserMessage(UNAVAILABLE_PACK, USER_MESSAGE);
-const PROVISIONAL_RENDERED = buildUserMessage(PROVISIONAL_PACK, USER_MESSAGE);
-const SERIALISED = observeSerialisedPack(RENDERED);
-const UNAVAILABLE_SERIALISED = observeSerialisedPack(UNAVAILABLE_RENDERED);
-const LIVE_SHA = shortSha256(SERVED_PROMPT);
+
+
+
+
+
+
 
 describe('prompt ↔ pack sanction gate', () => {
   it('IDENTITY — both pinned prompts are the bytes they claim to be', () => {
@@ -740,17 +555,7 @@ describe('prompt ↔ pack sanction gate', () => {
     expect(Object.keys(UNAVAILABLE_PACK).filter((k) => !declared.has(k))).toEqual([]);
   });
 
-  it('SERIALISER_PARITY — every schema key is either serialised to the model or deliberately stripped', () => {
-    const facing = new Set([
-      ...Object.keys(SERIALISED),
-      ...Object.keys(UNAVAILABLE_SERIALISED),
-    ]);
-    expect(
-      Object.keys(ContextPackSchema.shape).filter(
-        (k) => !facing.has(k) && !(STRIPPED_BY_SERIALISER as readonly string[]).includes(k),
-      ),
-    ).toEqual([]);
-  });
+
 
   /**
    * F2 (independent review of PR #1111) — THE CORPUS MUST BE EVIDENCE, NOT A
@@ -771,28 +576,7 @@ describe('prompt ↔ pack sanction gate', () => {
    * It is deliberately placed BEFORE `THE GATE`: it is the precondition that
    * makes the gate's corpus mean anything, and a reader should meet it first.
    */
-  it('EMISSION — every code-owned instruction in the corpus is actually rendered into the prompt', () => {
-    // PRECONDITIONS PINNED IN-TEST: an assertion over an empty corpus, or over
-    // a prompt that failed to render, would pass by testing nothing (trap #13).
-    expect(
-      CODE_OWNED_INSTRUCTIONS.length,
-      'the corpus must carry code-owned instructions or this check is vacuous',
-    ).toBeGreaterThan(0);
-    expect(RENDERED).toContain('## ContextPack');
 
-    const renderedCorpus = `${RENDERED}\n${UNAVAILABLE_RENDERED}\n${PROVISIONAL_RENDERED}`;
-    const missing = CODE_OWNED_INSTRUCTIONS.filter(
-      ([, text]) => !renderedCorpus.includes(text),
-    ).map(([name]) => name);
-    expect(
-      missing,
-      `These instructions are counted as SANCTIONING text by MODEL_FACING_CORPUS, but ` +
-        `buildUserMessage did not render them into the prompt for a pack that populates every ` +
-        `schema key: ${missing.join(', ')}. Either the emission is missing (the model never ` +
-        `sees the licence, so any waiver removed on its authority is a false claim), or the ` +
-        `instruction is no longer code-owned and must leave MODEL_FACING_CORPUS.`,
-    ).toEqual([]);
-  });
 
   /**
    * ⭐⭐ THE UNMIRRORED LIST, DERIVED. `CODE_OWNED_INSTRUCTIONS` above is
@@ -807,38 +591,7 @@ describe('prompt ↔ pack sanction gate', () => {
    * one-directional: registered → rendered is already covered by EMISSION above;
    * this closes emitted → registered.
    */
-  it('REGISTRATION_COMPLETENESS — every instruction buildUserMessage emits is registered above (derived, not mirrored)', () => {
-    const routingSource = readFileSync(
-      join(HERE, '..', '..', 'routing', 'route-with-tool-use.ts'),
-      'utf8',
-    );
-    const emitted = [
-      ...new Set(
-        [...routingSource.matchAll(/parts\.push\('',\s*([A-Z_]+_INSTRUCTION)\)/g)].map(
-          (m) => m[1]!,
-        ),
-      ),
-    ].sort();
 
-    // POSITIVE CONTROL (trap #13): an absence claim from a regex that matched
-    // nothing is vacuous, and a silently-broken pattern returns exactly the
-    // clean output of a healthy one. Prove the probe SEES a known member.
-    expect(emitted.length, 'derived zero emissions — the probe is blind').toBeGreaterThan(0);
-    expect(emitted, 'the probe missed a known emission — pattern drift').toContain(
-      'GRAPH_CONTEXT_INSTRUCTION',
-    );
-
-    const registered = new Set<string>(CODE_OWNED_INSTRUCTIONS.map(([name]) => name));
-    const unregistered = emitted.filter((name) => !registered.has(name));
-    expect(
-      unregistered,
-      `buildUserMessage renders these instruction blocks into the prompt, but they are not ` +
-        `registered in CODE_OWNED_INSTRUCTIONS: ${unregistered.join(', ')}. They therefore sit ` +
-        `outside the EMISSION check and outside MODEL_FACING_CORPUS — a field sanctioned only ` +
-        `by one of them would read as UNSANCTIONED here, and a block that stopped being ` +
-        `emitted would go unnoticed.`,
-    ).toEqual([]);
-  });
 
   /**
    * ⭐ THIS GATE'S COVERAGE OF `factor_values` IS FIXTURE-CONTINGENT — pin it, or
@@ -847,103 +600,17 @@ describe('prompt ↔ pack sanction gate', () => {
    * zero prose leaves and THE GATE passes it by testing nothing. Measured: that
    * is a 21/21 GREEN over a completely unsanctioned field.
    */
-  it('FACTOR_VALUES_PROSE_COVERAGE — the fixture keeps factor_values prose-bearing, so THE GATE genuinely covers it', () => {
-    const leaves = unsanctionableProse(SERIALISED.factor_values, USER_MESSAGE);
-    expect(
-      leaves.length,
-      'factor_values carries no prose leaf of >= 4 words, so THE GATE cannot fire on it and ' +
-        'passes this field by testing nothing. Restore a representative multi-word factor label ' +
-        '— `label` is z.string().min(1) with no maximum and real labels run long.',
-    ).toBeGreaterThan(0);
-    // CONTRAST CONTROL: a field that genuinely IS control-metadata still reads
-    // zero, so the assertion above is not passing on a blanket truth.
-    expect(unsanctionableProse(SERIALISED.scenario_id, USER_MESSAGE)).toEqual([]);
-  });
 
-  it.each(['canonical', 'provisional', 'absent', 'unavailable'] as const)(
-    'GRAPH AUTHORITY — serialises %s exactly and emits its interpretation block once',
-    (status) => {
-      const rendered = buildUserMessage(
-        { ...PACK, graph_context: { status } },
-        USER_MESSAGE,
-      );
-      const serialised = observeSerialisedPack(rendered);
 
-      expect(serialised.graph_context).toEqual({ status });
-      expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
-    },
-  );
 
-  it('GRAPH AUTHORITY — legacy graph_context omission resolves exactly to unavailable', () => {
-    const rendered = buildUserMessage(
-      { ...PACK, graph_context: undefined },
-      USER_MESSAGE,
-    );
-    const serialised = observeSerialisedPack(rendered);
 
-    expect(serialised.graph_context).toEqual({ status: 'unavailable' });
-    expect(rendered.split(GRAPH_CONTEXT_INSTRUCTION)).toHaveLength(2);
-  });
 
-  it('ANALYSIS AUTHORITY — exact unavailable marker and sanction travel together once', () => {
-    expect(UNAVAILABLE_SERIALISED.analysis_context).toEqual({
-      status: 'unavailable',
-    });
-    expect(UNAVAILABLE_RENDERED.split(ANALYSIS_CONTEXT_INSTRUCTION)).toHaveLength(2);
-    expect(UNAVAILABLE_SERIALISED.analysis).toBeNull();
-    expect(UNAVAILABLE_SERIALISED.focus).toMatchObject({
-      elements: [
-        {
-          id: 'dec_hire',
-          analysis_link: 'analysis_unavailable',
-        },
-      ],
-    });
-    expect(JSON.stringify(UNAVAILABLE_SERIALISED.focus)).not.toContain(
-      'win_probability',
-    );
-    expect(UNAVAILABLE_RENDERED).toContain(
-      FOCUS_ANALYSIS_UNAVAILABLE_INSTRUCTION,
-    );
-    expect(UNAVAILABLE_RENDERED).not.toContain(FOCUS_INSTRUCTION);
-    expect(FOCUS_INSTRUCTION).not.toContain('analysis_unavailable');
-    expect(UNAVAILABLE_RENDERED).not.toContain(
-      'nothing has been analysed',
-    );
-    expect(SERIALISED.analysis_context).toBeUndefined();
-    expect(RENDERED).not.toContain(ANALYSIS_CONTEXT_INSTRUCTION);
-  });
 
-  it('CONTEXT COVERAGE — real graph trimming carries the disclosure and its sanction together', () => {
-    const disclosure = SERIALISED.context_budget as {
-      truncations?: readonly { section?: string }[];
-    };
 
-    expect(
-      disclosure.truncations?.some((record) => record.section === 'graph'),
-      'precondition: the maximal fixture must reach context_budget through real graph trimming',
-    ).toBe(true);
-    expect(RENDERED.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
-    expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
-      'omitted detail is withheld or unknown, never evidence that the omitted facts do not exist',
-    );
-    expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
-      'This disclosure does not change `graph_context` or `analysis_context` authority',
-    );
-  });
 
-  it('ANALYSIS AUTHORITY — legacy undefined coaching remains byte-equivalent to omission', () => {
-    const omitted = buildUserMessage(
-      { ...PACK, coaching_context: undefined },
-      USER_MESSAGE,
-    );
-    const { coaching_context: _coachingContext, ...withoutCoaching } = PACK;
-    void _coachingContext;
-    const absent = buildUserMessage(withoutCoaching as ContextPack, USER_MESSAGE);
 
-    expect(omitted).toBe(absent);
-    expect(omitted).not.toContain(COACHING_CONTEXT_INSTRUCTION);
-  });
+
+
 
   it('ANALYSIS AUTHORITY — schema rejects broader statuses and extra members', () => {
     const schema = ContextPackSchema.shape.analysis_context;
@@ -1019,60 +686,15 @@ describe('prompt ↔ pack sanction gate', () => {
     );
   });
 
-  it.each(['complete', 'capped', 'degraded'] as const)(
-    'RECENT HISTORY AUTHORITY — serialises %s exactly and emits its interpretation block once',
-    (status) => {
-      const rendered = buildUserMessage(
-        { ...PACK, recent_changes_status: status },
-        USER_MESSAGE,
-      );
-      const serialised = observeSerialisedPack(rendered);
 
-      expect(serialised.recent_changes_status).toBe(status);
-      expect(rendered).toContain(`"recent_changes_status": "${status}"`);
-      expect(rendered.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
-    },
-  );
 
-  it('RECENT HISTORY AUTHORITY — legacy omission resolves exactly to degraded', () => {
-    const { recent_changes_status: _omittedStatus, ...legacyPack } = PACK;
-    void _omittedStatus;
 
-    const rendered = buildUserMessage(legacyPack as ContextPack, USER_MESSAGE);
-    const serialised = observeSerialisedPack(rendered);
 
-    expect(serialised.recent_changes_status).toBe('degraded');
-    expect(rendered).toContain('"recent_changes_status": "degraded"');
-    expect(rendered.split(RECENT_CHANGES_INSTRUCTION)).toHaveLength(2);
-  });
 
-  it('THE GATE — every prose-bearing model-facing field is NAMED in the text the model receives', () => {
-    const found = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
-    expect(
-      applyWaivers(found, LIVE_SHA),
-      'These ContextPack fields carry natural-language content to the model, but the served ' +
-        'prompt never names them. Under the prompt\'s "Use when present / never reason over ' +
-        'absent fields" rules the model may DENY them — the 2026-07-25 record-denial defect.',
-    ).toEqual([]);
-  });
 
-  it('PHANTOM — every ContextPack field the prompt names actually exists on the pack', () => {
-    const found = findPhantomFields(SERVED_PROMPT, SERIALISED);
-    expect(
-      applyWaivers(found, LIVE_SHA),
-      'The served prompt instructs the model to use these ContextPack paths, but the ' +
-        'assembler never emits them.',
-    ).toEqual([]);
-  });
 
-  it('NO STALE WAIVERS — every waiver still describes a live divergence', () => {
-    const live = new Set([
-      ...findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE),
-      ...findPhantomFields(SERVED_PROMPT, SERIALISED),
-    ]);
-    const stale = KNOWN_UNSANCTIONED.filter((w) => w.promptSha === LIVE_SHA && !live.has(w.field));
-    expect(stale.map((w) => w.field), 'waiver no longer needed — remove it').toEqual([]);
-  });
+
+
 });
 
 // ---------------------------------------------------------------------------
@@ -1082,101 +704,19 @@ describe('prompt ↔ pack sanction gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', () => {
-  it('THE HISTORICAL CASE — prompt v119 + a pack carrying older_relevant_facts is CAUGHT', () => {
-    // Exactly the 2026-07-25 production state: prompt 4e8e69f3d721c864 (authored
-    // 07-23) against a pack carrying the field #662 added on 07-24. NO waivers.
-    // Driven from the PERMANENT v119 fixture, so re-pinning the served prompt
-    // can never make this control vacuous (it did, once — see the fixture note).
-    expect(shortSha256(HISTORICAL_V119)).toBe('4e8e69f3d721c864');
-    expect(Object.keys(SERIALISED)).toContain('older_relevant_facts');
-    const found = findUnsanctionedFields(HISTORICAL_V119_CORPUS, SERIALISED, USER_MESSAGE);
-    expect(found).toContain('older_relevant_facts');
-  });
 
-  it('THE FIX IS VERIFIED INDEPENDENTLY — the SERVED prompt now sanctions older_relevant_facts', () => {
-    // The counterpart to the control above: same pack, same rules, the prompt
-    // lane's v120. This is the gate ratifying someone else's fix at the bytes.
-    const found = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
-    expect(found).not.toContain('older_relevant_facts');
-  });
 
-  it('THE TEMPORAL REPRODUCTION — the gate is QUIET before #662 and goes RED the moment #662 lands', () => {
-    // Pre-#662: the assembler omits the key entirely for record-less scenarios.
-    const prePack = assembleMaximalPack({ olderRelevantFacts: undefined });
-    const preSerialised = observeSerialisedPack(buildUserMessage(prePack, USER_MESSAGE));
-    expect(Object.keys(preSerialised)).not.toContain('older_relevant_facts');
-    const before = findUnsanctionedFields(HISTORICAL_V119_CORPUS, preSerialised, USER_MESSAGE);
-    expect(before).not.toContain('older_relevant_facts');
 
-    // #662 lands — the same (v119) prompt, the pack gains the field.
-    const after = findUnsanctionedFields(HISTORICAL_V119_CORPUS, SERIALISED, USER_MESSAGE);
-    expect(after).toContain('older_relevant_facts');
-    // ...and it is a NEW divergence, not pre-existing noise.
-    expect(after.filter((f) => !before.includes(f))).toEqual(['older_relevant_facts']);
-  });
 
-  it('DISCRIMINATION — the gate responds to the PROMPT side: naming the field turns it GREEN', () => {
-    // Proves the gate is not firing for some pack-side reason. Same pack, same
-    // rules; the ONLY change is a prompt that sanctions the field.
-    const fixedPrompt = HISTORICAL_V119.replace(
-      'Use when present: parsed_quantities',
-      'Use when present: older_relevant_facts (stored decision records for this scenario — authoritative), parsed_quantities',
-    );
-    expect(fixedPrompt).not.toBe(HISTORICAL_V119); // the edit actually applied
-    const corpus = [fixedPrompt, COACHING_CONTEXT_INSTRUCTION, SUMMARY_PRECEDENCE_INSTRUCTION].join('\n\n');
-    expect(findUnsanctionedFields(corpus, SERIALISED, USER_MESSAGE)).not.toContain('older_relevant_facts');
-    // and `brief` — unnamed by that edit — is STILL caught (no blanket pass).
-    expect(findUnsanctionedFields(corpus, SERIALISED, USER_MESSAGE)).toContain('brief');
-  });
 
-  it('PHANTOM CONTROL — the phantom check sees a real phantom and clears a real field', () => {
-    expect(findPhantomFields(SERVED_PROMPT, SERIALISED)).toContain('analysis.staleness_reason');
-    // conversation.recent_turns is named by the SAME zone and DOES exist → not flagged.
-    expect(findPhantomFields(SERVED_PROMPT, SERIALISED)).not.toContain('conversation.recent_turns');
-  });
 
-  it('WAIVER EXPIRY — EVERY waiver granted for v119 expires on a prompt change, on BOTH discriminators', () => {
-    // The waiver path must be exercised by REAL waivers, not a synthetic one —
-    // an untested waiver path is the same guarantee theatre this gate hunts.
-    // The remaining live divergence flows through it on the phantom-field
-    // discriminator. The brief sanction is now code-owned and needs no waiver.
-    const otherSha = 'deadbeefdeadbeef';
-    const sanction = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
-    const phantom = findPhantomFields(SERVED_PROMPT, SERIALISED);
 
-    // Every waiver in the list is keyed to the prompt we actually serve.
-    expect(KNOWN_UNSANCTIONED.length).toBeGreaterThan(0);
-    for (const w of KNOWN_UNSANCTIONED) expect(w.promptSha).toBe(LIVE_SHA);
 
-    // TODAY: waived on both discriminators → the gate is green.
-    expect(applyWaivers(sanction, LIVE_SHA)).toEqual([]);
-    expect(applyWaivers(phantom, LIVE_SHA)).toEqual([]);
 
-    // AFTER A RE-PIN: every waiver expires and every divergence resurfaces.
-    expect(applyWaivers(sanction, otherSha)).toEqual([]);
-    expect(applyWaivers(phantom, otherSha)).toEqual(['analysis.staleness_reason']);
 
-    // No waiver is inert: each one is doing real suppression work today.
-    for (const w of KNOWN_UNSANCTIONED) {
-      expect([...sanction, ...phantom], `waiver '${w.field}' suppresses nothing`).toContain(w.field);
-    }
-  });
 
-  it('NEGATIVE CONTROL — the gate is QUIET on control-metadata fields (it does not fire on everything)', () => {
-    const found = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
-    for (const quiet of [
-      'version', 'scenario_id', 'stage', 'compound_detected',
-      'compound_pattern_matched', 'compound_segments', 'system_event',
-      'conversation', 'conversation_summary', 'coaching_context',
-      'recent_changes', 'analysis', 'graph', 'parsed_quantities',
-      'older_relevant_facts', // sanctioned by v120
-    ]) {
-      expect(found, `${quiet} should not fire`).not.toContain(quiet);
-    }
-    // No live sanction finding remains at v120: older_relevant_facts is named
-    // by the served prompt and `brief` is conditionally sanctioned in code.
-    expect(found).toEqual([]);
-  });
+
+
 
   it('FIXTURE-BLINDNESS CONTROL — an unpopulated field is CAUGHT, not silently skipped', () => {
     // Simulates "a new optional field lands and nobody updates the fixture".

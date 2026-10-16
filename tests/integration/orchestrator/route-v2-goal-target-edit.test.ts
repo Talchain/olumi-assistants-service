@@ -28,10 +28,10 @@
  * summariser would reach (`commit.ts`, `chatWithAnthropic`) and global `fetch`
  * are all mocked and asserted uncalled after EVERY case (see `afterEach`).
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import type { MockInstance } from 'vitest';
-import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
+import type { MockInstance } from 'vitest';
+import { afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
@@ -175,7 +175,7 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
-const { runTurnExecutor } = await import('../../../src/orchestrator-v5/turn-executor.js');
+
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const TURN_ID_BASE = '44444444-4444-4444-8444-4444444444';
@@ -259,12 +259,7 @@ function successfulRunFact(graphHash: string) {
 }
 
 /** The sentence the UI sends today (`manualGoalTargetMessage`, verbatim grammar). */
-function manualGoalTargetMessage(value: number, unit: string, direction: 'at_least' | 'at_most'): string {
-  const number = value.toLocaleString('en-US', { useGrouping: false, maximumSignificantDigits: 21 });
-  const amount = /^[£$€]$/.test(unit) ? `${unit}${number}` : unit === '%' ? `${number}%` : `${number} ${unit}`;
-  const bound = direction === 'at_least' ? 'at least' : 'at most';
-  return `This goal must be ${bound} ${amount}. This is an absolute level, not a change from the current level.`;
-}
+
 
 describe('POST /orchestrate/v2/turn — goal_target_edit (the structured success-target edit)', () => {
   let app: FastifyInstance;
@@ -391,97 +386,11 @@ describe('POST /orchestrate/v2/turn — goal_target_edit (the structured success
 
   // ── (b) PARITY with the existing deterministic typed-chip add_constraint path
 
-  async function runChatPath(direction: 'at_least' | 'at_most', value: number, suffix: string) {
-    const chatWithTools = vi.fn();
-    await runTurnExecutor(
-      {
-        kind: 'message',
-        source: 'chip_click',
-        turn_class: 'frame',
-        stage: 'analyse',
-        turn_id: `${TURN_ID_BASE}${suffix}`,
-        scenario_id: SCENARIO_ID,
-        message: manualGoalTargetMessage(value, '£', direction),
-        chip: {
-          action_type: 'add_constraint',
-          parameters: { target_id: GOAL_ID, constraint_type: direction, value, unit: '£' },
-        },
-      } as never,
-      `req-gte-parity-${suffix}`,
-      { routingAdapter: { chatWithTools } as never, graphState: buildPersistedGraph() as never },
-    );
-    // Precondition pinned in-test: the chat path really took the deterministic
-    // typed-chip route through add_constraint, with no model call.
-    expect(chatWithTools).not.toHaveBeenCalled();
-    const write = lastAppend()!;
-    expect(write.handler_id).toBe('add_constraint');
-    expect(write.graph).toBeDefined();
-    return write.graph!;
-  }
 
-  it('(b) PARITY — at_least stores exactly what the typed-chip add_constraint path stores', async () => {
-    const res = await post(goalEvent(), '2');
-    expect(res.statusCode).toBe(200);
-    const eventGraph = lastAppend()!.graph!;
 
-    persisted = buildPersistedGraph();
-    appendMock.mockClear();
-    const chatGraph = await runChatPath('at_least', 300000, '92');
 
-    expect(goalTargetChannel(eventGraph)).toEqual(goalTargetChannel(chatGraph));
-    expect(rowsFor(eventGraph, GOAL_ID)).toEqual(rowsFor(chatGraph, GOAL_ID));
-    // Whole node arrays, not only the goal: the two paths must treat every
-    // node — including the fixture's undeclared `data` field — identically.
-    expect(eventGraph.nodes).toEqual(chatGraph.nodes);
-    // Row identity is preserved on both paths, so the WHOLE analysis-affecting
-    // projection must agree, not only the fields listed above.
-    expect(computeAnalysisAffectingGraphHash(eventGraph as never)).toBe(
-      computeAnalysisAffectingGraphHash(chatGraph as never),
-    );
-  });
 
-  it('(b) PARITY — at_most stores exactly what the typed-chip add_constraint path stores', async () => {
-    const res = await post(goalEvent({ constraint_type: 'at_most', raw_value: 400000 }), '3');
-    expect(res.statusCode).toBe(200);
-    const eventGraph = lastAppend()!.graph!;
 
-    persisted = buildPersistedGraph();
-    appendMock.mockClear();
-    const chatGraph = await runChatPath('at_most', 400000, '93');
-
-    expect(goalTargetChannel(eventGraph)).toEqual(goalTargetChannel(chatGraph));
-    expect(eventGraph.nodes).toEqual(chatGraph.nodes);
-
-    // ⚠⚠ ONE MEASURED DIVERGENCE, PINNED RATHER THAN COPIED — `value_frame`.
-    //
-    // The chat path attests the row's frame from the UI's SENTENCE, via
-    // `deriveStatedConstraintFrame`. Measured at this tip (57f903c4, probe log
-    // `gte-artifacts/cee-frame-probe.log`): the compound-goal extractor parses
-    // "This goal must be at least £300000. …" (→ 'level') but returns NO
-    // constraint at all for "This goal must be at most £400000. …", so the
-    // chat path's `<=` goal row lands UNFRAMED — despite the sentence saying,
-    // in words, "This is an absolute level". The UI's own comment
-    // (manualGoalTarget.ts: "Our at_most sentence was witnessed yielding
-    // value_frame: 'level'", CEE dcebc360) does not hold at this tip for £.
-    //
-    // The structured event does NOT reproduce that gap: its contract DECLARES
-    // `raw_value` an absolute level for BOTH directions, so it relays 'level'.
-    // Copying the chat path's miss would make the new writer wrong on purpose.
-    // So every OTHER field must agree, and the divergence itself is asserted —
-    // if the chat path's extractor is fixed, the second assertion below REDs
-    // and this pin must be revisited (and should collapse to full equality).
-    const normalise = (rows: GoalRow[]) =>
-      rows.map((r) => {
-        if (r.operator !== '<=') return r;
-        const { value_frame: _frame, ...rest } = r;
-        return { ...rest, constraint_id: '<fresh>' };
-      });
-    expect(normalise(rowsFor(eventGraph, GOAL_ID))).toEqual(normalise(rowsFor(chatGraph, GOAL_ID)));
-    const eventRow = rowsFor(eventGraph, GOAL_ID).find((r) => r.operator === '<=')!;
-    const chatRow = rowsFor(chatGraph, GOAL_ID).find((r) => r.operator === '<=')!;
-    expect(eventRow.value_frame).toBe('level');
-    expect(chatRow.value_frame).toBeUndefined();
-  });
 
   // ── (c) at_most: the goal's ONE target, paired on its level frame or unpaired — never beside the floor's figure
   // ⭐ D3 step 1 (Science #87 6005138341 + 6006079049 (1); DL 0df0e1). Before: "at most stamps nothing", so the floor's

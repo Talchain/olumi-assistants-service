@@ -38,15 +38,15 @@
  * either side proves nothing (legacy fact), exactly as in the gate.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { SAME_INPUTS_LEAD_TEXT } from '../../routing/run-comparison-gate.js';
+
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from '../../compose/terminology-rewrite.js';
-import { detectCoachingSignal, RERUN_SAME_RECORDED_MODEL_TEXT } from '../coaching-signals.js';
+import { detectCoachingSignal,RERUN_SAME_RECORDED_MODEL_TEXT } from '../coaching-signals.js';
 
 const N = 10_000;
 
@@ -156,21 +156,7 @@ function rerunText(args: {
 }
 
 describe('a re-run on the SAME analysis inputs attributes nothing to the change', () => {
-  it('RED-FIRST — unchanged leader + an attributed change + equal hashes: no "held both before and after"', () => {
-    const text = rerunText({
-      priorFacts: [edgeEditFact(), priorRunFact(OFFSHORE_LEADS, 'hash-same')],
-      currentEnv: OFFSHORE_LEADS,
-      currentHash: 'hash-same',
-    });
-    expect(text).not.toContain('held both before and after');
-    expect(text).not.toContain('Since you');
-    // The narrow framing, by IDENTITY — and NOT the gate's stronger claim.
-    expect(text.startsWith(RERUN_SAME_RECORDED_MODEL_TEXT)).toBe(true);
-    expect(text).not.toContain(SAME_INPUTS_LEAD_TEXT);
-    expect(text).not.toMatch(/same analytical inputs|saved/i);
-    // The observation itself survives: the leader is still reported.
-    expect(text).toContain('Offshore still leads');
-  });
+
 
   it('RED-FIRST — several changes + equal hashes: no plural attribution either', () => {
     const text = rerunText({

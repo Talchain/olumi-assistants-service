@@ -17,7 +17,7 @@
  * fail the narrow type-guard are dropped from the response copy; raw caches
  * (consumed by V5 ContextPack) retain the original data unchanged.
  */
-import type { DraftGraphResult } from "./tools/draft-graph.js";
+import type { DraftGraphResult } from "./types.js";
 import type {
   DraftCoaching,
   DraftCoachingWideningEntry,

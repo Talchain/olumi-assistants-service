@@ -1,15 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  assessCanonicalAnalysisReadiness,
-  buildCanonicalAnalysisReadyFromGraph,
+assessCanonicalAnalysisReadiness,
+buildCanonicalAnalysisReadyFromGraph,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { assessAnalysisReadiness } from '../../tools/handlers/analysis-ready-core.js';
-import {
-  buildReadinessRepairOffer,
-  executeReadinessRepair,
-  readReadinessRepairResume,
-} from '../readiness-repair-proposal.js';
+
 
 type Dict = Record<string, unknown>;
 
@@ -180,155 +176,5 @@ describe('canonical readiness authority', () => {
     expect(assessment.repairProposal?.unresolved_inputs).toHaveLength(2);
     expect(assessment.repairProposal?.unresolved_inputs.map((input) => input.factor_id))
       .toEqual(['fac_cost', 'fac_quality']);
-  });
-});
-
-describe('multi-blocker repair proposal', () => {
-  function multiBlockerGraph(): Dict {
-    const graph = baseGraph();
-    const optionA = node(graph, 'opt_a');
-    delete optionA.interventions;
-    optionA.data = {
-      interventions: { fac_cost: { raw_value: 40, unit: '£' } },
-    };
-    (graph.nodes as Dict[]).push({
-      id: 'fac_capacity',
-      kind: 'factor',
-      label: 'Delivery capacity',
-      category: 'controllable',
-    });
-    (graph.edges as Dict[]).push(edge('fac_capacity', 'goal_1'));
-    graph.nodes = (graph.nodes as Dict[]).filter((candidate) => candidate.id !== 'dec_1');
-    graph.edges = (graph.edges as Dict[]).filter((candidate) => candidate.from !== 'dec_1');
-    return graph;
-  }
-
-  it('contains every safe change and every unresolved human input, with zero pre-review mutation', () => {
-    const graph = multiBlockerGraph();
-    const before = JSON.stringify(graph);
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    const proposal = assessment.repairProposal;
-    expect(proposal).not.toBeNull();
-    expect(proposal?.complete).toBe(true);
-    expect(proposal?.changes.map((change) => change.option_id)).toEqual(['opt_a']);
-    expect(proposal?.unresolved_inputs.length).toBe(assessment.blockingIssues.length);
-    expect(assessment.analysisReady?.readiness_issues?.map((issue) => issue.issue_id))
-      .toEqual(proposal?.issue_ids);
-    expect(proposal?.unresolved_inputs.every((input) => !/\b(?:0\.5|50%)\b/.test(input.prompt))).toBe(true);
-    expect(JSON.stringify(graph)).toBe(before);
-
-    const offer = buildReadinessRepairOffer({
-      assessment,
-      currentGraphHash: 'hash_at_review',
-      scenarioId: 'scenario_1',
-    });
-    expect(offer).not.toBeNull();
-    expect(JSON.stringify(graph)).toBe(before);
-  });
-
-  it('confirmation builds one candidate, reassesses it, and preserves unresolved judgement', () => {
-    const graph = multiBlockerGraph();
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    const offer = buildReadinessRepairOffer({
-      assessment,
-      currentGraphHash: 'hash_at_review',
-      scenarioId: 'scenario_1',
-    })!;
-    const read = readReadinessRepairResume(offer.pending);
-    expect(read.kind).toBe('ok');
-    if (read.kind !== 'ok') return;
-
-    const outcome = executeReadinessRepair({
-      proposal: read.proposal,
-      currentGraph: graph,
-      hasExistingAnalysis: false,
-    });
-    expect(outcome.status).toBe('executed');
-    if (outcome.status !== 'executed') return;
-    const repaired = outcome.mutatedGraph as Dict;
-    expect((node(repaired, 'opt_a').interventions as Dict).fac_cost).toMatchObject({
-      value: 0.4,
-      raw_value: 40,
-      unit: '£',
-    });
-    expect((node(repaired, 'opt_a').data as Dict | undefined)?.interventions).toBeUndefined();
-    expect(outcome.assessmentAfter.blockingIssues.length).toBeGreaterThanOrEqual(2);
-    expect(node(repaired, 'fac_capacity').value).toBeUndefined();
-  });
-
-  it('applies several safe carrier changes together in the one reassessed candidate', () => {
-    const graph = multiBlockerGraph();
-    const optionB = node(graph, 'opt_b');
-    delete optionB.interventions;
-    optionB['data/interventions/fac_cost'] = { raw_value: 60, unit: '£' };
-    const before = JSON.stringify(graph);
-    const proposal = assessCanonicalAnalysisReadiness(graph).repairProposal!;
-    expect(proposal.changes.map((change) => change.option_id)).toEqual(['opt_a', 'opt_b']);
-
-    const outcome = executeReadinessRepair({
-      proposal,
-      currentGraph: graph,
-      hasExistingAnalysis: false,
-    });
-    expect(outcome.status).toBe('executed');
-    if (outcome.status !== 'executed') return;
-    const repaired = outcome.mutatedGraph as Dict;
-    expect((node(repaired, 'opt_a').interventions as Dict).fac_cost).toMatchObject({ value: 0.4 });
-    expect((node(repaired, 'opt_b').interventions as Dict).fac_cost).toMatchObject({ value: 0.6 });
-    expect(JSON.stringify(graph)).toBe(before);
-  });
-
-  it('accepts a JSONB-style key reordering without weakening exact proposal equality', () => {
-    const graph = multiBlockerGraph();
-    const proposal = assessCanonicalAnalysisReadiness(graph).repairProposal!;
-    const reordered = {
-      unresolved_inputs: proposal.unresolved_inputs.map((input) => ({
-        // ⚠ THIS LITERAL IS A HAND-MAINTAINED MIRROR OF THE INPUT SHAPE, and it
-        // went stale the moment `obligation`/`provenance` were added: the parser
-        // reconstructed fields this reordering dropped, so exact proposal equality
-        // failed and a healthy resume read `invalid`. The test's intent is
-        // "reordering must not break equality" — every field therefore has to be
-        // carried, in a deliberately different order.
-        ...(input.provenance ? { provenance: input.provenance } : {}),
-        prompt: input.prompt,
-        kind: input.kind,
-        issue_id: input.issue_id,
-        ...(input.factor_id ? { factor_id: input.factor_id } : {}),
-        ...(input.obligation ? { obligation: input.obligation } : {}),
-        ...(input.option_id ? { option_id: input.option_id } : {}),
-      })),
-      changes: proposal.changes.map((change) => ({
-        description: change.description,
-        option_label: change.option_label,
-        option_id: change.option_id,
-        kind: change.kind,
-        change_id: change.change_id,
-      })),
-      issue_ids: [...proposal.issue_ids],
-      complete: true as const,
-      proposal_version: 'readiness_repair_v1' as const,
-    };
-    expect(executeReadinessRepair({
-      proposal: reordered,
-      currentGraph: graph,
-      hasExistingAnalysis: false,
-    }).status).toBe('executed');
-  });
-
-  it('a dropped issue/input mutant is rejected and produces no candidate', () => {
-    const graph = multiBlockerGraph();
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    const proposal = assessment.repairProposal!;
-    const mutant = {
-      ...proposal,
-      unresolved_inputs: proposal.unresolved_inputs.slice(1),
-    };
-    const outcome = executeReadinessRepair({
-      proposal: mutant,
-      currentGraph: graph,
-      hasExistingAnalysis: false,
-    });
-    expect(outcome).toEqual({ status: 'invalid', reason: 'proposal_mismatch' });
-    expect(node(graph, 'opt_a').interventions).toBeUndefined();
   });
 });

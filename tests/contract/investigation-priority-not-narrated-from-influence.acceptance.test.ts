@@ -46,20 +46,20 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 import { z } from 'zod';
 
-import {
-  reconcileAnalysisSummaryWithEnrichment,
-} from '../../src/orchestrator-v5/context/analysis-fallback.js';
-import { assembleContextPack, projectAnalysis } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
-import { buildUserMessage } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import {
-  VOI_NOT_SCORED_NOTE,
-  formatAnalysisForContext,
-} from '../../src/orchestrator-v5/format/format-analysis-for-context.js';
+reconcileAnalysisSummaryWithEnrichment,
+} from '../../src/orchestrator-v5/context/analysis-fallback.js';
+import { assembleContextPack,projectAnalysis } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+
 import { INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE } from '../../src/orchestrator-v5/coaching/investigation-priority.js';
+import {
+VOI_NOT_SCORED_NOTE,
+formatAnalysisForContext,
+} from '../../src/orchestrator-v5/format/format-analysis-for-context.js';
 import type { AnalysisResponseSummary } from '../../src/orchestrator/context/analysis-compact.js';
 
 const CAPTURE = JSON.parse(
@@ -98,29 +98,9 @@ function assembledCapture(
 }
 
 describe('current-model eligibility and independent scoring channels', () => {
-  it('retains an earned captured-factor priority in the actual routing message', () => {
-    const pack = assembledCapture(RESOLVED_CONTROL);
-    expect(pack.display_analysis?.investigation_priority_note).toContain('"ICP Clarity"');
-    const sent = buildUserMessage(pack, 'What should we investigate next?');
-    expect(sent).toContain(JSON.stringify(pack.display_analysis!.investigation_priority_note));
-    expect(sent).not.toContain('"factorId"');
-  });
 
-  it('carries only the existing producer action joined to the selected eligible factor', () => {
-    const review = z.object({ evidence_enhancements: z.record(z.unknown()) }).parse(CAPTURE.decision_review);
-    const { specific_action: action } = z.object({ specific_action: z.string() }).parse(review.evidence_enhancements['16ec3d64']);
-    const pack = assembledCapture({ ...RESOLVED_CONTROL, decision_review: {
-      evidence_enhancements: {
-        '16ec3d64': { specific_action: action },
-        'unselected': { specific_action: 'This unrelated action must not be substituted.' },
-      },
-    } });
-    const sent = buildUserMessage(pack, 'What evidence should we collect next?');
-    expect(sent).toContain(action);
-    expect(sent).not.toContain('This unrelated action');
-    expect(assembledCapture({ ...RESOLVED_CONTROL, decision_review: {} }).display_analysis?.investigation_priority_note)
-      .not.toContain('Suggested evidence action');
-  });
+
+
 
   it('omits an oversized optional action without losing the earned priority', () => {
     const action = 'Read the documented evidence carefully. '.repeat(80);

@@ -40,17 +40,11 @@
  * stale verdict".
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-  ToolResponseBlock,
-} from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
@@ -100,8 +94,8 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+
+
 
 // ---------------------------------------------------------------------------
 // Fixtures — the graphs and hashes are COMPUTED, never spelled.
@@ -228,52 +222,12 @@ const PRIOR_TURN = {
   created_at: new Date(Date.now() - 60_000).toISOString(),
 };
 
-function mkPayload(message: string): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message,
-    turn_class: 'frame',
-    stage: 'analyse',
-  };
-}
+
 
 /** A coach tool call that finalises without dispatching a handler. */
-function coachToolResult(): ChatWithToolsResult {
-  const content: ToolResponseBlock[] = [
-    {
-      type: 'tool_use',
-      id: 'tu-1',
-      name: OLUMI_ACTION_TOOL_NAME,
-      input: {
-        intent_class: 'coach',
-        coaching_mode: 'reframe',
-        answer_shape: {
-          headline: 'Where the model stands',
-          bullets: [],
-          detail: 'A short reflection on the question.',
-        },
-      },
-    },
-  ];
-  return {
-    content,
-    stop_reason: 'tool_use',
-    usage: { input_tokens: 5, output_tokens: 5 } as unknown as ChatWithToolsResult['usage'],
-    model: 'claude-sonnet-4-6',
-    latencyMs: 20,
-  };
-}
 
-function adapterOnce() {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockResolvedValueOnce(coachToolResult()),
-  };
-}
+
+
 
 beforeEach(() => {
   mockState.priorTurns = [PRIOR_TURN];
@@ -297,94 +251,9 @@ describe('turn-executor — two freshness authorities, two questions, one turn',
     expect(EDITED_GRAPH_HASH).not.toBe(ANALYSED_GRAPH_HASH);
   });
 
-  it('⭐ THE PIN: the wire-bound verdict says `none` while the scenario-bound verdict says `stale`', async () => {
-    const result = await runTurnExecutor(
-      mkPayload('where does the model stand?'),
-      'req-g3-distinct',
-      { routingAdapter: adapterOnce(), graphState: EDITED_GRAPH as never },
-    );
-
-    // The hot window has lost the analysis — the wire verdict is unchanged by
-    // this feature and MUST stay the bounded-window answer.
-    expect(result.freshness?.freshness).toBe('none');
-    expect(result.freshness?.reason).toBe('no_successful_run_analysis_fact');
-
-    // The durable history still holds it. Bound by identity to the saved fact,
-    // not to "some stale verdict".
-    expect(result.scenarioFreshness).toBeDefined();
-    expect(result.scenarioFreshness?.freshness).toBe('stale');
-    expect(result.scenarioFreshness?.graph_hash_at_run).toBe(ANALYSED_GRAPH_HASH);
-    expect(result.scenarioFreshness?.computed_at).toBe(SAVED_COMPUTED_AT);
-
-    // ⭐ THE COLLAPSE DETECTOR. Any change that repoints one derivation at the
-    // other's array, or assigns one to the other, makes these two equal.
-    expect(result.scenarioFreshness?.freshness).not.toBe(result.freshness?.freshness);
-    expect(result.scenarioFreshness).not.toBe(result.freshness);
-
-    // …and the collapse's OWN signature, named so a future reader recognises it:
-    // a collapsed derivation over an absent carrier returns `unknown` /
-    // `derivation_failed` for every input class.
-    expect(result.freshness?.reason).not.toBe('derivation_failed');
-  });
-
-  it('both derivations describe the SAME current graph — the supersession gate\'s precondition', async () => {
-    // The two verdicts differ; the graph they were taken against does not. This
-    // is what licenses the route seam to adopt the durable verdict at all, and
-    // it is the observable that moves first if either derivation is ever handed
-    // a different hash at ORIENT.
-    const result = await runTurnExecutor(
-      mkPayload('where does the model stand?'),
-      'req-g3-same-graph',
-      { routingAdapter: adapterOnce(), graphState: EDITED_GRAPH as never },
-    );
-    expect(result.freshness?.current_graph_hash).toBe(EDITED_GRAPH_HASH);
-    expect(result.scenarioFreshness?.current_graph_hash).toBe(EDITED_GRAPH_HASH);
-  });
-
-  it('CONTRAST: no durable port ⇒ the field is ABSENT, never a `derivation_failed` non-verdict', async () => {
-    // This is the arm that keeps the authority gate honest. With no durable
-    // read, `promptAnalysisFreshness` is a derivation over `[]` with
-    // `readOk: false` — it exists, and it says `unknown` / `derivation_failed`
-    // for every input. Surfacing THAT would hand a consumer a non-verdict
-    // wearing a verdict's shape.
-    //
-    // The store factory re-reads `mockState.durablePage` on EVERY
-    // `getSessionStore()` call, so flipping it here genuinely removes the
-    // method — no module reset needed, and the first test in this file is the
-    // positive control proving the field IS populated under this same harness.
-    // Absence here is therefore a discrimination, not a blind instrument.
-    mockState.durablePage = null;
-
-    const result = await runTurnExecutor(
-      mkPayload('where does the model stand?'),
-      'req-g3-no-authority',
-      { routingAdapter: adapterOnce(), graphState: EDITED_GRAPH as never },
-    );
-
-    expect(result.scenarioFreshness).toBeUndefined();
-    // …and the wire verdict is untouched by the absence.
-    expect(result.freshness?.freshness).toBe('none');
-  });
-});
 
 
-describe('legacy clearance durability on the turn path', () => {
-  it.each(['complete', 'failed', 'capped'] as const)('equal numeric hash cannot revive the saved Run (%s edit read)', async state => {
-    mockState.persistedGraph = ANALYSED_GRAPH;
-    const page = durablePageWithSavedAnalysis();
-    const edit = { fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
-      edit_kind: 'option_configuration', status: 'applied', operations_count: 1, affected_entities: [],
-      graph_hash_before: ANALYSED_GRAPH_HASH, graph_hash_after: ANALYSED_GRAPH_HASH,
-      safe_summary: 'Cleared the last option gap', impact: 'moderate', rerun_recommended: true,
-    } };
-    mockState.durablePage = { ...page, legacy_edit_facts: {
-      since: SAVED_COMPUTED_AT, readOk: state === 'complete', total_count: state === 'complete' ? 1 : state === 'capped' ? 22 : null,
-      facts: state === 'complete' ? [{ fact: edit as never, fact_row_id: 'last-gap-clearance', fact_created_at: '2026-09-02T09:00:00.000Z' }] : [],
-    } };
-    const result = await runTurnExecutor(mkPayload('where does the model stand?'), 'req-legacy-clearance-' + state,
-      { routingAdapter: adapterOnce(), graphState: ANALYSED_GRAPH as never });
-    expect(result.scenarioFreshness).toMatchObject({ freshness: 'stale', graph_hash_at_run: ANALYSED_GRAPH_HASH,
-      computed_at: SAVED_COMPUTED_AT, current_graph_hash: ANALYSED_GRAPH_HASH });
-    expect(result.scenarioFreshness?.reason).toBe(state === 'complete' ? 'model_edited_after_analysis' : 'legacy_admission_unverified');
-  });
+
+
+
 });

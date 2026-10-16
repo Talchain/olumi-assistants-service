@@ -1,7 +1,7 @@
-import ts from 'typescript';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
+import { describe,expect,it } from 'vitest';
 
 type Sink = { file: string; symbol: string; assignments?: string[] };
 type Site = Sink & { keys: string[]; lines: number[] };
@@ -11,11 +11,9 @@ type Site = Sink & { keys: string[]; lines: number[] };
 const SINK_MANIFEST: Sink[] = [
   {"file": "src/orchestrator-v5/compose/applied-graph-emit.ts", "symbol": "buildAppliedGraphWireField", "assignments": []},
   {"file": "src/orchestrator-v5/compose/applied-graph-emit.ts", "symbol": "buildCanonicalCommittedGraphReceipt", "assignments": []},
-  {"file": "src/orchestrator-v5/handlers/draft-graph-dispatch.ts", "symbol": "draftResultToOlumiResponse", "assignments": ["draft_graph", "draft_graph"]},
   {"file": "src/routes/assist.v1.scenario-graph.ts", "symbol": "route", "assignments": ["graph", "graph", "graph", "graph"]},
   {"file": "src/orchestrator-v5/model-management/mutation-receipt.ts", "symbol": "toModelVersionMutationReceiptV1", "assignments": ["graph"]},
   {"file": "src/orchestrator-v5/tools/handlers/run-analysis.ts", "symbol": "runAnalysisHandler", "assignments": ["graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph"]},
-  {"file": "src/orchestrator/tools/draft-graph.ts", "symbol": "handleDraftGraph", "assignments": ["applied_graph"]},
   {"file": "src/orchestrator/tools/edit-graph.ts", "symbol": "handleEditGraph", "assignments": ["applied_graph"]},
   {"file": "src/routes/assist.share.ts", "symbol": "route", "assignments": ["graph", "graph", "graph"]},
   {"file": "src/routes/assist.v1.draft-graph-staged.ts", "symbol": "onStage", "assignments": ["graph"]},
@@ -24,13 +22,13 @@ const SINK_MANIFEST: Sink[] = [
 ];
 
 const ALLOWLIST: (Sink & { reason: string })[] = [
+  {"file": "src/orchestrator-v5/handlers/approve-held-proposal.ts", "symbol": "applyHeldProposal", "reason": "Forwards buildAppliedGraphWireField output from the manifest, after the same held-card commit.", "assignments": ["draft_graph"]},
   {"file": "src/adapters/llm/caching.ts", "symbol": "getConfiguredMaxTokens", "reason": "Task token budget lookup, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/adapters/llm/router.ts", "symbol": "<module>", "reason": "Task model-routing configuration, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/cee/unified-pipeline/index.ts", "symbol": "attachDraftGraphTimings", "reason": "Draft timing metadata only, not a graph.", "assignments": ["draft_graph", "draft_graph"]},
   {"file": "src/config/model-routing.ts", "symbol": "<module>", "reason": "Task model-routing configuration, not a graph.", "assignments": ["draft_graph", "draft_graph", "draft_graph"]},
   {"file": "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts", "symbol": "authoriseChange", "reason": "Reads committed receipts into graph-free receipt summaries.", "assignments": ["model_version_receipt", "model_version_receipt", "model_version_receipt", "model_version_receipt"]},
   {"file": "src/orchestrator-v5/compose/leader-licence-shadow.ts", "symbol": "leaderLicenceShadow", "reason": "Internal permission input; graph is never serialised.", "assignments": ["graph"]},
-  {"file": "src/orchestrator-v5/compose/unsupported-action-response.ts", "symbol": "<module>", "reason": "Capability phrase lookup, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/orchestrator-v5/compose/withheld-claim-projection.ts", "symbol": "projectCritiquesForWithheldClaim", "reason": "Internal critique input with graph null.", "assignments": ["graph"]},
   {"file": "src/orchestrator-v5/context/context-budget-telemetry.ts", "symbol": "<module>", "reason": "Task context policy lookup, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/orchestrator-v5/context/context-policy.ts", "symbol": "<module>", "reason": "Task context policy lookup, not a graph.", "assignments": ["draft_graph"]},
@@ -60,11 +58,6 @@ const ALLOWLIST: (Sink & { reason: string })[] = [
   {"file": "src/orchestrator-v5/system-events/dispatch.ts", "symbol": "dispatchAddConstraintEdit", "reason": "Forwards buildAppliedGraphWireField output from the manifest.", "assignments": ["draft_graph"]},
   {"file": "src/orchestrator-v5/system-events/olumi-option-adoption.ts", "symbol": "commitOlumiOptionAdoptionInProcess", "reason": "Forwards the committed receipt from the manifest converter.", "assignments": ["model_version_receipt"]},
   {"file": "src/orchestrator-v5/tools/handlers/run-analysis.ts", "symbol": "withoutDriftedAccumulations", "reason": "Internal compute projection; public payload projection is in the manifest.", "assignments": ["graph"]},
-  {"file": "src/orchestrator-v5/turn-executor.ts", "symbol": "commitReadinessRepairResume", "reason": "Forwards buildAppliedGraphWireField output from the manifest.", "assignments": ["draft_graph"]},
-  {"file": "src/orchestrator-v5/turn-executor.ts", "symbol": "commitValueBatchResume", "reason": "Forwards buildAppliedGraphWireField output from the manifest.", "assignments": ["draft_graph"]},
-  {"file": "src/orchestrator-v5/turn-executor.ts", "symbol": "commitGmHeldResume", "reason": "Forwards buildAppliedGraphWireField output from the manifest.", "assignments": ["draft_graph"]},
-  {"file": "src/orchestrator-v5/turn-executor.ts", "symbol": "commitGmHeldResumeAll", "reason": "Forwards buildAppliedGraphWireField output from the manifest.", "assignments": ["draft_graph"]},
-  {"file": "src/orchestrator-v5/turn-executor.ts", "symbol": "runTurnExecutor", "reason": "Forwards buildAppliedGraphWireField output from the manifest.", "assignments": ["draft_graph"]},
   {"file": "src/prompts/defaults.ts", "symbol": "registerAllDefaultPrompts", "reason": "Prompt task registration or override mapping, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/prompts/defaults.ts", "symbol": "<module>", "reason": "Prompt task registration or override mapping, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/prompts/estate.ts", "symbol": "<module>", "reason": "Prompt task registry, not a graph.", "assignments": ["draft_graph"]},

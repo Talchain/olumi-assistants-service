@@ -28,10 +28,10 @@
  * classified" assertion is vacuous. The final test feeds it a fixture compose
  * call with NO `answerKind` and asserts it is flagged.
  */
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { dirname,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { describe,expect,it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -97,7 +97,7 @@ function enumerateComposeCalls(source: string): ComposeCall[] {
 
 // The three files where a composed OlumiResponse reaches the route egress.
 const TARGET_FILES = {
-  'turn-executor.ts': resolve(HERE, '../turn-executor.ts'),
+  'approve-held-proposal.ts': resolve(HERE, '../handlers/approve-held-proposal.ts'),
   'chip-click-dispatch.ts': resolve(HERE, '../handlers/chip-click-dispatch.ts'),
 } as const;
 
@@ -114,7 +114,7 @@ const TARGET_FILES = {
 //     is therefore 'functional' today. Flipping the explain/flip compose to
 //     'substantive' later must bump this pin to 1 (deliberate).
 const EXPECTED_SUBSTANTIVE_COUNT: Record<keyof typeof TARGET_FILES, number> = {
-  'turn-executor.ts': 4,
+  'approve-held-proposal.ts': 0, // Only deterministic card receipts and recoveries remain.
   'chip-click-dispatch.ts': 0,
 };
 
@@ -154,15 +154,6 @@ describe('F1 answer-kind — compose-site classification drift guard (ROADMAP 1.
   // exactly the class of miss that burned F1 three times. Pin: the executor
   // calls `composeDirectAnswerResponse` EXACTLY ONCE — inside the wrapper — and
   // that call delegates a typed input variable.
-  it('turn-executor.ts: composeDirectAnswerResponse is called ONLY inside the composeAnswer chokepoint', () => {
-    const source = readFileSync(TARGET_FILES['turn-executor.ts'], 'utf8');
-    const directCalls = enumerateComposeCalls(source).filter(
-      (c) => c.composer === 'composeDirectAnswerResponse',
-    );
-    expect(directCalls, 'exactly one direct composeDirectAnswerResponse call (the wrapper)').toHaveLength(1);
-    // …and it delegates the wrapper's typed `input` (no inline object literal).
-    expect(directCalls[0]!.declaredKind).toBe('delegated');
-  });
 
   // ── POSITIVE CONTROL (trap #13) ────────────────────────────────────────────
   // Prove the detector can SEE an unclassified site — otherwise the

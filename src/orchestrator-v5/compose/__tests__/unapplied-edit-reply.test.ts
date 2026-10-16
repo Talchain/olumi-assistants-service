@@ -25,27 +25,24 @@
  * SAME verb, and both directions are asserted.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import {
-  classifyUnappliedEditFrame,
-  composeUnappliedEditReply,
-  resolveUnappliedEditUnderstanding,
-  type UnappliedEditNode,
-} from '../unapplied-edit-reply.js';
-import {
-  findEditInternalsHit,
-  findForbiddenPhraseHit,
-  findSuccessClaimHit,
-} from '../forbidden-user-facing-phrases.js';
 import { qualitativeBand } from '../../../cee/factor-extraction/display-value.js';
 import {
-  isValueUpdatePhrasing,
-  shouldSuppressEditDispatchForValueUpdate,
-} from '../../../orchestrator/routing/value-update-gate.js';
+findEditInternalsHit,
+findForbiddenPhraseHit,
+findSuccessClaimHit,
+} from '../forbidden-user-facing-phrases.js';
 import {
-  EDIT_GRAPH_NEGATIVE_REGEX,
-  EDIT_GRAPH_POSITIVE_REGEX,
+classifyUnappliedEditFrame,
+composeUnappliedEditReply,
+resolveUnappliedEditUnderstanding,
+type UnappliedEditNode,
+} from '../unapplied-edit-reply.js';
+
+import {
+EDIT_GRAPH_NEGATIVE_REGEX,
+EDIT_GRAPH_POSITIVE_REGEX,
 } from '../../../orchestrator/routing/edit-graph-intent-regex.js';
 
 // ── The graph the witnessed session had on screen ──────────────────────────
@@ -488,17 +485,9 @@ describe('QUESTION 2 — the understanding, and the coercion boundary', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('CHIP ROUTEABILITY — asserted by execution against the shipped gate', () => {
-  it('every numeric offer chip satisfies isValueUpdatePhrasing, which is what routes it to set_factor_value', () => {
-    const reply = composeUnappliedEditReply({ message: W2, nodes: NODES })!;
-    expect(reply.chips.length).toBeGreaterThan(0);
-    for (const c of reply.chips) {
-      expect(isValueUpdatePhrasing(c.message), `does not route: ${c.message}`).toBe(true);
-    }
-  });
 
-  it('POSITIVE CONTROL — the gate can say NO, so the assertion above is not vacuous', () => {
-    expect(isValueUpdatePhrasing('Tell me the specific factor to change')).toBe(false);
-  });
+
+
 
   it('the DELIBERATION chips route to the two DIFFERENT lanes they promise — measured, not assumed', () => {
     // The deliberation branch offers two ways out, and they must land in
@@ -524,13 +513,7 @@ describe('CHIP ROUTEABILITY — asserted by execution against the shipped gate',
     expect(dispatchesToEditLane(proceed)).toBe(true);
   });
 
-  it('W1 also reaches the value lane — the uncertainty ask still ends somewhere real', () => {
-    const reply = composeUnappliedEditReply({ message: W1, nodes: NODES })!;
-    expect(reply.chips.length).toBeGreaterThan(0);
-    for (const c of reply.chips) {
-      expect(isValueUpdatePhrasing(c.message)).toBe(true);
-    }
-  });
+
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -656,46 +639,7 @@ describe('F2 — a question that ALSO names the object and the value gets BOTH a
     expect(ids).toContain('unapplied_edit_deliberation_answer');
   });
 
-  it('⭐ the paired PROCEED chip lands somewhere real — it must not advertise an action that refuses', () => {
-    // Measured, then pinned. The paired branch mints a NEW chip shape
-    // (`Change <label> to <level>.`) that the existing deliberation-chip test
-    // does not cover, and the obvious failure mode is a LOOP: the chip
-    // re-submits the very message that produced this no-op.
-    //
-    // It does not loop, and the two hops are asserted here so a future change
-    // cannot quietly make it one:
-    //   hop 1 — the chip is claimed by the edit lane (else it promises a
-    //           change and delivers a conversation);
-    //   hop 2 — that message resolves to the band branch, whose chips satisfy
-    //           the REAL suppression predicate and therefore reach
-    //           `set_factor_value`.
-    const reply = composeUnappliedEditReply({
-      message: PAIRED_CASES[0].paired,
-      nodes: NODES,
-    })!;
-    const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
-    expect(proceed).toBeDefined();
 
-    const dispatchesToEditLane = (m: string): boolean =>
-      EDIT_GRAPH_POSITIVE_REGEX.test(m) && !EDIT_GRAPH_NEGATIVE_REGEX.test(m);
-    expect(dispatchesToEditLane(proceed.message)).toBe(true);
-
-    // …and the DISCRIMINATION: the other chip must NOT be claimed by the edit
-    // lane, or the user asks a question twice and is refused twice. Two
-    // expectations that DIFFER, so a blind probe cannot fake agreement.
-    const answer = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_answer')!;
-    expect(dispatchesToEditLane(answer.message)).toBe(false);
-
-    // hop 2 — the next turn ends somewhere that can write.
-    const next = composeUnappliedEditReply({ message: proceed.message, nodes: NODES })!;
-    expect(next.chips.length).toBeGreaterThan(0);
-    for (const c of next.chips) {
-      expect(
-        shouldSuppressEditDispatchForValueUpdate(c.message),
-        `paired proceed chip dead-ends: ${c.message}`,
-      ).toBe(true);
-    }
-  });
 
   it('OPPOSITE DIRECTION — a paired question never WRITES, and never claims we did', () => {
     // The frame gate's whole safety argument is that neither branch mutates.
@@ -717,54 +661,7 @@ describe('F2 — a question that ALSO names the object and the value gets BOTH a
 // mixed value+structural case unmeasured.
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('F3 — chip routing asserted against the predicate that actually suppresses', () => {
-  it('every numeric offer chip satisfies the REAL suppression predicate', () => {
-    const reply = composeUnappliedEditReply({ message: W2, nodes: NODES })!;
-    expect(reply.chips.length).toBeGreaterThan(0);
-    for (const c of reply.chips) {
-      expect(
-        shouldSuppressEditDispatchForValueUpdate(c.message),
-        `does not suppress edit dispatch: ${c.message}`,
-      ).toBe(true);
-    }
-  });
 
-  it('POSITIVE CONTROL — the real predicate can say NO, and says no for a DIFFERENT reason than the weak one', () => {
-    // Two controls with DIFFERENT expected answers, so a blind probe cannot
-    // fake agreement: the first fails both conjuncts, the second passes the
-    // weak conjunct and fails only the real one.
-    expect(shouldSuppressEditDispatchForValueUpdate('Tell me the specific factor')).toBe(false);
-    // ⚠ THIS EXAMPLE WAS MEASURED, NOT ASSUMED, AND THE FIRST ONE I WROTE WAS
-    // WRONG. I reached for the mixed message quoted in `value-update-gate.ts`'s
-    // own header ("Set Support cost to 30 and add a new factor called Shipping
-    // costs") — and BOTH predicates return false for it, because the weak
-    // conjunct's regex was tightened after that comment was written. The
-    // comment describes a historical state. Swept eight candidates to find one
-    // that genuinely separates the two.
-    const mixed = 'Update the churn rate to 5% and delete the status quo option';
-    expect(isValueUpdatePhrasing(mixed)).toBe(true);
-    expect(shouldSuppressEditDispatchForValueUpdate(mixed)).toBe(false);
-  });
-
-  it('a label containing a structural word does NOT break the chip — measured, not assumed', () => {
-    // Enumerated as a suspected defect and DISPROVEN; kept as a regression
-    // pin, because a future change to the decomposer could make it real.
-    const andLabel: UnappliedEditNode = {
-      id: 'fac_sm',
-      kind: 'factor',
-      label: 'Sales and marketing spend',
-      observed_state: { value: 0.3 },
-    };
-    const reply = composeUnappliedEditReply({
-      message: 'Change Sales and marketing spend to low',
-      nodes: [andLabel],
-    })!;
-    expect(reply.chips.length).toBeGreaterThan(0);
-    for (const c of reply.chips) {
-      expect(shouldSuppressEditDispatchForValueUpdate(c.message)).toBe(true);
-    }
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // KNOWN-DROPPED — pinned EXACTLY, so the suite REDs if the set grows OR

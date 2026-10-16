@@ -14,19 +14,19 @@
  *   - no raw IDs or internal terms appear in the rendered summary strings
  *   - non-mutation facts are skipped silently
  */
-import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { describe,expect,it } from 'vitest';
 
 type AdjustEdgeFact = Extract<HandlerFact, { fact_type: 'adjust_edge_strength' }>;
 
 import {
-  RECENT_CHANGES_CAP,
-  RECENT_CHANGES_HASH_EMPTY,
-  RECENT_CHANGES_SUMMARY_MAX_CHARS,
-  computeRecentChangesHash,
-  deriveRecentChangesEvidence,
-  projectRecentChanges,
-  type RecentMutation,
+RECENT_CHANGES_CAP,
+RECENT_CHANGES_HASH_EMPTY,
+RECENT_CHANGES_SUMMARY_MAX_CHARS,
+computeRecentChangesHash,
+deriveRecentChangesEvidence,
+projectRecentChanges,
+type RecentMutation,
 } from '../recent-changes.js';
 
 function mkAddConstraint(opts: {
@@ -602,34 +602,7 @@ describe('recent_changes — assembler-level budget proof', () => {
     );
   });
 
-  it('a persisted 60k target label cannot bypass the pack or rendered-prompt ceiling', async () => {
-    const { assembleContextPack } = await import('../context-pack-assembler.js');
-    const { CONTEXT_POLICY } = await import('../context-policy.js');
-    const { buildUserMessage } = await import('../../routing/route-with-tool-use.js');
 
-    const contextPack = assembleContextPack({
-      payload: {
-        kind: 'message',
-        source: 'composer',
-        scenario_id: '00000000-0000-4000-8000-000000000000',
-        turn_id: 't-budget-long-target',
-        stage: 'analyse',
-        turn_class: 'frame',
-        message: 'What changed?',
-      },
-      priorTurns: [],
-      priorFacts: [mkAddConstraint({ label: 'L'.repeat(60_000) })],
-    });
-
-    const budget = CONTEXT_POLICY.coach_converse.total_char_budget!;
-    expect(contextPack.recent_changes[0]!.target_label).toHaveLength(
-      RECENT_CHANGES_SUMMARY_MAX_CHARS,
-    );
-    expect(JSON.stringify(contextPack).length).toBeLessThanOrEqual(budget);
-    expect(buildUserMessage(contextPack, 'What changed?').length).toBeLessThanOrEqual(
-      budget,
-    );
-  });
 });
 
 describe('computeRecentChangesHash (V5 WS1 / E4)', () => {

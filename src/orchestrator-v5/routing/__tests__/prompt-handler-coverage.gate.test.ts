@@ -56,13 +56,13 @@
  * contrast fires.
  */
 
-import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describe,expect,it } from 'vitest';
 
-import { OLUMI_ACTION_TOOL } from '../tool-schema.js';
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../../..');
@@ -97,34 +97,18 @@ function sha256(s: string): string {
  * purpose: the shape is a JSONSchema literal, and narrowing it here would mean
  * restating the structure — a second mirror of the thing being checked.
  */
-function deriveHandlerIds(): readonly string[] {
-  const schema = OLUMI_ACTION_TOOL.input_schema as unknown as {
-    properties: {
-      action: { properties: { handler_id: { enum?: readonly string[] } } };
-    };
-  };
-  return schema.properties.action.properties.handler_id.enum ?? [];
-}
 
-const HANDLER_IDS = deriveHandlerIds();
+
+
 
 /**
  * A handler-shaped id that is NOT in the enum and NOT in the prompt. Its job is
  * to prove the probe DISCRIMINATES: if this ever reads non-zero, the matcher is
  * matching something other than what it claims to.
  */
-const CONTRAST_ABSENT_HANDLER = 'smooth_the_gradient';
 
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0;
-  let from = 0;
-  for (;;) {
-    const at = haystack.indexOf(needle, from);
-    if (at === -1) return count;
-    count += 1;
-    from = at + needle.length;
-  }
-}
+
+
 
 function extractHandlersSection(prompt: string): string {
   const match = /<HANDLERS>([\s\S]*?)<\/HANDLERS>/.exec(prompt);
@@ -138,16 +122,7 @@ const handlersSection = extractHandlersSection(servedPrompt);
 // ---------------------------------------------------------------------------
 
 describe('instrument — the probe can see, and can discriminate', () => {
-  it('derives a NON-EMPTY handler enum from the live tool definition', () => {
-    // A blind derivation returning [] would make every coverage assertion below
-    // pass vacuously (`[].every(...)` is true). Magnitude is checked too: a
-    // silently-truncated enum is a smaller, quieter version of the same lie.
-    expect(HANDLER_IDS.length).toBeGreaterThanOrEqual(5);
-    expect(new Set(HANDLER_IDS).size).toBe(HANDLER_IDS.length);
-    for (const id of HANDLER_IDS) {
-      expect(id, 'a handler id must be a non-empty string').toMatch(/^[a-z][a-z_]+$/);
-    }
-  });
+
 
   it('extracts a NON-EMPTY <HANDLERS> section from the served prompt', () => {
     expect(servedPrompt.length).toBeGreaterThan(18_500);
@@ -160,11 +135,7 @@ describe('instrument — the probe can see, and can discriminate', () => {
     );
   });
 
-  it('CONTRAST control — a handler-shaped id absent from the enum reads exactly zero', () => {
-    expect(HANDLER_IDS).not.toContain(CONTRAST_ABSENT_HANDLER);
-    expect(countOccurrences(servedPrompt, CONTRAST_ABSENT_HANDLER)).toBe(0);
-    expect(countOccurrences(handlersSection, CONTRAST_ABSENT_HANDLER)).toBe(0);
-  });
+
 
   it('the bytes under test ARE the served prompt (sha256 pinned to the canonical manifest)', () => {
     const manifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as {
@@ -189,34 +160,9 @@ describe('instrument — the probe can see, and can discriminate', () => {
 // ---------------------------------------------------------------------------
 
 describe('every dispatchable handler is named in the served prompt', () => {
-  it.each(HANDLER_IDS.map((id) => [id] as const))(
-    '<HANDLERS> names `%s`',
-    (handlerId) => {
-      expect(
-        countOccurrences(handlersSection, handlerId),
-        `\`${handlerId}\` is in the olumi_action tool enum but is NOT named in the ` +
-          `served prompt's <HANDLERS> section. The model is told to "only propose a ` +
-          `handler_id available in the current tool set" and then shown a list that ` +
-          `omits this one, so the intent it serves falls through to edit_graph. ` +
-          `Add a line for it to Prompts/canonical/routing.txt, mirror the bytes to ` +
-          `the served fixture, and re-pin the manifest sha256 ` +
-          `(Prompts/canonical/README.md, "Version-bump procedure").`,
-      ).toBeGreaterThan(0);
-    },
-  );
 
-  it('the two handlers the 2026-08-29 defect hid are present (regression pin)', () => {
-    // Bound BY IDENTITY, not by a count another handler could satisfy. These
-    // two names are the measured defect; if a future prompt edit drops either,
-    // this REDs naming the exact one.
-    for (const handlerId of ['add_constraint', 'adjust_edge_strength'] as const) {
-      expect(HANDLER_IDS, `${handlerId} left the tool enum`).toContain(handlerId);
-      expect(
-        countOccurrences(handlersSection, handlerId),
-        `${handlerId} left the prompt`,
-      ).toBeGreaterThan(0);
-    }
-  });
+
+
 
   it('edit_graph is told to defer to the specific handlers rather than absorb them', () => {
     // The gap did not merely omit two names, it MISROUTED their traffic:

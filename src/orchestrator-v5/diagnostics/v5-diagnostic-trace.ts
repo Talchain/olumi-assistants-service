@@ -57,10 +57,10 @@ import {
   DiagnosticTraceCollector,
   emptyDiagnosticTrace,
 } from '../../orchestrator/pipeline/diagnostic-trace.js';
-import type { PromptAttributionSnapshot } from '../../orchestrator/pipeline/prompt-attribution.js';
+import type { PromptAttributionSnapshot } from '../../orchestrator/pipeline/diagnostic-trace.js';
 import type { PipelineOutcome } from '../../cee/unified-pipeline/types.js';
 import type { DraftQualityTraceRecord } from '../../cee/draft-quality/types.js';
-import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
+import type { DraftGraphResult } from '../../orchestrator/types.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type { CommitResult } from '../commit.js';
 import type {

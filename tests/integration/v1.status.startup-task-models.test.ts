@@ -77,7 +77,9 @@ describe("GET /v1/status — model_routing states its own epistemic status", () 
     // POSITIVE CONTROL: a projection of {} makes every loop below vacuous.
     expect(Object.keys(startup).length).toBeGreaterThan(0);
 
-    for (const task of ["draft_graph", "edit_graph", "orchestrator", "critique_graph"]) {
+    // C1 removed the conventional orchestrator producer from runtime task models.
+    expect(Object.hasOwn(startup, "orchestrator")).toBe(false);
+    for (const task of ["draft_graph", "edit_graph", "critique_graph"]) {
       expect(startup[task]).toBe(resolveTaskRouting(task as never).model);
     }
   });

@@ -13,57 +13,21 @@
  *     measurably cannot see. This is the only guard that can notice a list
  *     is SHORT. Deleting either kind leaves a defect class unobserved.
  */
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import {
-  CALIBRATION_PHRASES,
-  THRESHOLD_MARKER_SOURCE_FOR_TESTS,
-  classifyCalibrationMessage,
-  detectProbabilityPhrase,
-  detectThreshold,
-  formatProbabilityPercent,
-  buildCalibrationPreviewText,
-  buildCalibrationConfirmMessage,
-  buildCalibrationReply,
-  mayOfferPointValue,
-  resolveFactorLabelForConsentPreview,
-} from '../calibration-semantics.js';
-import { CERTAINTY_TERMS } from '../../../cee/belief-elicitation/index.js';
-import {
-  COMPARATOR_ATLEAST_SOURCE,
-  COMPARATOR_ATMOST_SOURCE,
-} from '../../context/cqe/rules.js';
+
 import { extractQuantities } from '../../context/cqe/extract-quantities.js';
+import {
+COMPARATOR_ATLEAST_SOURCE,
+COMPARATOR_ATMOST_SOURCE,
+} from '../../context/cqe/rules.js';
 
-const CAPTURED_A =
-  'I think monthly churn staying below 3% in December is pretty likely. Please set that estimate and show me the number you will use before applying it.';
+
 
 // ---------------------------------------------------------------------------
 // A. DERIVED GUARDS
 // ---------------------------------------------------------------------------
-describe('DERIVED: the routing phrase table cannot drift from the canonical map', () => {
-  it('every routing phrase resolves to the SAME number CERTAINTY_TERMS holds', () => {
-    expect(CALIBRATION_PHRASES.size).toBeGreaterThan(0);
-    for (const [phrase, value] of CALIBRATION_PHRASES) {
-      // Iterating the routing map and reading the canonical one is the whole
-      // point: a value edited in belief-elicitation propagates, and a value
-      // that ever diverges REDs here.
-      expect(CERTAINTY_TERMS[phrase]).toBe(value);
-    }
-  });
 
-  it('the routing table is a strict SUBSET of the canonical map (nothing invented locally)', () => {
-    const canonical = new Set(Object.keys(CERTAINTY_TERMS));
-    for (const phrase of CALIBRATION_PHRASES.keys()) {
-      expect(canonical.has(phrase)).toBe(true);
-    }
-  });
-
-  it('"pretty likely" is 0.70 on BOTH paths — the number the witnessed defect never reached', () => {
-    expect(CERTAINTY_TERMS['pretty likely']).toBe(0.7);
-    expect(CALIBRATION_PHRASES.get('pretty likely')).toBe(0.7);
-  });
-});
 
 describe('DERIVED: the threshold-marker list is a SUPERSET of CQE comparator grammar', () => {
   const cqeAlternatives = [
@@ -75,15 +39,7 @@ describe('DERIVED: the threshold-marker list is a SUPERSET of CQE comparator gra
     expect(cqeAlternatives.length).toBeGreaterThan(8);
   });
 
-  it.each(cqeAlternatives)(
-    'routing carries CQE alternative %s',
-    (alternative) => {
-      // Union assertion, importable and therefore derivable. If CQE ever
-      // grows a comparator word routing does not carry, this REDs — which is
-      // exactly the direction the 5 Aug defect ran in reverse.
-      expect(THRESHOLD_MARKER_SOURCE_FOR_TESTS).toContain(alternative);
-    },
-  );
+
 });
 
 // ---------------------------------------------------------------------------
@@ -105,105 +61,21 @@ describe('CORPUS: threshold markers CQE measurably cannot see', () => {
     expect(withBelow[0]?.value).toBe(0.03);
   });
 
-  const THRESHOLD_CASES: ReadonlyArray<readonly [string, number, 'at_least' | 'at_most']> = [
-    ['churn staying below 3%', 0.03, 'at_most'],
-    ['churn staying above 3%', 0.03, 'at_least'],
-    ['margin under 12%', 0.12, 'at_most'],
-    ['margin over 12%', 0.12, 'at_least'],
-    ['costs at most 20%', 0.2, 'at_most'],
-    ['costs at least 20%', 0.2, 'at_least'],
-    ['uptime no lower than 99%', 0.99, 'at_least'],
-    ['error rate no higher than 2%', 0.02, 'at_most'],
-    ['spend beneath 40', 40, 'at_most'],
-    ['spend beyond 40', 40, 'at_least'],
-  ];
 
-  it.each(THRESHOLD_CASES)('reads %s as a threshold', (message, value, comparator) => {
-    const t = detectThreshold(message);
-    expect(t).not.toBeNull();
-    expect(t!.value).toBeCloseTo(value, 10);
-    expect(t!.comparator).toBe(comparator);
-  });
 
-  it('a plain value is NOT a threshold — the ordinary numeric path must keep owning it', () => {
-    expect(detectThreshold('Set Monthly Churn Rate to 3%.')).toBeNull();
-    expect(detectThreshold('Raise the budget to £50,000.')).toBeNull();
-  });
+
+
+
 });
 
-describe('CORPUS: probability phrases', () => {
-  it('recognises the witnessed phrase', () => {
-    expect(detectProbabilityPhrase(CAPTURED_A)).toEqual({
-      phrase: 'pretty likely',
-      value: 0.7,
-    });
-  });
 
-  it('LONGEST match wins — a compound phrase is never truncated to its head', () => {
-    // "very likely" (0.85) contains "likely" (0.70). Reading the shorter one
-    // would silently offer the wrong number with full confidence.
-    expect(detectProbabilityPhrase('that outcome is very likely')?.value).toBe(0.85);
-    expect(detectProbabilityPhrase('that outcome is highly unlikely')?.value).toBe(0.1);
-  });
-
-  const NON_CALIBRATION: readonly string[] = [
-    'Is that possible?',
-    'Maybe later.',
-    'I never ran the analysis.',
-    'Which option is probably best?',
-    'Set Monthly Churn Rate to 3%.',
-    'What is driving the result?',
-  ];
-
-  it.each(NON_CALIBRATION)(
-    'does NOT hijack an ordinary turn: %s',
-    (message) => {
-      expect(classifyCalibrationMessage(message).kind).toBe('none');
-    },
-  );
-});
 
 // ---------------------------------------------------------------------------
 // THE CLASSIFICATION THE WHOLE DEFECT TURNS ON
 // ---------------------------------------------------------------------------
-describe('EVENT PROBABILITY vs THRESHOLD', () => {
-  it('the captured prompt is a probability ABOUT a threshold — 0.70 is the estimate, 0.03 is the bound', () => {
-    const c = classifyCalibrationMessage(CAPTURED_A);
-    expect(c.kind).toBe('probability_of_threshold');
-    if (c.kind !== 'probability_of_threshold') throw new Error('unreachable');
-    expect(c.probability.value).toBe(0.7);
-    expect(c.threshold.value).toBe(0.03);
-    expect(c.threshold.comparator).toBe('at_most');
-  });
 
-  it('a bare qualitative set carries no threshold', () => {
-    const c = classifyCalibrationMessage('Set AI Chatbot Deployment to pretty likely.');
-    expect(c.kind).toBe('probability_only');
-  });
-});
 
-describe('the preview copy', () => {
-  it('says explicitly that the threshold is NOT the value — the sentence the witnessed build never produced', () => {
-    const c = classifyCalibrationMessage(CAPTURED_A);
-    const text = buildCalibrationPreviewText(c, 'Monthly Churn Rate');
-    expect(text).toContain('70%');
-    expect(text).toContain('3%');
-    expect(text).toContain('not that Monthly Churn Rate equals 3%');
-    expect(text).toContain('Nothing has been changed');
-  });
 
-  it('never invents a factor name it could not resolve', () => {
-    const c = classifyCalibrationMessage(CAPTURED_A);
-    expect(buildCalibrationPreviewText(c, null)).toContain('that factor');
-  });
-
-  it("the confirm chip's replay message carries an EXPLICIT number, so confirming travels the ordinary numeric path", () => {
-    const c = classifyCalibrationMessage('Set AI Chatbot Deployment to pretty likely.');
-    expect(buildCalibrationConfirmMessage(c, 'AI Chatbot Deployment')).toBe(
-      'Set AI Chatbot Deployment to 70%.',
-    );
-  });
-});
 
 // ---------------------------------------------------------------------------
 // ROADMAP 2.627 — WHICH CLASSIFICATIONS MAY BECOME A POINT VALUE
@@ -214,95 +86,3 @@ describe('the preview copy', () => {
 // are the unit-level statements of the same rule, at the one place that
 // decides it.
 // ---------------------------------------------------------------------------
-describe('2.627 — a probability ABOUT a threshold yields no point value', () => {
-  const THRESHOLD = classifyCalibrationMessage(CAPTURED_A);
-  const ONLY = classifyCalibrationMessage('Set AI Chatbot Deployment to pretty likely.');
-
-  it('the two fixtures really are the two classifications (precondition, trap 13b) — otherwise the pair below tests one branch twice', () => {
-    expect(THRESHOLD.kind).toBe('probability_of_threshold');
-    expect(ONLY.kind).toBe('probability_only');
-  });
-
-  it('DISCRIMINATING PAIR — probability_only may offer a value; probability_of_threshold may not', () => {
-    expect(mayOfferPointValue(ONLY)).toBe(true);
-    expect(mayOfferPointValue(THRESHOLD)).toBe(false);
-    expect(mayOfferPointValue({ kind: 'none' })).toBe(false);
-  });
-
-  it('the unsafe conversion is UNREPRESENTABLE, not merely unused — the confirm message REFUSES a threshold classification', () => {
-    // Before 2.627 this returned "Set Monthly Churn Rate to 70%." — a message
-    // that, replayed, wrote 0.70 into a churn factor. A future call site
-    // cannot reintroduce that by forgetting a condition.
-    expect(() => buildCalibrationConfirmMessage(THRESHOLD, 'Monthly Churn Rate')).toThrow(/2\.627/);
-  });
-
-  it('the reply offers NO action on a threshold classification, and keeps both numbers', () => {
-    const reply = buildCalibrationReply(THRESHOLD, 'Monthly Churn Rate');
-    expect(reply.suggested_actions).toHaveLength(0);
-    // What was learned survives...
-    expect(reply.assistant_text).toContain('70%');
-    expect(reply.assistant_text).toContain('3%');
-    // ...neither number is offered as the value...
-    expect(reply.assistant_text).not.toMatch(/set .{0,60}to 70%/i);
-    expect(reply.assistant_text).not.toMatch(/set .{0,60}to 3%/i);
-    // ...and the turn asks for what it does not have.
-    expect(reply.assistant_text).toContain('?');
-  });
-
-  it('the reply DOES offer one action on a bare qualitative set — the sibling branch is untouched', () => {
-    const reply = buildCalibrationReply(ONLY, 'AI Chatbot Deployment');
-    expect(reply.suggested_actions).toHaveLength(1);
-    expect(reply.suggested_actions[0]!.id).toBe('chip_prompt_calibration_confirm');
-    expect(reply.suggested_actions[0]!.message).toBe('Set AI Chatbot Deployment to 70%.');
-  });
-
-  it('an unresolved factor gets no action either — a chip cannot name a target we would not name in prose', () => {
-    expect(buildCalibrationReply(ONLY, null).suggested_actions).toHaveLength(0);
-  });
-});
-
-describe('formatProbabilityPercent', () => {
-  it.each([
-    [0.7, '70%'],
-    [0.85, '85%'],
-    [0.05, '5%'],
-    [0.75, '75%'],
-    [0.155, '15.5%'],
-  ])('%s -> %s', (value, expected) => {
-    expect(formatProbabilityPercent(value)).toBe(expected);
-  });
-});
-
-describe('resolveFactorLabelForConsentPreview', () => {
-  const graph = {
-    nodes: [
-      { id: 'g', kind: 'goal', label: 'Revenue' },
-      { id: 'f1', kind: 'factor', label: 'AI Chatbot Deployment' },
-      { id: 'f2', kind: 'factor', label: 'Monthly Churn Rate' },
-      { id: 'o', kind: 'option', label: 'Ship it' },
-    ],
-  };
-
-  it('resolves a single named factor', () => {
-    expect(
-      resolveFactorLabelForConsentPreview('Set AI Chatbot Deployment to pretty likely.', graph),
-    ).toBe('AI Chatbot Deployment');
-  });
-
-  it('returns null when TWO factors are named — never guesses which one', () => {
-    expect(
-      resolveFactorLabelForConsentPreview(
-        'Set AI Chatbot Deployment and Monthly Churn Rate to pretty likely.',
-        graph,
-      ),
-    ).toBeNull();
-  });
-
-  it('returns null when the named node is not a factor', () => {
-    expect(resolveFactorLabelForConsentPreview('Set Revenue to pretty likely.', graph)).toBeNull();
-  });
-
-  it('returns null on no graph', () => {
-    expect(resolveFactorLabelForConsentPreview('Set X to pretty likely.', null)).toBeNull();
-  });
-});

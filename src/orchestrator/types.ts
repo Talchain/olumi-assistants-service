@@ -1,3 +1,7 @@
+import type { GoalTargetCandidate } from '../cee/factor-extraction/goal-label-target.js';
+import type { PipelineOutcome } from '../cee/unified-pipeline/types.js';
+import type { DraftQualityTraceRecord } from '../cee/draft-quality/types.js';
+import type { ModelBuildingNotices } from '@talchain/schemas/boundary';
 /**
  * CEE Orchestrator Types
  *
@@ -1124,4 +1128,133 @@ export interface AppliedChanges {
   changes: AppliedChangeItem[];
   /** True when an existing analysis would be materially affected by this change. */
   rerun_recommended: boolean;
+}
+
+/** Retained result contract; the conventional draft tool implementation was removed by C1. */
+export interface CEEDraftWarning {
+  id: string;
+  severity: 'low' | 'medium' | 'high' | 'blocker';
+  affected_node_ids?: string[];
+  affected_edge_ids?: string[];
+  explanation?: string;
+  fix_hint?: string;
+  /** Legacy fields */
+  node_ids?: string[];
+  edge_ids?: string[];
+}
+
+/** Structured strengthen item from LLM coaching output. Canonical type
+ *  lives in `../types.ts` as `DraftCoachingStrengthenItem`; this is a
+ *  re-export for back-compat with existing call sites. */
+
+export interface DraftGraphResult {
+  blocks: TypedConversationBlock[];
+  assistantText: string | null;
+  latencyMs: number;
+  /** Coaching context for Phase 3 LLM narration (coaching.summary + strengthen_items) */
+  narrationHint?: string;
+  /** Structured strengthen items from LLM coaching, areas the model needs reinforcement. */
+  strengthenItems: StrengthenItem[];
+  /** Raw LLM coaching.summary text, preserved for V5 ContextPack threading. */
+  coachingSummary: string | null;
+  /** Raw LLM coaching.widening_log, preserved byte-for-byte for V5 ContextPack. */
+  coachingWideningLog: readonly unknown[] | null;
+  /**
+   * Canonical (v0.11.0+) coaching.widening_log OBJECT, narrowed and validated.
+   * The legacy `coachingWideningLog` array field only matches the pre-v0.11.0
+   * shape — on V5 the Anthropic-adapter ingress normaliser converts the LLM
+   * output to the `{elements_added, elements_considered_but_excluded,
+   * brief_completeness}` object, so the array extractor returns null and that
+   * field is effectively dead. This field carries the live object.
+   * SAFETY: `elements_added` holds NODE IDs — consumers must NEVER render it raw.
+   */
+  coachingWideningLogObject?: DraftCoachingWideningLog | null;
+  /** Raw LLM coaching.bias_signals (namespaced under draft_coaching in V5 to
+   *  avoid collision with CEE preflight bias_signals). */
+  coachingBiasSignals: readonly unknown[] | null;
+  /** Structured draft warnings from the pipeline (CEEStructuralWarningV1[]) */
+  draftWarnings: CEEDraftWarning[];
+  /** The drafted graph, for post-draft structural analysis */
+  graphOutput: GraphV3T | null;
+  /** Analysis-ready payload from the pipeline boundary stage. Threaded to V5 for OlumiResponse. */
+  analysisReady?: GraphPatchBlockData['analysis_ready'];
+  /**
+   * ROUND 6 (CEE #1328) — the figure the goal LABEL names when the brief
+   * contains it and no route minted a typed target: a CANDIDATE the V5
+   * orchestration seam may turn into an `elicit_goal_target` question (an
+   * amount answer; the pending record carries no value). `binding` is a
+   * parser result, never authority to mint, preselect or assert a target.
+   * Read off `UnifiedPipelineResult.goal_target_candidate` — the stage
+   * context does not escape the pipeline, and the body is the legacy wire.
+   */
+  goalTargetCandidate?: GoalTargetCandidate;
+  /**
+   * ⭐ THE R1 REFUSALS, AGGREGATED FOR THE TURN THE USER RENDERS.
+   *
+   * The record projector's refusals reach the CEE V3 wire as
+   * `record_disclosures` and STOPPED THERE: this interface is a DIFFERENT type
+   * from the adapter's same-named `DraftGraphResult`
+   * (`adapters/llm/types.ts:80`), only the adapter's declared the field, and the
+   * return literal below names its keys — so the channel died at this boundary
+   * with nothing to catch it. Measured cost, from the R1 e2e file's own header:
+   * **56 → 0** on this path.
+   *
+   * Carried as the published `model_building_notices` contract shape rather
+   * than as raw disclosures, because that is the field
+   * `OlumiResponseSchema` already exposes for exactly this and it pins
+   * `details_redacted: true` — the user's own words stay on the V3 detail
+   * channel. Absent when the projector refused nothing.
+   */
+  modelBuildingNotices?: ModelBuildingNotices;
+  /** Tool-level LLM telemetry extracted from the pipeline response. */
+  toolLLMTelemetry?: {
+    tool: string;
+    model: string;
+    provider: string;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    latency_ms: number;
+    stop_reason: string;
+    thinking_enabled: boolean;
+    structured_outputs_used: boolean;
+    prompt_version?: string;
+    prompt_hash?: string;
+  };
+  /** Pipeline outcome metadata from the CEE unified pipeline. */
+  pipelineOutcome?: PipelineOutcome;
+  /**
+   * V5 latency observability (Fix 4). Per-stage timings from the CEE
+   * unified pipeline, extracted from the pipeline result body's optional
+   * `_timings.draft_graph` block. Plumbed through so the V5 dispatch can
+   * attach it to the OlumiResponse before the egress strict-validator
+   * runs. Undefined when `V5_TIMING_DEBUG=false` (the pipeline writer
+   * gates on the same flag).
+   */
+  draftGraphTimings?: import('../orchestrator-v5/telemetry/turn-timings.js').DraftGraphTimings;
+  /**
+   * ⭐⭐ THE REJECTED DRAFT, CARRIED PAST THIS BOUNDARY.
+   *
+   * The draft-quality pass may spend a second draw and ship the better graph.
+   * The owner's ruling is that a repair pass which silently hides bad drafts
+   * destroys the only signal we have about draft quality — so the discarded
+   * draw, both coverage records and the second draw's verdict must reach the
+   * product, not stop inside the pipeline.
+   *
+   * ⚠ AND THIS INTERFACE IS WHERE IT STOPPED. The pass attaches the record to
+   * `body.trace.pipeline.draft_quality`, but the return literal below NAMES ITS
+   * KEYS — the same construct this file's own comment calls the "THIRD
+   * SILENT-DROP POINT", closed there for `record_disclosures` and reopened here
+   * for exactly the same reason. Measured before the fix: `DraftGraphResult`
+   * carried neither the raw trace nor any `draft_quality` field, so the
+   * rejected original disappeared before the V5 response and the debug export.
+   *
+   * Undefined when no redraw was spent — which is the overwhelming majority of
+   * turns, so an absent block honestly means "the pass did not fire", never
+   * "we dropped it". Read on to `V5DiagnosticTrace.draft_quality`, which is
+   * flag-gated behind `CEE_DIAGNOSTIC_TRACE_ENABLED`; that gate is why a field
+   * carrying user-derived labels may ride the trace and may not ride telemetry.
+   */
+  draftQuality?: DraftQualityTraceRecord;
 }

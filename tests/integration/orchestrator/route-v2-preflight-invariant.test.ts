@@ -1,5 +1,5 @@
-import { withScenarioRevision } from '../../utils/revision-store-double.js';
 import { installOwnershipHarness } from '../../utils/ownership-route-harness.js';
+import { withScenarioRevision } from '../../utils/revision-store-double.js';
 /**
  * Structural invariant: every dispatch branch in route-v2.ts runs the
  * shared pre-flight (`preflightEnsureScenario` → `ensureScenarioExists`)
@@ -23,9 +23,9 @@ import { installOwnershipHarness } from '../../utils/ownership-route-harness.js'
  * Together they close the "new branch bypasses pre-flight" regression
  * channel that has appeared in three prior briefs.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { attachCallerContext } from '../../../src/context/index.js';
 
@@ -61,9 +61,7 @@ const dispatchDraftGraphSpy = vi.fn();
 const dispatchEditGraphSpy = vi.fn();
 const dispatchChipClickRunAnalysisSpy = vi.fn();
 
-vi.mock('../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js', () => ({
-  dispatchDraftGraph: dispatchDraftGraphSpy,
-}));
+
 vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', () => ({
   dispatchEditGraph: dispatchEditGraphSpy,
 }));

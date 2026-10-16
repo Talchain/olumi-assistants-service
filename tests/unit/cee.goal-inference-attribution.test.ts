@@ -45,11 +45,10 @@
  * would otherwise silently strip the badge off a real one.
  */
 
-import { describe, it, expect } from "vitest";
-import { ensureGoalNode, DEFAULT_GOAL_LABEL } from "../../src/cee/structure/goal-inference.js";
+import { describe,expect,it } from "vitest";
+import { DEFAULT_GOAL_LABEL,ensureGoalNode } from "../../src/cee/structure/goal-inference.js";
 import { projectGraphAndOptionsToV3 } from "../../src/cee/transforms/schema-v3.js";
-import { buildPostDraftNarrative } from "../../src/orchestrator-v5/coaching/post-draft-narrative.js";
-import type { GraphV3T } from "../../src/orchestrator/types.js";
+
 
 /** A goalless draft: decision + option + outcome, the shape the drafter emits. */
 function goallessGraph(): any {
@@ -69,21 +68,12 @@ function goalNodeOf(projectedNodes: readonly any[]): any {
   return goals[0];
 }
 
-function makeGraph(nodes: unknown[]): GraphV3T {
-  return { nodes, edges: [] } as unknown as GraphV3T;
-}
 
-function openingLine(nodes: unknown[]): string {
-  const result = buildPostDraftNarrative({
-    graph: makeGraph(nodes),
-    analysisReady: { status: "ready" },
-  } as any);
-  expect(result.text.length, "narrative must be non-empty").toBeGreaterThan(0);
-  return result.text.split("\n")[0] ?? "";
-}
 
-const CONFIRM_QUOTED = /^I've built a first decision model for "([^"]*)"\.$/;
-const CONFIRM_FROM_BRIEF = "I've built a first decision model from your brief.";
+
+
+
+
 
 describe("a CEE-minted goal must not be attributed to the user", () => {
   // ── INSTRUMENT CONTROL ────────────────────────────────────────────────────
@@ -180,18 +170,7 @@ describe("a CEE-minted goal must not be attributed to the user", () => {
   });
 
   // ── H2: THE QUOTATION ─────────────────────────────────────────────────────
-  it("does NOT quote a CEE-minted goal label back at the user as their words", () => {
-    const line = openingLine([
-      { id: "goal_inferred", kind: "goal", label: DEFAULT_GOAL_LABEL, label_authored: true },
-      { id: "opt_1", kind: "option", label: "Ship it" },
-    ]);
 
-    expect(
-      line,
-      `the placeholder goal must not appear in quotation marks — got: ${line}`,
-    ).not.toMatch(CONFIRM_QUOTED);
-    expect(line).toBe(CONFIRM_FROM_BRIEF);
-  });
 
   /**
    * ⭐⭐ THE TWIN, REBUILT AGAINST THE REAL PROJECTOR — AND THE REASON IT HAD TO
@@ -261,21 +240,8 @@ describe("a CEE-minted goal must not be attributed to the user", () => {
       expect(minted.label_authored).toBe(true);
     });
 
-    it("a from_brief goal IS quoted, Title-Cased label and all", async () => {
-      const goal = await projectGoal(STATED, "Cut Churn Below 3% a Month");
-      const line = openingLine([goal, { id: "opt_1", kind: "option", label: "Ship it" }]);
-      const match = CONFIRM_QUOTED.exec(line);
-      expect(match, `a from_brief goal must be quoted — got: ${line}`).not.toBeNull();
-      expect(match?.[1]).toBe("Cut Churn Below 3% a Month");
-    });
 
-    it("an ai_inferred goal is NOT quoted", async () => {
-      const goal = await projectGoal(MINTED, "Achieve the best outcome for this decision");
-      const line = openingLine([goal, { id: "opt_1", kind: "option", label: "Ship it" }]);
-      expect(line, `an invented goal must not be quoted — got: ${line}`).not.toMatch(
-        CONFIRM_QUOTED,
-      );
-      expect(line).toBe(CONFIRM_FROM_BRIEF);
-    });
+
+
   });
 });

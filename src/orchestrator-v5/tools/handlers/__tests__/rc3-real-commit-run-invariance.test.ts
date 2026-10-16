@@ -4,29 +4,29 @@
  * HEAD assigns R1/ref_high_water.R:1; node removal leaves the counter on the wire and the residual becomes partial.
  * The author executes this row; no tests/typecheck are run in the fix sandbox.
  */
-import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { readFileSync } from 'node:fs';
+import { afterEach,describe,expect,it,vi } from 'vitest';
+import { _resetConfigCache } from '../../../../config/index.js';
+import { withoutPreconditionRisks } from '../../../../graph/inert-risk.js';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
-import { _resetConfigCache } from '../../../../config/index.js';
+import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
-import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { diffRunInputs } from '../../../coaching/run-input-changes.js';
+import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { assignEntityRefs } from '../../../graph/entity-refs.js';
 import { dispatchAddRiskTransaction } from '../../../handlers/add-risk-dispatch.js';
+import { runHeldProposalApproval as runTurnExecutor } from '../../../handlers/approve-held-proposal.js';
 import { projectGraphForPersistence } from '../../../persisted-graph-projection.js';
-import type { PendingAction } from '../../../session/pending-action.js';
-import type { SessionStore, SessionTurnWrite } from '../../../session/store.js';
+import { runWithBoundAnalysisSnapshot } from '../../../run-analysis-snapshot-binding.js';
 import { createNoopSessionStore } from '../../../session/__tests__/fixtures.js';
-import { makeMessagePayload } from '../../../__tests__/fixtures.js';
-import { runTurnExecutor } from '../../../turn-executor.js';
+import type { PendingAction } from '../../../session/pending-action.js';
+import type { SessionStore,SessionTurnWrite } from '../../../session/store.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { sentDigest } from '../run-input-snapshot.js';
-import { withoutPreconditionRisks } from '../../../../graph/inert-risk.js';
-import { runWithBoundAnalysisSnapshot } from '../../../run-analysis-snapshot-binding.js';
 
 type Json = Record<string, any>;
 const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run-20260930.json', import.meta.url), 'utf8')) as {
@@ -100,7 +100,7 @@ async function approveRisk(label: string, turnId: string) {
   const result = await runWithBoundAnalysisSnapshot(undefined as never, () => runTurnExecutor({
     kind: 'message', source: 'chip', scenario_id: SCENARIO, turn_id: turnId,
     message: held.chip.message, chip: { id: held.chip.id }, turn_class: 'decide', stage: 'analyse',
-  } as MessageTurnPayload, turnId, { routingAdapter }));
+  } as MessageTurnPayload, turnId));
   expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
   expect(result.response.assistant_text).toContain('Confirmed:');
   expect(writes.at(-1)?.handler_facts).toContainEqual(expect.objectContaining({ fact_type: 'edit_graph' }));

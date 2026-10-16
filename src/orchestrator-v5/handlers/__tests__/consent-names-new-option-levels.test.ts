@@ -14,17 +14,15 @@
  * "with 'X' at <figure>", never "set/change … to <figure>" — which `isValueUpdatePhrasing` would route as a fresh edit.
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import { describeChangeset, describeHeldOperationsSubject } from '../describe-changeset.js';
-import { buildGmHeldPublicCopy } from '../edit-graph-referee-gate.js';
-import { dispatchAddOptionTransaction } from '../add-option-dispatch.js';
-import { readGmHeldResume } from '../gm-held-execute.js';
-import { buildAddOptionsTransaction } from '../../routing/add-option-transaction.js';
-import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { isValueUpdatePhrasing } from '../../../orchestrator/routing/value-update-gate.js';
-import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { buildAddOptionsTransaction } from '../../routing/add-option-transaction.js';
+import { dispatchAddOptionTransaction } from '../add-option-dispatch.js';
+import { describeChangeset,describeHeldOperationsSubject } from '../describe-changeset.js';
+import { readGmHeldResume } from '../gm-held-execute.js';
+
 
 type Json = Record<string, any>;
 
@@ -125,18 +123,7 @@ describe('C2 consent: the approval names the levels a new option writes', () => 
       .toContain("'Existing customers grandfathered' on");
   });
 
-  it('the replayed chip message stays a CONFIRMATION (not a value edit) and carries no forbidden phrase; a real instruction still reads as one', () => {
-    const item = optionItem({
-      parent_decision_id: 'dec', label: 'Split it 50/50',
-      interventions: [{ factor_id: 'feat', value: 0.5, raw_value: 15000, unit: 'GBP' }, { factor_id: 'ads', value: 0.5, raw_value: 15000, unit: 'GBP' }],
-    });
-    const copy = buildGmHeldPublicCopy(item);
-    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
-    expect(isValueUpdatePhrasing(copy.label)).toBe(false);
-    expect(findForbiddenPhraseHit(copy.message)).toBeNull();
-    // CONTRAST: the gate is live, so `false` above is not a dead gate.
-    expect(isValueUpdatePhrasing("set 'Incremental feature investment' to £15,000")).toBe(true);
-  });
+
 
   it('CONTROL: an option with NO valued level is described exactly as before; so is a non-option add', () => {
     const d = describeChangeset([

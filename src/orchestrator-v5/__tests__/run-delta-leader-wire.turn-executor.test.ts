@@ -39,13 +39,10 @@
  * would pass with this wire deleted — which is the exact shortcut that let a
  * sibling slice ship two vacuous wire tests.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { setTestSink } from '../../utils/telemetry.js';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
-import { observeSerialisedPack } from '../context/__tests__/observe-serialised-pack.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
 import { PRESENT_PAIR } from '../context/__tests__/run-delta-fixtures.js';
 
@@ -98,51 +95,15 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
 
-function mkPayload(message: string): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message,
-    turn_class: 'frame',
-    stage: 'analyse',
-  };
-}
 
-function capturingAdapter() {
-  return {
-    chatWithTools: vi
-      .fn<(a: ChatWithToolsArgs, o: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () => ({
-        content: [{ type: 'text', text: 'Here is some guidance.' }],
-        stop_reason: 'end_turn' as const,
-        usage: { input_tokens: 5, output_tokens: 5 },
-        model: 'mock',
-        latencyMs: 0,
-      })),
-  };
-}
 
-function routedUserMessage(adapter: ReturnType<typeof capturingAdapter>): string {
-  expect(adapter.chatWithTools).toHaveBeenCalled();
-  const args = adapter.chatWithTools.mock.calls[0]![0];
-  return String(args.messages[0]!.content);
-}
 
-async function renderThroughTurnExecutor(): Promise<Record<string, unknown>> {
-  const adapter = capturingAdapter();
-  // ⚠ NOT a "what changed?" phrasing: that trips `v5.state_query_guard`, which
-  // answers deterministically and never calls the routing LLM — the adapter is
-  // then never invoked and the suite fails for a reason unrelated to the wire.
-  await runTurnExecutor(mkPayload('what is the most important factor here?'), `req-${randomUUID()}`, {
-    routingAdapter: adapter,
-    graphState: GRAPH as never,
-  });
-  return observeSerialisedPack(routedUserMessage(adapter));
-}
+
+
+
+
+
 
 describe('run_delta leader ids survive the turn-executor → assembler hop', () => {
   beforeEach(() => setTestSink(() => undefined));
@@ -175,20 +136,5 @@ describe('run_delta leader ids survive the turn-executor → assembler hop', () 
    * leaves it GREEN. One biting mutant would only prove sensitivity to
    * something; the pair proves sensitivity to THIS call site.
    */
-  it('WIRE — an entitled turn carries the leader ids into the pack the model receives', async () => {
-    const serialised = await renderThroughTurnExecutor();
 
-    const delta = serialised.run_delta as Record<string, unknown> | undefined;
-    expect(delta, '`run_delta` never reached the serialised pack — the delta wire itself is broken').toBeDefined();
-
-    const leader = delta!.leader as Record<string, unknown>;
-    // The fail-closed strip presents as `changed: true` with the ids gone, so
-    // assert the IDS, not merely that a leader object exists.
-    expect(leader.changed).toBe(true);
-    expect(
-      leader.prior_leading_option_id,
-      'leader ids stripped — turn-executor is not threading mayNameLeadingOptionForRun into pack assembly',
-    ).toBe('opt-a');
-    expect(leader.current_leading_option_id).toBe('opt-b');
-  });
 });

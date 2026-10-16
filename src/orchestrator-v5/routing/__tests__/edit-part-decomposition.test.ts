@@ -12,28 +12,25 @@
  * compound (the false-compound trap); non-edit clauses are never
  * accounted. Copy builders are swept against BOTH egress detectors.
  */
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  accountEditParts,
-  buildMultiPartRejectionClarify,
-  buildPartAccountingDisclosure,
-  buildReplayOverflowNotice,
-  buildStructuralRemainderNotice,
-  buildSubstitutionClarify,
-  buildUnmappedPartsNotice,
-  decomposeEditMessage,
-  oxfordJoin,
-  type PatchOperationLike,
-} from '../edit-part-decomposition.js';
-import {
-  findForbiddenPhraseHit,
-  findSuccessClaimHit,
+findForbiddenPhraseHit,
+findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
 import {
-  isValueUpdatePhrasing,
-  shouldSuppressEditDispatchForValueUpdate,
-} from '../../../orchestrator/routing/value-update-gate.js';
+accountEditParts,
+buildMultiPartRejectionClarify,
+buildPartAccountingDisclosure,
+buildReplayOverflowNotice,
+buildStructuralRemainderNotice,
+buildSubstitutionClarify,
+buildUnmappedPartsNotice,
+decomposeEditMessage,
+oxfordJoin,
+type PatchOperationLike,
+} from '../edit-part-decomposition.js';
+
 
 /** The exact compound message from the 2026-07-20 dress rehearsal (wire 012). */
 const REHEARSAL_MESSAGE =
@@ -796,20 +793,7 @@ describe("'unmapped' limit clauses — the silent half-drop", () => {
     expect(sawUnmapped).toBeGreaterThanOrEqual(4);
   });
 
-  it('leaves the value-update suppressor byte-identical on limit-bearing messages', () => {
-    for (const m of [
-      'set churn to 5% and cap the spend at 50k',
-      'set churn to 5%',
-      'cap the upfront spend at 50k',
-      REHEARSAL_MESSAGE,
-    ]) {
-      const d = decomposeEditMessage(m);
-      // The suppressor reads ONLY mixedValueStructural (value-update-gate.ts:413).
-      expect(shouldSuppressEditDispatchForValueUpdate(m)).toBe(
-        isValueUpdatePhrasing(m) && !d.mixedValueStructural,
-      );
-    }
-  });
+
 });
 
 /**

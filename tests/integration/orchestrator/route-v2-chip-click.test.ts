@@ -10,9 +10,9 @@
  *     set_factor_value) falls through and TurnExecutor returns the
  *     existing UNSUPPORTED_ACTION → FEATURE_NOT_ENABLED path.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
 const dispatchChipClickRunAnalysisMock = vi.fn();
 
@@ -58,21 +58,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 // per brief review comment (decision_review still may fire; don't block on
 // total LLM count).
 const routeWithToolUseSpy = vi.fn();
-vi.mock('../../../src/orchestrator-v5/routing/route-with-tool-use.js', async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import('../../../src/orchestrator-v5/routing/route-with-tool-use.js')
-  >();
-  return {
-    ...actual,
-    routeWithToolUse: (...args: unknown[]) => {
-      routeWithToolUseSpy(...args);
-      // Delegate to real impl so fallthrough tests (plain 'chip' source)
-      // still exercise routing. Tests that assert no-classification only
-      // care that the spy wasn't invoked.
-      return (actual.routeWithToolUse as unknown as (...a: unknown[]) => unknown)(...args);
-    },
-  };
-});
+
 
 // Minimal LLM adapter for fallthrough paths.
 vi.mock('../../../src/adapters/llm/router.js', () => ({

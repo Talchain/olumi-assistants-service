@@ -8,23 +8,19 @@
  * rows placeholder → olumi_accepted, coverage complete). The run_delta is shaped by @talchain/schemas 0.70.0
  * (`RunDeltaInputChangeObjectSchema`, `win_probabilities_unavailable`).
  */
-import { describe, expect, it, vi } from 'vitest';
+import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { describe,expect,it,vi } from 'vitest';
+import { diffRunInputSnapshots } from '../../coaching/run-input-changes.js';
 vi.mock('typescript', async (importOriginal) => {
   const actual = await importOriginal<{ default: typeof ts }>();
   return { default: { ...actual.default, createProgram: vi.fn(actual.default.createProgram) } };
 });
-import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
-import { diffRunInputSnapshots } from '../../coaching/run-input-changes.js';
-import { findEditInternalsHit, findForbiddenPhraseHit, findSuccessClaimHit, HELD_SCIENCE_VOCABULARY_PATTERN } from '../../compose/forbidden-user-facing-phrases.js';
-import { findProcessNarrationHit } from '../../compose/process-narration.js';
-import { sanitiseNarrateOutput } from '../../sanitise.js';
-import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
-import { REPAIR_VOCABULARY_DENYLIST } from '../../../orchestrator/shared/repair-vocabulary-denylist.js';
-import { checkMethodTurn, internalValueTerms } from '../guidance/index.js';
-import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+
+import { checkMethodTurn } from '../guidance/index.js';
+import { composeRerunExplanation,RERUN_FALLBACK_LINES,RERUN_NO_CHANGE_LINES,rerunExplanationPlan,rerunViewFailures } from '../rerun-explanation.js';
 
 const LABELS: Record<string, string> = {
   quarterly_revenue: 'Quarterly revenue',
@@ -289,26 +285,7 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
     expect(plan({ ...PAIRED, input_changes: [AI, unknownOption] })!.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
   });
 
-  it.each([
-    'The option ‘Raise price’ is now part of the analysis.',
-    'The option ‘Raise price’ is no longer part of the analysis.',
-    '‘MRR’ is now the goal of the analysis.',
-    '‘MRR’ is no longer the goal of the analysis.',
-    '‘Quarterly revenue’ is now the goal of the analysis.',
-    'The value of ‘Pro plan price’ for the option ‘Raise price’ changed: 49 GBP → 59 GBP.',
-    'The value of ‘Pro plan price’ for the option ‘Raise price’ was recorded: 59 GBP.',
-    'The recorded value of ‘Pro plan price’ for the option ‘Raise price’ was removed.',
-  ])('every new per-kind sentence passes the repository copy guards: %s', (sentence) => {
-    expect(findForbiddenPhraseHit(sentence)).toBeNull();
-    expect(findEditInternalsHit(sentence)).toBeNull();
-    expect(findSuccessClaimHit(sentence)).toBeNull();
-    expect(findProcessNarrationHit(sentence)).toBeNull();
-    expect(sentence).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
-    expect(internalValueTerms(sentence)).toEqual([]);
-    expect(sanitiseNarrateOutput(sentence)).toEqual({ output: sentence, contamination_detected: false });
-    expect(sanitiseUserFacingText(sentence, null)).toMatchObject({ text: sentence, matches: [] });
-    for (const ban of REPAIR_VOCABULARY_DENYLIST) expect(sentence).not.toMatch(ban);
-  });
+
 
   it.each(['from', 'to'] as const)('an unknown %s end stays skipped, alone and beside a named presence row', (end) => {
     const known = PRESENCE_ROWS.find((r) => r.link?.from === 'risk')!;

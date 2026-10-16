@@ -40,12 +40,12 @@
  *       → COVERED by the hand-written corpus in `mutation-consent.test.ts`,
  *         which is the only guard that can notice a short list.
  */
-import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync,readFileSync,readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe,expect,it } from 'vitest';
 
-import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
 import { getDefaultRegistry } from '../../tools/registry.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
 
 const SRC_ROOT = new URL('../../../', import.meta.url).pathname;
 const HANDLERS_DIR = join(SRC_ROOT, 'orchestrator-v5/tools/handlers');
@@ -102,7 +102,7 @@ describe('DERIVED: GRAPH_MUTATING_HANDLER_IDS matches the modules that can mutat
  */
 describe('DERIVED: every test file the consent module cites by name exists', () => {
   const MODULE_DIR = join(SRC_ROOT, 'orchestrator-v5/routing');
-  const CITING_MODULES = ['mutation-consent.ts', 'calibration-semantics.ts'] as const;
+  const CITING_MODULES = ['mutation-consent.ts'] as const;
 
   const citations = CITING_MODULES.flatMap((moduleName) => {
     // readFileSync, not grep: `edit-graph-referee-gate.ts` in this tree
@@ -135,6 +135,8 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
    * so widening the hole cannot happen quietly.
    */
   const KNOWN_UNCOVERED_WRITERS: readonly string[] = [
+    // The exact stored-card gesture authorises this extracted writer; it has no prose-consent backstop.
+    'orchestrator-v5/handlers/approve-held-proposal.ts',
     // ⚠ UNCOVERED, and NOT "covered by a different mechanism" — corrected
     // 6 Aug 2026 (ROADMAP 2.628a) after this entry claimed the GM referee
     // "HOLDS every structural op". Measured in `graph-management/referee.ts`:
@@ -145,7 +147,6 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     // consent layer sees it. Recorded as an open gap.
     'orchestrator-v5/handlers/edit-graph-dispatch.ts',
     // First-draft persistence — there is no prior model to protect.
-    'orchestrator-v5/handlers/draft-graph-dispatch.ts',
     // The inspector value edit: a UI direct manipulation. It carries no
     // conversational message, so there is no consent clause to honour.
     'orchestrator-v5/system-events/dispatch.ts',
@@ -205,7 +206,6 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     // NOT REACHABLE TODAY: the consuming controller is behind a default-off
     // flag whose route injects no write path, so nothing constructs this port
     // in production. Recorded now rather than on the day it is wired.
-    'orchestrator-v5/apply-operations.ts',
   ];
 
   function walk(dir: string, out: string[] = []): string[] {

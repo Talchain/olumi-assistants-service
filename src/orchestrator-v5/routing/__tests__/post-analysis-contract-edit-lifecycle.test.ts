@@ -15,16 +15,16 @@
  * patterns so the workstream cannot quietly steal their phrases.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import { tryVagueEditGuard } from '../vague-edit-guard.js';
-import { hasMutationSignal } from '../analytical-intent.js';
-import {
-  tryPostAnalysisAdviceGate,
-  type AdviceGateAnalysis,
-} from '../post-analysis-advice-gate.js';
+
 import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 import type { RawRobustnessSignals } from '../../coaching/robustness-honesty.js';
+import { hasMutationSignal } from '../analytical-intent.js';
+import {
+tryPostAnalysisAdviceGate,
+type AdviceGateAnalysis,
+} from '../post-analysis-advice-gate.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -69,10 +69,7 @@ describe('PR #194 regression — vague-edit-guard owns its phrases', () => {
   ];
 
   for (const { message, label } of vaguePhrases) {
-    it(`vague-edit-guard matches: ${label}`, () => {
-      const out = tryVagueEditGuard(message, []);
-      expect(out.matched).toBe(true);
-    });
+
     it(`advice-gate does NOT match (vague-edit-guard owns it): ${label}`, () => {
       const out = tryPostAnalysisAdviceGate({
         message,
@@ -89,19 +86,7 @@ describe('PR #194 regression — vague-edit-guard owns its phrases', () => {
     });
   }
 
-  it('"Tell me what to change" stays in advice-gate (does NOT trigger vague-edit-guard)', () => {
-    // Vague-edit-guard requires a vague-edit shape; "tell me what to
-    // change" does not match its 8 phrase patterns. Advice gate owns it.
-    expect(tryVagueEditGuard('Tell me what to change.', []).matched).toBe(false);
-    const adviceOut = tryPostAnalysisAdviceGate({
-      message: 'Tell me what to change.',
-      analysis: FIXTURE_ANALYSIS,
-      analysisReady: READY_PAYLOAD,
-      freshness: 'fresh',
-    });
-    expect(adviceOut.matched).toBe(true);
-    if (adviceOut.matched) expect(adviceOut.advice_class).toBe('update_advice');
-  });
+
 });
 
 // =========================================================================

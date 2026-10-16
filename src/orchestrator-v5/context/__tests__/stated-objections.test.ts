@@ -17,17 +17,17 @@
  *     words the user has retracted, or attributes an objection to the wrong
  *     finding
  */
-import { describe, it, expect } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { describe,expect,it } from 'vitest';
 
-import {
-  projectStatedObjections,
-  STATED_OBJECTIONS_CAP,
-  type StatedObjection,
-} from '../stated-objections.js';
-import { StatedObjectionSchema } from '../context-pack-schema.js';
 import { isDecisionContentField } from '../../../utils/logger-config.js';
-import { STATED_OBJECTIONS_INSTRUCTION } from '../../routing/route-with-tool-use.js';
+import { StatedObjectionSchema } from '../context-pack-schema.js';
+import {
+projectStatedObjections,
+STATED_OBJECTIONS_CAP,
+type StatedObjection,
+} from '../stated-objections.js';
+
 import { MUTATION_DISPATCH_SKIP } from '../recent-changes.js';
 
 
@@ -223,17 +223,5 @@ describe('the seam this field sits in', () => {
    * two failure modes are opposite and a field with a vague licence is worse
    * than no field.
    */
-  it('the instruction names the field and forbids BOTH capitulation and re-assertion', () => {
-    expect(STATED_OBJECTIONS_INSTRUCTION).toContain('stated_objections');
-    // Harm 1 — agreeing on the strength of an assertion.
-    expect(STATED_OBJECTIONS_INSTRUCTION).toMatch(/Do NOT quietly drop, soften or reverse a finding/);
-    // Harm 2 — carrying on as though nothing was said.
-    expect(STATED_OBJECTIONS_INSTRUCTION).toMatch(/Do NOT repeat the objected-to finding/);
-    // The state claim: an objection mutates nothing.
-    expect(STATED_OBJECTIONS_INSTRUCTION).toMatch(/An objection changes NOTHING in the model/);
-    // The reasoning-enhancement move, and the reason this field exists at all.
-    expect(STATED_OBJECTIONS_INSTRUCTION).toMatch(/make the disagreement testable/);
-    // Absence is never "uncontested".
-    expect(STATED_OBJECTIONS_INSTRUCTION).toMatch(/Never infer that a finding is uncontested/);
-  });
+
 });

@@ -50,20 +50,14 @@
  * TRAP 19 — every assertion binds by IDENTITY (exact option_id, exact
  * factor_id), never by a value predicate another pair could satisfy.
  */
-import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  deriveAskedEffectPair,
-  deriveRecordedEffectAsk,
+deriveAskedEffectPair,
+deriveRecordedEffectAsk,
 } from '../repair-value-binding.js';
-import {
-  buildOutstandingEffectAskDetails,
-  buildVerifiedCorrectionReplay,
-  findOutstandingEffectAskCollision,
-} from '../outstanding-effect-ask-misroute.js';
-import { detectConfigureOptionIntent } from '../configure-option-intent.js';
+
 import type { PendingAction } from '../../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
@@ -82,12 +76,7 @@ const OPT_ACQUIRE_LABEL = 'acquire a smaller competitor to buy market share';
 const FAC_ACQUIRE = '8d6a7335';
 const FAC_ACQUIRE_LABEL = 'Acquisition spend';
 
-const OPTION_LABELS: readonly string[] = [
-  OPT_SELF_SERVE_LABEL,
-  OPT_ENTERPRISE_LABEL,
-  OPT_ACQUIRE_LABEL,
-  'Continue current mid-market motion (Status Quo)',
-];
+
 
 const SCENARIO_ID = 'a05fefcd-3956-4700-879f-6fc8b09e3905';
 
@@ -166,21 +155,7 @@ const ASKED_ENTERPRISE = (): readonly PendingAction[] => [
 const identity = (p: { optionId: string; factorId: string } | null): string | null =>
   p === null ? null : `${p.optionId}::${p.factorId}`;
 
-const REPLAY_CAPTURE = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../__tests__/fixtures/witness-2026-08-18/model-compiler-option-effect.json',
-      import.meta.url,
-    ),
-    'utf8',
-  ),
-) as {
-  draft_graph: {
-    nodes: Array<{ id: string; kind: string; label: string }>;
-    edges: Array<Record<string, unknown>>;
-  };
-  ids: Record<string, string>;
-};
+
 
 // ---------------------------------------------------------------------------
 describe('deriveRecordedEffectAsk — the product’s own record of what it asked', () => {
@@ -327,221 +302,6 @@ describe('deriveAskedEffectPair — the record outranks the positional heuristic
 });
 
 // ---------------------------------------------------------------------------
-describe('the misroute refusal names the option the product asked about', () => {
-  const TYPED = `Set its effect on ${FAC_SELF_SERVE_LABEL} to 0.5`;
 
-  function collide(recordedAsk: ReturnType<typeof deriveRecordedEffectAsk>, opts?: {
-    readonly message?: string;
-    readonly chipOriginated?: boolean;
-    readonly entityId?: string;
-  }): ReturnType<typeof findOutstandingEffectAskCollision> {
-    return findOutstandingEffectAskCollision({
-      handlerId: 'set_factor_value',
-      entityId: opts?.entityId ?? FAC_SELF_SERVE,
-      message: opts?.message ?? TYPED,
-      optionLabels: OPTION_LABELS,
-      nonOptionLabels: [FAC_SELF_SERVE_LABEL, FAC_ACQUIRE_LABEL],
-      readiness: readiness(),
-      chipOriginated: opts?.chipOriginated ?? false,
-      recordedAsk,
-    });
-  }
-
-  const recorded = (pendings: readonly PendingAction[]): ReturnType<typeof deriveRecordedEffectAsk> =>
-    deriveRecordedEffectAsk({ readiness: readiness(), pendings, nowMs: NOW_MS });
-
-  it('⭐ THE CAPTURED DEFECT: two options outstanding on one factor collapse to the RECORDED one', () => {
-    const hit = collide(recorded(ASKED_SELF_SERVE()));
-    expect(hit).not.toBeNull();
-    expect(hit!.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
-      `${OPT_SELF_SERVE}::${FAC_SELF_SERVE}`,
-    ]);
-    // The refusal copy reads `effect_ask_option_labels`; ONE label is what stops
-    // "I'm not sure which option you mean" being composed at all.
-    expect(buildOutstandingEffectAskDetails(hit, null).effect_ask_option_labels).toEqual([
-      OPT_SELF_SERVE_LABEL,
-    ]);
-  });
-
-  it('⭐ THE DISCRIMINATING TWIN: the OTHER record collapses to the OTHER option', () => {
-    const hit = collide(recorded(ASKED_ENTERPRISE()));
-    expect(hit!.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
-      `${OPT_ENTERPRISE}::${FAC_SELF_SERVE}`,
-    ]);
-    expect(buildOutstandingEffectAskDetails(hit, null).effect_ask_option_labels).toEqual([
-      OPT_ENTERPRISE_LABEL,
-    ]);
-  });
-
-  it('⭐ P1 — a current turn explicitly naming option B outranks the stale recorded ask for A', () => {
-    const hit = collide(recorded(ASKED_SELF_SERVE()), {
-      message:
-        `For ${OPT_ENTERPRISE_LABEL}, let's make it 50% until I've had a chance to vet it more thoroughly.`,
-    });
-    expect(hit).not.toBeNull();
-    expect(hit!.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
-      `${OPT_ENTERPRISE}::${FAC_SELF_SERVE}`,
-    ]);
-    expect(buildOutstandingEffectAskDetails(hit, null).effect_ask_option_labels).toEqual([
-      OPT_ENTERPRISE_LABEL,
-    ]);
-  });
-
-  it('⭐ OPPOSITE TWIN — the genuinely elliptical answer still narrows to recorded option A', () => {
-    const hit = collide(recorded(ASKED_SELF_SERVE()), {
-      message: "Let's make it 50% until I've had a chance to vet it more thoroughly.",
-    });
-    expect(hit).not.toBeNull();
-    expect(hit!.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
-      `${OPT_SELF_SERVE}::${FAC_SELF_SERVE}`,
-    ]);
-  });
-
-  it('⭐ REPLAY CONSEQUENCE — explicit B can never produce a verified correction payload for stale A', () => {
-    const graph = JSON.parse(
-      JSON.stringify(REPLAY_CAPTURE.draft_graph),
-    ) as typeof REPLAY_CAPTURE.draft_graph;
-    const factorId = REPLAY_CAPTURE.ids.factor_id!;
-    const factorLabel = REPLAY_CAPTURE.ids.factor_label!;
-    const optionA = graph.nodes.find((n) => n.id === 'e755ec33')!;
-    const optionB = graph.nodes.find((n) => n.id === REPLAY_CAPTURE.ids.option_id)!;
-    optionA.label = 'Invest in self-serve product';
-    const replayReadiness = {
-      blockers: [optionA, optionB].map((option) => ({
-        code: 'MISSING_OPTION_VALUE',
-        option_id: option.id,
-        option_label: option.label,
-        factor_id: factorId,
-        factor_label: factorLabel,
-      })),
-    };
-    const hit = findOutstandingEffectAskCollision({
-      handlerId: 'set_factor_value',
-      entityId: factorId,
-      message: `For ${optionB.label}, set it to 0.5.`,
-      optionLabels: graph.nodes.filter((n) => n.kind === 'option').map((n) => n.label),
-      nonOptionLabels: graph.nodes.filter((n) => n.kind !== 'option').map((n) => n.label),
-      readiness: replayReadiness,
-      chipOriginated: false,
-      recordedAsk: {
-        optionId: optionA.id,
-        optionLabel: optionA.label,
-        factorId,
-        factorLabel,
-      },
-    });
-    expect(hit).not.toBeNull();
-    expect(hit!.pairs.map((p) => p.optionId)).toEqual([optionB.id]);
-
-    const replay = buildVerifiedCorrectionReplay(hit!, graph);
-    expect(replay).not.toBeNull();
-    expect(replay).toContain(optionB.label);
-    expect(replay).not.toContain(optionA.label);
-    expect(buildOutstandingEffectAskDetails(hit, replay).effect_ask_replay_message).toBe(replay);
-  });
-
-  it('⭐ the same narrowing on a CHIP-ORIGINATED turn, where identity is the only conjunct', () => {
-    const hit = collide(recorded(ASKED_SELF_SERVE()), {
-      message: 'Set that value in my model.',
-      chipOriginated: true,
-    });
-    expect(hit!.pairs.map((p) => p.optionId)).toEqual([OPT_SELF_SERVE]);
-  });
-
-  it('⭐ OPPOSITE DIRECTION — with NO record the ambiguity survives and the product still asks', () => {
-    const hit = collide(null);
-    expect(hit!.pairs.map((p) => p.optionId)).toEqual([OPT_SELF_SERVE, OPT_ENTERPRISE]);
-    expect(buildOutstandingEffectAskDetails(hit, null).effect_ask_option_labels).toEqual([
-      OPT_SELF_SERVE_LABEL,
-      OPT_ENTERPRISE_LABEL,
-    ]);
-  });
-
-  it('⭐ OPPOSITE DIRECTION — a record for a pair that is NOT in the collision cannot narrow it away', () => {
-    // The acquisition pair is outstanding, but on a DIFFERENT factor, so it is
-    // not a member of this collision. Narrowing to it would delete a real
-    // refusal; narrowing to nothing would let the wrong-field write through.
-    const hit = collide(recorded([
-      elicit(OPT_ACQUIRE, OPT_ACQUIRE_LABEL, FAC_ACQUIRE, FAC_ACQUIRE_LABEL),
-    ]));
-    expect(hit!.pairs.map((p) => p.optionId)).toEqual([OPT_SELF_SERVE, OPT_ENTERPRISE]);
-  });
-
-  it('⭐ OPPOSITE DIRECTION — a record cannot CREATE a collision where none exists', () => {
-    // No outstanding pair on this entity at all.
-    expect(collide(recorded(ASKED_SELF_SERVE()), { entityId: 'no_such_factor' })).toBeNull();
-  });
-
-  it('⭐ OPPOSITE DIRECTION — an already-unambiguous collision is untouched by a record for another pair', () => {
-    const hit = findOutstandingEffectAskCollision({
-      handlerId: 'set_factor_value',
-      entityId: FAC_ACQUIRE,
-      message: `Set its effect on ${FAC_ACQUIRE_LABEL} to 0.5`,
-      optionLabels: OPTION_LABELS,
-      nonOptionLabels: [FAC_SELF_SERVE_LABEL, FAC_ACQUIRE_LABEL],
-      readiness: readiness(),
-      chipOriginated: false,
-      recordedAsk: recorded(ASKED_SELF_SERVE()),
-    });
-    expect(hit!.pairs.map((p) => p.optionId)).toEqual([OPT_ACQUIRE]);
-  });
-});
 
 // ---------------------------------------------------------------------------
-describe('adjust_edge_strength — current option identity cannot release a stale-pair proposal', () => {
-  const explicitEnterpriseOpinion =
-    `I would say ${OPT_ENTERPRISE_LABEL} drives ${FAC_SELF_SERVE_LABEL} fairly strongly, about 0.6.`;
-  const ellipticalSelfServeOpinion =
-    `I would say it drives ${FAC_SELF_SERVE_LABEL} fairly strongly, about 0.6.`;
-  const recordedSelfServe = deriveRecordedEffectAsk({
-    readiness: readiness(),
-    pendings: ASKED_SELF_SERVE(),
-    nowMs: NOW_MS,
-  });
-
-  function edgeCollision(optionId: string, message: string) {
-    return findOutstandingEffectAskCollision({
-      handlerId: 'adjust_edge_strength',
-      entityId: `${optionId}→${FAC_SELF_SERVE}`,
-      message,
-      optionLabels: OPTION_LABELS,
-      nonOptionLabels: [FAC_SELF_SERVE_LABEL, FAC_ACQUIRE_LABEL],
-      readiness: readiness(),
-      chipOriginated: false,
-      recordedAsk: recordedSelfServe,
-    });
-  }
-
-  it('RED — stale A + proposed A + explicit B remains a generic fail-closed refusal', () => {
-    // This is the review counterexample's load-bearing precondition: the broad
-    // configure classifier does NOT rescue the turn. Identity must do it.
-    expect(detectConfigureOptionIntent(explicitEnterpriseOpinion, OPTION_LABELS).matched).toBe(false);
-
-    const mismatch = edgeCollision(OPT_SELF_SERVE, explicitEnterpriseOpinion);
-    expect(mismatch, 'the identity mismatch must refuse rather than release the proposal').not.toBeNull();
-    expect(mismatch!.pairs, 'no stale A pair may reach pair-specific copy or replay').toEqual([]);
-    expect(buildVerifiedCorrectionReplay(mismatch!, {})).toBeNull();
-    expect(buildOutstandingEffectAskDetails(mismatch, null)).toEqual({
-      effect_ask_refused_field: 'edge_strength',
-    });
-  });
-
-  it('OPPOSITE — current B plus proposed B still yields the current B pair', () => {
-    const current = edgeCollision(OPT_ENTERPRISE, explicitEnterpriseOpinion);
-    expect(current).not.toBeNull();
-    expect(current!.pairs.map((pair) => `${pair.optionId}::${pair.factorId}`)).toEqual([
-      `${OPT_ENTERPRISE}::${FAC_SELF_SERVE}`,
-    ]);
-    expect(buildOutstandingEffectAskDetails(current, null).effect_ask_option_labels).toEqual([
-      OPT_ENTERPRISE_LABEL,
-    ]);
-  });
-
-  it('OPPOSITE — a genuinely elliptical answer plus proposed A still uses recorded A', () => {
-    const elliptical = edgeCollision(OPT_SELF_SERVE, ellipticalSelfServeOpinion);
-    expect(elliptical).not.toBeNull();
-    expect(elliptical!.pairs.map((pair) => `${pair.optionId}::${pair.factorId}`)).toEqual([
-      `${OPT_SELF_SERVE}::${FAC_SELF_SERVE}`,
-    ]);
-  });
-});

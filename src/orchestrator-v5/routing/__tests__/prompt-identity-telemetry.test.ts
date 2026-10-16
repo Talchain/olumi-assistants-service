@@ -18,9 +18,8 @@
  * Supabase session store — the rest of the module graph is real.
  */
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 // Hoisted so the (hoisted) vi.mock factory can close over it.
 const { getCompiledMock } = vi.hoisted(() => ({ getCompiledMock: vi.fn() }));
@@ -60,17 +59,13 @@ vi.mock('../../session/index.js', () => ({
 
 import { setTestSink } from '../../../utils/telemetry.js';
 import {
-  buildRoutingPromptSnapshot,
-  getCachedRoutingPromptIdentity,
-  __resetRoutingPromptSnapshotForTests,
-  ROUTING_PROMPT_VERSION,
+__resetRoutingPromptSnapshotForTests,
+buildRoutingPromptSnapshot,
+getCachedRoutingPromptIdentity,
+ROUTING_PROMPT_VERSION,
 } from '../prompt-loader.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-} from '../../../adapters/llm/types.js';
 
-const { runTurnExecutor } = await import('../../turn-executor.js');
+
 
 // Live-specimen shape: PMS orchestrator version 112 at 21,860 chars —
 // inside the routing guard [18,500, 22,000] and distinct from the bundled
@@ -84,35 +79,12 @@ const SERVED_SENT_HASH = createHash('sha256')
   .digest('hex')
   .slice(0, 16);
 
-const BASE_PAYLOAD: MessageTurnPayload = {
-  kind: 'message',
-  source: 'composer',
-  turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-  scenario_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-  message: 'Why does the leading option win?',
-  turn_class: 'frame',
-  stage: 'frame',
-};
+
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
-function textOnlyAdapter() {
-  return {
-    chatWithTools: vi.fn(
-      async (
-        _args: ChatWithToolsArgs,
-        _opts: { requestId: string },
-      ): Promise<ChatWithToolsResult> => ({
-        content: [{ type: 'text', text: 'A conversational answer.' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
-        model: 'claude-sonnet-4-6',
-        latencyMs: 50,
-      }),
-    ),
-  };
-}
+
 
 beforeEach(() => {
   events = [];
@@ -146,51 +118,5 @@ describe('getCachedRoutingPromptIdentity()', () => {
     expect(identity!.system_chars).toBe(21_860);
     // The whole point: the served identity is NOT the repo-default constant.
     expect(identity!.version).not.toBe(ROUTING_PROMPT_VERSION);
-  });
-});
-
-describe('obsPayload + emitV5PromptCache carry the served snapshot identity (ROADMAP 1.32)', () => {
-  it('turn-lifecycle events report the PMS snapshot identity, not v40/21,439', async () => {
-    getCompiledMock.mockResolvedValue({
-      content: SERVED_CONTENT,
-      promptId: 'orchestrator_default',
-      version: SERVED_VERSION,
-    });
-    await buildRoutingPromptSnapshot();
-
-    await runTurnExecutor(BASE_PAYLOAD, 'req-identity-1', {
-      routingAdapter: textOnlyAdapter(),
-    });
-
-    // obsPayload-consuming lifecycle event (emitted before routing, so it
-    // proves the emit site reads the cached snapshot, not the routing call).
-    const started = events.find((e) => e.event === 'turn_executor.started');
-    expect(started).toBeDefined();
-    expect(started!.data.prompt_version).toBe('112');
-    expect(started!.data.prompt_hash).toBe(SERVED_SENT_HASH);
-    expect(started!.data.system_chars).toBe(21_860);
-    expect(started!.data.prompt_version).not.toBe('v40');
-
-    // emitV5PromptCache site in route-with-tool-use.ts — same identity.
-    const cacheEvent = events.find((e) => e.event === 'v5.prompt_cache');
-    expect(cacheEvent).toBeDefined();
-    expect(cacheEvent!.data.prompt_version).toBe('112');
-    expect(cacheEvent!.data.sent_hash).toBe(SERVED_SENT_HASH);
-  });
-
-  it('falls back to the repo-default constants when the snapshot is not yet built', async () => {
-    // No snapshot build before the turn. The turn_executor.started event
-    // fires BEFORE the routing call lazily builds the snapshot, so it must
-    // carry the constant fallback rather than throwing.
-    getCompiledMock.mockResolvedValue(null); // PMS empty → default fallback
-    await runTurnExecutor(BASE_PAYLOAD, 'req-identity-2', {
-      routingAdapter: textOnlyAdapter(),
-    });
-
-    const started = events.find((e) => e.event === 'turn_executor.started');
-    expect(started).toBeDefined();
-    expect(started!.data.prompt_version).toBe(ROUTING_PROMPT_VERSION);
-    expect(typeof started!.data.prompt_hash).toBe('string');
-    expect(typeof started!.data.system_chars).toBe('number');
   });
 });

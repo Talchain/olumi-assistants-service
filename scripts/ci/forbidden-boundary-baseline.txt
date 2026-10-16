@@ -55,4 +55,5 @@ as_unknown_as=58
 # destructured, renamed, mapped, or cast before the fallback). A low count
 # means "not detected by this cheap gate", NOT "safe".
 # Lowered 16 -> 10 by PR #615 (V1 orchestrator-belt deletion banked the cleanup).
-science_field_default_fallback=10
+# C1 group 2 removed three fallbacks with the unreachable conventional producers.
+science_field_default_fallback=7

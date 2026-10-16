@@ -60,25 +60,19 @@
  * exactly what it was.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import { makeMessagePayload } from '../../../__tests__/fixtures.js';
-import { setTestSink } from '../../../../utils/telemetry.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-  ToolResponseBlock,
-} from '../../../../adapters/llm/types.js';
 import type { GraphV3T } from '../../../../schemas/cee-v3.js';
+import { setTestSink } from '../../../../utils/telemetry.js';
 import type { ProposalAction } from '../../../routing/types.js';
 import { HandlerInvocationFailedError } from '../../handler-errors.js';
-import { buildD1Fixture, buildHandlerInvocation } from '../d1-shared/__tests__/fixtures.js';
 import { createAddConstraintHandler } from '../add-constraint.js';
+import { buildD1Fixture,buildHandlerInvocation } from '../d1-shared/__tests__/fixtures.js';
 // The producer's OWN constants, so this file cannot drift from the War-Room
 // phrase or from the projector it tests — a transcribed string here would be
 // the hand-maintained mirror CLAUDE.md trap 12 is about.
-import { ADD_CONSTRAINT_USER_GUIDANCE } from '../d1-shared/user-guidance.js';
 import { handlerRefusalFromError } from '../../../diagnostics/v5-diagnostic-trace.js';
+import { ADD_CONSTRAINT_USER_GUIDANCE } from '../d1-shared/user-guidance.js';
 
 vi.mock('../../../session/index.js', () => ({
   getSessionStore: () => ({
@@ -94,10 +88,10 @@ vi.mock('../../../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../../../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../../../routing/tool-schema.js');
 
-const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+
+
 
 /** Identities, addressed by ID — never by a predicate another node satisfies. */
 const GOAL_TARGET_ID = 'g-revenue';
@@ -249,145 +243,3 @@ describe('add_constraint refusal — the CAUSE is resolvable', () => {
 // Part 2 — the code SURVIVES onto the run result route-v2 stamps from.
 // Set is not carried; this is the half that proves carried.
 // ───────────────────────────────────────────────────────────────────────────
-
-function mkToolUseResult(input: unknown): ChatWithToolsResult {
-  const content: ToolResponseBlock[] = [
-    {
-      type: 'tool_use',
-      id: 'tu-1',
-      name: OLUMI_ACTION_TOOL_NAME,
-      input: input as Record<string, unknown>,
-    },
-  ];
-  return {
-    content,
-    stop_reason: 'tool_use',
-    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
-    model: 'claude-sonnet-4-6',
-    latencyMs: 50,
-  };
-}
-
-describe('add_constraint refusal — the code reaches the run result', () => {
-  it('a handler-path refusal populates handlerRefusal; a SUCCESS leaves it absent', async () => {
-    const routingAdapter = {
-      chatWithTools: vi.fn((async () =>
-        mkToolUseResult({
-          intent_class: 'execute',
-          action: {
-            handler_id: 'add_constraint',
-            entity: {
-              id: GOAL_TARGET_ID,
-              kind: 'goal',
-              resolution_status: 'resolved',
-              resolution_method: 'id_match',
-            },
-            // ⭐ WHY THIS PARAMETER AND NOT AN OBVIOUS ONE. The validator's
-            // `parameter_schemas` for add_constraint declares exactly four
-            // names — constraint_type, value, label, unit
-            // (`routing/validation-registry.ts:278-283`) — so a bad value in
-            // any of those is caught BEFORE dispatch and never reaches the
-            // handler (measured: an invalid `constraint_type` produced
-            // `failure_origin: 'validator'`). `corrects_node_id` is NOT
-            // declared there, so a malformed one is the handler's own to
-            // reject, at `:391`. This is a real execute-time throw, not a
-            // synthesised one.
-            parameters: [
-              { name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
-              { name: 'value', value: 5, source: 'user_explicit' },
-              { name: 'corrects_node_id', value: 42, source: 'user_explicit' },
-            ],
-            cited_context_fields: ['graph.nodes'],
-          },
-        })) as unknown as (
-        args: ChatWithToolsArgs,
-        opts: { requestId: string },
-      ) => Promise<ChatWithToolsResult>),
-    };
-
-    const refused = await runTurnExecutor(
-      makeMessagePayload({
-        turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-        scenario_id: TEST_SCENARIO_ID,
-        message: 'keep that at or above 100',
-      }),
-      'req-refusal-threading',
-      { routingAdapter, graphState: buildD1Fixture() },
-    );
-
-    // PRECONDITION, PINNED IN-TEST: this must have been the HANDLER path, not
-    // the validator family. Without this the assertions below could be about a
-    // turn nobody was asking about.
-    // `handler_recovery`, NOT `execute`: the handler threw, so the execute
-    // stage never completed. And NOT `validator_recovery`, which is the arm
-    // this test must exclude — the validator's own refusal family has its own
-    // codes and its own copy, and asserting against it would measure the
-    // wrong path. This exact distinction is what the first version of this
-    // file got wrong; it is asserted here rather than assumed.
-    expect(refused.telemetry.stages_completed, 'did not reach the handler').toContain(
-      'handler_recovery',
-    );
-    expect(refused.telemetry.stages_completed, 'the VALIDATOR refused, not the handler').not.toContain(
-      'validator_recovery',
-    );
-    expect(refused.telemetry.failure_type, 'did not recover as a 200').toBeNull();
-
-    expect(refused.handlerRefusal).toBeDefined();
-    expect(refused.handlerRefusal?.handler_id).toBe('add_constraint');
-    expect(refused.handlerRefusal?.d1_code).toBe('PARAMETER_INVALID');
-    expect(refused.handlerRefusal?.cause_kind).toBe('parameter_invalid_at_execute');
-
-    // NO USER-VISIBLE CHANGE — the refusal body is still the clean, canonical,
-    // chipped one. If this change had altered any of these it would be the
-    // user-visible copy change the brief forbids.
-    expect(refused.response.blocks).toEqual([]);
-    expect(refused.response.assistant_text).toBe(ADD_CONSTRAINT_USER_GUIDANCE);
-    expect(refused.response.suggested_actions.length).toBeGreaterThan(0);
-    // And no code leaked into that copy.
-    for (const value of Object.values(refused.handlerRefusal ?? {})) {
-      if (typeof value !== 'string') continue;
-      expect(refused.response.assistant_text).not.toContain(value);
-    }
-
-    // ── THE NEGATIVE TWIN ────────────────────────────────────────────────
-    // ⛔ Without this arm, "always stamp something" would pass. A SUCCESSFUL
-    // add_constraint must leave the field ABSENT — the record makes a claim
-    // about refusals, and a stamp on a success would be a false one.
-    const okAdapter = {
-      chatWithTools: vi.fn((async () =>
-        mkToolUseResult({
-          intent_class: 'execute',
-          action: {
-            handler_id: 'add_constraint',
-            entity: {
-              id: 'f-churn',
-              kind: 'node',
-              resolution_status: 'resolved',
-              resolution_method: 'id_match',
-            },
-            parameters: [
-              { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
-              { name: 'value', value: 5, source: 'user_explicit' },
-              { name: 'unit', value: '%', source: 'user_explicit' },
-            ],
-            cited_context_fields: ['graph.nodes'],
-          },
-        })) as unknown as (
-        args: ChatWithToolsArgs,
-        opts: { requestId: string },
-      ) => Promise<ChatWithToolsResult>),
-    };
-    const applied = await runTurnExecutor(
-      makeMessagePayload({
-        turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-        scenario_id: TEST_SCENARIO_ID,
-        message: 'keep churn at or below 5%',
-      }),
-      'req-refusal-negative-twin',
-      { routingAdapter: okAdapter, graphState: buildD1Fixture() },
-    );
-    expect(applied.telemetry.failure_type, 'the success arm did not succeed').toBeNull();
-    expect(applied.telemetry.turn_class, 'the success arm did not run the handler').toBe('handler');
-    expect(applied.handlerRefusal).toBeUndefined();
-  });
-});

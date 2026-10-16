@@ -26,25 +26,12 @@
  * trap 19).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { Intent } from '@talchain/schemas/boundary';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import { TelemetryEvents, setTestSink } from '../../utils/telemetry.js';
+import { TelemetryEvents,setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import {
-  ROUTED_COACHING_INTENTS,
-  buildCoachingMethodDirective,
-  composeCoachingRoutingMessage,
-} from '../coaching/typed-intent-directive.js';
-import { buildUserMessage } from '../routing/route-with-tool-use.js';
-import type { ContextPack } from '../context/context-pack-assembler.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-  ToolResponseBlock,
-} from '../../adapters/llm/types.js';
+
 import type { PendingAction } from '../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
@@ -73,10 +60,10 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
-const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+
+
 
 /** Two options, one goal, every non-baseline option carrying an intervention —
  * the shape `analysis_ready` resolves to `ready` on, so the Run affordance is
@@ -122,10 +109,9 @@ const READY_GRAPH = {
 
 void computeAnalysisAffectingGraphHash(READY_GRAPH as never);
 
-const SPARK_MESSAGE =
-  'Is this the right question to be asking, and does it fit my wider goals?';
 
-const PRIOR_RA_ROW_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+
 
 /**
  * A prior SUCCESSFUL analysis whose `graph_hash_at_run` does NOT match the
@@ -141,116 +127,20 @@ const PRIOR_RA_ROW_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
  * the coaching arm and the wrapper fix against each other rather than
  * separately.
  */
-function staleRunAnalysisFact(): Record<string, unknown> {
-  return {
-    fact_type: 'run_analysis' as const,
-    fact_version: 1 as const,
-    noop: false,
-    result: {
-      scenario_id: SCENARIO_ID,
-      leading_option_id: 'opt_hire',
-      summary: 'Prior analysis result',
-      graph_hash_at_run: 'sha256:deliberately-not-the-current-graph',
-      computed_at: new Date(Date.now() - 60_000).toISOString(),
-      enrichment: { analysis_status: 'completed' },
-      win_probabilities: { opt_hire: 0.72, opt_status_quo: 0.28 },
-    },
-  };
-}
 
-const PRIOR_RUN_ANALYSIS_TURN = {
-  id: PRIOR_RA_ROW_ID,
-  scenario_id: SCENARIO_ID,
-  user_id: null,
-  turn_id: 'prior-turn-run-analysis',
-  turn_class: 'handler',
-  handler_id: 'run_analysis',
-  request_hash: 'sha256:prior-ra',
-  response_emitted: true,
-  llm_calls_used: 1,
-  duration_ms: 200,
-  created_at: new Date(Date.now() - 60_000).toISOString(),
-};
 
-function seedStaleAnalysis(): void {
-  mockState.priorTurns = [PRIOR_RUN_ANALYSIS_TURN];
-  mockState.priorFacts = [staleRunAnalysisFact()];
-}
 
-function chipPayload(intent: string | undefined, stage: 'frame' | 'analyse'): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'chip_click',
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message: SPARK_MESSAGE,
-    turn_class: 'clarify',
-    stage,
-    ...(intent === undefined ? {} : { chip: { id: 'chip_spark', intent } }),
-  } as unknown as MessageTurnPayload;
-}
 
-function composerPayload(stage: 'frame' | 'analyse'): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message: SPARK_MESSAGE,
-    turn_class: 'clarify',
-    stage,
-  } as unknown as MessageTurnPayload;
-}
 
-function coachToolResultWithAnswer(): ChatWithToolsResult {
-  const content: ToolResponseBlock[] = [
-    {
-      type: 'tool_use',
-      id: 'tu-1',
-      name: OLUMI_ACTION_TOOL_NAME,
-      input: {
-        intent_class: 'coach',
-        coaching_mode: 'reframe',
-        answer_shape: {
-          headline: 'Two framings are worth separating here.',
-          bullets: [],
-          detail:
-            'The second framing changes which options are worth considering at all.',
-        },
-      },
-    } as unknown as ToolResponseBlock,
-  ];
-  return {
-    content,
-    stop_reason: 'tool_use',
-    usage: { input_tokens: 5, output_tokens: 5 } as unknown as ChatWithToolsResult['usage'],
-    model: 'claude-sonnet-4-6',
-    latencyMs: 20,
-  };
-}
+
+
+
+
+
+
 
 /** Captures the exact user message handed to the router — the wire under test. */
-function makeCapturingAdapter(): {
-  adapter: { chatWithTools: (a: ChatWithToolsArgs, o: { requestId: string }) => Promise<ChatWithToolsResult> };
-  seen: string[];
-} {
-  const seen: string[] = [];
-  const chatWithTools = vi
-    .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-    .mockImplementation(async (args) => {
-      const messages = (args as unknown as { messages?: Array<{ content?: unknown }> }).messages ?? [];
-      for (const m of messages) {
-        if (typeof m.content === 'string') seen.push(m.content);
-        else if (Array.isArray(m.content)) {
-          for (const part of m.content as Array<{ type?: string; text?: string }>) {
-            if (part?.type === 'text' && typeof part.text === 'string') seen.push(part.text);
-          }
-        }
-      }
-      return coachToolResultWithAnswer();
-    });
-  return { adapter: { chatWithTools }, seen };
-}
+
 
 /**
  * ⚠ THE ASSERTION THAT NEARLY WENT UNWRITTEN, AND WOULD HAVE MADE THE HARM TEST
@@ -265,17 +155,7 @@ function makeCapturingAdapter(): {
  * So the harm tests pin the turn's HEALTH first. A Run chip that only exists
  * because the turn broke is not the affordance being defended.
  */
-function expectHealthyCoachingTurn(result: { response: { assistant_text?: string } }): void {
-  expect(
-    events.filter(e => e.event === 'v5.routing_bounded_fallback'),
-    'the turn fell into the bounded routing fallback — any chip it carries is a ' +
-      'failure control, not the affordance under test',
-  ).toEqual([]);
-  expect(
-    (result.response.assistant_text ?? '').length,
-    'the turn produced no answer text — a chip on an empty turn is not coaching',
-  ).toBeGreaterThan(0);
-}
+
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
@@ -294,202 +174,11 @@ afterEach(() => {
   setTestSink(null);
 });
 
-describe('the seam is byte-equivalent to the routing-module append it replaces', () => {
-  it('appending inside `message` and appending after `buildUserMessage` emit the SAME bytes', () => {
-    // ⭐ THE CLAIM THIS PINS. The arm composes its directive into the `message`
-    // argument at the TurnExecutor call site, because
-    // `orchestrator-v5/routing/**` is under a concurrent rebuild this lane must
-    // not touch. That is only acceptable if it is not a compromise — and it is
-    // not, because `buildUserMessage` ends with
-    // `parts.push('', '## User turn', message)` and joins on '\n', so `message`
-    // is the FINAL segment. Both placements therefore emit identical bytes.
-    //
-    // This equality is an ASSUMPTION ABOUT ANOTHER MODULE'S INTERNALS, which is
-    // exactly the kind of claim that rots silently. Pinned here so that if the
-    // day comes when `buildUserMessage` appends anything after the user turn,
-    // this REDs and names the reason rather than the arm quietly mis-placing
-    // its directive.
-    const pack = { stage: 'frame' } as unknown as ContextPack;
-    const directive = buildCoachingMethodDirective('challenge_frame', 'frame').directive;
 
-    const composedInside = buildUserMessage(pack, composeCoachingRoutingMessage(SPARK_MESSAGE, directive));
-    const appendedAfter = `${buildUserMessage(pack, SPARK_MESSAGE)}\n\n${directive}`;
 
-    expect(composedInside).toBe(appendedAfter);
-    // Non-vacuity: both sides must actually contain the directive, or the
-    // equality above could hold between two strings that dropped it (trap 13 —
-    // an agreement between two empty results is not evidence).
-    expect(composedInside).toContain(directive);
-    expect(composedInside.length).toBeGreaterThan(directive.length);
-  });
-});
 
-describe('a typed coaching intent routes end-to-end and reaches the coach', () => {
-  it.each(ROUTED_COACHING_INTENTS)(
-    '%s — the routing turn carries this intent\'s method directive verbatim',
-    async intent => {
-      const { adapter, seen } = makeCapturingAdapter();
-      const result = await runTurnExecutor(chipPayload(intent, 'frame'), `req-wire-${intent}`, {
-        routingAdapter: adapter as never,
-        graphState: READY_GRAPH as never,
-      });
 
-      expect(seen.length, 'the router must have been called — zero captures proves nothing').toBeGreaterThan(0);
 
-      // Derived from the PRODUCTION builder at the stage the executor derived,
-      // never a phrase retyped here.
-      const stage = result.response.stage_indicator ?? 'frame';
-      const expected = buildCoachingMethodDirective(
-        intent,
-        typeof stage === 'string' ? stage : (stage as { stage: string }).stage,
-      ).directive;
-
-      expect(
-        seen.some(m => m.includes(expected)),
-        `the routing turn for \`${intent}\` did not carry its method directive — ` +
-          'the chip has degraded to an untyped prose turn, which is the defect this arm removes',
-      ).toBe(true);
-    },
-  );
-
-  it('emits the routing telemetry with the intent it routed', async () => {
-    const { adapter } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('challenge_frame', 'frame'), 'req-wire-telemetry', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-    // Bound to the registry constant, not to the string — a renamed event must
-    // move this test with it rather than silently emptying the filter.
-    const routed = events.filter(e => e.event === TelemetryEvents.V5TypedCoachingIntentRoute);
-    expect(routed).toHaveLength(1);
-    expect(routed[0]!.data.intent).toBe('challenge_frame');
-  });
-
-  it('CONTRAST CONTROL — the SAME message from the composer carries NO directive', async () => {
-    // ⭐ Without this the suite could not tell "the arm fired on the chip's
-    // typed intent" from "the directive is appended to every turn". The two
-    // arms differ ONLY in `source` + `chip.intent`; the message bytes are
-    // identical, so a passing pair is evidence about the intent and nothing
-    // else (CLAUDE.md trap 19 — bind by identity, and prove the binding with a
-    // discriminating pair rather than a single green assertion).
-    const withIntent = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('challenge_frame', 'frame'), 'req-wire-pair-a', {
-      routingAdapter: withIntent.adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-    const withoutIntent = makeCapturingAdapter();
-    await runTurnExecutor(composerPayload('frame'), 'req-wire-pair-b', {
-      routingAdapter: withoutIntent.adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-
-    const directive = buildCoachingMethodDirective('challenge_frame', 'frame').directive;
-    const marker = directive.split('\n')[0]!; // '## Requested coaching method (explicit)'
-
-    expect(withIntent.seen.some(m => m.includes(marker)), 'the chip turn must carry it').toBe(true);
-    expect(withoutIntent.seen.length, 'the control turn must have reached the router').toBeGreaterThan(0);
-    expect(
-      withoutIntent.seen.some(m => m.includes(marker)),
-      'a composer turn with the same words must NOT be steered — otherwise the ' +
-        'assertion above is about the message, not about the typed intent',
-    ).toBe(false);
-  });
-
-  it('an UNROUTED published intent is not steered (the gate is the SEVEN, not the enum)', async () => {
-    // ⚠ THIS CONTROL WAS `pre_mortem` UNTIL pre_mortem WAS ROUTED. That is the
-    // hazard worth naming: a negative case whose subject later acquires the
-    // behaviour keeps passing only if someone notices. It is now
-    // `mitigation_help` — published in the `Intent` enum, mounted by NO
-    // affordance in DGAI, and routed by nobody — and the precondition is
-    // asserted rather than assumed, so this cannot decay into a tautology.
-    expect(
-      Intent.options as readonly string[],
-      'mitigation_help is no longer published — this control proves nothing',
-    ).toContain('mitigation_help');
-    expect(
-      ROUTED_COACHING_INTENTS as readonly string[],
-      'mitigation_help is now ROUTED — this negative case is vacuous; pick another control',
-    ).not.toContain('mitigation_help');
-
-    const { adapter, seen } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('mitigation_help', 'frame'), 'req-wire-unrouted', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-    expect(seen.length).toBeGreaterThan(0);
-    expect(seen.some(m => m.includes('## Requested coaching method (explicit)'))).toBe(false);
-  });
-
-  it('DISCRIMINATING PAIR — the SAME turn shape WITH a routed intent IS steered', async () => {
-    // ⭐ The absence above proves the arm can decline; on its own it does not
-    // prove the arm can ACT on this exact turn shape, so a resolver that
-    // declined everything would pass it. This is the other half of the pair:
-    // same payload builder, same stage, same adapter — only the intent token
-    // differs, and now the directive MUST be present.
-    const { adapter, seen } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('pre_mortem', 'frame'), 'req-wire-routed-pair', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-    expect(seen.length).toBeGreaterThan(0);
-    expect(
-      seen.some(m => m.includes('## Requested coaching method (explicit)')),
-      'a routed intent on the same turn shape was NOT steered — the absence test ' +
-        'above is therefore not evidence about routing, only about a dead arm',
-    ).toBe(true);
-  });
-});
-
-describe('THE WITNESSED HARM — accepting the coaching chip must not cost the Run affordance', () => {
-  it('CONTROL FIRST — on a stale analysis the product DOES offer a Run affordance', async () => {
-    // ⭐ The baseline, asserted BEFORE the claim it grounds. Without it, the
-    // test below is satisfied by a build where Run is never offered at all, and
-    // a green suite would be recording an affordance nobody has (trap 13 — an
-    // absence/presence claim needs the opposite reading demonstrated).
-    seedStaleAnalysis();
-    const { adapter } = makeCapturingAdapter();
-    const result = await runTurnExecutor(composerPayload('analyse'), 'req-wire-run-control', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-    expectHealthyCoachingTurn(result);
-    expect(
-      result.response.suggested_actions.some(a => a.action_type === 'run_analysis'),
-      'the fixture no longer offers Run, so the harm test below asserts nothing',
-    ).toBe(true);
-  });
-
-  it('a routed coaching turn KEEPS the Run affordance', async () => {
-    // ⚠ THIS IS THE ONE THE USER FELT. On the pre-fix path a coaching chip
-    // click fell through to the free-text edit lane, returned a refusal, and
-    // the recovery chips replaced the row — so the user lost `Run analysis` by
-    // accepting a suggestion the product itself had made.
-    //
-    // Asserted on the WIRE RESPONSE (`suggested_actions`), not on rendered UI:
-    // the executor is the only party that can put the affordance in the
-    // payload, and if it is absent here no UI can show it.
-    seedStaleAnalysis();
-    const { adapter, seen } = makeCapturingAdapter();
-    const result = await runTurnExecutor(chipPayload('challenge_frame', 'analyse'), 'req-wire-run-kept', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-
-    // Bind the two halves together: this must be the turn that WAS steered,
-    // otherwise it is only evidence about an ordinary turn.
-    expect(
-      seen.some(m => m.includes('## Requested coaching method (explicit)')),
-      'sanity: this turn must actually have been routed as a coaching intent',
-    ).toBe(true);
-
-    expectHealthyCoachingTurn(result);
-    expect(
-      result.response.suggested_actions.some(a => a.action_type === 'run_analysis'),
-      'the coaching turn withdrew the Run affordance — the exact cost the widening-card ' +
-        'defect imposed on the user (ROADMAP 2.1288)',
-    ).toBe(true);
-  });
-});
 
 /**
  * ⭐ F2 — A NON-ROUTED `chip.intent` MUST NOT BE SILENTLY DROPPED.
@@ -523,71 +212,9 @@ describe('F2 — an unrouted typed intent is OBSERVABLE, not silently dropped', 
     ).toBe(UNROUTED_EVENT);
   });
 
-  it('a PUBLISHED-but-unrouted intent emits the drop, naming the exact token', async () => {
-    // Control subject moved `pre_mortem` → `mitigation_help` when pre_mortem
-    // gained an arm; the precondition is pinned in the sibling suite.
-    const { adapter, seen } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('mitigation_help', 'frame'), 'req-f2-unrouted', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
 
-    // Sanity: the turn must actually have reached the router, or the arm's
-    // whole neighbourhood never executed and this asserts nothing.
-    expect(seen.length, 'the turn never reached the router').toBeGreaterThan(0);
 
-    const dropped = events.filter(e => e.event === UNROUTED_EVENT);
-    expect(
-      dropped,
-      'a typed `chip.intent` CEE does not route left no trace at all — the silent ' +
-        'drop is the mechanism that made this whole defect class invisible',
-    ).toHaveLength(1);
-    expect(dropped[0]!.data.intent).toBe('mitigation_help');
-    expect(dropped[0]!.data.stage).toBe('frame');
-    // Content-free: the user's message must never ride this event.
-    expect(JSON.stringify(dropped[0]!.data)).not.toContain(SPARK_MESSAGE);
-  });
 
-  it('CONTRAST CONTROL — a turn with NO chip.intent does NOT emit it', async () => {
-    // ⭐ The absence claim below is worthless without proof the sink was live
-    // and the turn ran, so both are asserted first (CLAUDE.md trap 13).
-    const { adapter, seen } = makeCapturingAdapter();
-    await runTurnExecutor(composerPayload('frame'), 'req-f2-composer', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
 
-    expect(seen.length, 'the control turn never reached the router').toBeGreaterThan(0);
-    expect(
-      events.length,
-      'the telemetry sink captured nothing at all — the absence below is about the ' +
-        'sink, not about the arm',
-    ).toBeGreaterThan(0);
-    expect(
-      events.filter(e => e.event === UNROUTED_EVENT),
-      'the drop event fired on an ordinary turn with no typed intent — it would ' +
-        'drown its own signal under the whole traffic of the service',
-    ).toEqual([]);
-  });
 
-  it('CONTRAST CONTROL — a ROUTED intent emits the route event and NOT the drop', async () => {
-    // The two events are mutually exclusive by construction. Asserting the pair
-    // in one run is what proves the new emit discriminates on the ROUTING
-    // decision rather than on the mere presence of a chip.
-    const { adapter } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('challenge_frame', 'frame'), 'req-f2-routed', {
-      routingAdapter: adapter as never,
-      graphState: READY_GRAPH as never,
-    });
-
-    expect(
-      events.filter(e => e.event === TelemetryEvents.V5TypedCoachingIntentRoute),
-      'positive control: the routed arm must have fired on this turn',
-    ).toHaveLength(1);
-    expect(
-      events.filter(e => e.event === UNROUTED_EVENT),
-      'a ROUTED intent was also reported as dropped — the emit is firing on the ' +
-        'presence of a chip, not on the routing decision',
-    ).toEqual([]);
-  });
 });

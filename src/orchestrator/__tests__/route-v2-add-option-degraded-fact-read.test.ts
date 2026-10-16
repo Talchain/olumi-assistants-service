@@ -112,9 +112,9 @@
  * way files A and B do at their telemetry observable.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import Fastify,{ type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 
@@ -239,9 +239,7 @@ const dispatchEditGraphMock = vi.fn(async () => ({
   response: FALLTHROUGH_RESPONSE,
   commitPerformed: true,
 }));
-vi.mock('../../orchestrator-v5/turn-executor.js', () => ({
-  runTurnExecutor: runTurnExecutorMock,
-}));
+
 vi.mock('../../orchestrator-v5/handlers/edit-graph-dispatch.js', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../orchestrator-v5/handlers/edit-graph-dispatch.js')>();

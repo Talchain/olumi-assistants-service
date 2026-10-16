@@ -17,7 +17,7 @@
  * configure affordance must be offered.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 // ── Mocks — must be declared before imports ────────────────────────────────
 vi.mock('../../../../src/adapters/llm/prompt-loader.js', () => ({
@@ -58,16 +58,13 @@ vi.mock('../../../../src/config/index.js', async (importOriginal) => {
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { applyEgressForbiddenPhraseGuard } from '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 import { handleEditGraph } from '../../../../src/orchestrator/tools/edit-graph.js';
 import { log } from '../../../../src/utils/telemetry.js';
-import { applyEgressForbiddenPhraseGuard } from '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
-import {
-  isValueUpdatePhrasing,
-  shouldSuppressEditDispatchForValueUpdate,
-} from '../../../../src/orchestrator/routing/value-update-gate.js';
-import type { ConversationContext } from '../../../../src/orchestrator/types.js';
+
 import type { LLMAdapter } from '../../../../src/adapters/llm/types.js';
-import type { PLoTClient, ValidatePatchResult } from '../../../../src/orchestrator/plot-client.js';
+import type { PLoTClient,ValidatePatchResult } from '../../../../src/orchestrator/plot-client.js';
+import type { ConversationContext } from '../../../../src/orchestrator/types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function makeContext(overrides?: Partial<ConversationContext>): ConversationContext {
@@ -392,46 +389,7 @@ describe('handleEditGraph — LEG 2: an ADDED label quantity the model does not 
     expect((node!.observed_state as Record<string, unknown>).raw_value).toBe(50000);
   });
 
-  it('offers a typed affordance whose prompt the deterministic value lane CLAIMS', async () => {
-    const adapter = makeAdapter({
-      operations: [CAPTURED_LABEL_ONLY_ADD],
-      warnings: [],
-      coaching: { summary: 'Updated Annual CRM Spend to £63,000.', rerun_recommended: false },
-    });
 
-    const result = await handleEditGraph(
-      makeCapturedContext(),
-      'Change Annual CRM Spend to £63,000.',
-      adapter,
-      'req-leg2-3',
-      'turn-leg2-3',
-      { plotClient: makePlotClientSuccess() },
-    );
-
-    const actions = result.suggestedActions ?? [];
-    const chip = actions.find((a) => /£63,000/.test(a.prompt));
-    expect(chip).toBeDefined();
-    // ⚠ Not "a chip exists" — the chip must actually WORK. Derived against the
-    // real gate: the replayed prompt has to be claimed by the deterministic
-    // value-update lane, or the disclosure points at an affordance that would
-    // route straight back into the edit_graph LLM that caused this.
-    expect(isValueUpdatePhrasing(chip!.prompt)).toBe(true);
-    expect(shouldSuppressEditDispatchForValueUpdate(chip!.prompt)).toBe(true);
-    // ⚠ FLIPPED 2026-09-14 — the separate lane this comment named has landed.
-    // This row previously asserted FALSE and read: "the phrasing that CAUSED
-    // the defect is NOT claimed ... Routing is a separate lane; this asserts
-    // the boundary, it does not fix it." `change` is now in
-    // VALUE_UPDATE_VERBS_TO, so the causing phrasing is claimed by the value
-    // path and this rename should no longer be reachable through routing.
-    //
-    // The assertion is KEPT rather than deleted, in the opposite direction:
-    // it is now the regression pin proving the routing fix reaches this
-    // exact captured utterance. Everything else in this file is unchanged —
-    // the divergence detector still behaves correctly if edit_graph is
-    // reached by any other path, which is the point of a consent-first
-    // disclosure: it is a backstop, not the routing.
-    expect(isValueUpdatePhrasing('Change Annual CRM Spend to £63,000.')).toBe(true);
-  });
 
   it('the receipt cannot read as a completed value change', async () => {
     const adapter = makeAdapter({

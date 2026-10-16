@@ -27,17 +27,17 @@
  * held-apply is entirely unaffected (the branch is inert off a degraded read).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
+import type { ChatWithToolsArgs,ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 
+import { _resetConfigCache } from '../../config/index.js';
+import { GraphV3 } from '../../schemas/cee-v3.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { GraphV3 } from '../../schemas/cee-v3.js';
-import { _resetConfigCache } from '../../config/index.js';
 
 const SCENARIO_ID = randomUUID();
 const GM_PROPOSAL_REF = 'gmh_floordegraded';
@@ -118,7 +118,13 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
+const { runHeldProposalApproval } = await import('../handlers/approve-held-proposal.js');
+const { resolveProposalRenderCopy } = await import('../compose/proposed-change.js');
+// Approval now names the stored card; all graph/source/receipt assertions below are unchanged.
+const runTurnExecutor = (p: MessageTurnPayload, requestId: string, options?: Parameters<typeof runHeldProposalApproval>[2] & { routingAdapter?: unknown }) => {
+  const held = pendingActionsForRead[0]!;
+  return runHeldProposalApproval({ ...p, source: 'chip', chip: { id: held.chip_id }, message: resolveProposalRenderCopy(held.action).message }, requestId, options);
+};
 
 function gmHeldPending(): PendingAction {
   return {

@@ -167,11 +167,12 @@ describe("GET /admin/models/routing", () => {
       lifecycle_state: "standalone_route",
       runtime_availability: "available",
     });
+    // C1 deleted the M2 producer; its compatibility name has no executable path.
     expect(byTask.get("m2_graph_review")).toMatchObject({
       executable: false,
-      has_executable_path: true,
-      lifecycle_state: "feature_gated",
-      runtime_availability: "feature_gated_default_off",
+      has_executable_path: false,
+      lifecycle_state: "inert_compatibility",
+      runtime_availability: "not_executable",
     });
   });
 

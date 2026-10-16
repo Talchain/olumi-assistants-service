@@ -25,15 +25,15 @@
  * `orchestrator/__tests__/route-v2-diagnostic-trace-llm-calls.test.ts`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  buildV5DiagnosticTrace,
-  buildMinimalV5DiagnosticTrace,
-  buildErrorV5DiagnosticTrace,
-  emptyV5DiagnosticTrace,
-} from '../v5-diagnostic-trace.js';
-import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
+import { afterEach,beforeEach,describe,expect,it } from 'vitest';
+import type { DraftGraphResult } from "../../../orchestrator/types.js";
 import type { CommitResult } from '../../commit.js';
+import {
+buildErrorV5DiagnosticTrace,
+buildMinimalV5DiagnosticTrace,
+buildV5DiagnosticTrace,
+emptyV5DiagnosticTrace,
+} from '../v5-diagnostic-trace.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';

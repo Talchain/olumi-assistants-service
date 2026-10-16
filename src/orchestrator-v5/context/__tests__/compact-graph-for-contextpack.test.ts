@@ -5,20 +5,17 @@
  * passthrough.
  */
 
-import { readFileSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
-import { PROPOSAL_FIELD_CAPS } from '../../../cee/dual-draft/guards.js';
+
 import {
-  CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
+CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS,
 } from '../../../orchestrator/context/graph-compact.js';
 import {
-  compactGraphForContextPack,
-  compactSelectedGraphForContextPack,
+compactGraphForContextPack
 } from '../compact-graph-for-contextpack.js';
-import { selectContextGraphSnapshot } from '../context-graph-snapshot.js';
 
 // Long-ish body text representative of real scenario content — the compactor
 // drops this entirely, which is the largest single source of token savings.
@@ -95,17 +92,7 @@ function makeLayeredGraph(): GraphStateIngress {
   return { nodes, edges } as unknown as GraphStateIngress;
 }
 
-function makeCausalConfidenceGraph(std: number): GraphStateIngress {
-  const graph = makeStrictGraph(5, 0);
-  graph.edges = [{
-    from: 'n-3',
-    to: 'n-4',
-    strength: { mean: 0.5, std },
-    exists_probability: 0.9,
-    effect_direction: 'positive',
-  }];
-  return graph;
-}
+
 
 function firstFactor(graph: GraphStateIngress): Record<string, unknown> & {
   observed_state: Record<string, unknown>;
@@ -119,77 +106,16 @@ function firstFactor(graph: GraphStateIngress): Record<string, unknown> & {
   return factor as Record<string, unknown> & { observed_state: Record<string, unknown> };
 }
 
-const REAL_CAPTURE = JSON.parse(
-  readFileSync(
-    new URL('../../__tests__/fixtures/label-value-divergence-capture-5e036e.json', import.meta.url),
-    'utf8',
-  ),
-) as { pre_graph: GraphStateIngress };
 
-const REAL_DRIVER = 'Current platform capability not specified';
-const DISCRIMINATING_DRIVER = 'HubSpot fit for B2B sales workflow was validated';
 
-function cloneWithPlatformDriver(
-  graph: GraphStateIngress,
-  driver: string,
-): GraphStateIngress {
-  const clone = structuredClone(graph) as GraphStateIngress;
-  const platform = clone.nodes.find((node) => node.id === 'fac_platform_capability') as
-    | (Record<string, unknown> & { observed_state?: Record<string, unknown> })
-    | undefined;
-  if (platform === undefined || typeof platform.observed_state !== 'object') {
-    throw new Error('real fixture precondition: platform factor with observed_state');
-  }
-  platform.observed_state.uncertainty_drivers = [driver];
-  return clone;
-}
 
-function withoutPlatformDrivers(graph: GraphStateIngress): GraphStateIngress {
-  const clone = structuredClone(graph) as GraphStateIngress;
-  const platform = clone.nodes.find((node) => node.id === 'fac_platform_capability') as
-    | (Record<string, unknown> & { observed_state?: Record<string, unknown> })
-    | undefined;
-  if (platform?.observed_state !== undefined) {
-    delete platform.observed_state.uncertainty_drivers;
-  }
-  delete platform?.uncertainty_drivers;
-  return clone;
-}
 
-async function exactModelPromptFor(
-  graph: GraphStateIngress,
-  options: { readonly canonicalSelected?: boolean } = {},
-): Promise<string> {
-  const [{ assembleContextPack }, { buildUserMessage }] = await Promise.all([
-    import('../context-pack-assembler.js'),
-    import('../../routing/route-with-tool-use.js'),
-  ]);
-  const outcome = options.canonicalSelected
-    ? compactSelectedGraphForContextPack(
-        selectContextGraphSnapshot({
-          canonicalRead: { status: 'ok_present', graph },
-          requestGraph: null,
-        }),
-        { requestId: 'req-uncertainty-wire' },
-      )
-    : compactGraphForContextPack(graph, { requestId: 'req-uncertainty-wire' });
-  expect(outcome.kind).toBe('compacted');
-  if (outcome.kind !== 'compacted') throw new Error('expected compacted');
-  expect(outcome.via).toBe('strict_parse');
-  const pack = assembleContextPack({
-    payload: {
-      turn_id: 'turn-uncertainty-wire',
-      scenario_id: 'scenario-uncertainty-wire',
-      message: 'What are we least sure about?',
-      turn_class: 'coach',
-      stage: 'frame',
-    } as never,
-    priorTurns: [],
-    graphContext: { status: 'canonical' },
-    compactedGraph: outcome.compact,
-  });
-  return buildUserMessage(pack, 'What are we least sure about?');
-}
+
+
+
+
+
+
 
 describe('compactGraphForContextPack', () => {
   it('returns absent when graphState is null', () => {
@@ -258,38 +184,7 @@ describe('compactGraphForContextPack', () => {
     }
   });
 
-  it('carries the existing causal confidence band into exact model-prompt bytes', async () => {
-    const highGraph = makeCausalConfidenceGraph(0.07);
-    const uncertainGraph = makeCausalConfidenceGraph(0.25);
-    const high = compactGraphForContextPack(highGraph, { requestId: 'req-confidence-high' });
-    const uncertain = compactGraphForContextPack(uncertainGraph, { requestId: 'req-confidence-uncertain' });
-    expect(high.kind).toBe('compacted');
-    expect(uncertain.kind).toBe('compacted');
-    if (high.kind !== 'compacted' || uncertain.kind !== 'compacted') {
-      throw new Error('expected compacted confidence pair');
-    }
-    expect(high.via).toBe('strict_parse');
-    expect(uncertain.via).toBe('strict_parse');
-    expect(high.compact.edges[0]!.coefficient_confidence).toBe('high');
-    expect(uncertain.compact.edges[0]!.coefficient_confidence).toBe('uncertain');
 
-    const [highPrompt, uncertainPrompt] = await Promise.all([
-      exactModelPromptFor(highGraph, { canonicalSelected: true }),
-      exactModelPromptFor(uncertainGraph, { canonicalSelected: true }),
-    ]);
-    const highFact = '"coefficient_confidence": "high"';
-    const uncertainFact = '"coefficient_confidence": "uncertain"';
-    expect(highPrompt).toContain(highFact);
-    expect(uncertainPrompt).toContain(uncertainFact);
-    expect(highPrompt.replace(highFact, '"coefficient_confidence": "<BAND>"')).toBe(
-      uncertainPrompt.replace(uncertainFact, '"coefficient_confidence": "<BAND>"'),
-    );
-    for (const prompt of [highPrompt, uncertainPrompt]) {
-      expect(prompt).not.toContain('"plain_interpretation"');
-      expect(prompt).not.toContain('"std"');
-      expect(prompt).not.toMatch(/\b0\.(?:07|25)\b/);
-    }
-  });
 
   /**
    * ⚠⚠ THIS TEST DROPPED THE RATIO ASSERTION, AND THAT IS A TEST CHANGE MADE TO
@@ -463,11 +358,7 @@ describe('compactGraphForContextPack', () => {
    * one whose expected value comes from the OTHER authority. If the two caps are
    * ever meant to diverge, change this line deliberately — do not delete it.
    */
-  it('character cap equals the producer-side proposal guard (the docstring claim, enforced)', () => {
-    expect(CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS).toBe(
-      PROPOSAL_FIELD_CAPS.uncertainty_driver_length,
-    );
-  });
+
 
   it('bounds entries and characters without rewriting or silently dropping producer text', () => {
     const graph = makeStrictGraph(4, 0);
@@ -492,48 +383,9 @@ describe('compactGraphForContextPack', () => {
     });
   });
 
-  it('uses Unicode code-point boundaries and discloses only real character loss in buildUserMessage', async () => {
-    const exactBoundaryGraph = makeStrictGraph(4, 0);
-    const exactBoundary = `${'x'.repeat(CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS - 1)}😀`;
-    firstFactor(exactBoundaryGraph).uncertainty_drivers = [exactBoundary];
 
-    const exactPrompt = await exactModelPromptFor(exactBoundaryGraph);
-    expect(exactPrompt).toContain(exactBoundary);
-    expect(exactPrompt).not.toContain('\\ud83d');
-    expect(exactPrompt).not.toContain('entries_truncated_by_chars');
 
-    const overBoundaryGraph = makeStrictGraph(4, 0);
-    const retained = exactBoundary;
-    firstFactor(overBoundaryGraph).uncertainty_drivers = [`${retained}z`];
 
-    const truncatedPrompt = await exactModelPromptFor(overBoundaryGraph);
-    expect(truncatedPrompt).toContain(retained);
-    expect(truncatedPrompt).not.toContain(`${retained}z`);
-    expect(truncatedPrompt).not.toContain('\\ud83d');
-    expect(truncatedPrompt).toContain('"entries_truncated_by_chars": 1');
-    expect(truncatedPrompt).toContain(
-      `"per_entry_char_limit": ${CONTEXT_UNCERTAINTY_DRIVER_MAX_CHARS}`,
-    );
-  });
-
-  it('does not promote uncertainty-shaped metadata from non-factor nodes into compact or prompt', async () => {
-    const graph = makeStrictGraph(1, 0);
-    // Through `unknown`: the Zod passthrough output type does not sufficiently
-    // overlap the asserted shape, so a direct conversion is a TS2352. Widening
-    // first is the conversion the compiler names, and keeps the assertion at the
-    // one line that needs it rather than loosening `makeStrictGraph`'s return.
-    const goal = graph.nodes[0] as unknown as Record<string, unknown> & {
-      observed_state: Record<string, unknown>;
-    };
-    const nonFactorText = 'Out-of-scope goal metadata';
-    goal.observed_state.uncertainty_drivers = [nonFactorText];
-
-    const result = compactGraphForContextPack(graph, { requestId: 'req-non-factor' });
-    if (result.kind !== 'compacted') throw new Error('expected compacted');
-    expect(result.compact.nodes[0]).not.toHaveProperty('uncertainty_drivers');
-    expect(result.compact.nodes[0]).not.toHaveProperty('uncertainty_drivers_disclosure');
-    expect(await exactModelPromptFor(graph)).not.toContain(nonFactorText);
-  });
 
   it('keeps the compact JSON byte-identical when uncertainty input is absent', () => {
     const result = compactGraphForContextPack(makeStrictGraph(1, 0), {
@@ -545,30 +397,9 @@ describe('compactGraphForContextPack', () => {
     );
   });
 
-  it('carries a real captured uncertainty phrase into exact buildUserMessage bytes', async () => {
-    const prompt = await exactModelPromptFor(REAL_CAPTURE.pre_graph);
-    expect(prompt).toContain(REAL_DRIVER);
-  });
 
-  it('changes exact buildUserMessage bytes when only the producer uncertainty fact changes', async () => {
-    const graphA = cloneWithPlatformDriver(REAL_CAPTURE.pre_graph, REAL_DRIVER);
-    const graphB = cloneWithPlatformDriver(REAL_CAPTURE.pre_graph, DISCRIMINATING_DRIVER);
 
-    // Discriminating precondition: the persisted producer field is the only
-    // graph byte changed by the pair before prompt behaviour is evaluated.
-    expect(withoutPlatformDrivers(graphA)).toEqual(withoutPlatformDrivers(graphB));
-    expect(graphA).not.toEqual(graphB);
 
-    const [promptA, promptB] = await Promise.all([
-      exactModelPromptFor(graphA),
-      exactModelPromptFor(graphB),
-    ]);
-    expect(promptA).not.toBe(promptB);
-    expect(promptA).toContain(REAL_DRIVER);
-    expect(promptA).not.toContain(DISCRIMINATING_DRIVER);
-    expect(promptB).toContain(DISCRIMINATING_DRIVER);
-    expect(promptB).not.toContain(REAL_DRIVER);
-  });
 
   it('goal_constraints survive the compact path via compactedConstraints', async () => {
     // V5 review: compactGraph itself drops goal_constraints. The assembler

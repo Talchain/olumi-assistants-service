@@ -13,14 +13,14 @@ beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
  * because expectedGraphIdentityHash is undefined and append replaces the graph.
  * Vitest execution is deliberately left to the delivery lead.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Fastify, { type FastifyRequest } from 'fastify';
 import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
-import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
-import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
+import Fastify from 'fastify';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
+import type { DraftGraphResult } from "../../../orchestrator/types.js";
+import type { SessionStore,SessionTurnWrite } from '../../session/store.js';
 
 const ports = vi.hoisted(() => ({ draft: vi.fn(), store: vi.fn() }));
-vi.mock('../../../orchestrator/tools/draft-graph.js', () => ({ handleDraftGraph: ports.draft }));
+
 vi.mock('../../session/index.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../session/index.js')>(),
   getSessionStore: ports.store,
@@ -39,13 +39,13 @@ vi.mock('../../../adapters/llm/router.js', async importOriginal => ({
 
 import { _resetConfigCache } from '../../../config/index.js';
 import { setTestSink } from '../../../utils/telemetry.js';
-import { GraphStaleWriteError, SessionReadError } from '../../session/store.js';
-import { createNoopSessionStore } from '../../session/__tests__/fixtures.js';
 import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
-import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { createNoopSessionStore } from '../../session/__tests__/fixtures.js';
+import { GraphStaleWriteError } from '../../session/store.js';
+
 import { ceeOrchestratorRouteV2 } from '../../../orchestrator/route-v2.js';
 import scenarioGraphRoute from '../../../routes/assist.v1.scenario-graph.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const PAYLOAD = makeMessagePayload({
@@ -134,9 +134,7 @@ function harness(initial: Graph | null, duringDraft: (h: Harness) => void = () =
 }
 type Harness = ReturnType<typeof harness>;
 
-function dispatch() {
-  return dispatchDraftGraph({ payload: PAYLOAD, requestId: 's1-a-cas', request: { headers: {} } as FastifyRequest });
-}
+
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -156,59 +154,17 @@ afterEach(() => {
 });
 
 describe('S1-A draft/redraft base through the real durable commit door', () => {
-  it('RED: a moved-base redraft is refused and the user model is byte-identical', async () => {
-    const h = harness(BASE, state => { state.persisted = structuredClone(USER_MODEL); });
-    const savedBytes = JSON.stringify(USER_MODEL);
-    expect(identity(BASE)).not.toBeNull();
-    expect(identity(BASE)).not.toBe(identity(USER_MODEL));
-    await expect(dispatch()).rejects.toBeInstanceOf(GraphStaleWriteError);
-    expect(h.order.slice(0, 2)).toEqual(['read', 'draft']);
-    expect(h.attempts).toHaveLength(1);
-    expect(h.attempts[0]!.expectedGraphIdentityHash).toBe(identity(BASE));
-    expect(h.committed).toHaveLength(0);
-    expect(JSON.stringify(h.persisted)).toBe(savedBytes);
-  });
 
-  it('GREEN: first draft on a truly empty scenario succeeds', async () => {
-    const h = harness(null);
-    expect((await dispatch()).commitPerformed).toBe(true);
-    expect(h.committed).toHaveLength(1);
-    expect(h.persisted).toEqual(h.committed[0]!.graph);
-    expect(h.persisted).not.toBeNull();
-  });
 
-  it('GREEN: unchanged-base redraft succeeds with the original server identity', async () => {
-    const h = harness(BASE);
-    expect((await dispatch()).commitPerformed).toBe(true);
-    expect(h.committed).toHaveLength(1);
-    expect(h.persisted).toEqual(h.committed[0]!.graph);
-    expect(h.persisted).not.toEqual(BASE);
-  });
 
-  it('RED: another tab creates a model during a first draft; known absence refuses the replacement', async () => {
-    const h = harness(null, state => { state.persisted = structuredClone(USER_MODEL); });
-    await expect(dispatch()).rejects.toBeInstanceOf(GraphStaleWriteError);
-    expect(h.attempts[0]!.expectedGraphIdentityHash).toBeNull();
-    expect(h.persisted).toEqual(USER_MODEL);
-    expect(h.committed).toHaveLength(0);
-  });
 
-  it('RED: failed strict read cannot manufacture first-draft absence', async () => {
-    const h = harness(BASE);
-    h.readFailure = new SessionReadError('Storage read unavailable');
-    await expect(dispatch()).rejects.toBeInstanceOf(SessionReadError);
-    expect(ports.draft).not.toHaveBeenCalled();
-    expect(h.attempts).toHaveLength(0);
-    expect(h.persisted).toEqual(BASE);
-  });
 
-  it('GREEN: non-CAS append failure keeps the existing failed-commit outcome', async () => {
-    const h = harness(BASE);
-    h.appendFailure = new Error('Storage append unavailable');
-    expect((await dispatch()).commitPerformed).toBe(false);
-    expect(h.committed).toHaveLength(0);
-    expect(h.persisted).toEqual(BASE);
-  });
+
+
+
+
+
+
 
   it('the retired draft route returns 410; cold read in a fresh app reads the user model', async () => {
     const h = harness(USER_MODEL);

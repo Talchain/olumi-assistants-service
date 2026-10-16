@@ -78,7 +78,7 @@ export interface UnifiedPipelineOpts {
    * exactly as before. Recording is strictly observational: it cannot change
    * the graph, the response body, or whether a stage succeeds.
    */
-  promptAttribution?: import('../../orchestrator/pipeline/prompt-attribution.js').PromptAttributionCollector;
+  promptAttribution?: import('../../orchestrator/pipeline/diagnostic-trace.js').PromptAttributionCollector;
 
   /**
    * P0d — the corrective context attempt 1 produced, for attempt 2's draft.

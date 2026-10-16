@@ -27,10 +27,10 @@
  * Both halves are load-bearing: reverting either leaves the merge inert, and
  * reverting the parent filter alone OVER-MERGES a genuine factor into an option.
  */
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { projectDraftRecords } from "../seam.js";
+import { describe,expect,it } from "vitest";
 import type { RecordProjection } from "../projector.js";
+import { projectDraftRecords } from "../seam.js";
 
 const FIX = JSON.parse(
   readFileSync(new URL("./fixtures/diagnosis-hypotheses-1287.json", import.meta.url), "utf8"),
@@ -268,22 +268,7 @@ describe("THE TWINS — the opposite direction, which is where the gap would ope
 });
 
 describe("THE DOWNSTREAM SEAMS — what a new disclosure reason touches", () => {
-  it("NOTICE: the cause merge is `other`, NOT `alternative_consolidated`", async () => {
-    const { NOTICE_KIND_BY_REASON } = await import("../model-building-notices.js");
-    // The user's ALTERNATIVES were not consolidated — their choice set was never
-    // touched. `alternative_consolidated` would be specific-and-false on a
-    // channel whose whole purpose is telling the truth about what was lost; the
-    // file's own header rule is that the coarse-but-true bucket wins.
-    expect(NOTICE_KIND_BY_REASON.factor_merged_into_stated_cause).toBe("other");
-    expect(NOTICE_KIND_BY_REASON.factor_merged_into_stated_cause).not.toBe(
-      "alternative_consolidated",
-    );
-    // ...and the twin keeps its own, different answer, so this is a real
-    // discrimination and not a table collapsed onto one value.
-    expect(NOTICE_KIND_BY_REASON.refinement_merged_into_stated_option).toBe(
-      "alternative_consolidated",
-    );
-  });
+
 
   it("COMPLETION: a cause-merged label is ACCOUNTED FOR, not read as lost content", async () => {
     const { completionRegressesProtectedContent } = await import("../completion.js");

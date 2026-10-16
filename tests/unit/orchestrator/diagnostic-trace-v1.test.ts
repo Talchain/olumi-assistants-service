@@ -7,7 +7,7 @@
  * Also tests request ID chain consistency.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe,expect,it } from "vitest";
 import { DiagnosticTraceCollector } from "../../../src/orchestrator/pipeline/diagnostic-trace.js";
 // ROADMAP 1.162 — statically imported; see the sibling note in
 // tests/unit/cee.analysis-ready-enrichment.test.ts. This file resolved the same
@@ -19,7 +19,7 @@ import { DiagnosticTraceCollector } from "../../../src/orchestrator/pipeline/dia
 // import in `extractToolLLMTelemetry`'s first case. No `vi.mock` and no
 // `vi.resetModules()` in this file, so the dynamic form yielded the same
 // cached module a static import does.
-import { __test_only } from "../../../src/orchestrator/tools/draft-graph.js";
+
 
 describe("DiagnosticTraceCollector (unit)", () => {
   it("should produce non-empty llm_calls when a tool call is recorded", () => {
@@ -137,65 +137,7 @@ describe("DiagnosticTraceCollector (unit)", () => {
   });
 });
 
-describe("extractToolLLMTelemetry (draft-graph)", () => {
-  it("should extract telemetry from pipeline response with trace.pipeline.llm_metadata", () => {
-    const { extractToolLLMTelemetry } = __test_only;
 
-    const body = {
-      graph: { nodes: [], edges: [] },
-      trace: {
-        pipeline: {
-          llm_metadata: {
-            model: "claude-sonnet-4-6",
-            prompt_version: "v188",
-            prompt_hash: "abc123",
-            duration_ms: 4500,
-            finish_reason: "end_turn",
-            token_usage: {
-              prompt_tokens: 5000,
-              completion_tokens: 3000,
-              total_tokens: 8000,
-            },
-            structured_outputs_used: true,
-          },
-        },
-      },
-    };
-
-    const telemetry = extractToolLLMTelemetry(body);
-
-    expect(telemetry).toBeDefined();
-    expect(telemetry).toMatchObject({
-      tool: "draft_graph",
-      model: "claude-sonnet-4-6",
-      provider: "anthropic",
-      input_tokens: 5000,
-      output_tokens: 3000,
-      latency_ms: 4500,
-      stop_reason: "end_turn",
-      structured_outputs_used: true,
-      prompt_version: "v188",
-      prompt_hash: "abc123",
-    });
-  });
-
-  it("should return undefined when trace is absent", () => {
-    const { extractToolLLMTelemetry } = __test_only;
-
-    const telemetry = extractToolLLMTelemetry({ graph: { nodes: [], edges: [] } });
-    expect(telemetry).toBeUndefined();
-  });
-
-  it("should return undefined when both token_usage and model are absent", () => {
-    const { extractToolLLMTelemetry } = __test_only;
-
-    const telemetry = extractToolLLMTelemetry({
-      graph: { nodes: [], edges: [] },
-      trace: { pipeline: { llm_metadata: {} } },
-    });
-    expect(telemetry).toBeUndefined();
-  });
-});
 
 describe("V1 envelope _diagnostic_trace field", () => {
   it("should accept _diagnostic_trace on OrchestratorResponseEnvelope type", () => {

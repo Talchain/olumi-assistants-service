@@ -50,14 +50,11 @@
  *    the router had elected `run_analysis`, not that it ever does.
  */
 
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { describe,expect,it } from 'vitest';
 
-import {
-  evaluateAnalysisElection,
-  GATED_ANALYSIS_HANDLER_ID,
-} from '../analysis-election-gate.js';
+
 
 const CORPUS_PATH = resolve(__dirname, 'fixtures/n3-captured-turns.json');
 
@@ -73,11 +70,7 @@ const CORPUS: readonly CapturedTurn[] = (
   JSON.parse(readFileSync(CORPUS_PATH, 'utf8')) as { turns: CapturedTurn[] }
 ).turns;
 
-const outcomeOf = (message: string): string =>
-  evaluateAnalysisElection({
-    electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-    message,
-  }).kind;
+
 
 describe('N-3 re-measurement — the captured corpus is non-vacuous (trap 13)', () => {
   it('loaded a corpus of the expected size, with both verdict classes present', () => {
@@ -96,53 +89,7 @@ describe('N-3 re-measurement — the captured corpus is non-vacuous (trap 13)', 
     }
   });
 
-  it('POSITIVE CONTROL — the probe can return `admitted`, so a zero is a real zero', () => {
-    // Without this, "nothing was admitted" is equally consistent with a gate
-    // that admits nothing at all. Bound to the product's own chip sentence.
-    expect(outcomeOf('Run analysis.')).toBe('admitted');
-    expect(outcomeOf('Please rerun the simulation.')).toBe('admitted');
-  });
 
-  it('CONTRAST CONTROL — the gate is inert on a non-analysis election', () => {
-    // Proves the outcome is decided by the handler id as well as the message,
-    // so an `admitted`/`demoted` reading is about `run_analysis` specifically.
-    expect(
-      evaluateAnalysisElection({ electedHandlerId: 'edit_graph', message: 'Run analysis.' }).kind,
-    ).toBe('not_analysis_election');
-  });
-});
 
-describe('N-3 re-measurement — verdict per captured turn', () => {
-  it.each(CORPUS.map((t) => [t.id, t] as const))(
-    '%s',
-    (_id, turn) => {
-      // Bound by IDENTITY (the row's own id + origin), never by a value
-      // predicate another row could satisfy (CLAUDE.md trap 19).
-      expect(outcomeOf(turn.message), `${turn.id} (${turn.origin})`).toBe(turn.expect);
-    },
-  );
 
-  it('⭐ THE HEADLINE: zero non-request turns are honoured as an analysis', () => {
-    const wronglyHonoured = CORPUS.filter(
-      (t) => t.expect === 'demoted' && outcomeOf(t.message) === 'admitted',
-    );
-    expect(
-      wronglyHonoured.map((t) => `${t.id}: ${t.message}`),
-      'a captured non-request turn would now RUN an analysis — N-3 has reopened',
-    ).toEqual([]);
-  });
-
-  it('⭐ THE MIRROR: zero genuine requests are refused (the opposite-direction twin)', () => {
-    // Trap 22b — a predicate guarding two opposite harms needs its cases in
-    // BOTH directions. Suppressing a real request is the inverse harm of
-    // substituting an unrequested analysis, and a fix for one must not open
-    // the other.
-    const wronglyRefused = CORPUS.filter(
-      (t) => t.expect === 'admitted' && outcomeOf(t.message) !== 'admitted',
-    );
-    expect(
-      wronglyRefused.map((t) => `${t.id}: ${t.message}`),
-      'a captured genuine analysis request is no longer honoured — the mirror harm',
-    ).toEqual([]);
-  });
 });

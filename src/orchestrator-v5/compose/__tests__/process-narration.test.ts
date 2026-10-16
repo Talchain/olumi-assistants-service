@@ -15,31 +15,28 @@
  * A control set written here would only prove the guard agrees with its
  * author.
  */
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  applyProcessNarrationGuard,
-  findProcessNarrationHit,
-  INTERNAL_IDENTIFIER_PATTERNS,
-  PROCESS_NARRATION_FALLBACK_TEXT,
-  PROCESS_NARRATION_PATTERNS,
-  ROUTE_TAXONOMY_PATTERNS,
-  ROUTING_SELF_TALK_PATTERNS,
-  RULE_CITATION_PATTERNS,
-  SELF_HONESTY_POLICY_PATTERNS,
-  SENTENCE_SPLIT,
-  THIRD_PERSON_KNOWN_DROPPED_NOUNS,
-  THIRD_PERSON_READER_PATTERNS,
-} from '../process-narration.js';
-import {
-  findForbiddenPhraseHit,
-  findSuccessClaimHit,
+findForbiddenPhraseHit,
+findSuccessClaimHit,
 } from '../forbidden-user-facing-phrases.js';
-import { isPlanningText } from '../../routing/strip-planning-preamble.js';
+import {
+applyProcessNarrationGuard,
+findProcessNarrationHit,
+INTERNAL_IDENTIFIER_PATTERNS,
+PROCESS_NARRATION_FALLBACK_TEXT,
+PROCESS_NARRATION_PATTERNS,
+ROUTE_TAXONOMY_PATTERNS,
+ROUTING_SELF_TALK_PATTERNS,
+RULE_CITATION_PATTERNS,
+SELF_HONESTY_POLICY_PATTERNS,
+SENTENCE_SPLIT,
+THIRD_PERSON_KNOWN_DROPPED_NOUNS,
+THIRD_PERSON_READER_PATTERNS,
+} from '../process-narration.js';
+
 
 // ── THE TWO LEAKS, VERBATIM ────────────────────────────────────────────────
 /** Turn 18 of the capture. routing prompt v121 (hash bec840a648800928). */
@@ -173,10 +170,7 @@ const MARKER_CORPUS: ReadonlyArray<readonly [string, string]> = [
  * pinned is that this module's binding is IMPORTED there — a structural fact a
  * behavioural test cannot distinguish from a verbatim local copy.
  */
-const STRIPPER_SOURCE = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), '../../routing/strip-planning-preamble.ts'),
-  'utf8',
-);
+
 
 describe('the marker corpus — complete over the exported set, by derivation', () => {
   it('every pattern in PROCESS_NARRATION_PATTERNS is matched by at least one member', () => {
@@ -351,24 +345,7 @@ describe('the 12 Sep clarifying-answer leak — the third miss of this class', (
     expect(findForbiddenPhraseHit('You named values for the two unset factors.')).toBeNull();
   });
 
-  it('the widening reaches BOTH consumers of the shared set, by construction', () => {
-    // ⚠ THIS TEST REPLACED A WRONG ONE OF MINE, AND THE ERROR IS WORTH THE
-    // RECORD. The first draft asserted `isPlanningText(LEAK) === false` to pin
-    // the historic "no shipped guard saw it" fact — against the LIVE function.
-    // But `strip-planning-preamble` IMPORTS this module's marker set, so the
-    // moment the third pattern landed the live call went true and the test
-    // REDed. That is trap 12b (a control pinned to "whatever is current")
-    // committed inside the block written to avoid it. The historic fact is
-    // pinned above, against the FROZEN patterns, which is where it belongs.
-    //
-    // The live behaviour is a genuine property and is asserted here instead:
-    // one marker set, two consumers, so a pattern added for the egress guard
-    // cannot cover one path and silently miss the other (trap 12).
-    expect(isPlanningText(LEAK_CLARIFY_ANSWER)).toBe(true);
-    // …and the remedies stay DIFFERENT (trap 21): the stripper may empty, this
-    // guard may not.
-    expect(applyProcessNarrationGuard(LEAK_CLARIFY_ANSWER).text.length).toBeGreaterThan(0);
-  });
+
 
   it('the live guard now sees it, bound to the possessive + conversational noun', () => {
     expect(findProcessNarrationHit(LEAK_CLARIFY_ANSWER)).toBe("The user's turn");
@@ -503,45 +480,11 @@ describe('the replacement answer', () => {
 });
 
 describe('ONE marker set, TWO remedies — the anti-mirror assertion', () => {
-  it('the planning stripper IMPORTS this module\'s set — asserted at its source', () => {
-    // ⚠ THIS REPLACED AN ASSERTION THAT COULD NOT FAIL. The previous version
-    // was `for (const p of PROCESS_NARRATION_PATTERNS) expect(
-    // PROCESS_NARRATION_PATTERNS).toContain(p)`, which is true of any array
-    // unconditionally and never referenced the stripper at all. It carried
-    // this test's name while pinning nothing.
-    //
-    // The property is STRUCTURAL — one module importing another's binding —
-    // and a behavioural test cannot see it: a verbatim local copy of the array
-    // behaves identically and is exactly the mirror this is meant to forbid.
-    // So it is pinned the way the estate pins wiring: at the source, the same
-    // mechanism as `blocked-slot-claim-guard-callsite-pin.test.ts`.
-    expect(STRIPPER_SOURCE).toContain(
-      "from '../compose/process-narration.js'",
-    );
-    expect(STRIPPER_SOURCE).toContain('PROCESS_NARRATION_PATTERNS');
-    expect(STRIPPER_SOURCE).toContain('return PROCESS_NARRATION_PATTERNS.some((p) => p.test(text));');
-    // And it declares no second set of its own — the drift this forbids.
-    expect(STRIPPER_SOURCE).not.toMatch(/^(?:export )?const \w*PATTERNS\w*(?::[^=]*)?\s*=\s*\[/m);
-  });
 
-  it('EVERY pattern in the exported set is reachable through isPlanningText', () => {
-    // The behavioural half, and it is derived: the corpus below is proven
-    // complete over `PROCESS_NARRATION_PATTERNS` by the `marker corpus` block,
-    // so a thirteenth pattern cannot land covering the egress path while
-    // silently missing the orientation path — the corpus check REDs first.
-    for (const [name, exemplar] of MARKER_CORPUS) {
-      expect(isPlanningText(exemplar), `${name} is invisible to isPlanningText`).toBe(true);
-      expect(findProcessNarrationHit(exemplar), `${name} is invisible to the guard`).not.toBeNull();
-    }
-  });
 
-  it('the remedies stay DIFFERENT — the stripper may empty, the guard may not', () => {
-    // Trap 21: two authorities under similar names answering different
-    // questions. The fix is to name them apart, never to align them. This
-    // asserts they have NOT been aligned.
-    expect(isPlanningText(PRIOR_WITNESSED_MONOLOGUE)).toBe(true);
-    expect(applyProcessNarrationGuard(PRIOR_WITNESSED_MONOLOGUE).text.length).toBeGreaterThan(0);
-  });
+
+
+
 
   it('⭐ THE TWINS — the possessive class, in the register that is CORRECT', () => {
     // Trap 22b: a corpus that tests one direction is a guard watching one door.

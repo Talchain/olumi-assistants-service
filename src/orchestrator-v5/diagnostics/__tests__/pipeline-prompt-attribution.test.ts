@@ -26,8 +26,8 @@
  * index-bound assertion is satisfied by whichever record happens to land there.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { PromptAttributionCollector } from '../../../orchestrator/pipeline/prompt-attribution.js';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
+import { PromptAttributionCollector } from "../../../orchestrator/pipeline/diagnostic-trace.js";
 
 const ORIGINAL_ENV = { ...process.env };
 

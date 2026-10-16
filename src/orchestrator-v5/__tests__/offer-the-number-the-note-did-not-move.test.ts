@@ -28,13 +28,13 @@
  * existing working path handles it and writes `user_override`. Pinned below
  * against the ROUTER ITSELF, not against a regex written here.
  */
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import { isValueUpdatePhrasing } from '../../orchestrator/routing/value-update-gate.js';
+
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import {
-  detectStatedLevelDivergences,
-  buildStatedLevelDivergenceActions,
+buildStatedLevelDivergenceActions,
+detectStatedLevelDivergences,
 } from '../stated-level-divergence.js';
 
 const AUTHORED_PROSE_KEYS = ['description', 'body', 'notes'] as const;
@@ -126,18 +126,7 @@ describe('a note that left the number alone offers the number', () => {
     }
   });
 
-  it('⭐ the offer is bound to the REAL router, not to a string written here', () => {
-    // If the value lane's verb list ever moves, this REDs — the chip would be
-    // producing another note, which is the defect it exists to close.
-    const { actions } = actionsFor(WITNESSED_PROSE);
-    const offers = actions.filter((a) => /^Set Product Quality to /.test(a.prompt));
-    // ⚠ NOT VACUOUS. With zero offers this assertion would pass by testing
-    // nothing — which is exactly what it did at pristine.
-    expect(offers.length).toBeGreaterThan(0);
-    for (const a of offers) {
-      expect(isValueUpdatePhrasing(a.prompt), a.prompt).toBe(true);
-    }
-  });
+
 
   it('the existing "what value?" chip SURVIVES — a person who wants another number still can', () => {
     const { actions } = actionsFor(WITNESSED_PROSE);

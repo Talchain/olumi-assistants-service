@@ -12,25 +12,25 @@
  *     no `number` field at any depth — strongest test in the brief)
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import type {
-  ContextPackAnalysis,
-  ContextPackAnalysisDriver,
-  ContextPackAnalysisFragileEdge,
+ContextPackAnalysis,
+ContextPackAnalysisDriver,
+ContextPackAnalysisFragileEdge,
 } from '../../context/context-pack-assembler.js';
 import {
-  formatAnalysisForContext,
-  influencePhrase,
-  tippingRiskPhrase,
-  voiBandPhrase,
-  DISPLAY_ANALYSIS_CHAR_BUDGET,
-  ANALYSIS_UNVERIFIED_NOTE,
-  GOAL_FIT_NOT_SCORED_LINE,
-  VOI_NOT_SCORED_NOTE,
-  type DisplaySafeAnalysis,
+ANALYSIS_UNVERIFIED_NOTE,
+DISPLAY_ANALYSIS_CHAR_BUDGET,
+formatAnalysisForContext,
+GOAL_FIT_NOT_SCORED_LINE,
+influencePhrase,
+tippingRiskPhrase,
+VOI_NOT_SCORED_NOTE,
+voiBandPhrase,
+type DisplaySafeAnalysis,
 } from '../format-analysis-for-context.js';
-import { sanitiseAssistantTextProse } from '../numeric-prose-formatter.js';
+
 
 function rawDriver(label: string, sensitivityValue: number): ContextPackAnalysisDriver {
   return { factor_label: label, sensitivity_value: sensitivityValue };
@@ -386,49 +386,7 @@ describe('Lane 21 display-safe breadth', () => {
     expect(bare!.goal_fit).toContain('goal fit was scored');
   });
 
-  it('keeps a maximal widened projection inside the display char budget with no numbers anywhere', () => {
-    const out = formatAnalysisForContext(
-      rawAnalysis({
-        options: Array.from({ length: 12 }, (_, i) => ({
-          label: `Long Option Label Number ${String(i + 1).padStart(2, '0')} With Detail`,
-          probability: Math.max(0.01, 0.9 - i * 0.07),
-        })),
-        top_drivers: [
-          rawDriver('Marketing Spend Allocation Across Channels', 0.97),
-          rawDriver('Engineering Capacity Constraints In Q3', -0.82),
-          rawDriver('Customer Acquisition Cost Trend', 0.55),
-          rawDriver('Local Talent Market Tightness', -0.31),
-          rawDriver('Regulatory Approval Timeline', 0.12),
-        ],
-        fragile_edges: [
-          { from_label: 'Marketing Spend Allocation', to_label: 'New Leads Generated' },
-          { from_label: 'Engineering Capacity', to_label: 'Time to Market' },
-          { from_label: 'Talent Market Tightness', to_label: 'Hiring Velocity' },
-        ],
-        fragile_edge_count: 9,
-        flip_thresholds: [
-          { factor_label: 'Marketing Spend', current_value: 100, flip_value: 88, unit: 'GBP', no_flip_within_bounds: false },
-          { factor_label: 'Engineering Capacity', current_value: 0.3, flip_value: 0.297, unit: null, no_flip_within_bounds: false },
-          { factor_label: 'Offshore Engagement', current_value: 0, flip_value: null, unit: null, no_flip_within_bounds: true },
-        ],
-        evidence_gaps: [
-          { factor_label: 'Talent Market Tightness', voi_score: 0.63 },
-          { factor_label: 'Hiring Cost Uncertainty', voi_score: 0.42 },
-          { factor_label: 'Churn Rate Confidence', voi_score: 0.31 },
-        ],
-        goal_fit: { scored: true, basis: 'modelled_outcome_distribution' },
-      }),
-    );
-    const serialised = JSON.stringify(out, null, 2);
-    expect(serialised.length).toBeLessThan(DISPLAY_ANALYSIS_CHAR_BUDGET);
-    expect(serialised).not.toMatch(/\b0\.\d{2,}/);
-    assertNoNumbersAnywhere(out);
 
-    // The Track 2A regex sanitiser must see nothing to rewrite.
-    const result = sanitiseAssistantTextProse(serialised);
-    expect(result.probability_rewrites).toBe(0);
-    expect(result.sensitivity_rewrites).toBe(0);
-  });
 });
 
 // Lane 30 — per-option goal-fit (target-fit) truthfulness.
@@ -679,35 +637,7 @@ describe('Lane 30 runtime char-budget enforcement', () => {
 // produce zero probability_rewrites and zero sensitivity_rewrites. Proves
 // the upstream display-safe projection eliminates the defect class
 // (raw decimals + raw sensitivities) that the post-compose rewriter targets.
-describe('display-safe projection drives Track 2A rewrites to zero', () => {
-  it('serialised display-safe analysis is invisible to the Track 2A regex sanitiser', () => {
-    const out = formatAnalysisForContext(
-      rawAnalysis({
-        fragile_edges: [{ from_label: 'Marketing Spend', to_label: 'New Leads' }],
-      }),
-    );
-    const serialised = JSON.stringify(out, null, 2);
-    const result = sanitiseAssistantTextProse(serialised);
-    expect(result.probability_rewrites).toBe(0);
-    expect(result.sensitivity_rewrites).toBe(0);
-  });
 
-  it('display-safe phrases verbatim do not match the sanitiser regexes', () => {
-    const phrases = [
-      '"86%"',
-      '"79%"',
-      '"7 percentage points"',
-      '"very strong positive influence"',
-      '"moderate negative influence"',
-      '"no material influence"',
-      '"weak positive influence"',
-      '"strong negative influence"',
-    ].join(' ');
-    const result = sanitiseAssistantTextProse(phrases);
-    expect(result.probability_rewrites).toBe(0);
-    expect(result.sensitivity_rewrites).toBe(0);
-  });
-});
 
 // ROADMAP 2.54 (a) — near-zero win-probability honesty.
 //
@@ -851,21 +781,7 @@ describe('ROADMAP 2.54a near-zero win-probability note', () => {
     expect(out!.options![0]!).not.toHaveProperty('win_probability_note');
   });
 
-  it('the note carries no digits and is invisible to the Track 2A sanitiser', () => {
-    const out = formatAnalysisForContext(
-      rawAnalysis({
-        options: [
-          { label: 'A', probability: 0.98 },
-          { label: 'B', probability: 0.001 },
-        ],
-      }),
-    );
-    const note = out!.options![1]!.win_probability_note!;
-    expect(note).not.toMatch(/\d/);
-    const result = sanitiseAssistantTextProse(note);
-    expect(result.probability_rewrites).toBe(0);
-    expect(result.sensitivity_rewrites).toBe(0);
-  });
+
 });
 
 // ROADMAP 2.54 (b) — VOI claim coherence with zeroed levers (doctrine D-U).
@@ -977,18 +893,5 @@ describe('ROADMAP 2.54b VOI never-silent disclosure', () => {
     expect(out!).not.toHaveProperty('value_of_information_note');
   });
 
-  it('the notes carry no digits and are invisible to the Track 2A sanitiser', () => {
-    const shapes = [
-      rawAnalysis(),
-      rawAnalysis({ evidence_gaps: [{ factor_label: 'X', voi_score: 0 }] }),
-      rawAnalysis({ evidence_gaps: [], evidence_gaps_lever_suppressed: true }),
-    ];
-    for (const shape of shapes) {
-      const note = formatAnalysisForContext(shape)!.value_of_information_note!;
-      expect(note).not.toMatch(/\d/);
-      const result = sanitiseAssistantTextProse(note);
-      expect(result.probability_rewrites).toBe(0);
-      expect(result.sensitivity_rewrites).toBe(0);
-    }
-  });
+
 });

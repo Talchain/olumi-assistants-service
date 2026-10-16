@@ -51,18 +51,18 @@
  * chips survived.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
+import type { ChatWithToolsArgs,ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { _resetConfigCache } from '../../config/index.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { findForbiddenPhraseHit } from '../compose/forbidden-user-facing-phrases.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GM_HELD_APPLY_FAILED_ASSISTANT_TEXT } from '../handlers/gm-held-execute.js';
-import { _resetConfigCache } from '../../config/index.js';
 
 const SCENARIO_ID = randomUUID();
 /** The production confirm-chip handle, kept as the identity this test binds to. */
@@ -161,10 +161,7 @@ const REMOVE_OPS_APPLY_LEVEL_FAILURE = [
  * hold-threading would lapse its chip for reasons unrelated to this fix —
  * a green assertion proving nothing (CLAUDE.md trap 13b).
  */
-const REMOVE_OPS_APPLY_LEVEL_FAILURE_OPT_D = [
-  { op: 'remove_node', path: 'opt-d' },
-  { op: 'remove_node', path: 'opt-d' },
-];
+
 
 let pendingActionsForRead: readonly PendingAction[] = [];
 const appendCalls: Array<Record<string, unknown>> = [];
@@ -224,7 +221,13 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
+const { runHeldProposalApproval } = await import('../handlers/approve-held-proposal.js');
+const { resolveProposalRenderCopy } = await import('../compose/proposed-change.js');
+// Approval now names the stored card; all graph/source/receipt assertions below are unchanged.
+const runTurnExecutor = (p: MessageTurnPayload, requestId: string, options?: Parameters<typeof runHeldProposalApproval>[2] & { routingAdapter?: unknown }) => {
+  const held = pendingActionsForRead[0]!;
+  return runHeldProposalApproval({ ...p, source: 'chip', chip: { id: held.chip_id }, message: resolveProposalRenderCopy(held.action).message }, requestId, options);
+};
 
 function payload(message: string): MessageTurnPayload {
   return {
@@ -411,102 +414,3 @@ describe('P0 (b) — the confirm must NOT become a blanket bypass', () => {
  * after a mid-chain hash-derivation failure) legitimately keeps its chip — it
  * has not been spent, and that asymmetry is the point.
  */
-describe('P0 (c) — consent-all must not reproduce the loop', () => {
-  const CHIP_A = 'gmh_aaaaaaaaaaaa';
-  const CHIP_B = 'gmh_bbbbbbbbbbbb';
-
-  it('all holds fail at apply → honest copy, nothing persisted, BOTH spent chips retired', async () => {
-    pendingActionsForRead = [
-      gmHeldPending(REMOVE_OPS_APPLY_LEVEL_FAILURE, GRAPH_HASH, CHIP_A, 'Remove Option E'),
-      gmHeldPending(REMOVE_OPS_APPLY_LEVEL_FAILURE, GRAPH_HASH, CHIP_B, 'Remove Option D'),
-    ];
-
-    await runTurnExecutor(payload('Yes, all of them.'), 'req-p0-consent-all-declined', {
-      routingAdapter: throwingRoutingAdapter(),
-    });
-
-    const write = lastAppend();
-    const assistant = String(write.assistantMessage ?? '');
-    // The lie must be gone on this route too.
-    expect(assistant).not.toBe(INVALID_RECOVERY_TEXT);
-    expect(assistant).toBe(GM_HELD_APPLY_FAILED_ASSISTANT_TEXT);
-    expect(findForbiddenPhraseHit(assistant)).toBeNull();
-    // Nothing persisted.
-    expect(committedGraph()).toBeUndefined();
-    expect((write.handler_facts ?? []) as ReadonlyArray<unknown>).toHaveLength(0);
-    // Both spent confirmations retired — neither may survive to loop.
-    const persisted = (write.pending_actions ?? []) as ReadonlyArray<{ chip_id?: string }>;
-    expect(persisted.some((p) => p.chip_id === CHIP_A)).toBe(false);
-    expect(persisted.some((p) => p.chip_id === CHIP_B)).toBe(false);
-  });
-
-  /**
-   * ⚠ This case deliberately does NOT assert chip survival. `commitGmHeldResumeAll`'s
-   * applied path commits WITHOUT `priorPendingActions`, so that mutating commit
-   * wipes every live hold regardless of this fix — `pending_actions` is `[]`
-   * both before and after, and a chip assertion here would pass vacuously
-   * (CLAUDE.md trap 13b). Chip retirement IS discriminating on the
-   * all-declined case above, whose recovery commit does carry priors forward.
-   * What this case pins is the half that is observable: the applied change
-   * really landed, and the user is TOLD about the one that did not.
-   */
-  it('a partial "all of them" applies what it can and names what it could not', async () => {
-    pendingActionsForRead = [
-      // Applies (the P0 cascade batch, now fixed).
-      gmHeldPending(REMOVE_OPS_NODE_FIRST, GRAPH_HASH, CHIP_A, 'Remove Option E'),
-      // Attempted and declined at the applier.
-      gmHeldPending(REMOVE_OPS_APPLY_LEVEL_FAILURE_OPT_D, GRAPH_HASH, CHIP_B, 'Remove Option D'),
-    ];
-
-    await runTurnExecutor(payload('Yes, all of them.'), 'req-p0-consent-all-partial', {
-      routingAdapter: throwingRoutingAdapter(),
-    });
-
-    const write = lastAppend();
-    // The applied half really landed.
-    const graph = committedGraph();
-    expect(graph).toBeDefined();
-    expect(graph!.nodes.some((n) => n.id === 'opt-e')).toBe(false);
-    // Neither chip may survive: one was applied, the other was attempted and
-    // declined. Both are spent.
-    // The declined sibling is named honestly, never silently dropped.
-    const assistant = String(write.assistantMessage ?? '');
-    expect(assistant).toContain('Remove Option D');
-    expect(assistant).toContain("I couldn't take");
-    expect(findForbiddenPhraseHit(assistant)).toBeNull();
-    // Only the successful half's receipt fact is committed.
-    expect((write.handler_facts ?? []) as ReadonlyArray<unknown>).toHaveLength(1);
-  });
-
-  /**
-   * ⭐ THE ASYMMETRY, pinned so it cannot be flattened into "declines always
-   * retire" (which would destroy a still-actionable consent) or "declines
-   * never retire" (which re-opens the loop).
-   *
-   * all-declined  → nothing applied, graph UNCHANGED, decline deterministic
-   *                 → retire the spent chips.
-   * partial apply → graph MOVED, decline judged against an intermediate graph
-   *                 that no longer exists → the pending lifecycle re-assesses
-   *                 it against the FINAL graph. Retiring here would pre-empt
-   *                 that, so it must NOT happen. (Owned by
-   *                 consent-clarity-route-level.test.ts, whose mid-chain
-   *                 decline case asserts the chip SURVIVES.)
-   */
-  it('retires spent chips ONLY when nothing applied, never on a partial apply', async () => {
-    // All declined → chips retired.
-    pendingActionsForRead = [
-      gmHeldPending(REMOVE_OPS_APPLY_LEVEL_FAILURE, GRAPH_HASH, CHIP_A, 'Remove Option E'),
-      gmHeldPending(REMOVE_OPS_APPLY_LEVEL_FAILURE_OPT_D, GRAPH_HASH, CHIP_B, 'Remove Option D'),
-    ];
-    await runTurnExecutor(payload('Yes, all of them.'), 'req-p0-asym-all-declined', {
-      routingAdapter: throwingRoutingAdapter(),
-    });
-    const allDeclined = (lastAppend().pending_actions ?? []) as ReadonlyArray<{
-      chip_id?: string;
-    }>;
-    expect(allDeclined.some((p) => p.chip_id === CHIP_A)).toBe(false);
-    expect(allDeclined.some((p) => p.chip_id === CHIP_B)).toBe(false);
-    // And nothing was persisted on that turn.
-    expect(committedGraph()).toBeUndefined();
-  });
-});

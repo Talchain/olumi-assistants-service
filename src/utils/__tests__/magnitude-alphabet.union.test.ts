@@ -552,8 +552,7 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // ⚠ The standing recommendation stands and is now overdue: state the
     // decimal-split hazard ONCE in a shared place. Not done here — unrelated to
     // this lane, and "while we're here" work is prohibited.
-    'orchestrator-v5/routing/strip-planning-preamble.ts':
-      'incidental — comment only; spells no alphabet and parses no numbers',
+    // C1 deleted strip-planning-preamble; its shared sentence splitter remains below.
     // ⭐ SIXTH — AND THE STANDING RECOMMENDATION DIRECTLY ABOVE IS NOW CLOSED,
     // as a side effect of a change that was not about magnitudes at all.
     //
@@ -561,11 +560,10 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // shared by the orientation stripper and a new egress guard, so
     // `SENTENCE_SPLIT` — and the `£1.5 million` docstring explaining why it
     // must not cut on a bare `[.!?]` — MOVED here, byte-identical, and
-    // `strip-planning-preamble.ts` now imports it. That is the "state the
+    // `strip-planning-preamble.ts` imported it. That was the "state the
     // decimal-split hazard ONCE in a shared place" the entry above asked for.
-    // Its own entry is kept rather than deleted: the file still exists, the
-    // hazard still applies to it through the import, and a reader arriving at
-    // that entry needs the pointer to where the constant went.
+    // The deleted stripper's historical rationale still explains the shared helper;
+    // the retained entry points to where the constant went.
     //
     // Classification is the same as its sibling's and for the same reason: this
     // module holds no magnitude list, parses no number and multiplies nothing.

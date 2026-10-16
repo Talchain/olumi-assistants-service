@@ -13,9 +13,9 @@
  * gm-held-execute + the e2e test; here we prove the route hands the right
  * pending to the writer and never silently wipes a prior consent hold (C1).
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import Fastify,{ type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { PendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
 
@@ -107,9 +107,7 @@ const FALLTHROUGH = {
     intent_class: 'edit', coaching_mode: null, validation_error_code: null,
   },
 };
-vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({
-  runTurnExecutor: vi.fn(async () => FALLTHROUGH),
-}));
+
 vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js')>();
   return {

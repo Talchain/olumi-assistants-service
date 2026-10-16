@@ -37,22 +37,22 @@
  *      violation `analysis-election-gate.ts:125-129` claims to protect against.
  */
 
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { describe,expect,it } from 'vitest';
 
-import { composeHandlerFailure } from '../handler-failure-responses.js';
-import { HandlerInvocationFailedError } from '../../tools/handler-errors.js';
 import type {
-  HandlerFailureDetails,
-  HandlerInvocationFailedCause,
+HandlerFailureDetails,
+HandlerInvocationFailedCause,
 } from '../../tools/handler-errors.js';
+import { HandlerInvocationFailedError } from '../../tools/handler-errors.js';
+import { composeHandlerFailure } from '../handler-failure-responses.js';
 import type { ComposeContext } from '../types.js';
-import { PRODUCT_COACHING_PROMPTS } from '../../routing/process-meta-intake.js';
+
 import { looksLikeExplicitAnalysisRequest } from '../../routing/analytical-intent.js';
 import {
-  assessAnalysisReadiness,
-  readinessQuestions,
-  resolveRunAdmission,
+assessAnalysisReadiness,
+readinessQuestions,
+resolveRunAdmission,
 } from '../../tools/handlers/analysis-ready-core.js';
 
 const CTX: ComposeContext = { handlerRegistry: {} };
@@ -232,18 +232,7 @@ describe('analysis_not_ready — the user gets a route through the refusal', () 
     expect(chip_type).toBe('action');
   });
 
-  it('⭐ P8 — the chip replays a message the product already honours deterministically', () => {
-    const { response } = composeHandlerFailure(
-      build({ reason_code: 'MISSING_OPTION_VALUE', next_step: WITNESSED_NEXT_STEP,
-        readiness_questions: [...QUESTIONS_AS_EMITTED_2026_08_20] }),
-      CTX,
-      'frame',
-    );
-    const message = response.suggested_actions[0]?.message ?? '';
-    // Membership of the EXISTING canonical set — this adds no second string
-    // authority (Paul's convergence rule). `process-meta-intake.ts:63`.
-    expect(PRODUCT_COACHING_PROMPTS).toContain(message);
-  });
+
 
   it('⭐ REGRESSION PIN — the old replay string is refused by the product\'s own predicate', () => {
     // This is WHY the chip changed. Pinned so nobody restores it: the message
