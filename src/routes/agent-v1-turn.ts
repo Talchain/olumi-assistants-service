@@ -2166,7 +2166,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * dispatch to the conventional handlers — is refused before network I/O and logged
    * (`adapters/llm/provider-policy.ts`).
    */
-  const agentTurnBody = async (req: FastifyRequest, reply: FastifyReply, takeActiveRun: (key: string) => boolean) => {
+  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply, takeActiveRun: (key: string) => boolean) => {
     const startedAt = Date.now();
     let body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
@@ -6447,10 +6447,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
     });
   };
-  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
+  const agentTurnWithActiveRun = async (req: FastifyRequest, reply: FastifyReply) => {
     let activeKey: string | undefined;
     try {
-      return await agentTurnBody(req, reply, key => {
+      return await agentTurnHandler(req, reply, key => {
         if (activeRunTurns.has(key)) return false;
         activeRunTurns.add(key); activeKey = key;
         return true;
@@ -6462,7 +6462,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   };
   app.post('/agent/v1/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, (req: FastifyRequest, reply: FastifyReply) =>
     runWithProviderPolicy({ ...OPENAI_ONLY('agent_v1_turn'), request_id: String(req.id),
-      scenario_id: (req.body as { scenario_id?: string })?.scenario_id, turn_id: (req.body as { turn_id?: string })?.turn_id }, () => agentTurnHandler(req, reply))
+      scenario_id: (req.body as { scenario_id?: string })?.scenario_id, turn_id: (req.body as { turn_id?: string })?.turn_id }, () => agentTurnWithActiveRun(req, reply))
       // The recovery seam's interruption ends the turn like a crash: no answer row, nothing retried here.
       .catch((err: unknown) => {
         if (!(err instanceof RecoveryFaultInterrupt)) throw err;
