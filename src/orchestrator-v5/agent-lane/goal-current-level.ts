@@ -134,7 +134,8 @@ interface GoalObservedState {
   readonly unit?: string;
   readonly source: string;
   readonly raw_value: number;
-  readonly cap: number;
+  /** The frame the level is read on; none for a level of none (0) recorded before any target frames the goal. */
+  readonly cap?: number;
   readonly provenance_unit_normalised?: UnitNormalised;
 }
 
@@ -789,8 +790,17 @@ export async function proposeGoalCurrentLevel(
   // on ITS OWN frame here too — the apply then (re)pairs the ceiling on that frame in the same write. A paired ceiling's
   // earlier cap is today's earlier level's frame: a new level renormalises it, never refused against the old one.
   const ceilingTakesTheLevelFrame = !isChange && node.goal_threshold_frame === 'level' && holdsPairableCeiling(g.raw, goal.id);
-  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame;
-  if (!isChange && !levelOnItsOwnFrame && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
+  /**
+   * ⭐ TODAY'S LEVEL DOES NOT DEPEND ON THE TARGET (TL 21:30Z; G1 founder on 829a152b, turn 3: "We have no funding" refused
+   * `no_target` beside a target held as a bare figure in an unnamed currency with no cap, so the goal never got a level). A goal
+   * on the level frame whose target cannot frame a level yet (no cap, no raw figure) records today's level on its OWN frame, as a
+   * goal with no target does; the target is still said beside it and a later target write frames the goal as it does today.
+   */
+  const onLevelFrame = node.goal_threshold_frame === 'level';
+  const targetFramesLevel = num(target) && num(cap) && cap > 0 && onLevelFrame;
+  // A target on ANOTHER frame (`delta`) still gives nothing to read a level on; only the level frame's own gaps are lifted.
+  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame || (!isChange && !targetFramesLevel && onLevelFrame);
+  if (!isChange && !levelOnItsOwnFrame && !targetFramesLevel) {
     return refuse(
       'no_target',
       `"${goal.label}" has no stated target to measure its current level against, so there is no chance of reaching ` +
@@ -827,7 +837,7 @@ export async function proposeGoalCurrentLevel(
 
 
   let normalisedLevel: number;
-  let levelCap: number;
+  let levelCap: number | undefined;
   if (levelOnItsOwnFrame) {
     // ⛔ A ceiling the goal holds is never read as a floor (Codex buddy r1 on #2618 (c): the refusal the target path
     // applies, `admitStatedGoalLevel`, kept on the level's own frame): an "at least" reading would score it the wrong way round.
@@ -846,7 +856,8 @@ export async function proposeGoalCurrentLevel(
      * A level the rule cannot frame (0: no positive figure to scale from) still waits for a target, said so.
      */
     const own = resolveGoalThresholdCapWithProvenance(undefined, raw, goalUnit, undefined);
-    if (own === null) {
+    // ⭐ NONE NEEDS NO FRAME (TL 21:30Z): 0 is 0 on every frame, so it is recorded without one; a later target frames the goal.
+    if (own === null && raw !== 0) {
       return refuse(
         'no_target',
         `"${goal.label}" has no stated target yet, and ${sayFigureExactly(raw, goalUnit ?? '') ?? String(raw)} gives no range ` +
@@ -854,8 +865,8 @@ export async function proposeGoalCurrentLevel(
         'recorded with it.',
       );
     }
-    levelCap = own.cap;
-    normalisedLevel = raw / own.cap;
+    levelCap = own?.cap;
+    normalisedLevel = own === null ? 0 : raw / own.cap;
   } else {
     // (Checked above for a level goal; restated so the level path below reads them as numbers.)
     if (!num(target) || !num(cap)) return refuse('no_target', `"${goal.label}" has no stated target to measure its current level against. Nothing was prepared.`);
@@ -903,7 +914,7 @@ export async function proposeGoalCurrentLevel(
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
     source: USER_EDIT_SOURCE,
     raw_value: raw,
-    cap: levelCap,
+    ...(levelCap !== undefined ? { cap: levelCap } : {}),
     ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
   };
   // As the user writes a figure ("£72,000 per month"), from the lane's one formatter (DL #72 5866282787: "72000 £ MRR").
