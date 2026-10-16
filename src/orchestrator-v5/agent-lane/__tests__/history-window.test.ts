@@ -14,7 +14,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { HistoryStore, OLDER_WORDS_LABEL, BOARD_EDIT_PREFIX, needsDurableSeed, dropDanglingCalls, APPLIED_PROPOSAL_OUTPUT,
-  RESTORED_FIRST_LABEL, DURABLE_SEED_ROWS_READ, briefFromDurableTurns, historyFromDurableTurns } from '../history-store.js';
+  RESTORED_FIRST_LABEL, DURABLE_SEED_ROWS_READ, briefFromDurableTurns, historyFromDurableTurns, isOlderWordsItem,
+  ANSWERED_EARLIER_LABEL, olumiTail } from '../history-store.js';
 
 const user = (text: string) => ({ role: 'user', content: [{ type: 'input_text', text }] });
 const said = (text: string) => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
@@ -34,9 +35,9 @@ function drive(turns: { typed?: string; chip?: string; board?: string; items?: u
 }
 const firstText = (i: unknown): string | undefined => (i as { content?: { text?: string }[] }).content?.[0]?.text;
 const olderItem = (h: readonly unknown[]) => h.find((i) => firstText(i)?.startsWith(OLDER_WORDS_LABEL) === true) as { role: string; content: { text: string }[] } | undefined;
-/** The user TURNS in the window: user messages other than the labelled older-words item. */
+/** The user TURNS in the window: user messages other than the store's labelled items (the older words, the dropped pairs). */
 const userTexts = (h: readonly unknown[]) => h
-  .filter((i) => (i as { role?: string }).role === 'user' && firstText(i)?.startsWith(OLDER_WORDS_LABEL) !== true)
+  .filter((i) => (i as { role?: string }).role === 'user' && !isOlderWordsItem(i))
   .map((i) => (i as { content: { text: string }[] }).content[0]!.text);
 const turn = (n: number, words = `Turn ${n}: what about the churn?`) => ({ typed: words, reply: `Olumi's answer to turn ${n}.` });
 
@@ -154,6 +155,52 @@ describe('the history window keeps 8 turns, and the user’s older words verbati
  * and a chip's message carries Olumi's words (independent review rounds 1–2, BLOCKING; AIE 6115647793 wording).
  * Paul's hiring words, verbatim. The route rows are in `history-sent-text.route.test.ts`.
  */
+describe('⭐ S1 answered pairs: a reply the window drops keeps the Olumi question it answered, as Olumi\u2019s', () => {
+  const ASK = 'To judge the splits, the missing input is when you need the first funding secured. What is that deadline?';
+  const SIXTY = "Let's assume 60 and possibly more if I needed to.";
+  const pairsOf = (h: readonly unknown[]) => {
+    const items = h.filter((i) => firstText(i)?.startsWith(ANSWERED_EARLIER_LABEL) === true) as { role: string; content: { text: string }[] }[];
+    expect(items.length).toBeLessThanOrEqual(1);
+    return items.length === 0 ? [] : (JSON.parse(items[0]!.content[0]!.text.slice(ANSWERED_EARLIER_LABEL.length + 1)) as { answered_pairs: Record<string, any>[] }).answered_pairs;
+  };
+  it('RED→GREEN: the typed answer to Olumi\u2019s question, once dropped, is carried beside it: the reply the user\u2019s, the question Olumi\u2019s', () => {
+    const turns = [turn(1), { typed: 'We have no funding yet.', reply: `${ASK}\n\nWhy? Assumption-based planning: name the load-bearing assumption.` },
+      { typed: SIXTY, reply: 'Do you mean 60 days or 60 hours a week?' }, ...Array.from({ length: 8 }, (_, k) => turn(k + 4))];
+    const { history } = drive(turns);
+    expect(userTexts(history), 'control: the answer has left the window').not.toContain(SIXTY);
+    const sixty = pairsOf(history).filter((p) => p.response.text === SIXTY);
+    expect(sixty).toEqual([{ olumi: { speaker: 'olumi', source: "the end of Olumi's reply, not a user statement", text: ASK },
+      response: { speaker: 'user', source: 'typed', text: SIXTY } }]);
+    expect(olderItem(history)!.content[0]!.text, 'W2: the older words still never hold Olumi\u2019s words').not.toContain('deadline');
+    expect(history.filter((i) => firstText(i)?.startsWith(ANSWERED_EARLIER_LABEL) === true)[0]).toMatchObject({ role: 'user' });
+    expect(needsDurableSeed([history.find((i) => firstText(i)?.startsWith(ANSWERED_EARLIER_LABEL) === true)!]), 'never counted as a user message').toBe(true);
+  });
+  it('NEGATIVE: a chip\u2019s or board note\u2019s words never become a reply in a pair (they never enter the older words either)', () => {
+    const turns = [turn(1), { typed: 'Hello.', reply: 'Which option should I add first?' }, { chip: 'Yes, add option ‘Keep Pro at £49’.', reply: 'Added. Anything else to add?' },
+      { board: 'Moved the price node.', reply: 'Seen. Shall we run it now?' }, ...Array.from({ length: 9 }, (_, k) => turn(k + 5))];
+    const texts = pairsOf(drive(turns).history).map((p) => p.response.text);
+    expect(texts.some((t) => t.includes('Keep Pro at £49') || t.includes('Moved the price node'))).toBe(false);
+    expect(texts, 'control: typed replies past the window are paired').toContain('Turn 5: what about the churn?');
+  });
+  it('NEGATIVE: a reseeded reply\u2019s origin stays unknown in its pair, never the user\u2019s', () => {
+    const rows = Array.from({ length: 14 }, (_, i) => ({ request_hash: `agent_turn:${i}`, user_message: i === 0 ? 'Our brief.' : `Answer ${i + 1}.`,
+      assistant_message: `Question ${i + 1}: what do you mean?` })).reverse();
+    const store = new HistoryStore();
+    store.seed('s', historyFromDurableTurns(rows), [], rows);
+    const pairs = pairsOf(store.get('s'));
+    expect(pairs.length, 'control: reseeded rows past the window are paired').toBeGreaterThan(0);
+    expect(pairs.every((p) => p.response.speaker === 'unknown' && p.response.source === 'stored, origin not verified')).toBe(true);
+    expect(pairs[pairs.length - 1]).toMatchObject({ olumi: { text: expect.stringMatching(/^Question \d+: what do you mean\?$/) } });
+  });
+  it('the question is Olumi\u2019s last sentence of three or more words ending "?", not a one-word "Why?" line after it', () => {
+    expect(olumiTail(`${ASK}\n\nWhy? Assumption-based planning: test it.`)).toBe(ASK);
+    expect(olumiTail('Noted. I have added it.')).toBe('Noted. I have added it.');
+    const long = `${'Context sentence here. '.repeat(30)}What is that deadline?`;
+    expect(olumiTail(long).endsWith('What is that deadline?')).toBe(true);
+    expect(olumiTail(long).length).toBeLessThanOrEqual(281);
+  });
+});
+
 describe('SYS2 E1 · HistoryStore.seed', () => {
   const BRIEF = "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.";
   const L133 = "You're talking about links, but what about missing data from this decision?";
