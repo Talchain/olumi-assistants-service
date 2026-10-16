@@ -110,12 +110,14 @@ export interface GoalCurrentLevelArgs {
 }
 
 /**
- * ⭐ WHERE A LEVEL'S FIGURE COMES FROM (DL-3 lease 16 Oct; Relief's native check at c72fc72c; the three authorship dimensions):
+ * ⭐ WHERE A LEVEL'S FIGURE COMES FROM — the AI's own reading of the user's statement (DL-3 lease 16 Oct; Relief c72fc72c; TL 22:18Z
+ * meaning ruling: the door makes no meaning decision of its own):
  *  · `written` — the statement writes it ("We do about 80 a week today.");
- *  · `read_from_words` — the statement writes no figure and says there is none ("We have no funding." → 0): Olumi's reading;
- *  · `reported` — the user reports a figure from elsewhere (an earlier Run's result, someone's estimate), not what they see today.
+ *  · `stated_none` — the user stated there is NONE ("We have no funding." → 0), shown on the card as Olumi's reading of the sentence;
+ *  · `reported` — the user reports a figure from elsewhere (an earlier Run's result, someone's estimate), not what they see today;
+ *  · `unknown` — the user does not know it ("We don't know whether we have any funding."): no level, never a figure.
  */
-export const FIGURE_ORIGINS = ['written', 'read_from_words', 'reported'] as const;
+export const FIGURE_ORIGINS = ['written', 'stated_none', 'reported', 'unknown'] as const;
 export type FigureOrigin = (typeof FIGURE_ORIGINS)[number];
 
 /** Olumi's figure, accepted by the user's press: the stamp a level read from their words is written with. */
@@ -487,13 +489,14 @@ export function statedGoalLevelInUsersWords(
 }
 
 /**
- * ⭐ NONE, READ FROM THE USER'S WORDS (Relief c72fc72c loss 1: "We have no funding." refused as `figure_not_in_users_words`, so
- * no card). A statement that writes no figure can be read as ONE figure without inventing a magnitude: none, 0. Any other
- * figure would be Olumi's guess, and a statement that writes a figure is read by `statedGoalLevelInUsersWords` instead. The
- * unit is read exactly as for a written figure (`readStatedGoalLevel`). The SOURCE stays the user's words, the BINDING (0) is
- * Olumi's reading, said on the card before the press, and the press alone adopts it.
+ * ⭐ NONE, AS THE USER STATED IT (Relief c72fc72c loss 1: "We have no funding." refused as `figure_not_in_users_words`, so no
+ * card). The meaning is the AI's own reading that the user stated NONE (`stated_none`), never this door's: words that merely
+ * write no figure are no level (TL 22:18Z). This only checks the shape: none is 0 (any other figure would be a guess), a
+ * statement that writes a figure is read by `statedGoalLevelInUsersWords` instead, and the unit is read as for a written figure
+ * (`readStatedGoalLevel`). The SOURCE stays the user's words, the BINDING (0) is Olumi's reading, said on the card before the
+ * press, and the press alone adopts it.
  */
-export function goalLevelReadFromWords(
+export function goalLevelStatedNone(
   value: number,
   statedUnitArg: unknown,
   goal: { readonly label: string; readonly unit: string | undefined },
@@ -505,12 +508,12 @@ export function goalLevelReadFromWords(
   if (!stated.ok) return stated;
   if (stated.raw !== 0) {
     return { ok: false, refusal: 'reading_not_none',
-      detail: `Words that state no figure can be read only as none (0), so ${value} would be Olumi's guess and is never recorded as the ` +
+      detail: `A statement of none is 0, so ${value} would be Olumi's guess and is never recorded as the ` +
         `user's level of "${goal.label}". Nothing was prepared. Ask the user for today's figure in their own words.` };
   }
   if (figuresWrittenIn(quote) > 0) {
     return { ok: false, refusal: 'figure_in_quote',
-      detail: `“${quote}” writes a figure, so today's level is the figure it writes (figure_origin "written"), never a reading of it. Nothing was prepared.` };
+      detail: `“${quote}” writes a figure, so today's level is the figure it writes (figure_origin "written"), never a reading of none. Nothing was prepared.` };
   }
   return { ok: true, raw: 0, statedUnit: typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '', quote };
 }
@@ -829,6 +832,12 @@ export async function proposeGoalCurrentLevel(
   if (args?.figure_origin !== undefined && origin === undefined) {
     return refuse('statement_malformed', `figure_origin is one of: ${FIGURE_ORIGINS.join(', ')}. Nothing was prepared.`);
   }
+  // TL 22:18Z: what the user does not know stays UNKNOWN — no level, no figure, and the AI asks once at most.
+  if (origin === 'unknown') {
+    return refuse('level_unknown',
+      `The user does not know today's level of "${goal.label}", so it stays unknown: nothing is recorded, and no figure is offered for it. ` +
+      'Nothing was prepared. Ask once for it only if their question needs it; otherwise carry on without it.');
+  }
   if (origin === 'reported') {
     return refuse('not_the_users_observation',
       `This figure is one the user reported from elsewhere (an earlier Run's result, an estimate or a forecast), not what they observe ` +
@@ -839,7 +848,7 @@ export async function proposeGoalCurrentLevel(
   if (!num(value)) return refuse('unparsable_value', 'No usable number was given. Nothing was prepared.');
   // ── THE STATEMENT IT COMES FROM, when the Agent quotes it: a WHOLE statement of the user's verified typed words, verified
   // exactly as the statement door verifies one (`verifyStatement`); words of unknown origin are never a source.
-  if (origin === 'read_from_words' && args?.source_quote === undefined) {
+  if (origin === 'stated_none' && args?.source_quote === undefined) {
     return refuse('statement_malformed', 'A level read from the user\'s words needs their complete statement, copied exactly, as source_quote. Nothing was prepared.');
   }
   const said = args?.source_quote === undefined ? undefined : verifyStatement({ quote: args.source_quote, form: 'describes' },
@@ -898,7 +907,7 @@ export async function proposeGoalCurrentLevel(
   // its own unit. From here `goalUnit` is the unit the level is read, said and written in.
   // Words that write no figure write no unit: none read from them is read in the goal's OWN unit — unless the Agent's unit is of
   // another kind (`unitsConflict`), which says the words are about something else, refused as for a written figure.
-  const unitArg = origin === 'read_from_words' && storedUnit !== undefined && unitsConflict(args?.unit, storedUnit) === null ? storedUnit : args?.unit;
+  const unitArg = origin === 'stated_none' && storedUnit !== undefined && unitsConflict(args?.unit, storedUnit) === null ? storedUnit : args?.unit;
   const forLevel = levelUnitForGoal(value, unitArg, { label: goal.label, unit: storedUnit, heldUnit: unitAlreadyOnGoal(goal, g.raw, storedUnit) });
   if (!forLevel.ok) return refuse(forLevel.refusal, forLevel.detail);
   // ── A GOAL HELD ONLY AS A PERCENTAGE CHANGE TAKES THE UNIT ITS LEVEL IS STATED IN (`levelUnitForChangeGoal`, A1).
@@ -908,11 +917,11 @@ export async function proposeGoalCurrentLevel(
   const adoptedUnit = forLevel.adopted ? forLevel.unit : forChange.adopted;
 
   // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
-  // The one reading: none, from a quoted statement that writes no figure (`goalLevelReadFromWords`), said as Olumi's on the card.
-  const readingQuote = origin === 'read_from_words' ? quoted?.quote : undefined;
+  // The one reading: none, as the AI reads the user's quoted statement (`stated_none`, `goalLevelStatedNone`), said as Olumi's on the card.
+  const readingQuote = origin === 'stated_none' ? quoted?.quote : undefined;
   const readFromWords = readingQuote !== undefined;
   const levelGoal = { label: goal.label, unit: goalUnit };
-  const inWords = readingQuote !== undefined ? goalLevelReadFromWords(value, unitArg, levelGoal, readingQuote)
+  const inWords = readingQuote !== undefined ? goalLevelStatedNone(value, unitArg, levelGoal, readingQuote)
     : statedGoalLevelInUsersWords(value, args?.unit, levelGoal, ctx.user_text);
   if (!inWords.ok) return refuse(inWords.refusal, inWords.detail);
   // A quoted written figure is written in THAT statement, by the same rule.

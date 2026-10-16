@@ -2,12 +2,13 @@
  * ⭐ TODAY'S LEVEL FROM THE USER'S ANSWER (DL-3 lease 16 Oct; Relief's native check at c72fc72c, 7 pass / 2 fail; the three
  * authorship dimensions). Through the real /agent/v1/turn route with a scripted provider: the AI asks, the AI calls
  * propose_goal_current_level, the card is pressed, the route registers, and a fresh /graph read is the cold readback.
- *  · LOSS 1: "We have no funding." quoted whole and read as none (`read_from_words`): the card itself says £0 is Olumi's reading
+ *  · LOSS 1: "We have no funding." quoted whole and read as none (`stated_none`): the card itself says £0 is Olumi's reading
  *    of those words, and its button adopts a reading; the press saves £0 as Olumi's figure the user accepted (`user_confirmed`,
  *    read by the provenance readers as `user_ratified` / `olumi_accepted`, never the user's typed figure), with the user's
  *    sentence kept beside it (`user_statements`, `describes`, `read_as: 0`).
  *  · LOSS 2, BOUNDED: a figure the AI reads as reported from elsewhere (`reported`) is never carded as the user's level. A
  *    mislabelled report still reaches a card, which then shows the user's whole sentence; the AI's reading is not an attestation.
+ *  · UNKNOWN (TL 22:18Z): a level the user does not know, read by the AI as `unknown`, records nothing and offers no figure.
  *  · KEPT: an explicit "£0 funding" and "about 80 a week today" save as before; chance, other quantity, wrong unit and model
  *    origin are refused as before. A reading is none only, of words that write no figure, quoted from the user's own messages.
  * Kit adapted from Relief's (recovery-notes/level-answer-c72fc72c). SYNTHETIC answers, never an unseen brief.
@@ -130,7 +131,7 @@ afterEach(async () => { while (apps.length) await apps.pop()!.close(); vi.unstub
 describe('today\'s level from the user\'s answer: AI ask → card → press → register → cold read', () => {
   it('⭐ LOSS 1: "We have no funding." is read as £0 on a card that says it is Olumi\'s reading; saved as an accepted reading', async () => {
     const said = 'We have no funding.';
-    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, source_quote: said, figure_origin: 'read_from_words' });
+    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, source_quote: said, figure_origin: 'stated_none' });
     expect(w.card, JSON.stringify({ calls: w.b._agent?.tool_calls, toolResults })).toBeDefined();
     // The BINDING is said ON THE CARD before the press, and its button adopts a reading, never "Record … as your figure".
     const words = 'Record the current level of "Funding secured" as £0, Olumi\'s reading of your words “We have no funding.” (target £250,000)';
@@ -159,23 +160,23 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
 
   it('NEGATIVE: a reading whose unit is of another kind (a percentage for a goal in pounds) is about something else: no card', async () => {
     const said = 'We have no funding.';
-    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, unit: '%', source_quote: said, figure_origin: 'read_from_words' });
+    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, unit: '%', source_quote: said, figure_origin: 'stated_none' });
     expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
     expect(w.card).toBeUndefined();
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
   }, 30_000);
 
-  // ⚠ DOCUMENTED LIMIT (BUDDY-A #3325 B1; DL-3 ruling (a)): no reader separates "none" from "unknown" without a phrase list, so an
-  // AI that still reads "don't know" as none reaches a reading card. The card quotes the full sentence as Olumi's reading, nothing
-  // is written before the press, and Reject writes nothing. The tool text tells the AI to leave such a level unknown (Founder's hunk).
-  it('LIMIT: "We don\'t know whether we have any funding." misread as none shows the full quote as Olumi\'s reading; Reject writes nothing', async () => {
+  // TL 22:18Z meaning ruling (BUDDY-A #3325 B1): what the user does not know is UNKNOWN, never £0. The AI's own reading says so
+  // (`unknown`), and the door records nothing and offers no figure: no level, no card, one ask at most.
+  it('UNKNOWN: "We don\'t know whether we have any funding." → no level, no £0, no card; the AI is told to ask once at most', async () => {
     const said = 'We don\'t know whether we have any funding.';
-    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, source_quote: said, figure_origin: 'read_from_words' });
-    expect(w.card?.detail).toBe(`Record the current level of "Funding secured" as £0, Olumi's reading of your words “${said}” (target £250,000)`);
+    const w = await answered('Funding secured', 'GBP', 250000, 1000000, said, { value: 0, source_quote: said, figure_origin: 'unknown' });
+    const refused = toolResults.find((r) => r.refusal === 'level_unknown');
+    expect(refused, JSON.stringify(toolResults)).toMatchObject({ ok: false, mutated: false });
+    expect(String(refused!.detail)).toMatch(/stays unknown: nothing is recorded, and no figure is offered for it\..*Ask once for it only if/);
+    expect(w.card).toBeUndefined();
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
-    const reject = (w.b.suggested_actions as Dict[]).find((c) => c.label === 'Reject')!;
-    const declined = await w.turn(reject.message, reject); expect(declined.statusCode, declined.body).toBe(200);
-    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+    expect(stored.nodes.find((n: Dict) => n.id === 'goal').observed_state).toBeUndefined();
   }, 30_000);
 
   it('CONTRAST: an explicit "We have £0 funding today." is the user\'s own figure in the same readers', async () => {
@@ -193,7 +194,7 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     const held = graph('Funding secured', 'GBP', 250000, 1000000);
     held.nodes.find((n: Dict) => n.id === 'goal').observed_state = { value: 0.05, baseline: 0.05, unit: 'GBP', source: 'user_override', raw_value: 50000, cap: 1000000 };
     question = 'What is today\'s level of Funding secured, in GBP?';
-    args = { goal_label: 'Funding secured', unit: 'GBP', user_stated: true, value: 0, source_quote: said, figure_origin: 'read_from_words' };
+    args = { goal_label: 'Funding secured', unit: 'GBP', user_stated: true, value: 0, source_quote: said, figure_origin: 'stated_none' };
     const w = await world(held);
     await w.turn('Help me understand what is missing.');
     phase = 'propose'; emitted = false;
@@ -229,13 +230,13 @@ describe('today\'s level from the user\'s answer: AI ask → card → press → 
     ['other quantity', 'Our budget is £80 a week today.', { value: 80 }, undefined],
     ['wrong unit', 'We do about 80 a week today.', { value: 80, unit: 'GBP' }, undefined],
     ['model origin', 'I do not know today’s order volume.', { value: 80, user_stated: false }, 'not_the_users_figure'],
-    ['a reading is none only', 'We have hardly any orders.', { value: 5, source_quote: 'We have hardly any orders.', figure_origin: 'read_from_words' }, 'reading_not_none'],
-    ['a reading never overrides a written figure', 'We do about 80 a week today.', { value: 0, source_quote: 'We do about 80 a week today.', figure_origin: 'read_from_words' }, 'figure_in_quote'],
-    ['a quote the user never wrote', 'We have no orders yet.', { value: 0, source_quote: 'We have no orders at all.', figure_origin: 'read_from_words' }, 'statement_not_found'],
-    ['a reading needs its quote', 'We have no orders yet.', { value: 0, figure_origin: 'read_from_words' }, 'statement_malformed'],
+    ['a reading is none only', 'We have hardly any orders.', { value: 5, source_quote: 'We have hardly any orders.', figure_origin: 'stated_none' }, 'reading_not_none'],
+    ['a reading never overrides a written figure', 'We do about 80 a week today.', { value: 0, source_quote: 'We do about 80 a week today.', figure_origin: 'stated_none' }, 'figure_in_quote'],
+    ['a quote the user never wrote', 'We have no orders yet.', { value: 0, source_quote: 'We have no orders at all.', figure_origin: 'stated_none' }, 'statement_not_found'],
+    ['a reading needs its quote', 'We have no orders yet.', { value: 0, figure_origin: 'stated_none' }, 'statement_malformed'],
     ['a written figure is in its quote', 'We do about 80 a week today. We hope for 90.', { value: 90, source_quote: 'We do about 80 a week today.' }, 'figure_not_in_quote'],
-    ['a shortened quote', 'We have no orders yet.', { value: 0, source_quote: 'We have no', figure_origin: 'read_from_words' }, 'statement_not_found'],
-    ['Olumi\'s own words are never the source', 'Nothing yet.', { value: 0, source_quote: 'What is today\'s level of Order volume, in orders per week?', figure_origin: 'read_from_words' }, 'statement_not_found'],
+    ['a shortened quote', 'We have no orders yet.', { value: 0, source_quote: 'We have no', figure_origin: 'stated_none' }, 'statement_not_found'],
+    ['Olumi\'s own words are never the source', 'Nothing yet.', { value: 0, source_quote: 'What is today\'s level of Order volume, in orders per week?', figure_origin: 'stated_none' }, 'statement_not_found'],
     ['an unknown origin label', 'We have no orders yet.', { value: 0, source_quote: 'We have no orders yet.', figure_origin: 'guessed' }, 'statement_malformed'],
   ] as const)('NEGATIVE (%s): no card, nothing written', async (_name, answer, given, refusal) => {
     const w = await answered('Order volume', 'orders per week', 100, 200, answer, given);
@@ -263,7 +264,7 @@ describe('TL 21:30Z: today\'s level does not depend on the target (G1 founder 82
   }
   it('⭐ "We have no funding." beside the unframed target: offered as Olumi\'s reading, saved as 0 with no frame, the target untouched', async () => {
     const said = 'We have no funding.';
-    const w = await turnOn(halfWritten(), said, { value: 0, unit: 'GBP', source_quote: said, figure_origin: 'read_from_words' });
+    const w = await turnOn(halfWritten(), said, { value: 0, unit: 'GBP', source_quote: said, figure_origin: 'stated_none' });
     expect(w.card, JSON.stringify(toolResults)).toMatchObject({ label: 'Use this reading', detail: expect.stringContaining('Olumi\'s reading of your words “We have no funding.”') });
     const { cold, goal } = await pressAndReopen(w, w.card);
     expect(goal.observed_state).toMatchObject({ raw_value: 0, value: 0, baseline: 0, source: 'user_confirmed' });
