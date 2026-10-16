@@ -5,7 +5,7 @@
  * calls propose_statement for that link, the card is pressed, the route registers, and a fresh /graph read is the cold readback.
  *  · the range is kept as the user's (`user_statements`, `form: range`, both ends, their whole sentence) and sizes nothing: the
  *    edge is byte-identical, still Olumi's placeholder, and the card says so;
- *  · then no asker asks that link's size again: the link-size ask, the Strengthen card's selector, the Run's withhold;
+ *  · then no asker asks that link's size again: the Strengthen card's selector and the Run's withhold (the link-size ask has its row);
  *  · NEGATIVES: two ranges, a single figure, words the user never typed: no card, nothing written.
  * Graph from the real build (scripted drafter, no range in the brief). SYNTHETIC brief and answers, never an unseen brief.
  */
@@ -19,7 +19,6 @@ import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import { linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
-import { linkSizeAsk } from '../link-size-ask.js';
 import { selectStrengthenPlaceholder } from '../guidance/select-strengthen-placeholder.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../orchestrator/context/option-result-source.js';
@@ -118,7 +117,6 @@ async function builtGraph(): Promise<Dict> {
 const idOf = (g: Dict, label: string): string => (g.nodes as Dict[]).find((n) => n.label === label)!.id as string;
 const edgeOf = (g: Dict, from: string, to: string): Dict => (g.edges as Dict[]).find((e) => e.from === from && e.to === to)!;
 const ASK = 'How much would the corporate deal lift weekday attendance?';
-const NAMED = 'Tell me about the link from "Corporate deal active" to "weekday attendance".';
 
 /** The AI asks; the user answers; the AI calls propose_statement for the deal → attendance link with `quote`. */
 async function answered(g: Dict, answer: string, quote: string) {
@@ -148,7 +146,6 @@ describe('a link\'s effect stated as a range in chat is stored through the state
     const w = await answered(g, said, said);
     const { from, to } = w;
     // BEFORE: the link is a placeholder its askers ask about.
-    expect(linkSizeAsk(g, { message: NAMED, restingText: '', awaitingApproval: false })).not.toBeNull();
     expect(selectStrengthenPlaceholder(g, [option])).toMatchObject({ from_id: from, to_id: to });
     expect(w.card, JSON.stringify({ calls: w.b._agent?.tool_calls, toolResults })).toBeDefined();
     expect(toolResults.map((r) => String(r.public_label ?? '')).join(' ')).toContain('does not size this link');
@@ -166,8 +163,7 @@ describe('a link\'s effect stated as a range in chat is stored through the state
     expect(linkHoldsStatedRange(cold, from, to)).toBe(true);
     // SIZES NOTHING: the edge is byte-identical (still Olumi's placeholder).
     expect(edgeOf(cold, from, to)).toEqual(edgeOf(g, from, to));
-    // NEVER ASKED AGAIN: the link-size ask, the Strengthen card's selector, and the Run's withhold.
-    expect(linkSizeAsk(cold, { message: NAMED, restingText: '', awaitingApproval: false })).toBeNull();
+    // NEVER ASKED AGAIN: the Strengthen card's selector and the Run's withhold (the link-size ask: link-size-ask.test.ts).
     expect(selectStrengthenPlaceholder(cold, [option])).toBeNull();
     const withheld = placeholderGoalWarning(cold, unsizedLeaderGoalPaths(cold, [option]), GOAL_FIGURES_PLACEHOLDER_PATH) as Dict;
     expect(withheld.first_ask).toBeUndefined();
@@ -188,7 +184,7 @@ describe('a link\'s effect stated as a range in chat is stored through the state
   it('NEGATIVE: words the user never typed are never the source (statement_not_found): no card', async () => {
     const g = await builtGraph();
     const w = await answered(g, 'Somewhere between 4 and 7 points, I think.', 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.');
-    expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal: 'statement_not_found' }));
+    expect(toolResults, JSON.stringify(toolResults)).toContainEqual(expect.objectContaining({ ok: false, refusal: 'statement_not_found' }));
     expect(w.card).toBeUndefined();
   }, 60_000);
 });

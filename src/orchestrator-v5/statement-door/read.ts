@@ -9,6 +9,7 @@
  * The reading and its assumptions are the table's words. Pure.
  */
 import { namesBothEnds } from '../goal-target/input-claim-context.js';
+import { factorTheUserNamed } from '../agent-lane/stated-by-user.js';
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { verifyStatement, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
@@ -50,6 +51,22 @@ export type DoorVerdict = { readonly kind: 'read'; readonly reading: DoorReading
 
 const KEEP = 'Keep the user’s words exactly as they said them and do not ask them to repeat them.';
 
+/**
+ * G3 (VERIFY-2da89781 T02/T03): users name an OPTION ("the corporate deal"), not the switch factor it sets ("Corporate deal
+ * active"), whose shared words name neither. A link's source is also named by the ONE option that sets it, when that option sets
+ * nothing else (so its name points at this one link, by the model's own structure), and the statement names the link's target.
+ */
+function namesSourceOptionAndTarget(quote: string, nodes: readonly Rec[], from: string, to: string): boolean {
+  const setsOf = (o: Rec): string[] => [o.interventions, isRec(o.data) ? o.data.interventions : undefined]
+    .flatMap((iv) => (isRec(iv) ? Object.keys(iv) : []));
+  const setters = nodes.filter((n) => n.kind === 'option' && typeof n.label === 'string' && setsOf(n).includes(from));
+  if (setters.length !== 1 || new Set(setsOf(setters[0]!)).size !== 1) return false;
+  const label = (id: unknown): string => String(nodes.find((n) => n.id === id)?.label ?? '');
+  const others = (except: readonly unknown[]): string[] => nodes.filter((n) => typeof n.label === 'string' && !except.includes(n.id)).map((n) => String(n.label));
+  return factorTheUserNamed(String(setters[0]!.label), quote, { options: [], others: others([setters[0]!.id, from]) })
+    && factorTheUserNamed(label(to), quote, { options: [], others: others([to]) });
+}
+
 /** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
 export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
   alsoAnswers: readonly DoorSubject[] = []): 'bound' | 'another' | 'unbound' {
@@ -60,6 +77,7 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
   if (subject.kind === 'link') {
     const entities = nodes.flatMap((n) => (typeof n.id === 'string' && typeof n.label === 'string' ? [{ id: n.id, label: n.label }] : []));
     if (subject.to_id !== undefined && namesBothEnds(quote, entities, subject.id, subject.to_id)) return 'bound';
+    if (subject.to_id !== undefined && namesSourceOptionAndTarget(quote, nodes, subject.id, subject.to_id)) return 'bound';
   } else {
     const same = nodes.filter((n) => n.kind === subject.kind && typeof n.id === 'string' && typeof n.label === 'string');
     const named = same.filter((n) => isFactorNamedByUser(String(n.label), quote));
