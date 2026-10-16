@@ -6,7 +6,6 @@
  * (`before_write`, `after_write`) are proven on the stateful writer harness (`agent-writer-doors-seam.test.ts`).
  */
 import { randomUUID } from 'node:crypto';
-import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
@@ -70,19 +69,12 @@ describe('the recovery fault seam is impossible in production and off by default
 
 const rows: Record<string, unknown>[] = [];
 let runs = 0;
-let selectedRun = '';
-let hideFact = false;
-const nativeTurnIds: string[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
-  append: vi.fn(async (row: Record<string, unknown>) => {
-    const prior = rows.find(r => r.turn_id === row.turn_id);
-    if (prior) return { id: String(row.turn_id), replayedPriorTurn: true, priorTurnConflict: prior.request_hash !== row.request_hash };
-    rows.push({ ...row, id: row.turn_id, user_message: row.userMessage ?? null, assistant_message: row.assistantMessage ?? null }); return { id: String(row.turn_id) };
-  }),
+  append: vi.fn(async (row: Record<string, unknown>) => { rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => [...rows].reverse()),
-  readFactsFor: vi.fn(async (ids: readonly string[]) => hideFact ? [] : rows.filter(r => ids.includes(String(r.id))).flatMap(r => (r.handler_facts ?? []) as HandlerFact[])),
+  readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -92,40 +84,30 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 
 describe('after_run on the live route: the Run is recorded once, and the turn ends before its answer row', () => {
   let app: FastifyInstance;
-  let wait: { totalMs: number };
-  let savedWait: number;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => runPressToolResponse(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
       ?? new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] }] }), { status: 200 })));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    const { agentV1TurnRoute, AGENT_TURN_CLAIM_WAIT } = await import('../../../routes/agent-v1-turn.js');
-    wait = AGENT_TURN_CLAIM_WAIT; savedWait = wait.totalMs; wait.totalMs = 0;
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async req => {
+    app.post('/orchestrate/v2/turn', async () => {
       runs += 1;
-      const body = req.body as { turn_id: string };
-      nativeTurnIds.push(body.turn_id);
-      selectedRun = randomUUID();
-      const fact = RunAnalysisHandlerFactSchema.parse({ fact_type: 'run_analysis', fact_version: 1, noop: false,
-        result: { scenario_id: SCENARIO, run_id: selectedRun, graph_hash_at_run: HASH, computed_at: AT,
-          leading_option_id: null, summary: BLOCK.summary, win_probabilities: BLOCK.win_probabilities, enrichment: BLOCK.enrichment } });
-      await store.append({ turn_id: body.turn_id, request_hash: 'native-run', handler_facts: [fact] });
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: HASH, blocks: [BLOCK],
         analysis_state: STATE, analysis_ready: READY };
     });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
       analysis_state: STATE, analysis_result: BLOCK, current_read: { run_state: { kind: 'complete_current', computed_at: AT },
-        computed_against_hash: HASH, current_analysis_hash: HASH, figures: [], run_id: selectedRun } }));
+        computed_against_hash: HASH, current_analysis_hash: HASH, figures: [], run_id: 'run_seam_1' } }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => {
-    wait.totalMs = savedWait; await app.close(); vi.unstubAllGlobals(); restoreEnv();
+    await app.close(); vi.unstubAllGlobals(); restoreEnv();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; runs = 0; selectedRun = ''; hideFact = false; nativeTurnIds.length = 0; setEnv({ OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }); });
+  beforeEach(() => { rows.length = 0; runs = 0; setEnv({ OLUMI_ENV: 'staging', CEE_RECOVERY_FAULT_SEAM: 'on' }); });
   afterEach(restoreEnv);
 
   const runPress = (extra: Record<string, unknown> = {}) => {
@@ -141,55 +123,6 @@ describe('after_run on the live route: the Run is recorded once, and the turn en
     expect(res.json()).toEqual({ error: 'RECOVERY_FAULT_INJECTED', point: 'after_run' });
     expect(runs, 'the Run happened before the interruption, once').toBe(1);
     expect(rows.filter((r) => r.turn_id === turnId), 'no answer row for the interrupted turn').toEqual([]);
-  });
-
-
-  const retry = (turnId: string, extra: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn',
-    payload: { turn_id: turnId, scenario_id: SCENARIO, message: 'Run the analysis', source: 'retry', ...extra } });
-
-  it('after_run → same operation chipless retry recovers its Run and appends one answer; another retry replays it', async () => {
-    const { res, turnId } = await runPress(armed());
-    expect(res.statusCode).toBe(503);
-    const originalRun = selectedRun;
-    const recovered = await retry(turnId);
-    expect(recovered.statusCode, recovered.body).toBe(200);
-    expect(runs).toBe(1); expect(selectedRun).toBe(originalRun);
-    const answers = rows.filter(r => r.turn_id === turnId);
-    expect(answers).toHaveLength(1);
-    expect(String(answers[0]!.request_hash)).toContain('#chip:'); // Never reclassify button words as human authorship.
-    expect(recovered.json().blocks.some((b: { type: string }) => b.type === 'analysis_result')).toBe(true);
-    const replay = await retry(turnId);
-    expect(replay.statusCode, replay.body).toBe(200);
-    expect(replay.json().assistant_text).toBe(recovered.json().assistant_text);
-    expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
-  });
-
-  it('two concurrent retries recover one recorded Run and return the one committed answer', async () => {
-    const { turnId } = await runPress(armed());
-    const replies = await Promise.all([retry(turnId), retry(turnId)]);
-    expect(replies.map(r => r.statusCode)).toEqual([200, 200]);
-    expect(replies[0]!.json().assistant_text).toBe(replies[1]!.json().assistant_text);
-    expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(1);
-  });
-
-  it.each(['foreign selected Run', 'missing own fact'])('%s cannot recover or execute science again', async reason => {
-    const { turnId } = await runPress(armed());
-    if (reason === 'foreign selected Run') selectedRun = randomUUID(); else hideFact = true;
-    const recovered = await retry(turnId);
-    expect(recovered.statusCode, recovered.body).toBe(409);
-    expect(recovered.json().error).toBe('TURN_OUTCOME_UNKNOWN');
-    expect(runs).toBe(1); expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
-  });
-
-  it('a deliberate fresh Run on the same revision remains a second operation; changed message on the old id refuses', async () => {
-    const { turnId } = await runPress(armed());
-    const bad = await retry(turnId, { message: 'Another request' });
-    expect(bad.statusCode).toBe(409); expect(bad.json().error).toBe('TURN_ID_REUSED');
-    const fresh = await runPress();
-    expect(fresh.res.statusCode, fresh.res.body).toBe(200);
-    expect(runs).toBe(2); expect(new Set(nativeTurnIds).size).toBe(2);
-    expect(rows.filter(r => r.turn_id === fresh.turnId)).toHaveLength(1);
-    expect(rows.filter(r => r.turn_id === turnId)).toHaveLength(0);
   });
 
   it('CONTRAST: the same press with the switch off runs and answers as normal (one Run, one answer row)', async () => {

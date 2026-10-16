@@ -1,4 +1,3 @@
-import { readRecordedRun, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { withoutUnsizedLinkInvitation } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { postResponses } from '../adapters/llm/openai.js';
@@ -85,7 +84,7 @@ import { agentSelectionContext, type AgentSelectionContext } from '../orchestrat
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
-import { turnReadCache, FRESH_READ } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
+import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { armedRecoveryFault, interruptIfArmed, RecoveryFaultInterrupt } from '../orchestrator-v5/agent-lane/recovery-fault-seam.js';
 import { withAnalysisReadDeadline } from '../orchestrator-v5/session/analysis-read-deadline.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
@@ -2166,7 +2165,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    */
   const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
     const startedAt = Date.now();
-    let body = (req.body ?? {}) as Record<string, unknown>;
+    const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     // ⭐ Lane A recovery seam (`recovery-fault-seam.ts`): staging-only, off by default, armed by THIS request for its own scenario.
     const recoveryFault = armedRecoveryFault(body, scenarioId);
@@ -2387,7 +2386,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? `approve:${approvedProposal}${editsForThisCard !== undefined ? `:${proposalEditsDigest(editsForThisCard)}` : ''}`
       : isRunExplanationChip(explanationId) ? explanationId : undefined;
     const pressedChipIsStructural = typeof explanationId === 'string' && explanationId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX);
-    let requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
+    const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
       ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
     /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
@@ -2857,7 +2856,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     // Set only when THIS request owns the turn — used to release it if nothing ran.
-    let recoveredRun: RecoveredRun | undefined;
     let claimHash: string | undefined;
     let claimAppendSucceeded = false;
     let claimReleaseRecorded = false;
@@ -2922,16 +2920,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (!claim.won && !claim.sameRequest) {
         return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
       }
-      if (!claim.won && (typedRunOf(body) || chiplessRetry)) {
-        recoveredRun = await readRecordedRun(store, scenarioId, turnId, () => readBackState(
-          (path, body) => readCache.dispatch(path, { ...(body as Record<string, unknown>), ...FRESH_READ }), scenarioId));
-        if (recoveredRun !== undefined) {
-          // Restore the original chip authorship and Run-only permissions on a chipless UI retry.
-          requestHash = requestHashOfClaim(owner.request_hash);
-          if (chiplessRetry) body = { ...body, chip: { action_type: 'run_analysis' } };
-        }
-      }
-      if (!claim.won && recoveredRun === undefined) {
+      if (!claim.won) {
         // Another request owns this turn: in flight now, or it ran and its answer
         // was never recorded. It is NEVER run again here. Wait for its answer.
         const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
@@ -2953,7 +2942,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           detail: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again — reload to see the current model.',
         });
       }
-      // A new claim may run; a recovered claim can only reuse its proven Run.
+      // This request created the claim: it alone runs the turn.
     }
     /**
      * ⛔ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT
@@ -3057,8 +3046,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       {
         turnAuthority: true,
-        ...(recoveredRun !== undefined ? { recoveredRun } : {}),
-        ...(typedRunOf(body) && turnId !== undefined ? { runOperationId: runOperationTurnId(scenarioId, turnId) } : {}),
         deadlineAt: constructionDeadlineAt,
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
         /**
