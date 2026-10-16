@@ -102,14 +102,20 @@ describe('D2: the served capacity status quo, read in its own frame (run 3, norm
     }
   });
 
-  it('GUARD: the Run\'s recorder writes frame \'delta\' on every Run it records, so \'delta\' never means a reference of 0', () => {
+  it('GUARD: the dispatched LEVEL frame carries its explicit same-frame baseline; legacy delta never means a reference of 0', () => {
     // A licensed capacity Run (the 11 Oct served row for ‘Add one specialist’, verbatim): the recorder names goal_threshold.
     const env = runEnvelope();
     Object.assign((env.option_comparison as Rec[]).find((o) => o.option_id === SPECIALIST)!, { probability_of_goal: 0.3508,
       outcome: { p10: 0.16, p50: 0.1868588715621866, p90: 0.23487797617727985, mean: 0.19215858672280697, std: 0.03154728778563835 } });
-    const recorded = sentGoalThresholdOf(env, FX.graph, GOAL, earned);
-    expect(recorded).toEqual({ value: 0.2, field: 'goal_threshold', frame: 'delta' });
-    expect(recorded).toEqual(RECORDED);
+    const sentGraph = structuredClone(FX.graph);
+    const sentGoal = (sentGraph.nodes as Rec[]).find(n => n.id === GOAL)!;
+    sentGoal.goal_threshold_frame = 'level';
+    sentGoal.observed_state = { ...(sentGoal.observed_state as Rec), baseline: 0.16 };
+    const sentRun = { graph: sentGraph, goal_node_id: GOAL, options: [{ option_id: SQ, is_baseline: true }, { option_id: SPECIALIST }] };
+    const recorded = sentGoalThresholdOf(env, FX.graph, GOAL, earned, { sentRun });
+    expect(recorded).toEqual({ value: 0.2, field: 'goal_threshold', frame: 'level', baseline: 0.16, status_quo_option_id: SQ });
+    expect(recorded).toMatchObject({ value: RECORDED.value, field: RECORDED.field });
+    expect(sentGoalThresholdOf(env, FX.graph, GOAL, earned), 'legacy outputs cannot attest the dispatched frame').toBeUndefined();
     // Read as 0, today's 0.16 would be "moved" again; read in its field's frame it is today.
     const l = licence(env, recorded);
     expect(l!.status_quo).toEqual({ option_id: SQ, line: BY_ASSUMPTION });

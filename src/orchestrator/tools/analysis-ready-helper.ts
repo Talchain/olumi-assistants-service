@@ -1,3 +1,5 @@
+import type { RunQuestionScope } from '../../orchestrator-v5/goal-target/run-question.js';
+import { assessRunQuestionReadiness } from '../../orchestrator-v5/goal-target/run-question-scope.js';
 /**
  * Shared graph adapters for analysis_ready.
  *
@@ -212,6 +214,8 @@ export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_rea
 };
 
 export interface CanonicalReadinessAssessment {
+  /** Internal derived scope only; never persisted in analysis_ready or used as another execution gate. */
+  readonly questionScope?: RunQuestionScope;
   readonly analysisReady: AnalysisReadyPayload | undefined;
   readonly issues: readonly CanonicalReadinessIssue[];
   readonly blockingIssues: readonly CanonicalReadinessIssue[];
@@ -1897,6 +1901,7 @@ export function assessCanonicalAnalysisReadiness(
       proposedGraph: changes.length > 0 ? proposalGraph : null,
       repairedForAnalysis:
         safeToAnalyse && strictCanonicalGraph !== null && !sameJson(graph, strictCanonicalGraph),
+      questionScope: assessRunQuestionReadiness(graph),
       safeToAnalyse,
     };
   } catch {

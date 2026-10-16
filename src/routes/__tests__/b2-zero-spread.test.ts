@@ -45,6 +45,7 @@ const STAGING_CONTROL: Rec = { ...STAGING_CONTROL_CAPTURE, canonical_view: {
     limitation: STAGING_CONTROL_CAPTURE.canonical_view.staleness.limitation,
   },
 } };
+const RECORDED_QUESTION = json('run-question-unverified.json');
 const GOAL = 'monthly_recurring_revenue';
 const KEEP = 'keep_current_pricing';
 const STARTER = 'launch_starter_tier';
@@ -131,6 +132,15 @@ const withoutAmendment7InRecord = (enrichment: Rec): Rec => ({ ...enrichment, in
 const licenceRecord = (enrichment: Rec): Rec | undefined => enrichment.inference_warnings
   .find((warning: Rec) => warning.code === GOAL_CHANCE_LICENSED);
 const keepCell = (view: Rec): Rec => view.options.find((row: Rec) => row.option_id === KEEP).cell;
+// B2 adds only this read-only question to the legacy view. Pin the actual captured projection separately, so neither
+// today's read graph nor output percentiles can silently fill the historical Run's missing evidence.
+const withQuestionChecked = (view: Rec): Rec => {
+  const { question, ...rest } = view;
+  expect(question).toEqual(RECORDED_QUESTION);
+  expect(question).toMatchObject({ run_id: READ.current_read.run_id, evaluated_scenario_revision: null,
+    asked: null, calculated: null, scope: { status: 'unverified', can_show_goal_chance: false } });
+  return rest;
+};
 // S7 PR-A (#3192) added `leader` to the view after this staging control was frozen: it is compared by identity, not bytes.
 const otherwise = (view: Rec): Rec => {
   const { leader: _leader, ...rest } = view;
@@ -195,7 +205,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     // Batch C: condition 6 / r1 item 6 (DL, 12 Oct) — that range rests on Olumi's inputs and says so; nothing else moves.
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
     view.options.find((row: Rec) => row.option_id === STARTER).cell.face = STARTER_RANGE;
-    expect(JSON.stringify(otherwise(output.canonical_view))).toBe(JSON.stringify(otherwise(view)));
+    expect(JSON.stringify(otherwise(withQuestionChecked(output.canonical_view)))).toBe(JSON.stringify(otherwise(view)));
     expect(output.canonical_view.leader).toEqual(output.leader_expected);
     expect(STAGING_CONTROL.canonical_view).not.toHaveProperty('leader');
     expect(JSON.stringify(output)).not.toMatch(/Each option’s chance|has the highest|have similar chances|more likely to miss/);
@@ -233,7 +243,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expectNoGenericCellCopy(output.canonical_view);
   });
 
-  it('Starter-point control: byte-identical to staging except Keep’s canonical cell gains its zero-spread reason and why', () => {
+  it('Starter-point control: legacy bytes pinned; only Keep’s reason and the separately pinned historical question are added', () => {
     const envelope = producerEnvelope(true);
     // Batch C: ruling amendment 7 (independent check r1 item 6). Starter's 97% rests on Olumi's own option settings (150
     // subscribers and £49, both cee_hypothesis) and an Olumi starting value, so the licence now labels it provisional.
@@ -264,7 +274,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     expect(view).not.toHaveProperty('goal_chance');
     const { goal_chance: cardChance, ...cardRest } = output.canonical_view;
     expect(cardChance).toEqual({ notes: rangeNotes });
-    expect(JSON.stringify(otherwise(cardRest))).toBe(JSON.stringify(otherwise(view)));
+    expect(JSON.stringify(otherwise(withQuestionChecked(cardRest)))).toBe(JSON.stringify(otherwise(view)));
     expect(output.canonical_view.leader).toEqual(output.leader_expected);
     expect(STAGING_CONTROL.canonical_view).not.toHaveProperty('leader');
     expectKeepZeroSpread(output.canonical_view);

@@ -1,4 +1,6 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
+import { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
+import { deriveRunQuestion } from './run-question.js';
 import { goalTargetBasisIn, humanEffectsTimingOf, optionLeadWords, optionTimingAtPeriodEnd, referenceWords } from '../statement-door/fields/goal-timing.js';
 import { periodEndWords } from './goal-target-basis.js';
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
@@ -175,18 +177,32 @@ function withholdUntestedHorizonFigures<E>(response: E, graph: unknown, brief?: 
 export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, storedEnvelope?: unknown): R {
   const block = recordOf(result);
   if (block === undefined) return result;
+  // A request-bound static calculation makes no claim about the held date. A caveat alone cannot grant this permission.
+  if (deriveRunQuestion({ storedResult: block }).scope.status === 'supported_static') return result;
   const enrichment = recordOf(block.enrichment);
   const envelope = enrichment ?? block;
   const warnings = [block.inference_warnings, enrichment?.inference_warnings]
     .flatMap(value => Array.isArray(value) ? value : []);
-  if (warnings.some(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
-    || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold') return result;
+  const missingStaticEvidence = warnings.some(value => {
+    const warning = recordOf(value);
+    return warning?.code === 'GOAL_CHANCE_LICENSED' && Array.isArray(warning.notes) && warning.notes.includes(STATIC_MODEL_SCOPE_NOTE);
+  });
+  if (!missingStaticEvidence && (warnings.some(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED)
+    || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold')) return result;
   // Legacy blocks can keep their only chance record beside an otherwise empty enrichment. Its ids still need gating.
   const outerDisplays = enrichment === undefined || !Array.isArray(block.inference_warnings) ? []
     : block.inference_warnings.filter(w => ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(recordOf(w)?.code)));
   const candidate = outerDisplays.length === 0 ? envelope : { ...envelope,
     inference_warnings: [...(Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : []), ...outerDisplays] };
-  const gated = withholdUntestedHorizonFigures(candidate, currentGraph);
+  const displayIds = warnings.flatMap(value => {
+    const warning = recordOf(value); return Array.isArray(warning?.option_ids) ? warning.option_ids : [];
+  });
+  const ids = [...new Set([...readOptionResultSources(candidate).flat().map(row => row.option_id ?? row.id), ...displayIds]
+    .filter((id): id is string => typeof id === 'string' && id !== ''))];
+  const gated = missingStaticEvidence ? withholdOptionGoalFigures(candidate, new Set(ids), {
+    code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', message: STATIC_INPUTS_NOT_RECORDED, say: STATIC_INPUTS_NOT_RECORDED,
+    option_ids: ids, detail: { reason: 'EVALUATED_STATIC_INPUTS_NOT_RECORDED' },
+  }, { keepOutcome: true, keepOrdering: true }) : withholdUntestedHorizonFigures(candidate, currentGraph);
   if (gated === candidate) return result;
   // Stored display records contain percentages and attainment wording of their own. They cannot survive the withhold.
   const stripChanceRecords = (value: unknown): unknown => Array.isArray(value)

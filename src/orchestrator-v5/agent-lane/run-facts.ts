@@ -9,7 +9,7 @@
  * no host coaching prose. Today's date and the brief travel in `turnContextItems` (#3175). Pure.
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
-import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, goalChanceLicenceForAgent, type RunQuestion, type SelectedRunEvidence, STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from '../goal-target/goal-chance-licence.js';
 import { decisionSensitivityOf } from './decision-sensitivity.js';
 import { userStatementsOn } from '../statement-door/statements.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
@@ -76,7 +76,7 @@ export interface RunComparison {
  * consolidated Run instruction posted for AIE feedback, incorporating the 15 October reframing amendment; execution restrictions stay at the caller.
  */
 export const RUN_FACTS_USE = [
-  "After a Run or Explain, answer the user’s current question from the CURRENT run_facts and retained conversation: a direct model-relative finding, its most important implication and at most one useful reasoning move or supported action. Lead with each relevant option’s supplied chance of meeting the stated goal, preserving point or range, uncertainty, target, units, comparator, reference, window, conditions and exclusions. A target-only chance is not the full goal when a mandatory condition is unscored. A win share is supporting detail, never the headline or a goal chance. Name a goal-chance leader only when leader.goal_chance_leader licenses it; similar_option_ids does not mean exact equality. Scope conclusions to included options. Do not infer joint or paired claims from separate per-option chances. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader. When leader permission is withheld, do not favour or rank an option. You may explain a specifically scoped difference supported by current facts, preserving uncertainty and unresolved conditions; that difference does not establish an overall option to favour. If a result that may be named also carries `provisional: true`, that separation rests on Olumi's own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. Where supported, say which option is most likely to meet the goal in this model; never choose for the user or call it best, a winner or recommended, or say “go with”.",
+  "After a Run or Explain, answer the user’s current question from the CURRENT run_facts and retained conversation: a direct model-relative finding, its most important implication and at most one useful reasoning move or supported action. Lead with each relevant option’s supplied chance of meeting the stated goal, preserving point or range, uncertainty, target, units, comparator, reference, window, conditions and exclusions. A target-only chance is not the full goal when a mandatory condition is unscored. Use question.calculated for what this Run evaluated and question.omitted for what it did not answer. A supported static chance does not answer an omitted date question: keep the supplied static scope note beside the number, and acknowledge an unanswered timing question or missing historical evidence once. Never complete the record from today’s model or output statistics. A win share is supporting detail, never the headline or a goal chance. Name a goal-chance leader only when leader.goal_chance_leader licenses it; similar_option_ids does not mean exact equality. Scope conclusions to included options. Do not infer joint or paired claims from separate per-option chances. Missing or false permission, or permission from an earlier analysis, does not permit naming a leader. When leader permission is withheld, do not favour or rank an option. You may explain a specifically scoped difference supported by current facts, preserving uncertainty and unresolved conditions; that difference does not establish an overall option to favour. If a result that may be named also carries `provisional: true`, that separation rests on Olumi's own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. Where supported, say which option is most likely to meet the goal in this model; never choose for the user or call it best, a winner or recommended, or say “go with”.",
   "Maintain the user’s current question, corrections, agreed framing and rejected assumptions. When a material correction contradicts the saved model, state the mismatch briefly and use an available proposing or reframing capability to prepare a coherent change. A proposed change is still awaiting approval or save until the actual readback confirms it; explaining a change is not implementing it. Never invent a tool, overwrite without approval, claim an unsaved change is saved, or present a Run of the superseded model as progress on the requested correction. On an interpretation-only call, offer a reasoning move rather than promise a proposal you cannot create.",
   "Distinguish information the user has not supplied from information the application cannot record or verify. Reuse retained answers with their known speaker, source, conditions and qualifications. A missing saved field does not justify asking again or changing known human origin to unknown or Olumi. Ask again only for material unresolved meaning, a real conflict or changed circumstances, and explain why. Preserve disagreement and uncertainty; approval does not change authorship.",
   "Explain what the saved model implies and why: connect the actual option change to the supplied causal mechanism and conditional outcome, naming the human estimate, Olumi assumption, evidence gap or disagreement it rests on. Distinguish model implications from verified evidence about the world. Describe a driver or sensitivity as measured only when the packet says it was measured. Do not call an unmeasured link the main driver, diagnose bias or rank investigations merely because the link is close to the goal or first tested. One tested flip establishes that flip only; identical repeated inputs add no evidence. decision_sensitivity is EVPPI-only sensitivity of the option comparison; it is separate from the licensed per-option goal-chance driver availability. An unmeasured or none_measurable EVPPI result is not evidence that goal-chance drivers are absent. Name the most-sensitive assumption only from measured decision_sensitivity, keeping its source. A not_recorded or absent driver-availability record licences no absence claim. This availability grants no permission to name or rank a driver or an option. When the run says a limit cannot be checked in this model yet, explain that limitation plainly and preserve it.",
@@ -86,6 +86,8 @@ export const RUN_FACTS_USE = [
 ].join('\n\n');
 
 export interface RunFacts {
+  /** What this selected Run actually evaluated; missing historical evidence remains explicit. */
+  readonly question?: RunQuestion;
   /** How the AI uses these facts (`RUN_FACTS_USE`), present only with a current Run's facts. */
   readonly use?: string;
   /** Whether these facts are the selected CURRENT Run's (a stale Run's facts are never read as current). */
@@ -129,9 +131,14 @@ const warningsOf = (result: unknown): Rec[] => {
 /** The packet for the selected Run (`analysisResult`, the graph it reads, and whether it is current). */
 export function runFactsOf(analysisResult: unknown, graph: unknown, current: boolean,
   state: { readonly analysisState?: unknown; readonly analysisReady?: unknown;
+    readonly runEvidence?: SelectedRunEvidence;
     readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
-  const chances = goalChanceFactsForAgent(analysisResult, graph, current);
+  const question = analysisResult == null && state.runEvidence === undefined ? undefined
+    : deriveRunQuestion({ runEvidence: state.runEvidence, storedResult: analysisResult });
   const licence = current ? goalChanceLicenceForAgent(analysisResult) : undefined;
+  const verifiedCurrent = current && (licence?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) !== true
+    || question?.scope.status === 'supported_static');
+  const chances = goalChanceFactsForAgent(analysisResult, graph, verifiedCurrent);
   const withheld: RunWithheld[] = current ? warningsOf(analysisResult).filter((w) => typeof w.code === 'string' && w.code.startsWith('GOAL_FIGURES_'))
     .map((w) => {
       const detail = isRec(w.detail) ? w.detail : undefined;
@@ -152,9 +159,10 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     ? { links: licence.olumi_estimate_link_count ?? 0, values: licence.olumi_estimate_value_count ?? 0,
       settings_by_option: licence.olumi_estimate_settings_by_option ?? {} } : undefined;
   return {
+    ...(question === undefined ? {} : { question }),
     ...(current ? { use: RUN_FACTS_USE } : {}),
     current,
-    leader: runLeaderOf(analysisResult, state.analysisState, state.analysisReady, current),
+    leader: runLeaderOf(analysisResult, state.analysisState, state.analysisReady, verifiedCurrent),
     chances,
     withheld,
     ...(zeroSpread.length > 0 ? { zero_spread: zeroSpread } : {}),
@@ -166,7 +174,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
       ? { comparison: { prior_run_id: state.comparison.prior_run_id,
         ...(state.comparison.run_delta !== undefined ? { run_delta: state.comparison.run_delta } : {}),
         ...(recordFacts(state.comparison.rerun_record) !== undefined ? { rerun_record: recordFacts(state.comparison.rerun_record) } : {}) } } : {}),
-    must_say: [...(chances.goal_chance_notes ?? [])],
+    must_say: [...(chances.goal_chance_notes ?? []), ...(current && !verifiedCurrent ? [STATIC_INPUTS_NOT_RECORDED] : [])],
   };
 }
 

@@ -953,14 +953,14 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
 
     const contrast = await storedSteadyRun(world(graph), body);
     expect(goalHorizonVerdict(graph, contrast.result.enrichment)).toBe('withhold');
-    expect((contrast.result.enrichment as Rec).inference_warnings).toContainEqual(expect.objectContaining({
-      code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', option_ids: expect.arrayContaining(licence!.option_ids),
-    }));
-    expect(goalChanceLicenceForAgent(buildAnalysisResultBlock(contrast))).toBeUndefined();
-    expect((contrast.result.enrichment as Rec).option_comparison.every((row: Rec) => row.probability_of_goal === undefined)).toBe(true);
+    // B2: absence of a date attestation cannot suppress a verified static target calculation.
+    const staticContrast = goalChanceLicenceForAgent(buildAnalysisResultBlock(contrast))!;
+    expect(staticContrast.notes).toContain('Static model; not a forecast to a date.');
+    expect(staticContrast.chance_words).not.toMatch(/by month|at month|over 9 months/iu);
+    expect((contrast.result.enrichment as Rec).inference_warnings.some((w: Rec) => w.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')).toBe(false);
   });
 
-  it('real Run, mixed cause (held month + missing current level) -> no steady card; horizon as sole cause -> card (DL 58e392 #2903 P1)', async () => {
+  it('real Run: missing baseline stays withheld; a supported static result needs no date-attestation card', async () => {
     const { steadyHorizonCard } = await import('../../agent-lane/steady-horizon-card.js');
     const { graph, body } = steadyB2();
     const card = (result: unknown) => steadyHorizonCard({ graph, graphHash: computeAnalysisAffectingGraphHash(graph as never) ?? undefined,
@@ -970,15 +970,17 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     mixedBody.inference_warnings = [{ code: 'GOAL_THRESHOLD_NOT_CONVERTIBLE', message: 'Threshold not convertible.',
       severity: 'warning', detail: { reason: 'missing_goal_baseline' } }];
     const mixed = buildAnalysisResultBlock(await storedSteadyRun(world(graph), mixedBody)) as Rec;
-    expect(codesOf(mixed)).toEqual(expect.arrayContaining(['GOAL_FIGURES_MISSING_CURRENT_LEVEL', 'GOAL_FIGURES_HORIZON_NOT_TESTED']));
+    expect(codesOf(mixed)).toContain('GOAL_FIGURES_MISSING_CURRENT_LEVEL');
+    expect(JSON.stringify(mixed)).not.toContain('GOAL_CHANCE_LICENSED');
     expect(card(mixed)).toBeNull();
     const horizonOnly = buildAnalysisResultBlock(await storedSteadyRun(world(graph), body)) as Rec;
-    expect(codesOf(horizonOnly)).toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+    expect(codesOf(horizonOnly)).not.toContain('GOAL_FIGURES_HORIZON_NOT_TESTED');
+    expect(goalChanceLicenceForAgent(horizonOnly)?.notes).toContain('Static model; not a forecast to a date.');
     expect(codesOf(horizonOnly)).not.toContain('GOAL_FIGURES_MISSING_CURRENT_LEVEL');
-    expect(card(horizonOnly)?.chip.label).toBe('It stays about the same unless we act');
+    expect(card(horizonOnly)).toBeNull();
   });
 
-  it('supported attested Run -> restore pre-attestation version removes answer -> reload read-time goalHorizonVerdict withholds the former horizon chance', async () => {
+  it('restoring pre-attestation model keeps the old Run stale; its own verified static record remains historical', async () => {
     const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
     const { default: versionsRoute } = await import('../../../routes/assist.v1.scenario-versions.js');
     const management = await import('../../model-management/index.js');
@@ -1034,11 +1036,10 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
       expect(reloaded.canonical_analysis_view.options.some(row => row.cell.kind === 'figure')).toBe(false);
       expect(reloaded.current_read.figures).toEqual([]);
       const gated = withReadTimeHorizonGate(clone(run.result), w.read()) as Rec;
-      expect(gated.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
-        code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', option_ids: expect.arrayContaining(['raise_prices_10', 'launch_starter_tier', 'keep_current_pricing']),
-      }));
-      expect(gated.enrichment.option_comparison.every((row: Rec) => row.probability_of_goal === undefined)).toBe(true);
-      expect(JSON.stringify(gated)).not.toMatch(/pct_by_option|GOAL_CHANCE_LICENSED/);
+      // Historical stored static inputs keep their original scope; freshness still withholds all live/reloaded figures above.
+      expect(gated).toEqual(run.result);
+      expect(goalChanceLicenceForAgent(gated)?.notes).toContain('Static model; not a forecast to a date.');
+      expect(goalChanceLicenceForAgent(gated)?.chance_words).not.toMatch(/by month|at month|over 9 months/iu);
       expect(withReadTimeHorizonGate(clone(run.result), supportedGraph)).toEqual(run.result);
       expect(JSON.stringify(reloaded)).not.toMatch(/probability_of_goal|pct_by_option|GOAL_CHANCE_LICENSED/);
       expect(JSON.stringify(w.writes.at(-1)!.handler_facts[0])).toBe(storedBytes);

@@ -1,4 +1,5 @@
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
+import { readRunEvidence, runEvidenceWireOf } from '../orchestrator-v5/agent-lane/run-evidence.js';
 import { runLeaderOf, type RunLeader } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
@@ -8,7 +9,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import { isAnalysisRefusalFact } from '../orchestrator-v5/context/analysis-refusal-continuity.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../orchestrator-v5/compose/leader-licence.js';
-import { goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED, STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED, type RunQuestion } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { readStoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import {
@@ -86,6 +87,7 @@ export type CanonicalMainDriver =
   | { readonly kind: 'not_recorded' };
 
 export interface CanonicalAnalysisView {
+  readonly question?: RunQuestion;
   readonly schema: 'canonical_analysis_view.v1';
   readonly source: 'stored_run_facts';
   readonly face_when_stale?: string;
@@ -229,6 +231,8 @@ export function projectCanonicalAnalysisCells(
 export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput): CanonicalAnalysisView {
   const fact = input.runFact != null && !isAnalysisRefusalFact(input.runFact as HandlerFact) ? input.runFact : null;
   const occurrence = fact === null ? undefined : readRunAnalysisOccurrence(fact);
+  const question = fact === null ? undefined : deriveRunQuestion({ storedResult: fact.result,
+    runEvidence: readRunEvidence(runEvidenceWireOf(fact)) });
   const recordedRevision = occurrence?.evaluated_scenario_revision ?? null;
   const runRevision = recordedRevision !== null && occurrence?.fact_row_id === input.derivation?.selected_fact_row_id
     && recordedRevision === input.derivation?.run_revision?.value
@@ -238,15 +242,22 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
   const result = current ? input.currentResult : null;
-  const facts = goalChanceFactsForAgent(result, input.graph, current);
+  const staticClaim = goalChanceLicenceForAgent(result)?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
+  const verifiedCurrent = current && (!staticClaim || question?.scope.status === 'supported_static');
+  const facts = goalChanceFactsForAgent(result, input.graph, verifiedCurrent);
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
   const availability = goalChanceDriverAvailabilityForAgent(result);
   const driverStatus = new Map(availability?.options.map(row => [row.option_id, row]) ?? []);
   const cells = projectCanonicalAnalysisCells(result, input.graph, fact?.result.goal_certainty);
   const summary = (result as { summary?: unknown } | null)?.summary;
-  const goalChance = canonicalGoalChanceDetail(facts, typeof summary === 'string' ? [summary] : []);
+  const goalChance = canonicalGoalChanceDetail(facts, [
+    ...(typeof summary === 'string' ? [summary] : []),
+    ...(staticClaim && question?.scope.status === 'supported_static' && cells.some(({ cell }) => cell.kind === 'figure' || cell.kind === 'range')
+      ? [STATIC_MODEL_SCOPE_NOTE] : []),
+  ]);
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
+    ...(question === undefined ? {} : { question }),
     ...(fact !== null && freshness === 'stale' ? { face_when_stale: RUN_AGAIN_FOR_CHANCE } : {}),
     run: fact === null ? null : {
       run_id: fact.result.run_id ?? null,
@@ -263,8 +274,13 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
         : 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),
-    leader: runLeaderOf(result, input.analysisState, input.analysisReady, current),
-    options: cells.map(({ option_id, cell }) => {
+    leader: runLeaderOf(result, input.analysisState, input.analysisReady, verifiedCurrent),
+    options: cells.map(({ option_id, cell: projected }) => {
+      const why = STATIC_INPUTS_NOT_RECORDED;
+      const cell: CanonicalAnalysisCell = !staticClaim || (projected.kind !== 'figure' && projected.kind !== 'range') ? projected
+        : question?.scope.status === 'supported_static'
+          ? projected
+          : { kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why, reasons: [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: why }] };
       const driver = cell.kind === 'figure' ? drivers.get(option_id) : undefined;
       const status = driverStatus.get(option_id);
       const detail = facts.goal_chance_driver_display?.[option_id];

@@ -22,6 +22,8 @@
  */
 
 import { createHash } from 'node:crypto';
+import { sentDigest } from './run-input-digest.js';
+export { sentDigest } from './run-input-digest.js';
 import { InterventionRangeSchema } from '@talchain/schemas';
 import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
@@ -38,25 +40,6 @@ const finite = (v: unknown): number | undefined => (typeof v === 'number' && Num
 const text = (v: unknown, max = 200): string | undefined =>
   typeof v === 'string' && v.trim().length > 0 ? v.slice(0, max) : undefined;
 const label = (v: unknown): string | undefined => (typeof v === 'string' ? v.slice(0, 200) : undefined);
-
-/** Deterministic JSON: object keys sorted, so equal inputs digest equally whatever their insertion order. */
-function stableStringify(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
-  if (isRec(v)) {
-    return `{${Object.keys(v)
-      .filter((k) => v[k] !== undefined)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${stableStringify(v[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(v) ?? 'null';
-}
-
-/** sha256 of the request CEE sends PLoT, `request_id` excluded (it differs on every call, the inputs need not). */
-export function sentDigest(plotPayload: Rec): string {
-  const { request_id: _requestId, ...inputs } = plotPayload;
-  return createHash('sha256').update(stableStringify(inputs)).digest('hex');
-}
 
 /**
  * The Run's execution identity (`RunAnalysisResult.run_id`): one per turn that ran it, and the SAME on a replay of

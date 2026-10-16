@@ -1,0 +1,62 @@
+{
+  "run_id": "fefd84de08cf8ab7a038796f6f13daf07f2d3ff37a8002013d0c3ebe7c44c0ee",
+  "fact_row_id": null,
+  "evaluated_scenario_revision": null,
+  "asked": null,
+  "calculated": null,
+  "omitted": [
+    {
+      "field": "input_snapshot",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "evaluated_scenario_revision",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "fact_row_id",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "historical_model_at_evaluated_revision",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "asked_horizon_and_reference_at_evaluated_revision",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "asked_options_at_evaluated_revision",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "dispatched_goal_threshold",
+      "reason": "not_recorded"
+    },
+    {
+      "field": "dispatched_goal_baseline",
+      "reason": "not_recorded"
+    }
+  ],
+  "scope": {
+    "status": "unverified",
+    "can_show_goal_chance": false,
+    "reasons": [
+      "evaluated_question_not_fully_recorded"
+    ]
+  },
+  "evidence": {
+    "status": "unverified",
+    "missing": [
+      "input_snapshot",
+      "evaluated_scenario_revision",
+      "fact_row_id",
+      "historical_model_at_evaluated_revision",
+      "asked_horizon_and_reference_at_evaluated_revision",
+      "asked_options_at_evaluated_revision",
+      "dispatched_goal_threshold",
+      "dispatched_goal_baseline"
+    ],
+    "dispatched_input_digest": null
+  }
+}

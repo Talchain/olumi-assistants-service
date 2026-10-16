@@ -23,7 +23,7 @@ import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareOptionEstimateWords 
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { sayDate } from '../goal-target/deadline-date.js';
-import { shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE } from '../goal-target/goal-chance-licence.js';
+import { shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE, STATIC_MODEL_SCOPE_NOTE } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
@@ -156,7 +156,10 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
       : `whether ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’ at all, which Olumi assumed.`;
     return line(id, d.range, `${lead} ${link}`, undefined, undefined, false, rangeInputsOf(id));
   });
-  return { points, ranges, pointsOwed };
+  const scope = facts.goal_chance_notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
+  const scoped = (lines: ComposedChanceLine[]): ComposedChanceLine[] => scope
+    ? lines.map(l => ({ ...l, chance: `${l.chance} ${STATIC_MODEL_SCOPE_NOTE}` })) : lines;
+  return { points: scoped(points), ranges: scoped(ranges), pointsOwed };
 }
 
 /** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
