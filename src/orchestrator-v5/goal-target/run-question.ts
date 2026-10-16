@@ -1,6 +1,7 @@
 /** Read-only question/scope projection owned by the goal-chance licence. No store or output-statistic inference. */
 import type { GoalRecord } from './goal-record.js';
 import type { RunEvidence } from '../agent-lane/run-evidence.js';
+import type { RunOmittedRisk } from '../agent-lane/unsized-risk.js';
 import { askedQuestionOf, dispatchedQuestionOf, assessEvaluatedQuestionScope, STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
 export { STATIC_LEVEL_CAPABILITY, assessRunQuestionReadiness } from './run-question-scope.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
@@ -43,9 +44,30 @@ export interface RunQuestion {
   readonly evaluated_scenario_revision: number | null;
   readonly asked: RunQuestionSide | null;
   readonly calculated: RunQuestionSide | null;
-  readonly omitted: readonly { readonly field: string; readonly reason: string; readonly asked?: unknown }[];
+  readonly omitted: readonly { readonly field: string; readonly reason: string; readonly asked?: unknown;
+    readonly node_id?: string; readonly label?: string; readonly scope?: 'modelled_effects_only' }[];
   readonly scope: RunQuestionScope;
   readonly evidence: { readonly status: 'verified' | 'partial' | 'unverified'; readonly missing: readonly string[]; readonly dispatched_input_digest: string | null };
+}
+
+/** The existing stored licence's scope, not a new risk-eligibility decision or a projection of today's graph. */
+export interface RunOmissionScope {
+  readonly scope: 'modelled_effects_only';
+  readonly risks: readonly RunOmittedRisk[];
+}
+
+export function readRunOmissionScope(result: unknown): RunOmissionScope | undefined {
+  if (!isRec(result)) return undefined;
+  const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
+    .flatMap(w => Array.isArray(w) ? w : []).filter((w): w is Rec => isRec(w) && w.code === 'GOAL_CHANCE_LICENSED');
+  if (records.length !== 1) return undefined;
+  const omission = records[0]!.omitted_from_calculation;
+  if (!isRec(omission) || omission.scope !== 'modelled_effects_only' || !Array.isArray(omission.risks) || omission.risks.length === 0
+    || !omission.risks.every((risk): risk is Rec => isRec(risk) && typeof risk.node_id === 'string' && risk.node_id.trim() !== ''
+      && risk.reason === 'unsized_olumi_risk' && (risk.label === undefined || typeof risk.label === 'string' && risk.label.trim() !== '' && !/[\r\n]/u.test(risk.label)))) return undefined;
+  const risks = omission.risks.map(risk => ({ node_id: risk.node_id as string, reason: 'unsized_olumi_risk' as const,
+    ...(typeof risk.label === 'string' ? { label: risk.label.trim() } : {}) }));
+  return new Set(risks.map(risk => risk.node_id)).size !== risks.length ? undefined : { scope: 'modelled_effects_only', risks };
 }
 
 const questionText = (v: unknown): string | undefined => typeof v === 'string' && v.trim() !== '' ? v : undefined;
@@ -114,6 +136,8 @@ export function deriveRunQuestion(input: {
   const calculated = evaluatedInputs === null || scope.status !== 'supported_static' ? evaluatedInputs
     : { ...evaluatedInputs, scope: 'static' as const };
   const omitted = [
+    ...(!identityMismatch && runId !== null ? readRunOmissionScope(input.storedResult)?.risks ?? [] : [])
+      .map(risk => ({ field: 'risk', ...risk, scope: 'modelled_effects_only' as const })),
     ...(asked?.horizon === undefined ? [] : [{ field: 'horizon', reason: scope.status === 'supported_static' ? 'not_calculated' : 'not_verified', asked: asked.horizon }]),
     ...missing.map(field => ({ field, reason: 'not_recorded' })),
   ];

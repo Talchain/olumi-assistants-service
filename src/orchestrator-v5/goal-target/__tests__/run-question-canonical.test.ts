@@ -4,7 +4,8 @@ import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { runFactsOf } from '../../agent-lane/run-facts.js';
 import { withReadTimeHorizonGate } from '../goal-horizon-verdict.js';
-import { STATIC_MODEL_SCOPE_NOTE } from '../goal-chance-licence.js';
+import { STATIC_MODEL_SCOPE_NOTE, goalChanceLicenceForAgent, deriveRunQuestion } from '../goal-chance-licence.js';
+import { unsizedOlumiRiskLineFor } from '../../agent-lane/unsized-risk.js';
 
 const graph = () => ({ nodes: [
   { id: 'capacity', kind: 'goal', label: 'Weekly support capacity', goal_threshold_raw: 100, goal_threshold: 0.2,
@@ -29,6 +30,77 @@ const project = (run: ReturnType<typeof savedRun>, currentGraph = graph()) => pr
   runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: run } as never,
   analysisState: { run_state: { kind: 'complete_current' } } as never, analysisReady: {} as never,
   currentResult: { type: 'analysis_result', computed_against_hash: run.graph_hash_at_run, enrichment: run.enrichment } as never });
+
+describe('THIS Run’s recorded omissions survive every existing scope reader', () => {
+  const risk = { node_id: 'risk-N', label: 'The original provisional risk', reason: 'unsized_olumi_risk' as const };
+  const omission = { scope: 'modelled_effects_only' as const, risks: [risk] };
+  const recorded = () => {
+    const run = savedRun();
+    Object.assign(run.enrichment.inference_warnings[0]!, { omitted_from_calculation: structuredClone(omission) });
+    return run;
+  };
+  const note = unsizedOlumiRiskLineFor(risk.label, true)!;
+
+  it('the existing licence reader retains the stored id/reason/scope without changing its figures or permission', () => {
+    const run = recorded(), before = JSON.stringify(run);
+    expect(goalChanceLicenceForAgent(run)).toMatchObject({ omitted_from_calculation: omission, form: 'each', option_ids: ['hire', 'hold'] });
+    expect(JSON.stringify(run)).toBe(before);
+  });
+
+  it('the selected Run question and AI packet retain the omission and its one existing disclosure', () => {
+    const run = recorded();
+    run.enrichment.inference_warnings[0]!.notes.push(note);
+    const facts = runFactsOf(run, graph(), true);
+    expect(facts.question?.run_id).toBe('run-N');
+    expect(facts.question?.omitted).toContainEqual({ field: 'risk', ...risk, scope: 'modelled_effects_only' });
+    expect(facts.chances.goal_chance_licence).toMatchObject({ omitted_from_calculation: omission });
+    expect(facts.must_say.filter(line => line === note)).toHaveLength(1);
+    expect(facts.chances.goal_chance_display?.hire).toBe('about 35%');
+  });
+
+  it.each(['point', 'range'] as const)('%s Results keep the disclosure beside their own chance through JSON readback and later edits', kind => {
+    const run = recorded();
+    if (kind === 'range') (run.enrichment.inference_warnings as Record<string, unknown>[]).push({ code: 'GOAL_CHANCE_RANGE',
+      severity: 'info', message: 'Recorded range.', option_ids: ['hire'], range_by_option: { hire: { low_pct: 20, high_pct: 50,
+        low_rounding: 'whole', high_rounding: 'whole', kind: 'link_strength', from: 'hire', to: 'capacity', among: 'unsized_links' } } });
+    // The current model cannot rename or remove a historical omission; the selected saved Run owns it.
+    const today = graph(); today.nodes[1]!.label = 'A later option label';
+    const view = project(JSON.parse(JSON.stringify(run)), today);
+    expect(view.run?.run_id).toBe('run-N');
+    expect(view.options.find(o => o.option_id === 'hire')?.cell.kind).toBe(kind === 'point' ? 'figure' : 'range');
+    expect(view.question?.omitted).toContainEqual({ field: 'risk', ...risk, scope: 'modelled_effects_only' });
+    expect(view.goal_chance?.notes?.filter(line => line === note)).toHaveLength(1);
+    const cell = view.options.find(o => o.option_id === 'hire')!.cell;
+    expect('face' in cell ? cell.face : undefined).toContain(STATIC_MODEL_SCOPE_NOTE);
+  });
+
+  it('another selected Run supplies only its own omission; a missing record is never filled from today’s graph', () => {
+    const earlier = recorded(), later = savedRun(); later.run_id = 'run-M';
+    const today = graph();
+    Object.assign(today.nodes[1]!, { kind: 'risk', provenance: 'ai_inferred', label: risk.label });
+    expect(project(earlier, today).question?.omitted).toContainEqual({ field: 'risk', ...risk, scope: 'modelled_effects_only' });
+    expect(project(later, today).question?.omitted.some(o => o.field === 'risk')).toBe(false);
+    expect(project(later, today).goal_chance?.notes ?? []).not.toContain(note);
+    expect(runFactsOf(earlier, today, false).must_say).not.toContain(note);
+  });
+
+  it('foreign selected-Run evidence cannot lend this omission or a figure permission', () => {
+    const question = deriveRunQuestion({ storedResult: recorded(), runEvidence: { runId: 'run-foreign' } });
+    expect(question.scope.can_show_goal_chance).toBe(false);
+    expect(question.omitted.some(o => o.field === 'risk')).toBe(false);
+  });
+
+  it('a stale historical question retains its omission identity without reopening any figure or current disclosure', () => {
+    const run = recorded();
+    const view = projectCanonicalAnalysisView({ graph: graph(),
+      runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: run } as never,
+      analysisState: { run_state: { kind: 'complete_stale' } } as never, currentResult: null });
+    expect(view.question?.run_id).toBe('run-N');
+    expect(view.question?.omitted).toContainEqual({ field: 'risk', ...risk, scope: 'modelled_effects_only' });
+    expect(view.options).toEqual([]);
+    expect(view.goal_chance).toBeUndefined();
+  });
+});
 
 describe('one evaluated question on canonical Results and run facts', () => {
   it('keeps the probability supplied by the Run and puts the static scope beside it', () => {
