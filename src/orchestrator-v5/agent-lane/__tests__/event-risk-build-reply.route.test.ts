@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { heldEventRiskLine, refusedEventRiskLine } from '../stated-event-risk-draft.js';
@@ -38,6 +39,8 @@ vi.mock('../../handlers/chip-click-dispatch.js', async (original) => ({
 const PREFIX = "We're deciding between hiring contractors and training in-house. ";
 const STATED = 'Our key developer might leave, a 10–30% chance in the next 6 months.';
 const NARRATION = 'The shared model is ready to explore.\n- Check the delivery assumptions.\n- Discuss the staffing choices.';
+let rejectedDraft = false;
+const unattestedDraft = JSON.parse((JSON.parse(readFileSync(new URL('./fixtures/hiring-unattested-event-raw-20261014.json', import.meta.url), 'utf8')) as { raw_text: string }).raw_text) as Rec;
 let cause = false;
 let extraRisk = false;
 let narratorText = NARRATION;
@@ -77,7 +80,7 @@ describe('event-risk disclosure through the served build reply', () => {
       if (body.text?.format?.name === 'brief_spans') return new Response(JSON.stringify(say(JSON.stringify({
         goal: 'Delivery', options: ['Hiring contractors', 'Training in-house'], limits: [], build: true,
       }))), { status: 200 });
-      if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify(say(JSON.stringify(candidate()))), { status: 200 });
+      if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify(say(JSON.stringify(rejectedDraft ? unattestedDraft : candidate()))), { status: 200 });
       if (!askedToBuild && saved.nodes.length === 0) {
         askedToBuild = true;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',
@@ -100,8 +103,8 @@ describe('event-risk disclosure through the served build reply', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
-  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); cause = false; extraRisk = false; narratorText = NARRATION; buildOutput = undefined; askedToBuild = false; });
-  async function turn(brief: string) {
+  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); rejectedDraft = false; cause = false; extraRisk = false; narratorText = NARRATION; buildOutput = undefined; askedToBuild = false; });
+  async function turn(brief: string, built = true) {
     activeBrief = brief;
     const turnId = randomUUID();
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -109,7 +112,7 @@ describe('event-risk disclosure through the served build reply', () => {
     } });
     expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
     const body = response.json() as { assistant_text: string; _answer_shape?: AnswerShape; _agent: { tool_calls: { name: string; ok: boolean }[] } };
-    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
+    expect(body._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: built }));
     expect(rows.get(turnId)?.assistant_message).toBe(body.assistant_text);
     return body;
   }
@@ -162,4 +165,16 @@ describe('event-risk disclosure through the served build reply', () => {
     expect(body.assistant_text).toContain('Without a current level the analysis would treat it as zero.');
     expect(body.assistant_text).toContain('Olumi can’t run the numbers until this risk has a figure.');
   });
+  it('a rejected draft is a preparation limit: keep the reasoning question, never promise a retry', async () => {
+    rejectedDraft = true;
+    const question = 'Which source of evidence could help test the productivity assumption?';
+    narratorText = question;
+    const brief = (JSON.parse(readFileSync(new URL('./fixtures/hiring-unattested-event-raw-20261014.json', import.meta.url), 'utf8')) as { brief: string }).brief;
+    const body = await turn(brief, false);
+    expect(buildOutput).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expect(saved).toEqual({ nodes: [], edges: [] });
+    expect(body.assistant_text).toBe(`${question}\n\nThe model was not built: Olumi could not prepare a draft that keeps your aim and conditions — continue with the question in this reply.`);
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis')).toBe(false);
+  });
+
 });
