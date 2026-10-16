@@ -1,0 +1,13 @@
+{
+  "source_ref": "AIE 16 Oct 'shared-total wording' AMEND (TL6222944420 / DL6222998402; inbox/LANE-A.md) of TL 19:18Z's shortcut; G3 1a1a7907 option C, C4 rule 2 unchanged",
+  "path": "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+  "constant": "STATEMENTS_INSTRUCTION",
+  "status": "AIE AMEND, exact text; generated quality UNMEASURED; no new keyword matcher (clause meaning)",
+  "changes": [
+    {
+      "id": "Q4",
+      "old": "or treat a shared budget/limit as an option’s actual setting.",
+      "replacement": "or treat a shared budget/limit as an option’s actual setting. When the source states one aggregate cost covering named parts of the same option, record that stated total ONCE against that option's aggregate cost, preserving its complete attributed source, unit, period, conditions and uncertainty. Do not copy the total to each part, divide or annualise it, or create a total from separately stated figures. Keep separately stated costs separate. A budget, cap, shared cross-option amount or ambiguous/unassigned figure is not that option's actual cost; retain its stated role or leave the proposed binding unresolved. The drafter proposes the subject; existing source verification determines whether that binding is supported."
+    }
+  ]
+}

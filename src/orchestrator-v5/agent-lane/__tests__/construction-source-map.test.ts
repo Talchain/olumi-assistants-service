@@ -14,10 +14,12 @@ type Rec = Record<string, any>;
  * The AIE's text (#94 6180604131) with its exact replacements applied, in order: H0/H1 (AIE 6183352754); Q1, the whole
  * sentence with its colon lead-in (AIE disposition 16 Oct on #94 6214201657); Q2, an explicitly stated central figure kept
  * beside its range (AIE disposition 16 Oct on #94 6215225530); Q3, each stated option/factor setting with its source and
- * native period (AIE disposition 16 Oct on #94 6218243631). Each packet copied byte-identical.
+ * native period (AIE disposition 16 Oct on #94 6218243631); Q4, one stated aggregate cost for named parts of an option recorded
+ * ONCE against its aggregate cost (AIE AMEND 16 Oct of TL 19:18Z, TL6222944420 / DL6222998402). Each packet copied byte-identical.
  */
 const AIE_TEXT = ['tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'tests/fixtures/sys2/aie-quote-lead-in-amendment-v1.json',
-  'tests/fixtures/sys2/aie-range-central-figure-amendment-v1.json', 'tests/fixtures/sys2/aie-option-setting-statement-amendment-v1.json']
+  'tests/fixtures/sys2/aie-range-central-figure-amendment-v1.json', 'tests/fixtures/sys2/aie-option-setting-statement-amendment-v1.json',
+  'tests/fixtures/sys2/aie-one-figure-option-total-amendment-v1.json']
   .flatMap((path) => (JSON.parse(readFileSync(path, 'utf8')) as { changes: { old: string; replacement: string }[] }).changes)
   .reduce((text, c) => { if (text.split(c.old).length !== 2) throw new Error(`AIE old text not found once: ${c.old.slice(0, 60)}`); return text.replace(c.old, c.replacement); },
     readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8'));
