@@ -30,7 +30,8 @@ import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
-import { goalChanceLicenceForAgent, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, goalChanceLicenceOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
+import { runFactsOf } from '../../../agent-lane/run-facts.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
@@ -602,6 +603,30 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
 const SERVED_CAPACITY = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/capacity-c85817f2-construction.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
 
 describe('readback RESPONSE → LICENCE — the served capacity level brief (at least 100 tickets per week): withheld for its missing level', () => {
+  it('BUDDY B1: a licensed saved80/target100 Run never says its own role-less target is excluded; distinct limits stay disclosed', async () => {
+    const { bytes } = await constructedBytes(SERVED_CAPACITY.brief, SERVED_CAPACITY.raw_text);
+    const g = JSON.parse(bytes) as Rec, goal = node(g, 'weekly_support_capacity'), cap = goal.goal_threshold_cap;
+    goal.observed_state = { value: 80 / cap, baseline: 80 / cap, raw_value: 80, cap, unit: 'tickets per week',
+      source: 'user_override', extractionType: 'explicit' };
+    const evaluated = await runAndRead(JSON.stringify(GraphV3.parse(g)), request => request.options.map((o: Rec) =>
+      answered(o.id, o.is_baseline === true ? 0 : 0.46, o.is_baseline === true
+        ? { mean: 80 / cap, std: 0, p10: 80 / cap, p50: 80 / cap, p90: 80 / cap }
+        : { mean: 0.2, std: 0.03, p10: 0.16, p50: 0.2, p90: 0.24 })));
+    const licence = goalChanceLicenceForAgent(evaluated.view)!;
+    expect(licence).toBeDefined();
+    const ownExclusion = 'It does not include: ‘Weekly support capacity’ at least 100 tickets per week';
+    expect(JSON.stringify(licence.notes)).not.toContain(ownExclusion);
+    expect(JSON.stringify(runFactsOf(evaluated.result, evaluated.reloaded, true).must_say)).not.toContain(ownExclusion);
+    // Same node alone, or same bound alone, cannot erase a genuinely additional mandatory condition.
+    for (const [operator, value, words] of [['>=', 120, 'at least 120'], ['<=', 100, 'at most 100']] as const) {
+      const distinct = { constraint_id: `different:${operator}:${value}`, node_id: goal.id, operator, value, unit: 'tickets per week' };
+      const reading = goalChanceLicenceOf(evaluated.result.enrichment, evaluated.reloaded, goal.id, () => false,
+        licence.sent_threshold, evaluated.reloaded, { sentRun: evaluated.payload,
+          storedConstraints: [...evaluated.reloaded.goal_constraints, distinct], sentConstraints: evaluated.payload.goal_constraints })!;
+      expect(reading.notes?.join(' ')).toContain(`It does not include: ‘Weekly support capacity’ ${words} tickets per week`);
+    }
+  });
+
   it('B2 outbound: a confirmed saved80 baseline reaches the100-level ticket target on the same Run request', async () => {
     // Fixture prerequisite only: Lane A/verifier must separately prove that the human baseline reaches the saved model.
     const { bytes } = await constructedBytes(SERVED_CAPACITY.brief, SERVED_CAPACITY.raw_text);
@@ -882,6 +907,16 @@ async function refusedRun(brief: string, draft: Rec): Promise<{ payload: Rec; re
 const notTestable = (result: Rec): Rec[] => ((result.enrichment.inference_warnings ?? []) as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
 
 describe('RE-SCOPE 2 R5-5 — a reading refused for its conditions survives the reopen as "no chance", said truly', () => {
+  it('BUDDY B2: a request-bound level status quo drifting from75 to78 stays reference_moved, never relabelled a fixed baseline', async () => {
+    const { bytes } = await constructedBytes(LEVEL_BRIEF, levelDraft(null));
+    const { view } = await runAndRead(bytes, request => capacityAnswer(request).map(row => row.option_id === idOf(request, 'Carry on with the current team')
+      ? { ...row, outcome: { mean: 0.78, std: 0, p10: 0.78, p50: 0.78, p90: 0.78 } } : row));
+    const licence = goalChanceLicenceForAgent(view)!;
+    expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toMatchObject({ reason: 'reference_moved' });
+    expect(JSON.stringify(licence)).not.toContain('using today’s values as a fixed baseline');
+    expect(licence.status_quo).toBeUndefined();
+  });
+
   it('RED on e58b8dbd (LEVEL target): no threshold is sent, so no chance is licensed; the gate says the AIE\'s sentence on every cell', async () => {
     const { payload, result, view, reloaded } = await refusedRun(LEVEL_BRIEF, levelDraft(TWENTY_ONE));
     const goal = node(reloaded, 'development_capacity');

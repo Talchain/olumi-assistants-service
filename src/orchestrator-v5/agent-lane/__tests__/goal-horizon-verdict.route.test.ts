@@ -14,6 +14,7 @@ import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalHorizonVerdict } from '../../goal-target/goal-horizon-verdict.js';
+import { STATIC_MODEL_SCOPE_NOTE } from '../../goal-target/goal-chance-licence.js';
 import { untestedHorizonLine } from '../decision-input-ask.js';
 import { applyGoalSteadyEdit } from '../../goal-target/goal-steady-write.js';
 import { horizonSteadyAttested } from '../../goal-target/horizon-basis.js';
@@ -178,6 +179,21 @@ async function turn(narrator = NARRATOR): Promise<Body> {
   return body;
 }
 
+// B2/S6: a verified static calculation may answer the level target, never the omitted date question.
+function expectSupportedStatic(body: Body): void {
+  expect(lastView.question?.scope.status).toBe('supported_static');
+  const shown = lastView.options.flatMap(({ cell }) => cell.kind === 'figure' || cell.kind === 'range' ? [cell] : []);
+  expect(shown.length).toBeGreaterThan(0);
+  for (const cell of shown) {
+    expect(cell.face).toContain(STATIC_MODEL_SCOPE_NOTE);
+    expect(cell.face).not.toMatch(/\b(?:by|within|at) (?:month 9|9 months)\b/iu);
+  }
+  expect(body.assistant_text).toContain(STATIC_MODEL_SCOPE_NOTE);
+  expect(body.assistant_text).not.toContain(OLD_HORIZON);
+  expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+  expect(JSON.stringify(body)).not.toContain('Add monthly changes');
+}
+
 describe('Science §(ad) through the producer and reply route', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
@@ -220,7 +236,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   beforeEach(() => { graph = clone(B2_READ.graph); currentResult = clone(SOURCE_RESULT); currentFact = undefined;
     providerBodyOverride = undefined; rows.clear(); script = []; });
 
-  it('B2 H9: every scored option withheld; no narrator percentage, same face marker, no retired clause', async () => {
+  it('B2 H9: supported static figures carry their scope; the held date is not forecast', async () => {
     expect(goal(graph).goal_horizon_months).toBe(9);
     expect(graph.nodes.some((node: Rec) => node.nonlinear_identity?.operation === 'accumulation')).toBe(false);
     const body = await turn();
@@ -233,47 +249,32 @@ describe('Science §(ad) through the producer and reply route', () => {
       writeFileSync(join(captureDir, CAPTURE_BASELINE ? 'b2-before-cells.json' : 'b2-after-cells.json'), `${JSON.stringify(lastView.options, null, 2)}\n`);
     }
     if (CAPTURE_BASELINE) { expect(body.assistant_text).toContain('%'); return; }
-    expect(currentFact!.result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({
-      code: HORIZON_WITHHOLD, option_ids: expect.arrayContaining(optionIds(graph)),
-    }));
-    for (const row of currentFact!.result.enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
+    expectSupportedStatic(body);
+    expect(currentFact!.result.enrichment.inference_warnings.some((w: Rec) => w.code === HORIZON_WITHHOLD)).toBe(false);
     expect(lastView.options.map(row => row.option_id).sort()).toEqual(optionIds(graph).sort());
-    for (const row of lastView.options) {
-      expect(row.cell.kind).toBe('withheld');
-      expect(row.cell).toMatchObject({ reasons: expect.arrayContaining([expect.objectContaining({ code: HORIZON_WITHHOLD })]) });
-    }
-    expect(body.assistant_text).not.toContain('%');
-    // §(ad) amended (Paul pricing, DL → AIE #94): every card carries the marker; the reply never repeats it.
-    expect(lastView.options.every(row => row.cell.kind === 'withheld' && row.cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES)).toBe(true);
+    // Existing independent path/zero-spread refusals still own their options; static scope cannot unlock those.
+    expect(lastView.options.find(row => row.option_id === 'keep_current_pricing')!.cell.kind).toBe('withheld');
     expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
-    expect(body.assistant_text).not.toContain(OLD_HORIZON);
-    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
-    expect(JSON.stringify(body)).not.toContain('Add monthly changes');
   }, 60_000);
 
-  it.skipIf(CAPTURE_BASELINE)('same served B2 + stored triple does not unlock its chance', async () => {
+  it.skipIf(CAPTURE_BASELINE)('same served B2: a stored triple grants no date permission; evidenced static work stays scoped', async () => {
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
     const body = await turn();
-    // P1a (DL 87114 #2895): a stored triple does not unlock.
-    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('withhold');
-    expect(currentFact!.result.enrichment.inference_warnings.some((warning: Rec) => warning.code === HORIZON_WITHHOLD)).toBe(true);
-    // Raise's independently unsized links remain a separate refusal in the exact served model.
-    expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body.assistant_text).not.toContain('%');
+    expect(horizonSteadyAttested(graph)).toBe(false);
+    expect(goalHorizonVerdict(graph)).toBe('withhold'); // Forged historical triples still do not attest a date.
+    expectSupportedStatic(body);
+    expect(lastView.options.find(row => row.option_id === 'raise_prices_10')!.cell.kind).toBe('withheld');
     expect(body.assistant_text).not.toContain(WHY);
     if (body._answer_shape !== undefined) expect(body._answer_shape.detail).not.toContain(WHY);
-    expect(body.assistant_text).not.toContain(OLD_HORIZON);
-    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
   }, 60_000);
 
-  it.skipIf(CAPTURE_BASELINE).each(['ai_inferred', 'from_brief'])('same B2 + %s attestation still withholds', async provenance => {
+  it.skipIf(CAPTURE_BASELINE).each(['ai_inferred', 'from_brief'])('same B2: %s cannot attest a date or enlarge the static scope', async provenance => {
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: provenance, horizon_basis_months: goal(graph).goal_horizon_months });
     const body = await turn();
-    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('withhold');
-    expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body.assistant_text).not.toContain('%');
+    expect(horizonSteadyAttested(graph)).toBe(false);
+    expect(goalHorizonVerdict(graph)).toBe('withhold');
+    expectSupportedStatic(body);
     expect(body.assistant_text).not.toContain(WHY);
-    expect(body.assistant_text).not.toContain(OLD_HORIZON);
   }, 60_000);
 
   it('fully sized B2 with real door-minted attestation shows chance and ACKed Why through the served route', async () => {
@@ -290,23 +291,18 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(body.assistant_text).not.toContain(OLD_HORIZON);
   }, 60_000);
 
-  it.skipIf(CAPTURE_BASELINE)('fully sized B2 shape: a stored triple does not unlock any option chance', async () => {
-    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
+  it.skipIf(CAPTURE_BASELINE)('fully sized B2: a stored triple cannot turn verified static figures into a date forecast', async () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
-    const withheld = await realRun(graph);
-    expect(withheld.result.enrichment.inference_warnings).toContainEqual(expect.objectContaining({ code: HORIZON_WITHHOLD }));
-    for (const row of withheld.result.enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
+    const before = await realRun(graph);
+    expect(before.result.enrichment.inference_warnings.some((w: Rec) => w.code === HORIZON_WITHHOLD)).toBe(false);
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
     const body = await turn();
-    // P1a (DL 87114 #2895): a stored triple does not unlock.
-    expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('withhold');
+    expect(horizonSteadyAttested(graph)).toBe(false);
+    expect(goalHorizonVerdict(graph)).toBe('withhold');
     expect(lastView.options).toHaveLength(3);
-    expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body.assistant_text).not.toContain('%');
+    expectSupportedStatic(body);
     expect(body.assistant_text).not.toContain(WHY);
     if (body._answer_shape !== undefined) expect(body._answer_shape.detail).not.toContain(WHY);
-    expect(body.assistant_text).not.toContain(OLD_HORIZON);
-    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
   }, 60_000);
 
   it.skipIf(CAPTURE_BASELINE).each([false, true])('retired exact narrator horizon identities are removed (steady=%s)', async steady => {
@@ -318,11 +314,10 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     // P1a (DL 87114 #2895): neither stored triple nor narrator wording unlocks.
     expect(body.assistant_text).not.toContain(WHY);
-    expect(body.assistant_text).not.toContain('%');
+    expectSupportedStatic(body);
   }, 60_000);
 
-  it.skipIf(CAPTURE_BASELINE)('a stored triple does not unlock a zero-spread option', async () => {
-    // §(ad) S4 read gate: horizon H, no bound carrier → withheld on reload (DL 87114 (A)).
+  it.skipIf(CAPTURE_BASELINE)('a stored triple does not unlock a zero-spread option, even when other static chances are supported', async () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
     const keep = providerBodyOverride!.option_comparison.find((row: Rec) => row.option_id === 'keep_current_pricing');
@@ -330,21 +325,20 @@ describe('Science §(ad) through the producer and reply route', () => {
     keep.outcome = { ...keep.outcome, mean: 120000, std: 0, p10: 120000, p50: 120000, p90: 120000 };
     const body = await turn();
     const licence = currentFact!.result.enrichment.inference_warnings.find((warning: Rec) => warning.code === 'GOAL_CHANCE_LICENSED');
-    // P1a (DL 87114 #2895): a stored triple does not unlock even a zero-spread result.
-    expect(licence).toBeUndefined();
-    expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(lastView.options.every(row => row.cell.kind === 'withheld' && row.cell.face === ZERO_SPREAD_NEEDS_MONTHLY_CHANGES)).toBe(true);
+    expect(licence.withheld_option_ids).toContain('keep_current_pricing');
+    expect(licence.pct_by_option).not.toHaveProperty('keep_current_pricing');
+    const cell = lastView.options.find(row => row.option_id === 'keep_current_pricing')!.cell;
+    expect(cell.kind).toBe('withheld');
+    expect('face' in cell ? cell.face : undefined).not.toMatch(/\d+%/u);
+    expectSupportedStatic(body);
     expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
     expect(body.assistant_text).not.toContain(WHY);
   }, 60_000);
 
-  it('a horizon-withheld Run replays its bulletless _answer_shape deep-equal to live', async () => {
+  it('a scoped static Run replays its exact answer and shape without another provider call', async () => {
     const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
-    const body = await turn(); // turn asserts deep equality on the real same-id replay, without a model call.
-    expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    // §(ad) amended (AIE #94 6178106849): the reply leads with the goal at its point, once; the cards keep the marker.
-    const goalLabel = String(goal(graph).label);
-    expect(body._answer_shape).toMatchObject({ headline: `Your goal is ${goalLabel} at month 9; this Run has not evaluated it at that point.`, bullets: [] });
+    const body = await turn(); // Existing helper asserts deep-equal real same-id replay and zero additional provider calls.
+    expectSupportedStatic(body);
     expect(body.assistant_text).not.toContain("Your goal is for month 9, and this model only has today's numbers.");
     expect(body.assistant_text).not.toContain(ZERO_SPREAD_NEEDS_MONTHLY_CHANGES);
   }, 60_000);

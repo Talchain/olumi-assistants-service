@@ -55,23 +55,25 @@ const noRecordedThreshold = (l: ReturnType<typeof licence>): void => {
 };
 
 describe('spread-driven chance note — recorded scoring frame, point licence only', () => {
-  it('served T1b candidates: only raw agrees, recorded on the delta frame without a note', () => {
+  it('served T1b: £ output agreement cannot override the dispatched normalised LEVEL frame', () => {
     const g = graph(); goal(g).goal_threshold = 0.8;
     const envelope = { option_comparison: records() };
-    const sent = sentGoalThresholdOf(envelope, g, GOAL, earned);
-    expect(sent).toEqual(delta);
+    const sentRun = { graph: g, goal_node_id: GOAL, options: [{ option_id: A }, { option_id: B }, { option_id: SQ, is_baseline: true }] };
+    const sent = sentGoalThresholdOf(envelope, g, GOAL, earned, { sentRun });
+    expect(sent).toEqual({ value: 0.8, field: 'goal_threshold', frame: 'level', baseline: 120000 / 157500, status_quo_option_id: SQ });
+    expect(sentGoalThresholdOf(envelope, g, GOAL, earned), 'no request evidence').toBeUndefined();
+    // The £ samples do not validate a disclosure on that normalised threshold. Existing known-frame B19 positives below stay.
     const l = goalChanceLicenceOf(envelope, g, GOAL, earned, sent)!;
-    expect(l.sent_threshold).toEqual(delta);
-    noNote(l);
-    expect(goalChanceLicenceForAgent({ inference_warnings: [l] })!.sent_threshold).toEqual(delta);
+    noRecordedThreshold(l);
+    expect(goalChanceLicenceForAgent({ inference_warnings: [l] })).not.toHaveProperty('sent_threshold');
   });
-  it('same candidates with constructed reversal: raw recorded, note on B only', () => {
+  it('a constructed output reversal still cannot invent raw-frame evidence or a spread note', () => {
     const g = graph(); goal(g).goal_threshold = 0.8;
     const envelope = { option_comparison: trigger() };
-    const sent = sentGoalThresholdOf(envelope, g, GOAL, earned);
-    const l = goalChanceLicenceOf(envelope, g, GOAL, earned, sent)!;
-    expect(l.sent_threshold).toEqual(delta);
-    expect(l.spread_note_by_option).toEqual({ [B]: SPREAD_NOTE_WITHOUT_DOWNSIDE });
+    const sentRun = { graph: g, goal_node_id: GOAL, options: [{ option_id: A }, { option_id: B }, { option_id: SQ, is_baseline: true }] };
+    const sent = sentGoalThresholdOf(envelope, g, GOAL, earned, { sentRun });
+    expect(sent?.frame).toBe('level');
+    noRecordedThreshold(goalChanceLicenceOf(envelope, g, GOAL, earned, sent)!);
   });
   it.each(['both', 'neither'] as const)('%s candidates agree: no recorded threshold and no note', mode => {
     const g = graph();

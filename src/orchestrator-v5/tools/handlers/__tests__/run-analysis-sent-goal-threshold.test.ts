@@ -25,9 +25,10 @@ describe('Run handler records the sent goal threshold on its stored licence', ()
   it.each([false, true])('real handler, sent threshold and stored hash stay bound (attested: %s)', async attested => {
     vi.stubEnv('CEE_HMAC_SECRET', 's5-r9-run-test-only'); _resetConfigCache();
     // Constructed, fully sized graph: the served graph has paths the current handler withholds before licensing.
-    const optionIds = ['raise_prices_by_10', 'launch_starter_tier'];
+    const optionIds = ['raise_prices_by_10', 'launch_starter_tier', 'keep_pricing_as_it_is'];
     let graph = { nodes: [structuredClone(capture.draft_graph.nodes.find((n: Json) => n.kind === 'goal')),
-      ...optionIds.map((id, i) => ({ id, kind: 'option', label: `Option ${i + 1}`, interventions: { lever: 0.2 + i * 0.6 } })),
+      ...optionIds.map((id, i) => ({ id, kind: 'option', label: `Option ${i + 1}`, ...(i === 2 ? { is_baseline: true } : {}),
+        interventions: { lever: i === 2 ? 0.5 : 0.2 + i * 0.6 } })),
       { id: 'decision', kind: 'decision', label: 'Pricing strategy' },
       { id: 'lever', kind: 'factor', label: 'Lever', observed_state: { value: 0.5, source: 'user_override' } }],
       edges: [...optionIds.flatMap(id => [
@@ -83,7 +84,9 @@ describe('Run handler records the sent goal threshold on its stored licence', ()
     expect(RunAnalysisResultSchema.safeParse(fact.result).success).toBe(true);
     const licence = fact.result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED');
     expect(licence).toBeDefined();
-    expect(licence.sent_threshold).toEqual({ value: 126000, field: 'goal_threshold_raw', frame: 'delta' });
+    // B2 request authority: normalised LEVEL target and explicit paired baseline, never inferred from the £ outcome rows.
+    expect(licence.sent_threshold).toEqual({ value: 0.8, field: 'goal_threshold', frame: 'level',
+      baseline: 120000 / 157500, status_quo_option_id: 'keep_pricing_as_it_is' });
     expect(licence).not.toHaveProperty('spread_note_by_option');
     expect(fact.result.graph_hash_at_run).toBe(storedHash);
     expect(JSON.stringify(graph)).toBe(storedBytes);

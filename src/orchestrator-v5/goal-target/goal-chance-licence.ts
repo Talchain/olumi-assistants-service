@@ -620,7 +620,11 @@ export function goalChanceLicenceOf(
     if (today === undefined) return undefined;
     const normalised = finite(goalState?.value) ? goalState!.value as number : undefined;
     if (sentThreshold === undefined) return normalised === today ? today : 'unknown';
-    if (sentThreshold.frame !== 'delta' || !finite(sentThreshold.value) || goal?.[sentThreshold.field] !== sentThreshold.value) return 'unknown';
+    if (!finite(sentThreshold.value) || goal?.[sentThreshold.field] !== sentThreshold.value) return 'unknown';
+    // The request-bound LEVEL carrier records the reference in the same frame as the evaluated row. Keep the exact D2
+    // comparison below: recording a fixed baseline cannot excuse a status quo that actually moved away from it.
+    if (sentThreshold.frame === 'level') return finite(sentThreshold.baseline) ? sentThreshold.baseline : 'unknown';
+    if (sentThreshold.frame !== 'delta') return 'unknown';
     // The record's two fields name the two frames (`SentGoalThreshold['field']`): the raw one, and the normalised one.
     return sentThreshold.field.endsWith('_raw') ? today : normalised ?? 'unknown';
   })();
@@ -908,7 +912,9 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   // 2026" is not "20"): both are said. With several targets the joint says them.
   const covers = (label: string): string[] => {
     if (sentTargetRows(c.constraints)) return [];
-    const limits = limitsOutsideTheChance(c.graph, c.constraints);
+    const limits = limitsOutsideTheChance(c.graph, c.constraints, {
+      node_id: c.goal?.id, operator: c.comparatorHeld, value: c.target.value, unit: c.target.unit,
+    });
     const partial = partialGoalWords(label, [...limits, ...alsoRequired]);
     return partial === undefined ? [] : [partial];
   };
@@ -1013,13 +1019,17 @@ const sentTargetRows = (c: GoalChanceConstraintInputs): boolean => {
 };
 
 /** The labels of the limits the user set that this single-target chance does not include (amendment 4). */
-function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs): string[] {
+function limitsOutsideTheChance(graph: unknown, c: GoalChanceConstraintInputs,
+  scored: { readonly node_id: unknown; readonly operator: string; readonly value: number; readonly unit?: string }): string[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const stored = Array.isArray(c.storedConstraints) ? c.storedConstraints.filter(isRec) : [];
   return stored.flatMap((row) => {
     if (row.role === GOAL_TARGET_ROLE || isRec(row.deadline_metadata)) return [];
     const label = nodes.find((n) => n.id === row.node_id)?.label;
     const bound = row.operator_as_stated ?? row.operator;
+    // Older saved graphs do not stamp the primary target's role. Only the exact scored event is already included;
+    // another quantity, bound, value or unit is still a distinct condition and must keep its exclusion disclosure.
+    if (row.node_id === scored.node_id && bound === scored.operator && row.value === scored.value && row.unit === scored.unit) return [];
     const words = bound === '<' ? 'below' : bound === '<=' ? 'at most' : bound === '>' ? 'above' : bound === '>=' ? 'at least' : undefined;
     if (typeof label !== 'string' || label.trim() === '' || words === undefined || !finite(row.value)) return [];
     return [`‘${label.trim()}’ ${words} ${sayFigureAsWritten(row.value, typeof row.unit === 'string' ? row.unit : '')}`];

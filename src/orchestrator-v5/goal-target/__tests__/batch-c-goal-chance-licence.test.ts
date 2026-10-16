@@ -603,7 +603,12 @@ const capacityWireRun = (): Rec => ({ option_comparison: [
 const ZERO_SPREAD_LINE = 'Chance not shown: this result reports a very narrow central range or a very small spread. '
   + 'That alone does not establish certainty. Review whether the model captures the uncertainties that matter for this option.';
 /** The field this Run records for itself (run-analysis.ts: `sentGoalThresholdOf` beside `withGoalChanceLicence`). */
-const recordedField = (run: Rec, g: Rec) => sentGoalThresholdOf(run, g, 'capacity', () => false);
+const recordedField = (run: Rec, g: Rec) => {
+  // B2: retain the complete dispatched LEVEL request, including its goal identity; output percentiles supply no frame.
+  const sentRun = { graph: g, goal_node_id: 'capacity', options: (g.nodes as Rec[]).filter(n => n.kind === 'option')
+    .map(n => ({ option_id: n.id, ...(n.is_baseline === true ? { is_baseline: true } : {}) })) };
+  return sentGoalThresholdOf(run, g, 'capacity', () => false, { sentRun });
+};
 const wireLicence = (g: Rec = capacityGraph(), run: Rec = capacityWireRun()) => goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {});
 const wireEnvelope = (run: Rec, g: Rec = capacityGraph()): Rec => withGoalChanceLicence(run, g, 'capacity', () => false, recordedField(run, g), g, {}) as Rec;
 
@@ -642,7 +647,7 @@ describe('independent check r1 — item 1: a percentage quantity changed by an a
 describe('independent check r1 — item 3: the status quo is "no change, by assumption" for LEVEL targets too (amendment 1)', () => {
   it('RED: a level target\'s status quo is never a figure — its line is said, and the options keep their chances and words', () => {
     // D2: read in the Run's recorded frame (goal_threshold → today's normalised 0.75), on wire-shaped rows.
-    expect(recordedField(capacityWireRun(), capacityGraph())).toEqual({ value: 0.85, field: 'goal_threshold', frame: 'delta' });
+    expect(recordedField(capacityWireRun(), capacityGraph())).toEqual({ value: 0.85, field: 'goal_threshold', frame: 'level', baseline: 0.75, status_quo_option_id: 'carry_on' });
     const l = wireLicence()!;
     expect(l.pct_by_option).toEqual({ lead: 46, two: 31 });
     expect(l.withheld_option_ids).toEqual(['carry_on']);
@@ -675,8 +680,9 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     const run = capacityWireRun();
     for (const row of (run.option_comparison as Rec[]).slice(0, 2)) delete row.probability_of_goal;
     const g = capacityGraph();
-    expect(recordedField(run, g), 'nothing licensed: the Run records no field').toBeUndefined();
-    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, recordedField(run, g), g, {})!;
+    const unrecorded = sentGoalThresholdOf(run, g, 'capacity', () => false);
+    expect(unrecorded, 'no dispatched request: output absence cannot establish a frame').toBeUndefined();
+    const l = goalChanceLicenceOf(run, g, 'capacity', () => false, unrecorded, g, {})!;
     expect(l).not.toBeNull();
     expect(l).toMatchObject({ message: '', pct_by_option: {}, withheld_option_ids: ['lead', 'two', 'carry_on'],
       // S7 B2 (AIE 6186002237): no record of what this Run sent, so only the output summary is evidence: the 6172311003 words.
@@ -685,7 +691,7 @@ describe('independent check r1 — item 3: the status quo is "no change, by assu
     for (const key of ['leader_option_id', 'similar_option_ids', 'olumi_estimate_link_count', 'provisional']) {
       expect(l).not.toHaveProperty(key);
     }
-    const env = wireEnvelope(run, g);
+    const env = withGoalChanceLicence(run, g, 'capacity', () => false, unrecorded, g, {}) as Rec;
     const cells = Object.fromEntries(projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: env } as never, g).map((c) => [c.option_id, c.cell as Rec]));
     expect(cells.carry_on).toMatchObject({ kind: 'withheld', why: ZERO_SPREAD_LINE });
     expect(JSON.stringify(cells.carry_on)).not.toMatch(/by assumption|doesn’t match/);
