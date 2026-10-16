@@ -62,7 +62,10 @@ import { readPercentUnit } from './same-unit.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrameWithSetAside, rederiveGoalInLinksWithSetAside, setAsideEstimateDisclosure } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
-import { figureTheUserWrote, sameWord, wordsOf } from './stated-by-user.js';
+import { figuresWrittenIn, figureTheUserWrote, sameWord, wordsOf } from './stated-by-user.js';
+import { verifyStatement } from './user-statements.js';
+import { userStatementFor, userStatementRecord, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
@@ -84,7 +87,7 @@ import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWith
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
-import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
+import { hasUserStatedSize, heldFigureOwnerOf, inputOriginOf } from '../../cee/provenance/provenance-of.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -100,6 +103,38 @@ export interface GoalCurrentLevelArgs {
   readonly unit?: unknown;
   readonly goal_is?: unknown;
   readonly user_stated?: unknown;
+  /** The user's complete statement the level comes from, copied exactly: a WHOLE statement of their typed words. */
+  readonly source_quote?: unknown;
+  /** How the figure comes from that statement (`FIGURE_ORIGINS`). Absent: the figure is written, read by today's rule alone. */
+  readonly figure_origin?: unknown;
+}
+
+/**
+ * ⭐ WHERE A LEVEL'S FIGURE COMES FROM (DL-3 lease 16 Oct; Relief's native check at c72fc72c; the three authorship dimensions):
+ *  · `written` — the statement writes it ("We do about 80 a week today.");
+ *  · `read_from_words` — the statement writes no figure and says there is none ("We have no funding." → 0): Olumi's reading;
+ *  · `reported` — the user reports a figure from elsewhere (an earlier Run's result, someone's estimate), not what they see today.
+ */
+export const FIGURE_ORIGINS = ['written', 'read_from_words', 'reported'] as const;
+export type FigureOrigin = (typeof FIGURE_ORIGINS)[number];
+
+/** Olumi's figure, accepted by the user's press: the stamp a level read from their words is written with. */
+const ACCEPTED_READING_SOURCE = 'user_confirmed' as const;
+
+/** The goal's level, as the statement door names it: the subject of the record a level card keeps. */
+const levelSubjectOf = (goalId: string): DoorSubject => ({ kind: 'goal', id: goalId, field: 'level' });
+
+/**
+ * A carried level record still holds for the level it was prepared with: this goal's level, ONE statement of the user's, and
+ * either the written figure as a point at exactly that level, or none read from words that write no figure.
+ */
+function levelRecordHolds(record: UserStatementRecord, goalId: string, level: { readonly raw_value: unknown }): boolean {
+  const s = record.statements[0];
+  if (record.subject_key !== subjectKey(levelSubjectOf(goalId)) || record.statements.length !== 1 || s === undefined) return false;
+  // Whose the level is, asked of the ONE authority: the user's own figure, or Olumi's figure the user accepted.
+  return s.form === 'point' ? s.low === level.raw_value && s.high === level.raw_value && inputOriginOf(level) === 'human'
+    : s.form === 'describes' && level.raw_value === 0 && inputOriginOf(level) === 'ai_accepted' && record.attest?.read_as === 0
+      && s.low === undefined && s.high === undefined && figuresWrittenIn(s.quote) === 0;
 }
 
 /** The slice of a graph read this module needs — `agent-capabilities.ts`'s `GraphRead` satisfies it. */
@@ -451,6 +486,35 @@ export function statedGoalLevelInUsersWords(
 }
 
 /**
+ * ⭐ NONE, READ FROM THE USER'S WORDS (Relief c72fc72c loss 1: "We have no funding." refused as `figure_not_in_users_words`, so
+ * no card). A statement that writes no figure can be read as ONE figure without inventing a magnitude: none, 0. Any other
+ * figure would be Olumi's guess, and a statement that writes a figure is read by `statedGoalLevelInUsersWords` instead. The
+ * unit is read exactly as for a written figure (`readStatedGoalLevel`). The SOURCE stays the user's words, the BINDING (0) is
+ * Olumi's reading, said on the card before the press, and the press alone adopts it.
+ */
+export function goalLevelReadFromWords(
+  value: number,
+  statedUnitArg: unknown,
+  goal: { readonly label: string; readonly unit: string | undefined },
+  quote: string,
+):
+  | { readonly ok: true; readonly raw: number; readonly statedUnit: string; readonly normalised?: UnitNormalised; readonly quote: string | null }
+  | { readonly ok: false; readonly refusal: string; readonly detail: string } {
+  const stated = readStatedGoalLevel(value, statedUnitArg, goal);
+  if (!stated.ok) return stated;
+  if (stated.raw !== 0) {
+    return { ok: false, refusal: 'reading_not_none',
+      detail: `Words that state no figure can be read only as none (0), so ${value} would be Olumi's guess and is never recorded as the ` +
+        `user's level of "${goal.label}". Nothing was prepared. Ask the user for today's figure in their own words.` };
+  }
+  if (figuresWrittenIn(quote) > 0) {
+    return { ok: false, refusal: 'figure_in_quote',
+      detail: `“${quote}” writes a figure, so today's level is the figure it writes (figure_origin "written"), never a reading of it. Nothing was prepared.` };
+  }
+  return { ok: true, raw: 0, statedUnit: typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '', quote };
+}
+
+/**
  * ⭐ THE UNIT TODAY'S LEVEL IS RECORDED IN, WHEN THE GOAL'S UNIT NAMES NO CURRENCY (R3 F5 D1, #85 5934208404; served CEE
  * `2166aa0b`, guest 6bc6cae6; owner ruling MG; DL 380e54 (1)–(4)).
  *
@@ -758,8 +822,30 @@ export async function proposeGoalCurrentLevel(
       'reaching their target on a guess. Nothing was prepared. Ask the user for their own figure.',
     );
   }
+  // ── WHERE DOES THE FIGURE COME FROM? (`FIGURE_ORIGINS`; Relief c72fc72c loss 2.) A figure the user REPORTS from elsewhere — an
+  // earlier Run's result, someone's estimate — is not what they observe today, so it is never carded as their current level.
+  const origin = FIGURE_ORIGINS.find((o) => o === args?.figure_origin);
+  if (args?.figure_origin !== undefined && origin === undefined) {
+    return refuse('statement_malformed', `figure_origin is one of: ${FIGURE_ORIGINS.join(', ')}. Nothing was prepared.`);
+  }
+  if (origin === 'reported') {
+    return refuse('not_the_users_observation',
+      `This figure is one the user reported from elsewhere (an earlier Run's result, an estimate or a forecast), not what they observe ` +
+      `today, so it is never recorded as their current level of "${goal.label}". Nothing was prepared. Say where the figure came from. ` +
+      'If they said they have no current measurement, say today\'s level stays unknown in the model and carry on; do not ask for it again.');
+  }
   const value = args?.value;
   if (!num(value)) return refuse('unparsable_value', 'No usable number was given. Nothing was prepared.');
+  // ── THE STATEMENT IT COMES FROM, when the Agent quotes it: a WHOLE statement of the user's verified typed words, verified
+  // exactly as the statement door verifies one (`verifyStatement`); words of unknown origin are never a source.
+  if (origin === 'read_from_words' && args?.source_quote === undefined) {
+    return refuse('statement_malformed', 'A level read from the user\'s words needs their complete statement, copied exactly, as source_quote. Nothing was prepared.');
+  }
+  const said = args?.source_quote === undefined ? undefined : verifyStatement({ quote: args.source_quote, form: 'describes' },
+    { now: ctx.user_turn_text, conversation: ctx.user_text, unverified: ctx.unverified_user_text },
+    { subject: { quantity: 'level', node_id: goal.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
+  if (said !== undefined && said.kind === 'refused') return refuse(said.refusal, said.detail);
+  const quoted = said?.statement;
 
   // ── A TARGET ON THE LEVEL FRAME TO MEASURE AGAINST (the goal's own persisted trio).
   const node = goal as typeof goal & { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold_frame?: unknown; goal_threshold_unit?: unknown };
@@ -809,11 +895,24 @@ export async function proposeGoalCurrentLevel(
   const adoptedUnit = forLevel.adopted ? forLevel.unit : forChange.adopted;
 
   // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
-  const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text);
+  // The one reading: none, from a quoted statement that writes no figure (`goalLevelReadFromWords`), said as Olumi's on the card.
+  const readingQuote = origin === 'read_from_words' ? quoted?.quote : undefined;
+  const readFromWords = readingQuote !== undefined;
+  const levelGoal = { label: goal.label, unit: goalUnit };
+  const inWords = readingQuote !== undefined ? goalLevelReadFromWords(value, args?.unit, levelGoal, readingQuote)
+    : statedGoalLevelInUsersWords(value, args?.unit, levelGoal, ctx.user_text);
   if (!inWords.ok) return refuse(inWords.refusal, inWords.detail);
+  // A quoted written figure is written in THAT statement, by the same rule.
+  if (quoted !== undefined && !readFromWords && !statedGoalLevelInUsersWords(value, args?.unit, levelGoal, quoted.quote).ok) {
+    return refuse('figure_not_in_quote', `“${quoted.quote}” does not write ${value}${typeof args?.unit === 'string' && args.unit.trim() !== '' ? ` ${args.unit.trim()}` : ''} as today's level of "${goal.label}". Quote the statement that writes it. Nothing was prepared.`);
+  }
   const stated = inWords;
   const raw = inWords.raw;
   const statedUnit = inWords.statedUnit;
+  if (isChange && readFromWords) {
+    return refuse('not_admitted', `Olumi's reading of none is offered only for a goal measured as a level, and "${goal.label}" is measured as a change. ` +
+      'Nothing was prepared. Ask the user for today\'s figure in their own words.');
+  }
   if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
   // ⛔ An adopted unit is Olumi's reading of the user's figure, quoted from their sentence: none found, nothing is prepared.
   if (forChange.adopted !== undefined && stated.quote === null) {
@@ -894,14 +993,22 @@ export async function proposeGoalCurrentLevel(
 
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
-  if (args.goal_scope === undefined && existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
+  /**
+   * ⭐ WHOSE FIGURE (BUDDY-A 21:06Z: the provenance readers read `observed_state` alone, so a record beside it cannot keep an
+   * approved reading apart from a typed figure). A figure the user wrote is theirs (`USER_EDIT_SOURCE`). None read from their
+   * words is Olumi's figure that the user accepted: the existing `user_confirmed` stamp (`provenance-of.ts` `readValue`:
+   * origin Olumi, accepted; `user_ratified`), as for the other zeros Olumi proposes and a person confirms.
+   */
+  const levelSource = readFromWords ? ACCEPTED_READING_SOURCE : USER_EDIT_SOURCE;
+  const alreadyHeld = readFromWords ? inputOriginOf(existing) === 'ai_accepted' : existing?.source === USER_EDIT_SOURCE;
+  if (args.goal_scope === undefined && existingRaw === raw && alreadyHeld) {
     return refuse('already_recorded', `${sayFigureExactly(raw, goalUnit ?? '') ?? `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
   }
   const observed: GoalObservedState = {
     value: normalisedLevel,
     baseline: normalisedLevel,
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
-    source: USER_EDIT_SOURCE,
+    source: levelSource,
     raw_value: raw,
     cap: levelCap,
     ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
@@ -931,6 +1038,15 @@ export async function proposeGoalCurrentLevel(
   const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;
   const earlierHeld = replaces === undefined ? null
     : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit), withStoredUnit(replaces));
+  /**
+   * ⭐ THE STATEMENT, KEPT BESIDE THE LEVEL (the three authorship dimensions): the user's whole sentence (SOURCE), Olumi's
+   * reading of it (BINDING: the written figure as a point, or none read from words that write no figure — `describes`, with
+   * the reading in `read_as`), and, once written, the press (APPROVAL: a press record, never construction's). The goal's one
+   * `user_statements` record for its level (`withUserStatement`); it replaces an earlier one, as a correction supersedes.
+   */
+  const levelStatement = quoted === undefined ? undefined : userStatementRecord(levelSubjectOf(goal.id),
+    [{ ...quoted, unit: goalUnit ?? statedUnit, ...(readFromWords ? {} : { form: 'point' as const, low: raw, high: raw }) }],
+    new Date().toISOString(), readFromWords ? { read_as: raw } : undefined);
   const proposal = createProposal({
     scenario_id: ctx.scenario_id,
     user_id: ctx.authenticated_user_id,
@@ -944,14 +1060,20 @@ export async function proposeGoalCurrentLevel(
         ...(rederived !== null ? { rederived_part: rederived } : {}),
         ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
         ...(unitReading !== undefined ? { unit_reading: unitReading } : {}),
+        ...(levelStatement !== undefined ? { level_statement: levelStatement } : {}),
       },
     }],
-    provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
+    provenance: { authored_by: 'user_stated',
+      basis: readFromWords ? 'the current level of the goal, Olumi’s reading of the user’s words' : 'the current level of the goal, as the user stated it' },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     // ⭐ With no target yet, the card says today's level only (DL #85 5930770727): there is no target to name.
+    // A reading says so before the press: the figure is Olumi's reading of the user's quoted words, never a figure they wrote.
     public_label:
-      (noTargetYet ? `Record today's level of "${goal.label}" as your figure: ` : `Record the current level of "${goal.label}" as your figure: `) +
+      (readFromWords ? `Record ${noTargetYet ? "today's level" : 'the current level'} of "${goal.label}" as `
+        : noTargetYet ? `Record today's level of "${goal.label}" as your figure: ` : `Record the current level of "${goal.label}" as your figure: `) +
       (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
+      (readingQuote !== undefined ? `, Olumi's reading of your words “${readingQuote}”`
+        : quoted !== undefined ? `, from your words “${quoted.quote}”` : '') +
       (num(target) ? ` (target ${withUnit(target)})` : '') +
       sayAdoptedUnit(goal.label, adoptedUnit) +
       (unitReading !== undefined ? `, read as ${unitReading.unit}, as you wrote it` : '') +
@@ -975,9 +1097,12 @@ export async function proposeGoalCurrentLevel(
       ? { rederived: { factor: rederived.label, from: rederived.was, to: rederived.now, ...(rederived.unit !== undefined ? { unit: rederived.unit } : {}), whose: "Olumi's estimate" } }
       : {}),
     note:
-      'Nothing has changed. Show the user the figure as they gave it' +
-      (stated.normalised !== undefined ? ` and what it is recorded as (${asStated} is ${withUnit(raw)})` : '') +
-      ', and that it will be recorded as THEIR current level of the goal, never the id' +
+      (readingQuote !== undefined
+        ? `Nothing has changed. Show the user that ${figure} is Olumi's reading of their words “${readingQuote}”, which write no ` +
+          'figure, and that it is recorded as their current level of the goal only if they approve that reading, never the id'
+        : 'Nothing has changed. Show the user the figure as they gave it' +
+          (stated.normalised !== undefined ? ` and what it is recorded as (${asStated} is ${withUnit(raw)})` : '') +
+          ', and that it will be recorded as THEIR current level of the goal, never the id') +
       (rederived !== null
         ? `, and that in the same change Olumi's estimate of "${rederived.label}" becomes about ` +
           `${sayPartLevel(rederived.now, rederived.unit)} (was ${sayPartLevel(rederived.was, rederived.unit)}) so that ` +
@@ -1336,6 +1461,17 @@ export async function applyGoalCurrentLevel(
   }
   const readingToWrite = unitReading?.success === true ? unitReading.data : undefined;
 
+  // ⛔ THE STATEMENT THE LEVEL CAME FROM is re-checked at apply time: the carried record exactly (the one reader), and still a
+  // record of THIS goal's level holding exactly the level written (`levelRecordHolds`). Anything else writes nothing.
+  const carriedStatement = (op.value as { level_statement?: unknown } | undefined)?.level_statement;
+  const levelRecord = carriedStatement === undefined ? undefined : userStatementRecordOf(carriedStatement);
+  // An accepted reading is written only with the statement it was read from.
+  if ((carriedStatement === undefined && inputOriginOf(os) === 'ai_accepted')
+    || (carriedStatement !== undefined && (levelRecord === undefined || stableStringify(levelRecord) !== stableStringify(carriedStatement)
+    || !levelRecordHolds(levelRecord, goal.id, os)))) {
+    return notApplied(`The statement this level of "${goal.label}" was read from changed after this was prepared, so nothing was written. Read the model again and propose afresh.`);
+  }
+
   // ⛔ THE RE-DERIVED ESTIMATE IS RE-DERIVED AT APPLY TIME, and must come out exactly as the user approved it — or,
   // when none was approved, still none: the approval text said what would change, and nothing else is written.
   const carried = (op.value as { rederived_part?: RederivedPart } | undefined)?.rederived_part ?? null;
@@ -1393,7 +1529,11 @@ export async function applyGoalCurrentLevel(
    */
   // Read BEFORE this write: the frame every sized link into the goal was sized on.
   const frameBefore = frameOf(approved.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
-  const unretired = { ...approved.raw, nodes } as Record<string, unknown> & { nodes: typeof nodes };
+  const levelled = { ...approved.raw, nodes } as Record<string, unknown> & { nodes: typeof nodes };
+  // The statement is written beside the level, on the goal, in the SAME registration (the door's one writer).
+  const stated = levelRecord === undefined ? levelled : withUserStatement(levelled, levelRecord, levelSubjectOf(goal.id));
+  if (stated === undefined) return notApplied(`"${goal.label}" could not hold the statement its level was read from, so nothing was written.`);
+  const unretired = stated as typeof levelled;
   const retirement = retireNormalisingGoalFrameWithSetAside(unretired);
   const retiredOrSame = retirement.graph;
   // ⭐ D3 step 1: a goal ceiling is (re)paired on the level this write carries, in this same write (Science #87
@@ -1458,7 +1598,9 @@ export async function applyGoalCurrentLevel(
   const pairWritten = writtenGoal as Pair | undefined;
   const pairHeld = !ceilingPaired || (pairNow !== undefined && pairWritten !== undefined
     && (['goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold', 'goal_direction', 'goal_threshold_frame'] as const).every((k) => pairNow[k] === pairWritten[k]));
-  const landed = readingHeld && changeHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  // The statement is read back byte for byte, through the one reader.
+  const statementHeld = levelRecord === undefined || stableStringify(userStatementFor(after, levelSubjectOf(goal.id))) === stableStringify(levelRecord);
+  const landed = statementHeld && readingHeld && changeHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {
@@ -1480,7 +1622,10 @@ export async function applyGoalCurrentLevel(
     revision_before: approved.graph_hash,
     revision_after: after?.graph_hash ?? approved.graph_hash,
     not_represented:
-      `The current level of "${goal.label}" (${os.raw_value}${unit}) is recorded as the user’s own figure. Say so. ` +
+      (levelRecord?.statements[0]?.form === 'describes'
+        ? `The current level of "${goal.label}" (${os.raw_value}${unit}) is recorded as Olumi's reading of the user's words ` +
+          `“${levelRecord.statements[0].quote}”, which wrote no figure; the user accepted that reading, and their words are kept with it. Say so. `
+        : `The current level of "${goal.label}" (${os.raw_value}${unit}) is recorded as the user’s own figure. Say so. `) +
       (part !== null
         ? `Olumi's estimate of "${part.label}" is now about ${sayPartLevel(part.now, part.unit)} (was ` +
           `${sayPartLevel(part.was, part.unit)}), derived from the user's figures so that the product holds; say it is ` +

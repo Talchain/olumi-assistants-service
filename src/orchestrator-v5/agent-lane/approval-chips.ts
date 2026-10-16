@@ -1,4 +1,5 @@
 import { DOOR_APPROVE, DOOR_DERIVED_APPROVE } from '../statement-door/card.js';
+import { inputOriginOf } from '../../cee/provenance/provenance-of.js';
 import { RECORD_STATEMENT_OP } from '../statement-door/write.js';
 import type { NewLimitValue } from './stated-limit.js';
 /**
@@ -365,6 +366,22 @@ export function approvalChipsFor(
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
       tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' }
         : tool === 'propose_hiring_times' ? { id: 'agent-hiring-times-change', label: 'Change', message: 'I want to change the hiring times.' } : DEADLINE_CHANGE_CHIP];
+  }
+  /**
+   * ⭐ TODAY'S LEVEL FROM A QUOTED STATEMENT (the level door's `level_statement`): the STORED card's words ride in `detail` — the
+   * figure and the user's quoted words — only when the proposer's own result for that id returned the same words. None read
+   * from words that write no figure is Olumi's reading (`user_confirmed`), so it is approvable ONLY on that card, and its press
+   * adopts a reading: "Use this reading", never "Record".
+   */
+  const levelOp = tool === 'propose_goal_current_level' && stored?.operations.length === 1 ? stored.operations[0]!.value as
+    { level_statement?: unknown; goal_current_level?: { source?: unknown } } | undefined : undefined;
+  if (levelOp?.level_statement !== undefined) {
+    const result = labelSourceFor?.(proposalId)?.result;
+    const card = result?.ok === true && result.proposal_id === stored!.proposal_id && result.public_label === stored!.public_label ? stored!.public_label : undefined;
+    if (inputOriginOf(levelOp.goal_current_level) === 'ai_accepted') {
+      return card === undefined ? [] : [{ id: approvalChipIdFor(proposalId), ...DOOR_DERIVED_APPROVE, detail: card }, AMEND_CHIP];
+    }
+    return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) }, AMEND_CHIP];
   }
   const detail = assumptionCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
