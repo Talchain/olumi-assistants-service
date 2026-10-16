@@ -724,14 +724,8 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "compound-cardinal parser — scale words DERIVED from MAGNITUDE_MULTIPLIERS (asserted in " +
       "its spec); `hundred` is the phrase compounder the alphabet's own exclusion note calls for, " +
       "never a digit-suffix multiplier; magnitude words appear otherwise only in prose.",
+  // C1: propose-handoff was deleted; the magnitude manifest still scans every surviving production source.
 
-    // --- A real vocabulary, deliberately NOT folded into the union (2.331).
-    "orchestrator/tools/propose-handoff.ts":
-      "WORD_NUMBER_TOKEN is an English CARDINAL lexicon (eleven…ninety, hundred, thousand, million) " +
-      "used to detect whether the user stated a value at all — recognition-only, it never multiplies. " +
-      "Folding it into the union would demand an exclusion for every cardinal from `eleven` to " +
-      "`ninety`, burying the magnitude signal this guard exists to show. Its gap (`grand`, `billion`, " +
-      "`trillion` unrecognised) costs a readiness prompt, never a wrong number — rowed under 2.331.",
   };
 
   /** Declaration-position magnitude words: `million:`, `'grand'`, `|billion`, … */

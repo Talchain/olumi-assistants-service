@@ -188,7 +188,7 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // this count DOWN by extracting one local helper for all three — it was
     // deliberately NOT done here because it would rewrite two branches this
     // lane does not own (scope-expansion rule). Do that before adding a fourth.
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 7,
+    // C1: deleted edit-executor derivations retired; remaining route/chip/writer counts stay exact.
     // 2026-08-15 Train C: +2 (import + one call) — edge_strength_edit commits
     // mid-turn, then derives wire freshness against the authoritative analysis
     // hash returned by that atomic commit. The pre-write context frame cannot

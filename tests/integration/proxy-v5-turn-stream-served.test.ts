@@ -299,9 +299,15 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
       response: { response_version: 2, assistant_text: 'Ran.', suggested_actions: [], insights: [], stage_indicator: 'analyse', blocks: [] },
     });
     app = await buildApp();
+    await app.ready();
+  }, 120_000);
+
+  // Injectable served rows need no socket. Bind only for the three explicit socket witnesses.
+  const ensureListening = async () => {
+    if (port !== 0) return;
     await app.listen({ port: 0, host: '127.0.0.1' });
     port = (app.server.address() as { port: number }).port;
-  }, 120_000);
+  };
 
   afterAll(async () => {
     await app?.close();
@@ -546,6 +552,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
   // ═══════════════════════════════════════════════════════════════════════════
 
   it('the first frame reaches the client BEFORE the turn completes', async () => {
+    await ensureListening();
     const res = await realFetch(`http://127.0.0.1:${port}${STREAM_URL}`, {
       method: 'POST',
       headers: { ...browserHeaders, accept: 'text/event-stream' },
@@ -649,6 +656,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
   }, 120_000);
 
   it('two real-socket streams in parallel each receive exactly their own frame set', async () => {
+    await ensureListening();
     const run = async (scenarioId: string, team: string, delayMs: number) => {
       await new Promise((r) => setTimeout(r, delayMs));
       const res = await realFetch(`http://127.0.0.1:${port}${STREAM_URL}`, {
@@ -675,6 +683,7 @@ describe('POST /proxy/v5/turn/stream — the SERVED streamed turn (agent target)
   }, 90_000);
 
   it('destroying the socket after the FIRST frame: turn still commits, server survives, next request fine', async () => {
+    await ensureListening();
     const sid = nextScenarioId();
     const team = nextTeam();
     const turnId = randomUUID();

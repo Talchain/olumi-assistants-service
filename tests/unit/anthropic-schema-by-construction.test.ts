@@ -23,7 +23,6 @@ import {
   UNSUPPORTED_KEYWORDS,
 } from "../../src/adapters/llm/anthropic-schema-compliance.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA, countUnionParams } from "../../src/cee/draft/anthropic-graph-schema.js";
-import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 import { NodeKind, FactorCategory } from "../../src/schemas/graph.js";
 
 // ============================================================================
@@ -431,28 +430,6 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — prompt contract", () => {
     expect(directionEnum).toContain("negative");
     expect((edgeProps.edge_type as SchemaNode).enum).toContain("directed");
     expect((edgeProps.edge_type as SchemaNode).enum).toContain("bidirected");
-  });
-});
-
-// ============================================================================
-// ANTHROPIC_EDIT_GRAPH_SCHEMA
-// ============================================================================
-
-assertFullCompliance(
-  ANTHROPIC_EDIT_GRAPH_SCHEMA as unknown as SchemaNode,
-  "ANTHROPIC_EDIT_GRAPH_SCHEMA",
-);
-
-describe("ANTHROPIC_EDIT_GRAPH_SCHEMA — prompt contract", () => {
-  it("emitted payload passes all checks", () => {
-    const serialised = JSON.stringify(ANTHROPIC_EDIT_GRAPH_SCHEMA);
-    expect(serialised).not.toContain('"additionalProperties":true');
-    expect(serialised).not.toContain('"additionalProperties": true');
-    expect(serialised).not.toContain('"description"');
-
-    console.log("\n=== Full serialised edit_graph schema ===");
-    console.log(JSON.stringify(ANTHROPIC_EDIT_GRAPH_SCHEMA, null, 2));
-    console.log("=== END ===\n");
   });
 });
 

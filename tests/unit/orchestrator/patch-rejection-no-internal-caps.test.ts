@@ -31,27 +31,12 @@
  * branch leaks unobserved. Both, or neither is worth having.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildPatchRejectionEnvelope } from '../../../src/orchestrator/patch-rejection-helper.js';
-import type { ConversationContext } from '../../../src/orchestrator/types.js';
-import {
-  MAX_NODE_OPS,
-  MAX_EDGE_OPS,
-  OPTION_ADD_MAX_EDGE_OPS,
-} from '../../../src/orchestrator/tools/patch-budget-limits.js';
 
 vi.mock('../../../src/utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
   TelemetryEvents: {},
 }));
-
-const CONTEXT: ConversationContext = {
-  messages: [],
-  framing: null,
-  graph: null,
-  analysis_response: null,
-  scenario_id: 'scenario-2655',
-};
 
 /**
  * ⭐ THE PATTERN. Two independent shapes, because the witnessed sentence
@@ -96,133 +81,6 @@ describe('⭐⭐ 2.655 (I2) — the leak pattern itself is real', () => {
   it('ordinary user-facing copy does NOT match', () => {
     for (const text of MUST_NOT_MATCH) {
       expect(INTERNAL_CAP_LEAK.test(text), `pattern over-matched: ${text}`).toBe(false);
-    }
-  });
-});
-
-/**
- * ⭐⭐ THE DERIVED SWEEP — every rejection shape the builder can produce.
- *
- * The matrix spans both `reason` values, present and absent counts, present
- * and absent caps, and each of the copy-replacing branches
- * (`structural_guidance`, `user_safe_reasons`). Counts deliberately include
- * values ABOVE and BELOW the real caps so a de-leak that only suppresses the
- * cap clause, or only the counts, is caught.
- */
-interface RejectionShape {
-  readonly name: string;
-  readonly ctx: Parameters<typeof buildPatchRejectionEnvelope>[0];
-}
-
-const ACTIONS = [
-  { role: 'facilitator' as const, label: 'Break into smaller steps', prompt: 'Smaller steps please.' },
-];
-
-const SHAPES: readonly RejectionShape[] = [
-  {
-    name: 'budget_exceeded — the walk`s shape (node cap tripped, edge cap not)',
-    ctx: {
-      reason: 'budget_exceeded',
-      detail: 'Consider breaking this into smaller steps, or rebuilding the model from an updated brief.',
-      node_ops: 6,
-      edge_ops: 6,
-      max_node_ops: MAX_NODE_OPS,
-      max_edge_ops: MAX_EDGE_OPS,
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'budget_exceeded — probe C`s shape (edge cap tripped)',
-    ctx: {
-      reason: 'budget_exceeded',
-      detail: 'Consider breaking this into smaller steps.',
-      node_ops: 3,
-      edge_ops: 12,
-      max_node_ops: MAX_NODE_OPS,
-      max_edge_ops: MAX_EDGE_OPS,
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'budget_exceeded — the option-addition bucket cap',
-    ctx: {
-      reason: 'budget_exceeded',
-      detail: 'Consider breaking this into smaller steps.',
-      node_ops: 1,
-      edge_ops: 9,
-      max_node_ops: MAX_NODE_OPS,
-      max_edge_ops: OPTION_ADD_MAX_EDGE_OPS,
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'budget_exceeded — counts and caps absent (the fallback branch)',
-    ctx: {
-      reason: 'budget_exceeded',
-      detail: 'Consider breaking this into smaller steps.',
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'budget_exceeded — both dimensions over',
-    ctx: {
-      reason: 'budget_exceeded',
-      detail: 'Consider breaking this into smaller steps.',
-      node_ops: 11,
-      edge_ops: 20,
-      max_node_ops: MAX_NODE_OPS,
-      max_edge_ops: MAX_EDGE_OPS,
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'structural_violation — generic',
-    ctx: {
-      reason: 'structural_violation',
-      detail: 'Consider simplifying the change.',
-      violations: ['NO_PATH_TO_GOAL raw detail'],
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'structural_violation — caller-vetted reasons',
-    ctx: {
-      reason: 'structural_violation',
-      detail: 'Consider simplifying the change.',
-      user_safe_reasons: ['This change would leave a node that cannot reach the goal.'],
-      suggested_actions: ACTIONS,
-    },
-  },
-  {
-    name: 'structural_violation — flag-gated structural guidance',
-    ctx: {
-      reason: 'structural_violation',
-      detail: 'Consider simplifying the change.',
-      structural_guidance: 'Tell me which option the new risk belongs to and I will add it there.',
-      suggested_actions: ACTIONS,
-    },
-  },
-];
-
-describe('⭐⭐ 2.655 (I2) — no rejection the builder can produce names an internal cap', () => {
-  for (const shape of SHAPES) {
-    it(shape.name, () => {
-      const envelope = buildPatchRejectionEnvelope(shape.ctx, 'turn-2655', CONTEXT);
-      const text = envelope.assistant_text ?? '';
-      expect(text.length).toBeGreaterThan(0);
-      expect(text, `internal cap leaked in "${shape.name}": ${text}`).not.toMatch(
-        INTERNAL_CAP_LEAK,
-      );
-    });
-  }
-
-  it('the suggested actions are swept too — a chip label is user-facing copy', () => {
-    for (const shape of SHAPES) {
-      const envelope = buildPatchRejectionEnvelope(shape.ctx, 'turn-2655', CONTEXT);
-      for (const action of envelope.suggested_actions ?? []) {
-        expect(action.label).not.toMatch(INTERNAL_CAP_LEAK);
-        expect(action.prompt).not.toMatch(INTERNAL_CAP_LEAK);
-      }
     }
   });
 });

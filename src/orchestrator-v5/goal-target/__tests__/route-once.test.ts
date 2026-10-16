@@ -18,7 +18,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
-import { compactGraph } from '../../../orchestrator/context/serialise.js';
+import { compactGraph } from '../../../orchestrator/context/graph-compact.js';
 
 type Rec = Record<string, any>;
 type Edge = Rec & { from: string; to: string; exists_probability?: number; strength?: { mean: number; std?: number } };
@@ -343,7 +343,7 @@ describe('rule R route-once', () => {
     // Every reader of the PERSISTED graph sees the same: no hold on M->Y (control: held once X participates).
     expect(heldIds(excluded)).toEqual([]);
     expect(heldIds(control)).toEqual(['M->Y']);
-    const llm = (g: Graph) => compactGraph(g as never).edges.find((e) => e.from === 'M' && e.to === 'Y')!.exists_probability;
+    const llm = (g: Graph) => compactGraph(g as never).edges.find((e) => e.from === 'M' && e.to === 'Y')!.exists;
     expect([llm(excluded), llm(control)]).toEqual([0.8, 1]);
     const agentRow = async (g: Graph): Promise<Rec> => {
       const dispatch = vi.fn<InternalDispatch>(async () => ({ status: 200, json: { graph: g } }));

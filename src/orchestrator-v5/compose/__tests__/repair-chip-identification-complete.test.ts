@@ -44,34 +44,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
-
-import {
-  CONFIGURE_OPTION_EXAMPLE_VALUE,
-  composeConfigureOptionClarifyResponse,
-} from '../configure-option-clarify-response.js';
 import { findForbiddenPhraseHit } from '../forbidden-user-facing-phrases.js';
-import {
-  buildRepairPairChip,
-  buildRepairPairChipMessage,
-  buildConfigureOptionDirectSetSentence,
-  buildConfigureOptionAdvisedFormat,
-} from '../../configure-option-chip-text.js';
+import { buildRepairPairChip, buildRepairPairChipMessage } from '../../configure-option-chip-text.js';
 
 const OPTION = 'rebuild our product on an AI-native architecture';
 const FACTOR = 'Cash runway consumed';
-
-/** The teach-the-format lead-in — the sentence a chip click must never get. */
-const RETYPE_LEAD_IN = 'Tell me what it changes, like this:';
-
-const compose = (message: string) =>
-  composeConfigureOptionClarifyResponse({
-    optionLabel: OPTION,
-    factorLabels: [FACTOR],
-    stage: 'analyse',
-    message,
-    analysisWillProceed: true,
-  }).assistant_text;
 
 /**
  * ⭐ PRECONDITION PIN (CLAUDE.md trap 13b — a guard whose discrimination
@@ -104,29 +81,6 @@ describe('fixture precondition — the message under test is the product\'s own 
 });
 
 describe('clicking the repair chip — identification is complete', () => {
-  it('does NOT hand back the retype template', () => {
-    expect(compose(CHIP.message)).not.toContain(RETYPE_LEAD_IN);
-  });
-
-  it('does NOT quote the whole advised sentence back as something to type', () => {
-    const advised = buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6');
-    expect(compose(CHIP.message)).not.toContain(advised);
-  });
-
-  it('asks for the STRENGTH in human terms, naming the slot the chip named', () => {
-    // ⚠⚠ THE SHAPE OF THE ASK CHANGED AND THE ASSERTION FOLLOWS IT. This read
-    // `toMatch(/from 0 .*to 1/)` — Olumi's internal normalised coefficient
-    // scale, which a strategic user is never asked to understand (founder
-    // ruling, 30 Aug 2026). What this test is ACTUALLY about — that the chip
-    // click lands on an ask naming the slot and requesting the value — is
-    // unchanged and is still asserted; only the calibration is now human, and
-    // it is derived from the module that accepts it rather than transcribed.
-    const text = compose(CHIP.message);
-    expect(text).toContain(OPTION);
-    expect(text).toContain(FACTOR);
-    expect(text).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
-    expect(text).not.toMatch(/\b0\.\d/);
-  });
 
   /**
    * ⭐ THE MODULE'S COPY CONTRACT APPLIES TO THE NEW BRANCH TOO — and nothing
@@ -153,100 +107,5 @@ describe('clicking the repair chip — identification is complete', () => {
     // is a hand-maintained description of the list (trap 12) and is inaccurate
     // on that word. The control below is a DERIVED member of the real list.
     expect(findForbiddenPhraseHit('Sorry, no change was made.')).not.toBeNull();
-    expect(findForbiddenPhraseHit(compose(CHIP.message))).toBeNull();
-  });
-
-  /**
-   * ⛔ THE DIRECT-SET SENTENCE MUST NOT APPEAR ON THIS BRANCH.
-   *
-   * WHEN WRITTEN (#1113) the reason was FALSITY: the sentence then read "open
-   * <option> on the canvas and add <factor> to what it changes", and a live
-   * drive on 2026-08-25 found the canvas option panel renders the intervention
-   * row inside a `<fieldset disabled>` — a forced native write produced ZERO
-   * wire calls, and the panel states it is read-only because the change "cannot
-   * yet be saved to the shared model".
-   *
-   * ⚠ THE REASON HAS CHANGED; THE ASSERTION HAS NOT. ROADMAP 2.1269 fixed the
-   * `answered` branch (this note used to record that branch as an outstanding
-   * defect — it is closed, and the sentence now points at chat). What this case
-   * pins today is that the two branches stay DISTINCT: this branch makes its own
-   * ask in its own words, and must not also append the shared sentence.
-   */
-  it('makes its own ask and does not append the shared direct-set sentence', () => {
-    expect(compose(CHIP.message)).not.toContain(buildConfigureOptionDirectSetSentence());
-  });
-});
-
-/**
- * ⭐⭐ THE DISCRIMINATING CONTROL (CLAUDE.md trap 22b — one predicate, two
- * opposite harms, and a corpus that tests one direction is a guard watching one
- * door).
- *
- * Dropping the template is a GAP for a user who has named nothing; keeping it
- * for a chip click is the LIE this PR closes. These cases point the opposite
- * way to every case above and MUST stay green, so a fix that widens into a
- * blanket deletion REDs here rather than shipping.
- */
-describe('identification NOT complete — the teach-the-format branch is untouched', () => {
-  it.each([
-    ['option named, factor absent', `Configure ${OPTION}`],
-    ['nothing named', 'help me with this'],
-    ['a different option entirely', 'Help me configure the hiring option.'],
-  ])('%s — still gets the routable phrasing', (_name, message) => {
-    const text = compose(message);
-    expect(text).toContain(RETYPE_LEAD_IN);
-    // ⚠ DERIVED, NOT HAND-COPIED. This was the literal `'0.6'` — a mirror of a
-    // constant owned one file over (trap 12), which went stale the moment the
-    // exemplar became a percentage. The property under test is "this branch
-    // still advertises the ROUTABLE SENTENCE", never "it advertises 0.6".
-    expect(text).toContain(
-      buildConfigureOptionAdvisedFormat(OPTION, FACTOR, CONFIGURE_OPTION_EXAMPLE_VALUE),
-    );
-  });
-
-  // ⛔⛔ P8, ON THE BRANCH THAT BROKE IT. This lane appended the percentage
-  // anchors here, so the branch advertised the bare-decimal sentence AND a
-  // percentage in one breath — and the obvious combination is refused by BOTH
-  // readers (`resolveOptionEffectWrite("…to 60%")` →
-  // `no_single_unit_scale_value`, measured).
-  //
-  // ⚠ THE REVIEWER'S MUTANT R2 SURVIVED GREEN AT 543/543 because nothing
-  // pinned this. It is pinned now: this branch advertises exactly ONE value
-  // form, and it is the one its own reader accepts.
-  //
-  // ⚠⚠ THE PARENTHESISED MEASUREMENT ABOVE IS WITHDRAWN — RE-MEASURED AND
-  // REFUTED at `de58cff3`, quoted rather than deleted (trap 14). The percent
-  // conversion landed in `option-effect-write.ts` on 30 Aug 2026, so
-  // `resolveOptionEffectWrite("…to 60%")` now MATCHES and reads 0.6 (driven
-  // against the wire-witnessed graph fixture, both controls firing; the full
-  // table is on `CONFIGURE_OPTION_EXAMPLE_VALUE`). The exemplar is therefore a
-  // PERCENTAGE now, so this branch and the identified branches teach the same
-  // notation — the product used to give a tester two different instructions
-  // about what to type.
-  //
-  // ⭐ THE ASSERTION IS UNCHANGED IN SUBSTANCE AND STAYS: **exactly one value
-  // form**, and no anchor sentence whose "just the percentage is enough" claim
-  // is false HERE, because this branch needs the user to name the pair. What
-  // changed is which single form that is — not that there is one.
-  it.each([
-    ['option named, factor absent', `Configure ${OPTION}`],
-    ['nothing named', 'help me with this'],
-  ])('%s — advertises ONE value form, never a second scale', (_name, message) => {
-    const text = compose(message);
-    // The routable sentence is present … (derived, never a copied literal)
-    expect(text).toContain(
-      buildConfigureOptionAdvisedFormat(OPTION, FACTOR, CONFIGURE_OPTION_EXAMPLE_VALUE),
-    );
-    // … and the ANCHOR SENTENCE, whose "just the percentage is enough" claim is
-    // false on this branch, is absent. Asserted on the anchors themselves rather
-    // than on the hint constant, so re-wording the hint cannot silently un-pin
-    // this.
-    expect(text).not.toContain('0% means');
-    expect(text).not.toContain('100% means');
-    expect(text).not.toContain(MISSING_VALUE_ASK_FORMAT_HINT);
-    // ⭐ AND THE SECOND SCALE IS GONE FOR GOOD: the internal normalised
-    // coefficient must not appear in user copy anywhere (founder ruling,
-    // 30 Aug 2026). This branch was the last one still showing it.
-    expect(text).not.toMatch(/\b0\.\d/);
   });
 });

@@ -39,7 +39,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -168,7 +168,12 @@ function listTestFiles() {
     ],
     { encoding: "utf8", cwd: REPO_ROOT },
   );
-  return out.split("\n").filter(Boolean).sort();
+  return out.split("\n").filter(Boolean).filter((file) => {
+    // Pending deletions remain in git's index until the DL stages the patch.
+    // Ignore only absent directory entries; broken symlinks/read errors still fail closed.
+    try { lstatSync(join(REPO_ROOT, file)); return true; }
+    catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  }).sort();
 }
 
 /** Draft reason for --write: nearest preceding comment or skipped title. */

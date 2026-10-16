@@ -94,9 +94,8 @@ const DIRECT_ANTHROPIC_CHAT_CALLERS = directAnthropicChatCallers();
 describe('AI task lifecycle authority', () => {
   it('matches every literal production router call site without calling compatibility rows live', () => {
     const calls = LITERAL_ROUTER_TASKS;
+    // C1: route/executor tasks retired; the exact remaining router-call population still controls this list.
     expect(calls).toEqual([
-      'clarify_brief',
-      'critique_graph',
       'decision_review',
       'draft_graph',
       // The draft-quality semantic-coverage judge (src/cee/draft-quality/judge.ts).
@@ -104,9 +103,7 @@ describe('AI task lifecycle authority', () => {
       // deterministic pre-filter nominates — so it belongs in this derived
       // census, and its lifecycle row must not be display_only or inert.
       'draft_quality_review',
-      'edit_graph',
       'explain_diff',
-      'suggest_options',
       'validate_graph',
     ]);
 
@@ -125,8 +122,7 @@ describe('AI task lifecycle authority', () => {
     expect(AI_TASK_LIFECYCLE).toMatchObject({
       clarification: {
         executable: false,
-        state: 'display_only',
-        executableTask: 'clarify_brief',
+        state: 'inert_compatibility',
       },
       explainer: {
         executable: false,
@@ -302,14 +298,16 @@ describe('AI task lifecycle authority', () => {
     expect(RUNTIME_AI_TASK_AUTHORITY.decision_review.promotionGate).toBe(
       'decision_review_hash_bound_eval',
     );
-    expect(RUNTIME_AI_TASK_AUTHORITY.suggest_options).toMatchObject({
-      promptAuthority: 'pms_or_checked_in_default',
-      promptIdentity: 'runtime_source_version_hash',
-      checkedInModel: 'gpt-5.2',
-    });
-    expect(RUNTIME_AI_TASK_AUTHORITY.clarify_brief.promptAuthority).toBe(
-      'provider_specific_pms_or_inline_constant',
-    );
+    // C1: retired route/executor tasks must not regain executable runtime authority.
+    for (const task of ['clarify_brief', 'critique_graph', 'edit_graph', 'suggest_options'] as const) {
+      expect(RUNTIME_AI_TASK_AUTHORITY).not.toHaveProperty(task);
+      expect(hasAiTaskExecutablePath(task)).toBe(false);
+      expect(getAiTaskRuntimeAvailability(task)).toBe('not_executable');
+    }
+    for (const alias of ['clarification', 'options'] as const) {
+      expect(AI_TASK_LIFECYCLE[alias]).not.toHaveProperty('executableTask');
+      expect(getAiTaskRuntimeAvailability(alias)).toBe('not_executable');
+    }
     // Was 'router_global_fallback' with checkedInModel: null — the state that
     // let the global provider decide explain_diff's provider, and therefore the
     // state in which the task could never serve (the global fallback is OpenAI,

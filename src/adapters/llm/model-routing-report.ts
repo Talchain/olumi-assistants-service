@@ -52,7 +52,8 @@ export type ModelRoutingSource =
   | 'failover'
   | 'per_call'
   | 'store_model_config';
-export type ReportedModelTask = CeeTask | ExecutableRuntimeTask;
+// C1: direct inspection of clarify_brief stays type-safe compatibility metadata; it is absent from executable runtime rows.
+export type ReportedModelTask = CeeTask | ExecutableRuntimeTask | 'clarify_brief';
 export type ConfiguredProvider = 'anthropic' | 'openai' | 'fixtures';
 
 export interface ReportedFailoverAssignment {

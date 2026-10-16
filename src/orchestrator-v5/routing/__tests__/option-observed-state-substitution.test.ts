@@ -30,12 +30,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import {
-  detectOptionOwnValueSubstitution,
-  formatOptionOwnValueWithheldNotice,
-  OPTION_OWN_VALUE_IS_NOT_AN_EFFECT_CARRIER,
-} from '../option-observed-state-substitution.js';
-import { decideOptionInterventionWrite } from '../option-intervention-write-guard.js';
+import { detectOptionOwnValueSubstitution, formatOptionOwnValueWithheldNotice, OPTION_OWN_VALUE_IS_NOT_AN_EFFECT_CARRIER } from '../option-observed-state-substitution.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURE = JSON.parse(
@@ -53,11 +48,6 @@ function graph(key: string): { nodes: any[]; edges: any[] } {
 const PILOT = '70180763';
 const CURRENT = '4bba0554';
 const STAFFED_COVERAGE = '0d2a1d17';
-
-/** The natural sentence the auditor typed, and the product's own confirmation. */
-const NATURAL_SENTENCE =
-  'Revise Coverage Pilot to staff 30% of support hours, down from 70%. '
-  + 'Keep Current Coverage at 40%, and do not change any other values or causal relationships.';
 
 describe('the captured fixtures are the graphs they claim to be', () => {
   // A spec that reads a fixture must pin the fixture (trap 13b: a guard whose
@@ -100,22 +90,6 @@ describe('the captured fixtures are the graphs they claim to be', () => {
     expect(pilotAfter.interventions[STAFFED_COVERAGE].value).toBe(0.3);
     expect(pilotAfter.interventions[STAFFED_COVERAGE].source).toBe('user_specified');
     expect(pilotAfter.observed_state).toEqual(pilotBefore.observed_state);
-  });
-});
-
-describe('the premise, reproduced at this tip', () => {
-  // Not a guard — evidence. The auditor's mechanism note says the existing
-  // write guard ALLOWS this turn as `outcome_not_unhonoured`. If that ever
-  // stops being true the premise of this whole module has changed and this
-  // spec is the place that says so.
-  it('the pre-existing intervention write guard allows the witnessed turn', () => {
-    const verdict = decideOptionInterventionWrite({
-      message: NATURAL_SENTENCE,
-      before: graph('before'),
-      after: graph('after_natural_sentence'),
-      appliedMutation: true,
-    });
-    expect(verdict).toEqual({ verdict: 'allow', reason: 'outcome_not_unhonoured' });
   });
 });
 

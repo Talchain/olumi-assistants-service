@@ -1,8 +1,8 @@
 /** C1: exact global compose census after removing conventional routing. Surviving stances and chip claim gates are unchanged. */
-import { readdirSync,readFileSync } from 'node:fs';
-import { dirname,relative,resolve,sep } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe,expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC_ROOT = resolve(HERE, '../..');
@@ -29,7 +29,6 @@ const SCANNED_FILES: Readonly<Record<string,string>> = {
 "system-events/factor-value-edit.ts": resolve(HERE, "../system-events/factor-value-edit.ts"),
 "system-events/edge-strength-edit.ts": resolve(HERE, "../system-events/edge-strength-edit.ts"),
 "system-events/goal-target-edit.ts": resolve(HERE, "../system-events/goal-target-edit.ts"),
-"compose/configure-option-clarify-response.ts": resolve(HERE, "../compose/configure-option-clarify-response.ts"),
 "handlers/approve-held-proposal.ts": resolve(HERE, "../handlers/approve-held-proposal.ts"),
 };
 const UNSCANNED_COMPOSE_FILES: Readonly<
@@ -227,37 +226,7 @@ const GOAL_TARGET_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
       'recoverable-response composers keyed where those files are scanned.',
   },
 };
-const CONFIGURE_OPTION_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
-  assistant_text: {
-    stance: 'structural',
-    why:
-      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same ' +
-      'shape as EDIT_CLARIFY_SITES). The value is built immediately above as a four-element ' +
-      "`.join(' ')`: two module string constants, one `buildConfigureOptionAdvisedFormat(...)` " +
-      'template from configure-option-chip-text.ts, and interpolations of exactly TWO kinds of ' +
-      'graph label — the OPTION being configured and the FACTOR(s) it is linked to. ' +
-      'IT CANNOT ASSERT A LEADER, and the derivation is about SELECTION, not just wording. ' +
-      'The option is chosen by `tryConfigureOptionClarify` on ONE criterion: ' +
-      "`computeStructuralReadiness(...).options[].status === 'needs_encoding'` — i.e. it is " +
-      'named because it is BLOCKED, never because it ranks. There is no analysis read on this ' +
-      'path at all: the module takes the persisted graph and nothing else, the factor names come ' +
-      'from `edge.from === optionId` walks over that same graph, and no probability, margin, ' +
-      'win-rate, ordering or comparative claim is available to the composer to interpolate even ' +
-      'if it wanted one. Zero LLM calls — the whole point of the intercept is that it replaces ' +
-      'an edit-lane LLM round-trip that was returning OPERATION_DID_NOT_LAND. ' +
-      'ONE PHRASE DESERVES ITS OWN NOTE rather than being waved through: the copy contains ' +
-      '"the analysis cannot compare it with the others". That is a statement about the ' +
-      'ANALYSIS BEING BLOCKED, not a comparative result — it names no other option, asserts no ' +
-      'ordering, and is emitted only on the `needs_encoding` branch where by construction no ' +
-      'comparison exists yet. It is weaker than the add-risk echo already registered ' +
-      'structural, which interpolates two labels with no kind restriction. ' +
-      'The route threads `mayNameLeadingOption` from `claimSafety.forExit()` on this exit (it ' +
-      'is NOT hardcoded true here), so even the inherited permission is the turn-entry read. ' +
-      'SCOPE NOTE so a later reader does not think it was missed: this composer emits ' +
-      '`suggested_actions: []` deliberately, so unlike EDIT_CLARIFY_SITES there is no chip ' +
-      'channel carrying labels out of this file at all.',
-  },
-};
+
 const APPROVAL_SITES: Readonly<Record<string, RegisteredSite>> = {
   "text": {
     "stance": "structural",
@@ -274,7 +243,6 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string,Regi
 "system-events/factor-value-edit.ts": FACTOR_VALUE_EDIT_SITES,
 "system-events/edge-strength-edit.ts": EDGE_STRENGTH_EDIT_SITES,
 "system-events/goal-target-edit.ts": GOAL_TARGET_EDIT_SITES,
-"compose/configure-option-clarify-response.ts": CONFIGURE_OPTION_CLARIFY_SITES,
 "handlers/approve-held-proposal.ts": APPROVAL_SITES,
 };
 function composeCallPattern(): RegExp {
@@ -527,9 +495,9 @@ it('records the OPEN GAPS explicitly, so the residue is a list and not a surpris
     expect(ungated).toEqual([]);
   });
 it('pins every remaining site and key, including the extracted writer',()=>{
-expect(enumerateAllScannedSites(sources)).toHaveLength(11);
-expect(Object.keys(registerTally())).toHaveLength(11);
-expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual(["compose/configure-option-clarify-response.ts","compose/edit-clarify-response.ts","handlers/approve-held-proposal.ts","handlers/chip-click-dispatch.ts","system-events/edge-strength-edit.ts","system-events/factor-value-edit.ts","system-events/goal-target-edit.ts"]);
+expect(enumerateAllScannedSites(sources)).toHaveLength(10);
+expect(Object.keys(registerTally())).toHaveLength(10);
+expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual(["compose/edit-clarify-response.ts","handlers/approve-held-proposal.ts","handlers/chip-click-dispatch.ts","system-events/edge-strength-edit.ts","system-events/factor-value-edit.ts","system-events/goal-target-edit.ts"]);
 });
 it('mutant: duplicating a registered receipt expression changes the multiset',()=>{
 const key=qualify("handlers/approve-held-proposal.ts",'text');

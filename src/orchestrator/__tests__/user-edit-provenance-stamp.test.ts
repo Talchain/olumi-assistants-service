@@ -34,18 +34,51 @@
  * would FAIL CEE's GraphV3 parse at every edit seam. Widened to the user-owned
  * literals the estate actually writes.
  */
-import { describe, it, expect, vi } from 'vitest';
+/**
+ * ROADMAP 2.396(b) — "CEE writes observed_state WITHOUT `source` on chat-set
+ * values → the 'User edited' pill can never earn on that lane."
+ *
+ * ── The measured defect (P4 transport lane, 2026-08-05) ─────────────────────
+ * The UI's `isReviewedByUser` earns the "User edited" pill from
+ * `observed_state.source` ∈ {user_confirmed, user_assumption, user_override,
+ * user, user_edited} (witnessed pill-earning wire literal, runE2 of
+ * journey-witness-final-2026-08-04: `observed_state.source:"user_override"`).
+ * CEE's chat-edit lanes wrote NO source at all:
+ *   · edit-graph normal path + held/confirm path (via canonicalise-value-ops):
+ *     nothing stamped — neither `source` nor `provenance`;
+ *   · set_factor_value: stamps `provenance:'user_set'` only, and the V3
+ *     response transform CLOBBERS node provenance from extractionType
+ *     (`schema-v3.ts` — `v3Node.provenance = nodeProvenanceDisplay(...)`), so
+ *     the provenance rung is unreliable on the wire; `observed_state.source`
+ *     is the carrier that demonstrably survives to the UI.
+ * So every chat-set value rendered as "Olumi estimate — check first" forever.
+ *
+ * ── The fix pinned here ─────────────────────────────────────────────────────
+ * `stampUserEditProvenance` (canonicalise-value-ops.ts) stamps, INTO THE OP
+ * (pre-apply, so the stamp rides the applier → canonical parse →
+ * `batchFullyLanded` unchanged — stamping the canonical graph after the fact
+ * would trip `updateWritesSurvived`'s deepEqual):
+ *   · `observed_state.source: 'user_override'` — the pill's primary rung;
+ *   · node-level `provenance: 'user_set'` — the set_factor_value precedent.
+ * Applied at BOTH edit seams (edit-graph.ts and gm-held-execute.ts — the held
+ * half is pinned in gm-held-provenance-stamp.test.ts).
+ *
+ * Plus the schema half: `ObservedStateV3.source` was
+ * z.enum(['brief_extraction','cee_inference']) — structurally incapable of
+ * carrying ANY user stamp, and a UI-stamped persisted graph (the UI writes
+ * user_override / user_confirmed / user into the shared store since #581)
+ * would FAIL CEE's GraphV3 parse at every edit seam. Widened to the user-owned
+ * literals the estate actually writes.
+ */
+import { describe, it, expect } from 'vitest';
 
 import {
   canonicaliseValueOps,
   stampUserEditProvenance,
   reconcileObservedValuePair,
 } from '../canonicalise-value-ops.js';
-import { handleEditGraph } from '../tools/edit-graph.js';
 import { GraphV3, ObservedStateV3 } from '../../schemas/cee-v3.js';
 import type { PatchOperation } from '../types.js';
-import type { ConversationContext } from '../types.js';
-import type { LLMAdapter } from '../../adapters/llm/types.js';
 
 // ── schema half: the enum can now carry the user's stamp ────────────────────
 
@@ -316,204 +349,5 @@ describe('stampUserEditProvenance — the op-level stamp', () => {
     const frozen = JSON.parse(JSON.stringify(op));
     stampUserEditProvenance([op]);
     expect(op).toEqual(frozen);
-  });
-});
-
-// ── end-to-end on the NORMAL edit seam ──────────────────────────────────────
-// Mirrors the persisted-false-success harness: the REAL handleEditGraph loop
-// with the live slash-keyed spelling. RED before the seam wiring: the applied
-// graph carried NO source and NO provenance on the edited node.
-
-function buildContext(): ConversationContext {
-  return {
-    graph: {
-      nodes: [
-        { id: 'dec_a', kind: 'decision', label: 'Decide' },
-        {
-          id: 'fac_cash',
-          kind: 'factor',
-          label: 'Monthly Cash',
-          category: 'controllable',
-          observed_state: {
-            value: 0.5,
-            source: 'panel_elicited',
-            factor_type: 'cost',
-            extractionType: 'inferred',
-            elicited_from: {
-              round_id: 'round-prior',
-              participant_id: 'participant-prior',
-              evidence_event_id: 'evidence-prior',
-            },
-          },
-        },
-        { id: 'out_profit', kind: 'goal', label: 'Profit' },
-      ],
-      edges: [
-        {
-          from: 'fac_cash',
-          to: 'out_profit',
-          strength: { mean: -0.35, std: 0.1 },
-          exists_probability: 0.88,
-          effect_direction: 'negative',
-        },
-      ],
-    },
-    analysis_response: null,
-    framing: null,
-    messages: [],
-    scenario_id: 'scn-2396b-repro',
-  } as unknown as ConversationContext;
-}
-
-function makeAdapter(responseJson: unknown): LLMAdapter {
-  return {
-    name: 'fixtures',
-    model: 'test-model',
-    chat: vi.fn().mockResolvedValue({
-      content: JSON.stringify(responseJson),
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      model: 'test-model',
-      latencyMs: 1,
-      stopReason: 'end_turn',
-    }),
-  } as unknown as LLMAdapter;
-}
-
-describe('normal edit seam — a chat-set value earns the user stamp on the APPLIED graph', () => {
-  it('⭐ the edited node carries source user_override + provenance user_set (2.396(b))', async () => {
-    const result = await handleEditGraph(
-      buildContext(),
-      'Change the monthly cash factor to 0.42',
-      makeAdapter({
-        operations: [
-          {
-            op: 'update_node',
-            path: '/nodes/fac_cash/data/value',
-            value: 0.42,
-            old_value: null,
-            impact: 'moderate',
-            rationale: 'Set as requested.',
-          },
-        ],
-        removed_edges: [],
-        warnings: [],
-        coaching: { summary: 'Updated Monthly Cash.', rerun_recommended: true },
-      }),
-      'req-2396b',
-      'turn-2396b',
-    );
-
-    expect(result.wasRejected).toBe(false);
-    expect(result.appliedGraph).not.toBeNull();
-
-    const nodes = (result.appliedGraph as { nodes: Array<Record<string, unknown>> }).nodes;
-    // Identity binding: the EDITED node, by id.
-    const edited = nodes.find((n) => n.id === 'fac_cash')!;
-    const observed = edited.observed_state as Record<string, unknown>;
-    expect(observed.value).toBe(0.42);
-    expect(observed.source).toBe('user_override');
-    expect(observed.elicited_from).toBeUndefined();
-    expect('elicited_from' in observed).toBe(false);
-    expect(edited.provenance).toBe('user_set');
-
-    // Negative control: the untouched goal node earned NOTHING.
-    const goal = nodes.find((n) => n.id === 'out_profit')!;
-    expect(goal.provenance).not.toBe('user_set');
-  });
-
-  it('keeps the panel value attribution when chat changes only the unit', async () => {
-    const result = await handleEditGraph(
-      buildContext(),
-      'Change the monthly cash factor unit to USD',
-      makeAdapter({
-        operations: [
-          {
-            op: 'update_node',
-            path: '/nodes/fac_cash/data/unit',
-            value: 'USD',
-            old_value: 'GBP',
-            impact: 'minor',
-            rationale: 'Change the unit as requested.',
-          },
-        ],
-        removed_edges: [],
-        warnings: [],
-        coaching: { summary: 'Updated Monthly Cash.', rerun_recommended: true },
-      }),
-      'req-unit-only',
-      'turn-unit-only',
-    );
-
-    expect(result.wasRejected).toBe(false);
-    const nodes = (result.appliedGraph as { nodes: Array<Record<string, unknown>> }).nodes;
-    const observed = nodes.find((node) => node.id === 'fac_cash')!.observed_state as Record<
-      string,
-      unknown
-    >;
-    expect(observed.value).toBe(0.5);
-    expect(observed.unit).toBe('USD');
-    expect(observed.source).toBe('panel_elicited');
-    expect(observed.elicited_from).toEqual({
-      round_id: 'round-prior',
-      participant_id: 'participant-prior',
-      evidence_event_id: 'evidence-prior',
-    });
-  });
-
-  it.each([
-    [
-      'value → unit → std',
-      [
-        { op: 'update_node', path: '/nodes/fac_cash/data/value', value: 0.42 },
-        { op: 'update_node', path: '/nodes/fac_cash/data/unit', value: 'USD' },
-        { op: 'update_node', path: '/nodes/fac_cash/data/std', value: 0.2 },
-      ],
-    ],
-    [
-      'std → unit → value',
-      [
-        { op: 'update_node', path: '/nodes/fac_cash/data/std', value: 0.2 },
-        { op: 'update_node', path: '/nodes/fac_cash/data/unit', value: 'USD' },
-        { op: 'update_node', path: '/nodes/fac_cash/data/value', value: 0.42 },
-      ],
-    ],
-    [
-      'one combined observed-state op',
-      [
-        {
-          op: 'update_node',
-          path: '/nodes/fac_cash',
-          value: { observed_state: { value: 0.42, unit: 'USD', std: 0.2 } },
-        },
-      ],
-    ],
-  ])('lands every same-target leaf independent of order (%s)', async (_label, operations) => {
-    const result = await handleEditGraph(
-      buildContext(),
-      'Set monthly cash to 0.42 USD with uncertainty 0.2',
-      makeAdapter({
-        operations,
-        removed_edges: [],
-        warnings: [],
-        coaching: { summary: 'Updated Monthly Cash.', rerun_recommended: true },
-      }),
-      'req-multi-leaf',
-      'turn-multi-leaf',
-    );
-
-    expect(result.wasRejected).toBe(false);
-    expect(result.appliedGraph).not.toBeNull();
-    const node = (
-      result.appliedGraph as { nodes: Array<Record<string, unknown>> }
-    ).nodes.find((candidate) => candidate.id === 'fac_cash')!;
-    const observed = node.observed_state as Record<string, unknown>;
-    expect(observed).toMatchObject({
-      value: 0.42,
-      unit: 'USD',
-      std: 0.2,
-      source: 'user_override',
-    });
-    expect('elicited_from' in observed).toBe(false);
-    expect(node.provenance).toBe('user_set');
   });
 });

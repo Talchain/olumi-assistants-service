@@ -193,13 +193,7 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
     expect(edges.find((e) => e.from === 'price')?.exists).toBe(0.8);
     expect(edges.find((e) => e.from === 'office')?.exists).toBe(0.8);
   });
-  it('⛔ C1 serialise compactGraph: the same 0.8; the EDIT view keeps the stored 0.8', async () => {
-    const { compactGraph, editCompactGraph } = await import('../../../orchestrator/context/serialise.js');
-    const edges = (compactGraph(g() as never).edges as Rec[]);
-    expect(edges.find((e) => e.from === 'price')?.exists_probability).toBe(0.8);
-    expect(edges.find((e) => e.from === 'office')?.exists_probability).toBe(0.8);
-    expect((editCompactGraph(g() as never).edges as Rec[]).find((e) => e.from === 'price')?.exists_probability).toBe(0.8);
-  });
+
 });
 
 /**
@@ -546,17 +540,13 @@ describe('the Run sends validated definitions at 1.0 / 0.01; route-once changes 
 });
 
 describe('every reader that shows existence reads the SAME validated hold (served T1b fa1)', () => {
-  it('graph-compact and serialise show 1 for the definition and 0.8 for the causal control; the EDIT view keeps the stored 0.8', async () => {
+  it('graph-compact shows 1 for the definition and 0.8 for the causal control', async () => {
     const g = await servedGraph('fa1');
     const { compactGraph } = await import('../../../orchestrator/context/graph-compact.js');
-    const { compactGraph: serialiseCompact, editCompactGraph } = await import('../../../orchestrator/context/serialise.js');
     const compact = compactGraph(g as never).edges as Rec[];
     expect(compact.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists).toBe(1);
     expect(compact.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')?.exists).toBe(0.8);
-    const serialised = serialiseCompact(g as never).edges as Rec[];
-    expect(serialised.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists_probability).toBe(1);
-    expect(serialised.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')?.exists_probability).toBe(0.8);
-    expect((editCompactGraph(g as never).edges as Rec[]).find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists_probability).toBe(0.8);
+
   });
   it('the decision reviewer reads exists 1 for the definition, 0.8 for the causal control, on all three branches', async () => {
     const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');

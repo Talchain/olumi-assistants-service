@@ -40,22 +40,10 @@ import { describe, it, expect } from 'vitest';
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
-import {
-  buildCanonicalAnalysisReadyFromGraph,
-  computeStructuralReadiness,
-  mergeInterventionSources,
-} from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph, computeStructuralReadiness, mergeInterventionSources } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { evaluateEditGraphMutations } from '../../handlers/edit-graph-referee-gate.js';
 import { deriveMissingEffectPairs } from '../../routing/repair-value-binding.js';
-import {
-  buildOptionEffectRawOperation,
-  readCommittedOptionEffect,
-  resolveOptionEffectWrite,
-} from '../../routing/option-effect-write.js';
-import {
-  anyInterventionWriteLanded,
-  decideOptionInterventionWrite,
-} from '../../routing/option-intervention-write-guard.js';
+import { buildOptionEffectRawOperation, readCommittedOptionEffect, resolveOptionEffectWrite } from '../../routing/option-effect-write.js';
 import { evaluateConfigureOptionOutcome } from '../../routing/configure-option-outcome.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -189,7 +177,7 @@ describe('2.1266 — deterministic option-effect write, full apply chain', () =>
     expect(statusById(after)).toEqual(statusById(before));
   });
 
-  it('hop 5 — ACCEPTANCE 2 (composition): 2.427 says HONOURED and #1016 ALLOWS', () => {
+  it('hop 5 — the retained outcome reader recognises the exact written option', () => {
     const base = GraphV3.parse(graph()) as GraphV3T;
     const resolved = resolveOrThrow(ADVISED_SENTENCE, graph());
     const applied = applyPatchOperations(base, canonicalise(resolved));
@@ -206,36 +194,6 @@ describe('2.1266 — deterministic option-effect write, full apply chain', () =>
       }),
     ).toEqual({ status: 'honoured', optionId: OPTION_ID });
 
-    // #1016 owns the WRITE, and it lets this one through. The writer composes
-    // with the guard rather than bypassing it — the guard runs over exactly
-    // these two graphs in the dispatcher.
-    const verdict = decideOptionInterventionWrite({
-      message: ADVISED_SENTENCE,
-      before: graph(),
-      after: encoded,
-      appliedMutation: true,
-    });
-    expect(verdict.verdict).toBe('allow');
-    // NOT `interventions_write_landed`: the guard consults the outcome verdict
-    // FIRST, and `honoured` short-circuits it. Naming the reason we actually
-    // measured, not the one the mechanism suggests (trap 13c — derive the
-    // expectation from the producer, never from a reading of what it "ought"
-    // to say).
-    expect(verdict).toEqual({ verdict: 'allow', reason: 'outcome_not_unhonoured' });
-  });
-
-  it('the guard\'s interventions-landed arm is REACHABLE — the write is not merely short-circuited', () => {
-    // Positive control for the assertion above (trap 13): if the outcome guard
-    // could never reach the interventions arm, the previous test would be
-    // silent about whether the write is visible to #1016 at all. Drive the
-    // SAME two graphs through the arm's own predicate.
-    const base = GraphV3.parse(graph()) as GraphV3T;
-    const resolved = resolveOrThrow(ADVISED_SENTENCE, graph());
-    const applied = applyPatchOperations(base, canonicalise(resolved));
-    const { graph: encoded } = encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]));
-    expect(anyInterventionWriteLanded(base, GraphV3.parse(encoded) as GraphV3T)).toBe(true);
-    // Opposite-direction twin: the unchanged graph shows no write.
-    expect(anyInterventionWriteLanded(base, GraphV3.parse(graph()) as GraphV3T)).toBe(false);
   });
 
   it('ACCEPTANCE 5 — the chain still lands for a SURVIVOR after structural deletes', () => {
@@ -411,16 +369,6 @@ describe('W5 — the witnessed repair answer, through the full chain', () => {
     // 0.5 → 0.8 re-issue) could not pass this.
     expect(afterBlockers).toEqual(beforeBlockers.filter((b) => blockerKey(b) !== target));
   });
-
-  it('#1016 ALLOWS on `interventions_write_landed` — the writer does not bypass the guard', () => {
-    const resolved = resolveOrThrow(J18.wire.t5_user_message, j18());
-    const applied = applyPatchOperations(GraphV3.parse(j18()) as GraphV3T, canonicalise(resolved));
-    const { graph: encoded } = encodeOptionInterventionsForEdit(
-      applied,
-      new Set([J18.ids.option_id]),
-    );
-    expect(anyInterventionWriteLanded(GraphV3.parse(j18()) as GraphV3T, encoded)).toBe(true);
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -503,16 +451,8 @@ describe('A2 — the prose answer, through the full chain', () => {
     expect(afterBlockers).toEqual(beforeBlockers.filter((b) => blockerKey(b) !== target));
   });
 
-  it('#1016 ALLOWS, and 2.427 does not replace the acknowledgement', () => {
+  it('the retained outcome reader preserves the prose-answer acknowledgement', () => {
     const encoded = applyProseAnswer();
-    expect(anyInterventionWriteLanded(GraphV3.parse(j18()) as GraphV3T, encoded)).toBe(true);
-    const verdict = decideOptionInterventionWrite({
-      message: J18.wire.t4_user_message,
-      before: j18(),
-      after: encoded,
-      appliedMutation: true,
-    });
-    expect(verdict.verdict).toBe('allow');
     // The outcome guard must not read this turn as a mis-targeted configure.
     expect(
       evaluateConfigureOptionOutcome({

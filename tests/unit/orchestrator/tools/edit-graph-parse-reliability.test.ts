@@ -66,68 +66,12 @@ vi.mock("../../../../src/config/index.js", async (importOriginal) => {
   };
 });
 
-import {
-  parseEditGraphResponse,
-  handleEditGraph,
-} from "../../../../src/orchestrator/tools/edit-graph.js";
-import type { ConversationContext } from "../../../../src/orchestrator/types.js";
-import type { LLMAdapter } from "../../../../src/adapters/llm/types.js";
+import { parseEditGraphResponse } from "../../../../src/orchestrator/tools/edit-graph.js";
 
 beforeEach(() => {
   patchPreValidationEnabledForTest = false;
   patchBudgetEnabledForTest = false;
 });
-
-// ============================================================================
-// Helpers (mirrors edit-graph-v2.test.ts)
-// ============================================================================
-
-function makeContext(overrides?: Partial<ConversationContext>): ConversationContext {
-  return {
-    graph: {
-      nodes: [
-        { id: "goal_1", kind: "goal", label: "Revenue" },
-        { id: "factor_1", kind: "factor", label: "Price" },
-        { id: "out_1", kind: "outcome", label: "Sales" },
-      ],
-      edges: [
-        {
-          from: "factor_1",
-          to: "out_1",
-          strength_mean: 0.5,
-          strength_std: 0.1,
-          exists_probability: 0.9,
-          effect_direction: "positive",
-        },
-      ],
-    } as unknown as ConversationContext["graph"],
-    analysis_response: null,
-    framing: null,
-    messages: [],
-    conversational_state: { active_entities: [], stated_constraints: [], current_topic: "framing", last_failed_action: null },
-    scenario_id: "test-scenario",
-    ...overrides,
-  };
-}
-
-function makeSequencedAdapter(contents: string[]): { adapter: LLMAdapter; chat: ReturnType<typeof vi.fn> } {
-  const chat = vi.fn();
-  for (const content of contents) {
-    chat.mockResolvedValueOnce({ content });
-  }
-  const adapter = {
-    name: "test",
-    model: "test-model",
-    chat,
-    draftGraph: vi.fn(),
-    repairGraph: vi.fn(),
-    suggestOptions: vi.fn(),
-    clarifyBrief: vi.fn(),
-    critiqueGraph: vi.fn(),
-    explainDiff: vi.fn(),
-  } as unknown as LLMAdapter;
-  return { adapter, chat };
-}
 
 const SINGLE_OP = {
   op: "update_node",
@@ -287,72 +231,5 @@ describe("A4: alternate-key and inline payloads lifted into value", () => {
     };
     const result = parseEditGraphResponse(JSON.stringify(response));
     expect(result.operations[0]!.value).toBeUndefined();
-  });
-});
-
-// ============================================================================
-// A5 — repair message embeds {operations:[...]} and preserves raw ops on
-//      parse failure
-// ============================================================================
-
-describe("A5: repair prompt embedding", () => {
-  it("embeds previous ops as an { operations: [...] } object in the repair message", async () => {
-    // Attempt 1: parses fine but fails Zod (update_node without value and
-    // no liftable payload) → repair attempt fires.
-    const invalid = JSON.stringify({
-      operations: [{ op: "update_node", path: "/nodes/factor_1", impact: "low", rationale: "r" }],
-    });
-    // Attempt 2: clean no-op response so the run terminates successfully.
-    const emptyOps = JSON.stringify({
-      operations: [],
-      removed_edges: [],
-      warnings: [],
-      coaching: { summary: "Which factor should I update?", rerun_recommended: false },
-    });
-    const { adapter, chat } = makeSequencedAdapter([invalid, emptyOps]);
-
-    await handleEditGraph(makeContext(), "Set Price to 100", adapter, "req-a5", "turn-a5");
-
-    expect(chat).toHaveBeenCalledTimes(2);
-    const repairArgs = chat.mock.calls[1]![0] as { userMessage: string };
-    expect(repairArgs.userMessage).toContain("## Previous (Invalid) Operations");
-    // The embedded block must be the same JSON OBJECT shape the repair
-    // prompt mandates for output ({ "operations": [...] }), not a bare array.
-    const embedded = repairArgs.userMessage.split("## Previous (Invalid) Operations")[1]!.trim();
-    expect(embedded.startsWith("{")).toBe(true);
-    const parsedEmbedded = JSON.parse(embedded) as { operations: unknown[] };
-    expect(Array.isArray(parsedEmbedded.operations)).toBe(true);
-    expect(parsedEmbedded.operations).toHaveLength(1);
-  });
-
-  it("preserves the last parsed raw ops across a subsequent parse failure", async () => {
-    // Attempt 1: parses but fails Zod (no value) → lastRawOps = [op].
-    const invalid = JSON.stringify({
-      operations: [{ op: "update_node", path: "/nodes/factor_1", impact: "low", rationale: "r" }],
-    });
-    // Attempt 2: unparseable garbage → parse failure. lastRawOps must be
-    // PRESERVED (not reset to []).
-    const garbage = "I could not produce the JSON you asked for.";
-    // Attempt 3: clean no-op response so the run terminates successfully.
-    const emptyOps = JSON.stringify({
-      operations: [],
-      removed_edges: [],
-      warnings: [],
-      coaching: { summary: "Which factor should I update?", rerun_recommended: false },
-    });
-    const { adapter, chat } = makeSequencedAdapter([invalid, garbage, emptyOps]);
-
-    await handleEditGraph(makeContext(), "Set Price to 100", adapter, "req-a5b", "turn-a5b", {
-      maxRetries: 2,
-    });
-
-    expect(chat).toHaveBeenCalledTimes(3);
-    const thirdArgs = chat.mock.calls[2]![0] as { userMessage: string };
-    const embedded = thirdArgs.userMessage.split("## Previous (Invalid) Operations")[1]!.trim();
-    const parsedEmbedded = JSON.parse(embedded) as { operations: unknown[] };
-    // The ops from attempt 1 are still available to the repair prompt —
-    // NOT wiped to [] by the attempt-2 parse failure.
-    expect(parsedEmbedded.operations).toHaveLength(1);
-    expect((parsedEmbedded.operations[0] as { op: string }).op).toBe("update_node");
   });
 });

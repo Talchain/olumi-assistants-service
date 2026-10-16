@@ -131,12 +131,11 @@ describe('PROVENANCE & VALUES — the user’s own figure survives a reload', ()
 
 describe('THE CAS POSTURE IS DERIVED, NEVER ASSERTED IN PROSE', () => {
   it('⛔ the enforcing consumers of `requiresExpectedHash` are named, not assumed', () => {
-    // Measured: two enforcing consumers remain: edit dispatch and the extracted held approval.
+    // C1: the extracted held approval is the sole remaining requiresExpectedHash consumer.
     // The Agent lane never consults it — which is why the agent-lane writes need
-    // their own expectation rather than inheriting one. If a third appears, or
-    // one of these disappears, that changes the analysis and this must be re-read.
+    // their own expectation rather than inheriting one. Another consumer, or
+    // loss of this one, changes the analysis and must be reviewed.
     const CONSUMERS = [
-      '../handlers/edit-graph-dispatch.ts',
       // C1: the retained held writer now owns the executor's unchanged expected-base CAS floor.
       '../handlers/approve-held-proposal.ts',
     ];

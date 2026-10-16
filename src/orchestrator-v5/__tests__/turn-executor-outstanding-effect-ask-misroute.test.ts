@@ -28,13 +28,13 @@
  * the classifier's own trigger — `effect_vocab` vs `option_value_set`.
  */
 import { readFileSync } from 'node:fs';
-import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { setTestSink } from '../../utils/telemetry.js';
-import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/__tests__/retired-layer-inputs.fixture.js';
 import { resolveOptionEffectWrite } from '../routing/option-effect-write.js';
 import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';

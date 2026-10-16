@@ -1,5 +1,5 @@
 {
-  "source_sha": "00eee4b54a539b5e46228c1e6c42562a2bc47c39",
+  "source_sha": "cab2b4119a9c4e6d39c05e426181e72d2053349e",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -146,7 +146,6 @@
       "src/orchestrator/context/constraint-feasibility.ts": 11,
       "src/orchestrator/graph-structure-validator.ts": 5,
       "src/orchestrator/shared/referent-resolver.ts": 1,
-      "src/orchestrator/tools/edit-graph.ts": 3,
       "src/routes/agent-v1-turn.ts": 2,
       "src/routes/assist.v1.scenario-graph-register.ts": 7,
       "src/schemas/assist.ts": 2,
@@ -291,7 +290,7 @@
       "src/orchestrator-v5/goal-target/run-question.ts": 1,
       "src/orchestrator-v5/goal-target/static-run-evidence.ts": 3,
       "src/orchestrator-v5/handlers/chip-click-dispatch.ts": 1,
-      "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 6,
+      "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 5,
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 2,
       "src/orchestrator-v5/model-management/compare.ts": 1,
       "src/orchestrator-v5/persisted-graph-invariants.ts": 7,
@@ -600,7 +599,6 @@
       "src/orchestrator-v5/goal-target/goal-target-gap.ts": 1,
       "src/orchestrator-v5/goal-target/run-question-scope.ts": 1,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 5,
-      "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 2,
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 3,
       "src/orchestrator-v5/routing/clarification-resume.ts": 2,
       "src/orchestrator-v5/routing/typed-chip-mutation-proposal.ts": 1,
@@ -830,13 +828,13 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 29,
     "goalUnitOf": 5,
-    "goal_constraints": 448,
+    "goal_constraints": 445,
     "goal_deadline_as_stated": 11,
     "goal_direction": 102,
     "goal_horizon": 47,
     "goal_horizon_months": 43,
     "goal_level_reading": 20,
-    "goal_node_id": 284,
+    "goal_node_id": 283,
     "goal_period": 4,
     "goal_scope": 48,
     "goal_sense_reading": 15,
@@ -845,7 +843,7 @@
     "goal_threshold_cap": 168,
     "goal_threshold_cap_provenance": 38,
     "goal_threshold_frame": 147,
-    "goal_threshold_raw": 244,
+    "goal_threshold_raw": 242,
     "goal_threshold_unit": 225,
     "pickGoalThresholdTrio": 16,
     "quantity_frame": 45,
@@ -859,7 +857,7 @@
     "threshold_source": 43,
     "unit_reading": 79
   },
-  "total_references": 2478,
+  "total_references": 2472,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

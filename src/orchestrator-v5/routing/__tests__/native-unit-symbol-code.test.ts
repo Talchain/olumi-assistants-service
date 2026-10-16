@@ -24,9 +24,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildNativeQuantityOperation, sameUnit } from '../native-quantity-operation.js';
-import { decideNativeQuantityAnswer } from '../native-quantity-answer.js';
 import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
-import type { PendingAction } from '../../session/pending-action.js';
 
 const CELL = { value: 0.7, source: 'user_specified' };
 const WRITE = {
@@ -95,40 +93,6 @@ describe('the write accepts the REAL captured shape', () => {
 });
 
 describe('the reader and the ask agree with the writer', () => {
-  const HASH = 'gh-1';
-  const pending = (unit: string): PendingAction =>
-    ({
-      id: 'pa', scenario_id: 's', chip_id: 'c',
-      action: {
-        kind: 'elicit_option_native_quantity', option_id: 'opt_a', option_label: 'A',
-        factor_id: 'fac_cost', factor_label: 'Hiring and Salary Cost', unit,
-      },
-      preconditions: { graph_hash: HASH },
-      expires_at_turn_count: 2,
-      expires_at_iso: new Date(Date.now() + 600_000).toISOString(),
-      emitted_at_iso: new Date().toISOString(),
-    }) as PendingAction;
-
-  const graph = { nodes: [
-    { id: 'fac_cost', kind: 'factor' },
-    { id: 'opt_a', kind: 'option' },
-  ] };
-
-  it('⭐ a £ reply answers a question asked in GBP', () => {
-    const out = decideNativeQuantityAnswer({
-      message: '£150,000', pendings: [pending('GBP')], graph,
-      currentGraphHash: HASH, nowMs: Date.now(),
-    });
-    expect(out.kind).toBe('bind');
-  });
-
-  it('⛔ a $ reply still does NOT answer a GBP question', () => {
-    const out = decideNativeQuantityAnswer({
-      message: '$150,000', pendings: [pending('GBP')], graph,
-      currentGraphHash: HASH, nowMs: Date.now(),
-    });
-    expect(out).toEqual({ kind: 'ask', reason: 'unit_mismatch' });
-  });
 
   it('⭐ a cell stored under £ reads as ANSWERED for a GBP constraint', () => {
     // Otherwise the product re-asks a question it already holds the answer to. The cell is the user's answer as the

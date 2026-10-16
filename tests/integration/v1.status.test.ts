@@ -108,9 +108,9 @@ describe("GET /v1/status", () => {
     // This is what makes the assertion survive a change to the default
     // adapter and fail on a change to the ROUTING, which is the direction
     // that matters.
-    // C1 removed the conventional orchestrator producer from runtime task models.
+    // C1: startup pins follow the retained draft, explanation and validation tasks.
     expect(Object.hasOwn(startup, "orchestrator")).toBe(false);
-    for (const task of ["draft_graph", "edit_graph", "critique_graph"]) {
+    for (const task of ["draft_graph", "explain_diff", "validate_graph"]) {
       expect(startup[task]).toBe(resolveTaskRouting(task as never).model);
     }
 

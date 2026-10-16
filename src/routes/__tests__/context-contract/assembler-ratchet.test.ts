@@ -20,7 +20,6 @@ export const ASSEMBLERS = [
   { file: `${base}context/context-pack-assembler.ts`, symbol: 'assembleContextPackWithSummary' },
   { file: `${base}context/context-pack-assembler.ts`, symbol: 'projectAnalysis' },
   { file: `${base}context/model-facing-context-pack.ts`, symbol: 'projectModelFacingContextPack' },
-  { file: 'src/orchestrator/tools/edit-graph.ts', symbol: 'handleEditGraph' },
   { file: `${base}coaching/decision-review-enricher.ts`, symbol: 'buildInvokeInputForTests', local: 'buildInvokeInput' },
   { file: 'src/cee/decision-review/invoke.ts', symbol: 'buildDecisionReviewUserMessage' },
   { file: 'src/cee/decision-review/decompose.ts', symbol: 'buildSlices' },
@@ -33,7 +32,8 @@ export const ASSEMBLERS = [
 // 21 → 19: C1 deleted the replacement projection and read-results assembler.
 // #2900's opt-in getCanonicalState section remains A1 (its fact projection remains A3).
 // C1 group 2 removed the unreachable dual-draft review assembler.
-const BASELINE_N = 18;
+// C1 group 3 removes the unreachable natural-language edit assembler.
+const BASELINE_N = 17;
 interface MappedTransport { assembler?: string; kind?: string; via?: string; reason: string }
 const known = JSON.parse(readFileSync(new URL('./fixtures/source-inventory.json', import.meta.url), 'utf8')) as {
   transport_files: string[]; infrastructure: string[]; unclassified_census_gap: string[]; mapped: Record<string, MappedTransport>;

@@ -13,30 +13,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  BARE_REFERENTS,
-  CONTENTFUL_SUBJECT_KNOWN_DROPPED,
-  MISSING_VALUE_ANSWER_KNOWN_DROPPED,
-  MISSING_VALUE_ASK_FORMAT_HINT,
-  messageAnswersMissingValueAsk,
-  readMissingValueAnswer,
-} from '../missing-value-answer.js';
-import {
-  matchBareRepairValue,
-  REPAIR_BARE_VALUE_KNOWN_DROPPED,
-  resolveRepairValueBinding,
-} from '../repair-value-binding.js';
-import {
-  CONFIGURE_OPTION_EXAMPLE_VALUE,
-  composeConfigureOptionClarifyResponse,
-  QUALITATIVE_VALUE_KNOWN_DROPPED,
-} from '../../compose/configure-option-clarify-response.js';
-import { buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
-import type { StageType } from '@talchain/schemas/boundary';
+import { BARE_REFERENTS, CONTENTFUL_SUBJECT_KNOWN_DROPPED, MISSING_VALUE_ANSWER_KNOWN_DROPPED, messageAnswersMissingValueAsk, readMissingValueAnswer } from '../missing-value-answer.js';
+import { matchBareRepairValue, REPAIR_BARE_VALUE_KNOWN_DROPPED, resolveRepairValueBinding } from '../repair-value-binding.js';
+import { QUALITATIVE_VALUE_KNOWN_DROPPED } from './retired-layer-inputs.fixture.js';
 
 const OPTION = 'Subcontract inner-city runs';
 const FACTOR = 'Courier cost share';
-const STAGE = 'framing' as StageType;
 
 const PAIR = [
   {
@@ -48,34 +30,6 @@ const PAIR = [
     message: 'Choose the missing effect value.',
   },
 ];
-
-function clarify(message: string): string {
-  return composeConfigureOptionClarifyResponse({
-    optionLabel: OPTION,
-    factorLabels: [FACTOR],
-    stage: STAGE,
-    message,
-  }).assistant_text as string;
-}
-
-/** The demand the product makes when it has heard nothing yet. */
-const DEMAND = clarify('Configure Subcontract inner-city runs');
-
-/**
- * The product's own advised phrasing, as it appears inside that demand.
- *
- * ⚠ DERIVED FROM THE BUILDER AND THE EXPORTED EXEMPLAR, NOT HAND-COPIED. This
- * was the literal `` `Set the ${OPTION} option's effect on ${FACTOR} to 0.6` ``
- * — a hand-maintained mirror of copy owned elsewhere (trap 12), and it went
- * stale the moment `CONFIGURE_OPTION_EXAMPLE_VALUE` moved from the internal
- * `0.6` to the human `60%`. Deriving it means a future change to either the
- * builder or the exemplar re-runs this check instead of silently failing it.
- */
-const ADVISED = buildConfigureOptionAdvisedFormat(
-  OPTION,
-  FACTOR,
-  CONFIGURE_OPTION_EXAMPLE_VALUE,
-);
 
 describe('ordinary human answers are ACCEPTED and bound (the four forms that looped)', () => {
   // Measured at pristine: ALL FOUR were refused by `matchBareRepairValue` AND by
@@ -237,51 +191,8 @@ describe('OPPOSITE DIRECTION — what must still refuse to bind', () => {
 });
 
 describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issued', () => {
-  it('the demand names the slot it is asking about (both halves)', () => {
-    expect(DEMAND).toContain(OPTION);
-    expect(DEMAND).toContain(FACTOR);
-    expect(DEMAND).toContain(ADVISED);
-  });
 
-  it('⭐ VERBATIM COMPLIANCE — the witnessed loop — does NOT return the demand', () => {
-    // The witnessed defect: the product advised a template, the tester typed it
-    // back exactly, and got the identical demand word for word.
-    const reply = clarify(ADVISED);
-    expect(reply).not.toBe(DEMAND);
-    expect(reply).not.toContain(ADVISED);
-  });
-
-  it('⭐ NO ANSWER SHAPE CAN PRODUCE THE UNCHANGED DEMAND', () => {
-    // The union of every phrasing this estate has recorded as an answer to this
-    // ask — the two known-dropped sets plus the forms now claimed. If any one of
-    // them reproduced the demand, that is the loop.
-    const everyAnswer = [
-      ...MISSING_VALUE_ANSWER_KNOWN_DROPPED,
-      ...QUALITATIVE_VALUE_KNOWN_DROPPED,
-      'Make it 0.12.',
-      'Use 0.12.',
-      'Set it to .12.',
-      'Yes, set it to 0.12.',
-      'Set it to 0.12.',
-      // ⭐ SPELLED EXPLICITLY BECAUSE IT LEFT THE KNOWN-DROPPED SET. It used to
-      // reach this list through the spread above; keeping it by name means the
-      // coverage does not silently SHRINK by the same edit that closed the gap.
-      '0.12',
-      ADVISED,
-    ];
-    const looped = everyAnswer.filter((m) => clarify(m) === DEMAND);
-    // ⚠⚠ THE RESIDUE IS NOW EMPTY, AND THE EXCEPTION THAT USED TO SIT HERE WAS
-    // CLOSED BY A READ, NOT BY A NEW RECORD. The comment this replaces said a
-    // bare "0.12" "still gets the demand" because "nothing records which slot
-    // was asked about". That premise was false at the time it was written:
-    // `deriveAskedEffectPair` reads the asked pair off the head of the canonical
-    // blocker list, which is a fact about the PERSISTED GRAPH and therefore
-    // still present on the answering turn — precisely BECAUSE the answer has not
-    // been written yet. The gap was pinned behind a reason nobody re-derived.
-    expect(looped).toStrictEqual([]);
-  });
-
-  it('⭐⭐ THE DECLARED RESIDUE IS CLOSED — a bare number is an answer and terminates', () => {
+  it('the retained text predicate recognises a bare-number answer', () => {
     // ⚠ THIS ASSERTION IS THE INVERSE OF THE ONE IT REPLACES, AND THE FLIP IS
     // THE DELIVERABLE. It previously read `toBe(false)` / `toBe(DEMAND)`, on the
     // stated ground that "nothing in CEE records which slot the previous turn
@@ -295,7 +206,6 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
     // (deployed `a7ee21e`: chip → "0.6" → `exit_path: turn_executor`,
     // `GAINED_PAIR []`, blockers 8 → 8, hash unchanged).
     expect(messageAnswersMissingValueAsk('0.12')).toBe(true);
-    expect(clarify('0.12')).not.toBe(DEMAND);
   });
 
   it('⭐ a bare number reads as ELLIPTICAL — it carries no antecedent of its own', () => {
@@ -336,36 +246,6 @@ describe('⭐⭐ THE TERMINATING INVARIANT — the same demand cannot be re-issu
       const reading = readMissingValueAnswer(message);
       const isBare = reading !== null && reading.kind === 'numeric' && reading.elliptical;
       expect(isBare, message).toBe(true);
-    }
-  });
-
-  it('the CHANGED ASK quotes the user back, names the slot, and invents no number', () => {
-    const reply = clarify("Set the X option's effect on Y to high");
-    expect(reply).toContain('"high"');
-    expect(reply).toContain(FACTOR);
-    expect(reply).toContain(OPTION);
-    // ⚠ THE CALIBRATION IS NOW HUMAN. This asserted `'from 0'` / `'to 1'` —
-    // Olumi's internal normalised coefficient scale, which a strategic user is
-    // never asked to understand (founder ruling, 30 Aug 2026). The property the
-    // test is about — the ask states a calibration rather than guessing a
-    // figure — is unchanged, and the anchors are derived from the module that
-    // accepts them rather than transcribed.
-    expect(reply).toContain(MISSING_VALUE_ASK_FORMAT_HINT);
-    // NOTHING is guessed: no invented figure appears anywhere, and the internal
-    // representation is not shown either.
-    expect(reply).not.toContain('0.6');
-    expect(reply).not.toContain('0.8');
-    expect(reply).not.toMatch(/\b0\.\d/);
-  });
-
-  it('an UNRELATED message still gets the demand — the guard is not a blanket', () => {
-    // Termination must be earned by an answer, not by any message at all.
-    for (const message of [
-      'Configure Subcontract inner-city runs',
-      'What does this option do?',
-      'Run the analysis.',
-    ]) {
-      expect(clarify(message)).toBe(DEMAND);
     }
   });
 });
@@ -799,7 +679,6 @@ describe('the answer frame — PARAMETER 1 closes the GAP', () => {
 
     for (const message of CONTENTFUL_SUBJECT_KNOWN_DROPPED) {
       expect(messageAnswersMissingValueAsk(message), message).toBe(true);
-      expect(clarify(message), message).not.toBe(DEMAND);
     }
   });
 

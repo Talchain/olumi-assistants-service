@@ -60,15 +60,13 @@ import {
 } from '../../system-events/option-intervention-edit.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { admitCandidateModel, type CandidateModel } from '../../agent-lane/admit-model.js';
-import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
 import { stampUserStatedAddProvenance } from '../../../orchestrator/canonicalise-value-ops.js';
 import { tryStructureOriginAnswer } from '../../../cee/context-integrity/structure-origin-answer.js';
 import { projectEntity } from '../../agent-lane/runtime/agent-capabilities.js';
 import { GM_HELD_USER_STATED_NODES_KEY } from '../../routing/add-option-transaction.js';
 import { runWithUserNamedOptions, userNamedOptionIdsFor } from '../add-option-authorship-context.js';
-import type { ConversationContext, PatchOperation } from '../../../orchestrator/types.js';
-import type { ChatResult, LLMAdapter } from '../../../adapters/llm/types.js';
+import type { PatchOperation } from '../../../orchestrator/types.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import * as telemetry from '../../../utils/telemetry.js';
@@ -415,178 +413,7 @@ describe('(a) an approved add-option: the user’s only when the user supplied i
   });
 });
 
-// ---------------------------------------------------------------------------
-// (b) + (d) the edit_graph lane
-// ---------------------------------------------------------------------------
-const EDIT_GRAPH = {
-  nodes: [
-    { id: 'dec_x', kind: 'decision', label: 'Platform Migration' },
-    { id: 'opt_a', kind: 'option', label: 'Migrate Now' },
-    {
-      id: 'fac_setup', kind: 'factor', label: 'Setup and Migration Complexity',
-      observed_state: { value: 0.2, raw_value: 500000, unit: '£', cap: 2500000 },
-    },
-    { id: 'goal_g', kind: 'goal', label: 'Total Cost' },
-  ],
-  edges: [
-    { from: 'dec_x', to: 'opt_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'opt_a', to: 'fac_setup', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
-    { from: 'fac_setup', to: 'goal_g', strength: { mean: -0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
-  ],
-};
-
-function makeAdapter(responseJson: unknown): LLMAdapter {
-  const notCalled = (name: string) => () => Promise.reject(new Error(`${name} is not called by the edit lane`));
-  const reply: ChatResult = {
-    content: JSON.stringify(responseJson),
-    usage: { input_tokens: 1, output_tokens: 1 },
-    model: 'test-model',
-    latencyMs: 1,
-    stopReason: 'end_turn',
-  };
-  return {
-    name: 'fixtures',
-    model: 'test-model',
-    draftGraph: notCalled('draftGraph'),
-    suggestOptions: notCalled('suggestOptions'),
-    clarifyBrief: notCalled('clarifyBrief'),
-    critiqueGraph: notCalled('critiqueGraph'),
-    explainDiff: notCalled('explainDiff'),
-    chat: vi.fn(async () => reply),
-  };
-}
-
-/** The model's own batch for "add a data quality risk", its add carrying the model's OWN provenance claim. */
-function modelAddBatch(modelProvenance: unknown) {
-  return {
-    operations: [
-      {
-        op: 'add_node',
-        path: '/nodes/fac_risk',
-        value: { id: 'fac_risk', kind: 'factor', label: 'Data Quality Risk', provenance: modelProvenance },
-        old_value: null,
-        impact: 'moderate',
-        rationale: 'Add the risk factor.',
-      },
-      {
-        op: 'add_edge',
-        path: '/edges/opt_a->fac_risk',
-        value: { from: 'opt_a', to: 'fac_risk', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
-        old_value: null,
-        impact: 'moderate',
-        rationale: 'Wire the option to the risk.',
-      },
-      {
-        op: 'add_edge',
-        path: '/edges/fac_risk->goal_g',
-        value: { from: 'fac_risk', to: 'goal_g', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
-        old_value: null,
-        impact: 'moderate',
-        rationale: 'Wire the risk to the goal.',
-      },
-    ],
-    removed_edges: [],
-    warnings: [],
-    coaching: { summary: 'Added the data quality risk.', rerun_recommended: true },
-  };
-}
-
-/** The REAL edit lane: the model's batch → strip → canonicalise → the normal seam's applied candidate. */
-async function editGraphTurn(modelProvenance: unknown, tag: string) {
-  const ctx: ConversationContext = {
-    graph: GraphV3.parse(structuredClone(EDIT_GRAPH)),
-    analysis_response: null,
-    framing: null,
-    messages: [],
-    scenario_id: `scn-a6b-${tag}`,
-  };
-  const result = await handleEditGraph(
-    ctx,
-    'Add a data quality risk that affects total cost',
-    makeAdapter(modelAddBatch(modelProvenance)),
-    `req-a6b-${tag}`,
-    `turn-a6b-${tag}`,
-  );
-  expect(result.wasRejected, String(result.assistantText)).toBe(false);
-  expect(result.operations?.length ?? 0).toBeGreaterThan(0);
-  return result;
-}
-
-/** What `dispatchEditGraph` does next under the live posture: the SAME gate holds the batch. */
-function holdEditBatch(operations: readonly PatchOperation[], tag: string): PendingAction {
-  const hash = hashOf(EDIT_GRAPH);
-  const decision = evaluateEditGraphMutations({
-    mode: 'live',
-    operations: [...operations],
-    currentGraph: EDIT_GRAPH,
-    currentGraphHash: hash,
-    baseGraphHash: hash,
-    freshness: 'none',
-    scenarioId: `scn-a6b-${tag}`,
-    turnId: `turn-a6b-${tag}`,
-    requestId: `req-a6b-${tag}`,
-    dispatchPath: 'edit_graph',
-  });
-  expect(decision.governing, 'a structural add is proposed first, never auto-applied under live').toBe('held');
-  expect(decision.pendingActions?.length).toBe(1);
-  return throughTheStore(decision.pendingActions![0]!);
-}
-
-describe('(b) an approved edit_graph add is NOT the user’s — the model authored it, and the path has no typed authorship signal', () => {
-  it('RED (DL CR): the model’s add (carrying its own ai_inferred) is stripped, held, APPROVED → never user_set; the hold records no authorship', async () => {
-    const result = await editGraphTurn('ai_inferred', 'b');
-    const pending = holdEditBatch(result.operations!, 'b');
-    // The model's literal did not survive to the hold — whatever lands next is CEE's.
-    const add = heldOps(pending).find((o) => o.op === 'add_node')!;
-    expect(add.path).toBe('fac_risk');
-    expect(Object.prototype.hasOwnProperty.call(add.value as object, 'provenance')).toBe(false);
-
-    expect(statedOnHold(pending)).toBeUndefined();
-
-    const outcome = confirm(pending, EDIT_GRAPH, 'b');
-    expect(outcome.status).toBe('executed');
-    if (outcome.status !== 'executed') return;
-    const added = nodeOf(outcome.mutatedGraph, 'fac_risk');
-    expect(added.label, 'the add landed').toBe('Data Quality Risk');
-    expect(added.provenance, 'an approved model add is not the user’s').not.toBe(USER_SET);
-    // NEGATIVE CONTROL, by identity: the nodes the batch only LINKED earn nothing.
-    expect(nodeOf(outcome.mutatedGraph, 'opt_a').provenance).toBeUndefined();
-    expect(nodeOf(outcome.mutatedGraph, 'goal_g').provenance).toBeUndefined();
-  });
-});
-
 describe('(d) J2 — a model cannot self-stamp', () => {
-  it('a model add carrying provenance user_set that NO user approved (the auto-applied normal seam) lands UNSTAMPED', async () => {
-    const result = await editGraphTurn('user_set', 'd1');
-    // The candidate the normal seam applies — what `shadow`/`off` persist with no approval.
-    const added = nodeOf(result.appliedGraph, 'fac_risk');
-    expect(added.label).toBe('Data Quality Risk');
-    expect(Object.prototype.hasOwnProperty.call(added, 'provenance'), 'no stamp on an unapproved add').toBe(false);
-    // And the operations the gate / hold carry forward hold no self-stamp either.
-    const add = result.operations!.find((o) => o.op === 'add_node')!;
-    expect(Object.prototype.hasOwnProperty.call(add.value as object, 'provenance')).toBe(false);
-  });
-
-  it('POSITIVE CONTROL for the absence above: the normal seam DOES land a value the model sets on the add (the probe sees node fields)', async () => {
-    const result = await editGraphTurn('user_set', 'd1c');
-    expect(nodeOf(result.appliedGraph, 'fac_risk').kind).toBe('factor');
-    expect(nodeOf(result.appliedGraph, 'fac_risk').label).toBe('Data Quality Risk');
-  });
-
-  it('an APPROVED add whose held payload carries another provenance literal never lands that literal (the confirm refuses it whole)', async () => {
-    const result = await editGraphTurn('ai_inferred', 'd2');
-    const pending = holdEditBatch(result.operations!, 'd2');
-    // A payload that reached the hold carrying a literal (a row minted before the strip, or tampered).
-    const forged = structuredClone(pending);
-    const patch = 'inline_patch' in forged.action ? forged.action.inline_patch : undefined;
-    const ops: unknown = patch?.['operations'];
-    if (!Array.isArray(ops)) throw new Error('the held pending must embed its operations');
-    const add: unknown = ops.find((o: { op?: unknown }) => o.op === 'add_node');
-    if (add === null || typeof add !== 'object') throw new Error('the held batch must carry the add');
-    (add as { value: Record<string, unknown> }).value.provenance = 'from_brief';
-    const outcome = confirm(throughTheStore(forged), EDIT_GRAPH, 'd2');
-    expect(outcome.status, 'a yes never overrides a forged stamp').toBe('referee_blocked');
-  });
 
   it('RED (unit, the seam’s stamp): ONLY the adds the hold names are stamped, and CEE’s literal is written LAST on them — an unnamed add keeps its own provenance, by reference', () => {
     const ops: PatchOperation[] = [
@@ -657,6 +484,21 @@ function holdValueGraph(operations: PatchOperation[], tag: string): PendingActio
 }
 
 describe('(c) a held add with no typed authorship signal, approved, keeps its own provenance', () => {
+
+  it('an APPROVED add whose held payload carries another provenance literal never lands that literal (the confirm refuses it whole)', () => {
+    // C1: mint through the kept referee/hold producer; confirmation must still inspect the stored, unstripped payload.
+    const pending = holdValueGraph([RISK_ADD, RISK_LINK], 'forged-stamp');
+    const forged = structuredClone(pending);
+    const patch = 'inline_patch' in forged.action ? forged.action.inline_patch : undefined;
+    const ops: unknown = patch?.['operations'];
+    if (!Array.isArray(ops)) throw new Error('the held pending must embed its operations');
+    const add: unknown = ops.find((o: { op?: unknown }) => o.op === 'add_node');
+    if (add === null || typeof add !== 'object') throw new Error('the held batch must carry the add');
+    (add as { value: Record<string, unknown> }).value.provenance = 'from_brief';
+    const outcome = confirm(throughTheStore(forged), VALUE_GRAPH, 'forged-stamp');
+    expect(outcome.status, 'a yes never overrides a forged stamp').toBe('referee_blocked');
+  });
+
   it('RED (DL CR): a held risk add, confirmed → NOT user_set; the existing factor it links to earns nothing', () => {
     const pending = holdValueGraph([RISK_ADD, RISK_LINK], 'c');
     expect(statedOnHold(pending)).toBeUndefined();

@@ -40,20 +40,11 @@
 
 import { describe, it, expect } from 'vitest';
 
-import {
-  detectMutationWarrant,
-  hasMutationWarrantSignal,
-  hasStrongerThanTextWarrant,
-  hasConstraintMutationSignal,
-} from '../mutation-warrant.js';
-import {
-  maskQuotedNodeLabels,
-  projectModelNodeLabels,
-  resolveOrdinaryTextAuthority,
-} from '../ordinary-text-authority.js';
+import { detectMutationWarrant, hasMutationWarrantSignal, hasStrongerThanTextWarrant, hasConstraintMutationSignal } from '../mutation-warrant.js';
+import { maskQuotedNodeLabels, projectModelNodeLabels, resolveOrdinaryTextAuthority } from '../ordinary-text-authority.js';
 import { classifyUnappliedEditFrame } from '../../compose/unapplied-edit-reply.js';
 import { hasMutationSignal } from '../analytical-intent.js';
-import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from './retired-layer-inputs.fixture.js';
 
 /** The label that made two real mutating turns read as deliberation. */
 const DELIBERATIVE_NODE_LABEL = 'What should we do?';

@@ -24,14 +24,9 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  tryPostAnalysisAdviceGate,
-  type AdviceClass,
-  type AdviceGateAnalysis,
-} from '../post-analysis-advice-gate.js';
+import { tryPostAnalysisAdviceGate, type AdviceClass, type AdviceGateAnalysis } from '../post-analysis-advice-gate.js';
 import { classifyAnalyticalIntent, hasMutationSignal } from '../analytical-intent.js';
 import { isAnalyticalQuestion } from '../analytical-question-guard.js';
-import { tryStaleRerunGuard } from '../stale-rerun-guard.js';
 import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
@@ -407,74 +402,6 @@ describe('Issue #195 — stale free-text what-would-flip', () => {
 });
 
 // =========================================================================
-// Issue #195 full subsumption proof — direct stale-rerun-guard exercise
-//
-// Per the workstream brief, #195 may only be marked subsumed if the stale
-// path proves three properties:
-//   (a) deterministic — no broad LLM is reachable from the guard match
-//   (b) the response copy is a rerun prompt
-//   (c) the chip set includes `run_analysis`
-//
-// If any assertion below fails, #195 stays open and the failure is the
-// follow-up.
-// =========================================================================
-describe('Issue #195 — stale-rerun-guard full subsumption proof', () => {
-  const issuePhrases: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
-    { message: 'What would flip the result?', label: '#195 canonical' },
-    { message: 'What would flip this?', label: '#195 short form' },
-    { message: 'What would change the outcome?', label: '#195 close cousin' },
-    { message: 'What would need to change?', label: '#195 obligation form' },
-    // Also assert the new "Tell me what to change" family on the stale path
-    { message: 'Tell me what to change.', label: 'stale + new-pattern coverage' },
-    { message: 'What needs to change?', label: 'stale + new-pattern bare-interrogative' },
-  ];
-
-  for (const { message, label } of issuePhrases) {
-    it(`stale + ${label} → guard matches deterministically`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-    });
-
-    it(`stale + ${label} → response copy mentions re-running`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        // Honesty: must say the graph changed AND must nudge re-run.
-        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
-        // No "fresh" / "current" claims about the existing analysis.
-        expect(out.assistant_text.toLowerCase()).not.toMatch(/\bup\s+to\s+date\b/);
-        expect(out.assistant_text.toLowerCase()).not.toMatch(/\bstill\s+(?:fresh|current|valid)\b/);
-      }
-    });
-
-    it(`stale + ${label} → chip set includes run_analysis`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.suggested_actions.length).toBeGreaterThan(0);
-        const actionTypes = out.suggested_actions.map((a) => a.action_type);
-        expect(actionTypes).toContain('run_analysis');
-      }
-    });
-  }
-
-  it('fresh + #195 phrase does NOT trigger stale-rerun-guard (freshness gating intact)', () => {
-    const out = tryStaleRerunGuard({ message: 'What would flip the result?', freshness: 'fresh' });
-    expect(out.matched).toBe(false);
-    if (!out.matched) expect(out.reason).toBe('not_stale');
-  });
-
-  it('stale + concrete mutation does NOT trigger (mutation precedence intact)', () => {
-    const out = tryStaleRerunGuard({
-      message: 'Tell me what to change Pricing to £100',
-      freshness: 'stale',
-    });
-    expect(out.matched).toBe(false);
-    if (!out.matched) expect(out.reason).toBe('mutation_signal');
-  });
-});
-
-// =========================================================================
 // Review round-2 — `could/might` modal cousins of `what would change…`
 //
 // Pre-fix gap (PR #200 round-1 missed it): `classifyAnalyticalIntent` only
@@ -531,19 +458,6 @@ describe('Review round-2 — could/might modal cousins of what would change', ()
     });
   }
 
-  // ── Stale path: stale-rerun-guard must match + emit rerun + run_analysis chip
-  for (const { message, label } of modalCousins) {
-    it(`stale + ${label} → stale-rerun-guard matches with rerun copy + run_analysis chip`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.intent_class).toBe('what_would_flip');
-        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
-        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-      }
-    });
-  }
-
   // ── Mutation precedence stays intact: "What could change Pricing to 100" mutates
   it('"What could change Pricing to 100" → mutation precedence wins (advice gate rejects)', () => {
     const message = 'What could change Pricing to 100';
@@ -553,15 +467,6 @@ describe('Review round-2 — could/might modal cousins of what would change', ()
       analysis: FIXTURE_ANALYSIS,
       analysisReady: READY_PAYLOAD_OPEN,
       freshness: 'fresh',
-    });
-    expect(out.matched).toBe(false);
-    if (!out.matched) expect(out.reason).toBe('mutation_signal');
-  });
-
-  it('"What could change Pricing to 100" on stale also yields mutation_signal', () => {
-    const out = tryStaleRerunGuard({
-      message: 'What could change Pricing to 100',
-      freshness: 'stale',
     });
     expect(out.matched).toBe(false);
     if (!out.matched) expect(out.reason).toBe('mutation_signal');
@@ -647,19 +552,6 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
     });
   }
 
-  // ── Stale path: stale-rerun-guard matches + emits rerun + run_analysis chip
-  for (const { message, label } of wouldCousins) {
-    it(`stale + ${label} → stale-rerun-guard matches with rerun copy + run_analysis chip`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.intent_class).toBe('what_would_flip');
-        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
-        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-      }
-    });
-  }
-
   // ── Mutation precedence still wins on these forms too
   // (Note: the mutation verb list is `set|change|update|adjust|modify|
   // raise|lower|increase|decrease|bump` — verbs like `move`, `shift`,
@@ -695,21 +587,6 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
         expect(out.advice_class).toBe('what_would_flip_free_text');
       }
     });
-
-    it(`mutation precedence: ${label} → stale guard honours the shared flip-overlap exception`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      // Mission 1 (#195): the stale guard now carries the SAME
-      // strip-and-recheck exception as the advice gate — the outcome is
-      // either mutation_signal (an independent edit clause survives the
-      // flip-pattern strip, e.g. numeric / concrete set) or a
-      // what_would_flip match via the exception. No other class can
-      // admit a mutation-signal phrase.
-      if (out.matched) {
-        expect(out.intent_class).toBe('what_would_flip');
-      } else {
-        expect(out.reason).toBe('mutation_signal');
-      }
-    });
   }
 
   // ── #195 parity lock: the one wouldMutations phrase whose mutation
@@ -719,7 +596,7 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
   // exception, stale guard (stale) matches via the exception. Before
   // Mission 1 the stale guard declined it `mutation_signal` and the
   // question fell through to broad LLM routing with no staleness cue.
-  it('flip-overlap parity: "What would change the result to a draw?" matches BOTH guards via the shared exception', () => {
+  it('flip-overlap parity: "What would change the result to a draw?" matches the retained fresh advice gate', () => {
     const message = 'What would change the result to a draw?';
     const gate = tryPostAnalysisAdviceGate({
       message,
@@ -729,13 +606,6 @@ describe('Review round-3 — would parity for shift/move/alter and how-would-out
     });
     expect(gate.matched).toBe(true);
     if (gate.matched) expect(gate.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-    const guard = tryStaleRerunGuard({ message, freshness: 'stale' });
-    expect(guard.matched).toBe(true);
-    if (guard.matched) {
-      expect(guard.intent_class).toBe('what_would_flip');
-      expect(guard.mode).toBe('stale');
-      expect(guard.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-    }
   });
 
   // ── isAnalyticalQuestion delegation lock
@@ -810,35 +680,10 @@ describe('Review round-4 — broader (would|does|might) (need|have) shape', () =
     });
   }
 
-  // Stale path — the blocker proof: each phrase must yield deterministic
-  // rerun copy + run_analysis chip, with no broad LLM and no edit_graph.
-  for (const { message, label } of needHaveCousins) {
-    it(`stale + ${label} → stale-rerun-guard matches deterministically with rerun copy + run_analysis chip`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      // (a) Deterministic match — no broad LLM, no edit_graph dispatch.
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        // (b) Correct intent class lifted from the classifier.
-        expect(out.intent_class).toBe('what_would_flip');
-        // (c) Rerun copy.
-        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
-        // (d) run_analysis chip.
-        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-        // (e) Action type stays in the deterministic chip whitelist — never edit_graph.
-        for (const action of out.suggested_actions) {
-          expect(action.action_type).toBe('run_analysis');
-        }
-      }
-    });
-  }
-
   // Mutation precedence intact
-  it('"What might need to change to 100?" → mutation_signal (stale-rerun-guard rejects)', () => {
+  it('"What might need to change to 100?" carries an independent mutation signal', () => {
     const message = 'What might need to change to 100?';
     expect(hasMutationSignal(message)).toBe(true);
-    const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-    expect(out.matched).toBe(false);
-    if (!out.matched) expect(out.reason).toBe('mutation_signal');
   });
 });
 
@@ -869,14 +714,6 @@ describe('Review round-4 — how-option-win advice-gate mirror', () => {
       });
       expect(out.matched).toBe(true);
       if (out.matched) expect(out.advice_class).toBe<AdviceClass>('what_would_flip_free_text');
-    });
-    it(`stale + ${label} → stale-rerun-guard matches with rerun + run_analysis chip`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.intent_class).toBe('what_would_flip');
-        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-      }
     });
   }
 });
@@ -931,19 +768,6 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
     });
   }
 
-  // Stale path — the fix proof.
-  for (const { message, label } of shouldChangePhrases) {
-    it(`stale + ${label} → stale-rerun-guard matches with rerun copy + run_analysis chip`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.intent_class).toBe('explain');
-        expect(out.assistant_text.toLowerCase()).toMatch(/(re-?run|run\s+again|refresh)/);
-        expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-      }
-    });
-  }
-
   // Mutation precedence intact — value-edit forms still mutate
   const valueEdits: ReadonlyArray<{ readonly message: string; readonly label: string }> = [
     { message: 'What should I change to 100?', label: 'change-to-numeric' },
@@ -959,11 +783,6 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
         analysisReady: READY_PAYLOAD_OPEN,
         freshness: 'fresh',
       });
-      expect(out.matched).toBe(false);
-      if (!out.matched) expect(out.reason).toBe('mutation_signal');
-    });
-    it(`mutation precedence: ${label} → stale guard rejects mutation_signal`, () => {
-      const out = tryStaleRerunGuard({ message, freshness: 'stale' });
       expect(out.matched).toBe(false);
       if (!out.matched) expect(out.reason).toBe('mutation_signal');
     });
@@ -1019,13 +838,8 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
   // covered too (advice-gate fresh path routes "What should I improve?"
   // to the more specific `improvement` class — distinct from `advice`,
   // but both deterministic). Lock the classifier + stale-guard side here.
-  it('stale + "What should I improve?" → stale-rerun-guard matches (classifier covers improve verb)', () => {
+  it('the retained classifier covers the improve verb', () => {
     expect(classifyAnalyticalIntent('What should I improve?')).toBe('explain');
-    const out = tryStaleRerunGuard({ message: 'What should I improve?', freshness: 'stale' });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      expect(out.suggested_actions.map((a) => a.action_type)).toContain('run_analysis');
-    }
   });
 });
 

@@ -24,20 +24,12 @@ import {
   CONTEXT_SECTION_BUDGETS,
 } from '../../src/orchestrator-v5/context/context-budget-telemetry.js';
 import {
-  serialiseEditContextForLLM,
-  truncateGraphJson,
-  truncateGraphJsonWithMeta,
-  editCompactGraph,
-} from '../../src/orchestrator/context/serialise.js';
-import {
   projectBrief,
   projectConversation,
   CONTEXT_PACK_RECENT_TURNS_CAP,
 } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { capConversationText, CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
-import type { ConversationContext } from '../../src/orchestrator/types.js';
-import type { GraphV3T } from '../../src/schemas/cee-v3.js';
 
 let emitSpy: ReturnType<typeof vi.spyOn>;
 
@@ -53,36 +45,6 @@ function eventsNamed(name: string): Record<string, unknown>[] {
   return emitSpy.mock.calls
     .filter((c: readonly unknown[]) => c[0] === name)
     .map((c: readonly unknown[]) => c[1] as Record<string, unknown>);
-}
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-/** A graph whose edit-compact JSON comfortably exceeds `maxBytes`. */
-function bigGraph(nodeCount = 120): GraphV3T {
-  const nodes = Array.from({ length: nodeCount }, (_, i) => ({
-    id: `node_${i}`,
-    label: `A deliberately verbose node label for overflow ${i} ${'x'.repeat(40)}`,
-    kind: 'factor' as const,
-  }));
-  const edges = Array.from({ length: nodeCount - 1 }, (_, i) => ({
-    from: `node_${i}`,
-    to: `node_${i + 1}`,
-    strength: { mean: 0.5, std: 0.1 },
-    exists_probability: 1,
-  }));
-  return { nodes, edges } as unknown as GraphV3T;
-}
-
-function editContextWith(graph: GraphV3T | null, messages: { role: 'user' | 'assistant'; content: string }[] = []): ConversationContext {
-  return {
-    graph,
-    analysis_response: null,
-    framing: null,
-    messages,
-    scenario_id: 'scn_s0_fixture',
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -255,85 +217,6 @@ describe('emitContextTruncation (v5.context_truncation)', () => {
       request_id: 'req_4',
       scenario_id: 'scn_4',
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Cut site 1: truncateGraphJson via serialiseEditContextForLLM
-// ---------------------------------------------------------------------------
-
-describe('cut site: graph JSON truncation (serialise.ts)', () => {
-  it('emits a DISCLOSED v5.context_truncation when the graph JSON is cut, and the header is honest', () => {
-    const graph = bigGraph();
-    const context = editContextWith(graph);
-
-    const out = serialiseEditContextForLLM(context);
-
-    const events = eventsNamed(TelemetryEvents.V5ContextTruncation);
-    const graphCuts = events.filter((e) => e.section === 'graph_json');
-    expect(graphCuts).toHaveLength(1);
-    expect(graphCuts[0].site).toBe('serialise.truncateGraphJson');
-    expect(graphCuts[0].strategy).toBe('drop_edges_then_nodes');
-    // Disclosure is now unconditional — the cut is made visible to the LLM.
-    expect(graphCuts[0].disclosed).toBe(true);
-    const original = JSON.stringify(editCompactGraph(graph)).length;
-    expect(graphCuts[0].original_chars).toBe(original);
-    // DISCOVERY (pre-existing, pinned rather than fixed): the 10-iteration
-    // reduction loop can exhaust itself shrinking edges and return MORE than
-    // maxBytes (this fixture: ~17.9K for an 8K cap). kept_chars reports what
-    // was actually sent — that honesty is the whole point of the event.
-    const kept = truncateGraphJson(editCompactGraph(graph), 8_000).length;
-    expect(graphCuts[0].kept_chars).toBe(kept);
-    expect(kept).toBeLessThan(original);
-
-    // The rendered header reports POST-truncation counts + the in-section
-    // marker (the misreporting pre-truncation header is gone).
-    const compact = editCompactGraph(graph);
-    const meta = truncateGraphJsonWithMeta(compact, 8_000);
-    expect(out).toContain(`## Current Graph (${meta.keptNodes} nodes, ${meta.keptEdges} edges)`);
-    expect(out).toContain('(graph truncated: showing');
-    expect(out).not.toContain(
-      `## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`,
-    );
-    const expectedShape = [
-      `## Current Graph (${meta.keptNodes} nodes, ${meta.keptEdges} edges)`,
-      `(graph truncated: showing ${meta.keptNodes} of ${compact.nodes.length} nodes, ${meta.keptEdges} of ${compact.edges.length} edges)`,
-      '```json',
-      meta.json,
-      '```',
-    ].join('\n\n');
-    expect(out).toBe(expectedShape);
-  });
-
-  it('emits nothing when the graph fits', () => {
-    const graph = bigGraph(3);
-    serialiseEditContextForLLM(editContextWith(graph));
-    expect(eventsNamed(TelemetryEvents.V5ContextTruncation)).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Cut site 2: renderRecentConversationForEdit overflow (already disclosed)
-// ---------------------------------------------------------------------------
-
-describe('cut site: edit conversation overflow (serialise.ts)', () => {
-  it('emits a disclosed conversation truncation event when oldest turns are dropped', () => {
-    const messages = Array.from({ length: 12 }, (_, i) => ({
-      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: `turn ${i}: ${'y'.repeat(600)}`,
-    }));
-    const out = serialiseEditContextForLLM(editContextWith(bigGraph(3), messages));
-
-    const convCuts = eventsNamed(TelemetryEvents.V5ContextTruncation).filter(
-      (e) => e.section === 'conversation',
-    );
-    expect(convCuts).toHaveLength(1);
-    expect(convCuts[0].site).toBe('serialise.renderRecentConversationForEdit');
-    expect(convCuts[0].strategy).toBe('drop_oldest_turns');
-    // This cut has ALWAYS been disclosed in-prompt ("(N earlier turns
-    // omitted for length)") — disclosed:true from day one.
-    expect(convCuts[0].disclosed).toBe(true);
-    expect(out).toMatch(/\(\d+ earlier turns? omitted for length\)/);
   });
 });
 
