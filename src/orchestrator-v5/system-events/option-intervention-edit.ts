@@ -81,7 +81,9 @@ import { applyOptionGapDeclarations, optionGapFields, optionGapCardWords, option
   optionGapPostimageIsScoped, optionGapOperands, parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
-import { factorUnitOf, unitsConflict } from '../agent-lane/unit-conflict.js';
+import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../agent-lane/unit-conflict.js';
+import { readUnitParts } from '../agent-lane/same-unit.js';
+import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { IdentityRunUse } from '../compose/definitional-links.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -413,7 +415,31 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
     if (was.length !== 1 || now.length !== 1 || was[0]!.kind !== 'factor') return false;
     const node = now[0]! as Record<string, unknown>;
     const prior = was[0]! as Record<string, unknown>;
-    if (unitsConflict(factorUnitOf(after, now[0]), factorUnitOf(before, was[0])) !== null) return false;
+    const priorUnit = factorUnitOf(before, was[0]);
+    const nextUnit = factorUnitOf(after, now[0]);
+    if (unitsConflict(nextUnit, priorUnit) !== null) return false;
+    if (unitComparisonKey(priorUnit) !== unitComparisonKey(nextUnit)) {
+      // On a unitless factor, every stored option's OWN unit constrains the first declaration,
+      // even when its numeric encoding is already current and the option needs no rewrite.
+      const options = [...before.nodes.filter(n => n.kind === 'option'), ...(Array.isArray(before.options) ? before.options : [])];
+      for (const option of options) {
+        const cell = mergeInterventionSourceObjects(option as never)[id] as { unit?: unknown } | undefined;
+        if (cell === undefined) continue;
+        // An existing option also inherits its factor's declared coordinate, even without a cell unit.
+        if (priorUnit !== undefined) return false;
+        const heldUnit = typeof cell?.unit === 'string' ? cell.unit : undefined;
+        if (unitComparisonKey(heldUnit) === undefined || unitComparisonKey(heldUnit) === unitComparisonKey(nextUnit)) continue;
+        const held = readUnitParts(heldUnit);
+        const declared = readUnitParts(nextUnit);
+        // The full existing grammar reads qualified count nouns ("tech leads") without a noun catalogue.
+        // A recognised count declaration on this SAME factor keeps that stored noun/quantity intact;
+        // periods, denominators and scale must still agree. An unread unit is never proof of agreement.
+        if (held?.kind === 'count' && declared?.kind === 'count' && unitPhraseFamily(nextUnit) === 'count'
+          && unitPhraseFamily(heldUnit) !== 'time'
+          && isDeepStrictEqual({ ...held, noun: null }, { ...declared, noun: null })) continue;
+        return false;
+      }
+    }
     for (const member of VALUE_WRITER_OWNED_NODE_MEMBERS) {
       if (Object.hasOwn(prior, member)) node[member] = structuredClone(prior[member]);
       else delete node[member];
@@ -484,7 +510,7 @@ export function linksResizedByContract(before: unknown, after: unknown, factorId
  * half of a compound approval, so that it commits in the SAME append as the levels. All or nothing: the first value
  * refused refuses the whole approval (`valueIndex` names it). No I/O beyond the writer's own (it writes nothing).
  */
-async function applyApprovedFactorValues(
+export async function applyApprovedFactorValues(
   before: EditableGraph,
   values: readonly ApprovedFactorValue[],
   frames: readonly ApprovedFactorFrame[],
