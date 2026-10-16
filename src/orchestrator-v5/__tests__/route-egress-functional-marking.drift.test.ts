@@ -88,7 +88,7 @@ describe('F1 egress-inversion — route-v2 functional-marking drift guard (ROADM
   it('finds every sendFinalised200 call site', () => {
     // Sanity: the enumerator is actually seeing the route's exits (there are
     // ~19 of them). If this drops to 0 the guard below would be vacuously green.
-    expect(calls.length).toBeGreaterThanOrEqual(15);
+    expect(calls.length).toBe(6);
   });
 
   it('every sendFinalised200 call declares an answerKind (no unmarked egress under the inverted default)', () => {

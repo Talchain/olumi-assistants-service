@@ -230,9 +230,6 @@ afterEach(() => {
   _resetConfigCache();
   setTestSink(null);
 });
-
-
-import { ceeOrchestratorRouteV2 } from '../../orchestrator/route-v2.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { commitOlumiOptionAdoptionInProcess } from '../system-events/olumi-option-adoption.js';
@@ -516,41 +513,6 @@ describe.each([true, false])('graph writer rollback flag-OFF contract (model ver
         : await commitLimitEditInProcess(input, 'flag-off-limit-edit');
       assertFlagOff(h, `limit ${add ? 'add' : 'edit'}`, true);
       expect(result.status, JSON.stringify(result)).toBe('committed');
-    }
-
-    for (const failRead of [false, true]) {
-      ports.edit.mockClear();
-      const h = harness(failRead ? { failGraphReadAt: 1 } : {});
-      ports.routeDispatch.mockReset();
-      // As in the relocated route witness, the dispatcher is a port; reload/finaliser/store remain real.
-      ports.routeDispatch.mockImplementation(async (args: { graphState: unknown }) => {
-        await h.store.append({ scenario_id: SCENARIO, turn_id: TURN, turn_class: 'direct_answer',
-          handler_id: null, request_hash: 'route-reload-closed-set', response_emitted: true, llm_calls_used: 0, duration_ms: 1, handler_facts: [],
-          graph: args.graphState, expectedGraphIdentityHash: null, expectedGraphAnalysisHash: null,
-          ...(versionsEnabled ? { modelVersion: { mutation_id: TURN, graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64),
-            hash_algorithm: 'sha256', identity_projection_version: 'identity.v1', identity_normaliser_version: '1', graph_schema_version: 'graph_v3',
-            actor_kind: 'unknown', authored_by: null, creation_kind: 'committed_mutation', source_turn_id: TURN } } : {}),
-        });
-        return { response: { response_version: 2, assistant_text: 'Applied edit.', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' }, commitPerformed: true };
-      });
-      const edited = GraphStateIngressSchema.parse(baseGraph());
-      edited.nodes.find(n => n.id === 'fac_price')!.label = 'Price (revised)';
-      ports.edit.mockResolvedValue({ blocks: [], assistantText: 'Renamed Price.', latencyMs: 1,
-        appliedGraph: edited as unknown as EditGraphResult['appliedGraph'], wasRejected: false,
-        appliedChanges: { summary: 'Renamed Price.', changes: [{ label: 'Price', description: 'Renamed.', element_ref: 'fac_price' }], rerun_recommended: false },
-        operations: [{ op: 'update_node', path: 'fac_price', value: { label: 'Price (revised)' } }],
-        operation_meta: [{ impact: 'low', rationale: '' }],
-      } as EditGraphResult);
-      const app = Fastify();
-      await ceeOrchestratorRouteV2(app);
-      try {
-        const result = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: { ...message('Add opportunity cost of founder time as a risk'), turn_class: 'propose' } });
-        expect(result.statusCode, result.body).toBe(200);
-        expect(ports.routeDispatch).toHaveBeenCalledTimes(failRead ? 0 : 1);
-        if (failRead) expect(h.graphReadFailures).toBe(1);
-        else expectLegacyAppend(h);
-        assertFlagOff(h, `route-v2 reload — ${failRead ? 'read failure' : 'success'}`, false);
-      } finally { ports.routeDispatch.mockReset(); await app.close(); }
     }
   }, 120_000);
 });

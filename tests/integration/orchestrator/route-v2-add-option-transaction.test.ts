@@ -224,7 +224,7 @@ describe('route-v2 — typed add-option transaction pre-route (C2)', () => {
     expect(body.assistant_text.toLowerCase()).toContain('set migration effort');
   });
 
-  it('(b) GM off → fall-through with fell_through:gm_off telemetry, no held commit', async () => {
+  it('(b) GM off → refusal without text fallback with fell_through:gm_off telemetry, no held commit', async () => {
     gmHolder.mode = 'off';
     const { status } = await post(
       app,
@@ -232,20 +232,20 @@ describe('route-v2 — typed add-option transaction pre-route (C2)', () => {
         parent_decision_id: 'dec_choice', label: 'X', interventions: [{ factor_id: 'fac_effort', value: 0.5 }],
       }),
     );
-    expect(status).toBe(200);
+    expect(status).toBe(422);
     expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'fell_through:gm_off')).toBe(true);
     // Our pre-route did not commit a held pending (the edit path owns the turn).
     expect(commitCalls).toHaveLength(0);
   });
 
-  it('(b) invalid params (non-decision parent) → fall-through with the classified reason', async () => {
+  it('(b) invalid params (non-decision parent) → refusal without text fallback with the classified reason', async () => {
     const { status } = await post(
       app,
       addOptionPayload(randomUUID(), {
         parent_decision_id: 'g_profit', label: 'X', interventions: [{ factor_id: 'fac_effort', value: 0.5 }],
       }),
     );
-    expect(status).toBe(200);
+    expect(status).toBe(422);
     expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'fell_through:parent_not_decision')).toBe(true);
     expect(commitCalls).toHaveLength(0);
   });

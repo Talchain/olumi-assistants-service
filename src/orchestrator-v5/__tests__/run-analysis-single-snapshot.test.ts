@@ -26,7 +26,7 @@
  * site reads" — but that is an intent about ONE read, and there are two.
  *
  * ── WHY A CAPTURE, NOT A FIXTURE ──────────────────────────────────────────
- * The graph is `../replacement/__tests__/captures/journey-witness-20260921-graph.json`,
+ * The graph is `./fixtures/journey-witness-20260921-graph.json`,
  * lifted verbatim from a real 21 Sep journey witness (14 nodes, 25 edges). A
  * hand-written graph encodes the author's model of the producer and confirms it
  * instead of testing it — a real intervention is a RICH OBJECT
@@ -58,10 +58,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CAPTURE_PATH = join(
   HERE,
-  '..',
-  'replacement',
-  '__tests__',
-  'captures',
+  'fixtures',
   'journey-witness-20260921-graph.json',
 );
 const CAPTURED_GRAPH = JSON.parse(readFileSync(CAPTURE_PATH, 'utf8')) as Record<string, unknown>;

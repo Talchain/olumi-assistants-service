@@ -6,7 +6,7 @@
  * migrated to a fresh served raw must leave the list in the same PR. Regenerate with RECORDED_RAW_CARRIERS_WRITE=1.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
 
@@ -36,6 +36,8 @@ function census(pattern: RegExp): Record<string, number> {
     .filter((f) => /\.(ts|mts|js|mjs|json)$/.test(f) && f !== LIST && f !== 'tests/contract/recorded-raw-carriers.guard.test.ts');
   const out: Record<string, number> = {};
   for (const f of files) {
+    // A pending deletion is still indexed; retain fail-closed reads for every extant entry.
+    try { lstatSync(f); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
     const text = readFileSync(f, 'utf8');
     if (f.endsWith('.json') && statementEra(text)) continue;
     const n = (text.match(pattern) ?? []).length; if (n > 0) out[f] = n;

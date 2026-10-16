@@ -300,12 +300,9 @@ const DRAFT_EXIT_PATH = "draft_graph";
  * is what this set is for. Derived, not remembered: the spec re-ran and told me
  * the new set.
  */
+// C1: source-derived kept readiness exits; the conventional producers were deleted.
 export const READINESS_PRODUCING_EXIT_PATHS = new Set([
   "chip_click",
-  "draft_graph",
-  "edit_graph",
-  "readiness_intake",
-  "replacement_controller",
   "system_event",
   "turn_executor",
 ]);

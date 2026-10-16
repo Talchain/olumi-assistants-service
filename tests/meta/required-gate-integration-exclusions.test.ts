@@ -117,8 +117,10 @@ describe("required-gate integration exclusion list (finite, self-checking)", () 
     // If tests/integration moved or the walk broke, every claim below would
     // be vacuous — fail here first, loudly.
     expect(files.length).toBeGreaterThan(100);
-    expect(files).toContain("tests/integration/orchestrate-v2.test.ts");
-    expect(files).toContain("tests/integration/orchestrator/route-v2-draft-graph.test.ts");
+    // Sentinels re-pointed in #3283, which deleted the previous two (the retired
+    // free-text conversation's suites): one top-level file, one nested file.
+    expect(files).toContain("tests/integration/orchestrate-v2-preflight.test.ts");
+    expect(files).toContain("tests/integration/orchestrator/route-v2-system-events.test.ts");
   });
 
   // ── Derive the set and demand exact equality (both directions loud) ──────

@@ -201,32 +201,6 @@ describe('findForbiddenPhraseHit — boundary cases', () => {
 });
 
 // ---------------------------------------------------------------------------
-// V5 stale-aware explain recovery — Codex round-3 Improvement 4.
-//
-// Pin route-v2.ts's EDIT_GRAPH_RECOVERY_TEXT against the shared
-// FORBIDDEN_USER_FACING_PHRASES list. The constant is audit-only
-// today (it ships through sendFinalised200, which bypasses the
-// per-dispatch egress hooks landed in this workstream); a follow-up
-// task will fold this through the route-level chokepoint. Until
-// then, this test is the contract that the recovery text contains
-// no contradiction phrase, so a future edit to the constant cannot
-// silently re-introduce one.
-// ---------------------------------------------------------------------------
-
-describe('audited recovery constants — no forbidden phrase', () => {
-  // Known slow (pre-existing): the dynamic import pulls in route-v2's
-  // full module graph (fastify route + orchestrator + adapters), which
-  // can exceed the 5s default test timeout on a cold transform cache.
-  // The assertion itself is trivial — the budget only covers the import.
-  it('route-v2.ts EDIT_GRAPH_RECOVERY_TEXT is clean', { timeout: 30_000 }, async () => {
-    const { EDIT_GRAPH_RECOVERY_TEXT } = await import(
-      '../../../orchestrator/route-v2.js'
-    );
-    expect(findForbiddenPhraseHit(EDIT_GRAPH_RECOVERY_TEXT)).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
 // V5 H5 — internal-jargon defence (forbidden phrases additions).
 //
 // `validator` was observed leaking through user-facing prose on the

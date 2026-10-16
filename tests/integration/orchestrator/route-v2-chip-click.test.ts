@@ -411,7 +411,9 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
     expect(dispatchChipClickRunAnalysisMock).not.toHaveBeenCalled();
     // Either 200 (Sonnet text_only) or 500 (session env gap). What matters
     // is the branch decision.
-    expect([200, 500]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(410);
+    expect(res.json().details.reason).toBe('conventional_conversation_retired');
+    expect(routeWithToolUseSpy).toHaveBeenCalledTimes(0);
   });
 
   it('chip_click + unregistered action_type (set_factor_value) → NOT dispatched, falls through', async () => {
@@ -453,7 +455,9 @@ describe('POST /orchestrate/v2/turn — chip_click run_analysis dispatch', () =>
     // v0.7.0 schema allows chip to be absent. Without chip.action_type, the
     // chip-click shortcut cannot fire and falls through to TurnExecutor.
     expect(dispatchChipClickRunAnalysisMock).not.toHaveBeenCalled();
-    expect([200, 500]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(410);
+    expect(res.json().details.reason).toBe('conventional_conversation_retired');
+    expect(routeWithToolUseSpy).toHaveBeenCalledTimes(0);
   });
 
   it('chip_click run_analysis commit failure → 500 BoundaryError', async () => {

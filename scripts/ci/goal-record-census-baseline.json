@@ -1,5 +1,5 @@
 {
-  "source_sha": "aabe783d2964558cbf7e38de8605311d056311be",
+  "source_sha": "711b4d2f3cf53aec273556a0313e38242eeb5921",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -131,7 +131,6 @@
       "src/orchestrator-v5/handlers/size-new-factor-links.ts": 1,
       "src/orchestrator-v5/model-management/compare.ts": 12,
       "src/orchestrator-v5/model-management/store-adapter.ts": 1,
-      "src/orchestrator-v5/replacement/read-tools.ts": 2,
       "src/orchestrator-v5/routing/graph-lookup-adapter.ts": 5,
       "src/orchestrator-v5/system-events/dispatch.ts": 9,
       "src/orchestrator-v5/system-events/goal-target-edit.ts": 2,
@@ -301,7 +300,6 @@
       "src/orchestrator-v5/handlers/structural-challenge-dispatch.ts": 2,
       "src/orchestrator-v5/model-management/compare.ts": 1,
       "src/orchestrator-v5/persisted-graph-invariants.ts": 7,
-      "src/orchestrator-v5/replacement/read-tools.ts": 2,
       "src/orchestrator-v5/response-finaliser.ts": 1,
       "src/orchestrator-v5/routing/clarification-resume.ts": 1,
       "src/orchestrator-v5/session/pending-action.ts": 5,
@@ -415,7 +413,6 @@
       "src/orchestrator-v5/graph-management/field-safety.ts": 2,
       "src/orchestrator-v5/handlers/describe-changeset.ts": 2,
       "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 1,
-      "src/orchestrator-v5/replacement/read-tools.ts": 1,
       "src/orchestrator-v5/routing/clarification-resume.ts": 1,
       "src/orchestrator-v5/routing/typed-chip-mutation-proposal.ts": 4,
       "src/orchestrator-v5/system-events/dispatch.ts": 1,
@@ -846,18 +843,18 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 29,
     "goalUnitOf": 5,
-    "goal_constraints": 468,
+    "goal_constraints": 466,
     "goal_deadline_as_stated": 11,
     "goal_direction": 102,
     "goal_horizon": 47,
     "goal_horizon_months": 43,
     "goal_level_reading": 20,
-    "goal_node_id": 300,
+    "goal_node_id": 298,
     "goal_period": 4,
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
-    "goal_threshold": 261,
+    "goal_threshold": 260,
     "goal_threshold_cap": 168,
     "goal_threshold_cap_provenance": 38,
     "goal_threshold_frame": 147,
@@ -875,7 +872,7 @@
     "threshold_source": 43,
     "unit_reading": 79
   },
-  "total_references": 2531,
+  "total_references": 2526,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

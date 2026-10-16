@@ -888,8 +888,8 @@ describe("2.1300 F3 — an absent analysis_ready is only a LOSS where readiness 
     // POSITIVE CONTROL: an empty or single-bucket parse must not pass vacuously,
     // and identical answers for every site would be evidence about the parser
     // rather than about the route (trap 20).
-    expect(sites, "the sendFinalised200 parse found no call sites — the probe is blind").toBeGreaterThan(14);
-    expect(found.size, "the parse returned too few distinct exit paths to be discriminating").toBeGreaterThan(9);
+    expect(sites, "the sendFinalised200 parse found no call sites — the probe is blind").toBe(6);
+    expect(found.size, "the parse returned too few distinct exit paths to be discriminating").toBe(4);
     expect([...supplying].sort()).toEqual([...READINESS_PRODUCING_EXIT_PATHS].sort());
   });
 });

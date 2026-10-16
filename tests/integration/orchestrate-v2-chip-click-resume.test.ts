@@ -37,8 +37,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-
-import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { PendingAction } from '../../src/orchestrator-v5/session/pending-action.js';
 
 // Throwing routing adapter — any LLM call fails the test loudly.
@@ -190,9 +188,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
-const { buildAnalysisUnconfirmedTemplate } = await import(
-  '../../src/orchestrator-v5/tools/handlers/no-op-helpers.js'
-);
 
 function buildChipClickPayload(
   actionType: 'what_would_flip' | 'run_analysis',
@@ -241,58 +236,6 @@ describe('POST /orchestrate/v2/turn — chip-click resume HTTP boundary', () => 
   });
   afterEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('chip_click + action_type=what_would_flip + persisted PendingAction → resumer claims turn at HTTP boundary, no LLM call, safety recovery composed', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: buildChipClickPayload('what_would_flip'),
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-
-    // Acceptance Gate 1: zero LLM calls. The strongest signal that the
-    // chip-click intent flag was detected at the route, threaded into
-    // TurnExecutor, and the resumer claimed the turn deterministically.
-    expect(llmCallTracker.count).toBe(0);
-
-    // Acceptance Gate 2: the response surfaced the recovery copy.
-    // With unknown freshness on the prior run_analysis fact, resuming
-    // what_would_flip would surface a misleading answer, so the resumer
-    // downgrades to the recovery path.
-    // ROADMAP 1.148 C7 re-pin: PR #298 (Tier-0 freshness honesty) replaced
-    // the old "run analysis again" phrasing with the canonical
-    // unconfirmed-freshness template. Assert containment of the template
-    // itself (derive, don't mirror — copy drift breaks HERE, loudly).
-    expect(parsed.assistant_text).toContain(buildAnalysisUnconfirmedTemplate());
-
-    // Acceptance Gate 3 (re-pinned, ROADMAP 1.148 C7): the executable
-    // "Rerun analysis" chip is INTENTIONALLY suppressed for freshness
-    // 'unknown' — the chip-generator's stale-recovery rule emits it only
-    // for 'stale' (deterministic hash divergence), never for unconfirmed
-    // currency (see chip-generator.ts "The chip suppresses on fresh /
-    // unknown / none"). The recovery copy carries the re-run instruction;
-    // the generator's floor still offers a next step, and critically the
-    // response must NOT loop the user back into the (unconfirmed)
-    // what_would_flip chip it just declined to execute.
-    expect((parsed.suggested_actions ?? []).length).toBeGreaterThan(0);
-    const flipChips = (parsed.suggested_actions ?? []).filter(
-      (a) => a.action_type === 'what_would_flip',
-    );
-    expect(flipChips).toHaveLength(0);
-
-    // Acceptance Gate 4: no internal failure copy leaks at the boundary.
-    expect(parsed.assistant_text).not.toMatch(/no pending action/i);
-    expect(parsed.assistant_text).not.toMatch(/internal error/i);
-    expect(parsed.assistant_text).not.toMatch(/not found in graph/i);
-    expect(parsed.assistant_text).not.toMatch(/-?\d+\.\d+/); // no raw decimals
-
-    // Acceptance Gate 5: a turn row was committed (the recovery
-    // dispatches commit, not a bare error response).
-    expect(appendCalls.length).toBeGreaterThan(0);
   });
 
   // F2 CHANGE A — removed: a fresh-analysis what_would_flip chip now routes to the coach (forced intent), not the deterministic resumer — covered by route-v2-chip-click-explain.test.ts. The persisted-pending recovery test above and the run_analysis cordon below still hold.

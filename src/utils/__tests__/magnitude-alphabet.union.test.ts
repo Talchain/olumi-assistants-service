@@ -418,8 +418,6 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       'Count-word detector for the RC4 narrator backstop (sentence removal); no magnitude alphabet, no band word->value map.',
     'orchestrator-v5/agent-lane/guidance/method-turn-check.ts':
       'Leader-claim pattern ("stronger/strongest option") in the pre-mortem checker; no alphabet, no word->value map, no parsing.',
-    'orchestrator-v5/replacement/system-prompt.ts':
-      'Prompt copy rule on spelling amounts in full; no alphabet, no word->value map, no parsing.',
     // 16 Sep 2026 — INCIDENTAL, and the mention is one word of English prose.
     // `orchestrator/context/graph-compact.ts` qualifies an option's model value
     // for the AI-facing context ("model value 1 (display band Very high;

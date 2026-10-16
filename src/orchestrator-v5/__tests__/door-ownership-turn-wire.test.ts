@@ -67,8 +67,8 @@ it.each(ROUTES.flatMap(route => (['not_owner', 'owner_unreadable'] as const).map
       await ceeOrchestratorRouteV2(app); await streamRoute(app); await proxyStreamRoute(app);
       const response = await app.inject({ method: 'POST', url: route,
         headers: { 'x-request-id': 'door-r2', origin: 'https://staging--olumi.netlify.app' },
-        payload: { kind: 'message', scenario_id: SID, turn_id: 'b1111111-1111-4111-8111-111111111111',
-          message: 'Consider the strategic framing.', turn_class: 'frame', stage: 'analyse', source: 'composer' },
+        payload: { kind: 'system_event', scenario_id: SID, turn_id: 'b1111111-1111-4111-8111-111111111111',
+          stage: 'analyse', event: { kind: 'patch_accepted', patch_id: 'ownership-contract' } },
       });
       let body: unknown;
       if (route.endsWith('/stream')) {
@@ -124,8 +124,8 @@ async function bufferedRefusal(reason: 'not_owner' | 'owner_unreadable', marking
     await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
     await ceeOrchestratorRouteV2(app);
     const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
-      payload: { kind: 'message', scenario_id: SID, turn_id: 'b1111111-1111-4111-8111-111111111111',
-        message: 'Consider the strategic framing.', turn_class: 'frame', stage: 'analyse', source: 'composer' },
+      payload: { kind: 'system_event', scenario_id: SID, turn_id: 'b1111111-1111-4111-8111-111111111111',
+        stage: 'analyse', event: { kind: 'patch_accepted', patch_id: 'ownership-contract' } },
     });
     return { response, append, markGraphWriteFailed };
   } finally { await app.close(); state.store = undefined; }

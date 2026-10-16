@@ -55,12 +55,8 @@ vi.mock('../../handlers/edit-graph-dispatch.js', async (importOriginal) => ({
 import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js';
 import { GraphStaleWriteError, type SessionTurnWrite } from '../store.js';
 import { SupabaseSessionStore, __setUseAppendV6ForTest } from '../supabase-store.js';
-import { ceeOrchestratorRouteV2 } from '../../../orchestrator/route-v2.js';
 import { getStatusCodeForErrorCode, toErrorV1 } from '../../../utils/errors.js';
 import { promoteRevisionConflictResponse, readRevisionConflictDetails } from '../../graph-revision-conflict.js';
-import { EMPTY_CONVERSATION_MEMORY } from '../../replacement/conversation-memory.js';
-import { EMPTY_PROPOSAL_STORE, openProposal, authoriseProposal, beginApply } from '../../replacement/proposal-store.js';
-import { ACCEPT_TOOL_NAME, runReplacementTurn } from '../../replacement/run-replacement-turn.js';
 
 const SCENARIO = 'a6ccf5cf-aab0-4f01-b889-e0d6c072067c';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b';
@@ -97,42 +93,6 @@ async function register() {
 }
 
 describe('revision CAS wire refusal', () => {
-  it.each(['accept', 'reconcile'])('lets a known revision refusal escape the replacement %s path to HTTP mapping', async (path) => {
-    const now = '2026-10-08T12:00:00.000Z';
-    let proposals = openProposal(EMPTY_PROPOSAL_STORE, { id: 'proposal-1', operations: [{ kind: 'set', summary: 'Set capacity' }],
-      model_revision: 'rev-1', proposed_at: now, proposed_in_turn: 'prior-turn' });
-    if (path === 'reconcile') {
-      proposals = authoriseProposal(proposals, 'proposal-1', { authorised_in_turn: 'consent-turn', authorised_at: now, current_model_revision: 'rev-1' });
-      proposals = beginApply(proposals, 'proposal-1', { idempotency_key: 'write-1', apply_started_at: now, current_model_revision: 'rev-1' });
-    }
-    const error = new GraphStaleWriteError('stale revision', { conflict_category: 'revision_conflict',
-      cause: { details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) } });
-    const applyOperations = vi.fn(async () => { throw error; });
-    await expect(runReplacementTurn({ message: 'Yes, go ahead', history: [], memory: EMPTY_CONVERSATION_MEMORY,
-      proposals, modelRevision: 'rev-1', workspaceSummary: 'Capacity model', tools: [], turnId: 'accept-turn', now,
-      idFor: (purpose, index) => `${purpose}-${index}`,
-    }, { checkpoint: async () => undefined, applyOperations,
-      chatWithTools: async () => ({ content: [{ type: 'tool_use', id: 'accept-1', name: ACCEPT_TOOL_NAME,
-        input: { proposal_id: 'proposal-1', user_agreement_quote: 'Yes, go ahead' } }], stop_reason: 'tool_use' }),
-    })).rejects.toBe(error);
-    expect(applyOperations).toHaveBeenCalledTimes(1);
-  });
-
-  it('maps the edit-graph pipeline revision refusal at its existing HTTP catch', async () => {
-    mocks.dispatchEditGraph.mockRejectedValue(new GraphStaleWriteError('stale revision', { conflict_category: 'revision_conflict',
-      cause: { details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) } }));
-    app = Fastify();
-    await ceeOrchestratorRouteV2(app);
-    const res = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
-      kind: 'message', turn_id: 'b2222222-2222-4222-8222-222222222222', scenario_id: SCENARIO,
-      message: 'Add a risk for supplier delays affecting the launch', turn_class: 'decide', stage: 'analyse',
-      source: 'composer', graph_state: GRAPH,
-    } });
-    expect(mocks.dispatchEditGraph).toHaveBeenCalledTimes(1);
-    expect(res.statusCode).toBe(409);
-    expect(res.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8,
-      details: { conflict_category: 'revision_conflict', expected: 7, current: 8 } });
-  });
 
   it('preserves an internal HTTP revision refusal before Agent consumers turn it into a normal tool result', () => {
     const response = { status: 409, json: { code: 'revision_conflict', details: { expected: 7, current: 8 } } };
@@ -142,21 +102,6 @@ describe('revision CAS wire refusal', () => {
     expect(readRevisionConflictDetails(caught as GraphStaleWriteError)).toEqual({ expected: 7, current: 8 });
     const hashConflict = { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
     expect(promoteRevisionConflictResponse(hashConflict)).toBe(hashConflict);
-  });
-
-  it('maps the real executor failure envelope to HTTP 409 with the DETAIL revisions', async () => {
-    mocks.append.mockRejectedValue(new GraphStaleWriteError('stale revision', { conflict_category: 'revision_conflict',
-      cause: { code: 'OLRV1', details: JSON.stringify({ reason: 'revision_conflict', expected: 7, current: 8 }) } }));
-    app = Fastify();
-    await ceeOrchestratorRouteV2(app);
-    const res = await injectAsCeeWriter(app, { method: 'POST', url: '/orchestrate/v2/turn', payload: {
-      kind: 'message', turn_id: 'b1111111-1111-4111-8111-111111111111', scenario_id: SCENARIO,
-      message: 'Consider the strategic framing.', turn_class: 'frame', stage: 'analyse', source: 'composer',
-    } });
-    expect(mocks.append).toHaveBeenCalled();
-    expect(res.statusCode).toBe(409);
-    expect(res.json()).toMatchObject({ code: 'revision_conflict', expected: 7, current: 8,
-      details: { conflict_category: 'revision_conflict', expected: 7, current: 8 } });
   });
 
   it('maps errors escaping the Agent and replacement paths through the existing central HTTP mapper', async () => {

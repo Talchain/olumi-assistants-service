@@ -12,8 +12,6 @@
   "src/cee/validation-pipeline/validate-graph.ts",
   "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
   "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts",
-  "src/orchestrator-v5/replacement/agent-loop.ts",
-  "src/orchestrator-v5/routing/open-frame-intake.ts",
   "src/orchestrator-v5/routing/route-with-tool-use.ts",
   "src/orchestrator/tools/edit-graph.ts",
   "src/routes/agent-v1-turn.ts",
@@ -58,15 +56,6 @@
   "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": {
    "kind": "construction_stage",
    "reason": "Widening pass over the admitted draft: signals come from assembleGuidanceSignals (turn-context/guidance-signals.ts) and the candidate model; carries no Run facts."
-  },
-  "src/orchestrator-v5/routing/open-frame-intake.ts": {
-   "kind": "router_classifier",
-   "reason": "Advisory start_model/continue_conversation call on an EMPTY model: the current message and at most OPEN_FRAME_INTAKE_RECENT_TURNS_CAP recent turns; no graph, analysis or figure."
-  },
-  "src/orchestrator-v5/replacement/agent-loop.ts": {
-   "kind": "transport_only",
-   "via": "projectTurnContext",
-   "reason": "The model call is injected; the input is the replacement layer's projectTurnContext / read tools."
   },
   "src/orchestrator-v5/routing/route-with-tool-use.ts": {
    "kind": "transport_only",

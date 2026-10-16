@@ -54,7 +54,6 @@ import {
   buildOlumiActionTool,
   buildForcedPillTool,
 } from '../routing/tool-schema.js';
-import { OPEN_FRAME_INTAKE_TOOL } from '../routing/open-frame-intake.js';
 import {
   buildAddOptionGrounding,
   buildProposeAddOptionTool,
@@ -106,22 +105,11 @@ const GROUNDING: StructuralEditGrounding = buildStructuralEditGrounding({
  * drift. If a factory ever starts reading deps at construction time, this line
  * throws rather than silently covering a different schema.
  */
-const NO_DEPS = {} as never;
 
 const SERVED_TOOL_SCHEMAS: readonly {
   readonly label: string;
   readonly schema: unknown;
 }[] = [
-  // ── replacement conversation layer (21 Sep 2026) ──────────────────────
-  { label: 'replacement: set_option_effect', schema: createSetOptionEffectTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: read_workspace', schema: createReadWorkspaceTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: read_results', schema: createReadResultsTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: add_factor', schema: createAddFactorTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: add_option', schema: createAddOptionTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: add_link', schema: createAddEdgeTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: run_analysis', schema: createRunAnalysisTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: remember', schema: createRememberTool(NO_DEPS).definition.input_schema },
-  { label: 'replacement: accept_proposal', schema: ACCEPT_TOOL_INPUT_SCHEMA },
   { label: 'olumi_action (base advert)', schema: OLUMI_ACTION_TOOL.input_schema },
   { label: 'olumi_action (served)', schema: buildOlumiActionTool().input_schema },
   {
@@ -135,10 +123,6 @@ const SERVED_TOOL_SCHEMAS: readonly {
   {
     label: 'propose_structural_edit',
     schema: buildProposeStructuralEditTool(GROUNDING).input_schema,
-  },
-  {
-    label: 'olumi_route_open_frame_intake',
-    schema: OPEN_FRAME_INTAKE_TOOL.input_schema,
   },
   {
     // The add-option text leg's focused tool. It CONSTRUCTS its own schema
@@ -162,38 +146,11 @@ const SERVED_TOOL_SCHEMAS: readonly {
  * 400ing on `operations.items.properties.value`. Each schema must therefore be
  * conformant AT ITS PRODUCER, which is what the registry above tests.
  */
-import { createSetOptionEffectTool } from '../replacement/propose-tools.js';
-import { createReadWorkspaceTool, createReadResultsTool } from '../replacement/read-tools.js';
-import {
-  createAddFactorTool,
-  createAddOptionTool,
-  createAddEdgeTool,
-} from '../replacement/structure-tools.js';
-import { createRunAnalysisTool } from '../replacement/run-analysis-tool.js';
-import { createRememberTool } from '../replacement/remember-tool.js';
-import { ACCEPT_TOOL_INPUT_SCHEMA } from '../replacement/run-replacement-turn.js';
-
 const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'adapters/llm/anthropic.ts',
-  'orchestrator-v5/routing/open-frame-intake.ts',
   'orchestrator-v5/routing/tool-schema.ts',
   'orchestrator-v5/tools/propose-structural-edit.ts',
   'orchestrator-v5/tools/propose-add-option.ts',
-  // 21 Sep 2026 — the replacement conversation layer's tools. Each is listed
-  // here AND its built schema added to SERVED_TOOL_SCHEMAS below, because
-  // listing a file without covering its schema is exactly the "widen it to
-  // hide growth" this guard's own message forbids.
-  'orchestrator-v5/replacement/propose-tools.ts',
-  'orchestrator-v5/replacement/read-tools.ts',
-  'orchestrator-v5/replacement/structure-tools.ts',
-  'orchestrator-v5/replacement/run-analysis-tool.ts',
-  'orchestrator-v5/replacement/remember-tool.ts',
-  // NOT run-replacement-turn.ts: its accept-tool schema is now the exported
-  // `ACCEPT_TOOL_INPUT_SCHEMA` constant, so the file no longer matches this
-  // scanner's "constructs a schema inline" pattern — while the schema ITSELF is
-  // covered in SERVED_TOOL_SCHEMAS below. That is the stronger position: the
-  // sweep reads the real advert instead of merely noting the file exists, which
-  // is how the missing `additionalProperties: false` was found.
 ];
 
 interface ObjectNode {
@@ -305,11 +262,7 @@ describe('⭐⭐ 2.655 — every custom tool schema Anthropic is sent is API-con
     // line someone can quietly add. And the remedy for a genuinely parameterless
     // tool must never be to invent a decorative field — that would satisfy this
     // guard by lying to the model about what the tool accepts.
-    const PARAMETERLESS_BY_DESIGN: readonly string[] = [
-      'replacement: read_workspace $', // reads the workspace as it stands; nothing to parameterise
-      'replacement: read_results $', // reads the current analysis; takes no selector
-      'replacement: run_analysis $', // runs the analysis as configured; the model chooses nothing
-    ];
+    const PARAMETERLESS_BY_DESIGN: readonly string[] = []; // All three parameterless replacement tools were deleted.
 
     const closedToNothing = SERVED_TOOL_SCHEMAS.flatMap((t) =>
       objectNodesIn(t.schema)

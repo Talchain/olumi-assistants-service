@@ -98,7 +98,6 @@ function enumerateComposeCalls(source: string): ComposeCall[] {
 // The three files where a composed OlumiResponse reaches the route egress.
 const TARGET_FILES = {
   'turn-executor.ts': resolve(HERE, '../turn-executor.ts'),
-  'route-v2.ts': resolve(HERE, '../../orchestrator/route-v2.ts'),
   'chip-click-dispatch.ts': resolve(HERE, '../handlers/chip-click-dispatch.ts'),
 } as const;
 
@@ -116,7 +115,6 @@ const TARGET_FILES = {
 //     'substantive' later must bump this pin to 1 (deliberate).
 const EXPECTED_SUBSTANTIVE_COUNT: Record<keyof typeof TARGET_FILES, number> = {
   'turn-executor.ts': 4,
-  'route-v2.ts': 0,
   'chip-click-dispatch.ts': 0,
 };
 

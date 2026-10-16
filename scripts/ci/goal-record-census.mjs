@@ -3,7 +3,7 @@
 // Fixed scope derived from NodeV3's 19 goal fields (including quantity_frame),
 // GraphV3/CEEGraphResponseV3's goal_constraints + goal_node_id, and the named readers.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,6 +34,8 @@ export function censusFiles(root = ROOT) {
   const tracked = execFileSync('git', ['ls-files', '-z', '--', 'src'], { cwd: root, encoding: 'utf8' })
     .split('\0').filter(Boolean);
   return tracked.filter((file) => {
+    // Uncommitted deletions remain in the index; broken symlinks still fail in runCensus.
+    try { lstatSync(join(root, file)); } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
     const parts = file.split('/');
     const base = parts[parts.length - 1];
     return !parts.some((part) => ['__tests__', 'fixtures', 'prompts'].includes(part))

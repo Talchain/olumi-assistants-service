@@ -138,15 +138,25 @@ const { build } = await import("../../src/server.js");
 
 const TURN_URL = "/orchestrate/v2/turn";
 
+/**
+ * A KEPT `/orchestrate/v2/turn` shape: a canvas system event (`patch_accepted`).
+ *
+ * #3283 retired the free-text conversation shape on this route (it now answers
+ * 410 `conventional_conversation_retired` after admission). The ownership
+ * refusal this suite pins is a route-level preHandler
+ * (`plugins/scenario-ownership.ts`) and does not depend on the body shape, so
+ * every row runs on a shape the route still serves — system events are what
+ * the browser's canvas edits and the AI lane's `app.inject` calls send here.
+ * Refusals and their over-correction controls share this ONE shape, so each
+ * pair still differs only in the caller.
+ */
 function turnBody(scenarioId: string, userId?: string) {
   return {
-    kind: "message" as const,
+    kind: "system_event" as const,
     turn_id: randomUUID(),
     scenario_id: scenarioId,
-    message: "claimed-identity suite turn",
-    turn_class: "frame" as const,
+    event: { kind: "patch_accepted" as const, patch_id: "claimed-identity-suite" },
     stage: "analyse" as const,
-    source: "composer" as const,
     ...(userId !== undefined ? { user_id: userId } : {}),
   };
 }

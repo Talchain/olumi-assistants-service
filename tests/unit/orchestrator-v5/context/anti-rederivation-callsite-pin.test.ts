@@ -122,7 +122,6 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // ⚠ WHEN THE CONTROLLER IS WIRED THROUGH THE FRAME, THIS ENTRY MUST GO —
     // it is approved because the frame is unreachable there, not because the
     // controller is entitled to derive. Re-check it at that migration.
-    'src/orchestrator-v5/replacement/turn-context-view.ts': 2,
     'src/orchestrator-v5/build-turn-context.ts': 2, // approved seam (routing/coaching freshness)
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 2, // approved seam (canonical-state composition)
     // 2026-07-08 lane-34: +1 — the GM held-execute resume re-derives wire
@@ -348,7 +347,7 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // reopen exactly the divergence the entry above exists to prevent.
     // Deliberate, reviewed; still ad-hoc debt — migrate with the
     // frame-consumer audit, do not add more.
-    'src/orchestrator/route-v2.ts': 3,
+    'src/orchestrator/route-v2.ts': 2,
     // 2026-08-17 ROADMAP 2.1271: +2 (import + one call) — the scenario-graph
     // READ leg composes a scenario's analysis verdict OUTSIDE a turn, so the
     // guidance above ("read the value from the CanonicalContextFrame / turn

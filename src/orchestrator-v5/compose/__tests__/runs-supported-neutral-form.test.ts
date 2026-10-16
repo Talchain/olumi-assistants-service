@@ -18,7 +18,6 @@ import { textNamesLeadingOption } from '../leading-option-egress-guard.js';
 import { enforceAgentLaneLeaderClaimsAtWire, rankingCodesIn, rankingLabelContext } from '../../agent-lane/withheld-leader-fail-closed.js';
 import { LINK_COPY, renderLinkTippingPoints, IN_THIS_MODEL } from '../../agent-lane/method-turn/what-changes-turn.js';
 import { TARGET_FIT_DEFINITION } from '../../format/format-analysis-for-context.js';
-import { SYSTEM_PROMPT_DOCTRINE } from '../../replacement/system-prompt.js';
 
 const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'price', kind: 'factor', label: 'Price' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
 const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
@@ -99,12 +98,10 @@ describe('the composers emit only forms the guards read (derived from the real b
 });
 
 describe('the model-facing definitions name no winner (Codex r3 #2609)', () => {
-  it('the target-fit definition and the replacement doctrine use the runs-supported form', () => {
+  it('the target-fit definition uses the runs-supported form', () => {
     expect(TARGET_FIT_DEFINITION).toContain('win_probability only says how often runs supported the option over the alternatives');
     expect(TARGET_FIT_DEFINITION).toContain('an option can be supported by the most runs yet still be unlikely to meet the target');
-    expect(SYSTEM_PROMPT_DOCTRINE).toContain('far more than which option the most runs supported');
-    expect(SYSTEM_PROMPT_DOCTRINE).toContain('would change how the options compare if they are wrong');
-    for (const s of [TARGET_FIT_DEFINITION, SYSTEM_PROMPT_DOCTRINE]) {
+    for (const s of [TARGET_FIT_DEFINITION]) {
       expect(s).not.toMatch(/\b(?:wins?|beats?|leaders?|winner)\b/i);
     }
   });

@@ -154,7 +154,7 @@ function inject(h: Awaited<ReturnType<typeof harness>>, family: string) {
   return h.app.inject({ method: 'POST', url: family === 'sse' ? '/orchestrate/v2/turn/stream'
     : family === 'agent' || family === 'adoption' ? '/agent/v1/turn' : '/orchestrate/v2/turn', headers: { 'x-request-id': 'prop-request' }, payload: payload(family) });
 }
-it.each(['system_event', 'chip', 'draft', 'adoption', 'agent', 'sse'])('refusal propagation: %s', async family => {
+it.each(['system_event', 'chip', 'adoption', 'agent', 'sse'])('refusal propagation: %s', async family => {
   const warn = vi.spyOn(log, 'warn');
   const adoptionDoor = vi.spyOn(adoption, 'commitOlumiOptionAdoptionInProcess');
   const h = await harness(family);
