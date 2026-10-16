@@ -17,6 +17,7 @@ const rows = [
   { name: 'accepted-olumi', stamp: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } }, whose: 'olumi_accepted', sizing: 'olumi_accepted' },
   { name: 'unknown', stamp: { source: 'unrecognised' }, whose: 'unknown', sizing: 'unmarked' },
   { name: 'third-party', stamp: { source: 'unverified_brief', source_quote: 'The supplier says each additional specialist resolves about 20 tickets per week, between 10 and 30.' }, whose: 'unknown', sizing: 'unmarked' },
+  { name: 'placeholder', stamp: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' }, whose: 'unknown', sizing: 'placeholder' },
 ] as const;
 
 describe('bound link facts in the actual build continuation request', () => {
@@ -25,6 +26,7 @@ describe('bound link facts in the actual build continuation request', () => {
     const edge = { ...structuredClone(savedLink), provenance: {
       natural_effect: structuredClone(object(savedLink.provenance).natural_effect),
       source_quote: object(savedLink.provenance).source_quote, ...row.stamp } };
+    if (row.name === 'placeholder') edge.provenance.natural_effect = { ...object(edge.provenance.natural_effect), amount: 7.5 };
     // Same figure, another directed link, another author. It must never inherit this link's origin by number matching.
     const other = { ...structuredClone(savedLink), from: 'existing_team_capacity', to: 'additional_specialist_capacity',
       provenance: { ...object(savedLink.provenance), source: 'cee_hypothesis', magnitude: 'olumi_estimate',
@@ -53,7 +55,10 @@ describe('bound link facts in the actual build continuation request', () => {
     expect(built).toMatchObject({ ok: true, replayed: true, mutated: false });
     const links = array(built.links).map(object);
     const bound = links.find(l => l.from === savedLink.from && l.to === savedLink.to);
-    expect(bound).toMatchObject({ sizing: row.sizing, natural_effect: {
+    if (row.name === 'placeholder') {
+      expect(bound).toMatchObject({ sizing: 'placeholder' });
+      for (const key of ['natural_effect', 'strength', 'band']) expect(bound).not.toHaveProperty(key);
+    } else expect(bound).toMatchObject({ sizing: row.sizing, natural_effect: {
       amount: 20, amount_unit: 'tickets per week', per_source_change: 1, per_source_change_unit: 'specialists',
       stated_range: { low: 10, high: 30, end: 'centre', text: 'between 10 and 30' },
       whose: row.whose, source_quote: object(edge.provenance).source_quote,
@@ -61,5 +66,8 @@ describe('bound link facts in the actual build continuation request', () => {
     expect(links.find(l => l.from === other.from && l.to === other.to)).toMatchObject({
       natural_effect: { amount: 20, whose: 'olumi', source_quote: object(other.provenance).source_quote },
     });
+    const definitions = links.filter(l => l.holds_by_definition === true);
+    expect(definitions.some(l => object(l.natural_effect).amount === 1)).toBe(true);
+    for (const definition of definitions) expect(definition.natural_effect).not.toHaveProperty('whose');
   }, 60_000);
 });

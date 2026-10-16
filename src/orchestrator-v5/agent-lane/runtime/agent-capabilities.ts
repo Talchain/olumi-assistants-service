@@ -1755,10 +1755,11 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // are different authorship questions; ask the existing provenance authority about the size.
       ...((): Record<string, unknown> => {
         const p = isPlainRecord(e.provenance) ? e.provenance : undefined;
-        if (!isPlainRecord(p?.natural_effect)) return {};
+        if (linkSizing(e) === 'placeholder' || !isPlainRecord(p?.natural_effect)) return {};
         return { natural_effect: {
           ...pickKeys(p.natural_effect, ['amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'stated_range']),
-          whose: whoseOf(provenanceOf({ link: e, context: { fromKind: kindOf.get(e.from) } })),
+          ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? {}
+            : { whose: whoseOf(provenanceOf({ link: e, context: { fromKind: kindOf.get(e.from) } })) }),
           ...(str(p.source_quote) ? { source_quote: p.source_quote } : {}),
         } };
       })(),
