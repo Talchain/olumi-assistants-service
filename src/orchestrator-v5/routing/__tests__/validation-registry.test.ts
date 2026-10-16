@@ -298,7 +298,10 @@ describe('run_analysis confirmation_template forwarder', () => {
   it('falls back when text is Case D shape with a non-integer percentage (raw decimal)', () => {
     const adversarial =
       'Hire A was supported by the most runs of this model with 62.5% probability. Run the follow-up checks before treating this as final.';
-    expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
+    const confirmed = fwd({ assistant_text: adversarial });
+    expect(confirmed).toBe(FALLBACK + ' Run the follow-up checks before treating this as final.');
+    expect(confirmed).not.toContain('62.5');
+    expect(confirmed).not.toContain('was supported by');
   });
 
   it('falls back when assistant_text contains "was supported by the most runs of this model" mid-sentence with extra prose', () => {

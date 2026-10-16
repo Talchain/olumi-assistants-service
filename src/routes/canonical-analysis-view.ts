@@ -1,3 +1,4 @@
+import { withRecordedRunQuestion } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { readRunEvidence, runEvidenceWireOf } from '../orchestrator-v5/agent-lane/run-evidence.js';
 import { runLeaderOf, type RunLeader } from '../orchestrator-v5/agent-lane/run-facts.js';
@@ -9,7 +10,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import { isAnalysisRefusalFact } from '../orchestrator-v5/context/analysis-refusal-continuity.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../orchestrator-v5/compose/leader-licence.js';
-import { deriveRunQuestion, goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED, STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED, type RunQuestion } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED, STATIC_MODEL_SCOPE_NOTE, type RunQuestion } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { readStoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import {
@@ -241,10 +242,9 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const freshness = fact === null ? undefined : input.derivation?.freshness;
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
-  const result = current ? input.currentResult : null;
-  const staticClaim = goalChanceLicenceForAgent(result)?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
-  const verifiedCurrent = current && (!staticClaim || question?.scope.status === 'supported_static');
-  const facts = goalChanceFactsForAgent(result, input.graph, verifiedCurrent);
+  const result = current ? withRecordedRunQuestion(input.currentResult, question) : null;
+  const staticClaim = question?.scope.status === 'supported_static';
+  const facts = goalChanceFactsForAgent(result, input.graph, current);
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
   const availability = goalChanceDriverAvailabilityForAgent(result);
   const driverStatus = new Map(availability?.options.map(row => [row.option_id, row]) ?? []);
@@ -274,13 +274,9 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
         : 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),
-    leader: runLeaderOf(result, input.analysisState, input.analysisReady, verifiedCurrent),
+    leader: runLeaderOf(result, input.analysisState, input.analysisReady, current),
     options: cells.map(({ option_id, cell: projected }) => {
-      const why = STATIC_INPUTS_NOT_RECORDED;
-      const cell: CanonicalAnalysisCell = !staticClaim || (projected.kind !== 'figure' && projected.kind !== 'range') ? projected
-        : question?.scope.status === 'supported_static'
-          ? projected
-          : { kind: 'withheld', face: OPTION_CHANCE_NOT_SHOWN, why, reasons: [{ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', message: why }] };
+      const cell = projected;
       const driver = cell.kind === 'figure' ? drivers.get(option_id) : undefined;
       const status = driverStatus.get(option_id);
       const detail = facts.goal_chance_driver_display?.[option_id];

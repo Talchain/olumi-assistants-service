@@ -1,3 +1,4 @@
+import { buildAnalysisResultBlock } from '../../compose.js';
 /**
  * ⭐ C46 × R3-4 — A PRODUCT THE ENGINE EVALUATED ON THIS RUN IS NOT WITHHELD BY THE STRUCTURAL SIGN TEST.
  *
@@ -331,12 +332,12 @@ describe('C46 × R3-4: the structural sign test stands down only for a carrier t
     expect(cause(withheld)).toEqual({ withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true });
   });
 
-  it('HANDLER ROW (run_analysis): PLoT reports the carrier evaluated → the leader is named and the headline says it', async () => {
+  it('HANDLER ROW (run_analysis): PLoT reports the carrier evaluated → the public block names the permitted leader', async () => {
     const g = await build(paul());
     const fact = await runOn(g, [RAISE, KEEP], [EVALUATED_MRR]);
     expect(fact.result.leading_option_id).toBe(RAISE.id);
     expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
-    expect(fact.result.summary).toMatch(/Raise Pro to £59/);
+    expect(buildAnalysisResultBlock(fact).leading_option_id).toBe(RAISE.id);
     // The list is stored verbatim with the envelope, where the readback finds it.
     expect((fact.result.enrichment as Record<string, unknown>).identity_evaluations).toEqual([EVALUATED_MRR]);
   });
