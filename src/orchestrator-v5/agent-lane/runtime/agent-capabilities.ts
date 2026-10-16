@@ -6406,6 +6406,11 @@ export function createAgentCapabilities(
        * 15% and secure 20 new customers", on a draft of "launch % complete". With the goal typed in THIS message, the answer
        * is ONE revised-draft card when the draft is still unreviewed, else the gates' refusal; nothing changes either way.
        */
+      // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
+      if (inclusiveType === 'at_least' && !(value > 0)) {
+        return { ok: false, mutated: false, refusal: 'target_not_positive',
+          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
+      }
       const measures = typeof args.measures === 'string' ? args.measures.trim() : '';
       if (measures !== '' && norm(measures) !== norm(goal.label) && resolveNamed(g, measures, () => true).kind === 'none'
         && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(derived?.base ?? value, unit, ctx.user_turn_text)) {
@@ -6431,11 +6436,6 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'goal_is_a_change', saved_goal: savedGoalMeaningOf(g.raw, goal.id),
           detail: `The goal "${goal.label}" is stated as a change from today, and this path cannot yet change a target stated that way, so nothing was prepared. `
             + 'Tell the user plainly, and never offer a level target in its place.' };
-      }
-      // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
-      if (inclusiveType === 'at_least' && !(value > 0)) {
-        return { ok: false, mutated: false, refusal: 'target_not_positive',
-          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Explain the supplied current target or approval facts in ordinary words. Keep exact quantitative values, units, scope and human-versus-Olumi provenance. A proposed modelling interpretation or approval now does not prove the original quote’s subject or authorship.` };
       }
       // ⛔ A figure in another kind of unit is never this goal's target (the lane's one family check, `unit-conflict.ts`).
       // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.

@@ -217,6 +217,33 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     expect(saved.goal_constraints).toContainEqual(expect.objectContaining({ node_id: OUTCOME, value: 1.3 }));
   });
 
+  it.each([{ value: 0, refusal: 'target_not_positive' }, { value: -1, refusal: 'target_not_stated' }])('BUDDY B1: the restated-goal handoff refuses a non-positive at-least target (£$value) before drafting or offering a card', async ({ value, refusal }) => {
+    const message = `I need angel funding of at least £${value} to bring in technical resource.`;
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer).toMatchObject({ ok: false, mutated: false, refusal });
+    expect(offer.proposal_id).toBeUndefined();
+    expect(s.sent).toHaveLength(0);
+    expect(s.writes).toHaveLength(0);
+    expect(s.graph()).toEqual(FX.graph);
+  });
+
+  it('BUDDY B1 contrast: an at-most zero reading keeps the supported comparator, with nothing saved before approval', async () => {
+    const message = 'I need angel funding of at most £0 to bring in technical resource.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 0,
+      unit: '£', constraint_type: 'at_most', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer).toMatchObject({ ok: true, mutated: false, revised_draft: { holds_this_target: true } });
+    const candidate = s.candidateOf(offer).candidate;
+    const goal = candidate.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(candidate.goal_constraints.find((r: Rec) => r.node_id === goal.id)).toMatchObject({
+      operator: '<=', value: 0, provenance: 'inferred' });
+    expect(s.writes).toHaveLength(0);
+  });
+
   it('the cached call reading belongs to its quantity, never another call with the same figure', async () => {
     const message = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
     const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
