@@ -6543,14 +6543,8 @@ export function createAgentCapabilities(
         const source = [...lines].reverse().find(line => figureTheUserWrote(derived?.base ?? value, unit, line));
         if (source === undefined || source.trim() === '' || source.length > 200 || derived !== null || ctx.user_text_complete === false
           || quoteIsNotTheUsersClaim(source, source)) {
-          // DL-3 (#3279 review): when the ONLY gap is an incomplete conversation text (marketing L20's two-target restatement),
-          // keep the revised-draft card staging offered, rather than losing its only card. Every other unsupported source
-          // (too long, derived, not the user's claim) is refused: it never falls into a redraft (4 options → 1, founder).
-          const onlyIncompleteHistory = source !== undefined && source.trim() !== '' && source.length <= 200 && derived === null
-            && !quoteIsNotTheUsersClaim(source, source) && ctx.user_text_complete === false;
-          if (onlyIncompleteHistory && norm(ctx.user_turn_text).includes(norm(measures)) && figureTheUserWrote(value, unit, ctx.user_turn_text)) {
-            return offerRevisedDraft(ctx, g, goal, { measures, value, unit, comparator: TARGET_OPERATOR[type] });
-          }
+          // No redraft fallback (#3279 BUDDY-A r2): a redraft from here saved 4 options → 1 (founder). A restatement this
+          // card can't carry is refused truthfully; the full-redraft correction path is retired (DRASTIC CUT C5).
           return { ok: false, mutated: false, refusal: 'target_source_not_supported',
             detail: 'The complete source and its interpretation could not be retained on this target card. Nothing was prepared; keep the original statement available.' };
         }
