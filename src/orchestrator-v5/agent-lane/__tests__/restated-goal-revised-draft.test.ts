@@ -1048,9 +1048,8 @@ describe('the gates refuse, and nothing is drafted or written', () => {
     s.said('typed-turn-after-l20');
     const r = await caps.authoriseChange(pressed(offer.proposal_id as string), { proposal_id: offer.proposal_id } as never);
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
-    // At the press: the targets the card carried, neither on the canvas, named as missing (AIE 6128697025, row 10).
-    expect(String(r.detail)).toBe(`${AIE_NOT_HELD} Missing: \u2018New customers\u2019 at least 20 customers and \u2018Conversion rate\u2019 above 15%.`
-      + ' Olumi could not safely replace it because it found some earlier conversation could not be read; '
+    // This press failed its history recheck; missing target quantities are not the cause.
+    expect(String(r.detail)).toBe('This revision was not saved because Olumi found some earlier conversation could not be read; '
       + 'the conversation changed after this card was offered; ask for an updated card. Nothing was changed.');
     expect(s.commits).toHaveLength(0);
   });
@@ -1733,4 +1732,46 @@ describe('S2 turn-2 construction: history meaning on the one card', () => {
     expect(s.commits).toHaveLength(kind === 'CAS conflict' ? 0 : 1);
   });
 
+});
+
+
+describe('post-merge card messages reflect retained work and actual refusal', () => {
+  const edited = () => {
+    const g = structuredClone(FX.graph);
+    const n = (g.nodes as Rec[]).find(n => n.id === 'advertising_spend')!;
+    n.observed_state = { unit: 'GBP/year', value: 0.2, raw_value: 40000, source: 'user_override' };
+    n.provenance = 'user_set';
+    const s = server({ graph: g, ledger: { write_turn_ids: [FX.construction_commit_turn_id, 'user-edit'] } });
+    return { s, ...laneWith(s) };
+  };
+  it('the AI note permits the true kept-values statement on a history-flag card', async () => {
+    const { s, caps, proposals } = edited();
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    expect(cardOf(proposals, r)).toContain('Kept as you set them: your figure for ‘Advertising spend’.');
+    expect(r.note).toContain('Say an earlier value was kept only where the card explicitly says so');
+    expect(r.note).not.toContain('Never say the earlier value was kept.');
+    expect(s.commits).toHaveLength(0);
+  });
+  it('human edits plus saved changes give the keeps/replaces instruction once', async () => {
+    const { s, caps, proposals } = edited();
+    const r = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(r).toMatchObject({ ok: true, mutated: false });
+    const card = cardOf(proposals, r);
+    expect(card).toContain('Your model contains work you edited');
+    expect(card).toContain('Your model has saved changes after the draft');
+    expect(card.split('check what this revision keeps and replaces')).toHaveLength(2);
+    expect(s.commits).toHaveLength(0);
+  });
+  it('only the history moves: lead with that refusal, retain the user’s value, no write', async () => {
+    const { s, caps } = edited();
+    const offer = await caps.proposeGoalTarget!(l20Turn, conversion as never);
+    expect(offer).toMatchObject({ ok: true, mutated: false });
+    s.ledger.write_turn_ids.push('another-write'); s.said(FX.l20.turn_id);
+    const r = await caps.authoriseChange(pressed(String(offer.proposal_id)), { proposal_id: offer.proposal_id } as never);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'draft_holds_your_work' });
+    expect(r.detail).toBe('This revision was not saved because Olumi found the saved history or objections changed after this card was offered; ask for an updated card. Nothing was changed.');
+    expect(s.commits).toHaveLength(0);
+    expect(s.graph().nodes.find((n: Rec) => n.id === 'advertising_spend').observed_state.raw_value).toBe(40000);
+  });
 });

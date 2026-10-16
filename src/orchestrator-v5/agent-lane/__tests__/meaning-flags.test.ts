@@ -36,9 +36,9 @@ describe('meaning flags open the card, said once', () => {
     expect(cardWithMeaningFlags(card, [])).toBe(card);
   });
 
-  it('the AI note asks for the change first and never claims the earlier value was kept', () => {
+  it('the AI note asks for the change first and follows the card’s kept/changed distinction', () => {
     expect(MEANING_FLAG_NOTE.startsWith(' ')).toBe(true);
     expect(MEANING_FLAG_NOTE).toContain('Say that change first');
-    expect(MEANING_FLAG_NOTE).toContain('Never say the earlier value was kept.');
+    expect(MEANING_FLAG_NOTE).toContain('Say an earlier value was kept only where the card explicitly says so; describe changed or removed values as changes.');
   });
 });

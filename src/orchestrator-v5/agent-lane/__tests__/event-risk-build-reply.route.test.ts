@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { heldEventRiskLine, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { readStatedEventRisk } from '../../routing/stated-event-risk.js';
 import type { AnswerShape } from '../../routing/answer-shape.js';
+import { UNATTESTED_GOAL_CLARIFICATION } from '../runtime/build-model.js';
 
 type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
@@ -40,6 +41,9 @@ const PREFIX = "We're deciding between hiring contractors and training in-house.
 const STATED = 'Our key developer might leave, a 10–30% chance in the next 6 months.';
 const NARRATION = 'The shared model is ready to explore.\n- Check the delivery assumptions.\n- Discuss the staffing choices.';
 let rejectedDraft = false;
+let emptyDraft = false;
+let incompleteAnswer = false;
+let constructionCalls = 0;
 const unattestedDraft = JSON.parse((JSON.parse(readFileSync(new URL('./fixtures/hiring-unattested-event-raw-20261014.json', import.meta.url), 'utf8')) as { raw_text: string }).raw_text) as Rec;
 let cause = false;
 let extraRisk = false;
@@ -80,7 +84,10 @@ describe('event-risk disclosure through the served build reply', () => {
       if (body.text?.format?.name === 'brief_spans') return new Response(JSON.stringify(say(JSON.stringify({
         goal: 'Delivery', options: ['Hiring contractors', 'Training in-house'], limits: [], build: true,
       }))), { status: 200 });
-      if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify(say(JSON.stringify(rejectedDraft ? unattestedDraft : candidate()))), { status: 200 });
+      if (body.text?.format?.type === 'json_schema') {
+        constructionCalls += 1;
+        return new Response(JSON.stringify(say(JSON.stringify(rejectedDraft ? (emptyDraft ? { ...unattestedDraft, factors: [], risks: [], outcomes: [], links: [] } : unattestedDraft) : candidate()))), { status: 200 });
+      }
       if (!askedToBuild && saved.nodes.length === 0) {
         askedToBuild = true;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'build_model_from_brief',
@@ -88,7 +95,7 @@ describe('event-risk disclosure through the served build reply', () => {
       }
       const output = body.input?.filter((i) => i.type === 'function_call_output').at(-1)?.output;
       if (output !== undefined) buildOutput = JSON.parse(output) as Rec;
-      return new Response(JSON.stringify(say(narratorText)), { status: 200 });
+      return new Response(JSON.stringify({ ...say(narratorText), ...(incompleteAnswer ? { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } : {}) }), { status: 200 });
     }));
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
@@ -103,7 +110,7 @@ describe('event-risk disclosure through the served build reply', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
-  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); rejectedDraft = false; cause = false; extraRisk = false; narratorText = NARRATION; buildOutput = undefined; askedToBuild = false; });
+  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); rejectedDraft = false; emptyDraft = false; incompleteAnswer = false; constructionCalls = 0; cause = false; extraRisk = false; narratorText = NARRATION; buildOutput = undefined; askedToBuild = false; });
   async function turn(brief: string, built = true) {
     activeBrief = brief;
     const turnId = randomUUID();
@@ -165,15 +172,33 @@ describe('event-risk disclosure through the served build reply', () => {
     expect(body.assistant_text).toContain('Without a current level the analysis would treat it as zero.');
     expect(body.assistant_text).toContain('Olumi can’t run the numbers until this risk has a figure.');
   });
-  it('a rejected draft is a preparation limit: keep the reasoning question, never promise a retry', async () => {
-    rejectedDraft = true;
-    const question = 'Which source of evidence could help test the productivity assumption?';
-    narratorText = question;
+  it.each([
+    ['question', 'Which source of evidence could help test the productivity assumption?', false, 'Which source of evidence could help test the productivity assumption?'],
+    ['reasoning', 'We can examine which assumptions matter while the model remains unsaved.', false, 'We can examine which assumptions matter while the model remains unsaved.'],
+    ['empty', '', false, ''],
+    ['server fallback', '', true, 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.'],
+  ] as const)('%s after a rejected draft: truthful receipt with no promised question or retry', async (_kind, narration, incomplete, expected) => {
+    rejectedDraft = true; narratorText = narration; incompleteAnswer = incomplete;
     const brief = (JSON.parse(readFileSync(new URL('./fixtures/hiring-unattested-event-raw-20261014.json', import.meta.url), 'utf8')) as { brief: string }).brief;
     const body = await turn(brief, false);
     expect(buildOutput).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
     expect(saved).toEqual({ nodes: [], edges: [] });
-    expect(body.assistant_text).toBe(`${question}\n\nThe model was not built: Olumi could not prepare a draft that keeps your aim and conditions — continue with the question in this reply.`);
+    expect(body.assistant_text).toBe(`${expected === '' ? '' : `${expected}\n\n`}The model was not built: Olumi could not prepare a draft that keeps your aim and conditions.`);
+    expect(body._agent.tool_calls.some(c => c.name === 'run_analysis')).toBe(false);
+  });
+
+
+  it('early empty draft: no retry promise in the SENT detail or the exact served receipt', async () => {
+    rejectedDraft = true; emptyDraft = true;
+    narratorText = 'We can examine the productivity assumption while the model remains unsaved.';
+    const brief = (JSON.parse(readFileSync(new URL('./fixtures/hiring-unattested-event-raw-20261014.json', import.meta.url), 'utf8')) as { brief: string }).brief;
+    const body = await turn(brief, false);
+    expect(constructionCalls, 'the early refusal happens before a construction retry').toBe(1);
+    expect(buildOutput).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    // buildOutput was decoded from the actual function_call_output SENT to the Agent.
+    expect(buildOutput?.detail).toBe(UNATTESTED_GOAL_CLARIFICATION);
+    expect(body.assistant_text).toBe(`${narratorText}\n\nThe model was not built: Olumi could not prepare a draft that keeps your aim and conditions.`);
+    expect(saved).toEqual({ nodes: [], edges: [] });
     expect(body._agent.tool_calls.some(c => c.name === 'run_analysis')).toBe(false);
   });
 

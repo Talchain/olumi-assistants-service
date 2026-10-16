@@ -1883,7 +1883,7 @@ export async function buildModelFromBrief(
     if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
       && candidate.factors.length === 0 && candidate.risks.length === 0 && candidate.outcomes.length === 0 && candidate.links.length === 0) {
       return { ok: false, mutated: false, refusal: 'construction_needs_redraft',
-        detail: 'That draft has no usable model for this brief. Ask me to draft it again with the factors and links that explain the outcome.' };
+        detail: UNATTESTED_GOAL_CLARIFICATION };
     }
   } catch (err) {
     if (cutOff !== undefined) {

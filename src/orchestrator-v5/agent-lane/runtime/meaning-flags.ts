@@ -50,4 +50,4 @@ export function cardWithMeaningFlags(card: string, flags: readonly MeaningFlag[]
 /** Appended to the offer's note for this turn's AI when its card carries a flag. ⚠ AIE sign-off pending (prompt text). */
 export const MEANING_FLAG_NOTE = ' The card opens with a change Olumi could not confirm the user meant. Say that change first, in '
   + 'plain words, and ask the user to approve the card only if it is what they meant, or to say what it should be instead. '
-  + 'Never say the earlier value was kept.';
+  + 'Say an earlier value was kept only where the card explicitly says so; describe changed or removed values as changes.';
