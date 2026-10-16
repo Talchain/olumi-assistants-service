@@ -882,10 +882,10 @@ export async function proposeGoalCurrentLevel(
    * on the level frame whose target cannot frame a level yet (no cap, no raw figure) records today's level on its OWN frame, as a goal
    * with no target does; the target is still said beside it and a later target write frames the goal as it does today.
    */
-  const targetFramesLevel = num(target) && num(cap) && cap > 0 && node.goal_threshold_frame === 'level';
+  const onLevelFrame = node.goal_threshold_frame === 'level';
+  const targetFramesLevel = num(target) && num(cap) && cap > 0 && onLevelFrame;
   // A target on ANOTHER frame (`delta`) still gives nothing to read a level on; only the level frame's own gaps are lifted.
-  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame
-    || (!isChange && !targetFramesLevel && node.goal_threshold_frame === 'level');
+  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame || (!isChange && !targetFramesLevel && onLevelFrame);
   if (!isChange && !levelOnItsOwnFrame && !targetFramesLevel) {
     return refuse(
       'no_target',
