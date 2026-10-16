@@ -116,9 +116,9 @@ const LAST_WEEKDAY_FORM = new RegExp(`^last[ \\t]{1,2}${WEEKDAY_RE}$`);
 const LAST_WEEKDAY_NAMED = new RegExp(`(?:^|[^a-z])last[ \\t]{1,4}${WEEKDAY_RE}(?![a-z])`);
 /** "last friday was …" / "last friday is …" anywhere in a message (the date after it is read by `readCalendarDay`). */
 const WEEKDAY_DATED = new RegExp(`(?:^|[^a-z])last[ \\t]{1,4}${WEEKDAY_RE}[ \\t]{1,4}(?:was|is)[ \\t]{1,4}`);
-const QUARTER_FORM = /^(?:end[ \t]{1,2}of[ \t]{1,2}(?:the[ \t]{1,2})?)?q([1-4])(?:[ \t]{1,2}(\d{4}))?$/;
+const QUARTER_FORM = /^(?:end[ \t]{1,2}of[ \t]{1,2}(?:the[ \t]{1,2})?)?q([1-4])(?:[ \t]{1,2}(\d{4}|this[ \t]year|next[ \t]year))?$/;
 const YEAR_END_FORM = /^(?:end[ \t]{1,2}of[ \t]{1,2}(?:the[ \t]{1,2}|this[ \t]{1,2})?year|year[ \t-]?end|end[ \t]{1,2}of[ \t]{1,2}(\d{4}))$/;
-const MONTH_END_FORM = new RegExp(`^(?:end[ \\t]{1,2}of[ \\t]{1,2})?${MONTH_RE}(?:[ \\t]{1,2}(\\d{4}))?$`);
+const MONTH_END_FORM = new RegExp(`^(?:end[ \\t]{1,2}of[ \\t]{1,2})?${MONTH_RE}(?:[ \\t]{1,2}(\\d{4}|this[ \\t]year|next[ \\t]year))?$`);
 const DAY_MONTH_FORM = new RegExp(`^(\\d{1,2})(?:st|nd|rd|th)?(?:[ \\t]{1,2}of)?[ \\t]{1,2}${MONTH_RE}(?:[ \\t]{1,2}(\\d{4}))?$`);
 const MONTH_DAY_FORM = new RegExp(`^${MONTH_RE}[ \\t]{1,2}(\\d{1,2})(?:st|nd|rd|th)?(?:,?[ \\t]{1,2}(\\d{4}))?$`);
 const ISO_FORM = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -326,7 +326,8 @@ function placeDeadline(body: string, words: string, today: string, opts: Deadlin
   const quarter = QUARTER_FORM.exec(body);
   if (quarter !== null) {
     const m0 = Number(quarter[1]) * 3 - 1;
-    const explicit = quarter[2] !== undefined ? Number(quarter[2]) : undefined;
+    const yearWords = quarter[2]?.replace(/[ \t]+/, ' ');
+    const explicit = yearWords === undefined ? undefined : yearWords === 'next year' ? ty + 1 : yearWords === 'this year' ? ty : Number(yearWords);
     let date = iso(explicit ?? ty, m0, lastDay(explicit ?? ty, m0));
     if (explicit === undefined && date <= today) date = iso(ty + 1, m0, lastDay(ty + 1, m0));
     return result('quarter_end', date);
@@ -341,7 +342,9 @@ function placeDeadline(body: string, words: string, today: string, opts: Deadlin
   const monthEnd = MONTH_END_FORM.exec(body);
   if (monthEnd !== null) {
     const m0 = MONTH_ALIASES[monthEnd[1]!]!;
-    const explicit = monthEnd[2] !== undefined ? Number(monthEnd[2]) : undefined;
+    // "June next year" is the reference year's next; "June this year" the reference year's (never rolled on when passed).
+    const yearWords = monthEnd[2]?.replace(/[ \t]+/, ' ');
+    const explicit = yearWords === undefined ? undefined : yearWords === 'next year' ? ty + 1 : yearWords === 'this year' ? ty : Number(yearWords);
     let date = iso(explicit ?? ty, m0, lastDay(explicit ?? ty, m0));
     if (explicit === undefined && date <= today) date = iso(ty + 1, m0, lastDay(ty + 1, m0));
     return result('month_end', date);

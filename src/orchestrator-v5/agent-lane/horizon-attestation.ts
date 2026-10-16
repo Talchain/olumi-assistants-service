@@ -47,7 +47,9 @@ const SPELLED_DURATION = new RegExp(
 );
 /** A calendar point: a year or today's date is needed to count its months. */
 const CALENDAR_POINT = new RegExp(
-  String.raw`\b(?:by|before|until)\s+(?:the\s+)?(?:end\s+of\s+)?(?:(?:Q[1-4]|H[12])\b(?:\s+\d{4})?|(?:this|next)\s+(?:year|quarter)\b|year[-\s]?end\b|(?:January|February|March|April|May|June|July|August|September|October|November|December)\b(?:\s+\d{4})?)`
+  // DL-3 14:21Z (G3 #4): the year the user writes after a month or quarter is part of the point ("by the end of June next year"
+  // was held as "by the end of June", and the deadline was asked again).
+  String.raw`\b(?:by|before|until)\s+(?:the\s+)?(?:end\s+of\s+)?(?:(?:Q[1-4]|H[12])\b(?:\s+(?:\d{4}|(?:this|next)\s+year\b))?|(?:this|next)\s+(?:year|quarter)\b|year[-\s]?end\b|(?:January|February|March|April|May|June|July|August|September|October|November|December)\b(?:\s+(?:\d{4}|(?:this|next)\s+year\b))?)`
   + String.raw`|\b(?:in|during)\s+(?:Q[1-4]|H[12])\b(?:\s+\d{4})?`,
   'gi',
 );
