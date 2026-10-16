@@ -12,6 +12,7 @@ import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 import { jointWithheldLine } from './goal-targets-joint.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
 import { SHARE_BY_DATE_UNIT, isShareCalendarDate } from './goal-kind.js';
+import { unsizedOlumiRiskLineFor, unsizedOlumiRisksUnnamedLine } from '../agent-lane/unsized-risk.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -323,12 +324,20 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
   const horizon = warningsOf(result).filter((w) => (w.code === GOAL_HORIZON_NOT_TESTED || w.code === GOAL_HORIZON_STEADY_ATTESTED));
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
+  const omitted = licence?.omitted_from_calculation?.risks ?? [];
+  const unnamed = omitted.filter(risk => risk.label === undefined).length;
+  // Reuse the existing scope words from THIS Run's recorded labels, once; no new narrator or current-graph predicate.
+  const omissionNotes = [...omitted.flatMap(risk => {
+    const note = unsizedOlumiRiskLineFor(risk.label, true); return note === null ? [] : [note];
+  }), ...(unnamed === 0 ? [] : [unsizedOlumiRisksUnnamedLine(unnamed)])];
+  const notes = [...(licence?.notes ?? [])];
+  for (const note of omissionNotes) if (!notes.includes(note)) notes.push(note);
   return {
     ...((hasChance || carriesStaticQuestion) ? { goal_chance_licence: licence } : {}),
     ...(hasChance ? { goal_chance_display: display } : {}),
     ...(chanceWords !== undefined ? { goal_chance_words: chanceWords } : {}),
     // ⭐ S7 B2 (SESSION4 05:29Z): a range shown without a point is still a chance on screen, so its disclosures travel with it.
-    ...(licence?.notes !== undefined && (hasChance || hasRange || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),
+    ...(notes.length > 0 && (hasChance || hasRange || licence?.targets !== undefined) ? { goal_chance_notes: notes } : {}),
     ...(licence?.status_quo !== undefined ? { goal_chance_status_quo: licence.status_quo } : {}),
     ...(licence?.targets !== undefined ? { goal_targets: licence.targets } : {}),
     ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),

@@ -2,7 +2,7 @@ import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 import { goalKindOf } from './goal-kind.js';
 import { assessEvaluatedQuestionScope } from './run-question-scope.js';
-import type { RunQuestionScope } from './run-question.js';
+import { readRunOmissionScope, type RunOmissionScope, type RunQuestionScope } from './run-question.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
 export { deriveRunQuestion, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
@@ -366,6 +366,8 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
  */
 function statusQuoReadingOf(a: {
   readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined;
+  /** The same LEVEL reference in raw units, only when retained on the verified dispatched request. No row-scale inference. */
+  readonly rawReference?: number;
   /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
   readonly zeroChange?: 0 | 1;
 }): StatusQuoReading {
@@ -393,7 +395,11 @@ function statusQuoReadingOf(a: {
   const ref = a.reference;
   // D2 (PL 6130375396: AIE833 rejected the 1e-9·max(1, |reference|) floor): exact equality in the Run's frame.
   const away = (v: unknown): boolean => finite(v) && ref !== undefined && v !== ref;
-  return ['p10', 'p50', 'p90', 'mean'].some((k) => away(o[k])) ? 'moved' : 'assumed';
+  const centres = ['p10', 'p50', 'p90', 'mean'];
+  // A LEVEL request can retain both encodings of one reference while the result records no scale. Exact agreement of
+  // EVERY recorded centre with its raw reference also agrees; mixed frames, positive spread and true drift never do.
+  const rawAgrees = finite(a.rawReference) && centres.every(k => !finite(o[k]) || o[k] === a.rawReference);
+  return centres.some(k => away(o[k])) && !rawAgrees ? 'moved' : 'assumed';
 }
 
 /**
@@ -612,21 +618,28 @@ export function goalChanceLicenceOf(
    * ⭐ D2 (DL ruling 12 Oct, recovery Batch D): today's level is compared with the Run's status-quo row IN THE FRAME THE RUN
    * WAS SCORED IN, never across frames. Served run 3 (capacity): the row was on the normalised scale (0.16 = 80/500) and was
    * compared with `raw_value` 80, so a status quo sitting exactly at today read "doesn't match … as it stands today". The
-   * Run's own recorded threshold (`SentGoalThreshold`, the samples' frame, checked against the goal it names) decides: its
-   * normalised field → the normalised `value`, its raw field → `raw_value`. With no record, only a level both frames hold
-   * alike is known; anything else is 'unknown', never 'moved'.
+   * Legacy DELTA records name their samples' frame. A verified LEVEL request retains an encoded baseline and may retain
+   * the same reference in raw units; either exact representation can agree, with no inference from output magnitude.
+   * With no record, only a level both frames hold alike is known; anything else is 'unknown', never 'moved'.
    */
   const levelToday = ((): number | 'unknown' | undefined => {
     if (today === undefined) return undefined;
     const normalised = finite(goalState?.value) ? goalState!.value as number : undefined;
     if (sentThreshold === undefined) return normalised === today ? today : 'unknown';
     if (!finite(sentThreshold.value) || goal?.[sentThreshold.field] !== sentThreshold.value) return 'unknown';
-    // The request-bound LEVEL carrier records the reference in the same frame as the evaluated row. Keep the exact D2
-    // comparison below: recording a fixed baseline cannot excuse a status quo that actually moved away from it.
+    // The LEVEL carrier records the encoded reference, not the result row's scale. A verified sent raw reference is
+    // checked separately below; a fixed baseline cannot excuse actual drift or spread.
     if (sentThreshold.frame === 'level') return finite(sentThreshold.baseline) ? sentThreshold.baseline : 'unknown';
     if (sentThreshold.frame !== 'delta') return 'unknown';
     // The record's two fields name the two frames (`SentGoalThreshold['field']`): the raw one, and the normalised one.
     return sentThreshold.field.endsWith('_raw') ? today : normalised ?? 'unknown';
+  })();
+  const rawLevelReference = ((): number | undefined => {
+    if (!capturedThreshold || sentThreshold?.frame !== 'level' || !isRec(constraints.sentRun)) return undefined;
+    const sentGraph = isRec(constraints.sentRun.graph) ? constraints.sentRun.graph : undefined;
+    const goals = Array.isArray(sentGraph?.nodes) ? sentGraph.nodes.filter(isRec).filter(n => n.id === goalId && n.kind === 'goal') : [];
+    const state = goals.length === 1 && isRec(goals[0]!.observed_state) ? goals[0]!.observed_state : undefined;
+    return finite(state?.raw_value) && state.unit === target.unit ? state.raw_value : undefined;
   })();
   // The goal's quantity frame as Olumi's validated reading holds it (`goalTargetBasisOf` keeps a reading only while its frame
   // equals the node's: 'change', else 'level'); read once, here.
@@ -645,6 +658,7 @@ export function goalChanceLicenceOf(
       // A quantity measured AS a change is 0 today by construction; a level's reference is its held level today (D2: in
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
+      ...(changeQuantity || rawLevelReference === undefined ? {} : { rawReference: rawLevelReference }),
       // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
       ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
@@ -1612,6 +1626,8 @@ export function goalChanceLicenceForAgent(result: unknown): {
   period_end_assumption?: GoalChanceLicence['period_end_assumption'];
   /** G (AIE #94 6133027121): the licensed target itself, read only when well formed. */
   target?: GoalChanceLicence['target'];
+  /** THIS Run's already recorded exclusions; never reclassified from the current model. */
+  omitted_from_calculation?: RunOmissionScope;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -1713,6 +1729,7 @@ export function goalChanceLicenceForAgent(result: unknown): {
     ...(Object.keys(zeroSpreadReasons).length > 0 ? { withheld_reason_by_option: zeroSpreadReasons } : {}),
     ...batchCPartsOf(r, optionIds, withheld ?? []),
     ...(licensedTargetOf(r.target) !== undefined ? { target: licensedTargetOf(r.target)! } : {}),
+    ...((omission) => omission === undefined ? {} : { omitted_from_calculation: omission })(readRunOmissionScope(result)),
   };
 }
 

@@ -22,7 +22,12 @@ const happy = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.j
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('Run handler records the sent goal threshold on its stored licence', () => {
-  it.each([false, true])('real handler, sent threshold and stored hash stay bound (attested: %s)', async attested => {
+  it.each([
+    { attested: false, row: 'captured' }, { attested: true, row: 'captured' },
+    { attested: false, row: 'raw_unchanged' }, { attested: false, row: 'raw_moved' },
+    { attested: false, row: 'normalised_unchanged' }, { attested: false, row: 'normalised_moved' },
+    { attested: false, row: 'mixed_frames' },
+  ])('real handler, sent threshold/hash and same-frame reference (attested:$attested row:$row)', async ({ attested, row }) => {
     vi.stubEnv('CEE_HMAC_SECRET', 's5-r9-run-test-only'); _resetConfigCache();
     // Constructed, fully sized graph: the served graph has paths the current handler withholds before licensing.
     const optionIds = ['raise_prices_by_10', 'launch_starter_tier', 'keep_pricing_as_it_is'];
@@ -62,6 +67,14 @@ describe('Run handler records the sent goal threshold on its stored licence', ()
     const body = structuredClone(happy);
     body.option_comparison = structuredClone(capture.blocks.find((b: Json) => b.type === 'analysis_result').enrichment.option_comparison)
       .filter((r: Json) => optionIds.includes(r.option_id));
+    if (row !== 'captured') {
+      const baseline = body.option_comparison.find((r: Json) => r.option_id === 'keep_pricing_as_it_is');
+      const centre = row.startsWith('raw_') ? (row === 'raw_unchanged' ? 120000 : 121000)
+        : row === 'normalised_moved' ? 0.78 : 120000 / 157500;
+      baseline.probability_of_goal = 0;
+      baseline.outcome = { mean: centre, std: 0, p10: centre, p50: centre, p90: centre };
+      if (row === 'mixed_frames') baseline.outcome.mean = 120000;
+    }
     body.option_comparison_status = 'computed';
     // Deliberately different provider hash: CEE's stored graph owns freshness.
     body.graph_hash = 'f'.repeat(64);
@@ -88,6 +101,16 @@ describe('Run handler records the sent goal threshold on its stored licence', ()
     expect(licence.sent_threshold).toEqual({ value: 0.8, field: 'goal_threshold', frame: 'level',
       baseline: 120000 / 157500, status_quo_option_id: 'keep_pricing_as_it_is' });
     expect(licence).not.toHaveProperty('spread_note_by_option');
+    if (row.endsWith('_unchanged')) {
+      expect(licence.status_quo?.option_id).toBe('keep_pricing_as_it_is');
+      expect(licence.status_quo?.line).toContain('unchanged from today’s £120,000');
+      expect(licence.withheld_reason_by_option?.keep_pricing_as_it_is?.reason).not.toBe('reference_moved');
+      expect(licence.pct_by_option).not.toHaveProperty('keep_pricing_as_it_is');
+    } else if (row !== 'captured') {
+      expect(licence.withheld_reason_by_option?.keep_pricing_as_it_is?.reason).toBe('reference_moved');
+      expect(licence.status_quo).toBeUndefined();
+    }
+
     expect(fact.result.graph_hash_at_run).toBe(storedHash);
     expect(JSON.stringify(graph)).toBe(storedBytes);
     expect(horizonSteadyAttested(graph)).toBe(attested);
