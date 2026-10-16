@@ -696,14 +696,27 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     expect(r.text.split(LINE)).toHaveLength(2);
   });
 
-  it.each([
-    ['C0', { ...UNWITHHELD, attribution_case: 'C0_identical', input_changes: [] }],
-    ['unknown', { ...UNWITHHELD, attribution_case: 'C5_unattributed', input_changes: [], input_coverage: 'partial' }],
-  ] as const)('BUDDY-B round 3: finding-first remains for a %s record with no named change', (_name, delta) => {
-    const noChange = plan(delta)!;
+  it('BUDDY-B round 3: finding-first remains ONLY for a complete, empty record (C0: "Nothing you entered changed.")', () => {
+    const noChange = plan({ ...UNWITHHELD, attribution_case: 'C0_identical', input_changes: [] })!;
     expect(noChange.changes).toEqual([]);
+    expect(noChange.codeLine.startsWith(RERUN_NO_CHANGE_LINES.nothing)).toBe(true);
     const r = composeRerunExplanation(WHY, noChange);
     expect(r.text).toBe(`${WHY}\n\n${noChange.codeLine}`);
+  });
+
+  // ⭐ BUDDY-B #3253 r4 (flips the r3 exemption): a record that cannot say what changed LEADS, so a contrary "nothing changed"
+  // claim never opens the reply. Partial coverage, and real rows no template can name (the model DID change).
+  it.each([
+    ['partial coverage, no rows', { ...UNWITHHELD, attribution_case: 'C5_unattributed', input_changes: [], input_coverage: 'partial' }],
+    ['complete coverage, rows no template can name', { ...UNWITHHELD, attribution_case: 'C1_attributable', input_coverage: 'complete', input_changes: [accept('gone_a', 'gone_b')] }],
+  ] as const)('BUDDY-B round 4: an unknown record (%s) leads before the finding', (_name, delta) => {
+    const unknown = plan(delta)!;
+    expect(unknown.changes).toEqual([]);
+    expect(unknown.codeLine.startsWith(RERUN_NO_CHANGE_LINES.unknown)).toBe(true);
+    expect(composeRerunExplanation(WHY, unknown).text).toBe(`${unknown.codeLine}\n\n${WHY}`);
+    // The served probe: an unchanged claim the record contradicts never opens the reply.
+    const claim = 'No edits were made to the model.';
+    expect(composeRerunExplanation(`${claim} ${WHY}`, unknown).text.startsWith(unknown.codeLine), 'the record is the first sentence').toBe(true);
   });
 
   it.each(['Nothing else changed.', 'Olumi cannot confirm that your model is unchanged.',

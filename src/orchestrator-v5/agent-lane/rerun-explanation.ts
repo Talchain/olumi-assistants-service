@@ -557,7 +557,10 @@ const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
 /**
  * Check every model sentence beside the unchanged record, then repair only record sentences the answer omitted.
  * A named-change record leads even when an unrecognised contrary paraphrase survives the checker.
- * No-change/unknown records may follow the finding. Copied record sentences never create a second copy.
+ * Only a complete, empty record ("Nothing you entered changed.") may follow the finding: an AI claim that nothing changed then
+ * agrees with it. A record that names a change, or cannot say what changed (rows no template can name, partial or older coverage),
+ * leads, so a contrary "nothing changed" claim never opens the reply (BUDDY-B #3253 r4). Copied record sentences never create a
+ * second copy.
  */
 export function composeRerunExplanation(reply: string, plan: RerunExplanationPlan): {
   readonly text: string; readonly dropped: readonly string[]; readonly failed: readonly string[];
@@ -565,7 +568,7 @@ export function composeRerunExplanation(reply: string, plan: RerunExplanationPla
   const dropped: string[] = [];
   const failed = new Set<string>();
   const recordSentences = sentencesOf(plan.codeLine);
-  const recordLeads = plan.changes.length > 0;
+  const recordLeads = plan.changes.length > 0 || !plan.codeLine.startsWith(RERUN_NO_CHANGE_LINES.nothing);
   const saidRecord = new Set<number>();
   let sentenceIndex = 0;
   const kept = reply.split(/\r?\n/u).map((line) => line.split(SENTENCE_BREAK).filter((sentence) => {
