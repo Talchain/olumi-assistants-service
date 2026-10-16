@@ -220,7 +220,7 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
-import { withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { withGoalChanceReadback, withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2954,6 +2954,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
       { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedScope: evaluated.scope, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
+    // The stored fact and its readers share the same verdict when the dispatched snapshot was not retained.
+    response = withGoalChanceReadback(response, { ...response, run_id: runId, input_snapshot: runInputSnapshot });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);

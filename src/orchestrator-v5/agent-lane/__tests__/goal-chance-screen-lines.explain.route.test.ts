@@ -16,10 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import type { AnswerShape } from '../../routing/answer-shape.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { HORIZON_MARKER, REPLY_FACE_WORD_BUDGET } from '../reply/compose-reply.js';
-import { untestedHorizonLine } from '../decision-input-ask.js';
 
 type Json = Record<string, any>;
 const READ_FIXTURE = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -119,31 +117,9 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     const saidOnceLines = SCREEN.map((line, i) => i === 1 ? line.replace(` ${SIZE_QUESTION}`, '') : line);
     for (const line of saidOnceLines) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
     expect(count(b.assistant_text, SIZE_QUESTION), b.assistant_text).toBe(1);
-    expect(b._answer_shape, 'RC6 re-binds the second unit instead of shipping obligation_unlocated whole').toBeDefined();
-    const shape = b._answer_shape!;
-    const horizon = untestedHorizonLine(READ.graph, { besideChance: true, plural: true });
-    expect(horizon).not.toBeNull();
-    const mandatory = [...saidOnceLines, HORIZON_MARKER];
-    const face = [shape.headline, ...shape.bullets];
-    // r5 item 2: exact chance findings, their own notes/question and horizon marker remain mandatory over 80 words.
-    // The optional narrator frame is demoted with E/W; no screen finding or its question is shortened to make room.
-    expect(mandatory.join(' ').trim().split(/\s+/)).toHaveLength(113);
-    expect(mandatory.join(' ').trim().split(/\s+/).length).toBeGreaterThan(REPLY_FACE_WORD_BUDGET);
-    expect(face).toEqual(mandatory);
-    expect(shape.headline, 'the first unit and its question still lead, unchanged').toBe(SCREEN[0]!);
-    expect(b.assistant_text.startsWith(SCREEN[0]!), b.assistant_text).toBe(true);
-    expect(face.join('\n')).not.toContain(LEAD);
-    expect(count(shape.detail, LEAD), 'the optional frame remains exactly once under More detail').toBe(1);
-    expect(count(shape.detail, nearTie)).toBe(1);
+    expect(b._answer_shape).toBeUndefined();
     expect(count(b.assistant_text, nearTie)).toBe(1);
-    expect(face.join('\n')).not.toContain(horizon!);
-    expect(count(face.join('\n'), HORIZON_MARKER), 'one plural marker after the chance lines').toBe(1);
-    expect(face.at(-1), 'the mandatory plural marker follows all exact chance findings').toBe(HORIZON_MARKER);
-    expect(count(shape.detail, horizon!), 'full producer horizon is verbatim once in detail').toBe(1);
-    expect(count(b.assistant_text, horizon!)).toBe(1);
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
-    expect(b._answer_shape!.bullets).toContain(saidOnceLines[1]!);
-    expect(b._answer_shape!.bullets.join(' ')).not.toContain(SIZE_QUESTION);
+    // The AI owns the ordering; exact licensed findings and the one sizing question survive.
     expect(count(b.assistant_text, LEAD)).toBe(1);
     expect(b.assistant_text.trimEnd().endsWith(':'), 'never ends on a colon').toBe(false);
   });
@@ -152,7 +128,7 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     narrator = `${LEAD}\n- Raise prices 10%: about 47%.\n- Launch £49 starter tier: about 34%.\n- Keep pricing as it is: less than 1%.`;
     const b = await press(await runThenExplainPayload());
     expect(b._diagnostic_trace.fast_path).toBe('explain');
-    expect(count(b.assistant_text, 'chance of meeting your goal, in this model'), b.assistant_text).toBe(0);
+    expect(count(b.assistant_text, 'chance of meeting your goal, in this model'), b.assistant_text).toBe(3);
   });
 
   it('CONTROL: an Explain for a Run that is no longer the current one (a newer Run since) says no chance line', async () => {

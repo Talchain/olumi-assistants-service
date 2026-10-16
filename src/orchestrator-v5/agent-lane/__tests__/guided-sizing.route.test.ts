@@ -10,9 +10,8 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
-import { deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
 import { guidedSizingForRun, guidedSizingReplyText } from '../guided-sizing.js';
-import { thresholdReasonLine, THRESHOLD_REST_STANDS } from '../break-even.js';
+import { thresholdReasonLine } from '../break-even.js';
 
 type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
@@ -202,24 +201,6 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(words, 'the real threshold producer must supply the competing reasonLine').not.toBeNull();
     return words!;
   };
-  const assertGuidedFace = (body: Json, guided: string): string => {
-    const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Json)
-      .filter((entry: Json) => entry.event === 'agent_lane.reply_shaped').at(-1);
-    expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
-    const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
-    expect(body._answer_shape.headline).toBe(guided);
-    expect(face.split(guided)).toHaveLength(2);
-    expect(body.assistant_text.split(guided)).toHaveLength(2);
-    expect(face).not.toContain('?');
-    expect(wirePresses(body)).not.toHaveLength(0);
-    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape));
-    const words = face.trim().split(/\s+/u).filter(Boolean).length;
-    expect(words <= 80 || shapeLog?.face_over_word_budget === true,
-      `face has ${words} words; mandatory overflow must be logged`).toBe(true);
-    expect(shapeLog).toMatchObject({ face_words: words });
-    return face;
-  };
-
   it('DRAW-2 three-placeholder variant: exact words, unchanged level ask, 3 directness-ordered identity presses and root hook', async () => {
     const body = await run();
     expect(body.assistant_text).toContain(LEVEL_ASK);
@@ -312,15 +293,10 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(producerGuided).toBe(WORDS);
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
-    expect(first._answer_shape).toBeDefined();
     expect(first.assistant_text).not.toContain(producerGuided!);
     expect(first.assistant_text.split(GUIDED_WITHOUT_INVITE)).toHaveLength(2);
-    // r11d: recorded cell reasons own the marker; mixed unsized-links/other causes select the fallback.
-    expect(first._answer_shape.headline).toBe('Not shown yet; why is under More detail');
-    expect(first._answer_shape.detail).toContain(GUIDED_WITHOUT_INVITE);
-    expect(first._answer_shape.detail.split(reason)).toHaveLength(2);
-    expect([first._answer_shape.headline, ...first._answer_shape.bullets].join('\n')).not.toContain(reason.replace(THRESHOLD_REST_STANDS, ''));
-    expect(first.assistant_text).toBe(deriveAnswerTextFromShape(first._answer_shape));
+    expect(first.assistant_text.split(reason)).toHaveLength(2);
+    expect(first._answer_shape).toBeUndefined();
     expect(wirePresses(first).map(action => action.id)).toEqual(ORDERED_PAIRS.map(pair => pressId(pair[0], pair[1])));
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
@@ -338,8 +314,9 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const reason = withThresholdReason('goal_values_outside_normalised_domain');
     const turnId = randomUUID();
     const first = await run({ turn_id: turnId });
-    assertGuidedFace(first, WORDS);
-    expect(first._answer_shape.detail).toContain(reason);
+    expect(first.assistant_text).toContain(WORDS);
+    expect(first.assistant_text).toContain(reason);
+    expect(first._answer_shape).toBeUndefined();
     expect(first.guided_sizing.links).toHaveLength(3);
     const calls = runCalls;
     const replay = await run({ turn_id: turnId });
@@ -573,12 +550,11 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const guided = guidedSizingReplyText(guidedSizingForRun(result, graph)).guided;
     expect(guided).not.toBeNull();
     const body = await run();
-    const face = assertGuidedFace(body, guided!);
+    expect(body.assistant_text).toContain(guided!);
     expect(body.guided_sizing.progress_line).toBe(PROGRESS);
-    expect(body._answer_shape.detail).toContain(PROGRESS);
-    expect(face).not.toContain(PROGRESS);
+    expect(body._answer_shape).toBeUndefined();
     expect(body.assistant_text.split(PROGRESS)).toHaveLength(2);
-    expect(body._answer_shape.detail).toContain(reason);
+    expect(body.assistant_text).toContain(reason);
     expect(doorCalls).toHaveLength(1);
   });
 

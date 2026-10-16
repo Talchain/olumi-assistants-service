@@ -15,17 +15,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { asSent } from './helpers/as-sent.js';
 import { readFileSync } from 'node:fs';
-import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
-
-let lastComposeInput: ReplyComposeInput | undefined;
-vi.mock('../reply/compose-reply.js', async (original) => {
-  const actual = await original<typeof import('../reply/compose-reply.js')>();
-  return { ...actual, composeReplyShape: (input: ReplyComposeInput) => {
-    lastComposeInput = structuredClone(input);
-    return actual.composeReplyShape(input);
-  } };
-});
+import type { AnswerShape } from '../../routing/answer-shape.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -186,7 +176,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.useRealTimers(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; lastComposeInput = undefined; });
+  beforeEach(() => { vi.setSystemTime(Date.UTC(2026, 9, 8, 12)); nextScenario(); script = []; constructionCandidate = undefined; wideningAnswer = undefined; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     // Issuance allows 2 seconds of clock skew; separate public turns so the preceding answer cannot be the issuer.
@@ -320,19 +310,6 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect((answerWrite()?.agent_guidance as { entries?: Record<string, unknown> } | undefined)?.entries?.['RC-WIDEN']).toBeUndefined();
     } finally { delete readable.readGuidanceHistory; }
   });
-
-  it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
-    const t = await thinConstruction(1);
-    expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
-    expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
-    expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
-    // The live pre-composition base supplies the sentence identities; shaping may move them but loses/adds none.
-    expect(lastComposeInput?.faceContract).toBe('draft');
-    expect(lastComposeInput?.text).toBeDefined();
-    expect(sentenceMultiset(t.assistant_text)).toEqual(sentenceMultiset(lastComposeInput!.text));
-    expect(t._answer_shape).toBeDefined();
-    expect(t.assistant_text).toBe(deriveAnswerTextFromShape(t._answer_shape!));
-  }, 120_000);
 
   it('R1 first-draft construction with a pending identity approval keeps exactly the offers without thin, including approve and decline', async () => {
     const nextSteps = await import('../next-steps-from-guidance.js');

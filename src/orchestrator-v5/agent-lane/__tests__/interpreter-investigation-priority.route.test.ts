@@ -142,11 +142,6 @@ describe('S2i P6: investigation priority — no claim beyond the screen’s driv
     expect(reply, reply).not.toMatch(/not established/u);
   });
 
-  it('(a) served driver Run (B5 T1b): the limitation in the DL’s words is not said', async () => {
-    const { reply } = await explainSaying(T1B, LIMIT);
-    expect(reply, reply).not.toMatch(/not established/u);
-  });
-
   it('(b) no driver and no range (author: B5 T1b with no driver claim; robustness ran): the limitation is still said', async () => {
     const { reply } = await explainSaying(T1B_NO_DRIVER, LIMIT);
     expect(reply.split(LIMIT).length - 1, reply).toBe(1);

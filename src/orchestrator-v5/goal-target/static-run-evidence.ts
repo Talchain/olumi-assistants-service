@@ -6,6 +6,13 @@ const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object'
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const close = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-10 * Math.max(1, Math.abs(a), Math.abs(b));
 
+/** Older licences recorded static scope as A7's typed flag, before the current note existed. */
+export function recordedStaticScopeDeclared(licence: unknown): boolean {
+  const r = rec(licence);
+  return Array.isArray(r?.notes) && r.notes.includes(STATIC_MODEL_SCOPE_NOTE)
+    || (r?.horizon_untested === true && rec(r.sent_threshold)?.frame === 'level' && r.period_end_assumption === undefined);
+}
+
 /** Read the Run's retained dispatched threshold and input snapshot. Licence wording never grants scope. */
 export function recordedStaticLevelEvidence(result: unknown): {
   readonly goal_id: string; readonly label?: string; readonly target: number; readonly unit: string; readonly comparator: string;
@@ -51,7 +58,7 @@ export function recordedStaticLevelEvidence(result: unknown): {
   return { goal_id: goal.node_id, ...(typeof goal.label === 'string' ? { label: goal.label } : {}),
     target: goal.target_raw, unit: goal.unit, comparator: goal.operator as string,
     encoded_target: sent.value, baseline: base.raw, encoded_baseline: sent.baseline, option_ids: ids,
-    static_scope_declared: Array.isArray(carriers[0]!.notes) && carriers[0]!.notes.includes(STATIC_MODEL_SCOPE_NOTE) };
+    static_scope_declared: recordedStaticScopeDeclared(carriers[0]) };
 }
 
 /** Classify a recorded level calculation for fail-closed readers; this never verifies or licenses it. */

@@ -10,9 +10,8 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
  *   · the typed provisional view (C5b) with a movement claim is not shown; CONTROL: a clean view is (Codex pre-review P1).
  */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
-import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { sentencesOf, WITHHOLD_FALLBACK_MARKER } from '../reply/compose-reply.js';
+import { sentencesOf } from '../reply/compose-reply.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -114,12 +113,12 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     return post({ turn_id: turnId, agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id } });
   };
 
-  it('AIE-04 fail-safe: named change leads once on wire/history/replay', async () => {
+  it('current finding leads; the supplied change is kept once on wire/history/replay', async () => {
     modelText = `${WHY}\n**What changed:** Olumi’s record says: “${SAID}”\n${RERUN_NO_CHANGE_LINES.unwithheld}`;
     const first = (await runTurn(randomUUID())).json() as Body;
     const id = randomUUID();
     const explained = (await explainTurn(id, first)).json() as Body;
-    expect(explained.assistant_text.indexOf(SAID)).toBeLessThan(explained.assistant_text.indexOf(WHY));
+    expect(explained.assistant_text.indexOf(WHY)).toBeLessThan(explained.assistant_text.indexOf(SAID));
     expect(explained.assistant_text.split(SAID)).toHaveLength(2);
     expect(explained.assistant_text).toContain(RERUN_NO_CHANGE_LINES.unwithheld);
     expect(JSON.stringify(rows)).toContain(SAID);
@@ -134,7 +133,7 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
       { entity_kind: 'link', entity_id: 'price->risk', field: 'presence', link: { from: 'price', to: 'risk' },
         before: null, after: { raw: true }, change: 'added' },
     ] };
-    modelText = WHY;
+    modelText = `${WHY} The link from ‘Feature release slips’ to ‘MRR’ is now part of the analysis. The link from ‘Pro plan price’ to ‘Feature release slips’ is now part of the analysis.`;
     const first = (await runTurn(randomUUID())).json() as Body;
     // #3099: a re-run after a change is interpreted on the press itself, with the same code lines.
     expect(modelCalls).toBe(1);
@@ -162,26 +161,27 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     const first = (await runTurn(randomUUID())).json() as Body;
     // #3099: the press interprets this re-run too, through the same claim check.
     expect(modelCalls, 'the model really answered the press').toBe(1);
-    expect(first.assistant_text).toContain(FALLBACK);
+    expect(first.assistant_text).toContain(SAID);
     expect(first.assistant_text).not.toMatch(/\brose\b/);
     const e1 = randomUUID();
     const explained = (await explainTurn(e1, first)).json() as Body;
     expect(modelCalls, 'the model really answered').toBe(2);
-    expect(explained.assistant_text).toContain(FALLBACK);
+    expect(explained.assistant_text).toContain(SAID);
     expect(explained.assistant_text).not.toMatch(/\brose\b/);
     expect(rows.length, 'the control: rows were written').toBeGreaterThan(0);
     expect(JSON.stringify(rows)).not.toMatch(/\brose\b/);
     const replay = (await explainTurn(e1, first)).json() as Body;
     expect(modelCalls, 'a replay calls no model').toBe(2);
-    expect(replay.assistant_text).toContain(FALLBACK);
+    expect(replay.assistant_text).toContain(SAID);
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });
 
-  it('CONTROL: a clean model sentence is sent after Olumi\'s code line', async () => {
+  it('CONTROL: a clean AI answer is not prefixed with a second comparison account', async () => {
     modelText = WHY;
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body;
-    expect(explained.assistant_text).toContain(`${FALLBACK}\n\n${WHY}`);
+    expect(explained.assistant_text).toContain(WHY);
+    expect(explained.assistant_text).not.toContain(FALLBACK);
   });
 
   /**
@@ -197,16 +197,9 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     const explained = (await explainTurn(randomUUID(), first)).json() as Body & { _answer_shape?: unknown; blocks?: { type?: string }[] };
     expect(explained.assistant_text, 'the control: the host rebuilt the narrator\'s text (now through the one composer)').toContain(WHY);
     expect((explained.blocks ?? []).some((b) => b.type === 'analysis_result'), 'the control: an analysis-bearing reply').toBe(true);
-    const shape = explained._answer_shape as AnswerShape | undefined;
-    expect(shape, explained.assistant_text).toBeDefined();
+    expect(explained._answer_shape).toBeUndefined();
     const finding = goalChanceWithheldForAgent(SERVED.block, GRAPH)!.say;
-    expect(finding).toBe('This run doesn’t yet show each option’s chance of meeting your goal.');
-    expect(WITHHOLD_FALLBACK_MARKER).toBe('Not shown yet; why is under More detail');
-    expect(shape!.headline).toBe(WITHHOLD_FALLBACK_MARKER);
-    expect([shape!.headline, ...shape!.bullets].join('\n')).not.toContain(finding);
-    expect(shape!.detail.split(finding)).toHaveLength(2);
-    expect(shape!.detail).toContain(FALLBACK);
-    expect(explained.assistant_text).toBe(deriveAnswerTextFromShape(shape!));
+    expect(explained.assistant_text).toContain(FALLBACK);
     expect(explained.assistant_text.split(finding)).toHaveLength(2);
     for (const line of modelText.split('\n').filter((l) => l.trim() !== '')) {
       for (const sentence of sentencesOf(line.replace(/^\s*-\s+/, '').trim())) expect(explained.assistant_text.split(sentence).length, sentence).toBe(2);
@@ -220,7 +213,7 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     modelText = JSON.stringify({ answer: WHY, provisional_view: view });
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body;
-    expect(explained.assistant_text).toContain(FALLBACK);
+    expect(explained.assistant_text).toContain(WHY);
     expect(explained._agent.provisional_view !== undefined, JSON.stringify(explained._agent.provisional_view ?? null)).toBe(shown);
     expect(JSON.stringify(explained)).not.toMatch(/\brose\b/);
   });

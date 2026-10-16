@@ -49,9 +49,9 @@ type Chip = { id: string; label: string; message: string; action_type?: string }
 const isInterpretingCall = (body: Record<string, unknown>): boolean => body['tool_choice'] === 'none'
   && Array.isArray(body['tools']) && (body['tools'] as unknown[]).length === 0;
 /** That call's request: the last input item's JSON (`{ request, canonical_state }`). */
-const interpretingRequestOf = (body: Record<string, unknown>): { request?: string; canonical_state?: { ok?: boolean } } => {
+const interpretingRequestOf = (body: Record<string, unknown>): { request?: string; canonical_state?: { ok?: boolean; rerun_record?: { code_line?: string } } } => {
   const last = (body['input'] as { content?: { text?: string }[] }[]).at(-1);
-  return JSON.parse(last?.content?.[0]?.text ?? '{}') as { request?: string; canonical_state?: { ok?: boolean } };
+  return JSON.parse(last?.content?.[0]?.text ?? '{}') as { request?: string; canonical_state?: { ok?: boolean; rerun_record?: { code_line?: string } } };
 };
 
 describe('the explicit Run is offered after a change the canonical readiness admits', () => {
@@ -329,10 +329,10 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       input_changes: [{ entity_kind: 'link', field: 'presence', link: { from: 'f1', to: 'o1' }, before: null, after: { raw: true } }],
     };
     const CODE_LINE = 'The link from ‘Team size’ to ‘Velocity’ is now part of the analysis.';
-    const approveAndRun = async () => {
+    const approveAndRun = async (reply = COACHING) => {
       readiness = { status: 'ready', may_run: true };
-      interpretation = COACHING;
-      const b = await proposeThenApprove() as unknown as { assistant_text: string; suggested_actions: Chip[] };
+      interpretation = reply;
+      const b = await proposeThenApprove() as unknown as { assistant_text: string; suggested_actions: Chip[]; _answer_shape?: unknown; _diagnostic_trace: { reply_author?: string } };
       expect(runs, 'the automatic Run ran once').toBe(1);
       return b;
     };
@@ -347,18 +347,33 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(sent.request, 'the Explain press\'s own request').toBe(RUN_EXPLANATION_MESSAGE);
       expect(sent.canonical_state?.ok, 'over the canonical read after the Run').toBe(true);
       expect(b.assistant_text).toContain(COACHING);
+      // G3: a successful automatic interpretation owns the reply just like explicit Run/Explain.
+      expect(b._diagnostic_trace.reply_author).toBe('ai');
+      expect(b.assistant_text).toMatch(/Saved|Recorded/);
+      expect(b._answer_shape).toBeUndefined();
+      expect(b.assistant_text.split(COACHING)).toHaveLength(2);
     });
 
-    it('RED (compare): with the preceding Run\'s delta, the call is given the Run record and the reply leads with it', async () => {
+    it('an empty automatic interpretation keeps the factual receipt and existing fallback', async () => {
+      runStampedAt = RUN_AT;
+      const b = await approveAndRun('');
+      expect(modelBodies.filter(isInterpretingCall)).toHaveLength(1);
+      expect(b._diagnostic_trace.reply_author).toBe('host');
+      expect(b.assistant_text).not.toContain(COACHING);
+      expect(b.assistant_text).toMatch(/Saved|Recorded/);
+      expect(edges).toHaveLength(1);
+    });
+
+    it('compare: the actual request keeps the preceding Run record and the AI leads with the current finding', async () => {
       runStampedAt = RUN_AT;
       runDelta = LINK_ENTERED;
-      const b = await approveAndRun();
+      const b = await approveAndRun(`${COACHING} ${CODE_LINE}`);
       const calls = modelBodies.filter(isInterpretingCall);
       expect(calls).toHaveLength(1);
-      expect(String(calls[0]!['instructions']), 'what changed, from the delta\'s typed row').toContain(`Run record: "${CODE_LINE}`);
+      expect(interpretingRequestOf(calls[0]!).canonical_state?.rerun_record?.code_line, 'the selected comparison record reaches the actual request').toContain(CODE_LINE);
       expect(b.assistant_text).toContain(`${CODE_LINE}`);
       expect(b.assistant_text).toContain(COACHING);
-      expect(b.assistant_text.indexOf(CODE_LINE)).toBeLessThan(b.assistant_text.indexOf(COACHING));
+      expect(b.assistant_text.indexOf(COACHING)).toBeLessThan(b.assistant_text.indexOf(CODE_LINE));
     });
 
     it('ADVERSARIAL: the read selects another Run (same hash, another computed_at) → no interpreting call, no coaching', async () => {
@@ -434,12 +449,12 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     it('RED: a re-run after a change → ONE interpreting call over THIS Run; its coaching replaces the ready line', async () => {
       runStampedAt = RUN_AT;
       runDelta = LINK_ENTERED;
-      const b = await press();
+      const b = await press(`${COACHING} ${CODE_LINE}`);
       const calls = modelBodies.filter(isInterpretingCall);
       expect(calls, 'one interpreting call').toHaveLength(1);
       const { RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT } = await import('../run-explanation.js');
       expect(interpretingRequestOf(calls[0]!).request, 'the Explain press\'s own request').toBe(RUN_EXPLANATION_MESSAGE);
-      expect(String(calls[0]!['instructions']), 'what changed, from THIS Run\'s delta').toContain(`Run record: "${CODE_LINE}`);
+      expect(interpretingRequestOf(calls[0]!).canonical_state?.rerun_record?.code_line, 'the selected comparison record reaches the actual request').toContain(CODE_LINE);
       expect(b.assistant_text).toContain(CODE_LINE);
       expect(b.assistant_text).toContain(COACHING);
       expect(b.assistant_text, 'the coaching answers "ask me to explain them"').not.toContain(RUN_RESULT_READY_TEXT);
@@ -573,9 +588,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       return chance!;
     };
     const times = (text: string, part: string): number => text.split(part).length - 1;
-    const approveAndRun = async () => {
+    const approveAndRun = async (reply = COACHING) => {
       readiness = { status: 'ready', may_run: true };
-      interpretation = COACHING;
+      interpretation = reply;
       runStampedAt = RUN_AT;
       const b = await proposeThenApprove() as unknown as { assistant_text: string };
       expect(runs, 'the automatic Run ran once').toBe(1);

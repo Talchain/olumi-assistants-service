@@ -1,0 +1,64 @@
+{
+  "source": "live/runs/2026-10-16T100229Z-capacity-verify-4de96a0a/capacity/turns/05.json",
+  "sha256": "a0ba56812e585e5d9c34cfac3a0d3d56b03774d86276d3954992fd694fbf06fc",
+  "blocks": [
+    {
+      "block_id": "e8966ba8-c225-5d6b-b798-533f1b72ca5c",
+      "signal_id": "coach:lens:consider_opposite:consider_opposite:a3e4bc75f7a6a54d",
+      "created_at": "2026-10-16T10:06:41.686Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "a3e4bc75f7a6a54d",
+      "freshness": "fresh",
+      "type": "coaching",
+      "coaching_kind": "strengthen",
+      "title": "Strengthen your model: argue the other side",
+      "body": "In this model, one option scored highest by a wide margin. Before you commit, spend a few minutes making the strongest honest case against it \u2014 if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.",
+      "source": "deterministic_signal",
+      "target_refs": [],
+      "priority_rank": 15,
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "STRENGTHEN_ITEM"
+    },
+    {
+      "block_id": "a978f1c7-15b0-5b05-86a1-39a7937e1ba5",
+      "signal_id": "exercise:consider_opposite:a3e4bc75f7a6a54d",
+      "created_at": "2026-10-16T10:06:41.686Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "a3e4bc75f7a6a54d",
+      "freshness": "fresh",
+      "type": "exercise",
+      "exercise_kind": "consider_opposite",
+      "counter_case": "Take the opposite view for a moment: assume the option in front turns out to be the wrong choice. What would have to be true for that to happen? Write down the strongest argument against it, and note what evidence would confirm or rule out that argument.",
+      "target_refs": [
+        {
+          "id": "add_one_specialist",
+          "label": "Add one specialist",
+          "kind": "option"
+        }
+      ],
+      "dsk_provenance": {
+        "protocol_id": "DSK-P-003",
+        "protocol_title": "Disconfirmation exercise",
+        "evidence_strength": "medium"
+      }
+    },
+    {
+      "block_id": "85e192c5-5d1b-5c84-8343-574c4b29fdc0",
+      "signal_id": "coach:no_flagged_link:a3e4bc75f7a6a54d:2026-10-16T10:06:35.557Z:explicit_run",
+      "created_at": "2026-10-16T10:06:35.557Z",
+      "source_handler": "run_analysis",
+      "graph_hash_at_generation": "a3e4bc75f7a6a54d",
+      "freshness": "fresh",
+      "type": "coaching",
+      "coaching_kind": "assumption_check",
+      "title": "What the robustness check can't show",
+      "body": "The robustness check didn't single out any one link in the model. That doesn't show the estimates are right, and the check can only test what is already in the model, not what the model leaves out. Both are worth a look.",
+      "source": "deterministic_signal",
+      "target_refs": [],
+      "priority_rank": 15,
+      "action_label": "Look for weak spots and gaps",
+      "action_prompt": "Ask me questions to help me spot which estimates in the model I'm least sure of, and what matters to this decision but isn't in the model, including anything I could still find out. Don't choose for me, and don't change the model or re-run anything yet."
+    }
+  ]
+}

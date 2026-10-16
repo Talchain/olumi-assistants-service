@@ -51,14 +51,14 @@ function snapshot(s: Snapshot, trigger: Trigger): Snapshot {
   return s;
 }
 const carriers = (w: Awaited<ReturnType<typeof capture>>) => valueAt(w.calls.flatMap(c => c.payloads), 'eligible_intervention');
-function assertWholeAnswer(b: Obj, science = why): void {
+function assertWholeAnswer(b: Obj): void {
   expect(b._answer_shape).toBeUndefined();
   // Reply-face P1: the card's action label is a button (guidance.slot1), never a paragraph of the AI's answer.
-  expect(b.assistant_text).toBe(`${reply}\n\nWhy? ${science}`);
+  expect(b.assistant_text).toBe(reply);
   expect(String(b.assistant_text).split('\n\n')).not.toContain('Suggest risks');
   expect(String(b.assistant_text)).toContain('3%');
   // Host-authored disclosure as a plain paragraph the chat renders (R3-1: the UI escapes HTML); model text cannot replace its body.
-  expect(String(b.assistant_text)).toContain(`Why? ${science}`);
+  expect(String(b.assistant_text)).not.toContain('Why?');
   expect(String(b.assistant_text)).not.toContain('<details');
   expect(String(b.assistant_text)).toContain('Which risk could change your plan?');
 }
@@ -136,7 +136,8 @@ it('OV1 a goal-path figure you gave with no range: the Outside View is the one c
   const slot1 = object(object(w.response.guidance).slot1);
   expect(slot1).toMatchObject({ policy_id: 'RC-OUTSIDE-VIEW', priority: 'P5' });
   expect(object(slot1.primary_action)).toMatchObject({ label: ov.primary_action.label, intent: 'outside_view' });
-  expect(String(w.response.assistant_text)).toContain(`Why? ${ov.science_basis.summary}`);
+  expect(object(carriers(w)[0]).why).toBe(ov.science_basis.summary);
+  expect(String(w.response.assistant_text)).toBe('Our churn is 3%.');
   expect(JSON.stringify(w.response)).not.toMatch(/reference class/i);
   // Contrast: the same message and model with a range on every figure ('none') carries nothing (A2 below).
 });
@@ -249,7 +250,8 @@ describe('E6 Why-once on the route: a second Strengthen item on the same state c
     expect([a.policy_id, a.variant, b.policy_id, b.variant]).toEqual(['RC-STRENGTHEN-ITEM', 'S1', 'RC-STRENGTHEN-ITEM', 'S1']);
     expect(b.item, 'the next item is offered').not.toBe(a.item);
     // R3-1 (staging 9bac9729): the Why? is a plain final paragraph, never HTML; E6 says it once per state.
-    expect(String(first.response.assistant_text)).toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
+    expect(object(carriers(first)[0]).why).toBe(row('RC-STRENGTHEN-ITEM').science_basis.summary);
+    expect(first.response.assistant_text).toBe(reply);
     expect(String(first.response.assistant_text)).not.toContain('<details>');
     expect(String(second.response.assistant_text)).not.toContain(`Why? ${row('RC-STRENGTHEN-ITEM').science_basis.summary}`);
     expect(object(b.primary_action).label).toBe('Give your estimate');
@@ -375,10 +377,12 @@ it('X4 carrier whole answer: long headline and action labels retained verbatim, 
   recordC2('X4', w);
   expect(carriers(w)).toHaveLength(1);
   expect(w.response._answer_shape).toBeUndefined();
-  expect(w.response.assistant_text).toBe(`${text}\n\n${disclosure}`);
+  expect(w.response.assistant_text).toBe(text);
+  expect(carriers(w)).toHaveLength(1);
   expect(String(w.response.assistant_text)).toContain(`- ${longLabel}`);
   for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
-  expect(String(w.response.assistant_text).split('\n\n')).toContain(disclosure);
+  expect(String(w.response.assistant_text).split('\n\n')).not.toContain(disclosure);
+  expect(object(carriers(w)[0]).why).toBe(why);
 });
 it('X5 profile gate: method_step with carrier is byte-identical; proposal is byte-identical per P1 (R2 N2r)', async () => {
   const w = await capture('pre-mortem', 'run2', { evidenceLabel: 'X5', readSnapshot: async s => snapshot(s, 'S1'), providerReply: () => response(reply) });

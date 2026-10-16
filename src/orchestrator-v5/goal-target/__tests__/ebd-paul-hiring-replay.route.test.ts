@@ -451,8 +451,11 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     const said = 'This forecast does not yet use "Senior engineers hired" and "Junior engineers hired" from your brief; they remain as context for the wider productivity question. ' + 'This forecast does not yet use "£400k" from your brief; the model keeps it only in the wording of your decision question.';
     const t1 = await turn({ message: brief }, [call('build_model_from_brief', { brief }), say('I have set up the comparison.')]);
     expect(t1._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'build_model_from_brief', ok: true }));
-    expect(t1.assistant_text.split(said)).toHaveLength(2);
-    expect(t1._answer_shape?.detail).toContain(said);
+    const buildOutput = agentBodies.flatMap(body => (body.input ?? []).filter((item: Rec) => item.type === 'function_call_output')
+      .flatMap((item: Rec) => JSON.parse(String(item.output)).event_forecast_disclosures ?? []));
+    expect(buildOutput, 'the exact retained-but-unused facts reach the build narrator').toContain(said);
+    expect(t1.assistant_text).not.toContain(said);
+    expect(t1._answer_shape).toBeUndefined();
     // "remain" only where the SAVED model keeps them (AIE): the two factors are held as context nodes; the figure only in the
     // decision question's words (its label), never as a figure the model uses.
     const saved = w.read();

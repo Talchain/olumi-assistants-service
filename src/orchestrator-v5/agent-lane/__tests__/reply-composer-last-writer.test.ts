@@ -25,7 +25,7 @@ const CALL = 'const composedReply = composeReplyShape(';
 const REGISTRATION = "app.post('/agent/v1/turn'";
 /** Functions that compose or rewrite reply text upstream of the composer; none may run after it. */
 const TEXT_WRITERS = [
-  'withDisclosures(', 'withWriteOutcome(', 'withB3LinesAtRest(', 'withBreakEvenAnswer(', 'withScreenLinesOwed(',
+  'withDisclosures(', 'withWriteOutcome(', 'withB3LinesAtRest(', 'withBreakEvenAnswer(',
   'withA7AfterGate(', 'enforceAgentLaneLeaderClaimsAtWire(', 'enforceLeaderLicenceAtFinalEgress(',
   'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress(',
   'withEstimateGoalPointsAtEgress(', 'withCellHorizon(',
@@ -91,7 +91,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
 
   it('r11: live, preview, forwarded replies, same-id replay and reload use the ONE estimate point classifier', () => {
     const gate = 'withEstimateGoalPointsAtEgress(';
-    expect(ROUTE.split(gate).length - 1).toBe(4);
+    expect(ROUTE.split(gate).length - 1).toBe(5); // Mutually exclusive AI and host-fallback live exits share this same check.
     expect(RELOAD.split(gate).length - 1).toBe(1);
     const liveAt = ROUTE.lastIndexOf(gate);
     expect(liveAt).toBeLessThan(ROUTE.indexOf(CALL));

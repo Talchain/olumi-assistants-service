@@ -18,9 +18,8 @@ vi.mock('typescript', async (importOriginal) => {
   const actual = await importOriginal<{ default: typeof ts }>();
   return { default: { ...actual.default, createProgram: vi.fn(actual.default.createProgram) } };
 });
-
 import { checkMethodTurn } from '../guidance/index.js';
-import { composeRerunExplanation,RERUN_FALLBACK_LINES,RERUN_NO_CHANGE_LINES,rerunExplanationPlan,rerunViewFailures } from '../rerun-explanation.js';
+import { checkRerunExplanation, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES, rerunExplanationPlan, rerunViewFailures } from '../rerun-explanation.js';
 
 const LABELS: Record<string, string> = {
   quarterly_revenue: 'Quarterly revenue',
@@ -235,7 +234,7 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
       before: leaving ? { raw: true } : null, after: leaving ? null : { raw: true } }]);
     const p = plan({ ...PAIRED, input_changes: rows })!;
     expect(p.changes).toEqual([sentence]);
-    expect(composeRerunExplanation('', p).text).toBe(`${sentence} ${RERUN_FALLBACK_LINES.C1}`);
+    expect(checkRerunExplanation('', p).text).toBe(`${sentence} ${RERUN_FALLBACK_LINES.C1}`);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
@@ -257,7 +256,7 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
         after: change === 'added' ? { raw: true } : null }]);
     const p = plan({ ...PAIRED, input_changes: rows })!;
     expect(p.changes).toEqual(sentences);
-    expect(composeRerunExplanation('', p).text).toBe(`${sentences.join(' ')} ${RERUN_FALLBACK_LINES.C1}`);
+    expect(checkRerunExplanation('', p).text).toBe(`${sentences.join(' ')} ${RERUN_FALLBACK_LINES.C1}`);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
@@ -278,7 +277,7 @@ describe('Q4: every recorded row is spoken or accounted for', () => {
     const p = plan({ ...PAIRED, input_changes: rows })!;
     expect(p.changes[0]).toBe(sentence);
     expect(p.changes[0]).not.toBe(plan({ ...PAIRED, input_changes: [factor] })!.changes[0]);
-    expect(composeRerunExplanation('', p).text).toBe(p.codeLine);
+    expect(checkRerunExplanation('', p).text).toBe(p.codeLine);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
     const unknownOption = { ...setting, option_id: 'gone' };
     expect(plan({ ...PAIRED, input_changes: [unknownOption] })!.codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
@@ -377,13 +376,8 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
       attribution_case: 'C1_attributable', leader_licensed: false, model_labels: MODEL_LABELS });
     expect(p.codeLine).toBe(LINE);
     expect(p.fallback).toBe(LINE);
-    expect(p.instruction).toContain(LINE);
     // ⛔ CHANGED EXPECTATION (prompt P16, AIE one-pass packet 94ad9c8f…; the AIE's signed rerun sentence 75e053e8…): input
     // changes are stated only where the verified comparison establishes them; the code line stays the record and still leads.
-    expect(p.instruction).not.toContain('never say whether the inputs changed or stayed the same');
-    expect(p.instruction).toContain('Use the supplied run_delta rows to explain what changed between those actual Runs.');
-    expect(p.instruction).toContain('When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.');
-    expect(p.instruction).toContain(`Run record: "${LINE}"`);
   });
 
   it('INERT: no run_delta (a first Run) → no plan (the explanation path is exactly as before)', () => {
@@ -453,7 +447,6 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     ]);
     expect(p.codeLine).not.toContain('strong');
     expect(p.codeLine).toContain('slight');
-    expect(p.instruction).toContain(p.codeLine);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
@@ -481,7 +474,7 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     expect(p.changes).toHaveLength(3);
     expect(p.codeLine).toBe(`${p.changes.join(' ')}${disclosed} ${RERUN_FALLBACK_LINES.C0}`);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
-    expect(composeRerunExplanation('', p).text, 'an empty model reply keeps the disclosure').toBe(p.codeLine);
+    expect(checkRerunExplanation('', p).text, 'an empty model reply keeps the disclosure').toBe(p.codeLine);
   });
 
   it('a non-link row says its own label, before → after, with units; at most three changes', () => {
@@ -539,7 +532,6 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
  */
 describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown difference is never said as observed', () => {
   const NEUTRAL = RERUN_NO_CHANGE_LINES.unwithheld;
-  const UNSURE = 'Olumi can’t confirm nothing else differed between the two Runs';
   it.each<[string, string, string, string]>([
     ['C0 complete', 'C0_identical', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C0}`],
     ['C1 complete (the investor moment)', 'C1_attributable', 'complete', RERUN_FALLBACK_LINES.unwithheld],
@@ -563,29 +555,9 @@ describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown d
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
-  // The model's premise per case, on a PAIRED (not withheld) delta with a named change — each must be TRUE of its case.
-  it.each([
-    ['C0 complete + NO change: identity is proven', { ...PAIRED, attribution_case: 'C0_identical', input_changes: [] }, 'Nothing differed between the two Runs', ['Other things also differed', UNSURE]],
-    ['C1 complete', { ...PAIRED, input_changes: [AI] }, 'You may say what moved', ['Other things also differed', UNSURE]],
-    ['C2 complete: the draw is not shown equal', { ...PAIRED, attribution_case: 'C2_unpaired', input_changes: [AI] }, 'Olumi can’t confirm both Runs used the same draw', ['Other things also differed', 'new draw']],
-    ['C3 complete: a recorded engine difference', { ...PAIRED, attribution_case: 'C3_engine_drift', input_changes: [AI] }, 'Other things also differed between the two Runs', [UNSURE]],
-    ['C4 complete: a recorded budget difference', { ...PAIRED, attribution_case: 'C4_budget_drift', input_changes: [AI] }, 'Other things also differed between the two Runs', [UNSURE]],
-    ['C5 complete: unattributed', { ...PAIRED, attribution_case: 'C5_unattributed', input_changes: [AI] }, UNSURE, ['Other things also differed']],
-    ['C0 PARTIAL', { ...PAIRED, attribution_case: 'C0_identical', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed', 'Nothing differed']],
-    ['C2 PARTIAL', { ...PAIRED, attribution_case: 'C2_unpaired', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed']],
-    ['C4 PARTIAL', { ...PAIRED, attribution_case: 'C4_budget_drift', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed']],
-    ['C5 PARTIAL', { ...PAIRED, attribution_case: 'C5_unattributed', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed']],
-  ])('the model instruction is true of its case: %s', (_n, delta, says, never) => {
-    const p = plan(delta)!;
-    expect(p.instruction).toContain(says);
-    for (const n of never) expect(p.instruction).not.toContain(n);
-  });
-
   it('RED (MG 5943403202): an UNWITHHELD pair with PARTIAL coverage never says "Other things also differed" — Olumi can\'t confirm', () => {
     const p = plan({ ...PAIRED, input_coverage: 'partial', input_changes: [AI] })!;
     expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.unverified}`);
-    expect(p.instruction).toContain('Olumi can’t confirm nothing else differed between the two Runs');
-    expect(p.instruction).not.toContain('Other things also differed');
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
@@ -597,14 +569,9 @@ describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown d
   it('CONTROL: a RECORDED difference stays observed — engine drift says "Other things also differed", in the line and the instruction', () => {
     const p = plan({ ...PAIRED, attribution_case: 'C3_engine_drift', input_changes: [AI] })!;
     expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
-    expect(p.instruction).toContain('Other things also differed between the two Runs');
   });
 
-  it('the instruction never tells the model the earlier Run had NO figures (a subset withhold keeps some): it held them back', () => {
-    const p = plan(UNWITHHELD)!;
-    expect(p.instruction).toContain('The earlier Run held its comparison figures back');
-    expect(p.instruction).not.toContain('had no figures');
-  });
+
 });
 
 describe('the composer: the code line first, then the model\'s sentences that pass RC\'s checker beside it', () => {
@@ -612,36 +579,37 @@ describe('the composer: the code line first, then the model\'s sentences that pa
   const WHY = 'The model now shows a provisional comparison of the four options.';
 
   it('CONTROL: a clean model paragraph is sent after the code line, as written', () => {
-    expect(composeRerunExplanation(WHY, p)).toEqual({ text: `${LINE}\n\n${WHY}`, dropped: [], failed: [] });
+    expect(checkRerunExplanation(WHY, p)).toEqual({ text: WHY, dropped: [], failed: [] });
   });
 
-  it('a model sentence that only repeats the code line is dropped silently (the record is said once)', () => {
-    expect(composeRerunExplanation(`${SAID_AI}\n${RERUN_FALLBACK_LINES.unwithheld} ${WHY}`, p)).toEqual({ text: `${LINE}\n\n${WHY}`, dropped: [], failed: [] });
+  it('a supplied truthful record stays in the AI’s own position', () => {
+    const answer = `${SAID_AI}\n${RERUN_FALLBACK_LINES.unwithheld} ${WHY}`;
+    expect(checkRerunExplanation(answer, p)).toEqual({ text: answer, dropped: [], failed: [] });
   });
 
   it('RED (RX-NO-MOVEMENT-WITHOUT-PRIOR): the "rose" sentence is dropped, the honest one kept — never the claim', () => {
-    const r = composeRerunExplanation(`${WHY} AI Reporting Module Sprint's chance rose to 57%.`, p);
-    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
+    const r = checkRerunExplanation(`${WHY} AI Reporting Module Sprint's chance rose to 57%.`, p);
+    expect(r.text).toBe(WHY);
     expect(r.failed).toContain('RX-NO-MOVEMENT-WITHOUT-PRIOR');
     expect(r.dropped).toEqual(["AI Reporting Module Sprint's chance rose to 57%."]);
   });
 
   it('every model sentence fails → the code line alone', () => {
-    expect(composeRerunExplanation("AI Reporting Module Sprint's chance rose to 57%.", p).text).toBe(LINE);
+    expect(checkRerunExplanation("AI Reporting Module Sprint's chance rose to 57%.", p).text).toBe(LINE);
   });
 
   it('RED (RX-NO-LEADER-UNLICENSED): an unlicensed option said to lead is dropped', () => {
-    const r = composeRerunExplanation(`${WHY} AI Reporting Module Sprint leads the comparison.`, p);
+    const r = checkRerunExplanation(`${WHY} AI Reporting Module Sprint leads the comparison.`, p);
     expect(r.failed).toContain('RX-NO-LEADER-UNLICENSED');
-    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
+    expect(r.text).toBe(WHY);
   });
 
   it('CONTROL (RC MT-RERUN-MODEL-LABEL-GOOD): a MODEL label containing "leads", beside an option, is masked — kept', () => {
     // Without the mask this sentence holds an option label AND "leads", so RX-NO-LEADER-UNLICENSED would fire.
     const reply = 'Continue Current Plan keeps Qualified leads per month where it was.';
-    expect(composeRerunExplanation(reply, p)).toMatchObject({ text: `${LINE}\n\n${reply}`, dropped: [] });
+    expect(checkRerunExplanation(reply, p)).toMatchObject({ text: reply, dropped: [] });
     const unmasked = rerunExplanationPlan(UNWITHHELD, labelOf, OPTIONS, false, []);
-    expect(composeRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
+    expect(checkRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
   });
 
   // BUDDY-B #3253 round 2: finding-first still forbids an unchanged-input claim beside a named change.
@@ -652,33 +620,20 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     'Your model hasn’t changed.', 'The inputs stayed the same.', 'The other inputs were unchanged.', 'Everything else used the same inputs.',
     'The input settings have not changed at all.',
   ])('drops the contrary claim "%s" and retains the complete record once', (line) => {
-    const r = composeRerunExplanation(`${WHY} ${line}`, p);
+    const r = checkRerunExplanation(`${WHY} ${line}`, p);
     expect(r.failed).toContain('RX-NO-CONTRARY-SAME');
     expect(r.dropped).toContain(line);
     expect(r.text).not.toContain(line);
-    expect(r.text.split(LINE)).toHaveLength(2);
-    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
+    expect(r.text).toBe(WHY);
     expect(rerunViewFailures({ reasoning: line }, p)).toContain('RX-NO-CONTRARY-SAME');
-  });
-
-  it.each([
-    'Nothing about your model changed.', 'There were no changes to your model.', 'None of your assumptions changed.',
-    'Your inputs are identical to last time.', "Your settings haven't changed.", 'No edits were made to the model.',
-    'Everything in the model is as it was.', 'This run used exactly the same model.', 'No inputs differ from the previous run.',
-    'The inputs are as before.', 'Your model remains as it was.', 'Your model is the same as before.',
-    'The model has not changed since the last run.', 'The model stayed the same.', "You haven't changed anything.",
-  ])('BUDDY-B round 3: the named-change record leads before outside phrasing "%s"', line => {
-    const r = composeRerunExplanation(`${WHY} ${line}`, p);
-    expect(r.text.startsWith(`${LINE}\n\n`)).toBe(true);
-    expect(r.text.split(LINE)).toHaveLength(2);
   });
 
   it('BUDDY-B round 3: finding-first remains ONLY for a complete, empty record (C0: "Nothing you entered changed.")', () => {
     const noChange = plan({ ...UNWITHHELD, attribution_case: 'C0_identical', input_changes: [] })!;
     expect(noChange.changes).toEqual([]);
     expect(noChange.codeLine.startsWith(RERUN_NO_CHANGE_LINES.nothing)).toBe(true);
-    const r = composeRerunExplanation(WHY, noChange);
-    expect(r.text).toBe(`${WHY}\n\n${noChange.codeLine}`);
+    const r = checkRerunExplanation(WHY, noChange);
+    expect(r.text).toBe(WHY);
   });
 
   // ⭐ BUDDY-B #3253 r4 (flips the r3 exemption): a record that cannot say what changed LEADS, so a contrary "nothing changed"
@@ -690,34 +645,33 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     const unknown = plan(delta)!;
     expect(unknown.changes).toEqual([]);
     expect(unknown.codeLine.startsWith(RERUN_NO_CHANGE_LINES.unknown)).toBe(true);
-    expect(composeRerunExplanation(WHY, unknown).text).toBe(`${unknown.codeLine}\n\n${WHY}`);
+    expect(checkRerunExplanation(WHY, unknown).text).toBe(WHY);
     // The served probe: an unchanged claim the record contradicts never opens the reply.
-    const claim = 'No edits were made to the model.';
-    expect(composeRerunExplanation(`${claim} ${WHY}`, unknown).text.startsWith(unknown.codeLine), 'the record is the first sentence').toBe(true);
+    expect(unknown.inputs.changes_unsaid).toBe(true);
+    expect(checkRerunExplanation(`The inputs were unchanged. ${WHY}`, unknown).failed).toContain('RX-NO-CONTRARY-SAME');
   });
 
   it.each(['Nothing else changed.', 'Olumi cannot confirm that your model is unchanged.',
     '‘Carry on’ does not change the price.', 'Olumi can’t say what changed between these two runs.', 'The comparison uses the current calculation inputs.'])(
     'keeps the qualified full-coverage control "%s" and record once', (line) => {
-      const r = composeRerunExplanation(`${WHY} ${line}`, p);
+      const r = checkRerunExplanation(`${WHY} ${line}`, p);
       expect(r.failed).toEqual([]);
       expect(r.dropped).toEqual([]);
       expect(r.text).toContain(line);
-      expect(r.text.split(LINE)).toHaveLength(2);
-      expect(rerunViewFailures({ reasoning: line }, p)).toEqual([]);
+        expect(rerunViewFailures({ reasoning: line }, p)).toEqual([]);
     });
 
   it.each(['You ran it with the same input values.', 'Nothing in your model changed.'])('RED (RX-NO-CONTRARY-SAME, on staging today): "%s" is dropped', (line) => {
-    const r = composeRerunExplanation(`${WHY} ${line}`, p);
+    const r = checkRerunExplanation(`${WHY} ${line}`, p);
     expect(r.failed).toContain('RX-NO-CONTRARY-SAME');
-    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
+    expect(r.text).toBe(WHY);
   });
 
   it('CONTROL (buddy preflight 5939219187): a PAIRED, licensed C1 rerun MAY say what moved', () => {
     const paired = plan(PAIRED, true)!;
     expect(paired.inputs).toMatchObject({ prior_withheld: false, no_matched_figures: false, leader_licensed: true });
     const moved = "AI Reporting Module Sprint's chance rose to 57% and it leads the comparison.";
-    expect(composeRerunExplanation(moved, paired)).toMatchObject({ dropped: [], text: `${paired.codeLine}\n\n${moved}` });
+    expect(checkRerunExplanation(moved, paired)).toMatchObject({ dropped: [], text: moved });
   });
 
   // ⚠ RE-PINNED (Science d5, #87 6005682972 (1)): this row read `plan(PAIRED)`, which carries TWO changes (AI, FIX), as
@@ -726,20 +680,17 @@ describe('the composer: the code line first, then the model\'s sentences that pa
   // goal-row cases are the RED rows below.
   it('a C2 pair: a causal sentence is dropped (RX-NO-CAUSE-UNPAIRED); a C1 pair with ONE change may state the cause', () => {
     const causal = 'The shift happened because of your change.';
-    expect(composeRerunExplanation(causal, plan({ ...PAIRED, attribution_case: 'C2_unpaired' })!).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+    expect(checkRerunExplanation(causal, plan({ ...PAIRED, attribution_case: 'C2_unpaired' })!).failed).toContain('RX-NO-CAUSE-UNPAIRED');
     const one = plan({ ...PAIRED, input_changes: [AI] })!;
     expect(one.inputs.attribution_case).toBe('C1_attributable');
-    expect(one.instruction).toContain('You may say what moved in the comparison.');
-    expect(composeRerunExplanation(causal, one).dropped).toEqual([]);
+    expect(checkRerunExplanation(causal, one).dropped).toEqual([]);
   });
 
   it('RED (d5 6005682972 (1)): a C1 pair with TWO changes never credits one of them; checked as unpaired, told so', () => {
     const causal = 'The shift happened because of your change.';
     const two = plan(PAIRED)!;
     expect(two.inputs.attribution_case).toBe('C2_unpaired');
-    expect(two.instruction).not.toContain('You may say what moved in the comparison.');
-    expect(two.instruction).toContain('More than one input changed between the two Runs, or the goal itself changed, so never say which change caused the difference.');
-    expect(composeRerunExplanation(causal, two).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+    expect(checkRerunExplanation(causal, two).failed).toContain('RX-NO-CAUSE-UNPAIRED');
     // The line is still the record: both changes named, the same-draw case line kept.
     expect(two.codeLine).toBe(`${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.C1}`);
   });
@@ -749,14 +700,13 @@ describe('the composer: the code line first, then the model\'s sentences that pa
       label_after: 'Quarterly revenue', before: { raw: 'maximize' }, after: { raw: 'minimize' }, change: 'changed' };
     const p = plan({ ...PAIRED, input_changes: [flip] })!;
     expect(p.inputs.attribution_case).toBe('C2_unpaired');
-    expect(p.instruction).not.toContain('You may say what moved in the comparison.');
-    expect(composeRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+    expect(checkRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
   });
 
   it('RED (d5 6005682972 (4)): an engine-drift pair (C3, builds differ) never credits the change, even with ONE change', () => {
     const p = plan({ ...PAIRED, attribution_case: 'C3_engine_drift', input_changes: [AI] })!;
     expect(p.inputs.attribution_case).toBe('C2_unpaired');
-    expect(composeRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+    expect(checkRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
   });
 
   it('the UNWITHHELD line is not this gate: two Accepts on a C1 prior-withheld pair keep the investor-moment line and its check case', () => {
@@ -785,24 +735,24 @@ describe('AIE-04: one integrated checked comparison', () => {
   const current = 'The model now shows a provisional comparison of the four options.';
   it('puts a named change first and keeps a complete quoted record once', () => {
     const answer = `${current}\n**What changed:** Olumi’s record says: “${SAID_AI}”\n${RERUN_FALLBACK_LINES.unwithheld}`;
-    const composed = composeRerunExplanation(answer, p);
-    expect(composed).toEqual({ text: `${p.codeLine}\n\n${current}`, dropped: [], failed: [] });
+    const composed = checkRerunExplanation(answer, p);
+    expect(composed).toEqual({ text: answer, dropped: [], failed: [] });
     expect(composed.text.split(SAID_AI)).toHaveLength(2);
   });
   it('a second complete record citation is said once, even beneath a different heading', () => {
     const once = `${current}\n**What changed:** Olumi’s record says: “${SAID_AI}”\n${RERUN_FALLBACK_LINES.unwithheld}`;
-    const r = composeRerunExplanation(`${once}\n**What changed:** Olumi’s record says: “${SAID_AI}”`, p);
-    expect(r.text).toBe(`${p.codeLine}\n\n${current}`);
+    const r = checkRerunExplanation(`${once}\n**What changed:** Olumi’s record says: “${SAID_AI}”`, p);
+    expect(r.text).toBe(once);
     expect(r.text.split(SAID_AI)).toHaveLength(2);
   });
   it('keeps the full named-change record first, repairing its missing sentence once', () => {
     const answer = `${current}\n${SAID_AI}`;
-    expect(composeRerunExplanation(answer, p).text).toBe(`${p.codeLine}\n\n${current}`);
+    expect(checkRerunExplanation(answer, p).text).toBe(answer);
   });
   it('still drops a fabricated movement and repairs the record beside the honest finding', () => {
-    const r = composeRerunExplanation(`${current} Its chance rose to 57%.`, p);
+    const r = checkRerunExplanation(`${current} Its chance rose to 57%.`, p);
     expect(r.failed).toContain('RX-NO-MOVEMENT-WITHOUT-PRIOR');
     expect(r.text).not.toContain('57%');
-    expect(r.text).toBe(`${p.codeLine}\n\n${current}`);
+    expect(r.text).toBe(current);
   });
 });

@@ -20,7 +20,7 @@ import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { bindGuidedSizing, guidedSizingForRun, guidedSizingSentence } from '../guided-sizing.js';
 import { guidedSizingActions, guidedSizingProgressLine } from '../guided-sizing.js';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 import * as estimateProducer from '../olumi-estimates-feeding-result.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
@@ -252,9 +252,7 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     // starting values on the goal path, so they are named beside RC4's one relationship (still 1, the definition excluded).
     expect(lines[0]!.olumi_estimate_link_count).toBe(1);
     expect(lines[0]!.chance).toBe('‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model, using Olumi\'s estimates for 2 starting values and 1 relationship (see Check estimates).');
-    const reply = withScreenLinesOwed('This Run is ready.', lines);
-    expect(reply.text).toContain(lines[0]!.chance);
-    expect(reply.text).toContain('using Olumi\'s estimates for 2 starting values and 1 relationship (see Check estimates)');
+
   });
 
   it('MUTANT: relaxed case(c), but the narrator gave the unlabelled chance → RED', () => {
@@ -263,8 +261,7 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
     const lines = goalChanceScreenLinesForAgent(run, graph, true);
     expect(lines).toHaveLength(2);
     const bare = '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.';
-    const owed = withScreenLinesOwed(bare, [lines[0]!]).text;
-    const text = withEstimateGoalPointsAtEgress({ assistant_text: owed }, { analysisResult: run, graph, current: true }).assistant_text;
+    const text = withEstimateGoalPointsAtEgress({ assistant_text: bare }, { analysisResult: run, graph, current: true }).assistant_text;
     // Batch C: ruling r1 item 6 — the inferred starting values are named too.
     expect(text).toContain('using Olumi\'s estimates for 2 starting values and 1 relationship (see Check estimates)');
     expect(text).not.toContain(bare);
@@ -284,10 +281,9 @@ describe('GUIDED HONESTY round 4: the displayed point pays for relaxed case(c)',
       const exact = `using Olumi's estimates for 2 starting values and ${k} ${k === 1 ? 'relationship' : 'relationships'} (see Check estimates)`;
       expect(lines[0]!.olumi_estimate_link_count).toBe(k);
       expect(lines[0]!.chance).toContain(exact);
-      const screenReply = withScreenLinesOwed('This Run is ready.', lines).text;
       const egressReply = withEstimateGoalPointsAtEgress({ assistant_text: '‘Raise Pro price to £59’: about 46% chance of meeting your goal, in this model.' },
         { analysisResult: run, graph, current: true }).assistant_text;
-      for (const reply of [screenReply, egressReply]) {
+      for (const reply of [egressReply]) {
         expect(reply).toContain(exact);
         expect(reply).not.toMatch(/using Olumi's estimates for \d+ links? \(see Check estimates\)/);
       }

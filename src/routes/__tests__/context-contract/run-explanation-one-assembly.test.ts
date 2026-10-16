@@ -6,13 +6,14 @@ import { capture, captureDir, findState, expected, keysDeep, object, valueAt, se
 
 describe('Explain uses the canonical assembly (serialized provider bytes)', () => {
   it.each<Turn>(['Run-explanation', 'ordinary-converse', 'tool-continuation'])(
-    'S4: %s receives the record-first coaching direction once, with the record’s factual limits', async turn => {
+    'S4: %s receives the answer-first coaching direction once, with the record’s factual limits', async turn => {
       const w = await capture(turn, 'run2');
       for (const c of w.calls) {
         // The full serialized request actually sent: S1 (#3272) carries the Run instruction as its own input item.
         const sent = String(c.sentBody);
-        expect(sent.split('If that record names a change or cannot establish what changed, lead once')).toHaveLength(2);
-        expect(sent).toContain('With no preceding Run, or with a complete unchanged-input record, lead with the current supported finding');
+        expect(sent.split('Lead with the supported current finding or precise limitation')).toHaveLength(2);
+        expect(sent).toContain('Do not make edit history the default headline.');
+        expect(sent).not.toContain('If that record names a change or cannot establish what changed, lead once');
         expect(sent).toContain('Keep each endpoint’s Run, scope and qualifications');
         expect(sent).not.toContain('Lead with the current supported finding, then explain the recorded change');
         const record = object(findState(c.payloads).rerun_record);
@@ -250,9 +251,9 @@ describe('Explain scoped assembly safety', () => {
       // AIE-04: the exact disclosure/comparison rules below, prefix safeguards retained.
       // B2: evaluated-question scope sentence only; SENT instructions reverse byte-for-byte to AIE-04.
       // S4: two competing finding-first copies removed; record-first ordering owned once by RUN_FACTS_USE.
-      // AIE exact single replacement, #94 6206574562, with factual checks retained.
-      // 46781 UTF-8 bytes; Claude challenge required. LANE-B-S4-AIE-SENT-PIN-PROOF.json.
-      .toBe('666b4c08c972a8f3c2977cea06fbb747c5d19460b24497bdc2768bd581259530');
+      // AIE current-finding-first replacement; duplicate rerun-plan instruction retired, factual context retained.
+      // 46189 UTF-8 bytes from the actual mocked sent request; Claude challenge required.
+      .toBe('ef9d6733715e728ee13452dac5bfbbcbaa25cc6bbb59bf9221ad5789d481d6b6');
   },60000);
 });
 

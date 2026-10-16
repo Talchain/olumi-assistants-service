@@ -139,7 +139,7 @@ function isCount(word: string): boolean {
 }
 
 /** One linear token scan: no regex repetitions or backtracking on arbitrary narrator text. */
-function attributedCount(sentence: string): boolean {
+function attributedCount(sentence: string, speakerIsOlumi = false): boolean {
   const tokens: Token[] = [];
   let clause = 0;
   for (let i = 0; i < sentence.length;) {
@@ -199,16 +199,19 @@ function attributedCount(sentence: string): boolean {
   let hasPredicate = false;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i]!;
+    const previousToken = tokens[i - 1];
+    // The existing count grammar also accepts its labelled form, e.g. a count after a colon.
+    const countLabel: boolean = hasOlumi && previousToken !== undefined && COUNT_KINDS.has(previousToken.word)
+      && sentence.slice(previousToken.end, token.start).trim() === ':' && isCount(token.word);
     if (token.clause !== currentClause
       || (CONJUNCTIONS.has(token.word) && hasPredicate && startsClause(i + 1))) {
       if (hasOlumi && hasCount) return true;
       currentClause = token.clause;
-      hasOlumi = false;
-      hasCount = false;
+      hasOlumi = countLabel;
+      hasCount = countLabel && (token.end === sentence.length || /^[.,;!?]/.test(sentence.slice(token.end).trimStart()));
       hasPredicate = false;
     }
-    if (token.word === 'olumi') hasOlumi = true;
-    const previousToken = tokens[i - 1];
+    if (token.word === 'olumi' || (speakerIsOlumi && token.word === 'i')) hasOlumi = true;
     if (isVerb(token.word) || (previousToken !== undefined && previousToken.clause === token.clause
       && SUBJECTS.has(previousToken.word) && token.word !== 's'
       && !CONJUNCTIONS.has(token.word) && !SUBJECTS.has(token.word) && !isCount(token.word))) hasPredicate = true;
@@ -232,17 +235,17 @@ function attributedCount(sentence: string): boolean {
 }
 
 /** Science §(f): only the deterministic producer may state counts, even when narration matches N. */
-export function narratorCountGuard(text: string, _e: OlumiEstimates | null): { text: string; removed: string[] } {
+export function narratorCountGuard(text: string, _e: OlumiEstimates | null, speaker?: 'olumi'): { text: string; removed: string[] } {
   const removed: string[] = [];
   // Also preserves all whitespace and bytes of the common no-count case.
-  if (!text.toLowerCase().includes('olumi')) return { text, removed };
+  if (speaker !== 'olumi' && !text.toLowerCase().includes('olumi')) return { text, removed };
   const kept: string[] = [];
   const append = (end: number): void => {
     const sentence = text.slice(start, end);
     // Read a normalised copy (buddy r2): Markdown emphasis never hides a count ("**9** values"), and a grouped or
     // decimal figure is one count ("1,000 values"). The kept text is the original bytes.
     const plain = sentence.replace(/[*_`~]/g, '').replace(/(\d)[,.](?=\d)/g, '$1');
-    if (attributedCount(plain)) removed.push(sentence.trim());
+    if (attributedCount(plain, speaker === 'olumi')) removed.push(sentence.trim());
     else kept.push(sentence);
     start = end;
   };

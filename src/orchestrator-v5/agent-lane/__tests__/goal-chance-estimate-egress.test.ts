@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
+import { heldDeclineSentence, heldLapseSentence, editsRefusedSentence } from '../proposal-object/reply.js';
+import { rerunExplanationPlan } from '../rerun-explanation.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
 const line: GoalChanceScreenLine = {
@@ -12,9 +14,83 @@ const licence = { code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['rais
   target: { comparator: 'at_least', value: 20000, unit: '£/month' }, olumi_estimate_link_count: 1,
   goal_node_id: 'mrr', goal_label: 'Monthly recurring revenue', option_labels_by_option: { raise: line.label } };
 const result = { enrichment: { inference_warnings: [licence] } };
-const clean = (text: string): string => withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: result, graph, current: true }).assistant_text;
+const clean = (text: string): string => withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: result, graph, current: true, narrator: 'olumi' }).assistant_text;
 
 describe('r16 option and goal bound estimate points', () => {
+  it('the Run’s goal chance leads; a win share remains supporting detail once', () => {
+    const share = '‘Raise to £59’ comes out on top in 88% of runs.';
+    const out = clean(`${share}\n\n${line.chance}`);
+    expect(out.startsWith(line.chance)).toBe(true);
+    expect(out).toContain(share);
+    expect(out.split(line.chance)).toHaveLength(2);
+  });
+
+  it('a Run using no Olumi estimates cannot acquire a fabricated Olumi count', () => {
+    const { olumi_estimate_link_count: _count, ...humanLicence } = licence;
+    const humanResult = { enrichment: { inference_warnings: [humanLicence] } };
+    const out = withEstimateGoalPointsAtEgress({ assistant_text: "Olumi's estimates: 99, see Check estimates." }, {
+      analysisResult: humanResult, graph, current: true, narrator: 'olumi',
+    }).assistant_text;
+    expect(out).not.toContain('99');
+  });
+
+  it('a quoted human comparison is retained as their data', () => {
+    const share = '‘Raise to £59’ comes out on top in 88% of runs.';
+    const text = `${share}\n\n${line.chance}`;
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      analysisResult: result, graph, current: true, narrator: 'olumi', userAuthoredTexts: [share],
+    }).assistant_text).toBe(text);
+  });
+
+  it.each([heldDeclineSentence('The change'), editsRefusedSentence('stale'), heldLapseSentence('The change', 'superseded')])(
+    'the final numeric check preserves a server receipt beside an earlier comparison: %s', receipt => {
+      const comparison = rerunExplanationPlan({ attribution_case: 'C1_attributable', input_coverage: 'complete',
+        win_probabilities: [], leader: { changed: false, noise_verdict: 'not_noise_qualified' },
+        input_changes: [{ entity_kind: 'link', field: 'presence', link: { from: 'x', to: 'y' }, before: null, after: { raw: true } }],
+      }, id => id, ['raise'], false, ['x', 'y']);
+      expect(comparison).not.toBeNull();
+      const oldCallerContext = { analysisResult: result, graph, current: true, comparison: comparison! };
+      const body = { assistant_text: `${line.chance} ${receipt}` };
+      expect(withEstimateGoalPointsAtEgress(body, oldCallerContext)).toBe(body);
+    });
+
+  it('a comparison share cannot become the same option’s goal chance', () => {
+    const text = '‘Raise to £59’ comes out on top in 88% of runs, so it has an 88% chance.';
+    expect(clean(text)).toBe(line.chance);
+  });
+
+  it.each(['‘Raise to £59’ comes out on top in 88% of runs, but the supplier has a 10% chance.',
+    '‘Raise to £59’ comes out on top in 88% of runs, so it has a 10% chance of supplier failure.'])(
+    'an explicitly different subject is never rebound as the goal: %s', text => {
+      const out = clean(text);
+      expect(out).toContain(text);
+      expect(out).not.toContain('10% chance of meeting your goal');
+    });
+
+  it('a fabricated attribution count cannot borrow the producer’s label', () => {
+    expect(clean(`${line.chance} Olumi's estimates: 99, see Check estimates.`)).toBe(line.chance);
+  });
+
+  it('does not reinterpret first-person instructions without a known AI narrator', () => {
+    const text = 'I need 2 values for this worksheet.';
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: result, graph, current: true }).assistant_text).toBe(text);
+  });
+
+  it.each(['I supplied 4 of the values behind this.', 'I supplied nine underlying values.', 'I supplied 99 links.'])(
+    'the known assistant speaker cannot invent an attribution count: %s', statement => {
+      const out = clean(`${line.chance} ${statement}`);
+      expect(out).toContain(line.chance);
+      expect(out).not.toContain(statement);
+    });
+
+  it.each(['I supplied 4 of the values behind this.', 'I did not supply 4 values.'])(
+    'an exact retained human statement remains theirs, including its negative: %s', statement => {
+      const text = `${line.chance} ${statement}`;
+      expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+        analysisResult: result, graph, current: true, narrator: 'olumi', userAuthoredTexts: [`An earlier answer. ${statement}`],
+      }).assistant_text).toBe(text);
+    });
+
   it.each([
     '‘Raise to £59’: about 67% in this model.',
     'The recorded chance for Raise to £59 is 67%.',
@@ -36,9 +112,7 @@ describe('r16 option and goal bound estimate points', () => {
   });
   it('removes a bare qualified point with added=0', () => {
     const bare = '‘Raise to £59’: about 67% in this model.';
-    const owed = withScreenLinesOwed(`${bare}\n${line.chance}`, [line]);
-    expect(owed.added).toBe(0);
-    const out = clean(owed.text);
+    const out = clean(`${bare}\n${line.chance}`);
     expect(out).not.toContain(bare);
     expect(out.split(line.chance)).toHaveLength(2);
   });

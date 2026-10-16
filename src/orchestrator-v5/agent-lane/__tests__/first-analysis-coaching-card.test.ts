@@ -82,6 +82,8 @@ const candidate = {
 };
 
 let script: Array<Record<string, unknown>> = [];
+let narration: string | null = null;
+let sentInterpretation = '';
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: 'c1', arguments: JSON.stringify(args) }] });
 
@@ -91,10 +93,11 @@ function installFetch() {
     if (body.text?.format?.type === 'json_schema') {
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(candidate) }] }] }), { status: 200 });
     }
+    sentInterpretation += JSON.stringify(body); 
     const runCall = runPressToolResponse(body);
     if (runCall) return runCall;
     const next = body['tool_choice'] === 'none' ? undefined : script.shift();
-    return new Response(JSON.stringify(next ?? say('Here is a provisional first pass to argue with.')), { status: 200 });
+    return new Response(JSON.stringify(next ?? (narration === null ? { ...say(''), status: 'incomplete' } : say(narration))), { status: 200 });
   }));
 }
 
@@ -189,11 +192,11 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     n += 1; SID = `7b1e2d3c-4a5f-4e6d-8c7b-8a9f0e1d2c${String(n).padStart(2, '0')}`;
-    script = [];
+    script = []; narration = null; sentInterpretation = '';
     knobs = { graph: READY_GRAPH, readbackAfterRun: 'current' };
   });
 
-  it('RED: a brief that builds an admissible model → ONE automatic run, and exactly one card bound to it', async () => {
+  it('fallback: a brief that builds an admissible model → ONE automatic run, and exactly one card bound to it', async () => {
     const r = await buildTurn(app);
     expect(r._diagnostic_trace.first_analysis, 'control: the automatic first analysis ran').toMatchObject({ ran: true });
     expect(st(SID).inProcessRuns).toBe(1);
@@ -281,6 +284,18 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     expect(auto, 'control: the automatic card existed').toBeDefined();
     expect(cards[0]!.block_id).not.toBe(auto!.block_id);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
+  });
+
+  it('AI-written first analysis keeps one reply and no second coaching/exercise card, with the Run facts SENT', async () => {
+    narration = 'Here is a provisional first pass to argue with.';
+    const r = await buildTurn(app);
+    expect(st(SID).inProcessRuns).toBe(1);
+    expect(st(SID).injectRuns).toBe(0);
+    expect(coachingOf(r)).toEqual([]);
+    expect((r.blocks ?? []).filter(b => b.type === 'exercise')).toEqual([]);
+    expect((r.blocks ?? []).filter(b => b.type === 'analysis_result')).toHaveLength(1);
+    expect(sentInterpretation).toContain('run_facts');
+    expect(sentInterpretation).toContain('robustness');
   });
 
   it('RED: the readback no longer shows the run as current → no card, reason identity_mismatch', async () => {

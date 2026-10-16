@@ -256,9 +256,9 @@ describe('Science §(ad) through the producer and reply route', () => {
       reasons: expect.arrayContaining([expect.objectContaining({ code: HORIZON_WITHHOLD, message: detail })]) });
     // §(ad) amended (AIE #94 6178106849, #3130): the cards carry the marker; the reply leads ONCE with the goal at its point,
     // and the old why ("…only has today's numbers.") is never said beside it.
-    expect(body._answer_shape.headline).toBe(goalHorizonReplyLead(graph));
-    expect(body._answer_shape.headline).toMatch(/ on 31 March 2027; this Run has not evaluated it at that point\.$/);
-    expect(body.assistant_text).not.toContain(detail);
+    expect(goalHorizonReplyLead(graph)).toMatch(/ on 31 March 2027; this Run has not evaluated it at that point\.$/);
+    expect(body._answer_shape).toBeUndefined();
+    expect(body.assistant_text.split(detail)).toHaveLength(2); // exact limitation once, no host headline rewrite
     expect(body.assistant_text).not.toContain('%');
   }, 60_000);
 
@@ -309,7 +309,7 @@ describe('Science §(ad) through the producer and reply route', () => {
       && row.cell.reasons.some(reason => reason.code === HORIZON_WITHHOLD))).toBe(true);
     for (const row of enrichment.option_comparison) expect(row).not.toHaveProperty('probability_of_goal');
     const comparison = JSON.stringify({ results: enrichment.results, options: enrichment.option_comparison, summary: currentResult.summary });
-    const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
+    const face = body.assistant_text;
     expect(comparison).not.toMatch(/by month|on track|in time|within 9 months/i);
     expect(face).not.toMatch(/by month|on track|in time|within 9 months/i);
     expect(body.assistant_text).not.toMatch(/by month|on track|in time|within 9 months/i);
@@ -329,9 +329,10 @@ describe('Science §(ad) through the producer and reply route', () => {
     const detail = currentFact!.result.enrichment.inference_warnings.find((w: Rec) => w.code === HORIZON_WITHHOLD).say;
     expect(body.assistant_text).not.toContain(CHANCE_FREE_HORIZON_PREFIX);
     const lead = goalHorizonReplyLead(graph)!;
-    expect(body._answer_shape.headline).toBe(lead);
-    expect(body.assistant_text.split(lead)).toHaveLength(2);
-    expect(body.assistant_text).not.toContain(detail);
+    expect(lead).not.toBeNull();
+    expect(body._answer_shape).toBeUndefined();
+    expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
+    expect(body.assistant_text.split(detail)).toHaveLength(2); // exact limitation once, no host headline rewrite
     expect(currentFact!.result.enrichment.inference_warnings.some((w: Rec) => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
   }, 60_000);
 

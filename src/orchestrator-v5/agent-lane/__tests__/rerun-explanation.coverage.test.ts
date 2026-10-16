@@ -10,7 +10,7 @@ import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-pa
 import { buildRunInputSnapshot } from '../../tools/handlers/run-input-snapshot.js';
 import { REPAIR_VOCABULARY_DENYLIST } from '../../../orchestrator/shared/repair-vocabulary-denylist.js';
 import { checkMethodTurn } from '../guidance/index.js';
-import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+import { checkRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const dropLog = vi.spyOn(log, 'info').mockImplementation(() => {});
 afterEach(() => dropLog.mockClear());
@@ -104,7 +104,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     'The inputs did not move.', 'The inputs never altered.',
   ];
   // Explicit policy cases: a named change or an unknown record leads; only a complete, empty record may follow the finding.
-  for (const [name, delta, recordFirst] of cases) {
+  for (const [name, delta] of cases) {
     it.each([
       'Nothing changed.', 'Nothing else changed.', 'Nothing else has been changed.',
       'Nothing in your model changed.', 'Nothing in your model has changed.',
@@ -113,9 +113,9 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
       ...paraphrases,
     ])(`${name}: %s is dropped through composition`, (claim) => {
       const p = plan(delta);
-      const composed = composeRerunExplanation(`${WHY} ${claim}`, p);
-      expect(composed).toEqual({ text: recordFirst ? `${p.codeLine}\n\n${WHY}` : `${WHY}\n\n${p.codeLine}`, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
-      expect(composeRerunExplanation(claim, p).text, 'an all-rejected draft keeps the honest code line').toBe(p.codeLine);
+      const composed = checkRerunExplanation(`${WHY} ${claim}`, p);
+      expect(composed).toEqual({ text: WHY, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
+      expect(checkRerunExplanation(claim, p).text, 'an all-rejected draft keeps the honest code line').toBe(p.fallback);
     });
 
     it.each([
@@ -123,7 +123,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
       'Olumi isn\'t naming an option on this run.',
     ])(`${name}: a negation unrelated to input changes is kept: %s`, (draft) => {
       const p = plan(delta);
-      expect(composeRerunExplanation(draft, p)).toEqual({ text: recordFirst ? `${p.codeLine}\n\n${draft}` : `${draft}\n\n${p.codeLine}`, dropped: [], failed: [] });
+      expect(checkRerunExplanation(draft, p)).toEqual({ text: draft, dropped: [], failed: [] });
       expect(dropLog).not.toHaveBeenCalled();
     });
   }
@@ -133,7 +133,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
   });
 
   // Explicit policy cases: a named change or an unknown record leads; only a complete, empty record may follow the finding.
-  for (const [name, delta, recordFirst] of cases) {
+  for (const [name, delta] of cases) {
     it.each([
       'Olumi cannot confirm that nothing else changed.',
       'Olumi can\'t confirm that nothing else changed.',
@@ -141,7 +141,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     ])(`${name}: honest uncertainty survives composition and provisional-view checking: %s`, (uncertainty) => {
       const p = plan(delta);
       expect(p.inputs.changes_unsaid).toBe(true);
-      expect.soft(composeRerunExplanation(uncertainty, p)).toEqual({ text: recordFirst ? `${p.codeLine}\n\n${uncertainty}` : `${uncertainty}\n\n${p.codeLine}`, dropped: [], failed: [] });
+      expect.soft(checkRerunExplanation(uncertainty, p)).toEqual({ text: uncertainty, dropped: [], failed: [] });
       expect.soft(rerunViewFailures({ reasoning: uncertainty }, p)).toEqual([]);
     });
 
@@ -154,7 +154,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
       'Olumi isn\'t sure about the earlier comparison, but nothing else changed.',
     ])(`${name}: contrary claims still fail composition and provisional-view checking: %s`, (claim) => {
       const p = plan(delta);
-      expect(composeRerunExplanation(claim, p)).toEqual({ text: p.codeLine, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
+      expect(checkRerunExplanation(claim, p)).toEqual({ text: p.fallback, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
       expect(rerunViewFailures({ reasoning: claim }, p)).toEqual(['RX-NO-CONTRARY-SAME']);
     });
   }
@@ -163,47 +163,47 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     const p = plan({ input_changes: [NAMED, UNKNOWN] });
     const uncertainty = 'Olumi cannot confirm that nothing else changed.';
     const claim = 'Nothing else changed.';
-    expect(composeRerunExplanation(`${uncertainty} ${claim}`, p)).toEqual({
-      text: `${p.codeLine}\n\n${uncertainty}`, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'],
+    expect(checkRerunExplanation(`${uncertainty} ${claim}`, p)).toEqual({
+      text: uncertainty, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'],
     });
     expect(rerunViewFailures({ reasoning: `${uncertainty} ${claim}` }, p)).toEqual(['RX-NO-CONTRARY-SAME']);
     const joinedClaim = `${uncertainty.slice(0, -1)}, but nothing else changed.`;
-    expect(composeRerunExplanation(joinedClaim, p)).toEqual({ text: p.codeLine, dropped: [joinedClaim], failed: ['RX-NO-CONTRARY-SAME'] });
+    expect(checkRerunExplanation(joinedClaim, p)).toEqual({ text: p.fallback, dropped: [joinedClaim], failed: ['RX-NO-CONTRARY-SAME'] });
     expect(rerunViewFailures({ reasoning: joinedClaim }, p)).toEqual(['RX-NO-CONTRARY-SAME']);
   });
 
   it('CONTROL: full coverage beside a named change still permits Nothing else changed', () => {
     const p = plan({ input_changes: [NAMED] });
     const claim = 'Nothing else changed.';
-    expect(composeRerunExplanation(claim, p)).toEqual({ text: `${p.codeLine}\n\n${claim}`, dropped: [], failed: [] });
-    expect(composeRerunExplanation('Nothing in your model changed.', p).failed).toContain('RX-NO-CONTRARY-SAME');
+    expect(checkRerunExplanation(claim, p)).toEqual({ text: claim, dropped: [], failed: [] });
+    expect(checkRerunExplanation('Nothing in your model changed.', p).failed).toContain('RX-NO-CONTRARY-SAME');
   });
 
   it('CONTROL: a complete empty record keeps the existing no-change behaviour', () => {
     const p = plan({ input_changes: [] });
     const claim = 'Nothing in your model changed.';
     expect(p.codeLine).toBe(RERUN_NO_CHANGE_LINES.nothing);
-    expect(composeRerunExplanation(claim, p)).toEqual({ text: `${claim}\n\n${p.codeLine}`, dropped: [], failed: [] });
+    expect(checkRerunExplanation(claim, p)).toEqual({ text: claim, dropped: [], failed: [] });
   });
 
   it.each(paraphrases)('CONTROL: full coverage keeps the prior paraphrase behaviour: %s', (claim) => {
     const p = plan({ input_changes: [NAMED] });
     expect(p.inputs.changes_unsaid).toBe(false);
-    expect(composeRerunExplanation(claim, p)).toEqual({ text: `${p.codeLine}\n\n${claim}`, dropped: [], failed: [] });
+    expect(checkRerunExplanation(claim, p)).toEqual({ text: claim, dropped: [], failed: [] });
     expect(dropLog).not.toHaveBeenCalled();
   });
 
   it('CONTROL: full coverage does not normalize a new claim into a legacy match', () => {
     const p = plan({ input_changes: [NAMED] });
     const claim = 'No 2 changes were made.';
-    expect(composeRerunExplanation(claim, p)).toEqual({ text: `${p.codeLine}\n\n${claim}`, dropped: [], failed: [] });
+    expect(checkRerunExplanation(claim, p)).toEqual({ text: claim, dropped: [], failed: [] });
   });
 
   it('a model label consisting of a contrary assertion cannot hide that narrator claim', () => {
     const p = plan({ input_changes: [NAMED, UNKNOWN] });
     const claim = 'No other input changed.';
     const labelled = { ...p, inputs: { ...p.inputs, model_labels: ['No other input changed'] } };
-    expect(composeRerunExplanation(claim, labelled)).toEqual({ text: p.codeLine, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
+    expect(checkRerunExplanation(claim, labelled)).toEqual({ text: p.fallback, dropped: [claim], failed: ['RX-NO-CONTRARY-SAME'] });
   });
 
   it.each([
@@ -214,9 +214,10 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     const first = 'Nothing else was altered.';
     const second = 'No other input changed.';
     const draft = `${WHY} ${first}\nOlumi isn't naming an option on this run. ${second}`;
-    const composed = composeRerunExplanation(draft, p);
+    const composed = checkRerunExplanation(draft, p);
     expect(composed.dropped).toEqual([first, second]);
-    expect(composed.text).toContain(honest);
+    expect(p.codeLine).toContain(honest);
+    expect(composed.text).toBe(`${WHY}\nOlumi isn't naming an option on this run.`);
     expect(dropLog.mock.calls).toEqual([
       [{ event: 'agent_lane.rerun_sentence_dropped', policy_id: 'RERUN-EXPLANATION', sentence_index: 1, failed: ['RX-NO-CONTRARY-SAME'] }, 'agent-lane: rerun explanation sentence dropped'],
       [{ event: 'agent_lane.rerun_sentence_dropped', policy_id: 'RERUN-EXPLANATION', sentence_index: 3, failed: ['RX-NO-CONTRARY-SAME'] }, 'agent-lane: rerun explanation sentence dropped'],
@@ -233,12 +234,12 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     const measure = (reply: string) => {
       const samples = Array.from({ length: 5 }, () => {
         const started = performance.now();
-        for (let i = 0; i < 50; i++) composeRerunExplanation(reply, p);
+        for (let i = 0; i < 50; i++) checkRerunExplanation(reply, p);
         return (performance.now() - started) / 50;
       }).sort((a, b) => a - b);
       return samples[2]!;
     };
-    for (let i = 0; i < 20; i++) { composeRerunExplanation(short, p); composeRerunExplanation(long, p); }
+    for (let i = 0; i < 20; i++) { checkRerunExplanation(short, p); checkRerunExplanation(long, p); }
     const shortMs = measure(short);
     const longMs = measure(long);
     const ratio = longMs / shortMs;
@@ -246,7 +247,7 @@ describe('Q4 narrator: any unsaid change prevents a contrary no-change claim', (
     if (process.env.RERUN_TIMING_OUTPUT) writeFileSync(process.env.RERUN_TIMING_OUTPUT, JSON.stringify({ shortMs, longMs, ratio }));
     // Relative cost is the CI gate; wall-clock milliseconds are evidence, not a machine-dependent bar.
     if (timingGated) { expect(ratio).toBeLessThan(20); }
-    expect(composeRerunExplanation(long, p)).toEqual({ text: p.codeLine, dropped: [long], failed: ['RX-NO-CONTRARY-SAME'] });
+    expect(checkRerunExplanation(long, p)).toEqual({ text: p.fallback, dropped: [long], failed: ['RX-NO-CONTRARY-SAME'] });
     expect(p.codeLine).toContain(RERUN_FALLBACK_LINES.other);
   });
 });

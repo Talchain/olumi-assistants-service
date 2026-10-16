@@ -12,7 +12,7 @@ import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import {
-  GOAL_CHANCE_CHANGES_LEAD, NO_MATCHED_FIGURES_RULE, composeRerunExplanation, goalChanceChangesOf, rerunExplanationPlan, rerunRecordForModel,
+  NO_MATCHED_FIGURES_RULE, checkRerunExplanation, goalChanceChangesOf, rerunExplanationPlan, rerunRecordForModel,
 } from '../rerun-explanation.js';
 
 type Rec = Record<string, any>;
@@ -39,8 +39,6 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
     // By identity with the screen: the current end IS the card's display for this Run.
     const card = R2E.canonical_analysis_view.options.find((o: Rec) => o.option_id === ADD).cell.display;
     expect(plan.goalChanceChanges[0]!.current).toBe(card);
-    expect(plan.instruction).toContain(`${GOAL_CHANCE_CHANGES_LEAD} ‘Add one specialist’: between about 30% and 36% → between about 54% and 59%.`);
-    expect(plan.instruction).not.toContain(NO_FIGURES);
     expect(plan.inputs.no_matched_figures).toBe(false);
     // The typed record (the Agent loop) carries the same rows, and its rule no longer says no option has figures in both.
     const record = rerunRecordForModel(delta, false, R2E.graph.nodes)!;
@@ -51,7 +49,7 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
   it('capacity R2e: the AI’s sentence saying that change passes the reply’s own checker beside the code line (kept, not dropped)', () => {
     const plan = planOf(R2E)!;
     const said = 'Its chance of meeting your goal moved from between about 30% and 36% to between about 54% and 59% in this model.';
-    const c = composeRerunExplanation(said, plan);
+    const c = checkRerunExplanation(said, plan);
     expect(c.failed).toEqual([]);
     expect(c.text).toContain(said);
   });
@@ -68,7 +66,6 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
   it('capacity, the next Run pair (served read 10, C): 54–59% → 66–70%', () => {
     const plan = planOf(READ_C)!;
     expect(plan.goalChanceChanges.map((c) => [c.prior, c.current])).toEqual([['between about 54% and 59%', 'between about 66% and 70%']]);
-    expect(plan.instruction).not.toContain(NO_FIGURES);
   });
 
   it('point → point control (R2e’s pair as points): about 45% → about 50%', () => {
@@ -77,7 +74,6 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
     row.prior = { kind: 'point', pct: 45, rounding: 'nearest_5' }; row.current = { kind: 'point', pct: 50, rounding: 'nearest_5' };
     const plan = planOf(R2E, delta)!;
     expect(plan.goalChanceChanges.map((c) => [c.prior, c.current])).toEqual([['about 45%', 'about 50%']]);
-    expect(plan.instruction).toContain('‘Add one specialist’: about 45% → about 50%.');
   });
 
   it('marketing 7f5659fd (a second brief, its own labels and Runs): point → range, and its edge words', () => {
@@ -92,7 +88,6 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
   });
 
   it('AIE exact lead (PL 07:50Z): the interpret instruction introduces the pairs in the AIE’s words', () => {
-    expect(planOf(R2E)!.instruction).toContain('Recorded goal-chance displays for options with figures in both Runs (earlier Run → later Run): ‘Add one specialist’: between about 30% and 36% → between about 54% and 59%.');
   });
 
   // ⭐ PL 07:50Z: `prior_withheld` is the earlier Run's WIN SHARES. With goal chances recorded in both Runs, the plan, the typed
@@ -106,9 +101,7 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
       const plan = planOf(R2E, withheldShares())!;
       expect(plan.inputs.prior_withheld).toBe(true);
       expect(plan.inputs.goal_chances_in_both).toBe(true);
-      expect(plan.instruction).not.toContain('never say anything rose, fell, moved or changed in value');
-      expect(plan.instruction).toContain('never say a share rose, fell or moved; say a goal chance moved only as recorded above.');
-      const c = composeRerunExplanation(MOVED, plan);
+      const c = checkRerunExplanation(MOVED, plan);
       expect(c.failed).toEqual([]);
       expect(c.text).toContain(MOVED);
       const record = rerunRecordForModel(withheldShares(), false, R2E.graph.nodes)!;
@@ -120,15 +113,14 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
     it('CONTRASTS: a share said to move fails; with no chance in both Runs the full ban stands for the same sentence', () => {
       const plan = planOf(R2E, withheldShares())!;
       for (const bad of ['Its share of runs rose to 40%.', 'Its chance of coming out on top rose.', 'Add one specialist moved ahead of the others.']) {
-        expect(composeRerunExplanation(bad, plan).text, bad).not.toContain(bad);
+        expect(checkRerunExplanation(bad, plan).text, bad).not.toContain(bad);
       }
       const none = withheldShares();
       none.goal_chances.find((g: Rec) => g.option_id === ADD).prior = { kind: 'withheld' };
       const bare = planOf(R2E, none)!;
       expect(bare.inputs.prior_withheld).toBe(true);
       expect(bare.inputs.goal_chances_in_both).toBeUndefined();
-      expect(bare.instruction).toContain('never say anything rose, fell, moved or changed in value');
-      expect(composeRerunExplanation(MOVED, bare).text).not.toContain(MOVED);
+      expect(checkRerunExplanation(MOVED, bare).text).not.toContain(MOVED);
     });
   });
 
@@ -139,7 +131,5 @@ describe('S9: goal chances shown in both Runs reach the AI typed, never "no figu
     oneSide.goal_chances.find((g: Rec) => g.option_id === ADD).prior = { kind: 'withheld' };
     const plan = planOf(R2E, oneSide)!;
     expect(plan.goalChanceChanges).toEqual([]);
-    expect(plan.instruction).toContain(NO_FIGURES);
-    expect(plan.instruction).not.toContain(GOAL_CHANCE_CHANGES_LEAD);
   });
 });

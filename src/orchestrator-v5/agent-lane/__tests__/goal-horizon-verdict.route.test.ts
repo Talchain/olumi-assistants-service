@@ -158,6 +158,7 @@ vi.mock('../../../orchestrator/user-identity.js', async original => {
 
 type Body = { assistant_text: string; _answer_shape: AnswerShape; _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
 let sequence = 0;
+let sentRequests: string[] = [];
 async function turn(narrator = NARRATOR): Promise<Body> {
   script = [[{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'ad-run' }],
     [{ type: 'message', content: [{ type: 'output_text', text: narrator }] }]];
@@ -188,7 +189,7 @@ function expectSupportedStatic(body: Body): void {
     expect(cell.face).toContain(STATIC_MODEL_SCOPE_NOTE);
     expect(cell.face).not.toMatch(/\b(?:by|within|at) (?:month 9|9 months)\b/iu);
   }
-  expect(body.assistant_text).toContain(STATIC_MODEL_SCOPE_NOTE);
+  expect(sentRequests.join('\n')).toContain(STATIC_MODEL_SCOPE_NOTE);
   expect(body.assistant_text).not.toContain(OLD_HORIZON);
   expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
   expect(JSON.stringify(body)).not.toContain('Add monthly changes');
@@ -197,6 +198,7 @@ function expectSupportedStatic(body: Body): void {
 describe('Science §(ad) through the producer and reply route', () => {
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      sentRequests.push(String(init?.body ?? '{}'));
       const request = JSON.parse(String(init?.body ?? '{}'));
       if (request.tool_choice?.name === 'give_provisional_view') return new Response(JSON.stringify({ output: [{
         type: 'function_call', name: 'give_provisional_view', call_id: 'ad-forced',
@@ -234,7 +236,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => { graph = clone(B2_READ.graph); currentResult = clone(SOURCE_RESULT); currentFact = undefined;
-    providerBodyOverride = undefined; rows.clear(); script = []; });
+    providerBodyOverride = undefined; rows.clear(); script = []; sentRequests = []; });
 
   it('B2 H9: supported static figures carry their scope; the held date is not forecast', async () => {
     expect(goal(graph).goal_horizon_months).toBe(9);
@@ -285,9 +287,8 @@ describe('Science §(ad) through the producer and reply route', () => {
     const body = await turn();
     expect(goalHorizonVerdict(graph, currentFact!.result.enrichment)).toBe('steady_attested');
     expect(lastView.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(true);
-    expect(body.assistant_text).toContain('%');
-    expect(body._answer_shape.detail.split('\n\n')).toContain(WHY);
-    expect(body.assistant_text).toContain(WHY);
+    expect(lastView.options.some(row => 'display' in row.cell && row.cell.display.includes('%'))).toBe(true);
+    expect(sentRequests.join('\n')).toContain(WHY);
     expect(body.assistant_text).not.toContain(OLD_HORIZON);
   }, 60_000);
 
@@ -305,16 +306,18 @@ describe('Science §(ad) through the producer and reply route', () => {
     if (body._answer_shape !== undefined) expect(body._answer_shape.detail).not.toContain(WHY);
   }, 60_000);
 
-  it.skipIf(CAPTURE_BASELINE).each([false, true])('retired exact narrator horizon identities are removed (steady=%s)', async steady => {
+  it.skipIf(CAPTURE_BASELINE).each([false, true])('narrator horizon wording cannot enlarge recorded static scope (steady=%s)', async steady => {
     if (steady) Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
     const copies = [OLD_HORIZON, untestedHorizonLine(graph, { normalizationOnly: true }),
       untestedHorizonLine(graph, { plural: true, normalizationOnly: true })].filter((line): line is string => line !== null);
     const body = await turn([NARRATOR, ...copies].join(' '));
-    for (const copy of copies) expect(body.assistant_text).not.toContain(copy);
-    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    // Retired phrase matcher: narrator caveats cannot grant permission or change the Run's scope.
+    expect(lastView.question?.scope.status).toBe('supported_static');
+    expect(lastView.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(true);
+    expect(body.assistant_text).not.toMatch(/\d+%[^.]*by month 9/);
     // P1a (DL 87114 #2895): neither stored triple nor narrator wording unlocks.
     expect(body.assistant_text).not.toContain(WHY);
-    expectSupportedStatic(body);
+    expect(sentRequests.join('\n')).toContain(STATIC_MODEL_SCOPE_NOTE);
   }, 60_000);
 
   it.skipIf(CAPTURE_BASELINE)('a stored triple does not unlock a zero-spread option, even when other static chances are supported', async () => {
@@ -355,7 +358,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(lastView.options.find(row => row.option_id === 'keep_current_pricing')!.cell).toMatchObject({ kind: 'withheld',
       reasons: [{ code: 'reference_moved' }] });
     expect(currentFact!.result.enrichment.inference_warnings.some((warning: Rec) => warning.code === HORIZON_WITHHOLD)).toBe(false);
-    expect(body.assistant_text).toContain('%');
+    expect(sentRequests.join('\n')).toContain('goal_chance');
     const captureDir = process.env.S2_CAPTURE_REPLY_DIR;
     if (captureDir !== undefined) {
       if (!captureDir.startsWith('/private/tmp/')) throw new Error('Reply capture must stay under /private/tmp');

@@ -10,9 +10,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
-import { withoutDriverAbsenceClaimsAtEgress } from '../goal-chance-driver-egress.js';
-import { RANGE_OPENING } from '../goal-chance-withheld.js';
+import { goalChanceScreenLinesForAgent, checkScreenLineClaims, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
 
 type Json = Record<string, any>;
 const fixture = (name: string): string => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
@@ -34,7 +32,6 @@ const withoutRange = (body: Json): Json => {
   blockOf(out).enrichment.inference_warnings = blockOf(out).enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE');
   return out;
 };
-const T1B_LEAD = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
 // Batch C: condition 6 of a correct chance / r1 item 6 (DL, 12 Oct) — a range rests on the same Olumi inputs as a point and
 // says so in the point's own words. The served UI lines predate that: each is the CAPTURED line with exactly the clause
 // inserted after "in this model" (its count is RC4's census, `goalChanceEstimateCounts`, as for a point). Nothing else moves.
@@ -137,98 +134,25 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
   });
 });
 
-describe('S4c: owed only when the reply does not give that option’s figure', () => {
-  it('RED at base: the served b4-1 narration gets both range lines right after the range opening', () => {
-    const out = withScreenLinesOwed(B4_RUN1.assistant_text, linesOf(B4_RUN1));
-    expect(out.added).toBe(4);
+describe('the retained count check adds no host finding or coaching move', () => {
+  it('scrubs the captured fabricated narrator count without appending a chance or another question', () => {
     expect(B4_RUN1.assistant_text.startsWith(B4_1_NARRATOR_COUNT)).toBe(true);
-    expect(out.text).toBe(B4_RUN1.assistant_text.replace(B4_1_NARRATOR_COUNT, '')
-      .replace(RANGE_OPENING, `${RANGE_OPENING} ${servedNow('unseen-b4-1').join(' ')}`));
+    const out = checkScreenLineClaims(B4_RUN1.assistant_text, linesOf(B4_RUN1));
+    expect(out).toBe(B4_RUN1.assistant_text.replace(B4_1_NARRATOR_COUNT, ''));
   });
 
-  it('RED at base: the served b4-2 narration says the chance right after "That share is not its chance …"', () => {
-    const out = withScreenLinesOwed(B4_RUN2.assistant_text, linesOf(B4_RUN2));
-    expect(out.added).toBe(4);
-    for (const line of servedNow('unseen-b4-2')) expect(out.text).toContain(line);
-    expect(out.text.indexOf('That share is not its chance')).toBeLessThan(out.text.indexOf('between about 9% and 58%'));
+  it('a missing chance, static note or driver stays on its supplied card rather than being manufactured in the reply', () => {
+    const lines = linesOf(B4_RUN2);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(checkScreenLineClaims('The analysis ran.', lines))
+      .toBe('The analysis ran.');
   });
 
-  it('RED at base: the served B5 T1b narration gets its three lines under its own empty lead-in, before the deadline line', () => {
-    expect(B5_T1B.assistant_text).toContain(`${T1B_LEAD}\n\nThis model doesn't yet say whether any option gets there within 9 months.`);
-    const out = withScreenLinesOwed(B5_T1B.assistant_text, linesOf(B5_T1B));
-    expect(out.added).toBe(5);
-    expect(out.text).toBe(B5_T1B.assistant_text.replace(`${T1B_LEAD}\n\n`, `${T1B_LEAD}\n\n${screenFor('t1b-b5-1').join(' ')}\n\n`));
-  });
-
-  it('the served prod cut-6 has no estimated link sizes; its existing figure narration pays the unchanged point', () => {
-    const narratorCount = ' Six underlying values were supplied by Olumi, not you; sensitivity has not established which assumption matters most.';
-    expect(PROD.assistant_text).toContain(narratorCount);
-    expect(withScreenLinesOwed(PROD.assistant_text, linesOf(PROD))).toEqual({
-      text: PROD.assistant_text, added: 0,
-    });
-  });
-
-  it('a reply that already says the lines (restyled quotes and bold) is unchanged', () => {
-    // Batch C: condition 6 (DL, 12 Oct) — kept for a range that rests on no Olumi input (the served lines as captured, no clause).
-    const plain = linesOf(B4_RUN1).map(({ olumi_estimate_link_count: _k, ...l }) => ({ ...l,
-      chance: l.chance.replace(`, using Olumi's estimates for ${RANGE_INPUTS['unseen-b4-1']} (see Check estimates)`, '') }));
-    expect(plain.map(whole)).toEqual(screenFor('unseen-b4-1'));
-    const said = `${B4_RUN1.assistant_text}\n\n${screenFor('unseen-b4-1').join(' ').replace(/‘/g, '**“').replace(/’:/g, '”**:')}`;
-    expect(withScreenLinesOwed(said, plain)).toEqual({ text: said, added: 0 });
-    // A range that rests on Olumi's inputs is held to the point's rule (RC4): only its own estimate sentence pays it.
-    const restyled = `${B4_RUN1.assistant_text}\n\n${servedNow('unseen-b4-1').join(' ').replace(/‘/g, '**“').replace(/’:/g, '”**:')}`;
-    const out = withScreenLinesOwed(restyled, linesOf(B4_RUN1));
-    expect(out.added).toBeGreaterThan(0);
-    for (const l of linesOf(B4_RUN1)) expect(out.text).toContain(l.chance);
-  });
-
-  it('a reply that names the option with its figure in other words is unchanged (author)', () => {
-    const [first] = linesOf(B5_T1B);
-    const text = `Raise prices 10%: about 47%, on current information.`;
-    expect(first!.label).toBe('Raise prices 10%');
-    expect(withScreenLinesOwed(text, [first!])).toEqual({ text, added: 0 });
-  });
-
-  it('a reply that says only the "depends most on" sentence: the figure is added and the driver MOVES after it, never twice', () => {
-    const [first] = linesOf(B4_RUN1);
-    const text = `Figures are provisional. ${first!.depends}`;
-    expect(withScreenLinesOwed(text, [first!])).toEqual({ text: `Figures are provisional.\n\n${first!.chance} ${first!.depends}`, added: 1 });
-  });
-
-  it('a driver sentence the reply restyled (not word for word) stays where it is and is not added again', () => {
-    const [first] = linesOf(B5_T1B);
-    const restyled = first!.depends.replace(/‘/g, '“').replace(/’/g, '”');
-    const text = `Figures are provisional. ${restyled}`;
-    expect(withScreenLinesOwed(text, [first!])).toEqual({ text: `${text}\n\n${first!.chance}`, added: 1 });
-  });
-
-  it.each([
-    // a lead-in followed by a list is not an empty lead-in
-    ['Two things to check about reaching the goal:\n\n- the churn figure\n- the price rise', 'appends'],
-    // a lead-in whose next paragraph already names an option is not empty
-    ['On current information:\n\nRaise prices 10% looks fragile.', 'appends'],
-    // a colon line about something else
-    ['Next steps:\n\nSize the price link.', 'appends'],
-  ])('lead-in twins (author): %s → %s', (text) => {
-    const lines = linesOf(B5_T1B);
-    // naming an option without its figure does not give the figure: every line is owed, as a closing paragraph
-    expect(withScreenLinesOwed(text, lines).text).toBe(`${text}\n\n${screenFor('t1b-b5-1').join(' ')}`);
-  });
-
-  it('with no range opening and no empty lead-in, the lines close the reply as their own paragraph', () => {
-    expect(withScreenLinesOwed('The analysis ran.', linesOf(B4_RUN2)).text).toBe(`The analysis ran.\n\n${servedNow('unseen-b4-2').join(' ')}`);
-  });
-
-  it('no lines → the reply unchanged', () => {
-    const text = B4_RUN1.assistant_text as string;
-    expect(withScreenLinesOwed(text, []).text).toBe(text);
-  });
-
-  it('the S2/S2f egress keeps every added sentence (its classes never fire on a chance line)', () => {
-    for (const body of [B4_RUN1, B5_T1B]) {
-      const added: Json = { ...body, assistant_text: withScreenLinesOwed(body.assistant_text, linesOf(body)).text };
-      const out = withoutDriverAbsenceClaimsAtEgress(added, { analysisResult: blockOf(added), graph: added.draft_graph, requestId: 'r', exitPath: 'agent_lane_v1_final', turnId: 't' }) as Json;
-      for (const l of linesOf(body)) expect(out.assistant_text).toContain(whole(l));
-    }
+  it('retains a supplied driver in place and leaves ordinary conversation alone', () => {
+    const [line] = linesOf(B4_RUN1);
+    expect(line!.depends).not.toBe('');
+    const text = `Figures are provisional. ${line!.depends}`;
+    expect(checkScreenLineClaims(text, [line!])).toBe(text);
+    expect(checkScreenLineClaims('Which assumption matters?', [])).toBe('Which assumption matters?');
   });
 });

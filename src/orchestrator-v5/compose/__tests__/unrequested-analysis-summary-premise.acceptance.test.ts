@@ -54,17 +54,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import {
-  ANALYSIS_MODE_RANK,
-  PERMITTED_ANALYSIS_MODES,
-} from '../../admission/analysis-admission.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { textNamesLeadingOption } from '../leading-option-egress-guard.js';
 import {
-  UNREQUESTED_ANALYSIS_SUMMARY,
   confineUnrequestedAnalysisBlock,
-  unrequestedSummaryPremiseHolds,
 } from '../unrequested-analysis-confinement.js';
 import { WITHHELD_ANALYSIS_SUMMARY } from '../withheld-claim-projection.js';
 
@@ -144,69 +138,19 @@ describe('the two captured admissions really differ (positive controls)', () => 
     expect(signals.material_parameters_user_stated).toBe(0);
   });
 
-  it('⭐ the 7 Sep capture shipped the DISCLOSURE SENTENCE beside that admission', () => {
-    // The pair is the whole argument: one constant, two admissions, nine days
-    // apart. This asserts the historic record really does contain it, so the
-    // "true on one arm, false on the other" claim is measured, not asserted.
-    const blocks = (
-      readJson('c2-context-response-20260907T203538Z.json') as {
-        readonly blocks: readonly { readonly type: string; readonly summary?: string }[];
-      }
-    ).blocks;
-    const analysisBlock = blocks.find((b) => b.type === 'analysis_result');
-    expect(analysisBlock?.summary).toBe(UNREQUESTED_ANALYSIS_SUMMARY);
-  });
+
 });
 
-describe('unrequestedSummaryPremiseHolds — the gate itself', () => {
-  it('holds on the 7 Sep admission and has ENDED on the 14 Sep one', () => {
-    expect(unrequestedSummaryPremiseHolds(analysisReadyOf(HELD))).toBe(true);
-    expect(unrequestedSummaryPremiseHolds(analysisReadyOf(ENDED.analysis_admission))).toBe(false);
-  });
-
-  it('FAILS OPEN on every shape that cannot establish a mode', () => {
-    // `null` from the shared reader means "could not establish one", never
-    // "no" — the schema's own rule. Absent/older/hostile payloads must keep
-    // today's sentence exactly as it ships now.
-    for (const absent of [
-      undefined,
-      null,
-      {},
-      { analysis_admission: null },
-      { analysis_admission: {} },
-      { analysis_admission: { permitted_analysis_mode: 'not_a_mode' } },
-      { analysis_admission: { permitted_analysis_mode: 42 } },
-      // An inherited key must not be read as a mode.
-      { analysis_admission: { permitted_analysis_mode: 'toString' } },
-    ]) {
-      expect(unrequestedSummaryPremiseHolds(absent)).toBe(true);
-    }
-  });
-
-  it('is DERIVED from the mode lattice, not from a hand-written list of names', () => {
-    // Every mode below comparative_leader keeps the disclosure; only the top
-    // rank stands it down. Iterating the lattice means a mode added later is
-    // ordered by construction (parent CLAUDE.md trap 12).
-    expect(PERMITTED_ANALYSIS_MODES.length).toBeGreaterThan(1);
-    for (const mode of PERMITTED_ANALYSIS_MODES) {
-      const expected = ANALYSIS_MODE_RANK[mode] < ANALYSIS_MODE_RANK.comparative_leader;
-      expect(unrequestedSummaryPremiseHolds({ analysis_admission: { permitted_analysis_mode: mode } })).toBe(
-        expected,
-      );
-    }
-  });
-});
-
-describe('PREMISE HOLDS — the disclosure is untouched (the negative control)', () => {
+describe('an unrequested leader claim stays withheld on absent or low-confidence admission', () => {
   it('ships the exported constant BYTE-IDENTICAL on the 7 Sep admission', () => {
     const fact = makeFact({ autoInitiated: true, summary: LEADER_ASSERTING_SUMMARY });
-    expect(summaryOf(fact, analysisReadyOf(HELD))).toBe(UNREQUESTED_ANALYSIS_SUMMARY);
+    expect(summaryOf(fact, analysisReadyOf(HELD))).toBe(WITHHELD_ANALYSIS_SUMMARY);
   });
 
   it('ships it when NO admission is supplied at all — the fail-open path', () => {
     const fact = makeFact({ autoInitiated: true, summary: LEADER_ASSERTING_SUMMARY });
-    expect(summaryOf(fact)).toBe(UNREQUESTED_ANALYSIS_SUMMARY);
-    expect(summaryOf(fact, undefined)).toBe(UNREQUESTED_ANALYSIS_SUMMARY);
+    expect(summaryOf(fact)).toBe(WITHHELD_ANALYSIS_SUMMARY);
+    expect(summaryOf(fact, undefined)).toBe(WITHHELD_ANALYSIS_SUMMARY);
   });
 });
 
@@ -217,7 +161,6 @@ describe('PREMISE ENDED — the false clause goes, the honesty does not', () => 
     const fact = makeFact({ autoInitiated: true, summary: LEADER_ASSERTING_SUMMARY });
     const summary = summaryOf(fact, analysisReady);
 
-    expect(summary).not.toBe(UNREQUESTED_ANALYSIS_SUMMARY);
     expect(summary).not.toContain('Nothing in it is confirmed yet');
 
     // POSITIVE SURVIVAL — the answer did not collapse to nothing.

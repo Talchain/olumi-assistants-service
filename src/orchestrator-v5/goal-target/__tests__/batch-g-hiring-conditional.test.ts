@@ -17,7 +17,7 @@ import {
 } from '../goal-chance-licence.js';
 import { PERIOD_END_ASSUMPTION_NOTE_TEMPLATE } from '../period-end-assumption.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
-import { goalChanceCellFacesForAgent, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../../agent-lane/goal-chance-screen-lines.js';
+import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
 import { toOutboundGraph } from '../outbound-graph.js';
 import { withShareByDateFrame } from '../share-by-date-run.js';
 import { withoutStatedLevelRanges } from '../../routing/add-factor-transaction.js';
@@ -164,15 +164,6 @@ describe('G: the served run-4 hiring Run shows each option\'s CONDITIONAL chance
     expect(status).toEqual({ hire_a_tech_lead: 'permitted_with_caveat', hire_two_developers: 'permitted_with_caveat', continue_as_now: 'withheld' });
   });
 
-  it('Agent prose: a Run narration owes each option\'s own-target line and the note, said once and never twice', () => {
-    const run = runAsTheHandlerDoes();
-    const lines = goalChanceScreenLinesForAgent(run.view, FX.graph, true);
-    const notes = goalChanceNotesForAgent(run.view, FX.graph, true);
-    const owed = withScreenLinesOwed('Here is what this run shows for the two hiring options.', lines, notes).text;
-    for (const face of Object.values(FACE)) expect(owed).toContain(face);
-    expect(owed.split(NOTE)).toHaveLength(2);
-    expect(withScreenLinesOwed(owed, lines, notes).text).toBe(owed);
-  });
 
   it('D2 IN THE CHANGE FRAME: carrying on\'s recorded chance is what a zero change scores; a level-frame spread is not compared', () => {
     // As served, the status-quo row's outcome is the goal's raw LEVEL samples (std 0.188), and its chance is the paired change's 0.
@@ -382,8 +373,7 @@ describe('option A: the deadline card\'s held month equal to the target\'s own p
     const notes = goalChanceNotesForAgent(view, reloaded, true);
     expect(notes).toContain(CONDITIONS);
     expect(notes.filter((n) => n === NOTE)).toHaveLength(1);
-    const owed = withScreenLinesOwed('Here is what this run shows for the two hiring options.', goalChanceScreenLinesForAgent(view, reloaded, true), notes).text;
-    expect(owed.split(NOTE)).toHaveLength(2);
+
   });
 
   it('AIE 6171728409 (3): the card never attests timing — a missing or invalid timing reading with the card pressed withholds with E\'s sentence', () => {

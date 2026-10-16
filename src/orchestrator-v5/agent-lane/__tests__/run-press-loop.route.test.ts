@@ -173,7 +173,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     const hostSentences = sentencesOf(withheld!.say);
     expect(hostSentences.length).toBeGreaterThan(0);
     expect(live.assistant_text.split('\n').filter((line: string) => line.endsWith('?'))).toEqual([
-      '• No figure is set for "Launch date missed" yet, so the analysis treats it as zero. How likely or how large is "Launch date missed" today?',
+      'No figure is set for "Launch date missed" yet, so the analysis treats it as zero. How likely or how large is "Launch date missed" today?',
     ]);
     expect(live.assistant_text.split('\n').flatMap(sentencesOf).filter((s: string) => hostSentences.includes(s)), JSON.stringify({ text: live.assistant_text, hostSentences })).toEqual(hostSentences);
     expect(live.suggested_actions.find((a: Rec) => a.id === `agent-explain-run:${live.narration.run_key}`)).toEqual({
@@ -306,7 +306,8 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(bodies).toHaveLength(callCount);
     expect(runs).toHaveLength(1);
     expect(writes).toEqual([]);
-    expect(live.assistant_text).toContain('The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.');
+    expect(live.assistant_text).toContain('The analysis finished, but I couldn’t explain it this time.');
+    expect(live.assistant_text).toContain('You can ask me to explain the result.');
     expect(live.blocks).toContainEqual(expect.objectContaining({ type: 'analysis_result' }));
     expect(live.suggested_actions).toContainEqual(expect.objectContaining({ id: expect.stringMatching(/^agent-explain-run:/) }));
     expect(live.narration.status).toBe('unavailable');
