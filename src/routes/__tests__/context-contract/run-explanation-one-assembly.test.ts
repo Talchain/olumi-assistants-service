@@ -9,7 +9,8 @@ describe('Explain uses the canonical assembly (serialized provider bytes)', () =
     'S4: %s receives the record-first coaching direction once, with the record’s factual limits', async turn => {
       const w = await capture(turn, 'run2');
       for (const c of w.calls) {
-        const sent = `${String(c.body.instructions)}\n${JSON.stringify(c.payloads)}`;
+        // The full serialized request actually sent: S1 (#3272) carries the Run instruction as its own input item.
+        const sent = String(c.sentBody);
         expect(sent.split('If that record names a change or cannot establish what changed, lead once')).toHaveLength(2);
         expect(sent).toContain('With no preceding Run, or with a complete unchanged-input record, lead with the current supported finding');
         expect(sent).toContain('Keep each endpoint’s Run, scope and qualifications');
