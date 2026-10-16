@@ -23,6 +23,7 @@ beforeEachRevisionScope(() => __setUseAppendV6ForTest(false));
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
 
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number };
 const rows = new Map<string, Row>();
@@ -53,8 +54,11 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 const provider: { calls: number; userTurnsSeen: number[] } = { calls: 0, userTurnsSeen: [] };
 const fakeFetch = vi.fn(async (_url: unknown, init?: { body?: string }) => {
   provider.calls += 1;
-  const sent = JSON.parse(String(init?.body ?? '{}')) as { input?: { role?: string }[] };
-  provider.userTurnsSeen.push((sent.input ?? []).filter((i) => i.role === 'user').length);
+  const sent = JSON.parse(String(init?.body ?? '{}')) as { input?: { role?: string; content?: { text?: string }[] }[] };
+  const input = sent.input ?? [];
+  const context = input.filter((i) => i.role === 'user' && i.content?.[0]?.text?.split('\n')[0] === REASONING_CONTEXT_LABEL);
+  expect(context, 'one labelled reference item, separate from conversation turns').toHaveLength(1);
+  provider.userTurnsSeen.push(input.filter((i) => i.role === 'user' && i !== context[0]).length);
   const text = `Answer ${provider.calls}`;
   return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }), { status: 200 });
 });

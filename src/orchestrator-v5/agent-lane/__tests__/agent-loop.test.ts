@@ -112,12 +112,14 @@ describe('R2 Run instruction discovered by a tool', () => {
   it.each([
     { name: 'founder', brief: 'My current funding target is £250k within 60 hours per week.' },
     { name: 'capacity', brief: 'Capacity is 80 tickets per week; the target is at least 100.' },
-  ])('$name: the first instruction follows the paired function_call_output', async ({ brief }) => {
+  ].flatMap(brief => [1, 2].map(callCount => ({ ...brief, callCount }))))('$name ($callCount calls): the first instruction follows every paired function_call_output', async ({ brief, callCount }) => {
     const sent: unknown[][] = [];
     const facts = { current: true, must_say: ['These are provisional estimates.'], user_statements: [brief] };
     const model: CallModel = async req => {
       sent.push(structuredClone([...req.input]));
-      return { output: sent.length === 1 ? callTool('get_canonical_state') : say('The model remains provisional.') };
+      const calls = callTool('get_canonical_state');
+      if (callCount === 2) calls.push({ type: 'function_call', name: 'get_canonical_state', call_id: 'call_2', arguments: '{}' });
+      return { output: sent.length === 1 ? calls : say('The model remains provisional.') };
     };
     const result = await runAgentTurn({ ctx, history: [], message: brief, briefText: brief,
       instructions: 'Use the supplied facts.', maxOutputTokens: 100 },
@@ -128,9 +130,17 @@ describe('R2 Run instruction discovered by a tool', () => {
     const callIndex = hop2.findIndex(i => i.type === 'function_call' && i.call_id === 'call_1');
     const outputIndex = hop2.findIndex(i => i.type === 'function_call_output' && i.call_id === 'call_1');
     expect(callIndex).toBeGreaterThan(0);
-    expect(outputIndex, 'never insert an instruction between a call and its output').toBe(callIndex + 1);
+    expect(outputIndex, 'the outputs immediately follow all calls, with no intervening instruction').toBe(callIndex + callCount);
     const instructionIndex = hop2.findIndex(i => i.role === 'developer' && i.content?.[0]?.text === RUN_FACTS_USE);
     expect(instructionIndex).toBeGreaterThan(outputIndex);
+    if (callCount === 2) {
+      const secondCallIndex = hop2.findIndex(i => i.type === 'function_call' && i.call_id === 'call_2');
+      const secondOutputIndex = hop2.findIndex(i => i.type === 'function_call_output' && i.call_id === 'call_2');
+      expect(secondCallIndex).toBe(callIndex + 1);
+      expect(secondOutputIndex).toBe(outputIndex + 1);
+      expect(instructionIndex, 'a discovered instruction must follow every output in the hop').toBeGreaterThan(secondOutputIndex);
+      expect(JSON.parse(hop2[secondOutputIndex]!.output).run_facts).toEqual(facts);
+    }
     expect(hop2.filter(i => i.content?.[0]?.text === RUN_FACTS_USE)).toHaveLength(1);
     expect(JSON.parse(hop2[outputIndex]!.output).run_facts).toEqual(facts);
     expect(JSON.stringify(result.items)).not.toContain(RUN_FACTS_USE);

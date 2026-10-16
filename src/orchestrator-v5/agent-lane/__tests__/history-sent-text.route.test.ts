@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
 
 type Item = Record<string, unknown>;
 type Row = {
@@ -82,6 +83,11 @@ describe('sent-text replacement boundaries', () => {
 const textOf = (item: Item): string => typeof item.content === 'string' ? item.content
   : Array.isArray(item.content) ? item.content.map((p: { text?: string }) => p.text ?? '').join('') : '';
 const assistants = (input: Item[]): Item[] => input.filter((i) => i.role === 'assistant');
+const conversationUsers = (input: Item[]): Item[] => {
+  const context = input.filter((i) => i.role === 'user' && textOf(i).split('\n')[0] === REASONING_CONTEXT_LABEL);
+  expect(context, 'one labelled reference item, separate from conversation turns').toHaveLength(1);
+  return input.filter((i) => i.role === 'user' && i !== context[0]);
+};
 type Reply = { assistant_text: string; _agent: { session_id: string; replayed?: boolean } };
 
 let permitted = false;
@@ -157,7 +163,7 @@ describe('ordinary Agent history remembers the final sent text', () => {
     expect(assistants(input).map(textOf)).toEqual([first.assistant_text]);
     expect(JSON.stringify(input)).not.toContain(STRIPPED);
     expect(input.find((i) => i.id === 'rs_answer')).toEqual({ type: 'reasoning', id: 'rs_answer', summary: [] });
-    expect(input.filter((i) => i.role === 'user').map(textOf)).toEqual([USER_WORDS, FOLLOW_UP]);
+    expect(conversationUsers(input).map(textOf)).toEqual([USER_WORDS, FOLLOW_UP]);
   });
 
   it('H2 CONTROL: a licensed unedited single reply retains today\'s message bytes and reasoning', async () => {
@@ -218,7 +224,7 @@ describe('ordinary Agent history remembers the final sent text', () => {
     expect(store.readRecent.mock.calls.length, 'only the base replay sizing-history read; egress reuses it').toBe(readsBefore + 1);
     const input = await nextInput(first._agent.session_id);
     expect(assistants(input).map(textOf)).toEqual([first.assistant_text]);
-    expect(input.filter((i) => i.role === 'user').map(textOf)).toEqual([USER_WORDS, FOLLOW_UP]);
+    expect(conversationUsers(input).map(textOf)).toEqual([USER_WORDS, FOLLOW_UP]);
     expect(rows).toHaveLength(2); // One claim and one answer row.
   });
 });
@@ -289,14 +295,14 @@ describe('SYS2 E1 · the first message survives a cold reseed', () => {
   });
   it('CONTRAST (unchanged): the window is the newest 8 user rows, then the question; E1 adds no history read', async () => {
     const input = await coldAsk(E1_SERVED);
-    expect(input.filter((i) => i.role === 'user' && !isCarrier(i)).map(textOf)).toEqual([...E1_SERVED.slice(-8), E1_ASK]);
+    expect(conversationUsers(input).filter((i) => !isCarrier(i)).map(textOf)).toEqual([...E1_SERVED.slice(-8), E1_ASK]);
     // The reseed's one seed read; the first message comes from those rows. (This double has no pending-actions reader, so
     // the pre-existing, conditional deadline-card read at turn start is not exercised here; E1 does not touch it.)
     expect(store.readRecent).toHaveBeenCalledTimes(1);
   });
   it('CONTRAST 1 · L80 (AIE handback; was it.fails): the window CUT the later objection, and the carrier keeps it verbatim under the source-not-recorded header', async () => {
     const input = await coldAsk(E1_SERVED);
-    expect(input.filter((i) => i.role === 'user' && !isCarrier(i)).map(textOf), 'the cutoff happened').not.toContain(E1_L80);
+    expect(conversationUsers(input).filter((i) => !isCarrier(i)).map(textOf), 'the cutoff happened').not.toContain(E1_L80);
     const carrier = input.filter(isCarrier).map(textOf);
     expect(carrier).toHaveLength(1);
     expect(carrier[0]!.split('\n')).toEqual([E1_RESTORED, ...E1_SERVED.slice(0, 7).map((m) => `- "${m}"`)]);
@@ -310,7 +316,7 @@ describe('SYS2 E1 · the first message survives a cold reseed', () => {
     expect(carrier.split('\n').slice(0, 2)).toEqual([E1_RESTORED, `- "${E1_BRIEF}"`]);
     expect(carrier).toContain(`- "${E1_L80}"`);
     expect(carrier).not.toContain(E1_TYPED);
-    expect(input.filter((i) => i.role === 'user' && !isCarrier(i)).map(textOf)).toEqual([...thirty.slice(-8), E1_ASK]);
+    expect(conversationUsers(input).filter((i) => !isCarrier(i)).map(textOf)).toEqual([...thirty.slice(-8), E1_ASK]);
     expect(store.readRecent).toHaveBeenCalledTimes(1);
   });
   it('CONTRAST 4: an instruction-like recorded reference, on a new agent session, licenses no write, approval or leader claim', async () => {

@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
 
 const EARLIER = [
   // `readRecent` returns newest first. Each is the Agent route's own answer row, so it carries the route's request hash
@@ -35,8 +36,13 @@ const SCENARIO = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 type Item = { role?: string; content?: unknown; type?: string };
 const textOf = (c: unknown): string => (typeof c === 'string' ? c
   : Array.isArray(c) ? c.map((p) => String((p as { text?: unknown }).text ?? '')).join('') : JSON.stringify(c));
-// The conversation only: the turn's CURRENT MODEL STATE (slice C1) is a developer item Olumi gives, not something said.
-const texts = (input: Item[]) => input.filter((i) => typeof i.role === 'string' && i.role !== 'developer').map((i) => `${i.role}: ${textOf(i.content)}`);
+// Conversation turns exclude the labelled reference item as well as Olumi's developer context.
+const texts = (input: Item[]) => {
+  const context = input.filter((i) => i.role === 'user' && textOf(i.content).split('\n')[0] === REASONING_CONTEXT_LABEL);
+  expect(context, 'one labelled reference item, separate from conversation turns').toHaveLength(1);
+  return input.filter((i) => typeof i.role === 'string' && i.role !== 'developer' && i !== context[0])
+    .map((i) => `${i.role}: ${textOf(i.content)}`);
+};
 
 describe('after a restart, the Agent still knows the conversation the user can see', () => {
   let app: FastifyInstance;
