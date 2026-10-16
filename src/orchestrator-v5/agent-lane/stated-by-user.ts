@@ -353,6 +353,8 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
   brief: string,
   governing?: readonly string[],
+  /** The user's sentences the AI bound as this goal's target with its figure (`goalTargetSentences`); absent only for a recorded pre-SYSTEM-2 draft. */
+  targetSentences?: readonly string[],
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
   const goals = nodes.filter((n) => n.kind === 'goal');
@@ -377,9 +379,11 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // "support volume grew 15%" is not the cloud bill's "cut by 15%". Read as a chat goal target is (`scopeIn`): a figure
   // the nearest label word gives another quantity is not the goal's; one in a clause naming none ("cut it by 15%") is.
   const isChange = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs';
-  const wrote = (value: number): boolean => isChange
-    ? figureTheUserWroteFor(value, written.unit, brief, quantityScope(nodes, (node as { readonly label?: unknown }).label))
-    : figureTheUserWrote(value, written.unit, brief);
+  // ⭐ S2 C4 (TL 6208664188 rule 1): the user's target only inside a sentence the AI bound as THIS goal's target. A budget,
+  // headcount or other figure written elsewhere in the brief stays the user's statement about its own subject.
+  const wrote = (value: number): boolean => (targetSentences ?? [brief]).some((text) => isChange
+    ? figureTheUserWroteFor(value, written.unit, text, quantityScope(nodes, (node as { readonly label?: unknown }).label))
+    : figureTheUserWrote(value, written.unit, text));
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
     && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
