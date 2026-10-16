@@ -402,7 +402,8 @@ const SCAN_TIMEOUT_MS = 60_000;
  * the codebase (trap 13e — a target reading zero is only evidence when a
  * contrast reads non-zero IN THE SAME RUN).
  */
-const CONTRAST_NEEDLE = 'buildAnalysisStaleTemplate';
+// C1 removed cross-directory legacy template callers; this retained authority still spans directories without relaxing either control.
+const CONTRAST_NEEDLE = 'computeAnalysisAffectingGraphHash';
 
 /**
  * Every canonical user-facing sentence this module owns, paired with its export

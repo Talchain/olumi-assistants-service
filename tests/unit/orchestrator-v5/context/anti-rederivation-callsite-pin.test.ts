@@ -142,7 +142,8 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // snapshot used only by ContextPack/model reasoning. Reusing the hot-window
     // policy result would lose >20-turn return continuity; replacing it would
     // change deterministic policy outside System B ownership.
-    'src/orchestrator-v5/turn-executor.ts': 6,
+    // C1: retained held approval replaces the deleted executor: import + durable scenario read + post-commit freshness.
+    'src/orchestrator-v5/handlers/approve-held-proposal.ts': 3,
     // 2026-07-22 dead-noop deletion: 3 → 2 — the deterministic no-op explanation
     // chip-click dispatch (`buildProjectionInputs`, removed as dead code
     // post-#619) held one of the three references (its own ad-hoc freshness
@@ -406,7 +407,7 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // policy state without either losing >20-turn return continuity or changing
     // chips/recovery/finalisation policy owned by System A. No new caller file
     // or selector implementation is introduced.
-    'src/orchestrator-v5/turn-executor.ts': 4,
+    // C1 deleted the executor's four selector references; no replacement selector or authority was added.
     // 2026-09-28 Canonical ruling (single-projection parity, rule 1): +2 (import + one call). The scenario-graph READ
     // leg (the same non-turn seam approved under `deriveAnalysisFreshness` above) builds its verdict through THE
     // fact-based canonical state, over the same fact set and read status as its freshness derivation, instead of

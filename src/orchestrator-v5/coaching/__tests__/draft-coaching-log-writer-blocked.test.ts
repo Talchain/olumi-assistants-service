@@ -1,9 +1,9 @@
 /**
  * P5 (2026-07-27) — the draft-coaching sidecar WRITER stays unwired.
  *
- * `appendDraftCoaching` has zero production callers, but its READ end is
- * already wired into ContextPack assembly (`coaching-cache-reader.ts`). The day
- * a writer lands, pre-analysis coaching — produced by a prompt with no
+ * `appendDraftCoaching` has zero production callers; its READ end was
+ * retired together with ContextPack assembly's cache reader by C1. If a
+ * writer is reintroduced, pre-analysis coaching — produced by a prompt with no
  * output-quality eval, on a turn where nothing has been computed — begins
  * flowing into POST-analysis prompts as apparent prior state.
  *
@@ -26,6 +26,7 @@ import { resolve, join, sep } from 'node:path';
 
 const SRC = resolve(process.cwd(), 'src');
 const WRITER = 'appendDraftCoaching';
+const mentionsWriter = (source: string) => source.includes(WRITER);
 /** The definition site — a declaration is not a call. */
 const DEFINITION = join('orchestrator-v5', 'coaching', 'draft-coaching-log.ts');
 
@@ -46,7 +47,7 @@ function productionFiles(dir: string, out: string[] = []): string[] {
 /** Files that mention the writer, other than the file that defines it. */
 function callerManifest(): string[] {
   return productionFiles(SRC).filter(
-    (f) => !f.endsWith(DEFINITION) && readFileSync(f, 'utf8').includes(WRITER),
+    (f) => !f.endsWith(DEFINITION) && mentionsWriter(readFileSync(f, 'utf8')),
   );
 }
 
@@ -55,11 +56,9 @@ describe('P5 — the draft-coaching sidecar writer stays unwired (M7)', () => {
     // Prove the detector discriminates before trusting it to assert an absence.
     const files = productionFiles(SRC);
     expect(files.length).toBeGreaterThan(100);
-    // The definition file itself contains the token — so the scan reaches it,
-    // reads it, and it is excluded only by the explicit definition-site rule.
-    const definitionFile = files.find((f) => f.endsWith(DEFINITION));
-    expect(definitionFile).toBeDefined();
-    expect(readFileSync(definitionFile!, 'utf8')).toContain(WRITER);
+    // C1 deleted the writer and reader; a planted call still exercises the scanner's exact predicate.
+    expect(mentionsWriter('appendDraftCoaching(input)')).toBe(true);
+    expect(mentionsWriter('readGraph(input)')).toBe(false);
   });
 
   it('the sidecar writer has no production caller', () => {
@@ -70,19 +69,14 @@ describe('P5 — the draft-coaching sidecar writer stays unwired (M7)', () => {
         .map((f) => f.split(`src${sep}`)[1])
         .join(', ')}. ` +
         `Wiring the writer replays UNEVALUATED pre-analysis coaching into post-analysis ` +
-        `prompts as apparent prior state — the read end is already live in ContextPack ` +
+        `prompts as apparent prior state if its retired reader is also restored in ContextPack ` +
         `assembly. Land the coaching eval checks on the replayed surface first, then ` +
         `delete this pin deliberately.`,
     ).toEqual([]);
   });
 
-  it('the READ end really is wired — this is a live hazard, not a dead module', () => {
-    // If the reader is ever removed the hazard evaporates and this whole pin
-    // becomes pointless; assert the premise rather than assuming it.
-    const reader = readFileSync(
-      resolve(SRC, 'orchestrator-v5/coaching/coaching-cache-reader.ts'),
-      'utf8',
-    );
-    expect(reader).toContain('readLatestDraftCoaching');
+  it('the retired READ end has no production consumer either', () => {
+    // C1 deleted coaching-cache-reader: pin the complete remaining reader population at zero.
+    expect(productionFiles(SRC).filter(file => readFileSync(file, 'utf8').includes('readLatestDraftCoaching'))).toEqual([]);
   });
 });

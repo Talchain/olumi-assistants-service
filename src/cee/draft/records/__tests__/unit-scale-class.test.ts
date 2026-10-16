@@ -489,6 +489,7 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
 // (#2034) adds one: 47 across 26. A1's switch-level refusal copy (`shownSwitchLevel`) adds one: 48 across 27.
 // RT-18's card points rule (`meetsReading`) adds one: exact '%' reading only, the writer's own rule.
 // Science PR-4b's cohort rate row (`isCohortRateRow`) adds one: exact '%' only, the reader's and the capability's one rule.
+// C1: remove only inventory keys whose modules were deleted; all surviving counts and assertions stay exact.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
@@ -516,7 +517,6 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   // "%" and change the words the user typed.
   "orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 1,
   "orchestrator-v5/compose/validation-failure-responses.ts": 1,
-  "orchestrator-v5/compose/warrant-demotion.ts": 1,
   "orchestrator-v5/context/cqe/compromise-backstop.ts": 1,
   "orchestrator-v5/context/cqe/rules.ts": 1,
   // `isCohortRateRow` (science PR-4b): the cohort's rate target is a stored unit of exactly '%'. The display classifier would
@@ -525,7 +525,6 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "orchestrator-v5/handlers/describe-changeset.ts": 1,
   "orchestrator-v5/label-value-divergence.ts": 1,
   "orchestrator-v5/routing/baseline-answer-mutation.ts": 1,
-  "orchestrator-v5/routing/resolve-relative-factor-delta.ts": 1,
   "orchestrator-v5/tools/handlers/add-constraint.ts": 4,
   "orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts": 1,
   "orchestrator/canonicalise-value-ops.ts": 3,

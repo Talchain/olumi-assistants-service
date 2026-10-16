@@ -38,6 +38,11 @@ import { _resetConfigCache } from '../../config/index.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { SupabaseSessionStore } from '../session/supabase-store.js';
+import { SessionLRUCache } from '../session/cache.js';
+import { TURN_FENCE_RPC, TURN_FENCE_ATOMIC_SQLSTATE } from '../session/turn-fence.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const SCENARIO_ID = randomUUID();
 const GM_PROPOSAL_REF = 'gmh_floordegraded';
@@ -87,10 +92,17 @@ let failContextRead = false; // loadGraphAndBriefText throws → DEGRADED canoni
 let rereadMode: 'model' | 'absent' | 'throw' = 'model'; // loadGraph (the strict reread)
 const appendCalls: Array<Record<string, unknown>> = [];
 let pendingActionsForRead: readonly PendingAction[] = [];
+let fencedStore: SupabaseSessionStore | undefined;
+let fencedAppendError: unknown;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
+    claimTurnFence: async (sid: string, tid: string) => fencedStore?.claimTurnFence(sid, tid),
     append: async (write: Record<string, unknown>) => {
+      if (fencedStore !== undefined) {
+        try { return await fencedStore.append(write as never); }
+        catch (error) { fencedAppendError = error; throw error; }
+      }
       appendCalls.push(write);
       return { id: `row-${appendCalls.length}` };
     },
@@ -111,14 +123,14 @@ vi.mock('../session/index.js', () => ({
       if (failContextRead) {
         throw new Error('loadGraphAndBriefText failed (injected): canonical read degraded');
       }
-      return { graph: clone(STRICT_GRAPH), briefText: null };
+      return { graph: clone(STRICT_GRAPH), briefText: null, ...(fencedStore !== undefined ? { revision: 7 } : {}) };
     },
     ensureScenarioExists: async () => ({ user_id: null }),
   }),
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runHeldProposalApproval } = await import('../handlers/approve-held-proposal.js');
+const { runHeldProposalApproval, commitHeldProposalInProcess } = await import('../handlers/approve-held-proposal.js');
 const { resolveProposalRenderCopy } = await import('../compose/proposed-change.js');
 // Approval now names the stored card; all graph/source/receipt assertions below are unchanged.
 const runTurnExecutor = (p: MessageTurnPayload, requestId: string, options?: Parameters<typeof runHeldProposalApproval>[2] & { routingAdapter?: unknown }) => {
@@ -182,6 +194,8 @@ function throwingRoutingAdapter() {
 beforeEach(() => {
   setTestSink(() => undefined);
   appendCalls.length = 0;
+  fencedStore = undefined;
+  fencedAppendError = undefined;
   failContextRead = false;
   rereadMode = 'model';
   pendingActionsForRead = [gmHeldPending()];
@@ -261,9 +275,36 @@ describe('commitTurn floor — held-apply under a DEGRADED canonical read (clobb
     // The held-apply commits normally through the shared floor.
     expect(appendCalls).toHaveLength(1);
     expect(appendCalls[0]!.graph).toBeDefined();
+    expect({ expectedGraphIdentityHash: appendCalls[0]!.expectedGraphIdentityHash, expectedGraphAnalysisHash: appendCalls[0]!.expectedGraphAnalysisHash }).toEqual(computeExpectedGraphCasHashes(STRICT_GRAPH));
     const committed = appendCalls[0]!.graph as { nodes?: Array<{ id: string; description?: string }> };
     expect(committed.nodes?.find((n) => n.id === 'fac-marketing')?.description).toBe(
       'Quarterly ad budget',
     );
   });
+  it('E · a stopped held approval returns 409 and commits no append', async () => {
+    const claims: string[] = [];
+    // Real claim/enforcement/serializer; the local RPC port rejects the stopped transaction before recording any append.
+    const client = { rpc: async (name: string, args: Record<string, unknown>) => {
+      if (name === TURN_FENCE_RPC.claim) { claims.push(String(args.p_turn_id)); return { data: 1, error: null }; }
+      if (!name.startsWith('append_turn_atomic')) throw new Error(`Unexpected RPC ${name}`);
+      if (args.p_fence_generation != null) return { data: null, error: { code: TURN_FENCE_ATOMIC_SQLSTATE.stopped, message: 'turn stopped' } };
+      appendCalls.push(args); return { data: { turn_row_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', model_version_receipt: null, revision: 8 }, error: null };
+    }, from: () => {
+      // Post-commit loss-notice maintenance has no rows in this local backend.
+      const query: object = new Proxy({}, { get: (_target, key) => key === 'then'
+        ? (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve(resolve({ data: [], error: null }))
+        : () => query });
+      return query;
+    } } as unknown as SupabaseClient;
+    fencedStore = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 2, maxTurnsPerScenario: 4 }), { defaultReadLimit: 4 });
+    vi.spyOn(fencedStore, 'markGraphWriteFailed').mockResolvedValue(undefined);
+    const held = pendingActionsForRead[0]!;
+    const p = { ...payload(), source: 'chip' as const, chip: { id: held.chip_id }, message: resolveProposalRenderCopy(held.action).message };
+    const reply = await commitHeldProposalInProcess(p, 'req-stopped-held');
+    expect(reply.status, JSON.stringify(reply.json) + String(fencedAppendError)).toBe(409);
+    expect(reply.json).toMatchObject({ error: 'GRAPH_DIVERGED', details: { fence_verdict: 'stopped', conflict_category: 'turn_fence_stopped' } });
+    expect(claims).toEqual([p.turn_id]);
+    expect(appendCalls).toEqual([]);
+  });
+
 });

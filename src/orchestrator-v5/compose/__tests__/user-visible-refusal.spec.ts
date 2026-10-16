@@ -178,15 +178,14 @@ describe('the KNOWN CLEAN-BODY composers — an honest gap, pinned', () => {
   const KNOWN_CLEAN_BODY_REFUSAL_COMPOSERS = [
     'composeRecoverableHandlerResponse',
     'composeRecoverableValidationResponse',
-    'composeUnsupportedActionResponse',
+    // C1 deleted the unsupported-action composer; the two retained clean-body refusals stay pinned.
   ] as const;
 
-  it('is exactly these three, and each still ships blocks: [] in source', async () => {
+  it('is exactly these two retained composers, and each still ships blocks: [] in source', async () => {
     const { readFileSync } = await import('node:fs');
     const files = {
       composeRecoverableHandlerResponse: 'src/orchestrator-v5/compose/recoverable-handler-response.ts',
       composeRecoverableValidationResponse: 'src/orchestrator-v5/compose/recoverable-validation-response.ts',
-      composeUnsupportedActionResponse: 'src/orchestrator-v5/compose/unsupported-action-response.ts',
     } as const;
 
     expect(Object.keys(files).sort()).toEqual([...KNOWN_CLEAN_BODY_REFUSAL_COMPOSERS].sort());

@@ -30,25 +30,44 @@
  * directly and depend on no handler, so they land with the live fix.
  */
 
-import { describe,expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { assessCanonicalAnalysisReadiness } from '../analysis-ready-helper.js';
+import { parseEditGraphResponse } from '../edit-graph.js';
 import {
-PRESERVED_INTERVENTION_SOURCES
+  PRESERVED_INTERVENTION_SOURCES,
+  encodeOptionInterventionsForEdit,
 } from '../encode-option-interventions.js';
-
+import { applyPatchOperations } from '../../patch-applier.js';
 import {
-classifyValueSource,
-obligationFor
+  classifyIssueObligation,
+  classifyValueSource,
+  obligationFor,
 } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import type { PatchOperation } from '../../types.js';
 
+const CAPTURE = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../../orchestrator-v5/__tests__/fixtures/witness-2026-08-17/j4-wrong-entity-write.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as { draft_graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } };
 
-
-
+type Graph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
 
 /** The witnessed arm: every option unconfigured, so every effect value is open. */
+function zeroConfiguredGraph(): Graph {
+  const graph = structuredClone(CAPTURE.draft_graph) as Graph;
+  for (const node of graph.nodes) if (node.kind === 'option') node.interventions = {};
+  return graph;
+}
 
-
-
+const assess = (graph: unknown) => assessCanonicalAnalysisReadiness(graph);
 
 /**
  * An option/factor cell the PRODUCER itself raises as an answerable blocker
@@ -56,16 +75,133 @@ obligationFor
  * returning a fallback, so a capture that stopped raising blockers fails loudly
  * instead of turning every guard below into a pass-by-absence.
  */
-
+function firstSettableCell(graph: unknown): { option_id: string; factor_id: string } {
+  const answerable = assess(graph).blockingIssues;
+  const issue = answerable.find(
+    (i) =>
+      typeof i.option_id === 'string'
+      && i.option_id.length > 0
+      && typeof i.factor_id === 'string'
+      && i.factor_id.length > 0,
+  );
+  if (!issue) {
+    throw new Error(
+      'the capture no longer raises an answerable blocker with a known factor — '
+      + 'these guards would otherwise pass by absence',
+    );
+  }
+  return { option_id: issue.option_id as string, factor_id: issue.factor_id as string };
+}
 
 /**
  * Write one intervention through the real edit chain and read back what the
  * encoder committed. `value` is the raw op payload, so a guard can post any
  * shape a model or a user could actually produce.
  */
+function encodeThroughChain(
+  graph: Graph,
+  cell: { option_id: string; factor_id: string },
+  value: Record<string, unknown>,
+  rationale: string,
+): Record<string, unknown> {
+  const operations = parseEditGraphResponse(
+    JSON.stringify({
+      operations: [
+        {
+          op: 'update_node',
+          path: `/nodes/${cell.option_id}/data/interventions/${cell.factor_id}`,
+          value,
+          old_value: null,
+          impact: 'moderate',
+          rationale,
+        },
+      ],
+      removed_edges: [],
+      warnings: [],
+      coaching: null,
+    }),
+  ).operations as PatchOperation[];
+  const applied = applyPatchOperations(GraphV3.parse(graph), operations);
+  const { graph: encoded } = encodeOptionInterventionsForEdit(applied, new Set([cell.option_id]));
+  const node = (encoded as { nodes: Array<Record<string, unknown>> }).nodes.find(
+    (n) => n.id === cell.option_id,
+  );
+  expect(node, `option ${cell.option_id} survives encoding`).toBeDefined();
+  const stored = (node!.interventions as Record<string, Record<string, unknown>>)[cell.factor_id];
+  // Reachability first: a missing entry would make every source assertion below
+  // pass by absence rather than by survival (trap 13).
+  expect(stored, `intervention ${cell.option_id}/${cell.factor_id} survives encoding`).toBeDefined();
+  return stored!;
+}
 
+describe('encode-option-interventions — a model-authored value is not attributed to the user', () => {
+  /**
+   * ⭐⭐⭐ THE GUARD THAT IS RED AT PRISTINE `staging`.
+   *
+   * With the unconditional stamp restored, this reads:
+   *   AssertionError: expected 'user_specified' to be 'cee_hypothesis'
+   */
+  it('a cee_hypothesis value reads back as cee_hypothesis, not user_specified', () => {
+    const graph = zeroConfiguredGraph();
+    const cell = firstSettableCell(graph);
+    const stored = encodeThroughChain(
+      graph,
+      cell,
+      {
+        value: 0.4,
+        source: 'cee_hypothesis',
+        value_confidence: 'low',
+        reasoning: 'Reviewed estimate.',
+      },
+      'estimate',
+    );
+    expect(stored.source).toBe('cee_hypothesis');
+    expect(stored.value_confidence).toBe('low');
+    expect(stored.reasoning).toBe('Reviewed estimate.');
+  });
 
+  it('a value with NO stated provenance still defaults to user_specified — the existing contract is unchanged', () => {
+    // The control for the guard above. If the default had moved, every
+    // pre-existing writer's provenance would have changed silently.
+    const graph = zeroConfiguredGraph();
+    const cell = firstSettableCell(graph);
+    const stored = encodeThroughChain(graph, cell, { value: 0.4 }, 'user value');
+    expect(stored.source).toBe('user_specified');
+  });
 
+  it('an UNRECOGNISED source cannot be smuggled in, and cannot claim user authorship', () => {
+    // The allowlist holds only NON-user provenances, so this carry can narrow a
+    // claim but never widen it. A junk value falls through to the default.
+    const graph = zeroConfiguredGraph();
+    const cell = firstSettableCell(graph);
+    const stored = encodeThroughChain(
+      graph,
+      cell,
+      { value: 0.4, source: 'totally_made_up', value_confidence: 'high' },
+      'junk',
+    );
+    expect(stored.source).toBe('user_specified');
+    // The confidence rides ONLY with a preserved provenance, never on its own.
+    expect(stored.value_confidence).toBeUndefined();
+  });
+
+  it('a brief_extraction record is NOT carried — it defaults exactly as it did before', () => {
+    // Not a regression: `brief_extraction` and the `user_specified` default are
+    // the same `user_stated` class, so the obligation is unchanged either way.
+    // What the narrow allowlist buys is that the live edit path gains no new way
+    // to persist a "we read this in your brief" stamp the product wrote itself.
+    const graph = zeroConfiguredGraph();
+    const cell = firstSettableCell(graph);
+    const stored = encodeThroughChain(
+      graph,
+      cell,
+      { value: 0.4, source: 'brief_extraction', value_confidence: 'high' },
+      'brief',
+    );
+    expect(stored.source).toBe('user_specified');
+    expect(stored.value_confidence).toBeUndefined();
+  });
+});
 
 describe('encode-option-interventions — the stamp changes the OBLIGATION, not just the string', () => {
   /**
@@ -90,7 +226,72 @@ describe('encode-option-interventions — the stamp changes the OBLIGATION, not 
    * a handler that has no caller; the claim is the encoder's either way, and
    * pinning it here keeps it independent of whether that handler ever ships.
    */
+  it('⭐ an encoder-written cee_hypothesis value is ai_drafted/offered — a user-written one is still user_stated/required', () => {
+    const graph = zeroConfiguredGraph();
+    const assessment = assess(graph);
+    const cell = firstSettableCell(graph);
 
+    // The real issue from the producer, not a hand-built one — so the category
+    // and code are the ones the live path classifies.
+    const issue = assessment.blockingIssues.find(
+      (i) => i.option_id === cell.option_id && i.factor_id === cell.factor_id,
+    );
+    expect(issue, 'the producer really raises this cell as a blocker').toBeDefined();
+
+    // Precondition, in-test: before either write, this cell is unattributed — so
+    // neither arm below can pass on state that was already there.
+    expect(classifyIssueObligation(issue!, graph).provenance).toBe('unattributed');
+
+    // ⭐ THE AI ARM, written through the real encoder chain.
+    const aiGraph = structuredClone(graph);
+    const operations = parseEditGraphResponse(
+      JSON.stringify({
+        operations: [
+          {
+            op: 'update_node',
+            path: `/nodes/${cell.option_id}/data/interventions/${cell.factor_id}`,
+            value: {
+              value: 0.4,
+              source: 'cee_hypothesis',
+              value_confidence: 'low',
+              reasoning: 'Reviewed estimate.',
+            },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'estimate',
+          },
+        ],
+        removed_edges: [],
+        warnings: [],
+        coaching: null,
+      }),
+    ).operations as PatchOperation[];
+    const applied = applyPatchOperations(GraphV3.parse(aiGraph), operations);
+    const { graph: encoded } = encodeOptionInterventionsForEdit(
+      applied,
+      new Set([cell.option_id]),
+    );
+
+    const aiDecision = classifyIssueObligation(issue!, encoded);
+    expect(aiDecision.provenance).toBe('ai_drafted');
+    expect(aiDecision.obligation).toBe('offered');
+
+    // ⭐ THE CONTROL. Identical call, identical issue, identical graph shape —
+    // the ONLY difference is that the user stated this value. If it did not come
+    // back `required`, the arm above would be agreeing with itself.
+    const userGraph = structuredClone(graph);
+    const userNode = userGraph.nodes.find((n) => n.id === cell.option_id)!;
+    userNode.interventions = {
+      [cell.factor_id]: {
+        value: 0.4,
+        source: 'user_specified',
+        target_match: { node_id: cell.factor_id, match_type: 'exact_id', confidence: 'high' },
+      },
+    };
+    const userDecision = classifyIssueObligation(issue!, userGraph);
+    expect(userDecision.provenance).toBe('user_stated');
+    expect(userDecision.obligation).toBe('required');
+  });
 
   /**
    * ⭐ THE ALLOWLIST'S INVARIANT, DERIVED FROM THE AUTHORITY RATHER THAN RESTATED.
