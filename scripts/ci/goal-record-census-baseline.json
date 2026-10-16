@@ -1,5 +1,5 @@
 {
-  "source_sha": "cab2b4119a9c4e6d39c05e426181e72d2053349e",
+  "source_sha": "c762f0a065384db494d81738c17626a5bbf4b66f",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -89,9 +89,8 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 3,
       "src/orchestrator-v5/agent-lane/model-budgets.ts": 1,
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 3,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 40,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 34,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 16,
-      "src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts": 3,
       "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": 15,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 1,
@@ -171,7 +170,7 @@
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 8,
       "src/orchestrator-v5/agent-lane/goal-sense-reading.ts": 3,
       "src/orchestrator-v5/agent-lane/limit-frame.ts": 1,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 4,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 6,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 3,
       "src/orchestrator-v5/coaching/analysis-result-headline.ts": 2,
       "src/orchestrator-v5/coaching/decision-review-graph-projection.ts": 2,
@@ -788,7 +787,6 @@
     "threshold_source": {
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 3,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 2,
-      "src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts": 4,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 5,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 3,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
@@ -828,9 +826,9 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 29,
     "goalUnitOf": 5,
-    "goal_constraints": 445,
+    "goal_constraints": 436,
     "goal_deadline_as_stated": 11,
-    "goal_direction": 102,
+    "goal_direction": 104,
     "goal_horizon": 47,
     "goal_horizon_months": 43,
     "goal_level_reading": 20,
@@ -854,10 +852,10 @@
     "soleGoalOf": 16,
     "statedGoalTargetOf": 29,
     "success_threshold": 21,
-    "threshold_source": 43,
+    "threshold_source": 39,
     "unit_reading": 79
   },
-  "total_references": 2472,
+  "total_references": 2461,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

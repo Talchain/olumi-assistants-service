@@ -5,13 +5,12 @@
  * table passing after routing proves the gate decision unchanged on these shapes, including the type-less `brief_extraction`
  * stamp (C: the person's by its stamp alone; gates read it as before).
  *
- * Three site groups: the canonical view's stated-range author (agent-capabilities `projectEntity`); the stated level range
- * and the point beside it (add-factor-transaction); the revised draft's later-human-material gate (draft-replacement G1).
+ * Two surviving site groups: the canonical view's stated-range author (agent-capabilities `projectEntity`); the stated level range
+ * and the point beside it (add-factor-transaction).
  */
 import { describe, expect, it } from 'vitest';
 import { projectEntity } from '../runtime/agent-capabilities.js';
 import { isStatedLevelRange, levelRangePointBasis, USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
-import { humanMaterialAfterTheDraft } from '../runtime/draft-replacement.js';
 
 type Rec = Record<string, unknown>;
 const range = (source: string | undefined, extra: Rec = {}): Rec =>
@@ -52,27 +51,5 @@ describe('group 2 — the stated level range and the point beside it, exactly as
     ['a user-confirmed figure at the midpoint', os('user_confirmed'), undefined],
   ] as const)('levelRangePointBasis: %s', (_name, level, expected) => {
     expect(levelRangePointBasis({ ...level, range: range('brief_extraction') })).toBe(expected);
-  });
-});
-
-describe('group 3 — the revised draft\'s later-human-material gate (G1) lists exactly as before', () => {
-  const graphWith = (part: Rec): Rec => ({
-    nodes: [{ id: 'g', kind: 'goal', label: 'Goal' }, { id: 'f', kind: 'factor', label: 'Factor', ...(part.factor ?? {}) },
-      { id: 'o', kind: 'option', label: 'Option', ...(part.option ?? {}) }],
-    edges: part.edges ?? [],
-  });
-  it.each([
-    ['a value the user overrode', { factor: { observed_state: { value: 0.4, source: 'user_override' } } }, ['your figure for ‘Factor’']],
-    ['a value the user specified', { factor: { observed_state: { value: 0.4, source: 'user_specified' } } }, ['your figure for ‘Factor’']],
-    ['a value with an unknown stamp', { factor: { observed_state: { value: 0.4, source: 'something_else' } } }, ['a value for ‘Factor’ whose author is not recorded']],
-    ['a draft value (type-less brief stamp)', { factor: { observed_state: { value: 0.4, source: 'brief_extraction' } } }, []],
-    ['a level the user specified', { option: { interventions: { f: { value: 0.5, source: 'user_specified' } } } }, ['your level for ‘Option’ on ‘Factor’']],
-    ['a level with an unknown stamp', { option: { interventions: { f: { value: 0.5, source: 'something_else' } } } }, ['a level for ‘Option’ whose author is not recorded']],
-    ['a draft level (type-less brief stamp)', { option: { interventions: { f: { value: 0.5, source: 'brief_extraction' } } } }, []],
-    ['a link the user drew', { edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, provenance: { source: 'user_specified' } }] }, ['your link ‘Factor’ → ‘Goal’']],
-    ['a link with an unknown stamp', { edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, provenance: { source: 'something_else' } }] }, ['a link ‘Factor’ → ‘Goal’ whose author is not recorded']],
-    ['a draft link (type-less brief stamp)', { edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, provenance: { source: 'brief_extraction' } }] }, []],
-  ] as const)('%s', (_name, part, expected) => {
-    expect(humanMaterialAfterTheDraft(graphWith(part as Rec))).toEqual(expected);
   });
 });

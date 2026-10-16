@@ -70,8 +70,6 @@ const RATCHET: Readonly<Record<string, Entry>> = {
     note: '1726: a unit reading; the rest verify a committed write carries its own writer’s stamp' },
   'src/orchestrator-v5/agent-lane/runtime/build-model.ts': { categories: { 'hard-limit': 2, 'different-field': 1 }, feeds: 'decision',
     note: "HARD LIMIT (never touched by this batch): 1621/2375 read magnitude 'user_stated' (a narrower question than linkProvenanceOf: always its human); 2195 a unit reading" },
-  'src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts': { categories: { 'draft-time': 1 }, feeds: 'decision',
-    note: "101 (DL ruling (i), 12 Oct): asks whether a size was set AFTER the draft; provenanceOf answers whose, and routing it would refuse lossless revised drafts (parity rows pin it: provenance-routing-parity.test.ts)" },
   'src/orchestrator-v5/agent-lane/runtime/widen-draft.ts': { categories: { 'writer-readback': 1 }, feeds: 'neither', note: 'verifies the widen writer’s own estimate stamp' },
   'src/orchestrator-v5/agent-lane/stated-by-user.ts': { categories: { writer: 1 }, feeds: 'neither', note: 'withdraws brief stamps the brief does not support' },
   'src/orchestrator-v5/goal-target/goal-chance-driver.ts': { categories: { 'different-field': 1 }, feeds: 'neither', note: "ISL spread_source" },
@@ -145,8 +143,7 @@ describe('ONE PROVENANCE AUTHORITY — no reader outside the authority interpret
 
   it('only the hard-limit file may feed a decision, and only through its hard-limit reads', () => {
     const feeding = Object.entries(RATCHET).filter(([, e]) => e.feeds !== 'neither').map(([f]) => f);
-    // DL ruling (i), 12 Oct: draft-replacement's ONE draft-time read (when, not whose) gates G1's refusal; named, not a pattern.
     // DL ruling on the delta check (12 Oct): add-factor-transaction's one cee_inference-only read feeds what the Agent is told (the point).
-    expect(feeding).toEqual(['src/orchestrator-v5/agent-lane/runtime/build-model.ts', 'src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts', 'src/orchestrator-v5/routing/add-factor-transaction.ts']);
+    expect(feeding).toEqual(['src/orchestrator-v5/agent-lane/runtime/build-model.ts', 'src/orchestrator-v5/routing/add-factor-transaction.ts']);
   });
 });

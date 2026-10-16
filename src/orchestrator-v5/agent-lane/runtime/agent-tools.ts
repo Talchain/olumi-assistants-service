@@ -509,8 +509,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
       + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
       + 'decision with the other direction beside it, and the user chooses. '
-      + 'Give measures whenever the user names what the target is a figure of. Call this once per target the user stated; '
-      + 'never build the model yourself.',
+      + 'Give measures whenever the user names what the target is a figure of. '
+      + 'Use this tool for the target of the one current saved goal; it never constructs or replaces the model. '
+      + 'Do not use successive calls to represent additional goals or a full AND objective. '
+      + 'Retain every requested goal, condition and source; show exactly which target this card changes and which parts remain unsaved or unsupported.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
@@ -605,13 +607,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_goal_deadline',
-    description: 'Prepare one deadline card for approval. Keep the exact source deadline phrase and its conditions, using this turn or verified retained source. Interpret it from the actual known reference and any explicitly stated start; these have different roles. You may supply the proposed ISO deadline date, showing how it follows from that source. For a relative deadline (for example "6 months from last Friday"), pass the user\'s exact words and leave reference_date and deadline_date unset: Olumi resolves them from the recorded reference. Never invent or silently replace a reference, unit or level, or use recruitment/team completion time as the goal deadline. Put the full relevant source and uncertainty in rationale. Distinguish human wording from your interpretation; approval selects the displayed change without rewriting its original source. Nothing is saved before approval bound to this card. When the stated deadline belongs to this different deliverable, supply deliverable and the deadline wording through the existing parameters. Where the existing revised-draft preparation permits a complete faithful candidate, Olumi may return its approval card. The card must show the complete proposed goal, scope, conditions and changes; only the user’s approval applies them.',
+    description: 'Prepare one deadline card for approval. Keep the exact source deadline phrase and its conditions, using this turn or verified retained source. Interpret it from the actual known reference and any explicitly stated start; these have different roles. You may supply the proposed ISO deadline date, showing how it follows from that source. For a relative deadline (for example "6 months from last Friday"), pass the user\'s exact words and leave reference_date and deadline_date unset: Olumi resolves them from the recorded reference. Never invent or silently replace a reference, unit or level, or use recruitment/team completion time as the goal deadline. Put the full relevant source and uncertainty in rationale. Distinguish human wording from your interpretation; approval selects the displayed change without rewriting its original source. Nothing is saved before approval bound to this card. If the deadline belongs to a different deliverable, identify it with deliverable and retain the complete request. This tool does not replace or construct a goal: explain any unsupported change precisely, use supported targeted edits where they fit, and continue useful qualitative reasoning without claiming a save or asking for supplied facts again.',
     parameters: obj({
       reference_date: { type: 'string', description: 'Optional actual known or verified ISO reference date for this interpretation. Otherwise omit it and use the recorded reference. Do not substitute a duration\'s start or an invented date; retain an explicitly stated start in deadline_words and rationale.' },
       deadline_date: { type: 'string', description: 'Optional proposed ISO calendar deadline date derived from the actual source and known reference, shown with that basis for approval. An interpretation is not a newly stated human date.' },
       deadline_words: { type: 'string', maxLength: 80, description: 'Exact source deadline phrase being interpreted, including its timing qualifiers, within this field\'s limit. Retain the full surrounding source, conditions and authorship in rationale. A new Olumi proposal must be identified as such, not quoted as the user\'s words.' },
       rationale: { type: 'string', description: 'Full relevant source wording and conditions, its verified or unknown origin, the known reference and any stated start, and your reasoning for the proposed date. Distinguish source statements from your interpretation; do not drop negation, uncertainty or limits.' },
-      deliverable: { type: 'string', maxLength: 100, description: 'Optional trigger for a deliverable in this message that differs from the model’s current goal. Copy a short exact phrase from the user’s words; it does not replace the complete purpose, scope, conditions or source retained for the revised draft.' },
+      deliverable: { type: 'string', maxLength: 100, description: 'Optional trigger for a deliverable in this message that differs from the model’s current goal. Copy a short exact phrase from the user’s words; it does not replace the complete purpose, scope, conditions or source retained in this correction. This trigger does not authorise replacing the saved goal.' },
     }, ['deadline_words', 'rationale']),
   },
   {
@@ -650,13 +652,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'op option_timing: when ONE option\u2019s effect would be fully in place, as the user said it ("live about two months after we '
       + 'commit; full effect in about 4 months"): kind option, quote their complete statement, reading_words their own words that state '
       + 'the month(s). It goes through the same card as propose_statement\u2019s lead. '
-      + 'op revise_model: only an explicit request to rebuild or a different governing question, offered alone. A factual correction uses the existing targeted value or statement tool; it never requires a new draft. Quote the request from THIS '
-      + 'message (kind and label: the goal). Olumi prepares ONE revised model from their brief and everything they have said since, on '
-      + 'ONE card; only their press replaces the saved model. Never for one part\u2019s figure, and never ask them to repeat what they said. '
+      + 'For quantities and statements, use their existing targeted tools. Preserve every requested goal, condition and source. '
+      + 'Where a part cannot be changed with the supported operations, explain that specific limitation and continue useful qualitative reasoning; never claim it was saved. '
       + 'Never a part the user did not ask to change, and never a name or figure of your own.',
     parameters: obj({
       ops: { type: 'array', minItems: 1, maxItems: 6, items: obj({
-        op: { type: 'string', enum: ['remove', 'set_zero', 'rename', 'option_timing', 'revise_model'] },
+        op: { type: 'string', enum: ['remove', 'set_zero', 'rename', 'option_timing'] },
         kind: { type: 'string', enum: ['goal', 'option', 'factor', 'risk', 'link'] },
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it (for a link: where it starts).' },
         to_label: { type: 'string', description: 'Only for a link: the exact label of the part it points to.' },
@@ -1075,8 +1076,6 @@ export interface AgentCapabilities {
     /** op set_zero: the card shows that "zero" is read as removing the direct link (AIE 6188873084). */
     zero?: boolean;
   }): Promise<ToolResult>;
-  /** Optional: propose_change's revise_model op (demo): ONE revised-draft card from the user's correction to the model as a whole. */
-  proposeRevision?(ctx: AgentToolContext, args: { quote: string }): Promise<ToolResult>;
   /** Several existing correction adapters, prepared on one saved graph and approved as one candidate. */
   proposeChangeSet?(ctx: AgentToolContext, args: { ops: readonly unknown[] }): Promise<ToolResult>;
   /** Optional: propose_change's rename op (S5): the user's own new name for ONE option, factor or risk. */
@@ -1274,15 +1273,11 @@ async function dispatchToolUnbounded(
           statements: [{ quote: op.quote, ...(op.reading_words !== undefined ? { reading_words: op.reading_words } : {}),
             ...(op.answering !== undefined ? { answering: op.answering } : {}) }] } as never);
       }
-      // ⭐ DEMO op revise_model: the existing revised-draft prepare/approve/save path (`proposeRevision`).
-      if (op?.op === 'revise_model' && caps.proposeRevision !== undefined) {
-        return caps.proposeRevision(ctx, { quote: op.quote } as never);
-      }
       if (op?.op === 'rename' && caps.proposeRename !== undefined) {
         return caps.proposeRename(ctx, { kind: op.kind, label: op.label, id: op.id, new_label: op.new_label, quote: op.quote } as never);
       }
       return { ok: false, mutated: false, refusal: 'unsupported_change',
-        detail: 'propose_change takes exactly ONE op it holds (remove; set_zero for a link; rename; option_timing for an option; revise_model). Nothing was prepared.' };
+        detail: 'No whole-model replacement or unsupported edit was prepared. Retain the complete correction and its context. Use the existing targeted value, statement, goal, deadline or structural operations for supported parts; explain any remaining limitation and continue useful qualitative reasoning without claiming a save or asking for retained facts again.' };
     }
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
