@@ -25,7 +25,7 @@ import { composeRecoveredProposalReply } from '../proposal-reply.js';
 import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
-import { sayDate, todayInLondon } from '../../goal-target/deadline-date.js';
+import { turnContextItems, runFactsContext, runFactsInstructionItem } from '../turn-context.js';
 import { emitAgentPhase } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import {
   eligibleTools,
@@ -100,6 +100,7 @@ export interface AgentTurnInput {
   /** Prior turns, already in Responses-API item shape. Olumi owns this record. */
   readonly history: readonly unknown[];
   readonly message: string;
+  readonly briefText?: unknown;
   readonly instructions: string;
   readonly maxOutputTokens: number;
   /** Hard ceiling on tool round trips within one user turn. */
@@ -473,21 +474,7 @@ const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly stri
  * it. Pinned: `turn-state-given-not-fetched.test.ts` (C1 follow-up row). Keep `CURRENT MODEL STATE` first (tests and
  * the route prompt match the leading words) and keep `{` out of it (a test parses the state from the first `{`).
  */
-export const CURRENT_MODEL_STATE_PREFIX = 'CURRENT MODEL STATE \u2014 exactly what get_canonical_state returns, read by Olumi at the START of this turn. '
-  + 'If a tool result later in this turn APPLIED a change (mutated: true, the new entities, a new graph_revision, readiness_after), that result is '
-  + 'newer and supersedes this for what it covers: describe the model from the latest applied result. A proposal\u2019s '
-  + 'readiness_if_approved describes the model only IF the user approves, and never supersedes this. As the turn began: ';
-
-/**
- * ⭐ TODAY, FROM THE SERVER CLOCK (DL 15 Oct 23:08Z; HIRING's legacy capture turn 02 served "Six months from today, 9 March
- * 2026", on 14 Oct 2026). The ordinary turn's input held no date at all, so the Agent guessed one. Every turn now carries the
- * server's own day in Europe/London (`todayInLondon`, the deadline reader's clock), once, beside the state; like the state it
- * is never handed on into the history, so a later turn never reads a stale day.
- */
-export const TODAY_PREFIX = 'TODAY, from Olumi\u2019s server clock (Europe/London): ';
-export function todayLine(at: Date): string {
-  return `${TODAY_PREFIX}${sayDate(todayInLondon(at))}. Count every date, and anything \u201cfrom today\u201d, from this day; never assume another date.`;
-}
+export { CURRENT_MODEL_STATE_PREFIX, TODAY_PREFIX, todayLine } from '../turn-context.js';
 
 export async function runAgentTurn(
   input: AgentTurnInput,
@@ -529,26 +516,27 @@ export async function runAgentTurn(
     context: input.canonicalContext.packet,
     expectation: input.canonicalContext.expectation,
   });
-  const stateItem = eligibility !== undefined && input.canonicalContext?.packet != null
+  const state = eligibility !== undefined && input.canonicalContext?.packet != null
     && eligibility.omitted.some((o) => o.name === 'get_canonical_state')
-    ? { role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(input.canonicalContext.packet.state)}` }] }
-    : undefined;
+    ? input.canonicalContext.packet.state : undefined;
+  const stateContext = runFactsContext(state);
+  let runFactsUse = stateContext.use;
   const selectionItem = input.selectionNote !== undefined && input.selectionNote !== ''
     ? { role: 'developer', content: [{ type: 'input_text', text: input.selectionNote }] }
     : undefined;
-  // The day comes from the turn's own start reading (`startedAt`), so the clock is read no more often than before.
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
-  const todayItem = { role: 'developer', content: [{ type: 'input_text', text: todayLine(new Date(startedAt)) }] };
+  const contextItems = turnContextItems({ now: new Date(startedAt), briefText: input.briefText,
+    conversation: input.history, verifiedUserMessages: input.ctx.verified_user_messages,
+    unknownUserText: input.ctx.unverified_user_text, currentRequestOrigin: input.ctx.user_turn_text ? 'typed' : 'unknown', canonicalState: stateContext.facts, runFactsUse });
   const items: unknown[] = [
     ...input.history,
-    todayItem,
-    ...(stateItem !== undefined ? [stateItem] : []),
+    ...contextItems,
     ...(selectionItem !== undefined ? [selectionItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
-  /** What this turn hands on as history: everything but the state, the selection and the day it was given. */
-  const handedOn = (): unknown[] => items.filter((i) => i !== stateItem && i !== selectionItem && i !== todayItem);
+  /** Turn-local context never becomes a second historical source on the next turn. */
+  const handedOn = (): unknown[] => items.filter((i) => !contextItems.includes(i) && i !== selectionItem);
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
@@ -746,6 +734,7 @@ export async function runAgentTurn(
     // calls — then one output per call, in the order they were made.
     items.push(...out);
     const hopResultsFrom = toolResults.length;
+    let discoveredRunInstruction: unknown;
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
@@ -854,14 +843,23 @@ export async function runAgentTurn(
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
       });
       toolResults.push(result);
+      const toolContext = runFactsContext(modelFacingToolResult(String(call.name), result));
       items.push({
         type: 'function_call_output',
         call_id: call.call_id,
         // ⭐ The model reads the LICENSED run (`licensed-run-view.ts`): on a turn it may not name a leader, no leader
         // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
-        output: JSON.stringify(withRetryBasis(modelFacingToolResult(String(call.name), result), result, retryBasis)),
+        output: JSON.stringify(withRetryBasis(toolContext.facts, result, retryBasis)),
       });
+      if (toolContext.use !== undefined && runFactsUse === undefined) {
+        runFactsUse = toolContext.use;
+        const instructionItem = runFactsInstructionItem(runFactsUse);
+        contextItems.push(instructionItem);
+        discoveredRunInstruction = instructionItem;
+      }
     }
+    // Finish every paired output before adding an instruction, including when the model returned parallel calls.
+    if (discoveredRunInstruction !== undefined) items.push(discoveredRunInstruction);
     const hopResults = toolResults.slice(hopResultsFrom);
     // Finish every call's bookkeeping before returning, so history retains a paired output for each call.
     // The route still checks the final canonical read before shipping the result and its bound Explain control.

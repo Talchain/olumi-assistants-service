@@ -39,8 +39,8 @@ import { parseAnswerOffers, storedOfferId } from '../orchestrator-v5/agent-lane/
  */
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
-import { turnContextItems } from '../orchestrator-v5/agent-lane/turn-context.js';
-import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
+import { turnContextItems, runFactsContext } from '../orchestrator-v5/agent-lane/turn-context.js';
+import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
@@ -3609,18 +3609,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof target?.say === 'string' ? { target_testability: askedOnce(target, 'say') } : {}),
         ...(typeof sensitivity?.say === 'string' ? { decision_sensitivity: askedOnce(sensitivity, 'say') } : {}),
       };
-      const runForInterpreter = { canonical_state: {
-        ...canonicalAfterRun,
-        // The interpreter receives the instruction once, in instructions; ordinary Agent calls retain packet.use.
-        ...((canonicalAfterRun.run_facts !== null && typeof canonicalAfterRun.run_facts === 'object') ? { run_facts: { ...canonicalAfterRun.run_facts, use: undefined } } : {}),
+      const runForInterpreter = {
+        ...runFactsContext(canonicalAfterRun).facts,
         ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
         ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
-      } };
-      // ⭐ S2 turnContext (DL 15 Oct): today and the brief, verbatim, before the conversation (`turn-context.ts`).
-      const explanationInput = [...turnContextItems({ now: new Date(), briefText, conversation }), ...conversation,
-        { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
-        request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
-      }) }] }];
+      };
+      const explanationInput = turnContextItems({ now: new Date(), briefText, conversation,
+        verifiedUserMessages: toolCtx.verified_user_messages, unknownUserText: toolCtx.unverified_user_text,
+        canonicalState: runForInterpreter, request: RUN_EXPLANATION_MESSAGE, currentRequestOrigin: typedNow === null ? 'product control' : 'typed' });
       const standingAfterRun = leaderStandingOf(st);
       const askView = standingAfterRun !== null && standingAfterRun.analysis_on_record && standingAfterRun.withheld;
       // ⭐ M2 RERUN-EXPLANATION (MG; RC contract; DL ruling 5940472067): what changed between the two Runs is Olumi's own
@@ -3713,7 +3709,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
       ];
       const { admitted: matches, interpreted, explanationReady, rerunPlan, words, providerMs: interpretMs } =
-        await interpretSelectedRun(st, currentRead?.run_delta, recentRunExplanationConversation(history ?? []), admit,
+        await interpretSelectedRun(st, currentRead?.run_delta, history ?? [], admit,
           explanationBriefText);
       runInterpreted = matches;
       if (words !== null) narratorWords = words;
@@ -4244,6 +4240,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
               ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
             history,
+            // The same epoch-cached graph read; an unavailable brief stays unknown on the degraded path.
+            briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
+              .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
             message,
             instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
               : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
@@ -4425,7 +4424,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
       const pressedForInterpretation = autoRunIdentity === undefined && selected;
       const interpretedRun = !selected ? undefined
-        : await interpretSelectedRun(autoRead, currentRead?.run_delta, recentRunExplanationConversation(result.items), true,
+        : await interpretSelectedRun(autoRead, currentRead?.run_delta, result.items, true,
           selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined);
       if (interpretedRun?.admitted === true) {
         const said = interpretedRun.interpreted?.answer
