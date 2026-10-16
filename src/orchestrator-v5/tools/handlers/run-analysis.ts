@@ -63,7 +63,6 @@ import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail
 import { GOAL_TARGET_ROLE } from '../../goal-target/goal-targets-joint.js';
 import { withTargetForecasts } from '../../goal-target/cohort-forecast.js';
 import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
-import { withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd } from '../../goal-target/goal-horizon-verdict.js';
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
@@ -221,7 +220,7 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdForOpenTargetQuestion, withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { effectsTimingOf } from '../../goal-target/period-end-assumption.js';
-import { deriveRunQuestion, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
+import { withEvaluatedGoalChanceInputs, sentGoalThresholdOf, withGoalChanceLicence, withholdForOlumiGoalLevel, withholdForPeriodEndEffects } from '../../goal-target/goal-chance-licence.js';
 import { capacityRatioOptionIds, shareChanceRunBlock, withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
@@ -2300,33 +2299,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ The goal's derived level in the goal's own units (DL 58e392, 8 Oct): never "12,250.00 in its own units".
     // Science §(ad): every scored option is withheld before any licence, range or final cell projection.
     // The raw graph retains P45's tolerant attestation field, which GraphV3 currently strips.
-    const evaluatedQuestion = deriveRunQuestion({ runEvidence: { runId, ...(runInputSnapshot === null ? {} : { inputSnapshot: runInputSnapshot }),
-      ...(frozenRevision === undefined ? {} : { occurrence: { evaluated_scenario_revision: frozenRevision } }) },
-      ...(frozenRevision === undefined ? {} : { historicalModel: { revision: frozenRevision, graph: snapshot.rawPersistedGraph ?? graphForAnalysis } }),
-      dispatchedRequest: plotPayload });
-    const evaluatedQuestionScope = evaluatedQuestion.scope;
-    // Missing target/direction already have their precise option-scoped owner; do not replace them with a conflicting cause.
-    const missingTargetOrDirection = evaluatedQuestionScope.reasons.some(reason =>
-      reason === 'saved_target_not_recorded' || reason === 'saved_comparator_not_recorded');
-    if (evaluatedQuestionScope.status === 'invalid' || (evaluatedQuestionScope.status === 'unverified'
-      && !missingTargetOrDirection
-      && sentGoalThresholdOf(undefined, undefined, snapshot.goal_node_id, undefined, { sentRun: plotPayload })?.frame === 'level')) {
-      const scopedIds = goalFigureOptions(response).scored;
-      response = withholdOptionGoalFigures(response, new Set(scopedIds), {
-        code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning',
-        message: 'This Run’s dispatched inputs do not match the saved target’s baseline, frame, units or comparator, so its goal chances are not shown.',
-        option_ids: scopedIds, node_ids: [snapshot.goal_node_id],
-        detail: { reason: 'EVALUATED_INPUTS_DO_NOT_MATCH_SAVED_QUESTION', missing_or_conflicting: evaluatedQuestionScope.reasons },
-      }, { keepOutcome: true, keepOrdering: true });
-    }
-    // The static level question is independent of an unsupported date question. No time capability is asserted.
-    if (evaluatedQuestionScope?.status !== 'supported_static') {
-      response = withholdGoalFiguresForUntestedHorizon(response, snapshot.rawPersistedGraph ?? graphForAnalysis, snapshot.briefText);
-    }
-    // M3c (AIE 6181933060): an option not fully in place at the target's month, on its own recorded lead, is withheld, never "no change".
-    if (evaluatedQuestionScope?.status !== 'supported_static') {
-      response = withholdOptionsNotInPlaceAtPeriodEnd(response, snapshot.rawPersistedGraph ?? graphForAnalysis);
-    }
+    const evaluated = withEvaluatedGoalChanceInputs(response, snapshot.rawPersistedGraph ?? graphForAnalysis,
+      snapshot.goal_node_id, plotPayload, snapshot.briefText);
+    response = evaluated.response;
     response = withGoalLevelInGoalUnits(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
@@ -2977,7 +2952,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
-      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedQuestion, perLimit: constraintVerdict.perLimit,
+      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedScope: evaluated.scope, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.

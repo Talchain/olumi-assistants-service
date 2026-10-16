@@ -45,7 +45,9 @@ const STAGING_CONTROL: Rec = { ...STAGING_CONTROL_CAPTURE, canonical_view: {
     limitation: STAGING_CONTROL_CAPTURE.canonical_view.staleness.limitation,
   },
 } };
-const RECORDED_QUESTION = json('run-question-unverified.json');
+const RECORDED_QUESTION = { ...json('run-question-unverified.json'),
+  // C2: the existing licence keeps its permission; absent historical inputs stay absent in the descriptive record.
+  scope: { status: 'outside_static_scope', can_show_goal_chance: true, reasons: ['static_scope_not_declared_by_licence'] } };
 const GOAL = 'monthly_recurring_revenue';
 const KEEP = 'keep_current_pricing';
 const STARTER = 'launch_starter_tier';
@@ -138,7 +140,7 @@ const withQuestionChecked = (view: Rec): Rec => {
   const { question, ...rest } = view;
   expect(question).toEqual(RECORDED_QUESTION);
   expect(question).toMatchObject({ run_id: READ.current_read.run_id, evaluated_scenario_revision: null,
-    asked: null, calculated: null, scope: { status: 'unverified', can_show_goal_chance: false } });
+    asked: null, calculated: null, scope: { status: 'outside_static_scope', can_show_goal_chance: true } });
   return rest;
 };
 // S7 PR-A (#3192) added `leader` to the view after this staging control was frozen: it is compared by identity, not bytes.

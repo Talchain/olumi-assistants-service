@@ -40,13 +40,14 @@ const GATE_FILES = [
   'orchestrator-v5/coaching/structural-challenge-compare.ts',
   'orchestrator-v5/context/analysis-fallback.ts', 'orchestrator-v5/compose.ts',
   'orchestrator-v5/tools/handlers/run-analysis.ts', 'orchestrator-v5/agent-lane/decision-input-ask.ts',
+  'orchestrator-v5/goal-target/goal-chance-licence.ts',
   'orchestrator-v5/agent-lane/reply/compose-reply.ts',
 ] as const;
 const PURE_FILES = [
   'routes/canonical-analysis-view.ts', 'routes/agent-v1-turn.ts',
   'orchestrator-v5/agent-lane/runtime/agent-capabilities.ts',
   'orchestrator-v5/agent-lane/decision-sensitivity.ts', 'orchestrator-v5/agent-lane/goal-certainty-for-agent.ts',
-  'orchestrator-v5/agent-lane/goal-chance-withheld.ts', 'orchestrator-v5/goal-target/goal-chance-licence.ts',
+  'orchestrator-v5/agent-lane/goal-chance-withheld.ts',
   'orchestrator-v5/goal-target/goal-chance-range-agent.ts', 'orchestrator-v5/goal-target/goal-chance-sides.ts',
   'orchestrator-v5/coaching/build-run-delta.ts', 'orchestrator-v5/response-finaliser.ts',
 ] as const;
@@ -81,7 +82,7 @@ describe('S4: horizon token census', () => {
     expect(readFileSync(join(ROOT, 'orchestrator-v5/goal-target/goal-horizon-verdict.ts'), 'utf8')).not.toContain('Symbol(');
     for (const file of GATE_FILES) {
       const source = readFileSync(join(ROOT, file), 'utf8');
-      expect(source, file).toMatch(/(?:goalHorizonVerdict|withReadTimeHorizonGate|withholdGoalFiguresForUntestedHorizon)\(/);
+      expect(source, file).toMatch(/(?:goalHorizonVerdict|withReadTimeHorizonGate|withholdGoalFiguresForUntestedHorizon|withEvaluatedGoalChanceInputs)\(/);
       // Direct month tokens outside the verdict module have a reasoned allowlist entry: formatter, writer or admission.
       if (TOKENS.test(source)) expect(ALLOWLIST[file], file).toBeDefined();
     }

@@ -14,7 +14,7 @@
  *   · an invalid denominator: no goal target is sent at all (no chance can be computed for a target nobody can read).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { assessCanonicalAnalysisReadiness, buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 
 import { admitCandidateModel, type CandidateModel } from '../../../agent-lane/admit-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
@@ -30,7 +30,7 @@ import { targetTestabilityOf } from '../../../admission/target-testability.js';
 import { goalChanceTargetCause } from '../../../goal-target/goal-chance-gate.js';
 import { groupedGoalPathLinks } from '../../../compose/grouped-link-sizing.js';
 import { naturalAmountUnitsOf } from '../../../../cee/magnitude/frame-defaulted-links.js';
-import { deriveRunQuestion, goalChanceLicenceForAgent, goalChanceLicenceOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
+import { withEvaluatedGoalChanceInputs, goalChanceLicenceForAgent, goalChanceLicenceOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, zeroSpreadFixedBaselineLine } from '../../../goal-target/goal-chance-licence.js';
 import { runFactsOf } from '../../../agent-lane/run-facts.js';
 import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
 import { projectCanonicalAnalysisCells } from '../../../../routes/canonical-analysis-view.js';
@@ -345,7 +345,7 @@ const hiringAnswer = (request: Rec): Rec[] => [
 /** AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): a CHANGE goal's
  * status-quo row is the AIE's generic line. */
 const DOING_NOTHING = (label: string): string => `This Run can’t give a chance for carrying on as now, because it treats ‘${label}’ as unchanged `
-  + `from today. Worth checking: how ‘${label}’ could change over the goal period if nothing is done, including any forecast or range already in the model.`;
+  + `from today.`;
 
 describe('readback RESPONSE → LICENCE — hiring: a % CHANGE goal is said as "% higher than today", the status quo by assumption, Olumi\'s sizes named', () => {
   it('RED: the stored Run licenses each option on the ruled sentence; the status quo is "no change, by assumption" with no figure or interval', async () => {
@@ -622,7 +622,7 @@ describe('readback RESPONSE → LICENCE — the served capacity level brief (at 
       const distinct = { constraint_id: `different:${operator}:${value}`, node_id: goal.id, operator, value, unit: 'tickets per week' };
       const reading = goalChanceLicenceOf(evaluated.result.enrichment, evaluated.reloaded, goal.id, () => false,
         licence.sent_threshold, evaluated.reloaded, { sentRun: evaluated.payload,
-          evaluatedQuestion: deriveRunQuestion({ storedResult: evaluated.result }),
+          evaluatedScope: withEvaluatedGoalChanceInputs(evaluated.result.enrichment, evaluated.reloaded, goal.id, evaluated.payload).scope,
           storedConstraints: [...evaluated.reloaded.goal_constraints, distinct], sentConstraints: evaluated.payload.goal_constraints })!;
       expect(reading.notes?.join(' ')).toContain(`It does not include: ‘Weekly support capacity’ ${words} tickets per week`);
     }
@@ -641,8 +641,6 @@ describe('readback RESPONSE → LICENCE — the served capacity level brief (at 
     const stored = JSON.stringify(GraphV3.parse(g));
     const { payload, snapshot, reloaded } = await runFromStore(stored);
     expect(node(reloaded, 'weekly_support_capacity').observed_state.raw_value).toBe(80);
-    expect(assessCanonicalAnalysisReadiness(reloaded).questionScope).toMatchObject({ can_show_goal_chance: false,
-      reasons: ['not_yet_evaluated'], note: 'Static model; not a forecast to a date.' });
     expect(buildCanonicalAnalysisReadyFromGraph(reloaded)).not.toHaveProperty('questionScope');
     const sent = node(payload.graph, 'weekly_support_capacity');
     expect(sent).toMatchObject({ goal_threshold_raw: 100, goal_threshold_frame: 'level',

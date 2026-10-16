@@ -1,5 +1,5 @@
 {
-  "source_sha": "5b71e0315a41a42525beb62fbbf84e15c5843a5d",
+  "source_sha": "aabe783d2964558cbf7e38de8605311d056311be",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -29,10 +29,10 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 2,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 2,
       "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 3,
       "src/orchestrator-v5/goal-target/goal-kind.ts": 1,
       "src/orchestrator-v5/goal-target/goal-target-gap.ts": 2,
-      "src/orchestrator-v5/goal-target/run-question.ts": 2,
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 2
     },
     "goalUnitOf": {
@@ -290,7 +290,7 @@
       "src/orchestrator-v5/context/graph-identity.ts": 1,
       "src/orchestrator-v5/goal-target/decide-goal-target-ask.ts": 6,
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
-      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 9,
+      "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 10,
       "src/orchestrator-v5/goal-target/goal-record.ts": 1,
       "src/orchestrator-v5/goal-target/goal-target-gap.ts": 1,
       "src/orchestrator-v5/goal-target/run-question-scope.ts": 3,
@@ -314,7 +314,7 @@
       "src/orchestrator-v5/tools/handlers/analysis-ready-core.ts": 2,
       "src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts": 6,
       "src/orchestrator-v5/tools/handlers/run-analysis-participation-guard.ts": 2,
-      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 38,
+      "src/orchestrator-v5/tools/handlers/run-analysis.ts": 37,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
       "src/orchestrator-v5/tools/registry.ts": 1,

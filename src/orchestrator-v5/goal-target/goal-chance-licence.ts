@@ -1,8 +1,10 @@
-import { goalHorizonVerdict } from './goal-horizon-verdict.js';
-import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
-import { readRunOmissionScope, type RunOmissionScope, type RunQuestion } from './run-question.js';
+import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
+import { readDispatchedGoalThreshold, recordedStaticLevelEvidence, hasRecordedLevelCalculation, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
+import { readRunOmissionScope, type RunOmissionScope, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
+import { assessEvaluatedQuestionScope, STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
+import { goalKindOf } from './goal-kind.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
-export { deriveRunQuestion, assessRunQuestionScope, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
+export { deriveRunQuestion, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
@@ -279,7 +281,7 @@ export interface GoalChanceLicence {
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
 export interface GoalChanceConstraintInputs {
   /** The handler’s one evaluation, bound to the final request; never persisted or borrowed across requests. */
-  readonly evaluatedQuestion?: RunQuestion;
+  readonly evaluatedScope?: RunQuestionScope;
   readonly perLimit?: readonly PerLimitVerdict[];
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
@@ -523,14 +525,80 @@ function goalTargetStateOf(
     estimates: NO_ESTIMATES, estimateOnly: false, jointEstimates: undefined, primaryRefused: true });
 }
 
+/** Validate the final dispatched inputs once, before any range or licence reads the result. */
+export function withEvaluatedGoalChanceInputs<E>(response: E, savedGraph: unknown, goalId: unknown,
+  sentRun: SentRunInputs, brief?: string | null): { response: E; scope: RunQuestionScope } {
+  const scope: RunQuestionScope = typeof goalId === 'string'
+    ? { ...assessEvaluatedQuestionScope(savedGraph, sentRun, goalId, goalKindOf(savedGraph) === 'level'),
+      dispatched_input_digest: sentDigest({ ...sentRun }) }
+    : { status: 'unverified', can_show_goal_chance: false, reasons: ['saved_question_not_recorded'] };
+  const missingTargetOrDirection = scope.reasons.some(reason =>
+    reason === 'saved_target_not_recorded' || reason === 'saved_comparator_not_recorded');
+  if (scope.status === 'invalid' || (scope.status === 'unverified' && !missingTargetOrDirection
+    && readDispatchedGoalThreshold(sentRun, goalId)?.frame === 'level')) {
+    const ids = [...new Set(readOptionResultSources(isRec(response) ? response : {}).flat()
+      .flatMap(row => typeof (row.option_id ?? row.id) === 'string' ? [String(row.option_id ?? row.id)] : []))];
+    response = withholdOptionGoalFigures(response, new Set(ids), {
+      code: GOAL_FIGURES_TARGET_NOT_TESTABLE, severity: 'warning',
+      message: 'This Run’s dispatched inputs do not match the saved target’s baseline, frame, units or comparator, so its goal chances are not shown.',
+      option_ids: ids, node_ids: [goalId],
+      detail: { reason: 'EVALUATED_INPUTS_DO_NOT_MATCH_SAVED_QUESTION', missing_or_conflicting: scope.reasons },
+    }, { keepOutcome: true, keepOrdering: true });
+  }
+  if (scope.status !== 'supported_static') {
+    response = withholdGoalFiguresForUntestedHorizon(response, savedGraph, brief);
+    response = withholdOptionsNotInPlaceAtPeriodEnd(response, savedGraph);
+  }
+  return { response, scope };
+}
+
+/** The selected Run's licence is the only read-time chance authority. Never borrows today's graph or output percentiles. */
+export function goalChanceScopeOf(result: unknown, evidence?: SelectedRunEvidence): RunQuestionScope {
+  const block = isRec(result) ? result : {};
+  const runId = evidence?.runId ?? block.run_id;
+  const mismatch = evidence?.runId !== undefined && block.run_id !== undefined && evidence.runId !== block.run_id;
+  if (mismatch || typeof runId !== 'string' || runId.trim() === '') return {
+    status: 'unverified', can_show_goal_chance: false,
+    reasons: [mismatch ? 'selected_run_identity_mismatch' : 'selected_run_identity_not_recorded'],
+  };
+  const source = evidence?.inputSnapshot === undefined ? block : { ...block, input_snapshot: evidence.inputSnapshot };
+  const recorded = recordedStaticLevelEvidence(source);
+  if (goalChanceLicenceForAgent(source) === undefined || (hasRecordedLevelCalculation(source) && recorded === undefined)) {
+    return { status: 'unverified', can_show_goal_chance: false, reasons: ['evaluated_question_not_fully_recorded'] };
+  }
+  const snapshot = isRec(source.input_snapshot) ? source.input_snapshot : undefined;
+  const digest = typeof snapshot?.sent_digest === 'string' ? { dispatched_input_digest: snapshot.sent_digest } : {};
+  return recorded?.static_scope_declared === true
+    ? { status: 'supported_static', can_show_goal_chance: true, reasons: [], note: STATIC_MODEL_SCOPE_NOTE,
+      capability: STATIC_LEVEL_CAPABILITY, ...digest }
+    : { status: 'outside_static_scope', can_show_goal_chance: true,
+      reasons: ['static_scope_not_declared_by_licence'], ...digest };
+}
+
+/** Remove-only projection. Public blocks can use their selected fact's evidence without inventing missing fields. */
+export function withGoalChanceReadback<R>(result: R, selectedResult: unknown = result, evidence?: SelectedRunEvidence): R {
+  return hasRecordedLevelCalculation(result) && !goalChanceScopeOf(selectedResult, evidence).can_show_goal_chance
+    ? withChanceReadbackWithheld(result, undefined, true) : result;
+}
+
+/** Deadline edits omitted from legacy hashes may only remove a chance, never reopen a withheld Run. */
+export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, storedEnvelope?: unknown): R {
+  if (!isRec(result)) return result;
+  if (hasRecordedLevelCalculation(result)) return withGoalChanceReadback(result);
+  const envelope = isRec(result.enrichment) ? result.enrichment : result;
+  const warnings = [result.inference_warnings, envelope.inference_warnings].flatMap(v => Array.isArray(v) ? v : []);
+  return warnings.some(w => isRec(w) && w.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')
+    || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold'
+    ? result : withChanceReadbackWithheld(result, currentGraph, false);
+}
+
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
-  const evaluatedQuestion = constraints.evaluatedQuestion;
-  const evaluatedScope = evaluatedQuestion !== undefined && evaluatedQuestion.calculated?.quantity.node_id === goalId && isRec(constraints.sentRun)
-    && evaluatedQuestion.scope.dispatched_input_digest === sentDigest(constraints.sentRun) ? evaluatedQuestion.scope : undefined;
+  const evaluatedScope = isRec(constraints.sentRun) && constraints.sentRun.goal_node_id === goalId
+    && constraints.evaluatedScope?.dispatched_input_digest === sentDigest(constraints.sentRun) ? constraints.evaluatedScope : undefined;
   if (evaluatedScope?.status === 'invalid') return null;
   const finalSent = sentGoalThresholdOf(undefined, undefined, goalId, undefined, constraints);
   const capturedThreshold = sentThreshold !== undefined && finalSent !== undefined
