@@ -49,12 +49,13 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
   let script: Record<string, unknown>[] = [];
   let runs = 0;
   beforeAll(async () => {
+    // Retained host menu: an incomplete model reply uses the existing host fallback; the original control negatives stay.
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       const runCall = runPressToolResponse(body);
       if (runCall) return runCall;
       if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ status: 'incomplete', output: [] }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';

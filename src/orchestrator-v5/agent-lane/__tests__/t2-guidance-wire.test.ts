@@ -141,9 +141,10 @@ describe('the real route: the row rides the typed turn, and only it', () => {
   let analysisState: unknown = SERVED_CURRENT;
   let graph: unknown = D1.graph;
   beforeAll(async () => {
+    // Retained host menu: an incomplete model reply uses the existing host fallback; the original control negatives stay.
     vi.stubGlobal('fetch', vi.fn(async () => {
       modelCalls += 1;
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The comparison is close on your goal.' }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ status: 'incomplete', output: [] }), { status: 200 });
     }));
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';

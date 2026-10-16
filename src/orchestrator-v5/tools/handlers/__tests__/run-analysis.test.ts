@@ -132,6 +132,24 @@ function makeInvocation(overrides?: Partial<HandlerInvocation>): HandlerInvocati
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — happy path', () => {
+  it('S4: an unlicensed result retains its one authorship disclosure and the saved source stays intact', async () => {
+    const snapshot = makeScenarioSnapshot({ graph: { nodes: [
+      { id: 'g', kind: 'goal', label: 'Goal' },
+      { id: 'f', kind: 'factor', label: 'Starting assumption', observed_state: { value: 0.2, raw_value: 20, source: 'cee_inference', extractionType: 'inferred' } },
+    ], edges: [] } });
+    const before = structuredClone(snapshot.rawPersistedGraph);
+    const handler = createRunAnalysisHandler({ plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(snapshot) });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toContain('I supplied the value behind this');
+    expect(outcome.assistant_text.split('I supplied').length - 1).toBe(1);
+    expect(snapshot.rawPersistedGraph).toEqual(before);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.summary).toBe(outcome.assistant_text);
+    expect(outcome.llm_calls_used).toBe(0);
+  });
+
   it('returns a HandlerOutcome with a deterministic headline, exactly one fact, zero LLM calls', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),

@@ -233,6 +233,57 @@ describe('ONE reply contract through the build route', () => {
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';
   };
 
+  it('S4: the automatic reply keeps each supplied exclusion once, with no second host account or stock menu', async () => {
+    useNumericChanceRead();
+    const risks = withOlumiAddedRisks();
+    narrator = risks.map(risk => `‘${risk.label}’ was left out of this calculation; its effect remains unresolved.`).join(' ')
+      + '\n\nCheck evidence for the stated mechanism.';
+    const body = await buildTurn();
+    expect(body.assistant_text).toContain(narrator);
+    expect(body.assistant_text).not.toContain('relies on this not happening');
+    expect(body.assistant_text).not.toContain('Run leaves it out');
+    for (const risk of risks) {
+      expect(sentText()).toContain(String(risk.label));
+      expect(count(body.assistant_text, String(risk.label))).toBe(1);
+    }
+    expect(sentText()).toContain('retained_excluded');
+    expect(sentText()).toContain('The team still needs to test this condition.');
+    expect(body.suggested_actions.map(action => action.id)).not.toEqual(expect.arrayContaining([
+      'agent-next-pre-mortem', 'agent-next-strengthen',
+    ]));
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
+  it('S4 R3: an AI-written build retains the inert risk exclusion once, without handing its sentence to the narrator', async () => {
+    currentRead = structuredClone(FX.read);
+    currentRead.graph.nodes.push(
+      { id: 'transition_workload', kind: 'factor', label: 'Transition workload', provenance: 'from_brief' },
+      { id: 'transition_risk', kind: 'risk', label: 'Transition risk', provenance: 'ai_inferred' },
+    );
+    currentRead.graph.edges.push({ from: 'transition_workload', to: 'transition_risk' });
+    const goal = currentRead.graph.nodes.find(node => node.kind === 'goal')!;
+    const line = `"Transition risk" (with "Transition workload", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "${goal.label}".`;
+    narrator = 'Check evidence for the causal assumptions.';
+    const body = await buildTurn();
+    expect((body as Body & { _diagnostic_trace: { reply_author: string } })._diagnostic_trace.reply_author).toBe('ai');
+    expect(body._agent.tool_calls.map(call => call.name)).toContain('build_model_from_brief');
+    expect(count(body.assistant_text, narrator)).toBe(1);
+    expect(count(body.assistant_text, line)).toBe(1);
+    expect(sentText()).not.toContain(line);
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
+  it('S4: a useful AI move does not acquire the host’s three generic activities', async () => {
+    useNumericChanceRead();
+    currentRead.analysis_state.usable_for_chips = true;
+    narrator = 'Check evidence for the stated mechanism.';
+    const body = await buildTurn();
+    expect(body.assistant_text).toContain(narrator);
+    expect(body.suggested_actions.map(action => action.id)).not.toContain('agent-next-pre-mortem');
+    expect(body.suggested_actions.map(action => action.id)).not.toContain('agent-next-strengthen');
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
   it('FU1 withheld widened draft: the SENT receipt is typed, no invented risk chance, replay identical', async () => {
     currentRead = structuredClone(FX.read); buildWidened = { options: 0, risks: 3 };
     narrator = 'Olumi built your pricing model.';

@@ -165,8 +165,11 @@ const withinMonths = (goal: Rec): string => {
  * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
-function leftOutLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[], omitted?: readonly RunOmittedRisk[]): string[] {
-  return leftOutRiskLines(graph, goalLabel, cells, omitted).map((l) => l.line);
+interface LeftOutRiskLine {
+  readonly kind: 'inert' | 'relies_on' | 'unsized';
+  readonly riskId: string;
+  readonly line: string;
+  readonly chanceOmission: boolean;
 }
 
 /**
@@ -178,7 +181,7 @@ export function risksSaidLeftOutOfTheChance(graph: unknown, cells: readonly Opti
   return new Set(leftOutRiskLines(graph, '', cells, omitted).filter((l) => l.chanceOmission).map((l) => l.riskId));
 }
 
-function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[], omitted: readonly RunOmittedRisk[] = []): { riskId: string; line: string; chanceOmission: boolean }[] {
+function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly OptionChanceCell[], omitted: readonly RunOmittedRisk[] = []): LeftOutRiskLine[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const allEdges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -196,7 +199,7 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
   const besideAnyChance = chanceShownFor(cells);
   const unsized = omitted.flatMap(({ node_id: riskId, label }) => {
     const line = unsizedOlumiRiskLineFor(label, besideAnyChance);
-    return line === null ? [] : [{ riskId, line, chanceOmission: besideAnyChance }];
+    return line === null ? [] : [{ kind: 'unsized' as const, riskId, line, chanceOmission: besideAnyChance }];
   });
   return [...nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
     if (preconditions.has(r.id as string)) {
@@ -206,7 +209,7 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
       const option = nodes.find((n) => n.id === optionId && n.kind === 'option');
       if (option !== undefined) {
         const besideChance = chanceShownFor(cells, option.id as string);
-        return { riskId: r.id as string, line: reliesOnRiskLine(labelOf(r), labelOf(option), besideChance), chanceOmission: besideChance };
+        return { kind: 'relies_on' as const, riskId: r.id as string, line: reliesOnRiskLine(labelOf(r), labelOf(option), besideChance), chanceOmission: besideChance };
       }
     }
     // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
@@ -219,7 +222,7 @@ function leftOutRiskLines(graph: unknown, goalLabel: string, cells: readonly Opt
     const named = nodes.filter((n) => n.kind !== 'risk' && upstream.has(n.id as string)).map((n) => `"${labelOf(n)}"`);
     const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
     const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
-    return { riskId: r.id as string, line: `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`,
+    return { kind: 'inert' as const, riskId: r.id as string, line: `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`,
       chanceOmission: false };
   }), ...unsized];
 }
@@ -434,14 +437,18 @@ export function withDecisionInputAskDisplay(text: string, graph: unknown): strin
   return raw === null ? text : text.split(raw).join(withoutProposalIds(raw));
 }
 
-export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
+export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext,
+  /** Select only this existing typed exclusion; no horizon or missing-input ask is added. */
+  opts: { readonly onlyRiskKind?: LeftOutRiskLine['kind'] } = {}): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
-  const leftOut = leftOutLines(graph, label, ctx.chanceCells ?? [], ctx.omittedRisks);
+  const risks = leftOutRiskLines(graph, label, ctx.chanceCells ?? [], ctx.omittedRisks);
+  const leftOut = risks.filter(line => opts.onlyRiskKind === undefined || line.kind === opts.onlyRiskKind).map(line => line.line);
+  if (opts.onlyRiskKind !== undefined) return leftOut;
   const a7 = untestedHorizonLineForCells(graph, ctx.chanceCells ?? []);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.

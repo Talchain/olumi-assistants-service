@@ -716,7 +716,7 @@ function widenedCountsOfBuild(result: AgentTurnResult): WidenCounts | null {
 }
 
 /** Persisted draft-widening provenance, not a risk's label or generic AI origin, owns Run disclosures. */
-function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[], omitted?: readonly RunOmittedRisk[]): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
+function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell[], omitted?: readonly RunOmittedRisk[], ownLinesShip = true): { widenedRiskNote?: string; widenedRiskMarker?: string; saidByOwnLines?: true } {
   if (!chanceShownFor(cells)) return {};
   const nodes = (graph as { readonly nodes?: readonly GraphV3T['nodes'][number][] } | null | undefined)?.nodes;
   const addedRisks = Array.isArray(nodes) ? nodes.filter(node => node?.kind === 'risk'
@@ -724,7 +724,7 @@ function widenedRunWordsOf(graph: unknown, cells: readonly CanonicalAnalysisCell
   // Each added risk's own line already says its option's chance leaves it out: the generic note and its marker would say
   // the same omission again (capacity e2e 57687e86 turn 01, judge row 4). Said once, by the line that names the risk.
   const ownLines = risksSaidLeftOutOfTheChance(graph, cells, omitted);
-  if (addedRisks.length > 0 && addedRisks.every(risk => ownLines.has(String(risk.id)))) return { saidByOwnLines: true };
+  if (ownLinesShip && addedRisks.length > 0 && addedRisks.every(risk => ownLines.has(String(risk.id)))) return { saidByOwnLines: true };
   const note = widenedRiskNote({ options: 0, risks: addedRisks.length });
   const marker = widenedRiskMarker(addedRisks);
   return note === null || marker === null ? {} : { widenedRiskNote: note, widenedRiskMarker: marker };
@@ -5025,7 +5025,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
       state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       // S-B typed replies own their exits, including an intentional empty list (Science's estimate questions).
-    }, actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
+    }, !aiWroteReply && actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
@@ -5317,7 +5317,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
     const statusText = hostProse ? hostStatusText : aiStatusText;
-    const basis = fastPath !== 'method'
+    let basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
       ? conditionalInputBasis({ graph: readbackGraph,
@@ -5368,8 +5368,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
     // BYPASS1: the AI asks for a missing target, objective or deadline itself (R:784); the host keeps K3 and A7's facts.
-    const decisionLines = (await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined))
-      .filter((line) => hostProse || !isDecisionInputAsk(line));
+    const decisionLines = hostProse
+      ? await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined)
+      : decisionInputLines(readbackGraph, decisionCtx, { onlyRiskKind: 'inert' });
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     // BYPASS1 keeps it: it is never said when the reply at rest already asks (the AI's own ask included), so it cannot double.
@@ -5539,6 +5540,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && compareAnalysisRunFactIdentity(thisTurnRun, { scenario_id: scenarioId, graph_hash_at_run: cardView.run.graph_hash_at_run,
         computed_at: cardView.run.computed_at }).status === 'match'
       && (analysisResult as { computed_against_hash?: unknown }).computed_against_hash === cardView.run.graph_hash_at_run;
+    const selectedRunCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
+    // A disclosure is retired only when THIS turn's bound, shown chance already owns it.
+    const cardDetail = cardBound ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
+    const estimatesOnCard = cardBound && goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
+      .some(line => line.olumi_estimate_link_count !== undefined);
+    if (estimatesOnCard && basis !== null) {
+      wireBody = { ...wireBody, assistant_text: withoutDisclosure(String(wireBody.assistant_text ?? ''), basis) };
+      basis = null;
+    }
+    const horizonOwed = !hostProse && (decisionTurn.builtOrRan || (fastPath === 'explain' && narrationStatus !== 'stale'))
+      ? untestedHorizonLineForCells(readbackGraph, chanceCells) : null;
+    if (horizonOwed !== null && cardDetail?.has(horizonOwed) !== true && cardDetail?.has(STATIC_MODEL_SCOPE_NOTE) !== true) {
+      wireBody = { ...wireBody, assistant_text: withDisclosures(String(wireBody.assistant_text ?? ''), [horizonOwed]) };
+    }
     // ⭐ SAID ONCE (DL 14 Oct, marketing e2e 25d14238; the #3034 rule): this turn's bound card shows the §(g) cause itself,
     // so the GOAL-REACH 3b sentence is not said again (`cardSaysMissingLevel`; its next step stays on the action bar).
     if (reasonLine !== null && cardBound && cardSaysMissingLevel(analysisResult, cardView!.options)
@@ -5600,7 +5615,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const explainsCurrentRun = fastPath === 'explain' && narrationStatus !== 'stale';
     /** The screen's chance lines this turn owes (required evidence: the reply composer keeps them on the face). */
-    const selectedRunCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
     let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
@@ -5807,7 +5821,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const widenCounts = widenedCountsOfBuild(result);
       const widenReceipt = widenCounts === null ? null : widenedLine(widenCounts);
       const runWidenWords = faceContract === 'run' || firstAnalysisExists || chanceShownFor(chanceCells)
-        ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult)) : {};
+        ? widenedRunWordsOf(readbackGraph, chanceCells, runOmittedRisks(analysisResult), hostProse) : {};
       const widenNote = chanceShownFor(chanceCells) && runWidenWords.saidByOwnLines !== true
         ? runWidenWords.widenedRiskNote ?? (widenCounts === null ? null : widenedRiskNote(widenCounts)) : null;
       // The build keeps its Draft receipt after H even when it also ran. Bind that Run's marker beside its chance.
