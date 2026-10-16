@@ -443,13 +443,18 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
     ...(Object.hasOwn(before, 'options') ? { options: structuredClone(before.options) } : {}),
   };
   const plan = preserveSiblingQuantities(before, hybrid, []);
+  // A re-encoded cell is admitted only when its own unit agrees with the declared factor's unit now (one classifier).
+  const unitAgrees = (option: unknown) => factorIds.every(id => {
+    const cell = mergeInterventionSourceObjects(option as never)[id] as { unit?: unknown } | undefined;
+    return cell === undefined || unitsConflict(factorUnitOf(after, after.nodes.find(n => n.id === id)), cell.unit) === null;
+  });
   if (plan.kind === 'preserved') {
     restored.nodes = restored.nodes.map((node, i) => node.kind === 'option' && before.nodes[i]?.kind === 'option'
-      && isDeepStrictEqual(node, plan.graph.nodes[i]) ? structuredClone(before.nodes[i]!) : node);
+      && isDeepStrictEqual(node, plan.graph.nodes[i]) && (isDeepStrictEqual(node, before.nodes[i]) || unitAgrees(node)) ? structuredClone(before.nodes[i]!) : node);
     if (Array.isArray(before.options) && Array.isArray(restored.options) && Array.isArray(plan.graph.options)) {
       const priorOptions = before.options;
       const plannedOptions = plan.graph.options;
-      restored.options = restored.options.map((option, i) => i < priorOptions.length && isDeepStrictEqual(option, plannedOptions[i])
+      restored.options = restored.options.map((option, i) => i < priorOptions.length && isDeepStrictEqual(option, plannedOptions[i]) && (isDeepStrictEqual(option, priorOptions[i]) || unitAgrees(option))
         ? structuredClone(priorOptions[i]) : option);
     }
   }
