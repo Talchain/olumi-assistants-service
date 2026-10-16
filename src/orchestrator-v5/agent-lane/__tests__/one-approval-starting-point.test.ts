@@ -28,6 +28,7 @@ import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
+import { approvalChipsFor } from '../approval-chips.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -186,6 +187,10 @@ describe('propose_starting_point', () => {
     expect([...kinds].sort()).toEqual(['set_factor_value', 'set_option_intervention']);
     expect(String(r.public_label)).toMatch(/Coordination load = 40/);
     expect(String(r.public_label)).toMatch(/Hire Two Developers sets Team size to 7/);
+    const [card] = approvalChipsFor([{ name: 'propose_starting_point', ok: true, mutated: false,
+      proposal_id: String(r.proposal_id) }], id => ({ proposal: store.get(id)!, result: r }) as never);
+    expect(card!.label).toBe('Use these 3 starting figures');
+    expect(card!.detail).toMatch(/^Review these 3 starting figures\./);
   });
 
   it('(P) RED-first: ONE approval = ONE conditional values write, then each level CAS-gated on OUR previous write', async () => {
@@ -290,7 +295,7 @@ describe('propose_starting_point', () => {
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.mutated).toBe(false);
-    expect(out.refusal).toBe('not_applied');
+    expect(out.refusal).toBe('http 422'); // the native port's actual reason remains visible
     const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
     expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', false, 0], ['option_levels', false, 0]]);
     expect(String(out.detail)).toMatch(/nothing in this change was written/);
