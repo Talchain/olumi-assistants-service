@@ -186,6 +186,48 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     expect(s.graph().goal_constraints).toEqual(prepared.goal_constraints);
   });
 
+  // ⭐ CONFIRM ON THE CARD (PLAN-CONFIRM-NOT-REFUSE, second conversion; VERIFY-ec381b25 turn 12, the founder's words verbatim):
+  // the goal-target call holds the user's own £250,000, but the redraft held NO target, so it was refused
+  // `revised_draft_has_no_target`. The host puts the CALL's target on the redraft's goal as Olumi's reading (`inferred`).
+  it('RED turn 12: a goal-target call whose redraft holds no target → the call\u2019s own £250,000 on the goal, flagged as Olumi\u2019s reading; only the press saves it', async () => {
+    const message = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    expect(raw.goal).toMatchObject({ target_stated: false, value: null });
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false, revised_draft: { holds_this_target: true } });
+    // The card OPENS with Olumi's reading (which goal the user's figure governs); the eventual 1.3 million is carried, said once.
+    expect(String(offer.public_label).startsWith(`${meaningFlagWords({ kind: 'goal_target_reading', figure: 'at least \u00a3250,000',
+      goal: '\u2018Angel funding secured\u2019' })} Replace the early draft`), String(offer.public_label)).toBe(true);
+    expect(String(offer.public_label).match(/1\.3 million/g)).toHaveLength(1);
+    expect(String(offer.note)).toContain(MEANING_FLAG_NOTE.trim());
+    const prepared = s.candidateOf(offer).candidate;
+    const goal = prepared.nodes.find((n: Rec) => n.kind === 'goal');
+    // The user's figure, comparator and unit; its goal binding is Olumi's reading, so the row is stored `inferred`.
+    expect(prepared.goal_constraints.filter((r: Rec) => r.node_id === goal.id)).toEqual([{ constraint_id: `agent-lane:${goal.id}:>=`,
+      node_id: goal.id, role: 'goal_target', operator: '>=', value: 250000, unit: '\u00a3', label: goal.label, provenance: 'inferred', value_frame: 'level' }]);
+    expect(prepared.goal_constraints).toContainEqual(expect.objectContaining(FX.graph.goal_constraints.find((r: Rec) => r.node_id === OUTCOME)));
+    expect(s.writes).toHaveLength(0);
+    expect(await s.approve(offer)).toMatchObject({ ok: true, applied: true, mutated: true });
+    const saved = s.graph();
+    const savedGoal = saved.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(readGoalRecord(saved, savedGoal.id)?.target).toMatchObject({ raw: 250000 });
+    expect(saved.goal_constraints.find((r: Rec) => r.node_id === savedGoal.id)).toMatchObject({ value: 250000, provenance: 'inferred' });
+    expect(saved.goal_constraints).toContainEqual(expect.objectContaining({ node_id: OUTCOME, value: 1.3 }));
+  });
+
+  it('CONTRAST turn 12: a figure the user did not write about the redraft\u2019s goal is never put on it; still refused, nothing written', async () => {
+    const message = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    raw.goal = { ...raw.goal, metric: 'Technical resource hired', unit: 'people' };
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.writes).toHaveLength(0);
+  });
+
   it('the recorded conditional £250k statement stays conditional; a qualitative revision never turns it into today’s funding', async () => {
     const recorded = FX.turns.find((t: Rec) => t.turn === 10);
     const raw = JSON.parse(recorded.calls[0].raw_text);

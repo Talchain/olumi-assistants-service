@@ -17,12 +17,19 @@ export type MeaningFlag =
    * A correction's revised draft does not keep the governing goal's target as saved: it drops it, or holds a different
    * figure. `from` and `to` are the card's own words for the saved and the revised goal target.
    */
-  | { readonly kind: 'goal_target_change'; readonly from: string; readonly to: string };
+  | { readonly kind: 'goal_target_change'; readonly from: string; readonly to: string }
+  /**
+   * A goal-target call's own figure (the user's, verified at the call) put on the redraft's governing goal by the host,
+   * because the redraft held no target. Which goal it governs is Olumi's reading. `figure` and `goal` are the card's words.
+   */
+  | { readonly kind: 'goal_target_reading'; readonly figure: string; readonly goal: string };
 
 /** The card's words per kind. ⚠ AIE wording pending (PLAN step 3); one sentence pair per kind, reused by every gate. */
 const FLAG_WORDS: { readonly [K in MeaningFlag['kind']]: (flag: Extract<MeaningFlag, { kind: K }>) => string } = {
   goal_target_change: (flag) => `Check this change first: the goal’s target would change from ${flag.from} to ${flag.to}. `
     + 'Approve only if that is what you meant; otherwise say what the target should be.',
+  goal_target_reading: (flag) => `Check this change first: Olumi read ${flag.figure} as the target for ${flag.goal}, the goal of the revised model. `
+    + 'Approve only if that is what you meant; otherwise say which goal it is for.',
 };
 
 /** The card's words for one flag. */
