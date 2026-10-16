@@ -1863,6 +1863,9 @@ export async function buildModelFromBrief(
     event_by_date_prompted: briefAttestsEventByDate(brief) || deliverableWrittenIn(brief, attestedDeliverable),
   };
   const buildInstructions = buildInstructionsForBrief(brief, construction);
+  // ⭐ S1 A5: the ONE assembled construction input, built once: the drafter reads it, and a build with a context hands the very
+  // same string to its widening calls (BUDDY-A early challenge: reuse the build-owned result, never a second assembly).
+  const constructInput = firstConstructInput(brief, context);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
   // at output_tokens 6000 exactly and the refusal carried a SyntaxError). Same user words (`construction_failed`).
@@ -1871,7 +1874,7 @@ export async function buildModelFromBrief(
     const out = await callStructured({
       model: budget.model,
       instructions: buildInstructions,
-      input: firstConstructInput(brief, context),
+      input: constructInput,
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
       schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),
@@ -2803,7 +2806,7 @@ export async function buildModelFromBrief(
   }
   // S1 A5: a build with a construction context hands the widening calls the SAME assembled input its drafter read.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
-    ...(context === undefined ? {} : { constructionInput: firstConstructInput(brief, context) }),
+    ...(context === undefined ? {} : { constructionInput: constructInput }),
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
     admit: admitWidened, optionsArm: true, risksArm: true });
   if (widened !== null) {
