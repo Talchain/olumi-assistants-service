@@ -19,6 +19,7 @@
  */
 
 import { resizedLinksSentence, type ResizedLinksGroup } from '../../cee/magnitude/frame-defaulted-links.js';
+import { recordedSentenceIn, recordedSentencesOf as sentencesOf } from './recorded-sentence.js';
 import { indexGoalWeightsMessages } from '../goal-target/index-goal-weights-note.js';
 
 export interface DisclosableOutcome {
@@ -68,10 +69,21 @@ export function eventRiskDisclosuresFor(outcomes: readonly {
 }
 
 /** Append owed disclosures to the Agent's own text, without rewriting it. */
-export function withDisclosures(assistantText: string, owed: readonly string[]): string {
+export function withDisclosures(assistantText: string, owed: readonly string[],
+  opts: { readonly missingSentencesOnly?: boolean } = {}): string {
   if (owed.length === 0) return assistantText;
-  const body = assistantText.trimEnd();
-  return body.length === 0 ? owed.join('\n\n') : `${body}\n\n${owed.join('\n\n')}`;
+  if (opts.missingSentencesOnly !== true) {
+    const body = assistantText.trimEnd();
+    return body.length === 0 ? owed.join('\n\n') : `${body}\n\n${owed.join('\n\n')}`;
+  }
+  let body = assistantText.trimEnd();
+  for (const line of owed) {
+    // A composite disclosure owes only its missing sentences. Preserve every word/number/negative;
+    // quote and emphasis changes alone do not require a second copy.
+    const missing = line.split(/\r?\n/u).flatMap(sentencesOf).filter(sentence => !recordedSentenceIn(body, sentence));
+    if (missing.length > 0) body = [body, missing.join(' ')].filter(Boolean).join('\n\n');
+  }
+  return body;
 }
 
 /** The inverse of {@link withDisclosures} for ONE host-owed line: removed with its paragraph break, only when it stands exactly once. */

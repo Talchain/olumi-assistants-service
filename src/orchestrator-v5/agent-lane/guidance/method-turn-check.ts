@@ -51,9 +51,10 @@ export function internalValueTerms(text: string, labels: readonly (string | unde
  * qualifies only its own clause, never a subsequent assertion. The composer and provisional view share this check.
  */
 const contrarySame = (nothing: string): RegExp => new RegExp(String.raw`\b(${nothing}(?:'s| has| had)? changed|${nothing} (?:was|has been|had been) changed`
-  + String.raw`|${nothing} in (?:your|the) model(?:'s| has| had)? changed|same inputs?`
-  + String.raw`|inputs?(?: values)? (?:were|was|are|is|stayed|remained|have stayed|have remained) (?:unchanged|the same)`
-  + String.raw`|unchanged inputs?|(?:no|none of the) inputs? (?:were |was |have been |has been )?changed`
+  + String.raw`|${nothing} in (?:your|the|our|this) model(?:'s| has| had| was| has been| had been)? changed|same inputs?`
+  + String.raw`|(?:model|inputs?)(?: (?:values|settings))? (?:were|was|are|is|stays|remains|stayed|remained|has stayed|have stayed|has remained|have remained) (?:unchanged|the same|not changed)`
+  + String.raw`|(?:model|inputs?)(?: (?:values|settings))?(?:'s not| isn't| aren't| wasn't| weren't| hasn't| haven't| hadn't| didn't| has not| have not| had not| did not) (?:been )?changed`
+  + String.raw`|unchanged (?:model|inputs?)|(?:no|none of (?:the|your|our|these)) inputs?(?: (?:values|settings))? (?:were |was |have been |has been )?changed`
   + String.raw`|no changes? (?:were|was|have been|has been) made`
   + String.raw`|(?:didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\b`, 'iu');
 const CONTRARY_SAME = contrarySame('nothing');
@@ -96,7 +97,7 @@ function assertsContrarySame(text: string, changesUnsaid: boolean, labels: reado
       if (/^\s/u.test(chunk[0])) { if (!whitespace) prefix += ' '; whitespace = true; }
       else { prefix += chunk[0]; whitespace = false; }
     }
-    if (!/\b(?:(?:cannot|can't) confirm(?: that){0,1}|isn't sure whether) $/iu.test(prefix)) return true;
+    if (!/\b(?:(?:cannot|can't) confirm(?: that){0,1}|isn't sure whether) (?:(?:your|the|our|this|these) )?$/iu.test(prefix)) return true;
   }
   return false;
 }

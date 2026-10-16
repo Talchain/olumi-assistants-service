@@ -1,3 +1,4 @@
+import { unsizedLinkSentence, UNSIZED_PATH_LEADER_CAUSE_KEY } from '../unsized-path-cause.js';
 /**
  * S4c THROUGH THE ROUTE: on a Run turn the screen's range line is in the reply (Wave B4: both Run narrations said "only as
  * a range" with no figure). The REAL agent route, a scripted OpenAI `fetch` (no provider is contacted), and the SERVED
@@ -831,6 +832,25 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       expect(count(b.assistant_text, note), b.assistant_text).toBe(1);
       expect(b._answer_shape!.detail).not.toContain(note);
     }
+  });
+
+  it('AIE-04: the recorded qualification stays, while the AI owns one step; no stock invitation in wire or replay', async () => {
+    const line = estimateScreenLine();
+    const links = [{ from: 'monthly_churn', to: 'monthly_recurring_revenue',
+      from_label: 'Monthly churn', to_label: 'Monthly recurring revenue' }];
+    analysisResult.enrichment[UNSIZED_PATH_LEADER_CAUSE_KEY] = { ...links[0], links };
+    const qualification = unsizedLinkSentence(links).replace(' Set it to see how much it matters.', '');
+    const step = 'Compare the churn assumption with the latest customer evidence.';
+    const b = await turn(run(`${line.chance} ${unsizedLinkSentence(links)} ${step}`), 'Run it');
+    expect(b.assistant_text).toContain(line.chance);
+    expect(b.assistant_text).toContain(qualification);
+    expect(b.assistant_text.split(qualification)).toHaveLength(2);
+    expect(b.assistant_text.split(step)).toHaveLength(2);
+    expect(b.assistant_text).not.toContain('Set it to see how much it matters.');
+    const saved = rows.get(lastTurnPayload.turn_id)!;
+    expect(saved.assistant_message).toBe(b.assistant_text);
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: lastTurnPayload });
+    expect(replay.json().assistant_text).toBe(b.assistant_text);
   });
 
   it('CONTROL: a turn that ran nothing adds nothing', async () => {

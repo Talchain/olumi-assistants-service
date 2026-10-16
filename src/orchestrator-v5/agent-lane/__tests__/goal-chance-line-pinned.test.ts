@@ -100,7 +100,7 @@ describe('goalChanceLineOwed', () => {
     expect(src).toContain("goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,");
     expect(src).toContain('wireBody.assistant_text.includes(gateGoalChance.why)');
     expect(src).toContain('owed.push(...goalLines);');
-    expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
+    expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines, { missingSentencesOnly: aiRunTurn })');
     expect(src).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(src).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
     expect(src).toContain('identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, \'\') !== null, graph: readbackGraph });');
@@ -108,8 +108,8 @@ describe('goalChanceLineOwed', () => {
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     // BYPASS1: the owed lines said are `owedShown` (all of them on a host reply; on the AI's own, the lines it lacks).
-    expect(src).toContain('withDisclosures(narrationText, owedShown)');
-    expect(src).toContain('withDisclosures(narrationText, [...owedShown, ...decisionLines])');
+    expect(src).toContain('withDisclosures(narrationText, owedShown, { missingSentencesOnly: aiRunTurn })');
+    expect(src).toContain('withDisclosures(narrationText, [...owedShown, ...decisionLines], { missingSentencesOnly: aiRunTurn })');
   });
   it('R13 MUTANT: a raw-tool-only owed line loses the final scoped owner', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');

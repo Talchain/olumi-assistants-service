@@ -96,3 +96,15 @@ export const unsizedLinkSentence = (links: readonly UnsizedPathLink[]): string =
 /** #2613 CR (b): the same statement with no invitation, for a Run whose goal product (Gate 5) still blocks every option. */
 export const unsizedLinkStatement = (links: readonly UnsizedPathLink[], maxLength = 400): string => linkSentence(links, false, false, maxLength);
 export const legacyLinkSentence = (links: readonly UnsizedPathLink[]): string => linkSentence(links, true);
+
+/** AIE-04: an AI Run reply owns its next step. Remove only this recorded cause's stock invitation,
+ * keeping its complete scientific qualification and every other action/condition verbatim.
+ */
+export function withoutUnsizedLinkInvitation(text: string, result: unknown): string {
+  const cause = readUnsizedPathLeaderCause(result);
+  if (cause === undefined) return text;
+  const links = cause.links ?? [cause];
+  const full = unsizedLinkSentence(links);
+  const invitation = links.length > 1 ? ' Set them to see how much they matter.' : ' Set it to see how much it matters.';
+  return full.endsWith(invitation) ? text.split(full).join(full.slice(0, -invitation.length)) : text;
+}
