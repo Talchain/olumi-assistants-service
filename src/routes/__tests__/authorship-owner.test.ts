@@ -32,7 +32,7 @@ vi.mock('../../orchestrator-v5/drafter-raw/index.js', () => ({
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { figureSource } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
-import type { CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
+import { goalLevelOwner, type CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
 
 type Rec = Record<string, any>;
 const SID = '00000000-0000-4000-8000-000000000064';
@@ -81,7 +81,7 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
     expect(costs).toEqual([['Evening sort shift', 90000, 'inferred'], ['Route-planning software', 60000, 'inferred'], ['Micro-hubs and cargo bikes', 140000, 'inferred']]);
     expect((m.statements as Rec[]).filter((s) => s.subject.kind === 'option' && s.subject.factor_label === 'Total financial-year spend').map((s) => s.value)).toEqual([90000, 60000, 140000]);
   });
-  it('⭐ RED→GREEN (G3 #3): the user\u2019s £90k, £60k and £140k are saved as the user\u2019s; each switch keeps its own source', async () => {
+  it('⭐ RED→GREEN (G3 #3): the user\u2019s £90k, £60k and £140k are saved as the user\u2019s; a switch with no statement is never stamped theirs', async () => {
     const out = await construct(COSTS.brief_text, [draftOf(COSTS) as unknown as CandidateModel]);
     expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
     for (const [label, raw] of [['Evening sort shift', 90000], ['Route-planning software', 60000], ['Micro-hubs and cargo bikes', 140000]] as const) {
@@ -89,7 +89,8 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
       expect(setting, label).toMatchObject({ raw_value: raw, source: 'brief_extraction' });
       expect(setting.user_material_unverified, label).toBeUndefined();
     }
-    expect(settingOf(out.graph, 'Evening sort shift', 'evening_sort_shift_deployed')).toMatchObject({ value: 1, source: 'brief_extraction' });
+    // TL 13:18Z fail-safe: the draft's `explicit` on a switch with no statement is not proof; its origin is unknown, not the user's.
+    expect(settingOf(out.graph, 'Evening sort shift', 'evening_sort_shift_deployed')).toMatchObject({ value: 1, source: 'cee_hypothesis', user_material_unverified: true });
   });
   it('CONTRAST: a figure the AI produced itself, with no statement claiming it, stays Olumi\u2019s', async () => {
     const m = draftOf(COSTS);
@@ -130,22 +131,22 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
     expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toBeUndefined();
     expect(JSON.stringify(out.result.not_represented)).toContain('Confirm the current level of \\"scrap rate on Line 2\\"');
   });
-  it('CONTROL (served capacity cfa31dfb, row 5d0a23b7): a goal level with no goal-level statement but the existing proof (a verified factor level) is still theirs', async () => {
+  it('CONTROL (served capacity cfa31dfb, row 5d0a23b7): a goal level with no goal-level statement is still theirs as the total of their own declared sum', async () => {
     const fx = JSON.parse(readFileSync(new URL('./fixtures/capacity-cfa31dfb-first-draft.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
     const m = JSON.parse(fx.raw_text) as Rec;
     expect(figureSource(m, fx.brief, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 80)).toBe('unclaimed');
+    expect(goalLevelOwner(m as never, fx.brief, 80), 'the owner, through the declared sum').toBe('user');
     const out = await construct(fx.brief, [m as unknown as CandidateModel]);
     expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
     expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction' });
   });
-  it('NEGATIVE (settings, same rule): a cost flagged `explicit` with no statement for it is UNKNOWN; a 0/1 switch makes no figure claim and keeps its path', async () => {
+  it('NEGATIVE (settings, same rule): a cost flagged `explicit` with no statement for it is UNKNOWN, as is its switch', async () => {
     const m = draftOf(COSTS);
     m.statements = (m.statements as Rec[]).filter((st) => !(st.subject.kind === 'option' && st.subject.label === 'Route-planning software'));
     (m.options as Rec[]).find((o) => o.label === 'Route-planning software')!.interventions.find((i: Rec) => i.factor_label === 'Total financial-year spend').provenance = 'explicit';
     const out = await construct(COSTS.brief_text, [m as unknown as CandidateModel]);
     expect(settingOf(out.graph, 'Route-planning software', SPEND)).toMatchObject({ raw_value: 60000, source: 'cee_hypothesis', user_material_unverified: true });
-    expect(settingOf(out.graph, 'Route-planning software', 'route_planning_software_deployed')).toMatchObject({ value: 1, source: 'brief_extraction' });
-    expect(settingOf(out.graph, 'Route-planning software', 'route_planning_software_deployed').user_material_unverified).toBeUndefined();
+    expect(settingOf(out.graph, 'Route-planning software', 'route_planning_software_deployed')).toMatchObject({ value: 1, source: 'cee_hypothesis', user_material_unverified: true });
   });
   it('⭐ OWNER OVER FLAGS: the user\u2019s 6.5%, which a verified statement states, is theirs even where the draft marks it an estimate', async () => {
     const m = draftOf(SCRAP);
