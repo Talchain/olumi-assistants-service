@@ -129,6 +129,9 @@ function world(initial = dated(), unconfirmFirst = false, now = '2026-10-07T09:1
   };
   return { graph, failNextPostWriteRead: () => { failAfterCommit = true; }, replace: (g: Rec) => { json = JSON.stringify(g); }, rows, commits, proposals, commit,
     caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit,
+      // The existing native batch really appended these serialized graph rows; don't invent a saved-operation witness.
+      readCommittedTurnLedger: async sid => ({ write_turn_ids: rows.filter(r => r.write.scenario_id === sid && r.write.graph !== undefined)
+        .map(r => r.write.turn_id), user_message_turn_ids: [], first_user_message: null, complete: true }),
       now: () => new Date(now) }) };
 }
 
