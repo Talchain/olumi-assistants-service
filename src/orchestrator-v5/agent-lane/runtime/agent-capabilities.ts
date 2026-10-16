@@ -3841,7 +3841,9 @@ export function createAgentCapabilities(
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; /** The deadline goal's deliverable, when the draft holds one. */ readonly event: string | null;
     /** The card's own sentence on a result withheld for a carried limit (`limitsKeptBy`), when it has one. */ readonly withheld?: string;
-    /** The card opens with a meaning flag (`meaning-flags.ts`): the offer's note tells the AI to say that change first. */ readonly flagged?: true }
+    /** The card opens with a meaning flag (`meaning-flags.ts`): the offer's note tells the AI to say that change first. */ readonly flagged?: true;
+    /** The goal-target call whose own target the host put on the governing goal (the redraft held none). */
+    readonly readTarget?: { readonly value: number; readonly unit: string; readonly comparator: string } }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
   /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
@@ -3873,6 +3875,8 @@ export function createAgentCapabilities(
     deliverable?: string,
     /** ⭐ DEMO: a correction to the model as a whole (propose_change op revise_model), not a goal: the card says so. */
     correction = false,
+    /** The goal-target call's own target (its figure verified at the call), when this draft answers one. */
+    callTarget?: { readonly measures: string; readonly value: number; readonly unit: string; readonly comparator: string },
   ): Promise<RevisedDraft> => {
     const notOffered = (refusal: string, detail: string): RevisedDraft => ({ refused: { ok: false, mutated: false, refusal, detail } });
     const gate = await unreviewedDraftGate(ctx, g, 'offer');
@@ -3946,10 +3950,11 @@ export function createAgentCapabilities(
     }
     Object.assign(candidate, kept.replacement);
     // The drafter's targets are its reading of the user's goal: `limitsKeptBy` stores them `inferred`, never `explicit`.
-    const held = targetsHeldBy(candidate);
+    let held = targetsHeldBy(candidate);
     // Carried rows are disclosed by their carry clause below, once. They are not a new target supplied by the drafter.
-    const newTargets = held.filter((t) => !limits.carried.some((r) => r.role === 'goal_target' && r.node_id === t.node_id)
+    const newTargetsOf = (h: typeof held) => h.filter((t) => !limits.carried.some((r) => r.role === 'goal_target' && r.node_id === t.node_id)
       && !limits.uncertain.some((r) => r.previous.role === 'goal_target' && r.previous.node_id === t.node_id));
+    let newTargets = newTargetsOf(held);
     // ⭐ GEN #5 (Paul's funding test, 13 Oct): a deliverable done by its deadline (the event-by-date model) is a goal the user
     // stated, as a figure target is; it holds no target row, so it is recognised by its own definition.
     // ⛔ BY IDENTITY (Codex FAIL 3023 r1): the drafted event counts only when it IS the deliverable the user asked about — its own
@@ -3994,6 +3999,35 @@ export function createAgentCapabilities(
             + `${savedStated!.value}${savedStated!.unit !== undefined ? ` ${savedStated!.unit}` : ''}`,
         to: `\u2018${String(draftGoalNode?.label ?? goal.label)}\u2019 with no numeric target` });
     }
+    /**
+     * ⭐ CONFIRM ON THE CARD (PLAN-CONFIRM-NOT-REFUSE, second conversion; DL 16 Oct 00:08Z; VERIFY-ec381b25 turn 12): a goal-
+     * target call whose redraft holds NO target was refused `revised_draft_has_no_target`, though the call already holds the
+     * user's own figure, comparator and unit (verified at the call). The host puts THAT target on the redraft's governing goal
+     * as a row stored `inferred` (rows keep their origin; which goal it governs is Olumi's reading), and the card opens with
+     * that reading. Bound by the goal-target door's own checks, on the REDRAFT's goal: a unit of another kind refuses, and the
+     * user must have written the figure about that goal, not about another part ("conversion rate of over 15%" is never a
+     * target for ‘New customers’: `figureTheUserWroteFor` with `scopeIn`). Never a figure of the drafter's own.
+     */
+    const readGoalUnit = draftGoalNode === undefined ? undefined : draftGoalNode.goal_threshold_unit ?? factorUnitOf(candidate, draftGoalNode as never);
+    const readRowId = callTarget === undefined || typeof draftGoalNode?.id !== 'string' ? '' : `agent-lane:${draftGoalNode.id}:${callTarget.comparator}`;
+    const readTarget = !correction && callTarget !== undefined && event === null && draftedTargets.length === 0
+      && !held.some((t) => t.node_id === draftGoalNode?.id)
+      && draftStated === null && readRowId !== '' && unitsConflict(callTarget.unit, readGoalUnit) === null
+      && typeof draftGoalNode?.label === 'string' && figureTheUserWroteFor(callTarget.value, callTarget.unit, ctx.user_text ?? '',
+        scopeIn({ nodes: ((candidate as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? [] }, draftGoalNode.label))
+      && !(((candidate as { goal_constraints?: unknown }).goal_constraints as Array<Record<string, unknown>> | undefined) ?? [])
+        .some((r) => r?.constraint_id === readRowId)
+      ? callTarget : undefined;
+    if (readTarget !== undefined) {
+      const c = candidate as { goal_constraints?: unknown };
+      const row = { constraint_id: readRowId, node_id: String(draftGoalNode!.id), role: 'goal_target', operator: readTarget.comparator,
+        value: readTarget.value, unit: readTarget.unit, label: String(draftGoalNode!.label ?? goal.label), provenance: 'inferred', value_frame: 'level' };
+      c.goal_constraints = [...((Array.isArray(c.goal_constraints) ? c.goal_constraints : []) as unknown[]), row];
+      held = targetsHeldBy(candidate);
+      newTargets = newTargetsOf(held);
+      flags.push({ kind: 'goal_target_reading', goal: `\u2018${row.label}\u2019`,
+        figure: `${TARGET_COMPARATOR_WORDS[readTarget.comparator] ?? readTarget.comparator} ${targetFigure(readTarget.value, readTarget.unit)}` });
+    }
     // ⛔ BUDDY-A B1 (#3252 r1): a number in a later message proves neither its subject nor its role ("The advertising budget is
     // £250,000 per year", "my earlier £250,000 target is withdrawn"; the statement verifier accepts each). A correction therefore
     // never replaces the saved target by figure presence: a new target goes through the goal contract (propose_goal_target), whose
@@ -4014,7 +4048,7 @@ export function createAgentCapabilities(
     const qualitativeKept = correction && draftGoalTargets.length === 0
       && (savedStated === null ? savedGoalTargets.length === 0 && draftStated === null : stillStated);
     const dropsGoalTarget = correction && savedGoalTargets.length > 0 && draftGoalTargets.length === 0 && !stillStated && !goalTargetDropped;
-    if ((draftedTargets.length === 0 || dropsGoalTarget) && event === null && !qualitativeKept && !goalTargetDropped) {
+    if ((draftedTargets.length === 0 || dropsGoalTarget) && event === null && !qualitativeKept && !goalTargetDropped && readTarget === undefined) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : NO_TARGET_DETAIL);
     }
@@ -4101,7 +4135,7 @@ export function createAgentCapabilities(
     });
     proposals.put(proposal);
     return { proposal, held, event: event?.deliverable ?? null, ...(limits.withheld === undefined ? {} : { withheld: limits.withheld }),
-      ...(flags.length > 0 ? { flagged: true as const } : {}) };
+      ...(flags.length > 0 ? { flagged: true as const } : {}), ...(readTarget !== undefined ? { readTarget } : {}) };
   };
 
   /** This target (or deadline goal) call's answer from the turn's one revised draft: the same card, or why it is not in it. */
@@ -4113,7 +4147,7 @@ export function createAgentCapabilities(
     const key = `${ctx.scenario_id}\u0000${g.graph_identity_hash}\u0000${ctx.turn_id ?? ''}\u0000${deliverable ?? ''}`;
     let pending = revisedDrafts.get(key);
     if (pending === undefined) {
-      pending = prepareRevisedDraft(ctx, g, goal, deliverable);
+      pending = prepareRevisedDraft(ctx, g, goal, deliverable, false, 'deliverable' in target ? undefined : target);
       revisedDrafts.set(key, pending);
     }
     let draft = await pending;
@@ -4151,7 +4185,7 @@ export function createAgentCapabilities(
       draft = { proposal: createProposal({ ...content, base_graph_identity_hash: g.graph_hash,
         provenance: { ...content.provenance, basis: `${content.provenance.basis ?? ''} Offered again after a withdrawal this turn (${reissues}).` } }),
         held: draft.held, event: draft.event, ...(draft.withheld === undefined ? {} : { withheld: draft.withheld }),
-        ...(draft.flagged === true ? { flagged: true as const } : {}) };
+        ...(draft.flagged === true ? { flagged: true as const } : {}), ...(draft.readTarget === undefined ? {} : { readTarget: draft.readTarget }) };
       revisedDrafts.set(key, Promise.resolve(draft));
     }
     if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
@@ -4173,7 +4207,10 @@ export function createAgentCapabilities(
      */
     const sameFigure = draft.held.filter((t) => t.value === target.value && t.comparator === target.comparator
       && unitsConflict(target.unit, t.unit) === null);
-    const holds: boolean | 'unknown' = sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)) ? true
+    // The host put THIS call's own target on the goal (`readTarget`): held, with its goal binding flagged on the card.
+    const readHere = draft.readTarget !== undefined && draft.readTarget.value === target.value
+      && draft.readTarget.comparator === target.comparator && draft.readTarget.unit === target.unit;
+    const holds: boolean | 'unknown' = readHere || sameFigure.some((t) => t.quantity === canonicalLabel(target.measures)) ? true
       : sameFigure.length > 0 ? 'unknown' : false;
     return {
       ok: true, mutated: false,
