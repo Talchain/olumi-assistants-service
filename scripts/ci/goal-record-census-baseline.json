@@ -1,5 +1,5 @@
 {
-  "source_sha": "7e65d45414a0538571185cc516ed0ad594d9aafe",
+  "source_sha": "29ec5e7a3f446092de5b56545e6265ce94eaa6ec",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -91,7 +91,7 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 3,
       "src/orchestrator-v5/agent-lane/model-budgets.ts": 1,
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 3,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 29,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 35,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 16,
       "src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts": 3,
       "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": 15,
@@ -827,7 +827,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 27,
     "goalUnitOf": 5,
-    "goal_constraints": 455,
+    "goal_constraints": 461,
     "goal_deadline_as_stated": 11,
     "goal_direction": 100,
     "goal_horizon": 47,
@@ -856,7 +856,7 @@
     "threshold_source": 41,
     "unit_reading": 79
   },
-  "total_references": 2479,
+  "total_references": 2485,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
