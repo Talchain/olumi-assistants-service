@@ -1,0 +1,13 @@
+{
+ "source_ref": "#94 6214201657 (Lane A request) → AIE disposition 16 Oct (inbox/LANE-A.md, \"AIE two-text wording disposition\")",
+ "path": "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+ "constant": "STATEMENTS_INSTRUCTION",
+ "status": "AIE AMEND, replace rather than append (TL 10:49Z 2a: fix the ma3b colon loss at the source)",
+ "changes": [
+  {
+   "id": "Q1",
+   "old": "quote is the complete sentence copied verbatim from the brief;",
+   "replacement": "quote is the complete sentence copied verbatim from the brief, starting at its first word and retaining its colon lead-in, speaker, negation, qualifiers and conditions; a colon alone is not a sentence boundary. Preserve wider attribution context in source; examples are illustrative, never a lexical allow-list;"
+  }
+ ]
+}
