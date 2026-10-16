@@ -201,7 +201,7 @@ function attributedCount(sentence: string, speakerIsOlumi = false): boolean {
     const token = tokens[i]!;
     const previousToken = tokens[i - 1];
     // The existing count grammar also accepts its labelled form, e.g. a count after a colon.
-    const countLabel = hasOlumi && previousToken !== undefined && COUNT_KINDS.has(previousToken.word)
+    const countLabel: boolean = hasOlumi && previousToken !== undefined && COUNT_KINDS.has(previousToken.word)
       && sentence.slice(previousToken.end, token.start).trim() === ':' && isCount(token.word);
     if (token.clause !== currentClause
       || (CONJUNCTIONS.has(token.word) && hasPredicate && startsClause(i + 1))) {

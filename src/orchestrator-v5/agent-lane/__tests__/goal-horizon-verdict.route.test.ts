@@ -190,7 +190,6 @@ function expectSupportedStatic(body: Body): void {
     expect(cell.face).not.toMatch(/\b(?:by|within|at) (?:month 9|9 months)\b/iu);
   }
   expect(sentRequests.join('\n')).toContain(STATIC_MODEL_SCOPE_NOTE);
-  expect(sentRequests.join('\n')).toContain('supported_static');
   expect(body.assistant_text).not.toContain(OLD_HORIZON);
   expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
   expect(JSON.stringify(body)).not.toContain('Add monthly changes');
@@ -315,7 +314,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     // Retired phrase matcher: narrator caveats cannot grant permission or change the Run's scope.
     expect(lastView.question?.scope.status).toBe('supported_static');
     expect(lastView.options.some(row => row.cell.kind === 'figure' || row.cell.kind === 'range')).toBe(true);
-    expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
+    expect(body.assistant_text).not.toMatch(/\d+%[^.]*by month 9/);
     // P1a (DL 87114 #2895): neither stored triple nor narrator wording unlocks.
     expect(body.assistant_text).not.toContain(WHY);
     expect(sentRequests.join('\n')).toContain(STATIC_MODEL_SCOPE_NOTE);

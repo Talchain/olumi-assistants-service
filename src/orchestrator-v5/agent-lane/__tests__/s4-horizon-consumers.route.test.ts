@@ -258,7 +258,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     // and the old why ("…only has today's numbers.") is never said beside it.
     expect(goalHorizonReplyLead(graph)).toMatch(/ on 31 March 2027; this Run has not evaluated it at that point\.$/);
     expect(body._answer_shape).toBeUndefined();
-    expect(body.assistant_text).not.toContain(detail);
+    expect(body.assistant_text.split(detail)).toHaveLength(2); // exact limitation once, no host headline rewrite
     expect(body.assistant_text).not.toContain('%');
   }, 60_000);
 
@@ -332,7 +332,7 @@ describe('Science §(ad) through the producer and reply route', () => {
     expect(lead).not.toBeNull();
     expect(body._answer_shape).toBeUndefined();
     expect(lastView.options.every(row => row.cell.kind === 'withheld')).toBe(true);
-    expect(body.assistant_text).not.toContain(detail);
+    expect(body.assistant_text.split(detail)).toHaveLength(2); // exact limitation once, no host headline rewrite
     expect(currentFact!.result.enrichment.inference_warnings.some((w: Rec) => w.code === 'GOAL_HORIZON_NOT_TESTED')).toBe(false);
   }, 60_000);
 

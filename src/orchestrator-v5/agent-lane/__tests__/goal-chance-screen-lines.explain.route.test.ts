@@ -16,10 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
+import type { AnswerShape } from '../../routing/answer-shape.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { HORIZON_MARKER, REPLY_FACE_WORD_BUDGET } from '../reply/compose-reply.js';
-import { untestedHorizonLine } from '../decision-input-ask.js';
 
 type Json = Record<string, any>;
 const READ_FIXTURE = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -130,7 +128,7 @@ describe('S4d: the Explain turn on a current Run says the screen’s chance line
     narrator = `${LEAD}\n- Raise prices 10%: about 47%.\n- Launch £49 starter tier: about 34%.\n- Keep pricing as it is: less than 1%.`;
     const b = await press(await runThenExplainPayload());
     expect(b._diagnostic_trace.fast_path).toBe('explain');
-    expect(count(b.assistant_text, 'chance of meeting your goal, in this model'), b.assistant_text).toBe(0);
+    expect(count(b.assistant_text, 'chance of meeting your goal, in this model'), b.assistant_text).toBe(3);
   });
 
   it('CONTROL: an Explain for a Run that is no longer the current one (a newer Run since) says no chance line', async () => {

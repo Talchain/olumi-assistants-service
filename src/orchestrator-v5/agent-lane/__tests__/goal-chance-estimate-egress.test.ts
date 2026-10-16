@@ -25,6 +25,15 @@ describe('r16 option and goal bound estimate points', () => {
     expect(out.split(line.chance)).toHaveLength(2);
   });
 
+  it('a Run using no Olumi estimates cannot acquire a fabricated Olumi count', () => {
+    const { olumi_estimate_link_count: _count, ...humanLicence } = licence;
+    const humanResult = { enrichment: { inference_warnings: [humanLicence] } };
+    const out = withEstimateGoalPointsAtEgress({ assistant_text: "Olumi's estimates: 99, see Check estimates." }, {
+      analysisResult: humanResult, graph, current: true, narrator: 'olumi',
+    }).assistant_text;
+    expect(out).not.toContain('99');
+  });
+
   it('a quoted human comparison is retained as their data', () => {
     const share = '‘Raise to £59’ comes out on top in 88% of runs.';
     const text = `${share}\n\n${line.chance}`;

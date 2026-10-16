@@ -10,9 +10,8 @@ import { ActionSchema } from '@talchain/schemas/boundary';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { targetNotTestableWarning, targetTestabilityOf } from '../../admission/target-testability.js';
-import { deriveAnswerTextFromShape } from '../../routing/answer-shape.js';
 import { guidedSizingForRun, guidedSizingReplyText } from '../guided-sizing.js';
-import { thresholdReasonLine, THRESHOLD_REST_STANDS } from '../break-even.js';
+import { thresholdReasonLine } from '../break-even.js';
 
 type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Json;
@@ -202,24 +201,6 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     expect(words, 'the real threshold producer must supply the competing reasonLine').not.toBeNull();
     return words!;
   };
-  const assertGuidedFace = (body: Json, guided: string): string => {
-    const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Json)
-      .filter((entry: Json) => entry.event === 'agent_lane.reply_shaped').at(-1);
-    expect(body._answer_shape, JSON.stringify(shapeLog)).toBeDefined();
-    const face = [body._answer_shape.headline, ...body._answer_shape.bullets].join('\n');
-    expect(body._answer_shape.headline).toBe(guided);
-    expect(face.split(guided)).toHaveLength(2);
-    expect(body.assistant_text.split(guided)).toHaveLength(2);
-    expect(face).not.toContain('?');
-    expect(wirePresses(body)).not.toHaveLength(0);
-    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(body._answer_shape));
-    const words = face.trim().split(/\s+/u).filter(Boolean).length;
-    expect(words <= 80 || shapeLog?.face_over_word_budget === true,
-      `face has ${words} words; mandatory overflow must be logged`).toBe(true);
-    expect(shapeLog).toMatchObject({ face_words: words });
-    return face;
-  };
-
   it('DRAW-2 three-placeholder variant: exact words, unchanged level ask, 3 directness-ordered identity presses and root hook', async () => {
     const body = await run();
     expect(body.assistant_text).toContain(LEVEL_ASK);

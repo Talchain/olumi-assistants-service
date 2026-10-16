@@ -218,7 +218,7 @@ export function checkScreenLineClaims(text: string, lines: readonly GoalChanceSc
   // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
   const authorised: string[] = [];
   let body = text;
-  if (lines.some(l => l.olumi_estimate_link_count !== undefined)) {
+  if (speaker === 'olumi' || lines.some(l => l.olumi_estimate_link_count !== undefined)) {
     const recordSentences = lines.flatMap(l => [l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l), l.depends]);
     for (const sentence of [...recordSentences, ...sourceTexts].filter(s => s !== '')) {
       const folded = foldQuotes(body), needle = foldQuotes(sentence);

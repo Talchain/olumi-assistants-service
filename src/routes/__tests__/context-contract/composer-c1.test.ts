@@ -381,7 +381,8 @@ it('X4 carrier whole answer: long headline and action labels retained verbatim, 
   expect(carriers(w)).toHaveLength(1);
   expect(String(w.response.assistant_text)).toContain(`- ${longLabel}`);
   for (const line of [longLabel, ...short, 'Which risk could change your plan?']) expect(String(w.response.assistant_text)).toContain(line);
-  expect(String(w.response.assistant_text).split('\n\n')).toContain(disclosure);
+  expect(String(w.response.assistant_text).split('\n\n')).not.toContain(disclosure);
+  expect(object(carriers(w)[0]).why).toBe(why);
 });
 it('X5 profile gate: method_step with carrier is byte-identical; proposal is byte-identical per P1 (R2 N2r)', async () => {
   const w = await capture('pre-mortem', 'run2', { evidenceLabel: 'X5', readSnapshot: async s => snapshot(s, 'S1'), providerReply: () => response(reply) });

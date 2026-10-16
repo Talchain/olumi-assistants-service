@@ -7,7 +7,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { log } from '../../../utils/telemetry.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { markerForDisclosure, sentenceMultiset, type ReplyComposeInput } from '../reply/compose-reply.js';
-import { CHANCE_FREE_HORIZON_PREFIX } from '../decision-input-ask.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { actionFactsOf } from '../actions/state.js';
 import { deriveOlumiAuthoredValues } from '../../coaching/inferred-value-disclosure.js';
@@ -16,7 +15,7 @@ import { whatChangesFaceLine } from '../../goal-target/goal-chance-range-agent.j
 import { identityCardOfferable, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
 import { projectCanonicalAnalysisView, type CanonicalAnalysisCell } from '../../../routes/canonical-analysis-view.js';
 import { thresholdReasonLine } from '../break-even.js';
-import { widenedLine, widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../runtime/widen-draft.js';
+import { widenedRiskNote, widenedRiskMarker, type WidenCounts } from '../runtime/widen-draft.js';
 
 type Rec = Record<string, unknown>;
 type Graph = { nodes: Rec[]; edges: Rec[] };
@@ -41,7 +40,12 @@ let buildWidened: WidenCounts | undefined;
 let withoutRun = false;
 let lastComposeInput: unknown;
 const providerBodies: Rec[] = [];
-const sentText = () => providerBodies.map(body => JSON.stringify(body)).join('\n');
+const sentValues = (value: unknown): string[] => typeof value === 'string' ? [value]
+  : value && typeof value === 'object' ? [JSON.stringify(value), ...Object.values(value).flatMap(sentValues)] : [];
+const sentText = () => providerBodies.flatMap(body => (body.input as Rec[] ?? []).flatMap(item => {
+  if (typeof item.output === 'string') return [item.output, ...sentValues(JSON.parse(item.output))];
+  return (item.content as Rec[] ?? []).flatMap(part => typeof part.text === 'string' ? [part.text] : []);
+})).join('\n');
 let withholdDisclosureFor: typeof import('../../../routes/agent-v1-turn.js')['withholdDisclosureFor'];
 let lastBuildPayload: Rec;
 let saved: Graph = { nodes: [], edges: [] };
@@ -233,7 +237,7 @@ describe('ONE reply contract through the build route', () => {
     currentRead = structuredClone(FX.read); buildWidened = { options: 0, risks: 3 };
     narrator = 'Olumi built your pricing model.';
     const body = await buildTurn();
-    expect(sentText()).toContain('"widened":{"options":0,"risks":3}');
+    expect(sentText().includes('"widened":{"options":0,"risks":3}')).toBe(true);
     expect(lastComposeInput).toBeUndefined();
     expect(body.assistant_text).toContain(narrator);
     expect(body.assistant_text).not.toContain(widenedRiskNote(buildWidened)!);
@@ -247,7 +251,7 @@ describe('ONE reply contract through the build route', () => {
     expect(currentRead.graph.nodes.every(node => (node.nonlinear_identity as Rec | undefined)?.operation !== 'accumulation')).toBe(true);
     withoutRun = true; narrator = 'Olumi built your model.';
     const body = await buildTurn();
-    expect(sentText()).toContain('goal_horizon_months');
+    expect(sentText().includes('"horizon_months":9')).toBe(true);
     expect(body.assistant_text).not.toMatch(/\d+% chance/);
     expect(lastComposeInput).toBeUndefined();
     await expectStoredAndReplayed(body, lastBuildPayload);
@@ -258,12 +262,12 @@ describe('ONE reply contract through the build route', () => {
     currentRead.graph_hash = computeAnalysisAffectingGraphHash(currentRead.graph as never)!.slice(0, 16);
     buildWidened = { options: 0, risks: 3 }; withoutRun = true; narrator = 'Olumi built your pricing model.';
     const body = await buildTurn();
-    expect(sentText()).toContain('"widened":{"options":0,"risks":3}');
+    expect(sentText().includes('"widened":{"options":0,"risks":3}')).toBe(true);
     const risks = currentRead.graph.nodes.filter(node => node.kind === 'risk' && node.draft_widening !== undefined);
     expect(risks).not.toHaveLength(0);
     for (const risk of risks) {
-      expect(sentText()).toContain(String(risk.label));
-      expect(sentText()).toContain(String((risk.draft_widening as Rec).relies_on));
+      expect(sentText().includes(String(risk.label))).toBe(true);
+      expect(sentText().includes(String((risk.draft_widening as Rec).relies_on))).toBe(true);
     }
     expect(body.assistant_text).not.toContain("and that option's chance doesn't include it yet");
     expect(body.assistant_text).not.toContain("Leaves out Olumi's added risks");
@@ -294,10 +298,10 @@ describe('ONE reply contract through the build route', () => {
   it('r13 automatic first Run: retained risks reach the AI with exclusion and the widened receipt; replay identical', async () => {
     useNumericChanceRead(); buildWidened = { options: 0, risks: 3 };
     const risks = withOlumiAddedRisks(); const body = await buildTurn();
-    for (const risk of risks) expect(sentText()).toContain(String(risk.label));
-    expect(sentText()).toContain('retained_excluded');
-    expect(sentText()).toContain('The team still needs to test this condition.');
-    expect(sentText()).toContain('"widened":{"options":0,"risks":3}');
+    for (const risk of risks) expect(sentText().includes(String(risk.label))).toBe(true);
+    expect(sentText().includes('retained_excluded')).toBe(true);
+    expect(sentText().includes('The team still needs to test this condition.')).toBe(true);
+    expect(sentText().includes('"widened":{"options":0,"risks":3}')).toBe(true);
     expect(body.assistant_text).not.toContain(widenedRiskNote(buildWidened)!);
     expect(body.assistant_text).not.toContain(widenedRiskMarker(risks)!);
     await expectStoredAndReplayed(body, lastBuildPayload);
@@ -374,10 +378,10 @@ describe('ONE reply contract through the build route', () => {
     const enrichmentB1 = currentRead.analysis_result.enrichment as Rec;
     enrichmentB1.inference_warnings = [...(enrichmentB1.inference_warnings as Rec[] | undefined ?? []), { ...unsizedOlumiRiskOmissionWarning(omitted) }];
     const body = await buildTurn();
-    expect(sentText()).toContain('GOAL_FIGURES_MISSING_CURRENT_LEVEL');
-    expect(sentText()).toContain('GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED');
-    expect(sentText()).toContain('Price-rise cancellation risk');
-    expect(sentText()).toContain('not included in this calculation');
+    expect(sentText().includes("today's level of MRR")).toBe(true);
+    expect(sentText().includes(GOAL_CHANCE_CAPTURE)).toBe(true);
+    expect(sentText().includes('Price-rise cancellation risk')).toBe(true);
+    expect(sentText().includes('not included in this calculation')).toBe(true);
     expect(body.assistant_text).not.toContain('How likely is ‘Price-rise cancellation risk’');
     expect(body.assistant_text).not.toContain('How likely or how large is it today?');
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
@@ -391,7 +395,7 @@ describe('ONE reply contract through the build route', () => {
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';
     // Keep the captured Run's identity-only cell reasons. Its graph's current-level gap is not marker authority.
     const body = await buildTurn();
-    expect(sentText()).toContain('GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED');
+    expect(sentText().includes(GOAL_CHANCE_CAPTURE)).toBe(true);
     expect(body.assistant_text).not.toMatch(/This chance uses|These chances use/);
     expect(lastComposeInput).toBeUndefined();
     await expectStoredAndReplayed(body, lastBuildPayload);
@@ -466,15 +470,15 @@ describe('ONE reply contract through the build route', () => {
   it('R1 Paul, user-ratified count: one concise face, typed-card question in detail, RC4 census, plain units', async () => {
     withUserRatifiedSubscribers();
     const body = await buildTurn();
-    const shapeLog = info.mock.calls.map((call: unknown[]) => call[0] as Rec).find((e: Rec) => e.event === 'agent_lane.reply_shaped');
     const facts = actionFactsOf({ scenarioId: randomUUID(), graph: currentRead.graph, graphHash: currentRead.graph_hash,
       analysisState: currentRead.analysis_state, analysisResult: currentRead.analysis_result,
       analysisReady: (currentRead.current_read as Rec)?.analysis_ready });
     expect(facts.olumiEstimates).not.toBeNull();
     const wholeGraphAuthoredCount = deriveOlumiAuthoredValues(currentRead.graph).length;
     expect(wholeGraphAuthoredCount, 'M3 control: whole-model authored figures differ from RC4 result census').not.toBe(facts.olumiEstimates!.count);
-    expect(sentText()).toContain('olumiEstimates');
-    expect(sentText()).toContain(`"count":${facts.olumiEstimates!.count}`);
+    expect(sentText().includes('value_provenance')).toBe(true);
+    expect(sentText().includes('"whose":"olumi"')).toBe(true);
+    expect(body.assistant_text).not.toContain("Olumi's estimates: 4");
     expect(body.suggested_actions).toContainEqual(expect.objectContaining({ label: "Yes, that's how" }));
     expect(body.assistant_text).toContain(GOAL_CHANCE_CAPTURE);
     expect(lastComposeInput).toBeUndefined();
@@ -522,8 +526,8 @@ describe('ONE reply contract through the build route', () => {
     expect(approvalControls.some(a => a.action_id === 'confirm_reading' && a.enabled === true)).toBe(false);
     expect(body.assistant_text).not.toContain('Is that how you work it out?');
     expect(body.assistant_text).not.toContain('Please confirm on the button.');
-    expect(sentText()).toContain('GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED');
-    expect(sentText()).toContain('missing_current_level');
+    expect(sentText().includes(GOAL_CHANCE_CAPTURE)).toBe(true);
+    expect(sentText().includes("What's today's level of MRR?")).toBe(true);
     expect(saved).toEqual(before);
     expect(FX.read.graph).toEqual(before);
     expect(saved.nodes.find(n => n.id === 'pro_paying_subscribers')!.observed_state).toMatchObject({
@@ -612,7 +616,7 @@ describe('ONE reply contract through the build route', () => {
     withUserRatifiedSubscribers();
     const built = await buildTurn();
     expect(built.assistant_text).not.toContain("Olumi's estimates: ");
-    expect(sentText()).toContain('olumiEstimates');
+    expect(sentText().includes('value_provenance')).toBe(true);
     narrator = 'Start with how many subscribers a price change would cost you.';
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: randomUUID(), turn_id: randomUUID(), message: 'What should I look at first?' } });

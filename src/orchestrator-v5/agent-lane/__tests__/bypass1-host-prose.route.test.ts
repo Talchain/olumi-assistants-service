@@ -257,7 +257,6 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
   it('CONTRAST: with no canonical view to ship, the card cannot say the detail, so the reply still says it once', async () => {
     const { canonical_analysis_view: _dropped, ...withoutView } = CAPACITY;
     served = withoutView;
-    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: `${cardFaces(view as Json)[0]!} ${DEPENDS_3017}` }] }]];
     outputs = [[{ type: 'message', content: [{ type: 'output_text', text: [
       'Doing nothing: no change to ‘Weekly support capacity’ in this model, by assumption.',
       ...cardFaces(CAPACITY.canonical_analysis_view),
@@ -295,14 +294,19 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(sent.join('\n')).toContain('Additional specialist capacity');
   });
 
-  it('CONTRAST (served 5b6e5eb7 turn 01, no card to display): the reply keeps the canonical chance line, once', async () => {
+  it('CONTRAST (served 5b6e5eb7 turn 01, no card to display): the invalid historical delta stays unlicensed without a card', async () => {
     const { canonical_analysis_view: view, ...withoutView } = CAPACITY_3017;
     served = withoutView;
     outputs = [[{ type: 'message', content: [{ type: 'output_text', text: `${cardFaces(view as Json)[0]!} ${DEPENDS_3017}` }] }]];
     const run = await runPress();
     expect(run.canonical_analysis_view).toBeUndefined();
     const face = cardFaces(view as Json)[0]!;
-    expect(count(run.assistant_text as string, face)).toBe(1);
+    // This historical capture records a delta request for a level target. It cannot license its 34% as a level chance.
+    expect((served!.analysis_result.enrichment.inference_warnings as Json[]).find(w => w.code === 'GOAL_CHANCE_LICENSED'))
+      .toMatchObject({ sent_threshold: { frame: 'delta' }, pct_by_option: { add_one_specialist: 34 } });
+    expect(run.assistant_text).not.toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, view.goal_chance.notes.at(-1))).toBeLessThanOrEqual(1);
+    expect(face).toContain('34%');
     expect(count(run.assistant_text as string, DEPENDS_3017)).toBe(1);
   });
 
@@ -312,34 +316,40 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
    * `matchesCanonicalRun(by 'card')`). Hashes that are both absent are equal, and a view with no run id has an equal hash,
    * but neither card displays the face, so the reply keeps the line.
    */
-  it('ADVERSARIAL (served 5b6e5eb7 turn 01): the hashes agree but the view names no Run, so no card shows the face; the line stays', async () => {
+  it('ADVERSARIAL (served 5b6e5eb7 turn 01): the hashes agree but the view names no Run, so no card licenses its historical figure', async () => {
     const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
     delete view.run.run_id;
     expect(view.run.graph_hash_at_run).toBe(CAPACITY_3017.analysis_result.computed_against_hash);
     served = { ...CAPACITY_3017, canonical_analysis_view: view };
     outputs = [[{ type: 'message', content: [{ type: 'output_text', text: cardFaces(view)[0]! }] }]];
     const run = await runPress();
-    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+    expect(cardFaces(view)[0]!).toContain('34%'); // immutable historical display, not a new licence
+    expect(run.assistant_text).not.toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.")).toBe(1);
   });
 
-  it('ADVERSARIAL (served 5b6e5eb7 turn 01): both hashes absent are equal but bind nothing; the line stays', async () => {
+  it('ADVERSARIAL (served 5b6e5eb7 turn 01): both hashes absent bind no current figure', async () => {
     const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
     delete view.run.graph_hash_at_run;
     const { computed_against_hash: _gone, ...result } = CAPACITY_3017.analysis_result as Json;
     served = { ...CAPACITY_3017, canonical_analysis_view: view, analysis_result: result };
     outputs = [[{ type: 'message', content: [{ type: 'output_text', text: cardFaces(view)[0]! }] }]];
     const run = await runPress();
-    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+    expect(cardFaces(view)[0]!).toContain('34%'); // immutable historical display, not a new licence
+    expect(run.assistant_text).not.toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.")).toBe(1);
   });
 
-  it('ADVERSARIAL (Codex r1 probe, served 5b6e5eb7 turn 01): an EARLIER Run of the same graph is not this turn\'s Run; the line stays', async () => {
+  it('ADVERSARIAL (Codex r1 probe, served 5b6e5eb7 turn 01): an EARLIER Run of the same graph is not this turn\'s Run; its figure stays unlicensed', async () => {
     const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
     view.run = { ...view.run, run_id: 'earlier-run', computed_at: '2026-10-13T06:54:24.046Z' };
     expect(view.run.graph_hash_at_run).toBe(CAPACITY_3017.analysis_result.computed_against_hash);
     served = { ...CAPACITY_3017, canonical_analysis_view: view };
     outputs = [[{ type: 'message', content: [{ type: 'output_text', text: cardFaces(view)[0]! }] }]];
     const run = await runPress();
-    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+    expect(cardFaces(view)[0]!).toContain('34%'); // immutable historical display, not a new licence
+    expect(run.assistant_text).not.toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.")).toBe(1);
   });
 
   it('ADVERSARIAL (Codex r1 probe, capacity Run 2): a card face WITHOUT the shortfall sentence leaves the whole line said', async () => {
@@ -391,7 +401,6 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
   it('CONTRAST (the card says it): with no card to show the withheld cells, the reply keeps the line, once', async () => {
     const { canonical_analysis_view: _dropped, ...withoutView } = withNotTestable(true);
     served = withoutView;
-    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: `${cardFaces(view as Json)[0]!} ${DEPENDS_3017}` }] }]];
     const run = await runPress();
     expect(run.canonical_analysis_view).toBeUndefined();
     expect(saidTimes(run.assistant_text as string, served)).toEqual([1, 1]);
@@ -457,12 +466,14 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(comparisonSent()).toBeUndefined();
   });
 
-  it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the card is not the current Run, so the reply keeps the line', async () => {
+  it('CONTRAST (served 5b6e5eb7 turn 01, a stale card): the stale card cannot license a historical delta figure', async () => {
     const view = structuredClone(CAPACITY_3017.canonical_analysis_view) as Json;
     view.staleness = { ...view.staleness, stale: true };
     served = { ...CAPACITY_3017, canonical_analysis_view: view };
     outputs = [[{ type: 'message', content: [{ type: 'output_text', text: cardFaces(view)[0]! }] }]];
     const run = await runPress();
-    expect(count(run.assistant_text as string, cardFaces(view)[0]!)).toBe(1);
+    expect(cardFaces(view)[0]!).toContain('34%'); // immutable historical display, not a new licence
+    expect(run.assistant_text).not.toMatch(CHANCE_LINE);
+    expect(count(run.assistant_text as string, "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.")).toBe(1);
   });
 });

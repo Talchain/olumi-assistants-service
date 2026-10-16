@@ -1,11 +1,12 @@
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent, checkScreenLineClaims } from './goal-chance-screen-lines.js';
 import { withoutDisclosure } from './disclosure.js';
+import { recordedSentencesOf } from './recorded-sentence.js';
 import { STATIC_MODEL_SCOPE_NOTE } from '../goal-target/static-run-evidence.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { rankingCodesIn, rankingLabelContext } from './withheld-leader-fail-closed.js';
-import { licensedChancesOf } from './licensed-chance-lines.js';
+import { isLicensedChanceLine, licensedChancesOf } from './licensed-chance-lines.js';
 import { goalChanceWithheldForAgent } from './goal-chance-withheld.js';
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from './run-explanation.js';
 
@@ -71,6 +72,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           countedText = [limitation ?? (rest.trim() === '' ? RUN_EXPLANATION_UNAVAILABLE_TEXT : ''), rest].filter(Boolean).join('\n\n');
         }
       }
+    }
+    // Only exact sentences from this Run's record are deduplicated; source quotations remain opaque.
+    for (const sentence of new Set(screenLines.flatMap(line => recordedSentencesOf(line.depends)))) {
+      countedText = withoutDisclosure(countedText, sentence, { keep: 1, protectedTexts: sourceTexts });
     }
     const scopeOnCard = context.disclosureOnCard?.has(STATIC_MODEL_SCOPE_NOTE) === true;
     const ownsStaticInProse = withoutDisclosure(countedText, STATIC_MODEL_SCOPE_NOTE, { keep: 0, protectedTexts: sourceTexts }) !== countedText;
@@ -233,9 +238,9 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
           || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand)
           || ((subject.match(/\b(?:chance|probability|likelihood)\b/g) ?? []).length === 1
             && /\bit (?:has|gives) (?:an? )?(?:chance|probability|likelihood)$/.test(shorthand)));
-        const matched = lines.filter(l => {
+        const figuresMatch = (l: typeof lines[number]): boolean => {
           const pct = rec(licence.pct_by_option)?.[l.option_id];
-          const valueMatches = percentages.some(p => {
+          return percentages.every(p => {
             const value = Number(p[2]!.replace(/,/g, ''));
             const prefix = p[1]!.trim();
             const comparison = prefix.replace(/\b(?:about|roughly|around|approximately|circa)\b/g, '').trim();
@@ -244,11 +249,18 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
               : (pct === 0 && value === 1 && ['<', 'less than'].includes(prefix))
                 || (pct === 100 && value === 99 && ['>', 'more than'].includes(prefix));
           });
-          return namedOptions.length === 1 ? optionGoalPoint && namedOptions[0]!.id === l.option_id
-            : valueMatches && goalId !== undefined && namedGoalPoint;
-        });
+        };
+        const matched = lines.filter(l => namedOptions.length === 1 ? optionGoalPoint && namedOptions[0]!.id === l.option_id
+          : figuresMatch(l) && goalId !== undefined && namedGoalPoint);
         // Goal-only narration still needs one exact (option_id, scored goal_id, displayed value), never a guessed tie.
         if (matched.length !== 1) continue;
+        const [point] = matched;
+        if (point!.olumi_estimate_link_count === undefined && figuresMatch(point!)
+          && isLicensedChanceLine(sentence, licensedChancesOf(context.analysisResult, context.graph, true), optionLabels.map(o => o.label))) {
+          if (said.has(point!.option_id)) edits.push({ start, end, replacement: '' });
+          said.add(point!.option_id);
+          continue;
+        }
         const replacement = matched.filter(l => !said.has(l.option_id)).map(l => { said.add(l.option_id); return l.chance; }).join(' ');
         edits.push({ start, end, replacement });
       }

@@ -54,10 +54,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import {
-  ANALYSIS_MODE_RANK,
-  PERMITTED_ANALYSIS_MODES,
-} from '../../admission/analysis-admission.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { textNamesLeadingOption } from '../leading-option-egress-guard.js';
