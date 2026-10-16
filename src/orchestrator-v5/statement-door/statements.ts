@@ -79,6 +79,15 @@ export function userStatementFor(graph: unknown, subject: DoorSubject): UserStat
   return userStatementOnNode(nodeOf(graph, nodeIdOf(subject)), subjectKey(subject));
 }
 
+/**
+ * ⭐ THE ONE READ OF "THE USER STATED THIS LINK'S EFFECT AS A RANGE" (G3; from the brief at construction, or pressed from chat,
+ * `LINK_EFFECT_RANGE_ROW`): a range statement, not negated, on the link's record. Every asker that would ask the link's size reads it.
+ */
+export function linkHoldsStatedRange(graph: unknown, from: string, to: string): boolean {
+  return userStatementFor(graph, { kind: 'link', id: from, to_id: to, field: 'effect' })
+    ?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
+}
+
 /** The record ONE press writes. */
 export function userStatementRecord(subject: DoorSubject, statements: readonly UserStatement[], recordedAt: string,
   attest?: StatementAttest): UserStatementRecord {
