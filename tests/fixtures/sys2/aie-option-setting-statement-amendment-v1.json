@@ -1,0 +1,13 @@
+{
+  "source_ref": "#94 6218243631 (Lane A request) → AIE disposition 16 Oct, AIE-REVIEW-20261015.md:377–380, option-cost wording",
+  "path": "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+  "constant": "STATEMENTS_INSTRUCTION",
+  "status": "AIE AMEND: retain each stated option/factor setting with its complete attributed source and native period; generated quality UNMEASURED",
+  "changes": [
+    {
+      "id": "Q3",
+      "old": "Labels propose a binding; they do not verify it.",
+      "replacement": "Labels propose a binding; they do not verify it. For each explicitly stated cost or other setting of a particular option/factor, add its own statement entry, naming that option and the factor it sets. Retain the complete attributed source sentence, figure/form, unit, reference, conditions and period exactly as stated; distinguish per-year amounts, totals over the stated period and one-off costs. Never fold several options’ figures into one entry, infer a missing period or allocation, annualise a total, or treat a shared budget/limit as an option’s actual setting."
+    }
+  ]
+}
