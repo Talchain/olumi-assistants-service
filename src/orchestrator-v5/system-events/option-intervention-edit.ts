@@ -81,7 +81,7 @@ import { applyOptionGapDeclarations, optionGapFields, optionGapCardWords, option
   optionGapPostimageIsScoped, optionGapOperands, parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
-import { factorUnitOf } from '../agent-lane/unit-conflict.js';
+import { factorUnitOf, unitsConflict } from '../agent-lane/unit-conflict.js';
 import type { IdentityRunUse } from '../compose/definitional-links.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -398,7 +398,7 @@ type ValueHandlerFact = Extract<FactorValueEditResult, { kind: 'mutated' }>['han
  * ⛔ ONLY THE DECLARED FACTORS' VALUES MAY CHANGE: on each declared factor, the members the canonical value writer owns
  * (`observed_state`, and the node's own `display_value`, `provenance` and `scale_frame` it restates with the value), and
  * the magnitude contract's own re-sizing of Olumi's links on it — nothing else anywhere in the graph: no other member,
- * node, edge, size, option or top-level field.
+ * node, edge, size or top-level field. Options may only receive the value writer's exact quantity-preserving re-encoding.
  */
 const VALUE_WRITER_OWNED_NODE_MEMBERS = ['observed_state', 'display_value', 'provenance', 'scale_frame'] as const;
 export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unknown, factorIds: readonly string[]): boolean {
@@ -413,6 +413,7 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
     if (was.length !== 1 || now.length !== 1 || was[0]!.kind !== 'factor') return false;
     const node = now[0]! as Record<string, unknown>;
     const prior = was[0]! as Record<string, unknown>;
+    if (unitsConflict(factorUnitOf(after, now[0]), factorUnitOf(before, was[0])) !== null) return false;
     for (const member of VALUE_WRITER_OWNED_NODE_MEMBERS) {
       if (Object.hasOwn(prior, member)) node[member] = structuredClone(prior[member]);
       else delete node[member];
@@ -435,6 +436,28 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
     if (!isDeepStrictEqual(now, was) && !isDeepStrictEqual(now, resized[i])) return false;
   }
   restored.edges = structuredClone(before.edges);
+  // Re-derive from TRUSTED options on the final factor frames. Never seed the plan with the candidate's cells:
+  // preserving a changed quantity (or copied authorship) would otherwise turn an unrelated option edit into permission.
+  const hybrid = { ...structuredClone(after),
+    nodes: after.nodes.map((node, i) => node.kind === 'option' ? structuredClone(before.nodes[i] ?? node) : structuredClone(node)),
+    ...(Object.hasOwn(before, 'options') ? { options: structuredClone(before.options) } : {}),
+  };
+  const plan = preserveSiblingQuantities(before, hybrid, []);
+  // A re-encoded cell is admitted only when its own unit agrees with the declared factor's unit now (one classifier).
+  const unitAgrees = (option: unknown) => factorIds.every(id => {
+    const cell = mergeInterventionSourceObjects(option as never)[id] as { unit?: unknown } | undefined;
+    return cell === undefined || unitsConflict(factorUnitOf(after, after.nodes.find(n => n.id === id)), cell.unit) === null;
+  });
+  if (plan.kind === 'preserved') {
+    restored.nodes = restored.nodes.map((node, i) => node.kind === 'option' && before.nodes[i]?.kind === 'option'
+      && isDeepStrictEqual(node, plan.graph.nodes[i]) && (isDeepStrictEqual(node, before.nodes[i]) || unitAgrees(node)) ? structuredClone(before.nodes[i]!) : node);
+    if (Array.isArray(before.options) && Array.isArray(restored.options) && Array.isArray(plan.graph.options)) {
+      const priorOptions = before.options;
+      const plannedOptions = plan.graph.options;
+      restored.options = restored.options.map((option, i) => i < priorOptions.length && isDeepStrictEqual(option, plannedOptions[i]) && (isDeepStrictEqual(option, priorOptions[i]) || unitAgrees(option))
+        ? structuredClone(priorOptions[i]) : option);
+    }
+  }
   return isDeepStrictEqual(restored, before);
 }
 
@@ -502,7 +525,10 @@ async function applyApprovedFactorValues(
       ? await runWithApprovedAdoption({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, targetId: v.factorId, rawValue: v.value }, write)
       : await write();
     if (res.kind !== 'mutated') return refuse(`value_${res.reason}`, i);
-    working = res.mutatedGraph;
+    const valueGraph = res.mutatedGraph;
+    // Check each isolated writer result BEFORE the next value, so the refusal names the value that broke scope.
+    if (!factorValuesPostimageIsScoped(working, valueGraph, [v.factorId])) return refuse('value_scope_mismatch', i);
+    working = valueGraph;
     handlerFacts.push(...res.handlerFacts);
     if (res.response.assistant_text) confirmations.push(res.response.assistant_text);
   }
@@ -530,7 +556,7 @@ async function applyApprovedFactorValues(
   const graph = projectGraphForPersistence(working);
   const touched = [...new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)])];
   if (!isEditableGraph(graph) || !factorValuesPostimageIsScoped(before, graph, touched)) {
-    return refuse('value_scope_mismatch', Math.max(0, values.length - 1));
+    return { kind: 'refused', reason: 'value_scope_mismatch' };
   }
   return { kind: 'applied', graph, handlerFacts, confirmations, linksResized: linksResizedByContract(before, graph, touched) };
 }
