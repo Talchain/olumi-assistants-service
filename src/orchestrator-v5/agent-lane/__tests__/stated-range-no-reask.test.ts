@@ -96,8 +96,16 @@ describe('a Run never asks again for a link whose effect the user stated as a ra
     expect(w.acceptable_links).not.toContainEqual(pair(g, 'Corporate deal active'));
     expect(w.first_ask).toMatchObject({ kind: 'link' });
     expect(w.first_ask).not.toMatchObject(pair(g, 'Corporate deal active'));
-    expect(w.message).toMatch(/Set them to see how much they matter\.$/);
+    // PL 19:07Z: the limitation still names every link; the invitation names only the two with no stated range.
+    const [limitation, invite] = w.message.split(/(?<=yet\.) /u);
+    expect(limitation).toMatch(/^This comparison turns on the links from ‘Corporate deal active’ to ‘weekday attendance’/);
+    expect(limitation).toContain('‘Referral scheme running’');
+    expect(limitation).toContain('‘Flyers delivered’');
+    expect(invite).toMatch(/^Set the links from ‘(Referral scheme running|Flyers delivered)’ to ‘weekday attendance’ and from ‘(Referral scheme running|Flyers delivered)’ to ‘weekday attendance’ to see how much they matter\.$/);
+    expect(invite).not.toContain('Corporate deal active');
+    expect(w.message).not.toMatch(/Set them/);
     expect(w.message).not.toContain(STATED_RANGE_NEXT_STEP);
+    expect(w.message.length).toBeLessThanOrEqual(400);
     expect(chips.map((c) => c.label).sort()).toEqual(OTHERS.map(([, f]) => linkSizeQuestion(f, 'weekday attendance')).sort());
   });
   it('CONTRAST (other links, no range): all three links get their chips', async () => {
@@ -105,6 +113,7 @@ describe('a Run never asks again for a link whose effect the user stated as a ra
     const { w, chips } = runWithhold(g, ['Corporate wellness deal', 'Referral scheme', 'Flyer drop']);
     expect(w.acceptable_links).toHaveLength(3);
     expect(chips.map((c) => c.label)).toContain(linkSizeQuestion('Corporate deal active', 'weekday attendance'));
+    expect(w.message).toMatch(/Set them to see how much they matter\.$/); // no range anywhere: today's sentence
     expect(chips).toHaveLength(3);
   });
 });
