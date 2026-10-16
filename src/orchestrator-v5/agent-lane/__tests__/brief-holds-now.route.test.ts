@@ -300,9 +300,10 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     expect(card.startsWith('From your message: “')).toBe(true);
     expect(card).toContain(SENTENCE);
     // DL-3 RULING 23:12Z: the derived 100% is SHOWN before the press as Olumi's reading of his words, never his number.
-    expect(card).toContain(`Olumi proposes this reading: ‘${LABEL}’ already being true now. For this reading, Olumi represents that condition as `
-      + 'true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived reading of your words, not a numerical probability you '
-      + 'stated. It does not establish persistence throughout the window or the condition’s effect. How strongly it affects ‘New customers’ is a separate assumption:');
+    // AIE 6226765434's sentence ("scenario" said as "reading", Paul's vocabulary).
+    expect(card).toContain(`Olumi proposes this reading: ‘${LABEL}’ already being true now. For this conditional reading, Olumi would represent `
+      + `‘${LABEL}’ as true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived assumption, not a numerical probability you `
+      + 'stated, and does not establish persistence or effect. How strongly it affects ‘New customers’ is a separate assumption:');
     expect(card.endsWith('Record this reading?')).toBe(true);
     expect(graphWrites(w), 'nothing before the press').toBe(0);
     const pressed = await turn({ message: cards[0]!.message, source: 'chip_click', chip: { id: cards[0]!.id } });

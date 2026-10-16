@@ -133,7 +133,7 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     expect(held).toMatchObject({ ok: true, statement: { field: 'holds_now', quotes: [now] } });
     // DL-3 RULING 23:12Z: the derived 100% is shown before the press as Olumi's reading of their words.
     expect(held.public_label).toBe(`From your message: “${now}” Olumi proposes this reading: ‘${LABEL}’ already being true now. `
-      + 'For this reading, Olumi represents that condition as true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived reading of your words, not a numerical probability you stated. It does not establish persistence throughout the window or the condition’s effect. '
+      + `For this conditional reading, Olumi would represent ‘${LABEL}’ as true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived assumption, not a numerical probability you stated, and does not establish persistence or effect. `
       + `How strongly it affects ‘Productivity’ is a separate assumption: ${EFFECT}. Record this reading?`);
   });
 

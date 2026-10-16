@@ -91,18 +91,22 @@ describe('draft source → risk admission → retained participation → readine
       + 'unsized risk suggestion and is not included in this calculation; its likelihood and impact remain unresolved.');
   });
 
-  it('a verified human risk keeps its whole conditional/dissenting statement and still asks for its own size', () => {
+  // ⭐ DL-3 23:52Z (BUDDY-A #3327 R2 B1, the CLASS): for a risk, a figure-free reading of any form is Olumi's reading of the user's words.
+  // The GENUINE-DESCRIPTION POSITIVE: the whole conditional, dissenting words are kept, as human material (never Olumi's estimate, never
+  // left out of the Run) that still asks for the risk's own size; never verified human, never a holds-now record of theirs.
+  it('a human description of a risk keeps its whole conditional/dissenting words as Olumi\'s reading, and still asks for its own size', () => {
     const quote = 'If the supplier is late, specialist capacity could fall below target; our operations lead disagrees.';
     const statement = riskStatement(quote, { conditions: 'If the supplier is late', qualifier: 'could' });
-    const { graph, risk } = admitted(draft([statement]), `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('from_brief');
-    expect(authorshipOf({ nodeTag: risk.provenance }).origin).toBe('human');
+    const { graph, risk, out } = admitted(draft([statement]), `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(authorshipOf({ nodeTag: risk.provenance })).toMatchObject({ origin: 'human', role: 'unverified' });
     expect(risk.analysis_participation).toBeUndefined();
     expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
     expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
-    expect(JSON.stringify(risk.user_statements)).toContain(quote);
-    expect(JSON.stringify(risk.user_statements)).toContain('If the supplier is late');
+    expect(JSON.stringify(out.loss)).toContain(quote);
+    expect(JSON.stringify(out.loss)).toContain('If the supplier is late');
+    expect(risk.user_statements).toBeUndefined();
     expect(risk.already_true_quote).toBeUndefined();
   });
 
@@ -175,6 +179,32 @@ describe('draft source → risk admission → retained participation → readine
       olumisReading(risk, graph, out, quote);
     });
 
+  // ⭐ BUDDY-A #3327 R2 B1: a description verifies the user only where it NAMES the risk (the door's own subject check). The same
+  // unrelated budget sentence, read as describing the risk (with or without the receipt), stays Olumi's reading of the user's words,
+  // and no holds-now record of theirs is written; words that describe it loosely stay human material, never Olumi's.
+  it.each([['with the receipt', true], ['alone', false]] as const)('sole misbind as a DESCRIPTION, %s: unverified human words, no record of theirs', (_n, receipt) => {
+    const model = draft([riskStatement(BUDGET)]);
+    if (receipt) model.risks[0].already_true_evidence = { quote: BUDGET };
+    const { risk, graph, out } = admitted(model, `${BASE} ${BUDGET}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.user_statements).toBeUndefined();
+    expect(risk.event_risk).toBeUndefined();
+    expect(JSON.stringify(out.loss)).toContain(BUDGET);
+    expect(JSON.stringify(issuesFor(graph, risk.id))).not.toMatch(/you said|you stated/i);
+  });
+  it('CONTROL (BUDDY-A\'s genuine description): naming the risk does not make a figure-free reading the user\'s; its words are kept whole', () => {
+    const quote = 'Specialist capacity below target is a concern for us.';
+    const { risk, out } = admitted(draft([riskStatement(quote)]), `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(JSON.stringify(out.loss)).toContain(quote);
+  });
+  it('a loose description that does not name the risk stays human material (unverified), never Olumi\'s', () => {
+    const quote = 'The specialist capacity risk is a concern for us.';
+    const { risk, graph } = admitted(draft([riskStatement(quote)]), `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+  });
+
   it('a malformed statements list is no complete source: the risk is unknown, as with no list', () => {
     const model = draft(); model.statements = [...model.statements, null, 7];
     const { risk } = admitted(model);
@@ -194,8 +224,9 @@ describe('draft source → risk admission → retained participation → readine
   });
 
   it('draft participation/widening marks cannot overrule verified human origin', () => {
-    const quote = 'The specialist capacity risk is a concern for us.';
-    const model = draft([riskStatement(quote)]);
+    // Verified human = a FIGURE the verifier checks (the user's own stated chance), whatever the draft's marks say.
+    const quote = 'There is about a 30% chance that specialist capacity falls below target.';
+    const model = draft([riskStatement(quote, { field: 'occurrence', form: 'point', value: 30, unit: '%' })]);
     model.risks[0].analysis_participation = 'retained_excluded'; model.risks[0].draft_widening = { basis: 'model suggestion' };
     const { risk, graph } = admitted(model, `${BASE} ${quote}`);
     expect(risk.provenance).toBe('from_brief'); expect(risk.proposed_by).toBeUndefined();

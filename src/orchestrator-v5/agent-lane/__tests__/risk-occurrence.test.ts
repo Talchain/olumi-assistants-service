@@ -299,7 +299,7 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     const card = await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
     expect(card).toMatchObject({ ok: true, statement: { subject: 'Code quality deterioration', field: 'holds_now', quotes: [SAID] } });
     expect(card.public_label).toBe(`From your message: “${SAID}” Olumi proposes this reading: ‘Code quality deterioration’ already being true now. `
-      + 'For this reading, Olumi represents that condition as true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived reading of your words, not a numerical probability you stated. It does not establish persistence throughout the window or the condition’s effect. How '
+      + 'For this conditional reading, Olumi would represent ‘Code quality deterioration’ as true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived assumption, not a numerical probability you stated, and does not establish persistence or effect. How '
       + 'strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized. Record this reading?');
     expect(card.public_label).not.toMatch(/chance|likely|Olumi’s starting assumption/);
     // Card-only: the Agent's reading of a yes never applies it.

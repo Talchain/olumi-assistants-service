@@ -40,9 +40,10 @@ const derivedWindowWords = (months: number): string => `For this conditional rea
  * ⭐ DL-3 RULING 23:12Z (BUDDY-A #3327 AMEND): "already true now" is OLUMI'S READING of the user's words, so its press writes the
  * SAME derived block as a window forecast (basis olumi, AIE 6183711560's precedent), said in that sentence's words, from today.
  */
-const derivedNowWords = (months: number): string => `For this reading, Olumi represents that condition as true at least once in the next `
-  + `${windowSaid(months)}: occurrence 100%. This is Olumi’s derived reading of your words, not a numerical probability you stated. `
-  + 'It does not establish persistence throughout the window or the condition’s effect.';
+/** AIE 6226765434's card sentence, exact ("scenario" said as "reading": Paul's 14 Oct vocabulary, as for 6183711560's). */
+const derivedNowWords = (label: string, months: number): string => `For this conditional reading, Olumi would represent ‘${label.trim()}’ as true `
+  + `at least once in the next ${windowSaid(months)}: occurrence 100%. This is Olumi’s derived assumption, not a numerical probability you stated, `
+  + 'and does not establish persistence or effect.';
 const percent = (p: number): number => Number((p * 100).toFixed(6));
 const labelOf = (graph: unknown, id: string): string => String((isRec(graph) && Array.isArray(graph.nodes)
   ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === id)?.label : undefined) ?? id).trim();
@@ -225,7 +226,8 @@ export const RISK_HOLDS_NOW_ROW: RoleRow = {
     ? `your forecast that ‘${label.trim()}’ would hold at some point during your goal’s period, the first ${firstPeriod(windowOf(graph, subject))} `
       + 'after the launch, with no qualifications in your answer'
     : `‘${label.trim()}’ already being true now`,
-  assumptions: (s, subject, graph) => [s[0]?.form === 'holds_in_window' ? derivedWindowWords(windowOf(graph, subject)) : derivedNowWords(windowOf(graph, subject)),
+  assumptions: (s, subject, graph) => [s[0]?.form === 'holds_in_window' ? derivedWindowWords(windowOf(graph, subject))
+    : derivedNowWords(labelOf(graph, subject.id), windowOf(graph, subject)),
     effectAssumption(subject, graph)],
   // Said after the write, so its period is the block the risk now holds (the risk is no longer eligible for a new one).
   recordedWords: (s, subject, label, graph) => {

@@ -191,9 +191,8 @@ export type FigureSource = 'user' | 'unverified' | 'unclaimed';
  * Qualitative introduction uses the SAME verified source map, not the drafter's provenance flag.
  * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3327 B1 and its 22:59Z AMEND): a reading the host cannot check against the
  * words is OLUMI'S READING of the user's words, never the user's statement of it:
- *  · only the AI's verified statements that carry what they read (a figure the quote writes, or what it describes) make the
- *    subject the user's;
- *  · a `holds_now` reading (figure-free: "already true now") never does, nor does `retained` (words the drafter attached to the
+ *  · only a verified statement of a FIGURE the quote writes (a stated chance) makes the subject the user's;
+ *  · a figure-free reading (holds_now, describes, any other form) never does, nor does `retained` (words the drafter attached to the
  *    subject outside its statements, a risk's `already_true_evidence`). A whole sentence of the user's there keeps the subject
  *    unverified human material, its words kept in `claimed`; never Olumi's estimate;
  *  · `holdsNowReading` is that reading's whole quote, for the door's card (the card IS the ask; only the press adopts it, as
@@ -239,7 +238,10 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
     return keptWords ? unverifiedHuman(claimed)
       : out({ author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed: [...claimed, ...kept] });
   }
-  if (statements.some(({ statement: st }) => st.form !== 'holds_now' && !quoteIsNotTheUsersClaim(st.source, st.quote) && !rivalled(st.quote))) {
+  // ⭐ DL-3 23:52Z (BUDDY-A #3327 R2 B1, the CLASS): for a risk, only a FIGURE the verifier checks (a stated chance) is the user's
+  // statement. Every figure-free form (holds_now, describes, any other) is Olumi's reading of their words, whatever it is called.
+  const supported = (st: UserStatement): boolean => st.low !== undefined || st.high !== undefined;
+  if (statements.some(({ statement: st }) => supported(st) && !quoteIsNotTheUsersClaim(st.source, st.quote) && !rivalled(st.quote))) {
     return out({ author: authorshipOf({ words: { verified: true, unknown: false } }), statements, claimed: [...claimed, ...kept] });
   }
   // Known human words with an unverified field/figure (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
@@ -373,8 +375,11 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     const field = STATEMENT_FIELDS.find((f) => f === r['field']);
     if (drafted === undefined || field === undefined) continue;
     if (drafted.kind === 'risk') {
+      // The user's words are recorded on a risk they are human material for. A holds-now reading is Olumi's, carried only by its card
+      // (`already_true_quote`): never a construction record of theirs (DL-3 RULING 23:12Z + 23:52Z).
+      if (field === 'holds_now') continue;
       const source = subjectSource({ statements: entries }, brief, drafted);
-      if (source.author.origin !== 'human' || source.author.role === 'unverified') continue;
+      if (source.author.origin !== 'human') continue;
     }
     const verified = [...sourceMapOf([entry], brief).verified.values()].flat();
     if (verified.length === 0) continue;
