@@ -18,6 +18,7 @@ import CAPTURED_COACHING from './fixtures/c3-4de96a0a-coaching-blocks.json';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { STATIC_MODEL_SCOPE_NOTE } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -269,7 +270,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       if (mode === 'foreign') canonicalReadOverride = view => ({ ...view,
         run: view.run === null ? null : { ...view.run, computed_at: '2000-01-01T00:00:00.000Z' } });
       if (mode === 'bound') extraRunBlocks = structuredClone(CAPTURED_COACHING.blocks);
-      const answer = `The retained chance is conditional on these inputs. ${STATIC_MODEL_SCOPE_NOTE}`;
+      const legacyScope = goalChanceFactsForAgent(analysisResult, READ.graph, true).goal_horizon_line;
+      expect(legacyScope, 'the Run still carries the older scope sentence').toBeDefined();
+      const answer = `The retained chance is conditional on these inputs. ${STATIC_MODEL_SCOPE_NOTE} ${STATIC_MODEL_SCOPE_NOTE} ${legacyScope} I supplied **4** of the values behind this.`;
       const chip = runExplanationChip(SCENARIO, { graphHash: READ.graph_hash, analysisState: READ.analysis_state, analysisResult })!;
       const body = mode === 'explain'
         ? await turn([say(answer)], RUN_EXPLANATION_MESSAGE, { chip: { id: chip.id } })
@@ -286,6 +289,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
         expect(count(body.assistant_text, STATIC_MODEL_SCOPE_NOTE)).toBe(1);
         if (mode === 'explain') expect(runCompleted, 'Explain does not run analysis again').toBe(false);
       }
+      expect(body.assistant_text, 'the same recorded scope is not said in two forms').not.toContain(legacyScope);
+      expect(body.assistant_text, 'only the recorded producer may supply an attribution count').not.toContain('I supplied **4**');
       expect(rows.get(lastTurnPayload.turn_id)?.assistant_message).toBe(body.assistant_text);
     }, 60000);
 

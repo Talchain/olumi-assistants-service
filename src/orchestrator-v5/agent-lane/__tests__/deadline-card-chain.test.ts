@@ -136,7 +136,8 @@ describe('deterministic deadline card on the first Agent turn', () => {
   it('R1 Run-chip offers exactly one bound card using draft R; no graph change', async () => {
     const w = world(), before = w.read(), turn = await route(w), body = await turn(), { call, yes } = card(body);
     // AMENDED (hiring post3007 turn 02, DL 14 Oct; was `toBe(yes.detail)`): the card's question follows the AI's answer, never replaces it.
-    expect(body.assistant_text).toBe(`${AGENT_ANSWER}\n\n${yes.detail}`); expect(w.read()).toEqual(before);
+    expect(body.assistant_text).toBe(AGENT_ANSWER);
+    expect(yes.detail).toContain('Is your deadline'); expect(w.read()).toEqual(before);
     const carrier = (w.rows[0] as Rec).pending_actions.find((p: Rec) => p.chip_id === yes.id);
     expect(carrier.action.inline_patch.agent_proposal).toMatchObject({ proposal_id: call.proposal_id,
       operations: [{ op: 'set_goal_deadline', path: goal(before).id, value: { deadline: '2027-08-10', words: 'ten months', reference: R, expected_deadline: null, stated_months: 10 } }] });
@@ -522,7 +523,8 @@ describe('R6 the draft was built inside an Agent turn', () => {
     const w = world(), before = w.read(); w.rows.unshift(buildAnswer(w));
     const turn = await route(w), first = await turn(), { call, yes } = card(first);
     // AMENDED (hiring post3007 turn 02, DL 14 Oct; was `toBe(yes.detail)`): the card's question follows the AI's answer.
-    expect(first.assistant_text).toBe(`${AGENT_ANSWER}\n\n${yes.detail}`); expect(w.read()).toEqual(before);
+    expect(first.assistant_text).toBe(AGENT_ANSWER);
+    expect(yes.detail).toContain('Is your deadline'); expect(w.read()).toEqual(before);
     expect(call.proposal_id).toEqual(expect.any(String));
     const second = await turn({ agent_session_id: first._agent.session_id });
     expect(second._agent.tool_calls.filter((c: Rec) => c.name === 'propose_goal_deadline')).toEqual([]);
@@ -773,10 +775,10 @@ describe('RULING A: the route card trusts the attested words; retired negatives 
     const answer = 'It is mostly a data issue: most links between the factors and the outcome are still unsized, so they draw faintly.';
     const { body, history, before, after } = await turn02(answer);
     // Served: `assistant_text` was the card alone. Now the AI's answer, then the card's question.
-    expect(body.assistant_text).toBe(`${answer}\n\n${HIRING_CARD}`);
+    expect(body.assistant_text).toBe(answer);
     expect(after, 'offered, not saved').toEqual(before);
     // The next turn's AI holds this reply as ONE assistant item: its answer was given, and the card asked once.
-    expect(history).toContain(body.assistant_text);
+    expect(history.some(text => text.includes(body.assistant_text))).toBe(true);
     expect(history.reduce((n, t) => n + count(t, HIRING_CARD), 0)).toBe(1);
   });
 

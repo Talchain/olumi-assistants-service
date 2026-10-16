@@ -49,6 +49,7 @@ let cause = false;
 let extraRisk = false;
 let narratorText = NARRATION;
 let buildOutput: Rec | undefined;
+let sentBuildRequest = '';
 let activeBrief = '';
 let askedToBuild = false;
 const link = (from: string, to: string, direction: 'positive' | 'negative') => ({
@@ -94,7 +95,7 @@ describe('event-risk disclosure through the served build reply', () => {
           call_id: 'build', arguments: JSON.stringify({ brief: activeBrief }) }] }), { status: 200 });
       }
       const output = body.input?.filter((i) => i.type === 'function_call_output').at(-1)?.output;
-      if (output !== undefined) buildOutput = JSON.parse(output) as Rec;
+      if (output !== undefined) { buildOutput = JSON.parse(output) as Rec; sentBuildRequest = JSON.stringify(body); }
       return new Response(JSON.stringify({ ...say(narratorText), ...(incompleteAnswer ? { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } } : {}) }), { status: 200 });
     }));
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
@@ -110,7 +111,7 @@ describe('event-risk disclosure through the served build reply', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
-  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); rejectedDraft = false; emptyDraft = false; incompleteAnswer = false; constructionCalls = 0; cause = false; extraRisk = false; narratorText = NARRATION; buildOutput = undefined; askedToBuild = false; });
+  beforeEach(() => { saved = { nodes: [], edges: [] }; rows.clear(); rejectedDraft = false; emptyDraft = false; incompleteAnswer = false; constructionCalls = 0; cause = false; extraRisk = false; narratorText = NARRATION; buildOutput = undefined; sentBuildRequest = ''; askedToBuild = false; });
   async function turn(brief: string, built = true) {
     activeBrief = brief;
     const turnId = randomUUID();
@@ -125,44 +126,44 @@ describe('event-risk disclosure through the served build reply', () => {
   }
   const held = () => heldEventRiskLine('Key developer leaves', readStatedEventRisk(STATED)!.event_risk);
   const refused = () => refusedEventRiskLine('Key developer leaves');
-  it('ER-2-refused: a cause-link disclosure reaches More detail once without model narration', async () => {
+  it('ER-2-refused: the SENT cause-link disclosure retains the held user likelihood', async () => {
     cause = true;
     const body = await turn(PREFIX + STATED);
     expect(buildOutput?.not_represented).toContain(refused());
-    expect(body.assistant_text).toContain(refused());
-    expect(body.assistant_text.split(refused())).toHaveLength(2);
-    expect(body._answer_shape?.detail).toContain(refused());
-    expect(body._answer_shape?.bullets).not.toContain(refused());
+    expect(sentBuildRequest).toContain('10–30');
+    expect(buildOutput?.not_represented).toContain(refused());
+    expect(body.assistant_text).not.toContain(refused());
   });
-  it('ER-2-held: the user likelihood reaches More detail once without model narration', async () => {
+  it('ER-2-held: the user likelihood reaches the actual interpreter request', async () => {
     const body = await turn(PREFIX + STATED);
     expect(buildOutput?.not_represented).toContain(held());
-    expect(body.assistant_text).toContain(held());
-    expect(body.assistant_text.split(held())).toHaveLength(2);
-    expect(body._answer_shape?.detail).toContain(held());
-    expect(body._answer_shape?.bullets).not.toContain(held());
+    expect(sentBuildRequest).toContain('10–30');
+    expect(sentBuildRequest).toContain('not_represented');
+    expect(body.assistant_text).not.toContain(held());
   });
-  it.each(['paragraph', 'bullet'] as const)('ER-2-copy-%s: a verbatim narrator copy is moved to detail once', async (position) => {
+  it.each(['paragraph', 'bullet'] as const)('ER-2-copy-%s: a verbatim narrator copy survives once without a host detail layout', async (position) => {
     narratorText = position === 'bullet' ? `${NARRATION}\n- ${held()}` : `${NARRATION}\n\n${held()}`;
     const body = await turn(PREFIX + STATED);
     expect(body.assistant_text.split(held())).toHaveLength(2);
-    expect(body._answer_shape?.detail).toContain(held());
-    expect(body._answer_shape?.bullets).not.toContain(held());
+    expect(buildOutput?.not_represented).toContain(held());
+    expect(body._answer_shape).toBeUndefined();
   });
-  it('ER-2-multi: each risk has its own disclosure in detail', async () => {
+  it('ER-2-multi: each risk has its own held disclosure in the SENT tool result', async () => {
     extraRisk = true;
     const second = 'Our supplier fails, a 20% chance within a month.';
     const secondLine = heldEventRiskLine('Supplier fails', readStatedEventRisk(second)!.event_risk);
     const body = await turn(PREFIX + STATED + ' ' + second);
     for (const line of [held(), secondLine]) {
-      expect(body.assistant_text.split(line)).toHaveLength(2);
-      expect(body._answer_shape?.detail).toContain(line);
+      expect(buildOutput?.not_represented).toContain(line);
+      expect(body.assistant_text).not.toContain(line);
     }
-    expect(body._answer_shape?.bullets?.length).toBeLessThanOrEqual(3);
+    expect(body._answer_shape).toBeUndefined();
   });
-  it('ER-2-control: no likelihood keeps the current reply and shape byte-identical', async () => {
+  it('ER-2-control: no likelihood fabricates no probability; the AI reply has no host layout', async () => {
     const body = await turn(PREFIX + 'Our key developer might leave in the next 6 months.');
-    expect({ text: body.assistant_text, shape: body._answer_shape }).toMatchSnapshot();
+    expect(body.assistant_text).toContain(NARRATION);
+    expect(body._answer_shape).toBeUndefined();
+    expect(buildOutput?.not_represented ?? []).not.toContain(held());
     // BYPASS1: the AI wrote this reply and holds the D1 objective ask as its typed next step, so the host adds it 0 times.
     const objectiveAsk = 'I used "Delivery" as a provisional objective. What should this model help you explore?';
     expect(buildOutput?.next_step_blocker).toMatchObject({ kind: 'missing_input', cause: 'objective_provisional', ask: objectiveAsk });

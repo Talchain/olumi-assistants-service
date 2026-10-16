@@ -439,7 +439,10 @@ describe('⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456): the e
     // Fixture control: this Run's licence gives the screen's chance lines on the saved model.
     const lines = goalChanceScreenLinesForAgent(LICENSED(hash(w.read())).analysis_result, w.read(), true);
     expect(lines.map((l) => l.option_id).sort()).toEqual(['hire_a_tech_lead', 'hire_two_developers']);
-    for (const line of lines) expect(String(pressed.assistant_text), line.option_id).toContain(line.chance);
+    const shown = (pressed.blocks as Rec[]).find(b => b.type === 'analysis_result');
+    expect(shown).toMatchObject(LICENSED(hash(w.read())).analysis_result);
+    expect(String(pressed.assistant_text)).not.toContain('67%');
+    expect(String(pressed.assistant_text)).not.toContain('41%');
     // Recorded as this turn's Run, by the Run's own call.
     expect((pressed._agent.tool_calls as Rec[]).filter((c) => c.name === 'run_analysis')).toEqual([expect.objectContaining({ ok: true, mutated: false })]);
   }, 90_000);

@@ -18,6 +18,7 @@
  * that appears on every turn is noise, and noise is how a real one gets missed.
  */
 
+import { foldQuotes } from './quote-normalisation.js';
 import { resizedLinksSentence, type ResizedLinksGroup } from '../../cee/magnitude/frame-defaulted-links.js';
 import { recordedSentenceIn, recordedSentencesOf as sentencesOf } from './recorded-sentence.js';
 import { indexGoalWeightsMessages } from '../goal-target/index-goal-weights-note.js';
@@ -87,10 +88,39 @@ export function withDisclosures(assistantText: string, owed: readonly string[],
 }
 
 /** The inverse of {@link withDisclosures} for ONE host-owed line: removed with its paragraph break, only when it stands exactly once. */
-export function withoutDisclosure(assistantText: string, line: string): string {
-  if (line.trim() === '' || assistantText.split(line).length !== 2) return assistantText;
-  const form = [`\n\n${line}`, `${line}\n\n`, line].find((f) => assistantText.includes(f))!;
-  return assistantText.replace(form, '');
+export function withoutDisclosure(assistantText: string, line: string, opts?: {
+  /** Explicit ownership: keep one copy in prose, or none when the same Run's card carries it. */
+  readonly keep: 0 | 1;
+  readonly protectedTexts?: readonly string[];
+}): string {
+  if (line.trim() === '') return assistantText;
+  if (opts === undefined) {
+    if (assistantText.split(line).length !== 2) return assistantText;
+    const form = [`\n\n${line}`, `${line}\n\n`, line].find(f => assistantText.includes(f))!;
+    return assistantText.replace(form, '');
+  }
+  const protectedText: string[] = [];
+  let body = assistantText;
+  for (const source of opts.protectedTexts ?? []) {
+    if (source === '') continue;
+    const needle = foldQuotes(source), folded = foldQuotes(body);
+    const positions: number[] = [];
+    for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) positions.push(at);
+    for (const at of positions.reverse()) {
+      const key = `\u0000RECORDED_SOURCE_${protectedText.length}\u0000`;
+      protectedText.push(body.slice(at, at + needle.length));
+      body = body.slice(0, at) + key + body.slice(at + needle.length);
+    }
+  }
+  const positions: number[] = [];
+  for (let at = body.indexOf(line); at >= 0; at = body.indexOf(line, at + line.length)) positions.push(at);
+  for (const at of positions.slice(opts.keep).reverse()) {
+    const beforeBreak = body.slice(Math.max(0, at - 2), at) === '\n\n';
+    const afterBreak = body.slice(at + line.length, at + line.length + 2) === '\n\n';
+    body = body.slice(0, beforeBreak ? at - 2 : at) + body.slice(at + line.length + (!beforeBreak && afterBreak ? 2 : 0));
+  }
+  for (const [i, text] of protectedText.entries()) body = body.split(`\u0000RECORDED_SOURCE_${i}\u0000`).join(text);
+  return body;
 }
 
 /**

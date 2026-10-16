@@ -576,7 +576,8 @@ export function placeholderGoalWarning(
   const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
-    : noDeadEnd?.first ?? (firstLink !== undefined ? { kind: 'link', from: firstLink.from, to: firstLink.to } : undefined);
+    : noDeadEnd !== undefined ? noDeadEnd.first
+      : (firstLink !== undefined ? { kind: 'link', from: firstLink.from, to: firstLink.to } : undefined);
   return {
     code, message,
     links: ordered,
@@ -677,33 +678,11 @@ export function noDeadEndAsks(
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
-    const unit = unitOf(goalView);
-    // Science d5 #87 6007354826: the bridge says WHY the level comes first (the link question needs the goal's unit).
-    const askOf = (): string => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
-      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
-    // ⛔ THE ASK ALWAYS SURVIVES (Codex r1 #2635 P1): `first` names it, so the statement compacts WITH it and is dropped
-    // only when even compacted it leaves no room. Long labels used to keep the statement and drop the question.
-    const ask = askOf();
-    const statement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), 400 - ask.length - 1);
-    let message = statement === '' ? ask : `${statement} ${ask}`;
-    let question = ask;
-    // The complete question is kept whenever the cause still fits beside it in the 400 carrier (D-04). Otherwise the
-    // labels shorten, at word boundaries, in the statement AND the question together, so the reason is never lost
-    // (R10 Science: every link accounted for; Codex r2 P1 on #2748: a 308-character question left no room for the
-    // cause). `first.question` is the question actually said, so the current-level ask still binds (Codex r1 P1).
-    if (statement === '' || ask.length > 400) {
-      for (budget = 120; budget > 12; budget -= 12) {
-        const shortAsk = askOf();
-        const b = budget;
-        const shortStatement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: compactWordLabel(labelOf(l.from), b), to_label: compactWordLabel(labelOf(l.to), b) })), 400 - shortAsk.length - 1);
-        message = shortStatement === '' ? shortAsk : `${shortStatement} ${shortAsk}`;
-        question = shortAsk;
-        if (shortStatement !== '' && message.length <= 400) break;
-      }
-      budget = null;
-    }
-    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question } };
+    // Keep the unresolved link facts. The AI asks from the saved record and retained answers.
+    return { message: unsizedLinkStatement(links.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))),
+      gaugeLinks: new Set() };
   }
+
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
   const sentences: string[] = [];

@@ -450,7 +450,10 @@ describe('THE WORDS: the card and the withhold ask', () => {
     const goal = g.nodes.find((n: Rec) => n.id === 'mrr');
     delete goal.observed_state;
     goal.goal_threshold_unit = '£/month';
-    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toMatch(/whose strengths aren't sized in the model yet\. To size them, I first need today’s level of ‘MRR’\. What is it, in £\/month\?$/);
+    const result = W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise');
+    expect(result.message).toContain("whose strengths aren't sized in the model yet");
+    expect(result.message).not.toContain('What is it');
+    expect(result.first_ask).toBeUndefined();
   });
   it('CONTROL: a withhold with no mediator and a framed goal keeps its words byte for byte', () => {
     const g = gaugeGraph();

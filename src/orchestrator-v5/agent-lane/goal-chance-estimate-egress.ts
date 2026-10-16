@@ -1,13 +1,30 @@
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent, checkScreenLineClaims } from './goal-chance-screen-lines.js';
-import { checkRerunExplanation, type RerunExplanationPlan } from './rerun-explanation.js';
 import { withoutDisclosure } from './disclosure.js';
 import { STATIC_MODEL_SCOPE_NOTE } from '../goal-target/static-run-evidence.js';
 import { foldQuotes } from './quote-normalisation.js';
+import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { rankingCodesIn, rankingLabelContext } from './withheld-leader-fail-closed.js';
+import { licensedChancesOf } from './licensed-chance-lines.js';
+import { goalChanceWithheldForAgent } from './goal-chance-withheld.js';
+import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from './run-explanation.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
 const plain = (s: string): string => foldQuotes(s).replace(/['"`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+
+/** Exact source slices already used by the percentage check; no authorship is inferred from reply wording. */
+function authoredSlicesOf(texts: readonly string[]): string[] {
+  return texts.flatMap(authored => {
+    if (authored.trim() === '') return [];
+    const ends = [...authored.matchAll(/[.!?]["'”’`*_)]*(?=\s|$)|\n/g)].map(m => m.index! + m[0].length);
+    if (ends[ends.length - 1] !== authored.length) ends.push(authored.length);
+    const pieces = [authored];
+    let cursor = 0;
+    for (const end of ends) { pieces.push(authored.slice(cursor, end).trim()); cursor = end; }
+    return [...new Set(pieces)].filter(piece => piece !== '');
+  });
+}
 
 /**
  * The shared live, stored-answer replay and conversation-reload boundary. A named licensed option and its goal
@@ -19,29 +36,57 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   analysisResult: unknown; graph: unknown; current: boolean;
   /** Exact user-authored text from the turn/history, never a narration guess about whose words these are. */
   userAuthoredTexts?: readonly string[];
-  comparison?: RerunExplanationPlan;
+  /** Only the route which received AI narration can resolve its first-person speaker. */
+  narrator?: 'olumi';
   disclosureOnCard?: { has(line: string): boolean } | null;
 }): T {
+  const sourceTexts = authoredSlicesOf(context.userAuthoredTexts ?? []);
   const screenLines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, context.current);
+  const counted = goalChanceLicenceForAgent(context.analysisResult);
+  const staticScope = counted?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
+  const chanceFacts = goalChanceFactsForAgent(context.analysisResult, context.graph, context.current);
+  const legacyScopeLine = staticScope ? chanceFacts.goal_horizon_line : undefined;
   const finish = (value: T): T => {
     if (typeof value.assistant_text !== 'string') return value;
     // Correct a bound figure first; the count guard then sees the producer's complete authorised sentence.
-    const countedText = checkScreenLineClaims(value.assistant_text, screenLines);
-    const text = context.disclosureOnCard?.has(STATIC_MODEL_SCOPE_NOTE)
-      ? withoutDisclosure(countedText, STATIC_MODEL_SCOPE_NOTE) : countedText;
+    let countedText = checkScreenLineClaims(value.assistant_text, screenLines, sourceTexts, context.narrator);
+    if (context.current && context.narrator === 'olumi') {
+      const firstRow = countedText.trimStart().split('\n')[0] ?? '';
+      const head = firstRow.match(/^.*?[.!?]["'”’`*_)]*(?=\s|$)/)?.[0] ?? firstRow;
+      const sourceBound = head !== '' && sourceTexts.some(source => foldQuotes(source).includes(foldQuotes(head)));
+      const labels = { ...rankingLabelContext(context.graph, undefined),
+        licensedChances: licensedChancesOf(context.analysisResult, context.graph, true) };
+      const codes = sourceBound ? [] : rankingCodesIn(head, labels);
+      const shareLeads = codes.some(code => ['share_split', 'position_share', 'count_of_runs', 'came_out_at'].includes(code))
+        || (codes.includes('share_of_runs') && codes.some(code => !['share_of_runs', 'probability'].includes(code)));
+      if (shareLeads) {
+        const findings = screenLines.map(line => line.chance);
+        let rest = countedText;
+        if (findings.length > 0) {
+          for (const finding of findings) rest = withoutDisclosure(rest, finding, { keep: 0, protectedTexts: sourceTexts });
+          countedText = `${findings.join(' ')}\n\n${rest}`;
+        } else {
+          const limitation = goalChanceWithheldForAgent(context.analysisResult, context.graph)?.say;
+          rest = withoutDisclosure(rest, head);
+          countedText = [limitation ?? (rest.trim() === '' ? RUN_EXPLANATION_UNAVAILABLE_TEXT : ''), rest].filter(Boolean).join('\n\n');
+        }
+      }
+    }
+    const scopeOnCard = context.disclosureOnCard?.has(STATIC_MODEL_SCOPE_NOTE) === true;
+    const ownsStaticInProse = withoutDisclosure(countedText, STATIC_MODEL_SCOPE_NOTE, { keep: 0, protectedTexts: sourceTexts }) !== countedText;
+    let text = legacyScopeLine !== undefined && (scopeOnCard || ownsStaticInProse)
+      ? withoutDisclosure(countedText, legacyScopeLine, { keep: 0, protectedTexts: sourceTexts }) : countedText;
+    for (const note of new Set(chanceFacts.goal_chance_notes ?? [])) {
+      text = withoutDisclosure(text, note, { keep: context.disclosureOnCard?.has(note) ? 0 : 1, protectedTexts: sourceTexts });
+    }
     return text === value.assistant_text ? value : { ...value, assistant_text: text };
   };
-  if (typeof body.assistant_text === 'string' && context.current && context.comparison !== undefined) {
-    const text = checkRerunExplanation(body.assistant_text, context.comparison).text;
-    if (text !== body.assistant_text) body = { ...body, assistant_text: text };
-  }
   const licence = agentLicenceRecordOf(context.analysisResult);
   // Amendment 7 (independent check r1 item 6): ANY Olumi input the Run recorded (relationships, starting values, an option's
   // own settings) owes the labelled sentence; the validated reader decides which counts are well formed.
-  const counted = goalChanceLicenceForAgent(context.analysisResult);
   const owed = counted !== undefined && ((counted.olumi_estimate_link_count ?? 0) + (counted.olumi_estimate_value_count ?? 0) > 0
     || Object.keys(counted.olumi_estimate_settings_by_option ?? {}).length > 0);
-  if (!context.current || typeof body.assistant_text !== 'string' || licence === undefined || !owed) return finish(body);
+  if (!context.current || typeof body.assistant_text !== 'string' || licence === undefined || (!owed && context.narrator !== 'olumi')) return finish(body);
   const nodes = rec(context.graph)?.nodes;
   const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
   // Run identity comes ONLY from analysis_result: the producer captures snapshot.goal_node_id on the licence.
@@ -54,7 +99,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const [goalId] = goalIds;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
-  const lines = screenLines.filter(l => l.olumi_estimate_link_count !== undefined);
+  const lines = screenLines.filter(l => context.narrator === 'olumi' || l.olumi_estimate_link_count !== undefined);
   if (lines.length === 0) return finish(body);
   // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
   // Match that goal wording rather than assuming every licence says 'meeting your goal'.
@@ -86,22 +131,11 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const folded = foldQuotes(text);
   // An echoed user statement is still theirs. Keep those exact spans opaque even when an option name and percentage
   // happen to coincide with this Run's licensed tuple; only assistant-authored narration can earn a replacement.
-  for (const authored of context.userAuthoredTexts ?? []) {
-    if (authored.trim() === '') continue;
-    // Storage carries full turns. A narrator may echo just one sentence; derive only exact source slices, without
-    // guessing authorship from phrases such as "you said". Decimal stops remain inside the sentence.
-    const ends = [...authored.matchAll(/[.!?]["'”’`*_)]*(?=\s|$)|\n/g)].map(m => m.index! + m[0].length);
-    if (ends[ends.length - 1] !== authored.length) ends.push(authored.length);
-    const pieces = [authored];
-    let cursor = 0;
-    for (const end of ends) { pieces.push(authored.slice(cursor, end).trim()); cursor = end; }
-    for (const piece of new Set(pieces)) {
-      if (piece === '') continue;
-      const needle = foldQuotes(piece);
-      for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
-        const span = { start: at, end: at + needle.length };
-        protectedSpans.push(span); userSpans.push(span);
-      }
+  for (const piece of sourceTexts) {
+    const needle = foldQuotes(piece);
+    for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
+      const span = { start: at, end: at + needle.length };
+      protectedSpans.push(span); userSpans.push(span);
     }
   }
   // Producer-bound sentences and conditional drivers are opaque, including their own percentages.
@@ -164,7 +198,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         if (percentages.length === 0) continue;
         let withoutFigures = subject;
         for (const p of percentages) withoutFigures = withoutFigures.replace(p[0], ' ');
-        const bareChance = /^this gives (?:a )?chance[.!?]?$/.test(withoutFigures.replace(/\s+/g, ' ').trim());
+        const bareChance = /^this gives (?:an? )?chance[.!?]?$/.test(withoutFigures.replace(/\s+/g, ' ').trim());
         // A bare pronoun supplies no option identity. A sole option resolves it; beside every complete producer
         // point it is only an unlabelled duplicate, so remove it without guessing which option the pronoun means.
         if (namedOptions.length === 0 && bareChance) {
@@ -195,8 +229,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         // The familiar option: percentage display and recorded option chance imply the licensed goal. Any named
         // alternate subject (supplier failure, competitor launch, market share) prevents this shorthand binding.
         const optionGoalPoint = namedOptions.length === 1 && (genericGoalPoint || namedGoalPoint || producerGoalPoint
-          || shorthand === '' || /^(?:has|gives) (?:a )?chance$/.test(shorthand)
-          || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand));
+          || shorthand === '' || /^(?:has|gives) (?:an? )?chance$/.test(shorthand)
+          || /^(?:the )?recorded (?:chance|figure|probability) for (?:is|was)$/.test(shorthand)
+          || ((subject.match(/\b(?:chance|probability|likelihood)\b/g) ?? []).length === 1
+            && /\bit (?:has|gives) (?:an? )?(?:chance|probability|likelihood)$/.test(shorthand)));
         const matched = lines.filter(l => {
           const pct = rec(licence.pct_by_option)?.[l.option_id];
           const valueMatches = percentages.some(p => {

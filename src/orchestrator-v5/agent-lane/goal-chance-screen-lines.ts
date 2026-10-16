@@ -213,27 +213,25 @@ export function goalChanceCellFacesForAgent(result: unknown, graph: unknown, cur
 }
 
 /** Check narrator counts without appending any screen sentence. */
-export function checkScreenLineClaims(text: string, lines: readonly GoalChanceScreenLine[]): string {
+export function checkScreenLineClaims(text: string, lines: readonly GoalChanceScreenLine[], sourceTexts: readonly string[] = [], speaker?: 'olumi'): string {
   // Narration never supplies k, even when it guessed correctly. Complete producer-bound sentences are already authorised;
   // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
   const authorised: string[] = [];
   let body = text;
   if (lines.some(l => l.olumi_estimate_link_count !== undefined)) {
-    for (const l of lines) {
-      const chance = l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l);
-      for (const sentence of [chance, l.depends].filter(s => s !== '')) {
-        const folded = foldQuotes(body), needle = foldQuotes(sentence);
-        const positions: number[] = [];
-        for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) positions.push(at);
-        for (const at of positions.reverse()) {
-          const key = `\u0000GP_ESTIMATE_POINT_${authorised.length}\u0000`;
-          authorised.push(body.slice(at, at + sentence.length));
-          body = body.slice(0, at) + key + body.slice(at + sentence.length);
-        }
+    const recordSentences = lines.flatMap(l => [l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l), l.depends]);
+    for (const sentence of [...recordSentences, ...sourceTexts].filter(s => s !== '')) {
+      const folded = foldQuotes(body), needle = foldQuotes(sentence);
+      const positions: number[] = [];
+      for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) positions.push(at);
+      for (const at of positions.reverse()) {
+        const key = `\u0000GP_ESTIMATE_POINT_${authorised.length}\u0000.`;
+        authorised.push(body.slice(at, at + sentence.length));
+        body = body.slice(0, at) + key + body.slice(at + sentence.length);
       }
     }
-    body = narratorCountGuard(body, null).text;
-    for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000`).join(chance);
+    body = narratorCountGuard(body, null, speaker).text;
+    for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000.`).join(chance);
   }
   return body;
 }

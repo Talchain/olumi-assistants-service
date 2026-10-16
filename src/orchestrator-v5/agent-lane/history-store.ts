@@ -426,7 +426,8 @@ export function historyWithSentText(items: readonly unknown[], sent: string): un
     const content = messages[0]!.content;
     const text = typeof content === 'string' ? content : Array.isArray(content)
       ? content.map((p: { text?: unknown }) => typeof p.text === 'string' ? p.text : '').join('') : undefined;
-    if (text === sent) return [...items];
+    if (text === sent) return items.map((item, index) => index >= start && isAssistant(item)
+      && (item as Item).role === undefined ? { ...(item as Item), role: 'assistant' } : item);
   }
   return [
     ...items.slice(0, start), ...tail.filter((i) => !isAssistant(i)),

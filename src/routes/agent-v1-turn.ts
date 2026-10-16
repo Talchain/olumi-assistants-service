@@ -43,7 +43,7 @@ import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.j
 import { turnContextItems, runFactsContext } from '../orchestrator-v5/agent-lane/turn-context.js';
 import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
-import { rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
+import { checkRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -3381,7 +3381,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
-    let comparisonForReply: NonNullable<ReturnType<typeof rerunExplanationPlan>> | undefined;
     let explanationRead: Awaited<ReturnType<typeof readBackState>> | undefined;
     /**
      * The NARRATOR's own words on this turn, exactly as the model wrote them (the explanation's raw answer, or the Agent
@@ -3638,7 +3637,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runToolOutputLicensesLeader(selectedRun),
         graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
         pairRead.withinBand, pairRead.userWrittenLinks, pairRead.frameRefitLinks);
-      comparisonForReply = rerunPlan ?? undefined;
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -3677,11 +3675,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
         else if (answer.trim().length > 0) {
+          const checked = rerunPlan === null ? answer : checkRerunExplanation(answer, rerunPlan).text;
           explanationReady = true;
-          words = answer;
+          words = checked;
           interpreted = typed !== null
-            ? { answer, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] }
-            : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+            ? { answer: checked, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: checked }] }] }
+            : { answer: checked, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         }
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
@@ -5638,7 +5637,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
-    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
+    if (!aiWroteReply && fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
 
@@ -5753,7 +5752,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
-        comparison: comparisonForReply,
+        narrator: 'olumi',
         disclosureOnCard: cardBound ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null,
         userAuthoredTexts: userTextsForEgress(
           [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
@@ -5979,9 +5978,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       else if (at >= 0) durablePending.splice(at, 1, nextLevelAsk);
       else log.warn({ scenario_id: scenarioId }, 'agent-lane: current-level ask could not fit beside live holds');
     }
+    const displayedQuestion = automaticDeadlineLabel !== undefined
+      && wireBody.suggested_actions.some(action => action.detail === automaticDeadlineLabel)
+      && !sentText.includes(automaticDeadlineLabel) ? automaticDeadlineLabel : undefined;
+    const historyReply = displayedQuestion === undefined ? sentText
+      : `${sentText}\n\n[Card displayed beside this reply; reference data]\n${displayedQuestion}`;
     const sentItems = fastPath === 'method'
-      ? methodTurnItems(history, message, sentText)
-      : historyWithSentText(result.items, sentText);
+      ? methodTurnItems(history, message, historyReply)
+      : historyWithSentText(result.items, historyReply);
     histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
     // Published to in-memory session history, not a durable save; no-save copy is now false.
     recordUnsavableEffect();

@@ -321,19 +321,6 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     } finally { delete readable.readGuidanceHistory; }
   });
 
-  it('P05b-8a: construction with one risk puts the relabelled risks press first and conserves the base sentence multiset', async () => {
-    const t = await thinConstruction(1);
-    expect(t.suggested_actions[0], JSON.stringify(t)).toEqual({ id: RISKS.id, label: THIN_BUTTON, message: RISKS.message });
-    expect(t.suggested_actions.filter((c) => c.id === RISKS.id)).toHaveLength(1);
-    expect(t.suggested_actions.length).toBeLessThanOrEqual(3);
-    // The live pre-composition base supplies the sentence identities; shaping may move them but loses/adds none.
-    expect(lastComposeInput?.faceContract).toBe('draft');
-    expect(lastComposeInput?.text).toBeDefined();
-    expect(sentenceMultiset(t.assistant_text)).toEqual(sentenceMultiset(lastComposeInput!.text));
-    expect(t._answer_shape).toBeDefined();
-    expect(t.assistant_text).toBe(deriveAnswerTextFromShape(t._answer_shape!));
-  }, 120_000);
-
   it('R1 first-draft construction with a pending identity approval keeps exactly the offers without thin, including approve and decline', async () => {
     const nextSteps = await import('../next-steps-from-guidance.js');
     const { AMEND_CHIP } = await import('../approval-chips.js');

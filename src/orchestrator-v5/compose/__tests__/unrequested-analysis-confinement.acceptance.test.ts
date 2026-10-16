@@ -49,7 +49,6 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { buildAnalysisResultBlock } from '../../compose.js';
 import {
-  UNREQUESTED_ANALYSIS_SUMMARY,
   UNREQUESTED_OPTION_ROW_DROPPED_MEMBERS,
   UNREQUESTED_ROBUSTNESS_KEPT_MEMBERS,
   confineUnrequestedAnalysisBlock,
@@ -59,6 +58,7 @@ import {
   wasAnalysisRequestedByUser,
 } from '../unrequested-analysis-confinement.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
+import { WITHHELD_ANALYSIS_SUMMARY } from '../withheld-claim-projection.js';
 import { textNamesLeadingOption } from '../leading-option-egress-guard.js';
 
 /**
@@ -226,7 +226,6 @@ describe('a run the user asked for is untouched', () => {
     expect(block.leading_option_id).toBe(capture.leading_option_id);
     expect(block.win_probabilities).toEqual(capture.win_probabilities);
     expect(block.summary).toBe(capture.summary);
-    expect(block.summary).not.toBe(UNREQUESTED_ANALYSIS_SUMMARY);
     const robustness = block.enrichment?.robustness as Record<string, unknown>;
     expect(robustness.display_verdict).toBe('fragile');
     expect(robustness.is_robust).toBe(false);
@@ -367,7 +366,7 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
 
   it('substitutes a summary that names nobody and quantifies nothing', () => {
     const block = build(true);
-    expect(block.summary).toBe(UNREQUESTED_ANALYSIS_SUMMARY);
+    expect(block.summary).toBe(WITHHELD_ANALYSIS_SUMMARY);
     expect(textNamesLeadingOption(block.summary)).toBe(false);
     expect(block.summary).not.toMatch(/\d/);
   });
