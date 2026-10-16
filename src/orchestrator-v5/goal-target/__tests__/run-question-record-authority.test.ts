@@ -108,6 +108,9 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     const q = deriveRunQuestion({ storedResult: fact.result });
     expect(q.scope.can_show_goal_chance).toBe(true);
     expect(goalChanceLicenceForAgent(fact.result)?.notes).toContain(STATIC_MODEL_SCOPE_NOTE);
+    const statusQuoLine = goalChanceLicenceForAgent(fact.result)?.status_quo?.line;
+    expect(statusQuoLine).toContain('80 tickets per week (your target is at least 100 tickets per week)');
+    expect(statusQuoLine).not.toContain('over the goal period');
     expect(goalChanceLicenceForAgent(fact.result)?.withheld_option_ids).toContain('keep_current_staffing');
     expect(fact.result.enrichment?.option_comparison).toEqual(expect.arrayContaining([
       expect.objectContaining({ option_id: 'add_one_specialist', probability_of_goal: 0.3951 }),

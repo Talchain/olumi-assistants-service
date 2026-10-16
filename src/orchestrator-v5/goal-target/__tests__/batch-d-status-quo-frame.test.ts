@@ -27,8 +27,7 @@ const SERVED_LINE = (FX.served_licence.withheld_reason_by_option as Record<strin
  * holds it. These rows are about the Run's frame; the words are pinned in `status-quo-row-words.test.ts`.
  */
 const byAssumptionIn = (unit: string): string => `This Run can’t give a chance for carrying on as now, because it treats ‘Weekly support capacity’ `
-  + `as unchanged from today’s 80 ${unit} (your target is at least 100 ${unit}). Worth checking: how ‘Weekly support capacity’ could change `
-  + `over the goal period if nothing is done, including any forecast or range already in the model.`;
+  + `as unchanged from today’s 80 ${unit} (your target is at least 100 ${unit}).`;
 const BY_ASSUMPTION = byAssumptionIn('tickets per week');
 /** The run-4 served graph (`FLOAT`) spells the same unit "tickets / week". */
 const FLOAT_BY_ASSUMPTION = byAssumptionIn('tickets / week');

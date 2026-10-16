@@ -1,5 +1,3 @@
-import { hasRecordedLevelCalculation } from '../goal-target/static-run-evidence.js';
-import { withRecordedRunQuestion } from '../goal-target/goal-horizon-verdict.js';
 /**
  * ⭐ S7 STEP 1 — ONE RUN-FACTS PACKET (arch12/7-ai-scientific-coaching.md §3; DL 15 Oct 00:35Z, proof route approved 01:1xZ).
  * Every AI call after a Run (the interpreter, the Agent narrating, the method and widen turns) reads canonical state; this is
@@ -11,7 +9,7 @@ import { withRecordedRunQuestion } from '../goal-target/goal-horizon-verdict.js'
  * no host coaching prose. Today's date and the brief travel in `turnContextItems` (#3175). Pure.
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
-import { deriveRunQuestion, goalChanceLicenceForAgent, type RunQuestion, type SelectedRunEvidence, STATIC_INPUTS_NOT_RECORDED } from '../goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, goalChanceLicenceForAgent, withGoalChanceReadback, type RunQuestion, type SelectedRunEvidence, STATIC_INPUTS_NOT_RECORDED } from '../goal-target/goal-chance-licence.js';
 import { decisionSensitivityOf } from './decision-sensitivity.js';
 import { userStatementsOn } from '../statement-door/statements.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
@@ -137,8 +135,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     readonly comparison?: { readonly prior_run_id?: string; readonly run_delta?: unknown; readonly rerun_record?: unknown } } = {}): RunFacts {
   const question = analysisResult == null && state.runEvidence === undefined ? undefined
     : deriveRunQuestion({ runEvidence: state.runEvidence, storedResult: analysisResult });
-  const unverifiedLevel = hasRecordedLevelCalculation(analysisResult) && question?.scope.can_show_goal_chance !== true;
-  analysisResult = withRecordedRunQuestion(analysisResult, question);
+  analysisResult = withGoalChanceReadback(analysisResult, analysisResult, state.runEvidence);
   const licence = current ? goalChanceLicenceForAgent(analysisResult) : undefined;
   const chances = goalChanceFactsForAgent(analysisResult, graph, current);
   const withheld: RunWithheld[] = current ? warningsOf(analysisResult).filter((w) => typeof w.code === 'string' && w.code.startsWith('GOAL_FIGURES_'))
@@ -176,7 +173,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
       ? { comparison: { prior_run_id: state.comparison.prior_run_id,
         ...(state.comparison.run_delta !== undefined ? { run_delta: state.comparison.run_delta } : {}),
         ...(recordFacts(state.comparison.rerun_record) !== undefined ? { rerun_record: recordFacts(state.comparison.rerun_record) } : {}) } } : {}),
-    must_say: [...(chances.goal_chance_notes ?? []), ...(current && unverifiedLevel ? [STATIC_INPUTS_NOT_RECORDED] : [])],
+    must_say: [...(chances.goal_chance_notes ?? []), ...(current && withheld.some(w => w.reason === 'EVALUATED_STATIC_INPUTS_NOT_RECORDED') ? [STATIC_INPUTS_NOT_RECORDED] : [])],
   };
 }
 

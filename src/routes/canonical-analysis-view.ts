@@ -1,4 +1,4 @@
-import { withRecordedRunQuestion } from '../orchestrator-v5/goal-target/goal-horizon-verdict.js';
+import { withGoalChanceReadback } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
 import { readRunEvidence, runEvidenceWireOf } from '../orchestrator-v5/agent-lane/run-evidence.js';
 import { runLeaderOf, type RunLeader } from '../orchestrator-v5/agent-lane/run-facts.js';
@@ -242,7 +242,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const freshness = fact === null ? undefined : input.derivation?.freshness;
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
-  const result = current ? withRecordedRunQuestion(input.currentResult, question) : null;
+  const result = current ? withGoalChanceReadback(input.currentResult, fact?.result, fact === null ? undefined : readRunEvidence(runEvidenceWireOf(fact))) : null;
   const staticClaim = question?.scope.status === 'supported_static';
   const facts = goalChanceFactsForAgent(result, input.graph, current);
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
