@@ -574,23 +574,6 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await turn(app, { message: 'What does the analysis say?' });
     expect(b.assistant_text).toBe(prose);
   });
-
-  /**
-   * The automatic first pass is an analysis reply too (#69 5831886008): its narration arrives headline
-   * first. The prose is a SERVED Run reply's (AI Quality corpus W.V2.rep1, labelled clean), used for its
-   * shape — first sentence, three bullets, a closing line. See `agent-run-reply-answer-shape.test.ts`.
-   */
-  /**
-   * ⛔ DL item 3 (2 Oct; CODEX r2 P1 on #2509, CODEX on #2517): this row used to require a shape here, and that shape put
-   * the host's OWN build lines (what is held fixed, the questions the model does not
-   * answer yet) behind "Show more", because the UI renders `_answer_shape` instead of the text. The build turn's narration
-   * is still the narrator's, but the reply is no longer ONLY the narrator's words, so it ships whole with every host line
-   * on the face. CONTROL: `agent-run-reply-answer-shape.test.ts` rows 8/11 (the narrator's words alone are still shaped).
-   */
-  // Re-pinned for S-A (lane COPY-SHAPE, DL ruling R1, 7 Oct): a receipt such as the build line MAY sit under "More detail";
-  // the ONE composer shapes this reply like any other, and the line is kept exactly once.
-  const deriveAnswerTextFromShapeOf = (shape: { headline: string; bullets: string[]; detail: string }): string =>
-    [shape.headline.trim(), shape.bullets.map((b) => `• ${b.trim()}`).join('\n'), shape.detail.trim()].filter((p) => p.length > 0).join('\n\n');
   it('a build turn whose first analysis ran → its narration PLUS the host\'s own build lines → shaped by the one composer; the build line kept once (R1)', async () => {
     const { readFileSync } = await import('node:fs');
     const corpus = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as { replies: { id: string; text: string }[] };
@@ -602,9 +585,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(b.assistant_text).not.toMatch(/model was saved|I saved the model/i);
     // S6 (#3237): on the AI-written reply the AI decides what to ask; the host's build questions line is not added.
     expect(b.assistant_text, 'no host questions line on the AI’s reply').not.toContain('Questions this model does not answer yet:');
-    expect(b._answer_shape, 'shaped').toBeDefined();
-    expect(b.assistant_text).toBe(deriveAnswerTextFromShapeOf(b._answer_shape!));
-    expect(prose.startsWith(b._answer_shape!.headline), 'the narrator’s first sentence leads').toBe(true);
+    expect(b._answer_shape, 'the AI answer is not reordered by the host composer').toBeUndefined();
+    expect(b.assistant_text.startsWith(prose.split('\n')[0]!.trim())).toBe(true);
     for (const line of prose.split('\n').filter((l) => l.trim() !== '')) expect(b.assistant_text).toContain(line.replace(/^\s*-\s+/, '').trim());
   });
 

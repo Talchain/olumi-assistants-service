@@ -1,5 +1,8 @@
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
-import { goalChanceScreenLinesForAgent } from './goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, checkScreenLineClaims } from './goal-chance-screen-lines.js';
+import { checkRerunExplanation, type RerunExplanationPlan } from './rerun-explanation.js';
+import { withoutDisclosure } from './disclosure.js';
+import { STATIC_MODEL_SCOPE_NOTE } from '../goal-target/static-run-evidence.js';
 import { foldQuotes } from './quote-normalisation.js';
 
 type Rec = Record<string, unknown>;
@@ -16,14 +19,29 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   analysisResult: unknown; graph: unknown; current: boolean;
   /** Exact user-authored text from the turn/history, never a narration guess about whose words these are. */
   userAuthoredTexts?: readonly string[];
+  comparison?: RerunExplanationPlan;
+  disclosureOnCard?: { has(line: string): boolean } | null;
 }): T {
+  const screenLines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, context.current);
+  const finish = (value: T): T => {
+    if (typeof value.assistant_text !== 'string') return value;
+    // Correct a bound figure first; the count guard then sees the producer's complete authorised sentence.
+    const countedText = checkScreenLineClaims(value.assistant_text, screenLines);
+    const text = context.disclosureOnCard?.has(STATIC_MODEL_SCOPE_NOTE)
+      ? withoutDisclosure(countedText, STATIC_MODEL_SCOPE_NOTE) : countedText;
+    return text === value.assistant_text ? value : { ...value, assistant_text: text };
+  };
+  if (typeof body.assistant_text === 'string' && context.current && context.comparison !== undefined) {
+    const text = checkRerunExplanation(body.assistant_text, context.comparison).text;
+    if (text !== body.assistant_text) body = { ...body, assistant_text: text };
+  }
   const licence = agentLicenceRecordOf(context.analysisResult);
   // Amendment 7 (independent check r1 item 6): ANY Olumi input the Run recorded (relationships, starting values, an option's
   // own settings) owes the labelled sentence; the validated reader decides which counts are well formed.
   const counted = goalChanceLicenceForAgent(context.analysisResult);
   const owed = counted !== undefined && ((counted.olumi_estimate_link_count ?? 0) + (counted.olumi_estimate_value_count ?? 0) > 0
     || Object.keys(counted.olumi_estimate_settings_by_option ?? {}).length > 0);
-  if (!context.current || typeof body.assistant_text !== 'string' || licence === undefined || !owed) return body;
+  if (!context.current || typeof body.assistant_text !== 'string' || licence === undefined || !owed) return finish(body);
   const nodes = rec(context.graph)?.nodes;
   const goals = (Array.isArray(nodes) ? nodes : []).map(rec).filter(n => n?.kind === 'goal');
   // Run identity comes ONLY from analysis_result: the producer captures snapshot.goal_node_id on the licence.
@@ -32,13 +50,12 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
   const goalIds = new Set([licence.goal_node_id, rec(run?.input_snapshot)?.goal_node_id,
     rec(enrichment?.input_snapshot)?.goal_node_id, run?.goal_node_id, enrichment?.goal_node_id]
     .filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
-  if (goalIds.size > 1) return body;
+  if (goalIds.size > 1) return finish(body);
   const [goalId] = goalIds;
   const goal = goals.find(n => n?.id === goalId);
   const goalLabel = typeof licence.goal_label === 'string' ? licence.goal_label : goal?.label;
-  const lines = goalChanceScreenLinesForAgent(context.analysisResult, context.graph, true)
-    .filter(l => l.olumi_estimate_link_count !== undefined);
-  if (lines.length === 0) return body;
+  const lines = screenLines.filter(l => l.olumi_estimate_link_count !== undefined);
+  if (lines.length === 0) return finish(body);
   // Specialized goals (for example launching by a recorded date) carry their own producer-owned predicate.
   // Match that goal wording rather than assuming every licence says 'meeting your goal'.
   const producerGoalPredicates = lines.flatMap(l => {
@@ -202,10 +219,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
       rowStart += row.length + 1;
     }
   }
-  if (edits.length === 0) return body;
+  if (edits.length === 0) return finish(body);
   let result = text;
   for (const edit of edits.sort((a, b) => b.start - a.start)) {
     result = result.slice(0, edit.start) + edit.replacement + result.slice(edit.end);
   }
-  return { ...body, assistant_text: result };
+  return finish({ ...body, assistant_text: result });
 }

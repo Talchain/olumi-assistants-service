@@ -1,26 +1,7 @@
-/**
- * ⭐ M2 — WHAT CHANGED BETWEEN TWO RUNS IS OLUMI'S OWN LINE, RENDERED FROM run_delta's TYPED ROWS; THE MODEL ONLY SAYS WHY
- * (RC contract `RERUN-EXPLANATION`, policy.ts; DL assignment to MG; lease #85 5939005849; DL ruling 5940472067: the
- * input-change claim is CODE-OWNED, MG mechanics 5940496939).
- *
- * The investor moment (R3 5938917543, final seed `eeeff8b4`): Accept Olumi's estimate → Run. No figure changes; the
- * comparison appears for the first time. Olumi's line says what the user did ("You accepted Olumi's estimate for how much
- * A changes B.") and, when the earlier Run held its figures back (`win_probabilities_unavailable: 'prior_withheld'`,
- * schemas 0.70.0), that THIS is what held the comparison back — never that anything rose or fell.
- *
- * Read from the TYPED run_delta only (never words; never an inference from an empty array):
- *   · the CODE LINE: rows → RC's `change_label_templates` with the graph's labels for the link's node ids (a `sizing` and a
- *     `strength` row on one link are ONE change; at most 3 named, the rest disclosed as "You also made N other changes.")
- *     + the case line; `complete` coverage with no rows → "Nothing you entered
- *     changed."; anything else → "Olumi can't say what changed between these two runs.";
- *   · the `MethodInputs` RC's `checkMethodTurn('RERUN-EXPLANATION')` judges on;
- *   · an instruction handing the model that line, told never to restate whether inputs changed.
- * Every model sentence passes RC's checker beside the code line. A named change leads as a fail-safe;
- * no-change/unknown records may follow the current finding. A complete record is always said once. No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
- */
+/** Typed comparison context and retained scientific checks. The AI writes and orders its reply from this record. */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
+import { recordedSentenceIn, recordedSentencesOf } from './recorded-sentence.js';
 import { POLICY } from './guidance/policy.js';
-import { recordedSentenceIn, recordedSentencesOf as sentencesOf } from './recorded-sentence.js';
 import { CANVAS_BAND_WORD, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 import { log } from '../../utils/telemetry.js';
@@ -150,8 +131,6 @@ export interface RerunExplanationPlan {
   readonly changes: readonly string[];
   /** Olumi's own line from the typed rows: what changed (or that nothing the user entered did, or that it can't say). */
   readonly codeLine: string;
-  /** Appended to the explanation request's instructions. */
-  readonly instruction: string;
   /** Said when the model gives nothing usable: the code line alone. */
   readonly fallback: string;
 }
@@ -413,30 +392,7 @@ export function rerunExplanationPlan(
       : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.unwithheld
         : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
-  const instruction = [
-    'Use the supplied run_delta rows to explain what changed between those actual Runs. Name the metric and revision being compared; do not describe an unchanged ranking as proof that goal chances or model inputs did not change. State only the particular input changes or unchanged inputs established by the verified current comparison. When the supplied facts do not establish this, say that the comparison is unknown; do not infer input changes or stability from output variation or absent rows.',
-    `Run record: "${codeLine}"`,
-    ...(goalChanceChanges.length === 0 ? [] : [`${GOAL_CHANCE_CHANGES_LEAD} ${goalChanceChanges.map((c) => `‘${c.option_label}’: ${c.prior} → ${c.current}.`).join(' ')}`]),
-    priorWithheld && goalChanceChanges.length === 0
-      ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
-      : priorWithheld
-        ? 'The earlier Run held its comparison shares back, so never say a share rose, fell or moved; say a goal chance moved only as recorded above.'
-      : noMatched
-        ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
-        : inputs.attribution_case === 'C1_attributable'
-          ? 'You may say what moved in the comparison.'
-          : wireCase === 'C1_attributable'
-            ? 'More than one input changed between the two Runs, or the goal itself changed, so never say which change caused the difference.'
-          // Each premise is TRUE of its case (CODEX on 3d0891e2 P1): C0 + complete proves identity; C2 leaves the draw unshown.
-          : wireCase === 'C0_identical'
-            ? 'Nothing differed between the two Runs, so never say anything moved because of a change.'
-            : differenceUnknown
-              ? 'Olumi can’t confirm nothing else differed between the two Runs, so never say the change caused the difference.'
-              : wireCase === 'C2_unpaired'
-                ? 'Olumi can’t confirm both Runs used the same draw, so never say the change caused the difference.'
-                : 'Other things also differed between the two Runs, so never say the change caused the difference.',
-  ].join('\n');
-  return { inputs, goalChanceChanges, changes, codeLine, instruction, fallback: codeLine };
+  return { inputs, goalChanceChanges, changes, codeLine, fallback: codeLine };
 }
 
 /**
@@ -477,7 +433,6 @@ type NodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label
  * S9: the words that introduce the goal chances both Runs showed (interpret request). They are chances of meeting the goal as
  * each Run displayed them, never win shares, and say nothing of cause beyond the case line.
  */
-export const GOAL_CHANCE_CHANGES_LEAD = 'Recorded goal-chance displays for options with figures in both Runs (earlier Run → later Run):';
 
 /** The chip's no-matched-figures guard, appended to the typed rule when it holds. */
 export const NO_MATCHED_FIGURES_RULE = ' No option has figures in both Runs, so never say anything rose, fell or moved.';
@@ -552,48 +507,31 @@ export function rerunRecordForModel(
 
 const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
 
-/**
- * Check every model sentence beside the unchanged record, then repair only record sentences the answer omitted.
- * A named-change record leads even when an unrecognised contrary paraphrase survives the checker.
- * Only a complete, empty record ("Nothing you entered changed.") may follow the finding: an AI claim that nothing changed then
- * agrees with it. A record that names a change, or cannot say what changed (rows no template can name, partial or older coverage),
- * leads, so a contrary "nothing changed" claim never opens the reply (BUDDY-B #3253 r4). Copied record sentences never create a
- * second copy.
- */
-export function composeRerunExplanation(reply: string, plan: RerunExplanationPlan): {
+/** Check the reply against its recorded comparison; never reorder it or append another account. */
+export function checkRerunExplanation(reply: string, plan: RerunExplanationPlan): {
   readonly text: string; readonly dropped: readonly string[]; readonly failed: readonly string[];
 } {
   const dropped: string[] = [];
   const failed = new Set<string>();
-  const recordSentences = sentencesOf(plan.codeLine);
-  const recordLeads = plan.changes.length > 0 || !plan.codeLine.startsWith(RERUN_NO_CHANGE_LINES.nothing);
-  const saidRecord = new Set<number>();
   let sentenceIndex = 0;
-  const kept = reply.split(/\r?\n/u).map((line) => line.split(SENTENCE_BREAK).filter((sentence) => {
+  let deduplicated = false;
+  const records = recordedSentencesOf(plan.codeLine);
+  const said = new Set<number>();
+  const kept = reply.split(/\r?\n/u).map(line => line.split(SENTENCE_BREAK).filter(sentence => {
     const index = sentenceIndex++;
     if (sentence.trim() === '') return false;
-    const recordIndex = recordSentences.findIndex(record => recordedSentenceIn(sentence, record));
-    if (recordIndex >= 0 && saidRecord.has(recordIndex)) return false;
+    const record = records.findIndex(value => recordedSentenceIn(sentence, value));
+    if (record >= 0 && said.has(record)) { deduplicated = true; return false; }
     const verdict = checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${sentence}`, plan.inputs, true, sentence);
-    if (verdict.failed.length === 0) {
-      if (recordIndex >= 0) {
-        saidRecord.add(recordIndex);
-        if (recordLeads) return false; // The complete authoritative record is placed once, before this prose.
-      }
-      return true;
-    }
+    if (verdict.failed.length === 0) { if (record >= 0) said.add(record); return true; }
     dropped.push(sentence);
-    // Narrator/user text is protected decision content: log only the policy failure and its zero-based draft index.
     log.info({ event: 'agent_lane.rerun_sentence_dropped', policy_id: 'RERUN-EXPLANATION', sentence_index: index,
       failed: verdict.failed }, 'agent-lane: rerun explanation sentence dropped');
     for (const id of verdict.failed) failed.add(id);
     return false;
-  }).join(' ')).filter((line) => line.trim() !== '').join('\n').trim();
-  // The AI may integrate the exact record beside its current finding. Repair only missing record sentences;
-  // formatting does not make a second obligation, while a changed number, unit, source or negative is still missing.
-  if (recordLeads) return { text: [plan.codeLine, kept].filter(Boolean).join('\n\n'), dropped, failed: [...failed] };
-  const missing = recordSentences.filter(sentence => !recordedSentenceIn(kept, sentence));
-  return { text: kept === '' ? plan.codeLine : [kept, missing.join(' ')].filter(Boolean).join('\n\n'), dropped, failed: [...failed] };
+  }).join(' ')).filter(line => line.trim() !== '').join('\n').trim();
+  return { text: !deduplicated && dropped.length === 0 && reply.trim() !== '' ? reply : kept || plan.fallback,
+    dropped, failed: [...failed] };
 }
 
 /**

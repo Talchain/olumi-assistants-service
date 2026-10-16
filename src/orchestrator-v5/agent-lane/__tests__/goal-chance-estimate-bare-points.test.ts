@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, checkScreenLineClaims } from '../goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
 const graph = { nodes: [{ id: 'raise', kind: 'option', label: 'Raise to £59' }, { id: 'goal', kind: 'goal', label: 'MRR' }], edges: [] };
@@ -56,14 +56,12 @@ describe('r16: a licensed option and its goal bind any narrated percentage', () 
   });
   it('keeps owing separate from the final value-bound egress, with added=0', () => {
     const bare = '‘Raise to £59’: about 67% in this model.';
-    const owed = withScreenLinesOwed(`${bare}\n${line().chance}`, [line()]);
-    expect(owed.added).toBe(0);
-    expect(clean(owed.text)).not.toContain(bare);
+    expect(clean(`${bare}\n${line().chance}`)).not.toContain(bare);
   });
   it('keeps established shorthand when no estimate licence is owed', () => {
     const { olumi_estimate_link_count: _count, ...plain } = line();
     plain.chance = '‘Raise to £59’: about 67% chance of meeting your goal, in this model.';
     const text = 'Raise to £59: about 67%.';
-    expect(withScreenLinesOwed(text, [plain])).toEqual({ text, added: 0 });
+    expect(checkScreenLineClaims(text, [plain])).toBe(text);
   });
 });

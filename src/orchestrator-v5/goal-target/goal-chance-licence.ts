@@ -1,5 +1,5 @@
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
-import { readDispatchedGoalThreshold, recordedStaticLevelEvidence, hasRecordedLevelCalculation, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
+import { readDispatchedGoalThreshold, recordedStaticScopeDeclared, recordedStaticLevelEvidence, hasRecordedLevelCalculation, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 import { readRunOmissionScope, type RunOmissionScope, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 import { assessEvaluatedQuestionScope, STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
 import { goalKindOf } from './goal-kind.js';
@@ -1812,7 +1812,8 @@ function batchCPartsOf(r: Rec, optionIds: readonly string[], withheld: readonly 
 } {
   const sayable = (v: unknown, max = 600): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max && !/[\r\n]/.test(v);
   // A note may name every retained condition (up to 20 × 300 characters; re-scope r2 BLOCKING 2): its own, larger bound.
-  const notes = Array.isArray(r.notes) && r.notes.length > 0 && r.notes.every((n) => sayable(n, NOTE_MAX)) ? r.notes as string[] : undefined;
+  const recordedNotes = Array.isArray(r.notes) && r.notes.length > 0 && r.notes.every((n) => sayable(n, NOTE_MAX)) ? r.notes as string[] : undefined;
+  const notes = recordedStaticScopeDeclared(r) ? [...new Set([...(recordedNotes ?? []), STATIC_MODEL_SCOPE_NOTE])] : recordedNotes;
   const sq = isRec(r.status_quo) && typeof r.status_quo.option_id === 'string' && withheld.includes(r.status_quo.option_id)
     && sayable(r.status_quo.line) ? { option_id: r.status_quo.option_id, line: r.status_quo.line as string } : undefined;
   const est = isRec(r.estimate_only) && finite(r.estimate_only.base) && typeof r.estimate_only.unit === 'string'

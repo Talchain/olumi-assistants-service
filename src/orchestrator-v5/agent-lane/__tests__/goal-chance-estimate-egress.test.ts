@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent, type GoalChanceScreenLine } from '../goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
 
 const line: GoalChanceScreenLine = {
@@ -36,9 +36,7 @@ describe('r16 option and goal bound estimate points', () => {
   });
   it('removes a bare qualified point with added=0', () => {
     const bare = '‘Raise to £59’: about 67% in this model.';
-    const owed = withScreenLinesOwed(`${bare}\n${line.chance}`, [line]);
-    expect(owed.added).toBe(0);
-    const out = clean(owed.text);
+    const out = clean(`${bare}\n${line.chance}`);
     expect(out).not.toContain(bare);
     expect(out.split(line.chance)).toHaveLength(2);
   });

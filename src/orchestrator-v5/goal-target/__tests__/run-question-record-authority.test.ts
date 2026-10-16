@@ -9,6 +9,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
+import * as snapshotBuilder from '../../tools/handlers/run-input-snapshot.js';
 
 const stored = () => ({ ...structuredClone(captured.result), run_id: captured.evidence.run_id,
   input_snapshot: structuredClone(captured.evidence.input_snapshot), graph_hash_at_run: 'saved-capture' });
@@ -16,12 +17,11 @@ const evidence = () => ({ runId: captured.evidence.run_id, inputSnapshot: struct
   occurrence: captured.evidence.occurrence });
 
 describe('S3 single evaluated-input authority — independent capacity capture247ae5b4', () => {
-  it('the saved80 /100 /level /≥ /tickets per week inputs survive without inventing an unrecorded scope', () => {
+  it('the saved80 /100 /level /≥ /tickets per week inputs retain the Run’s recorded static limitation', () => {
     const run = stored();
     const q = deriveRunQuestion({ storedResult: run, runEvidence: evidence() });
-    expect(q.scope).toMatchObject({ status: 'outside_static_scope', can_show_goal_chance: true });
-    expect(q.scope.note).toBeUndefined();
-    expect(q.omitted).toContainEqual({ field: 'calculation_scope_at_evaluated_revision', reason: 'not_recorded' });
+    expect(q.scope).toMatchObject({ status: 'supported_static', can_show_goal_chance: true, note: STATIC_MODEL_SCOPE_NOTE });
+    expect(goalChanceLicenceForAgent(run)?.notes?.filter(note => note === STATIC_MODEL_SCOPE_NOTE)).toHaveLength(1);
     expect(q.calculated).toMatchObject({ quantity: { node_id: 'weekly_support_capacity' }, target: 100, baseline: 80,
       encoded_target: 0.2, encoded_baseline: 0.16, frame: 'level', comparator: '>=', unit: 'tickets per week' });
     expect(q.evaluated_scenario_revision).toBe(2);
@@ -43,9 +43,21 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     expect(facts.chances.goal_chance_display?.add_one_specialist).toBe('about 40%');
     const cell = view.options.find(row => row.option_id === 'add_one_specialist')!.cell;
     expect(cell.kind).toBe('figure');
-    expect('face' in cell && cell.face).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+    expect('face' in cell && cell.face).toContain(STATIC_MODEL_SCOPE_NOTE);
     expect(view.question?.calculated).toMatchObject({ target: 100, baseline: 80, unit: 'tickets per week' });
     expect(JSON.stringify(run)).toBe(before);
+  });
+
+  it('without a recorded static declaration the reader preserves the scope as unknown', () => {
+    const run = stored();
+    const licence = run.enrichment.inference_warnings.find(w => w.code === 'GOAL_CHANCE_LICENSED')!;
+    delete (licence as Record<string, unknown>).horizon_untested;
+    delete (licence as Record<string, unknown>).horizon_line;
+    const q = deriveRunQuestion({ storedResult: run });
+    expect(q.scope).toMatchObject({ status: 'outside_static_scope', can_show_goal_chance: true });
+    expect(q.scope.note).toBeUndefined();
+    expect(q.omitted).toContainEqual({ field: 'calculation_scope_at_evaluated_revision', reason: 'not_recorded' });
+    expect(goalChanceLicenceForAgent(run)?.notes).not.toContain(STATIC_MODEL_SCOPE_NOTE);
   });
 
   it.each(['missing_baseline', 'wrong_frame', 'reversed_comparator', 'wrong_unit', 'wrong_conversion', 'different_recorded_target', 'different_recorded_goal'] as const)(
@@ -81,7 +93,7 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     expect(runFactsOf(run, captured.graph, false, { runEvidence: evidence() }).chances.goal_chance_display).toBeUndefined();
   });
 
-  it.each(['normal', 'reduced', 'partial', 'provisional'] as const)('the actual handler stores the record-owned chance and retains the %s caution through the registry', async mode => {
+  it.each(['normal', 'reduced', 'partial', 'provisional', 'missing_snapshot'] as const)('the actual handler stores the record-owned chance and retains the %s caution through the registry', async mode => {
     const snapshot = await loadScenarioSnapshotForRunAnalysis('bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', 's3-capture', {
       loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(captured.graph), briefText: captured.brief, revision: 2 })),
       readMostRecentPendingActions: vi.fn(async () => []),
@@ -97,8 +109,10 @@ describe('S3 single evaluated-input authority — independent capacity capture24
       ...(mode === 'partial' ? { analysis_status: 'partial' } : {}) }; });
     const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
       plotClient: { run: transport, validatePatch: vi.fn() } as never });
+    const snapshotSpy = mode === 'missing_snapshot' ? vi.spyOn(snapshotBuilder, 'buildRunInputSnapshot').mockReturnValue(null) : undefined;
     const outcome = await handler({ payload: { scenario_id: 'bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c', turn_id: 's3-capture' }, requestId: 's3-capture',
       context: {}, signal: new AbortController().signal, orientationText: '' } as never);
+    snapshotSpy?.mockRestore();
     expect(transport).toHaveBeenCalledTimes(1);
     expect(outbound).toMatchObject({ goal_node_id: 'weekly_support_capacity', graph: { nodes: expect.arrayContaining([
       expect.objectContaining({ id: 'weekly_support_capacity', goal_threshold_raw: 100, goal_threshold: 0.2, goal_threshold_frame: 'level',
@@ -107,6 +121,14 @@ describe('S3 single evaluated-input authority — independent capacity capture24
     const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
     if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected actual saved Run fact');
     const q = deriveRunQuestion({ storedResult: fact.result });
+    if (mode === 'missing_snapshot') {
+      expect(fact.result.input_snapshot).toBeUndefined();
+      expect(q.scope.can_show_goal_chance).toBe(false);
+      expect(fact.result.enrichment?.inference_warnings).not.toEqual(expect.arrayContaining([expect.objectContaining({ code: 'GOAL_CHANCE_LICENSED' })]));
+      expect(fact.result.enrichment?.option_comparison).not.toEqual(expect.arrayContaining([expect.objectContaining({ probability_of_goal: expect.any(Number) })]));
+      expect(fact.result.summary).not.toContain('about 40%');
+      return;
+    }
     expect(q.scope.can_show_goal_chance).toBe(true);
     expect(goalChanceLicenceForAgent(fact.result)?.notes).toContain(STATIC_MODEL_SCOPE_NOTE);
     const statusQuoLine = goalChanceLicenceForAgent(fact.result)?.status_quo?.line;

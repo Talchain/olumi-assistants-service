@@ -1,3 +1,4 @@
+import { STATIC_MODEL_SCOPE_NOTE } from '../orchestrator-v5/goal-target/static-run-evidence.js';
 import { readRecordedRun, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { withoutUnsizedLinkInvitation } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
@@ -42,7 +43,7 @@ import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.j
 import { turnContextItems, runFactsContext } from '../orchestrator-v5/agent-lane/turn-context.js';
 import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
-import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
+import { rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -128,7 +129,7 @@ import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizing
 import { notTargetTestableSentence, targetTestabilityOf } from '../orchestrator-v5/admission/target-testability.js';
 import type { CanonicalAnalysisCell, CanonicalGoalChanceDetail } from './canonical-analysis-view.js';
 import { chanceShownFor, type OptionChanceCell } from '../orchestrator-v5/agent-lane/chance-shown.js';
-import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceNotesForAgent, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
+import { goalChanceNotesForAgent, goalChanceScreenLinesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { withEstimateGoalPointsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-estimate-egress.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -223,7 +224,6 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { withoutSentenceCopies, withSentenceSaidOnce } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestrator-v5/handlers/approve-held-proposal.js';
@@ -681,15 +681,23 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
  * quo by assumption, and the notes. `null` when the view carries no goal-chance detail.
  */
 function cardDetailLinesOf(view: unknown): { has(line: string): boolean } | null {
-  const detail = (view as { goal_chance?: CanonicalGoalChanceDetail } | null | undefined)?.goal_chance;
-  if (detail === undefined || detail === null) return null;
-  const joint = detail.targets?.joint;
+  const card = view as { goal_chance?: CanonicalGoalChanceDetail;
+    question?: { scope?: { status?: unknown; note?: unknown } };
+    options?: readonly { cell?: { kind?: unknown; face?: unknown } }[] } | null | undefined;
+  const detail = card?.goal_chance;
+  const staticOnCard = card?.question?.scope?.status === 'supported_static'
+    && card.question.scope.note === STATIC_MODEL_SCOPE_NOTE
+    && card.options?.some(({ cell }) => (cell?.kind === 'figure' || cell?.kind === 'range')
+      && typeof cell.face === 'string' && cell.face.includes(STATIC_MODEL_SCOPE_NOTE)) === true;
+  if ((detail === undefined || detail === null) && !staticOnCard) return null;
+  const joint = detail?.targets?.joint;
   const exact = new Set([
     ...(joint?.status === 'withheld' ? [joint.line, ...(joint.frechet_line !== undefined ? [joint.frechet_line] : [])] : []),
-    ...(detail.status_quo !== undefined ? [detail.status_quo.line] : []), ...(detail.notes ?? []),
+    ...(detail?.status_quo !== undefined ? [detail.status_quo.line] : []), ...(detail?.notes ?? []),
+    ...(staticOnCard ? [STATIC_MODEL_SCOPE_NOTE] : []),
   ]);
-  const targetLeads = (detail.targets?.per_target ?? []).map((t) => `On its own, the chance of ${t.words}, in this model: `);
-  return { has: (line) => exact.has(line) || targetLeads.some((lead) => line.startsWith(lead)) };
+  const targetLeads = (detail?.targets?.per_target ?? []).map(t => `On its own, the chance of ${t.words}, in this model: `);
+  return { has: line => exact.has(line) || targetLeads.some(lead => line.startsWith(lead)) };
 }
 
 /** The latest successful build's typed receipt owns the draft words; narrator prose is never a receipt. */
@@ -1161,12 +1169,6 @@ export function leavesProposalAwaitingApproval(
       const { proposal_id: _hidden, ...rest } = d;
       return rest;
     })).length > 0);
-}
-
-/** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
-function placeExplainCaveat(text: string, caveat: string, keepFirst = false): string {
-  if (keepFirst) return withB3LinesAtRest(withSentenceSaidOnce(text, caveat, true), [caveat]);
-  return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
 }
 
 /**
@@ -2600,8 +2602,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // helpers on the same readback: without them the replay loses the typed chance headline the user first saw.
           const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
             (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
-          rebuilt = withScreenLinesOwed(rebuilt, screenNow, goalChanceNotesForAgent(state.analysisResult, state.graph,
-            (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current')).text;
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           const guidedReplayFinding = replayGuidedText !== null && replayText.includes(replayGuidedText) ? replayGuidedText : null;
           replayObligations = [
@@ -3381,6 +3381,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
+    let comparisonForReply: NonNullable<ReturnType<typeof rerunExplanationPlan>> | undefined;
     let explanationRead: Awaited<ReturnType<typeof readBackState>> | undefined;
     /**
      * The NARRATOR's own words on this turn, exactly as the model wrote them (the explanation's raw answer, or the Agent
@@ -3637,6 +3638,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runToolOutputLicensesLeader(selectedRun),
         graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
         pairRead.withinBand, pairRead.userWrittenLinks, pairRead.frameRefitLinks);
+      comparisonForReply = rerunPlan ?? undefined;
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -3646,7 +3648,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // Standing unit/authorship/calculation safeguards remain; RUN_FACTS_USE is the one Run coaching instruction.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${eligibleIntervention === undefined ? '' : `${ELIGIBLE_INTERVENTION_INSTRUCTION}\n\n`}${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${RUN_FACTS_USE}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -3677,14 +3679,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         else if (answer.trim().length > 0) {
           explanationReady = true;
           words = answer;
-          // AIE-04: check the model's sentences and repair only missing record facts, without a second prefix.
-          const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
-          if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
-          const said = composed?.text ?? answer;
-          interpreted = typed !== null || composed !== null
-            // The history keeps the ANSWER, never the JSON: one id-less assistant message, which needs no reasoning item
-            // (the f828a61 refusal is for a message WITH its id and without its reasoning). The same for a composed rerun text.
-            ? { answer: said, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }] }
+          interpreted = typed !== null
+            ? { answer, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] }
             : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         }
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
@@ -5186,15 +5182,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult, analysisReady });
-    /**
-     * ⭐ THE RUN-TURN COACHING CARD (CEE #1855), bound to the SAME readback. On this lane the run's own
-     * blocks carry no coaching on the automatic first pass (leader withheld, no decision_review), so
-     * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
-     * blocks stay under `bindRunBlocksToReadback`'s rule above.
-     */
-    // C4: the same blocks and eligibility as `runTurnCoaching`, plus the typed move, its caveats and the science brief.
+    // Data blocks stay bound to the current readback. The AI's reply owns the coaching move.
     const runCoaching = runTurnNextMove(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, limitVerdicts });
-    const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
+    const coachingBound = [...runBound, ...runCoaching.blocks.filter(b => !lastRunBlocks.includes(b))]
+      .filter(block => !aiWroteReply || !['coaching', 'exercise'].includes(String((block as { type?: unknown })?.type)));
     // What changed since the last run: the run turn's own block and refusal reason, only beside that same run.
     const runDelta = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
     const coachingBlocks: unknown[] = coachingBound.length === 0
@@ -5298,8 +5289,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
     const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
       && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
-    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, aiRunTurn));
+    const scopedNarration = noDirectLink ?? scopedNarrationRaw;
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
@@ -5606,28 +5596,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         wireBody = { ...wireBody, assistant_text: text };
       }
-      // ⭐ THE RESULT CARD IS THE CHANCE (DL, PL #94 07:24Z; capacity post3017 row 4: the face said by the reply, then
-      // again by the card under it). When this reply displays the Run's bound result card (this readback's result block
-      // beside a shipped, current canonical view of that SAME Run), an option whose card cell shows this exact chance is
-      // not said again here; what it rests on still is (DL ruling on #3027), and the AI's answer explains it. No such card
-      // (an Explain, a view that cannot ship, another or a stale Run): the line stays, the truthful fallback. By the Run's
-      // identity and the cell's own face, never by words.
-      const cardFaces = new Map(cardBound
-        ? cardView.options.flatMap(({ option_id, cell }) => (cell.kind === 'figure' || cell.kind === 'range')
-          && typeof cell.face === 'string' ? [[option_id, cell.face] as const] : []) : []);
-      // Only a line the card displays IN FULL goes (Codex r1 on #3027): a face without the line's shortfall sentence
-      // leaves the whole line said, so nothing the card does not show disappears.
-      const onCard = new Set(screenLines.filter((l) => cardFaces.get(l.option_id) === l.chance).map((l) => l.option_id));
-      // Add only missing factual units: a partial card or one option's chance cannot stand for another's shortfall.
-      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines,
-        goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent, cardDetail)
-          .filter((note) => cardDetail === null || !cardDetail.has(note)), { onCard });
-      if (ranged.text !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: ranged.text };
-      if (ranged.added > 0) {
-        log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
-          ...(turnId !== undefined ? { turn_id: turnId } : {}), added_count: ranged.added },
-        'agent-lane: the screen\'s chance line was said by Olumi (the reply did not say it)');
-      }
+
     }
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
@@ -5781,8 +5750,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Whole profiles/envelopes retain their existing behavior; an uninterpreted Run uses coaching.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
-    {
-      // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
+    if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
+      const checked = withEstimateGoalPointsAtEgress(wireBody, {
+        analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
+        comparison: comparisonForReply,
+        disclosureOnCard: cardBound ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null,
+        userAuthoredTexts: userTextsForEgress(
+          [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress),
+      });
+      const { _answer_shape: _priorShape, ...unshaped } = checked;
+      wireBody = unshaped as OlumiResponse & Record<string, unknown>;
+    } else {
+      // The existing factual fallback still serves a turn with no usable AI answer.
       const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
       // A route-issued deadline card says its own question (the door's public_label, nothing added) AFTER the AI's answer to
       // this turn's message, never instead of it (hiring post3007 turn 02: "Is this a UI or a data issue?" got only the card,
@@ -5861,17 +5840,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat, disclosure: { kind: 'robustness' as const } }] : []),
         // Typed screen evidence: chance lines stay with their own notes; comparison basis/root lines go to detail.
         // A chance and what it depends on are ONE finding: the joined line (as
-        // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
+        // shown by the screen) binds as one unit when present, else each sentence binds where it stands.
         ...screenLines.flatMap((l): FaceObligation[] => [
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const, subjects: [l.option_id] }]),
           { role: 'evidence', text: l.chance, lead: true, subjects: [l.option_id] },
           ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends, subjects: [l.option_id], companionOf: l.option_id }]),
           ...[l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined)
             .map((text): FaceObligation => ({ role: 'evidence', text, subjects: [l.option_id], companionOf: l.option_id })),
-          // B15: where the narrator gave this figure in its own accepted words (so nothing was added), THAT sentence is
-          // the finding: typed as leading evidence, by this option's label and screen figure (Codex P1, DL 6049287605).
-          // With its spread note as ONE unit when the note follows it (never a chance on the face, its qualifier in detail).
-          ...ownWordsLeadTexts(reply, l, sentencesOf).map((text): FaceObligation => ({ role: 'evidence', text, lead: true, subjects: [l.option_id] })),
+
         ]),
         ...[basis, rootLine].filter((l): l is string => typeof l === 'string' && l.trim() !== '')
           .map((text) => ({ role: 'evidence' as const, text })),

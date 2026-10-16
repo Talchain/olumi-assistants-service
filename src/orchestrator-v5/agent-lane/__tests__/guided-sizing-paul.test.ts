@@ -18,7 +18,7 @@ import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../sy
 import { applyIdentityConfirmEdit } from '../../system-events/identity-confirm-edit.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../goal-chance-screen-lines.js';
+import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
 import { placeholderGoalPaths, placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { guidedSizingActions, guidedSizingForRun, guidedSizingProgressLine } from '../guided-sizing.js';
 import { ProposalStore } from '../proposal.js';
@@ -147,8 +147,6 @@ describe('GUIDED PATH round 6 — Paul 632b92b9, without graph repair', () => {
       "‘Test £54 Pro price’: about 45% chance of meeting your goal, in this model, using Olumi's estimates for 1 option setting and 2 relationships (see Check estimates).",
     ]);
     expect(points.map(p => p.olumi_estimate_link_count)).toEqual([2, 2]);
-    const reply = withScreenLinesOwed('This Run is ready.', points);
-    for (const point of points) expect(reply.text).toContain(point.chance);
     expect(goalChanceWithheldForAgent(wordRun, graph)).toBeUndefined();
     expect(graphWrites).toBe(1);
     expect(graph.edges).toEqual(paul.edges);
