@@ -181,6 +181,41 @@ describe('THE RANGE READING ON A PER-ONE LINK (T1b F2, served g1-2633t d3 turn 4
   });
 });
 
+describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their range lands whichever side they write it, beside a range in another unit', () => {
+  /** The same press as MUST-FIX: card, approval, and the real writer storing the user's figure with its range. */
+  async function landsWithRange(said: string) {
+    const graph = graphOf(D1[0]);
+    const { caps, store, commits } = world(graph);
+    const f = idOf(graph, D1[1]); const t = idOf(graph, D1[2]);
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...switchArgs(D1[1], D1[2], 150), quote: said }) as Json;
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, link: { effect: { amount: 150, per_source_change: 1 }, your_words: said } });
+    expect(JSON.stringify(r)).not.toMatch(/rather than a range|in figures\?/);
+    const card = cardFor(store, r);
+    const out = await caps.authoriseChange(ctxPressing(String(r.proposal_id), card.message), { proposal_id: String(r.proposal_id) }) as Json;
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(commits).toHaveLength(1);
+    expect(linkOf(graph, f, t).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', source_quote: said,
+      natural_effect: { amount: 150, per_source_change: 1, per_source_change_unit: 'switch',
+        stated_range: { low: 80, high: 250, text: 'between 80 and 250', end: 'centre' } } });
+  }
+  it('⭐ the range written FIRST, the figure after ("between 80 and 250 …, probably about 150")', async () => {
+    await landsWithRange('The starter tier would win between 80 and 250 new subscribers, probably about 150.');
+  });
+  it('⭐ "somewhere between 80 and 250 …, call it 150"', async () => {
+    await landsWithRange('The starter tier would win somewhere between 80 and 250 new subscribers, call it 150.');
+  });
+  it('⭐ a money range in the SAME sentence is a separate claim ("…, and it would cost £2k to £3k a month to run")', async () => {
+    await landsWithRange('The starter tier would win about 150 new subscribers, between 80 and 250, and it would cost £2k to £3k a month to run.');
+  });
+  it.each([
+    ['a range BEFORE the figure in another clause (", and")', 'Between 80 and 250 people visit each week, and the starter tier would win about 150 new subscribers.'],
+    ['a second range of the same quantity, the range first', 'The starter tier would win between 80 and 250 new subscribers, or 100-300 in a good year, probably about 150.'],
+    ['a range in another unit written first, and no range of its own', 'Between 1 and 4 months after launch, the starter tier would win about 150 new subscribers.'],
+  ] as const)('KEPT NEGATIVE: %s → asked, nothing proposed or stored', async (_name, said) => {
+    await expectAsked(D1[0], switchArgs(D1[1], D1[2], 150), said, 'unclear_figure');
+  });
+});
+
 describe('CONTROLS: where Olumi cannot read one figure, it still asks', () => {
   it.each([
     ['a range with no figure inside it', 'The starter tier would win between 80 and 250 new subscribers.', 150, 'unclear_figure', 'not_the_users_statement'],
