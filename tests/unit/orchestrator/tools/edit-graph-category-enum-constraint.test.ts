@@ -22,7 +22,6 @@
 import { describe, it, expect } from "vitest";
 
 import { parseEditGraphResponse } from "../../../../src/orchestrator/tools/edit-graph.js";
-import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 import { GraphV3 } from "../../../../src/schemas/cee-v3.js";
 import { FactorCategoryV3 } from "../../../../src/schemas/cee-v3.js";
 
@@ -93,16 +92,5 @@ describe("edit_graph category enum constraint (1.46 residual, task_97fbcb00)", (
       const value = result.operations[0]!.value as Record<string, unknown>;
       expect(value.category).toBe(cat);
     }
-  });
-
-  it("the operations item schema declares category as a closed, grammar-enforced enum (structural constraint, not just runtime coercion)", () => {
-    const opsSchema = ANTHROPIC_EDIT_GRAPH_SCHEMA.properties.operations.items as {
-      properties: Record<string, unknown>;
-    };
-    const categoryField = opsSchema.properties.category as
-      | { type: string; enum?: readonly string[] }
-      | undefined;
-    expect(categoryField).toBeDefined();
-    expect(categoryField?.enum).toEqual([...FactorCategoryV3.options]);
   });
 });

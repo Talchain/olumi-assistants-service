@@ -18,12 +18,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as telemetry from '../../src/utils/telemetry.js';
 import { TelemetryEvents } from '../../src/utils/telemetry.js';
 import {
-  serialiseEditContextForLLM,
-  serialiseEditContextForLLMWithMeta,
-  truncateGraphJsonWithMeta,
-  editCompactGraph,
-} from '../../src/orchestrator/context/serialise.js';
-import {
   projectConversation,
   PERSISTED_MESSAGE_CAP,
   CONTEXT_PACK_RECENT_TURNS_CAP,
@@ -31,8 +25,6 @@ import {
 import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js';
 import { CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
-import type { ConversationContext } from '../../src/orchestrator/types.js';
-import type { GraphV3T } from '../../src/schemas/cee-v3.js';
 
 let emitSpy: ReturnType<typeof vi.spyOn>;
 
@@ -43,31 +35,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-function bigGraph(nodeCount = 120): GraphV3T {
-  const nodes = Array.from({ length: nodeCount }, (_, i) => ({
-    id: `node_${i}`,
-    label: `A deliberately verbose node label for overflow ${i} ${'x'.repeat(40)}`,
-    kind: 'factor' as const,
-  }));
-  const edges = Array.from({ length: nodeCount - 1 }, (_, i) => ({
-    from: `node_${i}`,
-    to: `node_${i + 1}`,
-    strength: { mean: 0.5, std: 0.1 },
-    exists_probability: 1,
-  }));
-  return { nodes, edges } as unknown as GraphV3T;
-}
-
-function editContextWith(graph: GraphV3T | null): ConversationContext {
-  return {
-    graph,
-    analysis_response: null,
-    framing: null,
-    messages: [],
-    scenario_id: 'scn_s1_fixture',
-  };
-}
 
 function turnFixture(i: number, userMessage?: string): SessionTurnWithContent {
   return {
@@ -86,89 +53,6 @@ function turnFixture(i: number, userMessage?: string): SessionTurnWithContent {
     assistant_message: `answer ${i}`,
   };
 }
-
-// Parse the node/edge counts out of the rendered "## Current Graph (N nodes,
-// M edges)" header, and count what the ```json body actually carries.
-function readHeaderAndBody(text: string): {
-  headerNodes: number;
-  headerEdges: number;
-  bodyNodes: number;
-  bodyEdges: number;
-} {
-  const header = text.split('\n').find((l) => l.startsWith('## Current Graph'));
-  if (!header) throw new Error('no graph header rendered');
-  const m = header.match(/\((\d+) nodes, (\d+) edges\)/);
-  if (!m) throw new Error(`header shape unexpected: ${header}`);
-  const jsonStart = text.indexOf('```json');
-  const jsonEnd = text.indexOf('```', jsonStart + 7);
-  const body = JSON.parse(text.slice(jsonStart + 7, jsonEnd).trim());
-  return {
-    headerNodes: Number(m[1]),
-    headerEdges: Number(m[2]),
-    bodyNodes: body.nodes.length,
-    bodyEdges: body.edges.length,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Graph disclosure (marker + honest header) — UNCONDITIONAL
-// ---------------------------------------------------------------------------
-
-describe('graph disclosure (serialise.ts) — always on', () => {
-  it('LIVE FIX: a truncated graph header never overstates what the JSON carries', () => {
-    // Regression pin for the misreporting header: pre-fix the header printed
-    // pre-truncation counts (120 nodes, 119 edges) over a JSON body that had
-    // been edge-sliced to a fraction — the edit LLM was told edges existed
-    // that it could not see. The default (production) path must be honest.
-    const out = serialiseEditContextForLLM(editContextWith(bigGraph()));
-    const { headerNodes, headerEdges, bodyNodes, bodyEdges } = readHeaderAndBody(out);
-    expect(headerNodes).toBe(bodyNodes);
-    expect(headerEdges).toBe(bodyEdges);
-  });
-
-  it('default (no opts): header carries POST-truncation counts and the in-section marker', () => {
-    const graph = bigGraph();
-    const compact = editCompactGraph(graph);
-    const cut = truncateGraphJsonWithMeta(compact, 8_000);
-    expect(cut.truncated).toBe(true);
-
-    const { text } = serialiseEditContextForLLMWithMeta(editContextWith(graph), 8_000, 4_000);
-
-    // Honest header: post-truncation counts.
-    expect(text).toContain(`## Current Graph (${cut.keptNodes} nodes, ${cut.keptEdges} edges)`);
-    // The 02 §Disclosure marker, exact shape.
-    expect(text).toContain(
-      `(graph truncated: showing ${cut.keptNodes} of ${compact.nodes.length} nodes, ${cut.keptEdges} of ${compact.edges.length} edges)`,
-    );
-    // The misreporting pre-truncation header must be GONE (edges differ).
-    expect(text).not.toContain(
-      `## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`,
-    );
-
-    // The cut-site event is disclosed:true.
-    const cuts = emitSpy.mock.calls
-      .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
-      .map((c: readonly unknown[]) => c[1] as Record<string, unknown>)
-      .filter((e: Record<string, unknown>) => e.section === 'graph_json');
-    expect(cuts).toHaveLength(1);
-    expect(cuts[0].disclosed).toBe(true);
-  });
-
-  it('positive control — a fitting graph: no marker, full header, no cut event', () => {
-    const graph = bigGraph(3);
-    const compact = editCompactGraph(graph);
-    const { text } = serialiseEditContextForLLMWithMeta(editContextWith(graph), 8_000, 4_000);
-    expect(text).toContain(`## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`);
-    expect(text).not.toContain('(graph truncated:');
-    // Absence assertion is meaningful only because the truncated case above
-    // DOES emit — here the graph fits, so no graph_json cut event fires.
-    const cuts = emitSpy.mock.calls
-      .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
-      .map((c: readonly unknown[]) => c[1] as Record<string, unknown>)
-      .filter((e: Record<string, unknown>) => e.section === 'graph_json');
-    expect(cuts).toHaveLength(0);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Window + per-turn disclosure (projectConversation) — UNCONDITIONAL

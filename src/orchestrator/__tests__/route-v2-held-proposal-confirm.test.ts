@@ -465,6 +465,23 @@ describe('POST /orchestrate/v2/turn — held proposal survives the confirm turn 
     },
   );
 
+  it.each([
+    ['founder', 'Alex reported revenue of £2m on 2026-09-01; the hiring deadline is December.'],
+    ['capacity', 'Sam proposed 30 extra hours for Support; the capacity deadline is December.'],
+  ])('unrelated history in the %s brief cannot become approval of the stored card', async (_brief, history) => {
+    const held = renameHold();
+    pendingActionsForRead = [held.pending];
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message: `${history} ${held.copy.message}`, source: 'chip_click' }),
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).details.reason).toBe('held_card_not_available');
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
   it('the emitted rename label cannot revive an expired hold or redraft it', async () => {
     const held = renameHold();
     pendingActionsForRead = [{ ...held.pending, expires_at_iso: '2020-01-01T00:00:00.000Z' }];

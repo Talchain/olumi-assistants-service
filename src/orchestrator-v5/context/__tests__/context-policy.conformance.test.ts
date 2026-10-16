@@ -25,24 +25,7 @@ import { describe,expect,it,vi } from 'vitest';
 
 import { DRAFT_ATTACHMENT_MAX_BYTES } from '../../../adapters/llm/draft-attachment.js';
 import { projectDecisionRecords } from '../../decision-records/project.js';
-import {
-CONTEXT_PACK_CEILING_CUT_ORDER,
-CONTEXT_POLICY,
-declaredSectionNames,
-deriveContextSectionBudgets,
-emitContextPolicyDivergence,
-findContextPolicyDivergences,
-modelFacingSectionKeys,
-POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP,
-POLICY_EDIT_BRIEF_CHAR_CAP,
-POLICY_EDIT_CONVERSATION_CAP,
-POLICY_EDIT_GRAPH_JSON_CAP,
-POLICY_MAX_PROJECTED_OPTIONS,
-POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
-POLICY_VERBATIM_TURNS,
-type ContextCallSite,
-type ContextPolicyTripwireLogger,
-} from '../context-policy.js';
+import { CONTEXT_PACK_CEILING_CUT_ORDER, CONTEXT_POLICY, declaredSectionNames, deriveContextSectionBudgets, emitContextPolicyDivergence, findContextPolicyDivergences, POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP, POLICY_MAX_PROJECTED_OPTIONS, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, POLICY_VERBATIM_TURNS, type ContextCallSite, type ContextPolicyTripwireLogger } from '../context-policy.js';
 
 import { runStageCoachingPass } from '../../../cee/unified-pipeline/stages/coaching-pass.js';
 import type { StageContext } from '../../../cee/unified-pipeline/types.js';
@@ -57,38 +40,7 @@ import { CONTEXT_PACK_BRIEF_CHAR_CAP } from '../context-pack-schema.js';
 
 import * as llmRouter from '../../../adapters/llm/router.js';
 import { DECISION_REVIEW_MAX_BRIEF_CHARS } from '../../../cee/decision-review/invoke.js';
-import {
-EDIT_CONTEXT_BRIEF_CHAR_CAP,
-EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
-EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES,
-serialiseEditContextForLLMWithMeta,
-} from '../../../orchestrator/context/serialise.js';
-import type { ConversationContext } from '../../../orchestrator/types.js';
 import { composeEditClarifyResponse } from '../../compose/edit-clarify-response.js';
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-
-
-
-
-/** Build a rich coach_converse pack that populates the interesting sections. */
-
-
-
-
-/** Is `observed` a subsequence of `declared` (same relative order)? */
-function isSubsequence(observed: string[], declared: string[]): boolean {
-  let di = 0;
-  for (const key of observed) {
-    const found = declared.indexOf(key, di);
-    if (found === -1) return false;
-    di = found + 1;
-  }
-  return true;
-}
 
 // ---------------------------------------------------------------------------
 // Derived budgets — import identity (the derive-don't-mirror proof)
@@ -117,9 +69,6 @@ describe('context-policy — budgets are DERIVED, never re-typed', () => {
 });
 
 describe('context-policy — local-const replicas PINNED to their originals (fail-loud)', () => {
-  it('POLICY_EDIT_BRIEF_CHAR_CAP === EDIT_CONTEXT_BRIEF_CHAR_CAP', () => {
-    expect(POLICY_EDIT_BRIEF_CHAR_CAP).toBe(EDIT_CONTEXT_BRIEF_CHAR_CAP);
-  });
   it('POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP === DECISION_REVIEW_MAX_BRIEF_CHARS', () => {
     expect(POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP).toBe(DECISION_REVIEW_MAX_BRIEF_CHARS);
   });
@@ -128,15 +77,6 @@ describe('context-policy — local-const replicas PINNED to their originals (fai
   });
   it('POLICY_MAX_PROJECTED_OPTIONS === MAX_PROJECTED_OPTIONS', () => {
     expect(POLICY_MAX_PROJECTED_OPTIONS).toBe(MAX_PROJECTED_OPTIONS);
-  });
-  // egress-F5 (2026-07-24): the two edit-cap replicas were docstring-claimed to
-  // equal the serialise defaults but NOT pinned — a fail-silent telemetry_only
-  // mirror. Now pinned to the exported single source.
-  it('POLICY_EDIT_GRAPH_JSON_CAP === EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES', () => {
-    expect(POLICY_EDIT_GRAPH_JSON_CAP).toBe(EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES);
-  });
-  it('POLICY_EDIT_CONVERSATION_CAP === EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS', () => {
-    expect(POLICY_EDIT_CONVERSATION_CAP).toBe(EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS);
   });
 });
 
@@ -310,47 +250,6 @@ describe('coach_converse older_relevant_facts — the P6 read slice is declared,
   });
 
 
-});
-
-// ---------------------------------------------------------------------------
-// edit_graph ANCHOR — observed serialiser sections == declared policy
-// ---------------------------------------------------------------------------
-
-describe('edit_graph anchor — realised serialiser sections are declared', () => {
-  const editContext: ConversationContext = {
-    graph: {
-      nodes: [
-        { id: 'dec_hire', kind: 'decision', label: 'Hire?' },
-        { id: 'goal_rev', kind: 'goal', label: 'Revenue' },
-      ],
-      edges: [{ from: 'dec_hire', to: 'goal_rev' }],
-    } as unknown as ConversationContext['graph'],
-    analysis_response: null,
-    framing: { stage: 'analyse' } as unknown as ConversationContext['framing'],
-    messages: [
-      { role: 'user', content: 'We are choosing between local hire and offshore.' },
-      { role: 'assistant', content: 'Understood — I have the two options.' },
-    ],
-    scenario_id: 'scen-edit-anchor',
-    brief: { text: 'Choose a hiring model for the new tier.', truncated: false, original_chars: 39 },
-  };
-
-  it('every realised sectionChars key is a declared edit_graph section', () => {
-    const { sectionChars } = serialiseEditContextForLLMWithMeta(editContext);
-    const declared = declaredSectionNames('edit_graph');
-    const undeclared = Object.keys(sectionChars).filter((k) => !declared.has(k));
-    expect(undeclared).toEqual([]);
-  });
-
-  it('realised section order is a subsequence of the declared model-facing edit order', () => {
-    const { sectionChars } = serialiseEditContextForLLMWithMeta(editContext);
-    expect(isSubsequence(Object.keys(sectionChars), modelFacingSectionKeys('edit_graph'))).toBe(true);
-  });
-
-  it('the brief renders FIRST as the ## Decision Brief section (S2)', () => {
-    const { text } = serialiseEditContextForLLMWithMeta(editContext);
-    expect(text.startsWith('## Decision Brief')).toBe(true);
-  });
 });
 
 // ---------------------------------------------------------------------------

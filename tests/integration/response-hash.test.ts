@@ -128,7 +128,7 @@ describe.skip("Response Hash Integration - QUARANTINED", () => {
       },
       {
         method: "POST" as const,
-        url: "/assist/suggest-options",
+        url: "/assist/v1/explain-diff",
         payload: {
           graph: {
             schema: "graph.v1",

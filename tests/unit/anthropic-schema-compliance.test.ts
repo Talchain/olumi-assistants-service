@@ -20,7 +20,6 @@ import {
   MIN_ITEMS_ALLOWED_VALUES,
 } from "../../src/adapters/llm/anthropic-schema-compliance.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
-import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "../../src/orchestrator/tools/anthropic-edit-graph-schema.js";
 
 // ============================================================================
 // Helpers
@@ -471,32 +470,6 @@ describe("enforceAnthropicSchemaCompliance", () => {
       const props = normalised.properties as Record<string, unknown>;
       expect(props.nodes).toBeDefined();
       expect(props.edges).toBeDefined();
-    });
-  });
-
-  describe("ANTHROPIC_EDIT_GRAPH_SCHEMA compliance", () => {
-    it("normalised schema has additionalProperties: false on ALL objects", () => {
-      const normalised = enforceAnthropicSchemaCompliance(
-        ANTHROPIC_EDIT_GRAPH_SCHEMA as unknown as Record<string, unknown>,
-        "edit_graph",
-      );
-      assertAllObjectsCompliant(normalised);
-    });
-
-    it("normalised schema has no unsupported keywords", () => {
-      const normalised = enforceAnthropicSchemaCompliance(
-        ANTHROPIC_EDIT_GRAPH_SCHEMA as unknown as Record<string, unknown>,
-        "edit_graph",
-      );
-      assertNoUnsupportedKeywords(normalised);
-    });
-
-    it("normalised schema has no $ref nodes", () => {
-      const normalised = enforceAnthropicSchemaCompliance(
-        ANTHROPIC_EDIT_GRAPH_SCHEMA as unknown as Record<string, unknown>,
-        "edit_graph",
-      );
-      assertNoRefs(normalised);
     });
   });
 

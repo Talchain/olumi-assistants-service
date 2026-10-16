@@ -28,8 +28,6 @@ import { readFileSync } from 'node:fs';
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction, afterEach } from 'vitest';
 import { _resetConfigCache } from '../../../config/index.js';
-import type { FastifyRequest } from 'fastify';
-import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
 
 // ── module-level mocks (same pattern as edit-graph-dispatch.test.ts) ─────────
 
@@ -65,17 +63,10 @@ vi.mock('../../build-turn-context.js', () => ({
 
 // ── imports after mocks ───────────────────────────────────────────────────────
 
-import {
-  dispatchEditGraph,
-  mergeAppliedGraphForPersistence,
-} from '../edit-graph-dispatch.js';
-import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
+// ── imports after mocks ───────────────────────────────────────────────────────
+import { mergeAppliedGraphForPersistence } from '../edit-graph-dispatch.js';
 import { commitDirectAnswer } from '../../commit.js';
-import {
-  buildTurnContext,
-  loadMostRecentPendingActions,
-  loadPersistedGraphStrict,
-} from '../../build-turn-context.js';
+import { loadMostRecentPendingActions } from '../../build-turn-context.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
@@ -118,65 +109,6 @@ function buildAppliedGraphFromWireEcho(
 }
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-const STUB_REQUEST = {} as FastifyRequest;
-
-function makePayload() {
-  return {
-    kind: 'message' as const,
-    scenario_id: SCENARIO_ID,
-    turn_id: TURN_ID,
-    stage: 'analyse' as const,
-    message: 'Set the Local Senior Hire Programme factor to 1.0.',
-    turn_class: 'frame' as const,
-    source: 'composer' as const,
-  };
-}
-
-function makeAppliedEditResult(appliedGraph: GraphV3T): EditGraphResult {
-  return {
-    blocks: [],
-    assistantText: 'Updated Local Senior Hire Programme from 0 to 1.',
-    latencyMs: 1200,
-    appliedGraph: appliedGraph as unknown as EditGraphResult['appliedGraph'],
-    wasRejected: false,
-    operations: [
-      { op: 'update_node', path: 'fac_local_hire', value: { observed_state: { value: 1 } } },
-    ],
-  } as EditGraphResult;
-}
-
-function installTurnContext(): void {
-  // buildTurnContext no longer drives the merge base; it supplies
-  // prior_facts / pending actions only. persistedGraph here is irrelevant
-  // to persistence (kept null to prove the base comes from the strict read).
-  (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockResolvedValue({
-    prior_facts: [],
-    prior_turns: [],
-    most_recent_pending_actions: [],
-    persistedGraph: null,
-  } as never);
-}
-
-/** Strict persisted read returns this graph (genuine value or null). */
-function installPersistedBase(graph: unknown): void {
-  (loadPersistedGraphStrict as MockedFunction<typeof loadPersistedGraphStrict>).mockResolvedValue(
-    graph,
-  );
-}
-
-/** Strict persisted read THROWS — simulates a degraded Supabase/session read. */
-function installDegradedPersistedRead(): void {
-  (loadPersistedGraphStrict as MockedFunction<typeof loadPersistedGraphStrict>).mockRejectedValue(
-    new Error('SessionReadError: scenarios.graph read failed (degraded)'),
-  );
-}
-
-function committedGraph(): Record<string, unknown> {
-  const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
-  expect(calls.length).toBe(1);
-  return calls[0]![1].graph as Record<string, unknown>;
-}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -223,169 +155,6 @@ describe('defect premise — GraphV3 strips the server-authoritative fields', ()
     // Premise for the decisive case below: the rich fixture HAS both.
     expect(typeof RICH_PERSISTED_GRAPH.goal_node_id).toBe('string');
     expect(Array.isArray(RICH_PERSISTED_GRAPH.options)).toBe(true);
-  });
-});
-
-// ── live-faithful decisive case (acceptance 2 + 3) ───────────────────────────
-
-describe('dispatchEditGraph — persisted-base merge-back (decisive live-faithful case)', () => {
-  it('applied edit on a DGAI-shaped echo (no goal_node_id/options[]) commits a graph that retains the persisted options[] byte-for-byte, goal_node_id, and the mutation', async () => {
-    const persisted = clone(RICH_PERSISTED_GRAPH);
-    installTurnContext();
-    installPersistedBase(persisted);
-    const applied = buildAppliedGraphFromWireEcho((g) => {
-      const node = g.nodes.find((n) => n.id === 'fac_local_hire');
-      expect(node).toBeDefined();
-      (node as { observed_state?: Record<string, unknown> }).observed_state = {
-        ...(node as { observed_state?: Record<string, unknown> }).observed_state,
-        value: 1,
-        raw_value: 1,
-      };
-    });
-    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-      makeAppliedEditResult(applied),
-    );
-
-    const result = await dispatchEditGraph({
-      payload: makePayload(),
-      requestId: 'req-pmb-decisive',
-      request: STUB_REQUEST,
-      graphState: clone(WIRE_ECHO) as GraphStateIngress,
-      analysisState: null,
-    });
-
-    expect(result.commitPerformed).toBe(true);
-    const graph = committedGraph();
-
-    // Server-authoritative top-level fields survive from the PERSISTED base.
-    expect(graph.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
-    expect(JSON.stringify(graph.options)).toBe(
-      JSON.stringify(RICH_PERSISTED_GRAPH.options),
-    );
-
-    // The intended mutation is applied (appliedGraph wins on nodes/edges).
-    expect(graph.nodes).toBe(applied.nodes);
-    expect(graph.edges).toBe(applied.edges);
-    const mutated = (graph.nodes as Array<Record<string, unknown>>).find(
-      (n) => n.id === 'fac_local_hire',
-    );
-    expect((mutated?.observed_state as Record<string, unknown>).value).toBe(1);
-
-    // Option-node top-level interventions survive (they live on the
-    // applied nodes, which came from the captured echo's option nodes).
-    const optionNodesWithInterventions = (
-      graph.nodes as Array<Record<string, unknown>>
-    ).filter((n) => n.kind === 'option' && n.interventions !== undefined);
-    expect(optionNodesWithInterventions.length).toBeGreaterThan(0);
-
-    // Revert-the-fix oracle: the pre-fix commit was the appliedGraph
-    // object itself, which provably lacks both fields.
-    expect(
-      (applied as unknown as Record<string, unknown>).goal_node_id,
-    ).toBeUndefined();
-    expect((applied as unknown as Record<string, unknown>).options).toBeUndefined();
-  });
-
-  it('GENUINELY empty persisted graph (strict read returns null) → ingress-fallback base; commit still carries the applied mutation and whatever the echo had', async () => {
-    installTurnContext();
-    installPersistedBase(null); // strict read SUCCEEDED, scenario genuinely has no graph
-    const applied = buildAppliedGraphFromWireEcho(() => undefined);
-    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-      makeAppliedEditResult(applied),
-    );
-
-    await dispatchEditGraph({
-      payload: makePayload(),
-      requestId: 'req-pmb-fallback',
-      request: STUB_REQUEST,
-      graphState: clone(ECHO_GRAPH_STATE) as GraphStateIngress, // harness echo WITH goal
-      analysisState: null,
-    });
-
-    const graph = committedGraph();
-    // Base = raw ingress: the echo's goal_node_id survives. This is the
-    // legitimate no-persisted-graph case — there is nothing to lose, and
-    // the edit must still persist.
-    expect(graph.goal_node_id).toBe(ECHO_GRAPH_STATE.goal_node_id);
-    expect(graph.nodes).toBe(applied.nodes);
-  });
-
-  it('DEGRADED persisted read (strict read throws) → FAIL CLOSED: dispatch rejects and NO graph is committed (Codex P0 — never overwrite canonical state with the lossy echo)', async () => {
-    // A2: rollback-only late-read error contract; CAS ON refuses before the provider.
-    __setUseAppendV6ForTest(false);
-    installTurnContext();
-    installDegradedPersistedRead(); // strict read THROWS — cannot prove the base
-    const applied = buildAppliedGraphFromWireEcho(() => undefined);
-    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-      makeAppliedEditResult(applied),
-    );
-
-    await expect(
-      dispatchEditGraph({
-        payload: makePayload(),
-        requestId: 'req-pmb-degraded',
-        request: STUB_REQUEST,
-        graphState: clone(WIRE_ECHO) as GraphStateIngress, // lossy DGAI echo
-        analysisState: null,
-      }),
-    ).rejects.toThrow(/persisted merge base unavailable|degraded/i);
-
-    // The whole point: a degraded read must NOT commit the lossy echo over
-    // a (possibly rich) persisted graph. Route-v2 maps this throw to a
-    // retryable edit_graph_pipeline_threw 500.
-    expect(
-      (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls.length,
-    ).toBe(0);
-  });
-
-  it('persisted read OK but buildTurnContext later throws → base already resolved from the strict read; commit still carries the merged graph (base independent of buildTurnContext swallowing)', async () => {
-    installPersistedBase(clone(RICH_PERSISTED_GRAPH)); // base proven good up front
-    (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockRejectedValue(
-      new Error('context unavailable'),
-    );
-    const applied = buildAppliedGraphFromWireEcho(() => undefined);
-    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
-      makeAppliedEditResult(applied),
-    );
-
-    await dispatchEditGraph({
-      payload: makePayload(),
-      requestId: 'req-pmb-ctx-fail',
-      request: STUB_REQUEST,
-      graphState: clone(WIRE_ECHO) as GraphStateIngress,
-      analysisState: null,
-    });
-
-    const graph = committedGraph();
-    expect(graph.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
-    expect(JSON.stringify(graph.options)).toBe(
-      JSON.stringify(RICH_PERSISTED_GRAPH.options),
-    );
-    expect(graph.nodes).toBe(applied.nodes);
-  });
-
-  it('no-op / rejected edit commits NO graph (shape cannot be corrupted by a non-mutation; no strict read needed)', async () => {
-    installTurnContext();
-    installPersistedBase(clone(RICH_PERSISTED_GRAPH));
-    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue({
-      blocks: [],
-      assistantText: 'The proposed edit was rejected.',
-      latencyMs: 800,
-      appliedGraph: null,
-      wasRejected: true,
-    } as EditGraphResult);
-
-    await dispatchEditGraph({
-      payload: makePayload(),
-      requestId: 'req-pmb-noop',
-      request: STUB_REQUEST,
-      graphState: clone(WIRE_ECHO) as GraphStateIngress,
-      analysisState: null,
-    });
-
-    const calls = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mock.calls;
-    expect(calls.length).toBe(1);
-    expect(calls[0]![1].graph).toBeUndefined();
   });
 });
 

@@ -11,7 +11,6 @@
   "src/cee/validation-pipeline/validate-graph.ts",
   "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
   "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts",
-  "src/orchestrator/tools/edit-graph.ts",
   "src/routes/agent-v1-turn.ts",
   "src/routes/assist.v1.decision-review.ts"
  ],
@@ -46,10 +45,6 @@
   "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": {
    "kind": "construction_stage",
    "reason": "Widening pass over the admitted draft: signals come from assembleGuidanceSignals (turn-context/guidance-signals.ts) and the candidate model; carries no Run facts."
-  },
-  "src/orchestrator/tools/edit-graph.ts": {
-   "assembler": "handleEditGraph",
-   "reason": "V2 edit tool builds its own context; on staging it ran about once in 24 h (10 Oct), not on the served path."
   },
   "src/routes/agent-v1-turn.ts": {
    "kind": "route",

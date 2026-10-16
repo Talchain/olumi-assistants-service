@@ -68,8 +68,6 @@
  *    could satisfy.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-
-import { handleEditGraph } from '../edit-graph.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../patch-applier.js';
@@ -77,8 +75,6 @@ import {
   canonicaliseValueOps,
   firstOperationThatDidNotLand,
 } from '../../canonicalise-value-ops.js';
-import type { ConversationContext } from '../../types.js';
-import type { LLMAdapter } from '../../../adapters/llm/types.js';
 
 // ── identity: the ONE node every assertion below binds to ───────────────────
 
@@ -121,16 +117,6 @@ function buildGraph() {
   };
 }
 
-function buildContext(): ConversationContext {
-  return {
-    graph: buildGraph(),
-    analysis_response: null,
-    framing: null,
-    messages: [],
-    scenario_id: 'scn-bare-key',
-  } as unknown as ConversationContext;
-}
-
 // ── helpers, all identity-bound ─────────────────────────────────────────────
 
 /** The node under test, found by ID. Throws rather than returning undefined. */
@@ -143,78 +129,6 @@ function factorOf(graph: unknown): Record<string, unknown> {
 
 function observedOf(graph: unknown): Record<string, unknown> {
   return (factorOf(graph).observed_state ?? {}) as Record<string, unknown>;
-}
-
-/**
- * WALK the result for the rejection code rather than guessing a block path —
- * a wrong path returns `undefined` identically to "no rejection", which would
- * make every assertion here vacuous in the most convincing way.
- */
-function rejectionCodeOf(result: { blocks?: unknown[] }): string | null {
-  let found: string | null = null;
-  const walk = (v: unknown): void => {
-    if (found !== null || v === null || typeof v !== 'object') return;
-    if (Array.isArray(v)) { v.forEach(walk); return; }
-    const rec = v as Record<string, unknown>;
-    const rejection = rec.rejection as Record<string, unknown> | undefined;
-    if (rejection !== undefined && typeof rejection.code === 'string') {
-      found = rejection.code;
-      return;
-    }
-    Object.values(rec).forEach(walk);
-  };
-  walk(result.blocks);
-  return found;
-}
-
-/** Adapter stub returning ONE canned edit_graph response. */
-function makeAdapter(responseJson: unknown): LLMAdapter {
-  return {
-    name: 'fixtures',
-    model: 'test-model',
-    chat: vi.fn().mockResolvedValue({
-      content: JSON.stringify(responseJson),
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-      model: 'test-model',
-      latencyMs: 1,
-      stopReason: 'end_turn',
-    }),
-  } as unknown as LLMAdapter;
-}
-
-function editResponse(operations: unknown[]) {
-  return {
-    operations,
-    removed_edges: [],
-    warnings: [],
-    coaching: { summary: 'Updated.', rerun_recommended: true },
-  };
-}
-
-/**
- * The op shape the SERVED prompt's PATH SYNTAX produces: a field-suffixed path
- * and a SCALAR value. `normaliseOperation` is what turns this into the bare
- * key — this test does not hand-write the bare key at this seam.
- */
-function fieldPathOp(field: string, value: unknown, oldValue: unknown) {
-  return {
-    op: 'update_node',
-    path: `/nodes/${FACTOR_ID}/${field}`,
-    value,
-    old_value: oldValue,
-    impact: 'moderate',
-    rationale: 'Apply the change the user asked for.',
-  };
-}
-
-async function runEdit(responseJson: unknown, description: string) {
-  return handleEditGraph(
-    buildContext(),
-    description,
-    makeAdapter(responseJson),
-    'req-bare-key',
-    'turn-bare-key',
-  );
 }
 
 /**
@@ -384,17 +298,6 @@ describe('POSITIVE CONTROL — the rooted `observed_state/unit` spelling lands t
     expect(observedOf(canonical).value).toBe(0.2);
     expect(observedOf(canonical).raw_value).toBe(20);
   });
-
-  it('at the PRODUCT seam: the edit is applied, not refused', async () => {
-    const result = await runEdit(
-      editResponse([fieldPathOp('observed_state/unit', '£', 'index')]),
-      'That factor is in pounds, not an index',
-    );
-
-    expect(rejectionCodeOf(result)).toBeNull();
-    expect(result.wasRejected).toBe(false);
-    expect(observedOf(result.appliedGraph).unit).toBe('£');
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -415,18 +318,6 @@ describe('⛔ RED — a bare `unit` op must LAND, not refuse the whole edit', ()
     // the unit the user stated must be the unit the product stores.
     expect(observedOf(canonical).unit).toBe('£');
   });
-
-  it('product seam: the edit is NOT refused as OPERATION_DID_NOT_LAND', async () => {
-    const result = await runEdit(
-      editResponse([fieldPathOp('unit', '£', 'index')]),
-      'That factor is in pounds, not an index',
-    );
-
-    // The specific refusal, named — not merely "something was rejected".
-    expect(rejectionCodeOf(result)).not.toBe('OPERATION_DID_NOT_LAND');
-    expect(result.wasRejected).toBe(false);
-    expect(observedOf(result.appliedGraph).unit).toBe('£');
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -437,90 +328,5 @@ describe('⛔ RED — a bare `unit` op must LAND, not refuse the whole edit', ()
 describe('⛔ RED — a bare `value` op must LAND, and must DENOTE what was asked', () => {
   it('guard seam: the op survives canonicalisation (RED today: update_writes_did_not_survive / value)', () => {
     expect(driveGuard({ value: REQUESTED_RAW }).nonLanding).toBeNull();
-  });
-
-  it('product seam: the edit is NOT refused as OPERATION_DID_NOT_LAND', async () => {
-    const result = await runEdit(
-      editResponse([fieldPathOp('value', REQUESTED_RAW, 20)]),
-      'Raise the unit price to 69',
-    );
-
-    expect(rejectionCodeOf(result)).not.toBe('OPERATION_DID_NOT_LAND');
-    expect(result.wasRejected).toBe(false);
-  });
-
-  /**
-   * ⭐ THE ASSERTION A RENAME-ONLY FIX FAILS.
-   *
-   * Route the bare key straight to `observed_state.value` and the op LANDS —
-   * every landing assertion above goes green — while the model now holds 69 in
-   * a field PLoT gates as `value < 0 || value > 1`, with `raw_value` stale at
-   * 20. The stored pair would denote 6,900 in real units, and the factor would
-   * be 345x its true magnitude.
-   *
-   * Written against the CONSUMER's predicate, not against the failure in hand.
-   */
-  it('product seam: does NOT corrupt the normalised field (69 must not land in a 0-1 slot)', async () => {
-    const result = await runEdit(
-      editResponse([fieldPathOp('value', REQUESTED_RAW, 20)]),
-      'Raise the unit price to 69',
-    );
-    expect(result.wasRejected).toBe(false);
-
-    const observed = observedOf(result.appliedGraph);
-    const stored = observed.value as number;
-
-    expect(typeof stored).toBe('number');
-    // PLoT's own gate, restated as the invariant it is.
-    expect(stored).toBeGreaterThanOrEqual(0);
-    expect(stored).toBeLessThanOrEqual(1);
-  });
-
-  it('product seam: the stored state DENOTES 69 (meaning, not field names)', async () => {
-    const result = await runEdit(
-      editResponse([fieldPathOp('value', REQUESTED_RAW, 20)]),
-      'Raise the unit price to 69',
-    );
-    expect(result.wasRejected).toBe(false);
-
-    const observed = observedOf(result.appliedGraph);
-    // Carrier-agnostic: whichever carrier holds it, the DENOTED quantity is
-    // what the user asked for. This accepts any honest reconciliation and
-    // rejects both "stripped" and "69 written into the normalised slot".
-    const denoted =
-      typeof observed.raw_value === 'number'
-        ? observed.raw_value
-        : (observed.value as number) * SCALE_FRAME;
-
-    expect(denoted).toBeCloseTo(REQUESTED_RAW, 9);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 5. ⛔ RED — the REALISTIC batch: the two dominant shapes in one edit.
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe('⛔ RED — "that\'s in pounds, raise it to £69" (both bare keys, one batch)', () => {
-  it('product seam: the batch lands and the factor denotes £69', async () => {
-    const result = await runEdit(
-      editResponse([
-        fieldPathOp('unit', '£', 'index'),
-        fieldPathOp('value', REQUESTED_RAW, 20),
-      ]),
-      "That's in pounds, not an index — raise it to £69",
-    );
-
-    expect(rejectionCodeOf(result)).not.toBe('OPERATION_DID_NOT_LAND');
-    expect(result.wasRejected).toBe(false);
-
-    const observed = observedOf(result.appliedGraph);
-    expect(observed.unit).toBe('£');
-
-    const denoted =
-      typeof observed.raw_value === 'number'
-        ? observed.raw_value
-        : (observed.value as number) * SCALE_FRAME;
-    expect(denoted).toBeCloseTo(REQUESTED_RAW, 9);
-    expect(observed.value as number).toBeLessThanOrEqual(1);
   });
 });

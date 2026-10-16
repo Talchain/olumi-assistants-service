@@ -30,17 +30,12 @@
  * going red.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-
-import { handleEditGraph } from '../edit-graph.js';
 import { canonicaliseValueOps } from '../../canonicalise-value-ops.js';
 import { readableNonLandingFailure } from '../edit-failure-disclosure.js';
 import { ALLOWED_OBSERVED_SUBKEYS } from '../../../orchestrator-v5/graph-management/field-safety.js';
-import type { ConversationContext } from '../../types.js';
-import type { LLMAdapter } from '../../../adapters/llm/types.js';
 
 const FACTOR_ID = 'fac_unit_price';
 const OPTION_ID = 'opt_a';
-const REQUEST_ID = 'req-known-gap-0001';
 
 function buildGraph() {
   return {
@@ -116,73 +111,6 @@ describe('the bare-leaf translation covers EXACTLY the derived leaf set', () => 
 });
 
 describe('nothing fails silently — the refusal discloses request id, fault and plain English', () => {
-  it('a still-refused edit carries the disclosure, and the fault is `olumi`', async () => {
-    const adapter = {
-      name: 'fixtures',
-      model: 'test-model',
-      chat: vi.fn().mockResolvedValue({
-        content: JSON.stringify({
-          operations: [
-            {
-              op: 'update_node',
-              // The known-gap spelling: still refused, now disclosed.
-              path: `/nodes/${FACTOR_ID}/interventions/${OPTION_ID}/value`,
-              value: 5,
-              old_value: 1,
-              impact: 'moderate',
-              rationale: 'Apply the change the user asked for.',
-            },
-          ],
-          removed_edges: [],
-          warnings: [],
-          coaching: { summary: 'Updated.', rerun_recommended: true },
-        }),
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        model: 'test-model',
-        latencyMs: 1,
-        stopReason: 'end_turn',
-      }),
-    } as unknown as LLMAdapter;
-
-    const result = await handleEditGraph(
-      { graph: buildGraph(), analysis_response: null, framing: null, messages: [], scenario_id: 'scn-gap' } as unknown as ConversationContext,
-      'Set that intervention to 5',
-      adapter,
-      REQUEST_ID,
-      'turn-known-gap',
-    );
-
-    expect(result.wasRejected).toBe(true);
-
-    // WALK for the disclosure rather than guessing a block path — a wrong path
-    // returns undefined identically to "no disclosure", which would make this
-    // assertion vacuous in the most convincing way.
-    let found: Record<string, unknown> | null = null;
-    const walk = (v: unknown): void => {
-      if (found !== null || v === null || typeof v !== 'object') return;
-      if (Array.isArray(v)) { v.forEach(walk); return; }
-      const rec = v as Record<string, unknown>;
-      const d = rec.disclosure as Record<string, unknown> | undefined;
-      if (d !== undefined && typeof d.readable === 'string') { found = d; return; }
-      Object.values(rec).forEach(walk);
-    };
-    walk(result.blocks);
-
-    expect(found).not.toBeNull();
-    const disclosure = found as unknown as Record<string, unknown>;
-    // Copyable, and it is THIS request — bound by identity, not by shape.
-    expect(disclosure.request_id).toBe(REQUEST_ID);
-    // ⛔ THE LOAD-BEARING ONE. Never the user's fault by elimination.
-    expect(disclosure.fault).toBe('olumi');
-    // Plain English for a person, not a code: it must not be the enum member.
-    expect(disclosure.readable).toBe(
-      readableNonLandingFailure('update_writes_did_not_survive'),
-    );
-    expect(disclosure.readable as string).not.toMatch(/update_writes_did_not_survive|OPERATION_DID_NOT_LAND|_/);
-    // And it must say the two things a person needs to hear.
-    expect(disclosure.readable as string).toMatch(/nothing in your model has changed/i);
-    expect(disclosure.readable as string).toMatch(/fault on our side/i);
-  });
 
   it('every NonLandingReason has plain-English copy — no code leaks to a user', () => {
     // The closed enum, restated here ONLY as the corpus to walk; the `never`

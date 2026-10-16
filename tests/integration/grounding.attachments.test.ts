@@ -6,14 +6,13 @@
  * - Privacy guarantees (no content logging)
  * - Safe CSV summarization (no row/header leakage)
  * - Location markers for citations
- * - End-to-end flow with draft-graph and critique-graph routes
+ * - End-to-end flow with the retained draft-graph route
  */
 
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import Fastify from "fastify";
 import { Buffer } from "node:buffer";
 import draftRoute from "../../src/routes/assist.draft-graph.js";
-import critiqueRoute from "../../src/routes/assist.critique-graph.js";
 
 // Use fixtures adapter for deterministic tests without API keys
 vi.stubEnv("LLM_PROVIDER", "fixtures");
@@ -24,14 +23,11 @@ vi.stubEnv("GROUNDING_ENABLED", "true");
 // TODO: ISSUE-9009 — v04 grounding/determinism integration parked
 describe.skip("Grounding: Attachments Integration (v04)", () => {
   let draftApp: ReturnType<typeof Fastify>;
-  let critiqueApp: ReturnType<typeof Fastify>;
 
   beforeAll(async () => {
     draftApp = Fastify();
     await draftRoute(draftApp);
 
-    critiqueApp = Fastify();
-    await critiqueRoute(critiqueApp);
   });
 
   describe("TXT/MD Attachments", () => {
@@ -332,107 +328,6 @@ describe.skip("Grounding: Attachments Integration (v04)", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.graph).toBeDefined();
-    });
-  });
-
-  describe("Critique Route with Attachments", () => {
-    const validGraph = {
-      version: "1",
-      default_seed: 42,
-      nodes: [
-        { id: "goal_1", kind: "goal", label: "Increase revenue" },
-        { id: "dec_1", kind: "decision", label: "Pricing strategy" },
-        { id: "opt_a", kind: "option", label: "Premium pricing" },
-        { id: "out_1", kind: "outcome", label: "Revenue impact" },
-      ],
-      edges: [
-        { from: "goal_1", to: "dec_1" },
-        { from: "dec_1", to: "opt_a" },
-        { from: "opt_a", to: "out_1" },
-      ],
-    };
-
-    it("accepts attachments for context", async () => {
-      const txtContent = "Context document with background information";
-      const base64Content = Buffer.from(txtContent, 'utf-8').toString('base64');
-
-      const res = await critiqueApp.inject({
-        method: "POST",
-        url: "/assist/critique-graph",
-        payload: {
-          graph: validGraph,
-          brief: "Critique this graph against the attached requirements",
-          attachments: [
-            { id: "req_1", kind: "txt", name: "requirements.txt" }
-          ],
-          attachment_payloads: {
-            req_1: base64Content
-          }
-        },
-      });
-
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.body);
-      expect(body.issues).toBeDefined();
-      expect(Array.isArray(body.issues)).toBe(true);
-    });
-
-    it("rejects critique with over-limit attachment", async () => {
-      const longContent = "A".repeat(6000);
-      const base64Content = Buffer.from(longContent, 'utf-8').toString('base64');
-
-      const res = await critiqueApp.inject({
-        method: "POST",
-        url: "/assist/critique-graph",
-        payload: {
-          graph: validGraph,
-          attachments: [
-            { id: "long", kind: "txt", name: "toolarge.txt" }
-          ],
-          attachment_payloads: {
-            long: base64Content
-          }
-        },
-      });
-
-      expect(res.statusCode).toBe(400);
-      const body = JSON.parse(res.body);
-      expect(body.code).toBe("BAD_INPUT");
-      // Error message includes filename and exceeds_limit
-      expect(body.message).toMatch(/toolarge\.txt.*exceeds_limit/);
-    });
-
-    it("rejects critique with aggregate size exceeding 50k chars", async () => {
-      // Create 11 files of 4800 chars each = 52,800 total (exceeds 50k limit)
-      const attachments = [];
-      const payloads: Record<string, string> = {};
-
-      for (let i = 0; i < 11; i++) {
-        const content = "A".repeat(4800);
-        attachments.push({
-          id: `file_${i}`,
-          kind: "txt" as const,
-          name: `file_${i}.txt`
-        });
-        payloads[`file_${i}`] = Buffer.from(content, 'utf-8').toString('base64');
-      }
-
-      const res = await critiqueApp.inject({
-        method: "POST",
-        url: "/assist/critique-graph",
-        payload: {
-          graph: validGraph,
-          attachments,
-          attachment_payloads: payloads
-        },
-      });
-
-      expect(res.statusCode).toBe(400);
-      const body = JSON.parse(res.body);
-      expect(body.code).toBe("BAD_INPUT");
-      expect(body.message).toMatch(/aggregate_exceeds_limit.*total attachment size.*50000/i);
-      // Verify the route provides the specific aggregate limit hint
-      expect(body.details?.hint).toMatch(/total attachment size exceeds 50k/i);
     });
   });
 

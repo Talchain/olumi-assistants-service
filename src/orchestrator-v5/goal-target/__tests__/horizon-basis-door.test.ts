@@ -14,10 +14,6 @@ import * as steadyWrite from '../goal-steady-write.js';
 import { assertDoorProvenance,prepareHorizonBasisForWrite } from '../horizon-basis-provenance.js';
 import { toOutboundGraph } from '../outbound-graph.js';
 
-import { dispatchEditGraph } from '../../handlers/edit-graph-dispatch.js';
-
-import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
-
 import { createMockSessionStore,makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { stripModelAuthoredGoalThreshold } from '../../../adapters/llm/normalisation.js';
 import { projectDraftRecords } from '../../../cee/draft/records/seam.js';
@@ -25,7 +21,6 @@ import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js'
 import { GraphV3,NodeV3 } from '../../../schemas/cee-v3.js';
 import { parseRequestExtensions } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import * as graphHashes from '../../context/graph-hash.js';
 import { computeGraphIdentityHash,computeVersionAnalysisAffectingHashRecord } from '../../context/graph-identity.js';
 import { buildReadyGraph,frameFor,hashOf,makeEnvelope } from '../../graph-management/__tests__/fixtures.js';
 import { checkFieldSafety,stripPipelineOwnedFromAddOperations } from '../../graph-management/field-safety.js';
@@ -386,78 +381,6 @@ const payload = (message: string) => ({ kind: 'message' as const, source: 'compo
   turn_id: TURN, scenario_id: SCENARIO, message, turn_class: 'frame' as const, stage: 'analyse' as const });
 
 describe('S5 r1 append-door provenance', () => {
-
-  it.each(['live', 'off', 'shadow'])('P1-2 echoed basis survives an unrelated real edit in %s mode', async mode => {
-    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
-    const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
-    const boundary = parseRequestExtensions({ graph_state: client }, 'r1-edit');
-    if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
-    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
-      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
-      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.',
-        changes: [{ label: 'Coverage', description: 'Renamed.', element_ref: 'factor' }], rerun_recommended: false } } as never);
-    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
-      requestId: 'r1-edit', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
-    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
-    expect(w.writes).toHaveLength(1);
-    expect(w.writes[0]!.graph).toBeDefined();
-    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
-    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
-  });
-  it.each(['live', 'off', 'shadow'])('P1-1 empty-store real edit cannot promote client basis to stored authority in %s mode', async mode => {
-    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
-    const client = attested(), w = world(null); activeStore = w.store;
-    const boundary = parseRequestExtensions({ graph_state: client }, 'r1-empty-edit');
-    if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
-    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
-      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
-      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
-    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
-      requestId: 'r1-empty-edit', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
-    expect(result.commitPerformed).toBe(true);
-    expect(w.writes).toHaveLength(1);
-    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
-    expect(goalOf(w.read())).not.toHaveProperty('horizon_basis');
-    expect(goalOf(result.response.draft_graph as Rec)).not.toHaveProperty('horizon_basis');
-  });
-  it('P1-a forged live echo commits the rename using the stored answer', async () => {
-    const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
-    goalOf(client).horizon_basis.metric = 'f'.repeat(32);
-    const boundary = parseRequestExtensions({ graph_state: client }, 'r1-forged-echo');
-    if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
-    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
-      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
-      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
-    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
-      requestId: 'r1-forged-echo', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
-    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
-    expect(result.commitPerformed).toBe(true);
-    expect(w.writes).toHaveLength(1);
-    expect(w.writes[0]!.graph).toBeDefined();
-    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
-    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
-  });
-  it.each(['live', 'off', 'shadow'])('P1-2b P1-a omitted basis survives the real edit path in %s mode', async mode => {
-    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode); _resetConfigCache();
-    const g = attested(), w = world(g), client = clone(g); activeStore = w.store;
-    delete goalOf(client).horizon_basis;
-    const after = clone(client); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
-    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
-      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
-      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
-    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'), requestId: 'r1-omit',
-      request: {} as never, graphState: client as never, analysisState: null });
-    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
-    expect(result.commitPerformed).toBe(true);
-    expect(w.writes).toHaveLength(1);
-    expect(goalOf(result.graph as Rec).horizon_basis).toEqual(goalOf(g).horizon_basis);
-    expect(goalOf(result.response.draft_graph as Rec).horizon_basis).toEqual(publicBasis(goalOf(g).horizon_basis));
-    expect(w.read().nodes.find((n: Rec) => n.id === 'factor').label).toBe('Coverage revised');
-    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
-  });
 
   it.each(['changed', 'removed'])('caller preparation restores stored value when unauthorised write %s it', async mode => {
     const g = attested(), proposed = clone(g), w = world(g);
@@ -1068,26 +991,6 @@ describe('S5 r8 server proof', () => {
       expect(horizonSteadyAttested(w.read())).toBe(true);
     } finally { await app.close(); }
   });
-  it('proof-free wire echo preserves stored proof through live CAS and real edit', async () => {
-    const { buildAppliedGraphWireField } = await import('../../compose/applied-graph-emit.js');
-    const g = attested(), w = world(g); activeStore = w.store;
-    const client = JSON.parse(JSON.stringify(buildAppliedGraphWireField(g as never)));
-    expect(JSON.stringify(client)).not.toContain('"proof"');
-    const boundary = parseRequestExtensions({ graph_state: client }, 'r8-wire-echo');
-    if (!boundary.ok) throw new Error('invalid client');
-    const after = clone(boundary.value.graphState!); after.nodes.find((n: Rec) => n.id === 'factor')!.label = 'Coverage revised';
-    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
-      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
-      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
-    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
-      requestId: 'r8-wire-echo', request: {} as never, graphState: boundary.value.graphState!, analysisState: null });
-    expect(result.commitPerformed).toBe(true);
-    expect(JSON.stringify(result.response)).not.toContain('"proof"');
-    expect(JSON.stringify(result)).not.toContain('BASE_HASH_DIVERGED');
-    expect(w.writes).toHaveLength(1);
-    expect(JSON.stringify(goalOf(w.read()).horizon_basis)).toBe(JSON.stringify(goalOf(g).horizon_basis));
-    expect(horizonSteadyAttested(w.read())).toBe(true);
-  });
 
   it('guest-copy ruled residual: copy_guest_scenario inherits valid proof and remains attested', async () => {
     const { SupabaseGuestCopyStore } = await import('../../guest-copy/index.js');
@@ -1159,53 +1062,5 @@ describe('S5 r9 outbound receipt and graph identity', () => {
     expect(out.nodes[1]).toBe(graph.nodes[1]); expect(out.edges).toBe(graph.edges);
     expect(JSON.stringify(out)).not.toContain('"proof"');
     expect(JSON.stringify(graph)).toBe(bytes); expect(horizonSteadyAttested(graph)).toBe(true);
-  });
-  it('a real edit turn response model_version_receipt omits proof while its stored graph retains it', async () => {
-    const graph = attested(), w = world(graph, true), graphBytes = JSON.stringify(graph); activeStore = w.store;
-    const after = clone(graph); after.nodes.find((n: Rec) => n.id === 'factor').label = 'Coverage revised';
-    vi.mocked(handleEditGraph).mockResolvedValue({ blocks: [], assistantText: 'Renamed Coverage.', latencyMs: 0,
-      wasRejected: false, operations: [{ op: 'update_node', path: 'factor', value: { label: 'Coverage revised' } }],
-      appliedGraph: after, appliedChanges: { summary: 'Renamed Coverage.', changes: [], rerun_recommended: false } } as never);
-    const result = await dispatchEditGraph({ payload: payload('Rename Coverage to Coverage revised'),
-      requestId: 'r9-edit-receipt', request: {} as never, graphState: graph as never, analysisState: null });
-    expect(result.commitPerformed).toBe(true); expect(w.writes).toHaveLength(1);
-    expect(result.response.model_version_receipt).toBeDefined();
-    expect(JSON.stringify(result.response.model_version_receipt)).not.toContain('"proof"');
-    expect(JSON.stringify(result.response)).not.toContain('"proof"');
-    expect(goalOf(result.response.model_version_receipt!.graph as Rec).horizon_basis).toEqual(publicBasis(goalOf(graph).horizon_basis));
-    expect(goalOf(w.read()).horizon_basis).toEqual(goalOf(graph).horizon_basis);
-    expect(horizonSteadyAttested(w.read())).toBe(true);
-    expect(JSON.stringify(graph)).toBe(graphBytes);
-  });
-});
-describe('R5 unavailable read drops basis without nulling hash candidates', () => {
-  it.each(['edit-early-question'])('%s retains its graph and hashes after dropping submitted basis', async () => {
-    const g = attested(), w = world(null);
-    activeStore = new Proxy(w.store, { get(target, key) {
-      if (key === 'loadGraph' || key === 'loadGraphAndBriefText') {
-        return async () => { throw new Error('Unavailable stored provenance'); };
-      }
-      return Reflect.get(target, key);
-    } });
-    vi.stubEnv('ENABLE_V5_ORCHESTRATOR', 'true');
-    vi.stubEnv('CEE_PIPELINE_V4_ENABLED', 'false');
-    vi.stubEnv('CEE_REPLACEMENT_COACH_ENABLED', 'false');
-    _resetConfigCache();
-    const hashes: { graph: unknown; hash: string | null }[] = [];
-    const realHash = graphHashes.computeAnalysisAffectingGraphHash;
-    const spy = vi.spyOn(graphHashes, 'computeAnalysisAffectingGraphHash').mockImplementation(graph => {
-      const hash = realHash(graph);
-      hashes.push({ graph: graph == null ? null : clone(graph), hash });
-      return hash;
-    });
-    try {
-        await dispatchEditGraph({ payload: payload('Add delays as a risk'), requestId: 'r5-drop',
-          request: {} as never, graphState: g as never, analysisState: null });
-      const candidates = hashes.filter(h => h.graph != null);
-      expect(candidates.length).toBeGreaterThan(0);
-      expect(candidates.some(h => h.hash === realHash(seed() as never))).toBe(true);
-      for (const candidate of candidates) expect(goalOf(candidate.graph as Rec)).not.toHaveProperty('horizon_basis');
-      expect(goalOf(g)).toHaveProperty('horizon_basis');
-    } finally { spy.mockRestore(); }
   });
 });

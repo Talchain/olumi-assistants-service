@@ -16,7 +16,6 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeEditFallbackText, selectEditAssistantText } from '../edit-graph-dispatch.js';
-import { deriveEditTurnFieldsFromResult } from '../edit-graph-turn-event.js';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
 
 function result(overrides: Partial<EditGraphResult> = {}): EditGraphResult {
@@ -94,41 +93,5 @@ describe('B2 — an applied-but-unchanged turn never claims a change', () => {
       .toBe(prose);
     expect(selectEditAssistantText(result({ modelUnchanged: undefined, assistantText: prose }), 'fb'))
       .toBe(prose);
-  });
-
-  it('the turn event reports applied_unchanged, NOT success', () => {
-    const fields = deriveEditTurnFieldsFromResult(result({ modelUnchanged: true }), {
-      successfulAppliedMutation: true,
-      graphNodesBefore: 21,
-      graphEdgesBefore: 43,
-    });
-    // The measured signature was `outcome: success, operations_count: 1`.
-    // operations_count stays 1 — the operation WAS proposed and applied; what
-    // changes is that the outcome stops calling it a success.
-    expect(fields.outcome).toBe('applied_unchanged');
-    expect(fields.operations_count).toBe(1);
-    expect(fields.model_changed).toBe(false);
-  });
-
-  it('a real change still reports success with model_changed true', () => {
-    const fields = deriveEditTurnFieldsFromResult(result({ modelUnchanged: false }), {
-      successfulAppliedMutation: true,
-      graphNodesBefore: 21,
-      graphEdgesBefore: 43,
-    });
-    expect(fields.outcome).toBe('success');
-    expect(fields.model_changed).toBe(true);
-  });
-
-  it('NON-EQUIVALENCE OBLIGATION: no verdict => model_changed null, outcome unchanged from today', () => {
-    // Demonstrated, not asserted (trap 13c): `undefined` must not be counted
-    // as either a change or a no-change.
-    const fields = deriveEditTurnFieldsFromResult(result({ modelUnchanged: undefined }), {
-      successfulAppliedMutation: true,
-      graphNodesBefore: 21,
-      graphEdgesBefore: 43,
-    });
-    expect(fields.model_changed).toBeNull();
-    expect(fields.outcome).toBe('success');
   });
 });

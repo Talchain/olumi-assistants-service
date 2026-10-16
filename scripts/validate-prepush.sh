@@ -33,7 +33,7 @@ SMOKE_TESTS=(
   src/orchestrator-v5/agent-lane/__tests__/agent-add-option-held-seam.test.ts          # C1: retained held writer and Agent route
   src/orchestrator-v5/__tests__/b2-run-evaluated-revision.test.ts                      # C1: kept chip Run evaluated-revision contract
   src/orchestrator-v5/handlers/__tests__/chip-click-dispatch.test.ts                  # run_analysis chip dispatch
-  src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch.test.ts                  # edit-graph dispatch
+  src/orchestrator-v5/agent-lane/__tests__/agent-writer-doors-seam.test.ts              # C1: retained Agent writer doors
   src/orchestrator-v5/context/__tests__/freshness.test.ts                             # analysis-freshness derivation
   src/orchestrator-v5/__tests__/turn-executor-commit-floor-degraded.test.ts           # C1: retained held writer CAS/fence floor
   tests/unit/validators/b1-drift.test.ts                                              # B1 boundary validator (INGRESS drift -> typed fallback)

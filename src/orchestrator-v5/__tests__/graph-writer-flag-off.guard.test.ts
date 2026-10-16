@@ -8,8 +8,7 @@ import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWithTurnFence } from '../session/turn-fence.js';
 import type { SessionTurnWrite } from '../session/store.js';
-import Fastify, { type FastifyRequest } from 'fastify';
-import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
+import Fastify from 'fastify';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 const ports = vi.hoisted(() => ({ edit: vi.fn(), store: vi.fn(), routeDispatch: vi.fn() }));
@@ -19,8 +18,7 @@ vi.mock('../../orchestrator/tools/edit-graph.js', async importOriginal => ({
 }));
 vi.mock('../handlers/edit-graph-dispatch.js', async importOriginal => {
   const original = await importOriginal<typeof import('../handlers/edit-graph-dispatch.js')>();
-  return { ...original, dispatchEditGraph: (...args: Parameters<typeof original.dispatchEditGraph>) =>
-    ports.routeDispatch.getMockImplementation() ? ports.routeDispatch(...args) : original.dispatchEditGraph(...args) };
+  return { ...original, dispatchEditGraph: ports.routeDispatch };
 });
 vi.mock('../session/index.js', async importOriginal => ({
   ...await importOriginal<typeof import('../session/index.js')>(), getSessionStore: ports.store,
@@ -46,10 +44,8 @@ import { SessionLRUCache } from '../session/cache.js';
 import { _resetConfigCache } from '../../config/index.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
-import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { computeGraphIdentityHash } from '../context/graph-identity.js';
-import { dispatchEditGraph } from '../handlers/edit-graph-dispatch.js';
 import { dispatchSystemEvent, dispatchOptionLevelsBatch, commitOptionLevelsInProcess, holdAddRiskInProcess, holdAddFactorInProcess, commitLimitEditInProcess, commitLimitAddInProcess, commitOptionStatusInProcess } from '../system-events/dispatch.js';
 import registerRoute from '../../routes/assist.v1.scenario-graph-register.js';
 
@@ -195,11 +191,6 @@ function harness(options: { failGraphReadAt?: number; missingV4?: boolean } = {}
  };
 }
 
-function message(message = 'Rename Price to Price (revised)') {
-  return { kind: 'message' as const, scenario_id: SCENARIO, turn_id: TURN,
-    stage: 'analyse' as const, message, turn_class: 'frame' as const, source: 'composer' as const };
-}
-
 beforeEach(() => {
   storeModule.__setUseAppendV6ForTest(false);
   vi.clearAllMocks();
@@ -277,49 +268,6 @@ describe.each([true, false])('graph writer rollback flag-OFF contract (model ver
     _resetConfigCache();
   });
   it('keeps the PR-owned revision calls absent across every door family', async () => {
-    // edit — mismatched ingress
-    await (async () => {
-    const h = harness();
-    const client = GraphStateIngressSchema.parse(baseGraph());
-    const price = client.nodes.find(n => n.id === 'fac_price')!;
-    price.observed_state = { value: 0.2 };
-    const server = GraphStateIngressSchema.parse(h.tables.scenarios![0]!.graph);
-    expect(computeGraphIdentityHash(client)?.value).not.toBe(computeGraphIdentityHash(server)?.value);
-    const edited = structuredClone(client);
-    edited.nodes.find(n => n.id === 'fac_price')!.label = 'Price (revised)';
-    ports.edit.mockResolvedValue({ blocks: [], assistantText: 'Renamed Price.', latencyMs: 1,
-      appliedGraph: edited as unknown as EditGraphResult['appliedGraph'], wasRejected: false,
-      appliedChanges: { summary: 'Renamed Price.', changes: [{ label: 'Price', description: 'Renamed.', element_ref: 'fac_price' }], rerun_recommended: false },
-      operations: [{ op: 'update_node', path: 'fac_price', value: { label: 'Price (revised)' } }],
-      operation_meta: [{ impact: 'low', rationale: '' }],
-    } as EditGraphResult);
-    const result = await dispatchEditGraph({ payload: message(), requestId: 'flag-off-edit',
-      request: { headers: {} } as FastifyRequest, graphState: client, analysisState: null });
-    expect(result.commitPerformed).toBe(true);
-    expect(ports.edit).toHaveBeenCalledTimes(1);
-    expectLegacyAppend(h);
-    assertFlagOff(h, 'edit — mismatched ingress', false);
-    })();
-    // edit — brief read recovery
-    await (async () => {
-    const h = harness({ failGraphReadAt: 1 });
-    const client = GraphStateIngressSchema.parse(baseGraph());
-    const edited = structuredClone(client);
-    edited.nodes.find(n => n.id === 'fac_price')!.label = 'Price (revised)';
-    ports.edit.mockResolvedValue({ blocks: [], assistantText: 'Renamed Price.', latencyMs: 1,
-      appliedGraph: edited as unknown as EditGraphResult['appliedGraph'], wasRejected: false,
-      appliedChanges: { summary: 'Renamed Price.', changes: [{ label: 'Price', description: 'Renamed.', element_ref: 'fac_price' }], rerun_recommended: false },
-      operations: [{ op: 'update_node', path: 'fac_price', value: { label: 'Price (revised)' } }],
-      operation_meta: [{ impact: 'low', rationale: '' }],
-    } as EditGraphResult);
-    const result = await dispatchEditGraph({ payload: message(), requestId: 'flag-off-edit-read-recovery',
-      request: { headers: {} } as FastifyRequest, graphState: client, analysisState: null });
-    expect(h.graphReadFailures).toBe(1);
-    expect(result.commitPerformed).toBe(true);
-    expect(ports.edit).toHaveBeenCalledTimes(1);
-    expectLegacyAppend(h);
-    assertFlagOff(h, 'edit — brief read recovery', false);
-    })();
     // system event — factor value
     await (async () => {
     const h = harness();
