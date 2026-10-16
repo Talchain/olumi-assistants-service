@@ -624,6 +624,12 @@ export function classifyValueSource(stamp: unknown): StructureProvenance {
   return 'unattributed';
 }
 
+/** Is this source stamp Olumi's own (AI-drafted, e.g. a goal target saved `cee_inference` from a pressed card)? The ONE
+ * reader for whether a target is "your target" or "the target" (#3279; TL 05:18: approval never reauthors). */
+export function isOlumiSourceStamp(stamp: unknown): boolean {
+  return classifyValueSource(stamp) === 'ai_drafted';
+}
+
 /**
  * Strength authorship follows the MEAN (Science FD, 5 Oct 2026). A marked user
  * natural effect earns credit even when spread or existence was projected.

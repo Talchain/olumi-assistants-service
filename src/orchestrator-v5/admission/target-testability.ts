@@ -1,5 +1,5 @@
 import { confirmedCeilingStockOf } from '../agent-lane/ceiling-stock-carrier.js';
-import { isUserSetBand } from '../../cee/provenance/provenance-of.js';
+import { isOlumiSourceStamp, isUserSetBand } from '../../cee/provenance/provenance-of.js';
 import { linkList } from '../agent-lane/unsized-path-cause.js';
 import { evaluatedIdentityCarriers, exactIdentityOperandLinks, identityCanCarryExactLinks } from './identity-evaluations.js';
 /**
@@ -489,12 +489,13 @@ export interface UntestableTargetParts {
 
 /**
  * "your target" only for a target the user set (TL 05:18; approval never reauthors): a figure Olumi read as this goal's
- * target (`cee_inference`, e.g. a pressed budget or headcount card) is "the target", before and after approval. The
- * user's own sources (`user`, `brief_extraction`) and an unrecorded source keep their existing words.
+ * target (an Olumi source per the ONE provenance authority, e.g. `cee_inference` from a pressed budget or headcount card)
+ * is "the target", before and after approval. The user's own sources (`user`, `brief_extraction`) and an unrecorded
+ * source keep their existing words.
  */
 export function targetNounOf(graph: unknown, goalId: unknown): 'your target' | 'the target' {
   const source = typeof goalId === 'string' ? readGoalRecord(graph, goalId)?.target?.source : undefined;
-  return source === 'cee_inference' ? 'the target' : 'your target';
+  return isOlumiSourceStamp(source) ? 'the target' : 'your target';
 }
 
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
