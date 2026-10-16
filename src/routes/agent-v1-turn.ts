@@ -5593,8 +5593,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // this reply says the goal-chance detail from this response's `canonical_analysis_view.goal_chance`, in these same
       // words (DGAI `goalChanceDetailLines`): "Doing nothing: … by assumption." was said twice. The reply does not repeat
       // what the card says; a line the card does not say (the range census note) stays, and an Explain (no card) keeps all.
-      const cardDetail = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
-        ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
+      const cardDetail = cardBound ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
+      if (cardDetail !== null) {
+        const recordNotes = goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
+        let text = wireBody.assistant_text;
+        for (const line of new Set([...decisionLines, ...recordNotes])) {
+          if (cardDetail.has(line)) text = withoutDisclosure(text, line);
+        }
+        wireBody = { ...wireBody, assistant_text: text };
+      }
       // ⭐ THE RESULT CARD IS THE CHANCE (DL, PL #94 07:24Z; capacity post3017 row 4: the face said by the reply, then
       // again by the card under it). When this reply displays the Run's bound result card (this readback's result block
       // beside a shipped, current canonical view of that SAME Run), an option whose card cell shows this exact chance is

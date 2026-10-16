@@ -23,6 +23,8 @@ import { goalKindOf } from '../../goal-target/goal-kind.js';
 import { teamShareMoments, extraShareMoments } from '../../goal-target/event-by-date-share.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { WIDENED_RISK_MARKER_DOWN } from '../widened-risk-markers.js';
+import { runOmittedRisks, unsizedOlumiRiskLineFor, unsizedOlumiRiskOmissionWarning } from '../unsized-risk.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 type Json = Record<string, any>;
 const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -60,6 +62,8 @@ let composeInput: ReplyComposeInput | undefined;
 let composition: ReplyComposition | undefined;
 let lastTurnPayload: Json;
 let runCompleted = false;
+let nb1SavedBasis = false;
+let nb1MovedBasis = false;
 let canonicalReadOverride: ((view: ReturnType<typeof projectCanonicalAnalysisView>) => unknown) | undefined;
 let warn: ReturnType<typeof vi.spyOn>;
 vi.mock('../reply/compose-reply.js', async original => {
@@ -87,6 +91,8 @@ const store = {
   readRecent: vi.fn(async () => recentRows),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
+  // NB1 exercises the real uncached CAS/readback condition; older rows keep their former no-card setup.
+  readExistingScenario: vi.fn(async () => nb1SavedBasis ? { graph: READ.graph, revision: nb1MovedBasis ? 2 : 1 } : null),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
@@ -95,7 +101,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 let callModelOutputs: Record<string, unknown>[][] = [];
-type Body = { assistant_text: string; _answer_shape?: AnswerShape; _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
+type Body = { assistant_text: string; canonical_analysis_view?: ReturnType<typeof projectCanonicalAnalysisView>; blocks?: Json[]; _answer_shape?: AnswerShape; _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
 
 describe('S4c through the route: the screen’s range line is in the Run narration', () => {
   let app: FastifyInstance;
@@ -123,6 +129,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     app.post('/assist/v1/scenarios/:id/graph', async () => {
       // The harness authors the successful fact wrapper around this captured Run; production never invents one.
       const canonical_analysis_view = projectCanonicalAnalysisView({ graph: READ.graph,
+        ...(nb1SavedBasis ? { revision: 1, derivation: { freshness: 'fresh' as const, reason: 'graph_hash_match' as const } } : {}),
         runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
           scenario_id: SCENARIO, run_id: 'fixture-screen-run', summary: analysisResult.summary,
           leading_option_id: analysisResult.leading_option_id, enrichment: analysisResult.enrichment,
@@ -138,7 +145,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { warn.mockRestore(); await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
+  beforeEach(() => { nb1SavedBasis = false; nb1MovedBasis = false; runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
@@ -260,6 +267,51 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     }];
     return goalChanceScreenLinesForAgent(analysisResult, READ.graph, true)[0]!;
   };
+
+  it.each(['run_with_card', 'run_without_card', 'run_basis_moved', 'run_card_stale', 'run_foreign_card', 'explain'] as const)(
+    'NB1: recorded omission is said once across reply and the actual card (%s)', async mode => {
+      // Reuse the existing authored 67% licence control; add both real omission carriers and its matching read basis.
+      const finding = estimateScreenLine();
+      nb1SavedBasis = true; nb1MovedBasis = mode === 'run_basis_moved';
+      const savedHash = computeAnalysisAffectingGraphHash(READ.graph);
+      if (savedHash === null) throw new Error('NB1 fixture must have a real analysis hash');
+      READ.graph_hash = savedHash; analysisResult.computed_against_hash = savedHash;
+      const risk = { node_id: 'recorded-risk', label: 'The recorded provisional risk', reason: 'unsized_olumi_risk' as const };
+      analysisResult.enrichment.inference_warnings[0].omitted_from_calculation = { scope: 'modelled_effects_only', risks: [risk] };
+      analysisResult.enrichment.inference_warnings.push(unsizedOlumiRiskOmissionWarning([risk]));
+      expect(runOmittedRisks(analysisResult)).toEqual([risk]);
+      const note = unsizedOlumiRiskLineFor(risk.label, true)!;
+      const riskSentence = note.slice(note.indexOf('. ') + 2);
+      if (mode === 'run_without_card') canonicalReadOverride = () => undefined;
+      if (mode === 'run_card_stale') canonicalReadOverride = view => ({ ...view, staleness: { ...view.staleness, stale: true } });
+      if (mode === 'run_foreign_card') canonicalReadOverride = view => ({ ...view,
+        run: view.run === null ? null : { ...view.run, computed_at: '2000-01-01T00:00:00.000Z' } });
+      const chip = runExplanationChip(SCENARIO, { graphHash: READ.graph_hash, analysisState: READ.analysis_state, analysisResult })!;
+      const b = mode === 'explain'
+        ? await turn([say('Review the retained assumptions.')], RUN_EXPLANATION_MESSAGE, { chip: { id: chip.id } })
+        : await turn(run('Review the retained assumptions.'), 'Run it');
+      const view = b.canonical_analysis_view;
+      const cardNotes = view?.goal_chance?.notes ?? [];
+
+      if (mode === 'run_with_card') {
+        expect(runCompleted).toBe(true);
+        expect(b.blocks?.some(block => block.type === 'analysis_result')).toBe(true);
+        expect(view?.run).toMatchObject({ run_id: 'fixture-screen-run', graph_hash_at_run: READ.graph_hash,
+          computed_at: READ.analysis_state.run_state.computed_at });
+        expect(view?.staleness.stale).toBe(false);
+        expect(cardNotes.filter(line => line === note)).toHaveLength(1);
+        expect(view?.options.find(row => row.option_id === finding.option_id)?.cell).toMatchObject({ kind: 'figure', face: finding.chance });
+        expect(b.assistant_text, 'the exact chance face already follows the same-Run card binding').not.toContain(finding.chance);
+        expect(count(b.assistant_text, riskSentence), 'the same current card already says this whole recorded omission').toBe(0);
+      } else {
+        expect(count(b.assistant_text, riskSentence), 'without a new Run card the reply retains the risk disclosure').toBe(1);
+        if (mode === 'explain') expect(runCompleted, 'Explain must not run analysis again').toBe(false);
+        else if (mode === 'run_card_stale') expect(view?.staleness.stale).toBe(true);
+        else if (mode === 'run_foreign_card') expect(view?.run?.computed_at).not.toBe(READ.analysis_state.run_state.computed_at);
+        else expect(view).toBeUndefined();
+      }
+      expect(rows.get(lastTurnPayload.turn_id)?.assistant_message).toBe(b.assistant_text);
+    }, 60000);
 
   it.each([
     ['missing', () => undefined],
