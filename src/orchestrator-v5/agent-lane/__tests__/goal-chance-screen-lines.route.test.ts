@@ -129,7 +129,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     app.post('/assist/v1/scenarios/:id/graph', async () => {
       // The harness authors the successful fact wrapper around this captured Run; production never invents one.
       const canonical_analysis_view = projectCanonicalAnalysisView({ graph: READ.graph,
-        ...(nb1SavedBasis ? { revision: 1, derivation: { freshness: 'fresh' as const, reason: 'graph_hash_match' as const } } : {}),
+        ...(nb1SavedBasis ? { revision: 1, derivation: { freshness: 'fresh' as const, reason: 'graph_hash_match' as const, selected_fact_index: 0,
+          graph_hash_at_run: READ.graph_hash, current_graph_hash: READ.graph_hash, computed_at: READ.analysis_state.run_state.computed_at } } : {}),
         runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
           scenario_id: SCENARIO, run_id: 'fixture-screen-run', summary: analysisResult.summary,
           leading_option_id: analysisResult.leading_option_id, enrichment: analysisResult.enrichment,
