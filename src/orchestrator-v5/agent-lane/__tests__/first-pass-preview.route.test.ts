@@ -100,6 +100,18 @@ let repairHold: Promise<void> | undefined;
 let repairEntered = deferred();
 let delays: number[] = [];
 let activeBrief = cases[0]!.brief;
+let widenRisk = false;
+let wideningCalls = 0;
+function riskReply(input: string): Rec {
+  const graph = (JSON.parse(input) as { graph: { nodes: Rec[]; edges: Rec[] } }).graph;
+  const goal = graph.nodes.find((n) => n.kind === 'goal')!;
+  const option = graph.nodes.find((n) => n.kind === 'option' && n.is_baseline !== true
+    && graph.edges.some((e) => e.from === n.id))!;
+  const factor = graph.edges.find((e) => e.from === option.id)!.to as string;
+  return { risk_suggestions: [{ label: 'Onboarding takes longer', category: 'timing', mechanism: 'relies_on',
+    hits_id: option.id, through_id: factor, through_direction: 'positive', affects_id: goal.id, direction: 'negative',
+    restates_id: null, relies_on: 'the additional hire reaching full pace quickly', watch_for: 'delivery stays flat' }] };
+}
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 function installFetch() {
   vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
@@ -107,8 +119,10 @@ function installFetch() {
     const instructions = typeof body.instructions === 'string' ? body.instructions : '';
     if (body.text?.format?.name === 'brief_spans') return new Response(JSON.stringify(say('{}')), { status: 200 });
     if (instructions.includes('suggest risks they have not considered') || instructions.includes('METHOD TURN:')) {
-      steps.push({ at: 'widen' });
-      return new Response(JSON.stringify(say(instructions.includes('suggest risks') ? '{"risk_suggestions":[]}' : '{"options":[]}')), { status: 200 });
+      steps.push({ at: 'widen' }); wideningCalls += 1;
+      const reply = instructions.includes('suggest risks')
+        ? widenRisk ? riskReply(String(body.input)) : { risk_suggestions: [] } : { options: [] };
+      return new Response(JSON.stringify(say(JSON.stringify(reply))), { status: 200 });
     }
     if (body.text?.format?.type === 'json_schema') {
       const index = constructionCalls++;
@@ -200,6 +214,7 @@ const nextScenario = () => { n += 1; SID = `7c6e1a2b-3a4f-4e5d-8c6b-7a8f9e0d1c${
 
 // Captured from unmodified ca0714a8 with Date fixed at 2026-10-16T12:00:00Z; provider responses below were identical.
 const baselinePath = new URL('./fixtures/o3-first-pass-preview.base.json', import.meta.url);
+const wideningBaselinePath = new URL('./fixtures/o3-first-pass-widening.base.json', import.meta.url);
 type Snapshot = { graph: unknown; reply: unknown; frames: PipelineStageEvent[] };
 
 describe('O3 accepted first-pass preview', () => {
@@ -216,6 +231,7 @@ describe('O3 accepted first-pass preview', () => {
   });
   beforeEach(() => {
     nextScenario(); steps = []; constructionCalls = 0; repairHold = undefined; repairEntered = deferred(); delays = [];
+    widenRisk = false; wideningCalls = 0;
     activeBrief = cases[0]!.brief; scripted = [candidate(), candidate(cases[0], true)];
   });
   const streamed = (frames: PipelineStageEvent[]) => runWithStageStream((ev) => {
@@ -292,6 +308,66 @@ describe('O3 accepted first-pass preview', () => {
         expect(JSON.stringify(actual)).toBe(JSON.stringify(baseline[`${c.name}-no-repair`]));
       }
     } finally { vi.useRealTimers(); }
+  });
+
+  it.each(cases)('widening $name: real additions preserve base registered graph and reply bytes', async (c) => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-16T12:00:00.000Z'));
+    try {
+      activeBrief = c.brief; scripted = [candidate(c), candidate(c, true)]; widenRisk = true;
+      const frames: PipelineStageEvent[] = [];
+      const body = await streamed(frames);
+      expect(wideningCalls).toBeGreaterThan(0);
+      const graph = st(SID).graph as { nodes: Rec[] };
+      const risk = graph.nodes.find((n) => n.label === 'Onboarding takes longer');
+      expect(risk).toMatchObject({ kind: 'risk', proposed_by: 'olumi', analysis_participation: 'retained_excluded',
+        draft_widening: { provenance: 'ai_suggested_widen' } });
+      expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
+      const actual = snapshot(body, frames);
+      const baseline = JSON.parse(readFileSync(wideningBaselinePath, 'utf8')) as Record<string, Snapshot>;
+      expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline[c.name]!.graph));
+      expect(actual.reply).toBe(baseline[c.name]!.reply);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(cases)('FINAL recovery $name: no refused preview; real widening still reaches the base final outcome', async (c) => {
+    // Fault injection at the FINAL boundary: reject a graph until the real widener adds its risk.
+    // All construction, widening, admission and reply code stays real. This proves refusal timing,
+    // without claiming a naturally invalid production graph can be repaired by an addition.
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const parse = GraphV3.safeParse.bind(GraphV3);
+    const invalid = parse({ nodes: 'not an array', edges: [] });
+    expect(invalid.success).toBe(false);
+    let rejected = 0;
+    const gate = vi.spyOn(GraphV3, 'safeParse').mockImplementation((value, ...args) => {
+      const graph = value as { nodes?: Rec[] } | null;
+      if (Array.isArray(graph?.nodes) && graph.nodes.some((n) => n.kind === 'goal')
+        && !graph.nodes.some((n) => n.draft_widening?.provenance === 'ai_suggested_widen')) {
+        rejected += 1;
+        return invalid;
+      }
+      return parse(value, ...args);
+    });
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-16T12:00:00.000Z'));
+    try {
+      activeBrief = c.brief; scripted = [candidate(c), candidate(c, true)]; widenRisk = true;
+      const release = deferred(); repairHold = release.promise;
+      const frames: PipelineStageEvent[] = [];
+      const pending = streamed(frames);
+      await repairEntered.promise;
+      const beforeRelease = [...graphs(frames)];
+      release.resolve();
+      const body = await pending;
+      expect(rejected, 'control: FINAL refused the un-widened graph').toBeGreaterThan(0);
+      expect(beforeRelease).toEqual([]);
+      expect(wideningCalls, 'FINAL must not prevent the existing widening work').toBeGreaterThan(0);
+      expect(graphs(frames), 'only the finally registered, widened graph reaches the canvas').toHaveLength(1);
+      expect(st(SID).registered).toBe(true);
+      expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
+      const baseline = JSON.parse(readFileSync(wideningBaselinePath, 'utf8')) as Record<string, Snapshot>;
+      const actual = snapshot(body, frames);
+      expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline[c.name]!.graph));
+      expect(actual.reply).toBe(baseline[c.name]!.reply);
+    } finally { gate.mockRestore(); vi.useRealTimers(); }
   });
 
   it('offline founder durations at 1:100: report existing GRAPH_READY and provider duration fields', async () => {

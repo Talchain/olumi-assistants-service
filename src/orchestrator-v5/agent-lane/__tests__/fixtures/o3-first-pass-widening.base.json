@@ -1,0 +1,798 @@
+{
+  "delivery": {
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_delivery_reliability",
+          "kind": "decision",
+          "label": "Question: Delivery reliability",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "delivery_reliability",
+          "kind": "goal",
+          "label": "Delivery reliability",
+          "provenance": "from_brief",
+          "goal_threshold_unit": "%",
+          "goal_threshold_frame": "level",
+          "goal_threshold_raw": 90,
+          "goal_threshold_cap": 100,
+          "goal_threshold_cap_provenance": "metric_scale",
+          "goal_threshold": 0.9,
+          "threshold_source": "brief_extraction",
+          "goal_direction": ">=",
+          "goal_horizon_months": 6
+        },
+        {
+          "id": "hire_a_tech_lead",
+          "kind": "option",
+          "label": "Hire a tech lead",
+          "provenance": "from_brief",
+          "interventions": {
+            "team_capacity": {
+              "value": 0.6,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "team_capacity",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 6,
+              "unit": "people"
+            }
+          }
+        },
+        {
+          "id": "team_capacity",
+          "kind": "factor",
+          "label": "Team capacity",
+          "provenance": "unverified_brief",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.5,
+            "raw_value": 5,
+            "cap": 10,
+            "declared_scale": "unit_interval",
+            "unit": "people",
+            "source": "cee_inference",
+            "extractionType": "inferred",
+            "user_material_unverified": true
+          }
+        },
+        {
+          "id": "onboarding_takes_longer",
+          "kind": "risk",
+          "label": "Onboarding takes longer",
+          "provenance": "ai_inferred",
+          "analysis_participation": "retained_excluded",
+          "draft_widening": {
+            "provenance": "ai_suggested_widen",
+            "hits": {
+              "id": "hire_a_tech_lead",
+              "label": "Hire a tech lead",
+              "kind": "option"
+            },
+            "through": {
+              "id": "team_capacity",
+              "label": "Team capacity",
+              "direction": "positive"
+            },
+            "affects": {
+              "id": "delivery_reliability",
+              "label": "Delivery reliability",
+              "direction": "negative"
+            },
+            "mechanism": "relies_on",
+            "relies_on": "the additional hire reaching full pace quickly",
+            "watch_for": "delivery stays flat"
+          },
+          "proposed_by": "olumi"
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_delivery_reliability",
+          "to": "hire_a_tech_lead",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "hire_a_tech_lead",
+          "to": "team_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "team_capacity",
+          "to": "delivery_reliability",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true,
+            "magnitude": "olumi_placeholder"
+          },
+          "defaulted": true
+        }
+      ]
+    },
+    "reply": "Here is where the model stands.\n\n• Olumi added 1 risk for you to consider. They're Olumi's suggestions, not yours; remove any that don't fit.\n\nThe first analysis could not run yet: The model has fewer than two options.\n\n‘Onboarding takes longer’: ‘Hire a tech lead’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
+    "frames": [
+      {
+        "kind": "GRAPH_READY",
+        "graph": {
+          "nodes": [
+            {
+              "id": "decision_delivery_reliability",
+              "kind": "decision",
+              "label": "Question: Delivery reliability",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "delivery_reliability",
+              "kind": "goal",
+              "label": "Delivery reliability",
+              "provenance": "from_brief",
+              "goal_threshold_unit": "%",
+              "goal_threshold_frame": "level",
+              "goal_threshold_raw": 90,
+              "goal_threshold_cap": 100,
+              "goal_threshold_cap_provenance": "metric_scale",
+              "goal_threshold": 0.9,
+              "threshold_source": "brief_extraction",
+              "goal_direction": ">=",
+              "goal_horizon_months": 6
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a tech lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "team_capacity": {
+                  "value": 0.6,
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "node_id": "team_capacity",
+                    "match_type": "exact_id",
+                    "confidence": "high"
+                  },
+                  "raw_value": 6,
+                  "unit": "people"
+                }
+              }
+            },
+            {
+              "id": "team_capacity",
+              "kind": "factor",
+              "label": "Team capacity",
+              "provenance": "unverified_brief",
+              "category": "controllable",
+              "observed_state": {
+                "value": 0.5,
+                "raw_value": 5,
+                "cap": 10,
+                "declared_scale": "unit_interval",
+                "unit": "people",
+                "source": "cee_inference",
+                "extractionType": "inferred",
+                "user_material_unverified": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "decision_delivery_reliability",
+              "to": "hire_a_tech_lead",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "hire_a_tech_lead",
+              "to": "team_capacity",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "team_capacity",
+              "to": "delivery_reliability",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.125
+              },
+              "exists_probability": 0.8,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "mean_projected": true,
+                "magnitude": "olumi_placeholder"
+              },
+              "defaulted": true
+            }
+          ],
+          "node_count": 4,
+          "edge_count": 3
+        },
+        "schema_version": "v3",
+        "elapsed_ms": 0
+      },
+      {
+        "kind": "GRAPH_READY",
+        "graph": {
+          "nodes": [
+            {
+              "id": "decision_delivery_reliability",
+              "kind": "decision",
+              "label": "Question: Delivery reliability",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "delivery_reliability",
+              "kind": "goal",
+              "label": "Delivery reliability",
+              "provenance": "from_brief",
+              "goal_threshold_unit": "%",
+              "goal_threshold_frame": "level",
+              "goal_threshold_raw": 90,
+              "goal_threshold_cap": 100,
+              "goal_threshold_cap_provenance": "metric_scale",
+              "goal_threshold": 0.9,
+              "threshold_source": "brief_extraction",
+              "goal_direction": ">=",
+              "goal_horizon_months": 6
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a tech lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "team_capacity": {
+                  "value": 0.6,
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "node_id": "team_capacity",
+                    "match_type": "exact_id",
+                    "confidence": "high"
+                  },
+                  "raw_value": 6,
+                  "unit": "people"
+                }
+              }
+            },
+            {
+              "id": "team_capacity",
+              "kind": "factor",
+              "label": "Team capacity",
+              "provenance": "unverified_brief",
+              "category": "controllable",
+              "observed_state": {
+                "value": 0.5,
+                "raw_value": 5,
+                "cap": 10,
+                "declared_scale": "unit_interval",
+                "unit": "people",
+                "source": "cee_inference",
+                "extractionType": "inferred",
+                "user_material_unverified": true
+              }
+            },
+            {
+              "id": "onboarding_takes_longer",
+              "kind": "risk",
+              "label": "Onboarding takes longer",
+              "provenance": "ai_inferred",
+              "analysis_participation": "retained_excluded",
+              "draft_widening": {
+                "provenance": "ai_suggested_widen",
+                "hits": {
+                  "id": "hire_a_tech_lead",
+                  "label": "Hire a tech lead",
+                  "kind": "option"
+                },
+                "through": {
+                  "id": "team_capacity",
+                  "label": "Team capacity",
+                  "direction": "positive"
+                },
+                "affects": {
+                  "id": "delivery_reliability",
+                  "label": "Delivery reliability",
+                  "direction": "negative"
+                },
+                "mechanism": "relies_on",
+                "relies_on": "the additional hire reaching full pace quickly",
+                "watch_for": "delivery stays flat"
+              },
+              "proposed_by": "olumi"
+            }
+          ],
+          "edges": [
+            {
+              "from": "decision_delivery_reliability",
+              "to": "hire_a_tech_lead",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "hire_a_tech_lead",
+              "to": "team_capacity",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "team_capacity",
+              "to": "delivery_reliability",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.125
+              },
+              "exists_probability": 0.8,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "mean_projected": true,
+                "magnitude": "olumi_placeholder"
+              },
+              "defaulted": true
+            }
+          ],
+          "node_count": 5,
+          "edge_count": 3
+        },
+        "schema_version": "v3",
+        "elapsed_ms": 0
+      },
+      {
+        "kind": "PROGRESS",
+        "labels": [],
+        "phase": "writing",
+        "elapsed_ms": 0
+      }
+    ]
+  },
+  "capacity": {
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_resolved_tickets",
+          "kind": "decision",
+          "label": "Question: Resolved tickets",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "resolved_tickets",
+          "kind": "goal",
+          "label": "Resolved tickets",
+          "provenance": "from_brief",
+          "goal_threshold_unit": "tickets/week",
+          "goal_threshold_frame": "level",
+          "goal_threshold_raw": 100,
+          "goal_threshold_cap": 125,
+          "goal_threshold_cap_provenance": "target_derived_headroom",
+          "goal_threshold": 0.8,
+          "threshold_source": "brief_extraction",
+          "goal_direction": ">=",
+          "goal_horizon_months": 6
+        },
+        {
+          "id": "hire_a_specialist",
+          "kind": "option",
+          "label": "Hire a specialist",
+          "provenance": "from_brief",
+          "interventions": {
+            "support_capacity": {
+              "value": 0.3,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "support_capacity",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 3,
+              "unit": "specialists"
+            }
+          }
+        },
+        {
+          "id": "support_capacity",
+          "kind": "factor",
+          "label": "Support capacity",
+          "provenance": "unverified_brief",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.2,
+            "raw_value": 2,
+            "cap": 10,
+            "declared_scale": "unit_interval",
+            "unit": "specialists",
+            "source": "cee_inference",
+            "extractionType": "inferred",
+            "user_material_unverified": true
+          }
+        },
+        {
+          "id": "onboarding_takes_longer",
+          "kind": "risk",
+          "label": "Onboarding takes longer",
+          "provenance": "ai_inferred",
+          "analysis_participation": "retained_excluded",
+          "draft_widening": {
+            "provenance": "ai_suggested_widen",
+            "hits": {
+              "id": "hire_a_specialist",
+              "label": "Hire a specialist",
+              "kind": "option"
+            },
+            "through": {
+              "id": "support_capacity",
+              "label": "Support capacity",
+              "direction": "positive"
+            },
+            "affects": {
+              "id": "resolved_tickets",
+              "label": "Resolved tickets",
+              "direction": "negative"
+            },
+            "mechanism": "relies_on",
+            "relies_on": "the additional hire reaching full pace quickly",
+            "watch_for": "delivery stays flat"
+          },
+          "proposed_by": "olumi"
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_resolved_tickets",
+          "to": "hire_a_specialist",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "hire_a_specialist",
+          "to": "support_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "support_capacity",
+          "to": "resolved_tickets",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true,
+            "magnitude": "olumi_placeholder"
+          },
+          "defaulted": true
+        }
+      ]
+    },
+    "reply": "Here is where the model stands.\n\n• Olumi added 1 risk for you to consider. They're Olumi's suggestions, not yours; remove any that don't fit.\n\nThe first analysis could not run yet: The model has fewer than two options.\n\n‘Onboarding takes longer’: ‘Hire a specialist’ relies on this not happening. This model can't yet apply that risk to that option alone, so the Run leaves it out.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
+    "frames": [
+      {
+        "kind": "GRAPH_READY",
+        "graph": {
+          "nodes": [
+            {
+              "id": "decision_resolved_tickets",
+              "kind": "decision",
+              "label": "Question: Resolved tickets",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "resolved_tickets",
+              "kind": "goal",
+              "label": "Resolved tickets",
+              "provenance": "from_brief",
+              "goal_threshold_unit": "tickets/week",
+              "goal_threshold_frame": "level",
+              "goal_threshold_raw": 100,
+              "goal_threshold_cap": 125,
+              "goal_threshold_cap_provenance": "target_derived_headroom",
+              "goal_threshold": 0.8,
+              "threshold_source": "brief_extraction",
+              "goal_direction": ">=",
+              "goal_horizon_months": 6
+            },
+            {
+              "id": "hire_a_specialist",
+              "kind": "option",
+              "label": "Hire a specialist",
+              "provenance": "from_brief",
+              "interventions": {
+                "support_capacity": {
+                  "value": 0.3,
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "node_id": "support_capacity",
+                    "match_type": "exact_id",
+                    "confidence": "high"
+                  },
+                  "raw_value": 3,
+                  "unit": "specialists"
+                }
+              }
+            },
+            {
+              "id": "support_capacity",
+              "kind": "factor",
+              "label": "Support capacity",
+              "provenance": "unverified_brief",
+              "category": "controllable",
+              "observed_state": {
+                "value": 0.2,
+                "raw_value": 2,
+                "cap": 10,
+                "declared_scale": "unit_interval",
+                "unit": "specialists",
+                "source": "cee_inference",
+                "extractionType": "inferred",
+                "user_material_unverified": true
+              }
+            }
+          ],
+          "edges": [
+            {
+              "from": "decision_resolved_tickets",
+              "to": "hire_a_specialist",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "hire_a_specialist",
+              "to": "support_capacity",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "support_capacity",
+              "to": "resolved_tickets",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.125
+              },
+              "exists_probability": 0.8,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "mean_projected": true,
+                "magnitude": "olumi_placeholder"
+              },
+              "defaulted": true
+            }
+          ],
+          "node_count": 4,
+          "edge_count": 3
+        },
+        "schema_version": "v3",
+        "elapsed_ms": 0
+      },
+      {
+        "kind": "GRAPH_READY",
+        "graph": {
+          "nodes": [
+            {
+              "id": "decision_resolved_tickets",
+              "kind": "decision",
+              "label": "Question: Resolved tickets",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "resolved_tickets",
+              "kind": "goal",
+              "label": "Resolved tickets",
+              "provenance": "from_brief",
+              "goal_threshold_unit": "tickets/week",
+              "goal_threshold_frame": "level",
+              "goal_threshold_raw": 100,
+              "goal_threshold_cap": 125,
+              "goal_threshold_cap_provenance": "target_derived_headroom",
+              "goal_threshold": 0.8,
+              "threshold_source": "brief_extraction",
+              "goal_direction": ">=",
+              "goal_horizon_months": 6
+            },
+            {
+              "id": "hire_a_specialist",
+              "kind": "option",
+              "label": "Hire a specialist",
+              "provenance": "from_brief",
+              "interventions": {
+                "support_capacity": {
+                  "value": 0.3,
+                  "source": "brief_extraction",
+                  "target_match": {
+                    "node_id": "support_capacity",
+                    "match_type": "exact_id",
+                    "confidence": "high"
+                  },
+                  "raw_value": 3,
+                  "unit": "specialists"
+                }
+              }
+            },
+            {
+              "id": "support_capacity",
+              "kind": "factor",
+              "label": "Support capacity",
+              "provenance": "unverified_brief",
+              "category": "controllable",
+              "observed_state": {
+                "value": 0.2,
+                "raw_value": 2,
+                "cap": 10,
+                "declared_scale": "unit_interval",
+                "unit": "specialists",
+                "source": "cee_inference",
+                "extractionType": "inferred",
+                "user_material_unverified": true
+              }
+            },
+            {
+              "id": "onboarding_takes_longer",
+              "kind": "risk",
+              "label": "Onboarding takes longer",
+              "provenance": "ai_inferred",
+              "analysis_participation": "retained_excluded",
+              "draft_widening": {
+                "provenance": "ai_suggested_widen",
+                "hits": {
+                  "id": "hire_a_specialist",
+                  "label": "Hire a specialist",
+                  "kind": "option"
+                },
+                "through": {
+                  "id": "support_capacity",
+                  "label": "Support capacity",
+                  "direction": "positive"
+                },
+                "affects": {
+                  "id": "resolved_tickets",
+                  "label": "Resolved tickets",
+                  "direction": "negative"
+                },
+                "mechanism": "relies_on",
+                "relies_on": "the additional hire reaching full pace quickly",
+                "watch_for": "delivery stays flat"
+              },
+              "proposed_by": "olumi"
+            }
+          ],
+          "edges": [
+            {
+              "from": "decision_resolved_tickets",
+              "to": "hire_a_specialist",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "hire_a_specialist",
+              "to": "support_capacity",
+              "strength": {
+                "mean": 1,
+                "std": 0.01
+              },
+              "exists_probability": 1,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis"
+              }
+            },
+            {
+              "from": "support_capacity",
+              "to": "resolved_tickets",
+              "strength": {
+                "mean": 0.5,
+                "std": 0.125
+              },
+              "exists_probability": 0.8,
+              "effect_direction": "positive",
+              "provenance": {
+                "source": "cee_hypothesis",
+                "mean_projected": true,
+                "magnitude": "olumi_placeholder"
+              },
+              "defaulted": true
+            }
+          ],
+          "node_count": 5,
+          "edge_count": 3
+        },
+        "schema_version": "v3",
+        "elapsed_ms": 0
+      },
+      {
+        "kind": "PROGRESS",
+        "labels": [],
+        "phase": "writing",
+        "elapsed_ms": 0
+      }
+    ]
+  }
+}

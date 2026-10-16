@@ -2120,8 +2120,10 @@ export async function buildModelFromBrief(
     // Finalize afresh after repair: this observer must not seed the final model's cache or recording timestamp.
     if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
       try {
-        const preview = checkedConstruction(size, () => finalizeGraph(admitted), eventFallbackRefusals.get(admitted));
-        if (preview.ok) onDraftAdmitted(preview.final.graph);
+        if (checkedConstructionPre(size).ok) {
+          const preview = finalizeGraph(admitted);
+          if (constructionFinalRefusal(preview, eventFallbackRefusals.get(admitted)) === null) onDraftAdmitted(preview.graph);
+        }
       } catch { /* an unavailable preview never costs the repair */ }
     }
     sizeRetried = needsSizeRetry;
@@ -2333,12 +2335,8 @@ export async function buildModelFromBrief(
     path_missing: pathIssues(admitted).map(({ option_id, option, dead_end_ids, dead_ends }) => ({ option_id, option, dead_end_ids, dead_ends })),
   };
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
-  /** The same finalization/refusal boundary for an early preview and the graph that registers. */
-  function checkedConstruction(
-    acceptedSize: ConstructionSizeVerdict,
-    finalize: () => ReturnType<typeof finalizeGraph>,
-    eventFallbackRefusal: string | undefined,
-  ) {
+  /** Refusals that precede widening on both the preview and registration paths. */
+  function checkedConstructionPre(acceptedSize: ConstructionSizeVerdict) {
     // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
     // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
     if (unattested !== null && stillTheUnattestedEvent(candidate)) {
@@ -2374,22 +2372,29 @@ export async function buildModelFromBrief(
         ambiguous_names: notToldApart.map((a) => ({ option: a.option, owners: [...a.owners], because: a.because })),
       } };
     }
-    const final = finalize();
+    return { ok: true as const, admittedOverLinks };
+  }
+
+  /** Preview-only before widening; returned as the build's refusal only on the graph that registers. */
+  function constructionFinalRefusal(
+    final: ReturnType<typeof finalizeGraph>,
+    eventFallbackRefusal: string | undefined,
+  ): ToolResult | null {
     // Never persist a graph the product cannot then read.
     const parsed = GraphV3.safeParse(final.graph);
     if (!parsed.success) {
-      return { ok: false as const, refusal: {
+      return {
         ok: false, mutated: false, refusal: 'admitted_graph_invalid',
         issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
-      } };
+      };
     }
     // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
     // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
     if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
-      return { ok: false as const, refusal: { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal } };
+      return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
     }
 
-    return { ok: true as const, final, admittedOverLinks };
+    return null;
   }
 
   /**
@@ -2776,12 +2781,11 @@ export async function buildModelFromBrief(
     if (final === undefined) { final = finalizeGraph(admission); finals.set(admission, final); }
     return final;
   };
-  // Keep the pre-widening admission verdict: widening has its own unchanged admission checks.
-  const acceptedSize = size;
   const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
-  const checked = checkedConstruction(acceptedSize, () => finalFor(admitted), eventFallbackRefusal);
+  const checked = checkedConstructionPre(size);
   if (!checked.ok) return checked.refusal;
   const admittedOverLinks = checked.admittedOverLinks;
+  finalFor(admitted);
   const admitWidened = (model: CandidateModel): AdmittedModel => admitForBuild(model, admissionLevelCandidate);
   observeAdmissionForTests?.({ candidate: admissionCandidate, admitted, admit: admitWidened, admitBase: admitForBuild });
   // The construction recorder sees only drafting/retry responses; widening uses the plain provider.
@@ -2789,7 +2793,10 @@ export async function buildModelFromBrief(
   // and risks against the options. Every added item is Olumi's (`markOlumiOptions`, `draft_widening`, `proposed_by`), the
   // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
   if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
-    try { onDraftAdmitted(checked.final.graph); } catch { /* an observer never costs the build */ }
+    const draft = finalFor(admitted);
+    if (constructionFinalRefusal(draft, eventFallbackRefusal) === null) {
+      try { onDraftAdmitted(draft.graph); } catch { /* an observer never costs the build */ }
+    }
   }
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
@@ -2798,9 +2805,9 @@ export async function buildModelFromBrief(
     admitted = widened.admitted;
     size = assessConstructionSize(admitted);
   }
-  const checkedFinal = checkedConstruction(acceptedSize, () => finalFor(admitted), eventFallbackRefusal);
-  if (!checkedFinal.ok) return checkedFinal.refusal;
-  const final = checkedFinal.final;
+  const final = finalFor(admitted);
+  const finalRefusal = constructionFinalRefusal(final, eventFallbackRefusal);
+  if (finalRefusal !== null) return finalRefusal;
   admitted = final.admitted;
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
 
