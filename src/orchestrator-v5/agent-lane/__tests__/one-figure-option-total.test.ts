@@ -8,18 +8,21 @@
  * Rows through the real build, scripted drafter (the prompt pin is construction-source-map.test.ts):
  *  · attributed once → the option's cost is stored as the user's total (`brief_extraction`, not unverified);
  *  · RULE 2 KEPT: the same figure bound to two of the option's parts stays unverified on both;
- *  · CONTRAST: two figures the user stated separately stay separate, each the user's.
+ *  · CONTRAST: two figures the user stated separately stay separate, each the user's;
+ *  · CONTRAST (AIE): a figure that "may be available" stays a possible funding statement, with its qualifier, never a cost.
  * SYNTHETIC brief (never an unseen brief).
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, STATEMENTS_INSTRUCTION } from '../runtime/build-model.js';
+import { userStatementFor } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const LEVEL = 'Our library gets about 2000 visits a week at the moment.';
 const TARGET = 'We need at least 2400 visits a week by the end of next year.';
 const TOTAL = 'Option two is an outreach campaign covering posters and school visits, costing £18,000 a year in total.';
 const SPLIT = 'Option two is an outreach campaign: posters would cost £8,000 a year and school visits £10,000 a year.';
+const BUDGET = 'Option two is an outreach campaign covering posters and school visits; £18,000 a year may be available for it.';
 const statement = (quote: string, subject: Rec, field: string, form: string, figures: Rec, unit: string): Rec =>
   ({ quote, subject: { to_label: null, factor_label: null, ...subject }, field, form, value: null, low: null, high: null, ...figures, unit, qualifier: null, conditions: null });
 const setting = (option: string, factor: string, value: number, quote: string): Rec =>
@@ -27,11 +30,16 @@ const setting = (option: string, factor: string, value: number, quote: string): 
 const factor = (label: string, unit: string, max: number): Rec =>
   ({ label, role: 'controllable', baseline_known: false, baseline_value: 0, unit, provenance: 'inferred', plausible_max: max });
 
-/** shape: 'once' (the option's total on its own cost), 'twice' (the same figure on two parts), 'split' (two stated figures). */
-function draft(shape: 'once' | 'twice' | 'split'): { brief: string; text: string } {
-  const sentence = shape === 'split' ? SPLIT : TOTAL;
+type Shape = 'once' | 'twice' | 'split' | 'budget';
+/**
+ * 'once' (the option's total on its own cost), 'twice' (the same figure on two parts), 'split' (two stated figures), 'budget'
+ * (the AIE's third contrast: "£… may be available" is a possible funding statement, never the option's cost).
+ */
+function draft(shape: Shape): { brief: string; text: string } {
+  const sentence = shape === 'split' ? SPLIT : shape === 'budget' ? BUDGET : TOTAL;
   const parts = shape === 'split' ? [['Poster spend', 8000], ['School visit spend', 10000]] as const
-    : shape === 'twice' ? [['Annual extra cost', 18000], ['Outreach spend', 18000]] as const : [['Annual extra cost', 18000]] as const;
+    : shape === 'twice' ? [['Annual extra cost', 18000], ['Outreach spend', 18000]] as const
+      : shape === 'budget' ? [] as const : [['Annual extra cost', 18000]] as const;
   return {
     brief: `${LEVEL} ${TARGET} Option one is keeping the current service. ${sentence}`,
     text: JSON.stringify({
@@ -46,7 +54,8 @@ function draft(shape: 'once' | 'twice' | 'split'): { brief: string; text: string
           interventions: [{ factor_label: 'Campaign running', value: 1, value_kind: 'absolute', unit: '0/1', provenance: 'inferred' },
             ...parts.map(([f, v]) => ({ factor_label: f, value: v, value_kind: 'absolute', unit: '£/year', provenance: 'explicit' }))] },
       ],
-      factors: [factor('Campaign running', '0/1', 1), ...parts.map(([f]) => factor(f, '£/year', 40000))],
+      factors: [factor('Campaign running', '0/1', 1), ...parts.map(([f]) => factor(f, '£/year', 40000)),
+        ...(shape === 'budget' ? [{ label: 'Funding available', role: 'external', baseline_known: true, baseline_value: 18000, unit: '£/year', provenance: 'explicit', plausible_max: 40000 }] : [])],
       risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
       links: [{ from: 'Campaign running', to: 'Weekly library visits', direction: 'positive', provenance: 'ai_proposed', effect_amount: null,
         effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null }],
@@ -54,11 +63,12 @@ function draft(shape: 'once' | 'twice' | 'split'): { brief: string; text: string
         statement(LEVEL, { kind: 'goal', label: 'Weekly library visits' }, 'level', 'point', { value: 2000 }, 'visits per week'),
         statement(TARGET, { kind: 'goal', label: 'Weekly library visits' }, 'target', 'lower_bound', { value: 2400 }, 'visits per week'),
         ...parts.map(([f, v]) => setting('Outreach campaign', f, v, sentence)),
+        ...(shape === 'budget' ? [{ ...statement(BUDGET, { kind: 'factor', label: 'Funding available' }, 'level', 'point', { value: 18000 }, '£/year'), qualifier: 'may be available' }] : []),
       ],
     }),
   };
 }
-async function built(shape: 'once' | 'twice' | 'split'): Promise<Rec> {
+async function built(shape: Shape): Promise<Rec> {
   const { brief, text } = draft(shape);
   let graph: Rec | undefined;
   const result = await buildModelFromBrief('7b7b7b7b-7b7b-4b7b-8b7b-7b7b7b7b7b7b', brief, (async (path: string, body: Rec) => {
@@ -95,6 +105,14 @@ describe('one figure for several parts of an option is the user\'s total, attrib
       // The served G3 shape (VERIFY-1a1a7907 reads/01-brief.json): Olumi's hypothesis, flagged as unverified user material.
       expect(settingOf(g, part)).toMatchObject({ raw_value: 18000, source: 'cee_hypothesis', user_material_unverified: true });
     }
+  });
+  it('CONTRAST (AIE): "£18,000 a year may be available" stays a possible funding statement, never the option\'s cost', async () => {
+    const g = await built('budget');
+    const option = (g.nodes as Rec[]).find((n) => n.label === 'Outreach campaign')!;
+    expect(Object.values(option.interventions as Rec).some((v: Rec) => v.raw_value === 18000)).toBe(false);
+    const funding = (g.nodes as Rec[]).find((n) => n.label === 'Funding available')!;
+    const said = userStatementFor(g, { kind: 'factor', id: funding.id as string, field: 'level' })?.statements[0];
+    expect(said).toMatchObject({ quote: BUDGET, form: 'point', low: 18000, high: 18000, qualifier: 'may be available' });
   });
   it('CONTRAST: two figures the user stated separately stay separate, each the user\'s', async () => {
     const g = await built('split');
