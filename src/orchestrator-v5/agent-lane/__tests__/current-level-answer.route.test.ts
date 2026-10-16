@@ -17,8 +17,10 @@ const graph = (JSON.parse(readFileSync(new URL('./fixtures/founder-58bd5e71-stor
   graph: { nodes: Record<string, unknown>[]; edges: { from: string; to: string }[] };
 }).graph;
 const asked = placeholderAskWords(graph, graph.edges.filter((e) => e.to === GOAL))!;
-const question = asked.first?.kind === 'goal_level' ? asked.first.question! : '';
-const warning = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: asked.message, first_ask: asked.first };
+// A saved ask from before the host question was retired. C3 must not turn this retained carrier into null.
+const question = 'To size them, I first need today’s level of ‘Productivity’. What is it, in %?';
+const warning = { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', message: asked.message,
+  first_ask: { kind: 'goal_level', node_id: GOAL, question } };
 const analysisResult = { type: 'analysis_result', computed_against_hash: 'h0', enrichment: { inference_warnings: [warning] } };
 const state = { ok: true, entities: [{ id: GOAL, kind: 'goal', label: GOAL }], goal: { id: GOAL, target: { unit: '%', frame: 'change_rel' } } };
 const now = () => new Date().toISOString();
@@ -38,12 +40,20 @@ let pending: PendingAction[] = [];
 let priorUser = SIZES;
 let priorAssistant = question;
 const appends: Record<string, unknown>[] = [];
+let pendingReadMode: 'ok' | 'null' | 'null_entry' | 'corrupt' | 'throw' = 'ok';
+const readPending = vi.fn(async () => {
+  if (pendingReadMode === 'throw') throw new Error('pending store unavailable');
+  if (pendingReadMode === 'null') return null;
+  if (pendingReadMode === 'null_entry') return [null];
+  if (pendingReadMode === 'corrupt') return [{ action: null }];
+  return pending.map(roundTrip);
+});
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async () => null),
   readRecent: vi.fn(async () => [{ scenario_id: SCENARIO, turn_id: 'prior-answer', request_hash: 'agent_turn:prior',
     user_message: priorUser, assistant_message: priorAssistant, created_at: now() }]),
-  readMostRecentPendingActions: vi.fn(async () => pending.map(roundTrip)),
+  readMostRecentPendingActions: readPending,
   append: vi.fn(async (w: Record<string, unknown>) => { appends.push(w); return { id: 'answer-row' }; }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -169,10 +179,33 @@ describe('the real Agent route and level door', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { pending = [initialAsk()]; priorUser = SIZES; priorAssistant = question; choices.length = 0; appends.length = 0; calls = 0; direct = false; levelArgs = { goal_label: GOAL, value: 16, unit: UNIT, user_stated: true }; naturalReply = 'Those figures are noted.'; });
+  beforeEach(() => { pendingReadMode = 'ok'; pending = [initialAsk()]; priorUser = SIZES; priorAssistant = question; choices.length = 0; appends.length = 0; calls = 0; direct = false; levelArgs = { goal_label: GOAL, value: 16, unit: UNIT, user_stated: true }; naturalReply = 'Those figures are noted.'; });
   const turn = (message: string) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', scenario_id: SCENARIO, agent_session_id: `level-answer-${randomUUID()}`, message,
   } });
+
+  it.each(['null', 'null_entry', 'corrupt', 'throw'] as const)(
+    'unreadable pending authority (%s) returns a truthful no-write reply, never a 500 or borrowed approval', async mode => {
+      pendingReadMode = mode; direct = true;
+      const res = await turn('Yes, apply it and run analysis.');
+      expect(res.statusCode, res.body).toBe(200);
+      const body = res.json();
+      expect(body.assistant_text).toContain('couldn’t verify the pending changes');
+      expect(body._agent).toMatchObject({ mutated: false, tool_calls: [], stopped_reason: 'pending_actions_unreadable' });
+      expect(body.suggested_actions).toEqual([]);
+      expect(calls).toBe(0);
+      expect(appends).toEqual([]); // In particular, do not replace an unreadable latest row with an empty carrier.
+    });
+
+  it('a successful empty pending read keeps the normal conversation', async () => {
+    pending = [];
+    const res = await turn('What do these assumptions mean?');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().assistant_text).toBe(naturalReply);
+    expect(res.json()._agent.stopped_reason).not.toBe('pending_actions_unreadable');
+    expect(calls).toBeGreaterThan(0);
+    expect(appends.some(w => w.graph !== undefined)).toBe(false);
+  });
 
   it.each([
     [`Productivity: ${SIZES}`, 'initial'],
