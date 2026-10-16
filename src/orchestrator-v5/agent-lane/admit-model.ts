@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figuresWritten, goalTargetStatements } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -4104,8 +4104,19 @@ function admitOnce(
         // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
         // `baseline_known` to its provenance, so a level the model marks known but
         // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
-        const estimated = goalLevelIsEstimated(model.goal);
-        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
+        // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z; BUDDY-A #3290 B1): whose this level is, read once from the AI's verified statements
+        // (`figureSource`). A level a verified statement states is the user's whatever the draft's `explicit` / `baseline_known`
+        // flags say; one the AI claimed that no verified statement states is UNKNOWN (a 7% the brief never wrote, beside the
+        // user's 6.5%, was saved as theirs); a level the AI made no statement about keeps the draft's own path.
+        const ownLevel = typeof brief === 'string' && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)
+          ? figureSource(model, brief, { kind: 'goal', label: model.goal.metric }, 'level', baselineRaw) : undefined;
+        const estimated = ownLevel !== 'user' && goalLevelIsEstimated(model.goal);
+        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && ownLevel === 'unverified') {
+          withheld(
+            `The current level of "${model.goal.metric}" (${baselineRaw}) is not one you stated, so it was not used and no chance ` +
+            `of reaching ${raw} is shown. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
+          );
+        } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
             `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
@@ -4652,11 +4663,17 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
-        (iv as { derived_total?: unknown }).derived_total === true);
+      const derived = (iv as { derived_total?: unknown }).derived_total === true;
+      // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z, `figureSource`): a setting the user wrote is theirs whatever the draft's flag says
+      // (G3 #3: the user's £90k / £60k / £140k were drafted "inferred" and saved as Olumi's); one the AI claimed that no verified
+      // statement states is UNKNOWN, never theirs and never Olumi's. A setting the AI made no statement about (a deployment
+      // switch) and a total build-model computed keep their own path.
+      const own = derived ? undefined : figureSource(model, brief, { kind: 'option', label: o.label, factor_label: iv.factor_label }, 'level', iv.value);
+      const source = own === 'user' ? 'brief_extraction' : own === 'unverified' ? 'cee_hypothesis' : levelSourceFor(iv.provenance);
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, source, nodes.find((n) => n.id === factorId), unitById.get(factorId), derived);
       if (iv.estimate === true) bundle[factorId]!.estimate = true;
       if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
-      if (iv.user_material_unverified === true) bundle[factorId]!.user_material_unverified = true;
+      if (own !== 'user' && (iv.user_material_unverified === true || own === 'unverified')) bundle[factorId]!.user_material_unverified = true;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }

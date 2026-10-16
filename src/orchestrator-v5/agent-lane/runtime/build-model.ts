@@ -87,7 +87,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { draftStatements, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { draftStatements, figureSource, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -1034,8 +1034,9 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // user's that the verifier cannot credit keeps today's non-user path through admission (no rule exempts it as the
         // user's), and its origin is UNKNOWN, not Olumi's: it carries `user_material_unverified`, which the one authority
         // (`settingProvenanceOf`) reads as unknown, so the census discloses it as unverified, never as an Olumi estimate.
-        if (intervention.provenance === 'explicit' && unknownBaseline
-          && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
+        // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): whether the setting is the user's is the owner's verdict (`verifiedOptionSetting`
+        // reads `figureSource`), whatever the factor's baseline; a known or zero baseline no longer decides it.
+        if (intervention.provenance === 'explicit' && unknownBaseline && !verifiedOptionSetting(model, option, intervention, brief)) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed', user_material_unverified: true });
         } else {
@@ -1063,12 +1064,17 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
       if (!factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
         unresolved('unit_mismatch'); continue;
       }
+      // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): the addition is the user's where the owner says so (`figureSource`), the baseline
+      // where its verifier does; the draft's `explicit` flags decide only for a draft recorded before SYSTEM 2.
+      const own = brief === undefined ? undefined
+        : figureSource(model, brief, { kind: 'option', label: option.label, factor_label: intervention.factor_label }, 'level', intervention.value);
+      const additionUsers = own === undefined ? intervention.provenance === 'explicit' : own === 'user';
+      const baselineUsers = own === undefined ? factor.baseline_known && factor.provenance === 'explicit' : verifiedFactorLevel(model, factor, brief);
       // A stated addition to known zero IS the stated figure, regardless of who named the factor.
-      const statedFigure = intervention.provenance === 'explicit' && factor.baseline_known === true && factor.baseline_value === 0;
+      const statedFigure = additionUsers && factor.baseline_known === true && factor.baseline_value === 0;
       interventions.push({
         ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
-        provenance: statedFigure || (factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit')
-          ? 'explicit' : 'ai_proposed',
+        provenance: statedFigure || (additionUsers && baselineUsers) ? 'explicit' : 'ai_proposed',
         // ⛔ A TOTAL WE COMPUTED IS NOT A FIGURE THE USER WROTE (RT-4 class A, #2603; Codex r1): a stated 5% today plus a
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.

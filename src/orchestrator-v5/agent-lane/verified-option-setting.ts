@@ -12,7 +12,7 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
-import { draftStatements, sourceMapOf, subjectKey } from './construction-source-map.js';
+import { draftStatements, figureSource, sourceMapOf, subjectKey } from './construction-source-map.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -262,8 +262,15 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
 }
 function verified(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
   if (typeof brief !== 'string') return false;
-  // SYSTEM 2's whole-raw switch: a draft with statements[] gives the quote only through its verified statement.
-  const quote = carriesStatements(model) ? statedSettingQuote(model, option, intervention, brief) : recordedRawSettingQuote(model, intervention) ?? null;
+  // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z): a draft with statements[] is the user's setting exactly where the owner says so —
+  // its verified statement states this figure for this option's setting of this factor. The host's clause, vocabulary and
+  // label-word readers below no longer decide it (G3 #3: "the micro-hubs probably £140k to set up" failed them, and the
+  // user's own costs were saved as Olumi's); which option and factor it binds stays the AI's reading.
+  if (carriesStatements(model)) {
+    return figureSource(model, brief, { kind: 'option', label: option.label, factor_label: intervention.factor_label }, 'level', intervention.value) === 'user'
+      && (option.interventions ?? []).filter((i) => i.factor_label === intervention.factor_label).length === 1;
+  }
+  const quote = recordedRawSettingQuote(model, intervention) ?? null;
   if (quote === null) return false;
   const sentences = assertions(brief);
   // Only the unique normalized quote is model evidence. Every offset, including amount_start, is ignored.
@@ -903,23 +910,6 @@ export function statementCitesLevel(model: CandidateModel, factor: Factor, brief
   const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
   return (sourceMapOf(draftStatements(model), brief).verified.get(key) ?? [])
     .some((s) => s.negated !== true && (s.low === Math.abs(value) || s.high === Math.abs(value)));
-}
-
-/**
- * The verified statement of an option's setting of a factor (`{option, factor_label}`, field level), as the one quote the
- * setting's existing checks read: the sentence the user wrote, verified once, with exactly the setting's figure, and no
- * other subject bound to that figure in it. Otherwise none: the setting is not the user's.
- */
-function statedSettingQuote(model: CandidateModel, option: Option, intervention: Intervention, brief: string): string | null {
-  const map = sourceMapOf(draftStatements(model), brief);
-  const key = subjectKey({ kind: 'option', label: option.label, factor_label: intervention.factor_label }, 'level');
-  const quotes = [...new Set((map.verified.get(key) ?? [])
-    .filter((s) => s.form === 'point' && s.low === intervention.value && s.negated !== true).map((s) => s.quote))];
-  if (quotes.length !== 1) return null;
-  const quote = quotes[0]!;
-  const elsewhere = [...map.verified.entries()].some(([other, statements]) => other !== key
-    && statements.some((s) => s.quote === quote && (s.low === intervention.value || s.high === intervention.value)));
-  return elsewhere ? null : quote;
 }
 
 /** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
