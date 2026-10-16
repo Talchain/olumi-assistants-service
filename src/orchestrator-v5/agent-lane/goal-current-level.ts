@@ -792,7 +792,7 @@ export async function proposeGoalCurrentLevel(
   const ceilingTakesTheLevelFrame = !isChange && node.goal_threshold_frame === 'level' && holdsPairableCeiling(g.raw, goal.id);
   /**
    * ⭐ TODAY'S LEVEL DOES NOT DEPEND ON THE TARGET (TL 21:30Z; G1 founder on 829a152b, turn 3: "We have no funding" refused
-   * `no_target` beside a target held as 1.3 "million (currency unspecified)" with no cap, so the goal never got a level). A goal
+   * `no_target` beside a target held as a bare figure in an unnamed currency with no cap, so the goal never got a level). A goal
    * on the level frame whose target cannot frame a level yet (no cap, no raw figure) records today's level on its OWN frame, as a
    * goal with no target does; the target is still said beside it and a later target write frames the goal as it does today.
    */
