@@ -78,7 +78,13 @@ const textOf = (item: unknown): string | undefined => {
  * durable row, whose source (typed, chip or template) the row does not record. `opening`: the conversation's first
  * message, from a reseed whose read reached the start. ⛔ Source belongs to the OCCURRENCE, never to matching bytes.
  */
-export type OlderEntry = { readonly text: string; readonly source: 'typed' | 'unknown'; readonly opening?: true };
+export type OlderEntry = {
+  readonly text: string; readonly source: 'typed' | 'unknown'; readonly opening?: true;
+  /** A `typed` entry's occurrence: the {@link TypedEntry} it was when the window dropped it (identity, never its bytes). */
+  readonly typed_seq?: number;
+};
+/** One typed message as this process holds it: its words, and which occurrence it is (`seq`, unique per store). */
+type TypedEntry = { readonly text: string; readonly seq: number };
 
 /**
  * The user's older words as ONE user item (the user's own authority, as `BOARD_EDIT_PREFIX` notes): the first message (the brief) whole, then the NEWEST of the rest that
@@ -443,7 +449,8 @@ const MAX_TYPED_WORDS = 40;
 
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
-  private readonly typed = new Map<string, string[]>();
+  private readonly typed = new Map<string, TypedEntry[]>();
+  private nextTypedSeq = 0;
   /** Missing source coverage is sticky for the life of this history, including an empty/failed reseed. */
   private readonly incompleteAuthorship = new Set<string>();
   /** The older words the window has dropped, in the order written, each with its source (`olderWordsItem`). */
@@ -492,7 +499,9 @@ export class HistoryStore {
       // ⭐ SYS2 L80: a reseeded row's words are kept as a source-unknown reference, by its PLACE among the reseeded
       // messages (the front `unknownAhead`). Otherwise only what the user TYPED (`recordTyped`) qualifies: this
       // process's chip words and board-edit notes never do.
-      const typed = new Set(this.typed.get(sessionId) ?? []);
+      // A dropped typed message is the OLDEST typed occurrence of its words that no older entry stands for yet (G1).
+      const typed = this.typed.get(sessionId) ?? [];
+      const claimed = new Set((this.older.get(sessionId) ?? []).flatMap((e) => (e.typed_seq === undefined ? [] : [e.typed_seq])));
       let unknown = this.unknownAhead.get(sessionId) ?? 0;
       let opening = this.openingAhead.has(sessionId);
       let openingEntry: OlderEntry | undefined;
@@ -508,8 +517,12 @@ export class HistoryStore {
           if (left > 0) { carried!.set(t, left - 1); continue; }
           if (first) openingEntry = { text: t, source: 'unknown', opening: true };
           else fresh.push({ text: t, source: 'unknown' });
-        } else if (t !== undefined && t.trim() !== '' && typed.has(t)) {
-          fresh.push({ text: t, source: 'typed' });
+        } else if (t !== undefined && t.trim() !== '') {
+          const occurrence = typed.find((e) => e.text === t && !claimed.has(e.seq));
+          if (occurrence !== undefined) {
+            claimed.add(occurrence.seq);
+            fresh.push({ text: t, source: 'typed', typed_seq: occurrence.seq });
+          }
         }
       }
       if (unknown > 0) this.unknownAhead.set(sessionId, unknown); else this.unknownAhead.delete(sessionId);
@@ -549,7 +562,7 @@ export class HistoryStore {
       if (proven.length > 0) {
         const held = this.typed.get(sessionId) ?? [];
         this.typed.delete(sessionId);
-        this.typed.set(sessionId, [...proven, ...held].slice(-MAX_TYPED_WORDS));
+        this.typed.set(sessionId, [...proven.map((text) => ({ text, seq: this.nextTypedSeq++ })), ...held].slice(-MAX_TYPED_WORDS));
       }
     }
     const found = briefFromDurableTurns(rows);
@@ -571,7 +584,7 @@ export class HistoryStore {
 
   /** What the user TYPED in this session, as this process saw it — never a chip's text, a board-edit note or a reseeded row. */
   typedWords(sessionId: string): readonly string[] {
-    return this.typed.get(sessionId) ?? [];
+    return (this.typed.get(sessionId) ?? []).map((e) => e.text);
   }
 
   /** Authorship inputs retain message boundaries and the source of restored rows. */
@@ -581,10 +594,20 @@ export class HistoryStore {
       .slice(0, this.unknownAhead.get(sessionId) ?? 0).flatMap(i => {
         const text = textOf(i); return text === undefined ? [] : [text];
       });
+    /**
+     * ⭐ EACH TYPED MESSAGE ONCE, IN ORDER (G1 founder verify 79d4da30, hash-proven on the drafter rows): the window moves a
+     * dropped typed message into `older` while `typed` (the newest MAX_TYPED_WORDS) still holds it, so joining the two said
+     * every trimmed message twice. From turn 9 on, a revised draft read the brief and the earliest corrections again AFTER the
+     * later ones, and its retained conversation lost the typed origin of every later message. By OCCURRENCE, never by equal
+     * words (BUDDY-A #3265 B1): an older entry is said only once the typed list no longer holds the occurrence it stands for.
+     */
+    const held = new Set((this.typed.get(sessionId) ?? []).map((e) => e.seq));
+    const olderTyped = older.filter(e => e.source === 'typed' && (e.typed_seq === undefined || !held.has(e.typed_seq))).map(e => e.text);
+    const typed = this.typedWords(sessionId);
     return {
       complete: !this.incompleteAuthorship.has(sessionId) && this.has(sessionId) && this.typedWords(sessionId).length > 0 && this.typedWords(sessionId).length < MAX_TYPED_WORDS
         && restored.length === 0 && !older.some(e => e.source === 'unknown'),
-      verified: [...older.filter(e => e.source === 'typed').map(e => e.text), ...this.typedWords(sessionId)],
+      verified: [...olderTyped, ...typed],
       unknown: [...older.filter(e => e.source === 'unknown').map(e => e.text), ...restored],
     };
   }
@@ -592,7 +615,7 @@ export class HistoryStore {
   recordTyped(sessionId: string, text: string, sourceComplete = true): void {
     if (!sourceComplete) this.incompleteAuthorship.add(sessionId);
     if (text.trim() === '') return;
-    const next = [...(this.typed.get(sessionId) ?? []), text].slice(-MAX_TYPED_WORDS);
+    const next = [...(this.typed.get(sessionId) ?? []), { text, seq: this.nextTypedSeq++ }].slice(-MAX_TYPED_WORDS);
     this.typed.delete(sessionId);
     if (this.typed.size >= this.maxSessions) {
       const oldest = this.typed.keys().next().value;

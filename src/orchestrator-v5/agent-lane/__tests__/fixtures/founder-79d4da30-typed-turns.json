@@ -1,0 +1,118 @@
+{
+ "source": "live/runs/2026-10-16T000648Z-funding-verify-founder-79d4da30 (verifier); drafter rows cee_drafter_raw_responses, read-only dump",
+ "served_cee": "79d4da307ca53ac35c49988f4cc823c55ced02ab",
+ "scenario_id": "2d337015-27eb-463d-b313-bfd6a30ee69b",
+ "brief_text": "I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.",
+ "turns": [
+  {
+   "turn": 1,
+   "source": "composer",
+   "message": "I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these."
+  },
+  {
+   "turn": 2,
+   "source": "composer",
+   "message": "Once funding is secured, then that changes this question completely. Securing funding is an outcome that would result in a new decision, not influence this decision."
+  },
+  {
+   "turn": 3,
+   "source": "composer",
+   "message": "I feel like you're going down the wrong route. We have no funding. I cannot carry on as I am now. I need to get funding as soon as possible. I probably need a PoC as soon as I have an interview/meeting with an investor, but I obviously need to get investors to ask to speak to me first."
+  },
+  {
+   "turn": 5,
+   "source": "chip",
+   "message": "Yes, use the revised draft."
+  },
+  {
+   "turn": 6,
+   "source": "composer",
+   "message": "Make this change"
+  },
+  {
+   "turn": 7,
+   "source": "composer",
+   "message": "Yes, it's really bad that this risk was generated, but it connects to nothing, so it's pretty much useless. I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process. They need to be really good to attract talent, but the more time I spend on them, the less I can spend on other things. I feel like all of this should be pretty obvious to you."
+  },
+  {
+   "turn": 8,
+   "source": "composer",
+   "message": "The job specification is just the work I would be doing if I was focusing on that, so I'm not sure we should be focusing on it. The question I'm trying to answer is how to best divide my time."
+  },
+  {
+   "turn": 9,
+   "source": "composer",
+   "message": "Let's assume 60 and possibly more if I needed to."
+  },
+  {
+   "turn": 10,
+   "source": "composer",
+   "message": "I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly. Or, if I was to complete it more slowly, I could spend less time on it."
+  },
+  {
+   "turn": 11,
+   "source": "composer",
+   "message": "I feel like you're getting into minutia. I need a quick decision on the split of my time. How do we model that to help me decide? What are the key factors, risks, and likely outcomes?"
+  },
+  {
+   "turn": 12,
+   "source": "composer",
+   "message": "If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time."
+  },
+  {
+   "turn": 13,
+   "source": "composer",
+   "message": "I feel like we're going around in circles. Can you just update the model to reflect our conversation so I can actually decide what to spend my time on?"
+  },
+  {
+   "turn": 14,
+   "source": "composer",
+   "message": "Yes, at least"
+  },
+  {
+   "turn": 15,
+   "source": "composer",
+   "message": "This is not what I've asked for. I've said that some of the components in the model just don't make sense and are distractions, such as the job specifications. What else is redundant or missing from this model? Suggest either a completely updated brief from our dialogue to create a new model or a set of updates and improvements, whichever you think is the right approach."
+  },
+  {
+   "turn": 16,
+   "source": "composer",
+   "message": "Okay, let's go with that. Send that brief, create a new model, and produce your estimates for me to review."
+  },
+  {
+   "turn": 17,
+   "source": "composer",
+   "message": "I've already agreed with this brief. Generate a new model based on this brief."
+  }
+ ],
+ "served_redraft_briefs": [
+  {
+   "turn": 12,
+   "drafter_row_created_at": "2026-10-16 00:17:52.904963+00",
+   "brief_sha256": "4b1b88bfe5360fd00872f1930a38fb9f4b6d3b686bedfd6793af9a14b7cd5efb",
+   "brief_chars": 2903,
+   "duplicated_typed_prefix": 2
+  },
+  {
+   "turn": 13,
+   "drafter_row_created_at": "2026-10-16 00:19:24.813077+00",
+   "brief_sha256": "31cdde0b49d38bbc9f637fc20e7d0d64084a12b4a0e1f1fd6254837adc4002c8",
+   "brief_chars": 3344,
+   "duplicated_typed_prefix": 3
+  },
+  {
+   "turn": 16,
+   "drafter_row_created_at": "2026-10-16 00:21:30.002743+00",
+   "brief_sha256": "390d725c093e6973493d0330812433cdb07c6d8983f3962a5821fbbdad4eb710",
+   "brief_chars": 4261,
+   "duplicated_typed_prefix": 5
+  },
+  {
+   "turn": 17,
+   "drafter_row_created_at": "2026-10-16 00:22:42.127997+00",
+   "brief_sha256": "b5336ffc178772089346aa5468ed1d22202bfae5d972c82a33603112a12508e0",
+   "brief_chars": 4535,
+   "duplicated_typed_prefix": 6
+  }
+ ]
+}
