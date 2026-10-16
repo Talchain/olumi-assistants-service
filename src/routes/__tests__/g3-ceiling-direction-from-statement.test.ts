@@ -99,7 +99,7 @@ describe('G3: a ceiling goal\u2019s direction comes from the AI\u2019s verified 
   });
   it('NEGATIVE (AIQ 5872082179 kept): with the target NOT typed as a level, a "%" ceiling may be a change, so the level is not admitted', async () => {
     const m = served() as unknown as Rec;
-    m.goal.quantity_frame = 'change';
+    delete m.goal.frame;
     const out = await construct(BRIEF, [m as unknown as CandidateModel]);
     expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
     expect(goalNode(out.graph).observed_state).toBeUndefined();

@@ -4133,8 +4133,8 @@ function admitOnce(
             metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
             targetUnit: model.goal.unit, ...(signedScale !== undefined && resolved.provenance === 'level_frame' ? { signedLevel: true as const } : {}),
             ...(ceilingRead ? { heldComparator: model.goal.operator } : {}),
-            // The AI typed this target as a level, as the run will score it (`goal_threshold_frame`).
-            ...(ceilingRead && model.goal.frame === 'level' && model.goal.quantity_frame !== 'change' ? { targetFrame: 'level' } : {}),
+            // The AI typed this target as a level, as the run will score it.
+            ...(ceilingRead && model.goal.frame === 'level' ? { targetFrame: 'level' } : {}),
           });
           if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
