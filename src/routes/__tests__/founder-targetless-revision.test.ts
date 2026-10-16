@@ -186,6 +186,107 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     expect(s.graph().goal_constraints).toEqual(prepared.goal_constraints);
   });
 
+  // ⭐ CONFIRM ON THE CARD (PLAN-CONFIRM-NOT-REFUSE, second conversion; VERIFY-ec381b25 turn 12, the founder's words verbatim):
+  // the goal-target call holds the user's own £250,000, but the redraft held NO target, so it was refused
+  // `revised_draft_has_no_target`. The host puts the CALL's target on the redraft's goal as Olumi's reading (`inferred`).
+  it('RED turn 12: a goal-target call whose redraft holds no target → the call\u2019s own £250,000 on the goal, flagged as Olumi\u2019s reading; only the press saves it', async () => {
+    const message = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    expect(raw.goal).toMatchObject({ target_stated: false, value: null });
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false, revised_draft: { holds_this_target: true } });
+    // The card OPENS with Olumi's reading (which goal the user's figure governs); the eventual 1.3 million is carried, said once.
+    expect(String(offer.public_label).startsWith(`${meaningFlagWords({ kind: 'goal_target_reading', figure: 'at least \u00a3250,000',
+      goal: '\u2018Angel funding secured\u2019' })} Replace the early draft`), String(offer.public_label)).toBe(true);
+    expect(String(offer.public_label).match(/1\.3 million/g)).toHaveLength(1);
+    expect(String(offer.note)).toContain(MEANING_FLAG_NOTE.trim());
+    const prepared = s.candidateOf(offer).candidate;
+    const goal = prepared.nodes.find((n: Rec) => n.kind === 'goal');
+    // The user's figure, comparator and unit; its goal binding is Olumi's reading, so the row is stored `inferred`.
+    expect(prepared.goal_constraints.filter((r: Rec) => r.node_id === goal.id)).toEqual([{ constraint_id: `agent-lane:${goal.id}:>=`,
+      node_id: goal.id, role: 'goal_target', operator: '>=', value: 250000, unit: '\u00a3', label: goal.label, provenance: 'inferred', value_frame: 'level' }]);
+    expect(prepared.goal_constraints).toContainEqual(expect.objectContaining(FX.graph.goal_constraints.find((r: Rec) => r.node_id === OUTCOME)));
+    expect(s.writes).toHaveLength(0);
+    expect(await s.approve(offer)).toMatchObject({ ok: true, applied: true, mutated: true });
+    const saved = s.graph();
+    const savedGoal = saved.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(readGoalRecord(saved, savedGoal.id)?.target).toMatchObject({ raw: 250000 });
+    expect(saved.goal_constraints.find((r: Rec) => r.node_id === savedGoal.id)).toMatchObject({ value: 250000, provenance: 'inferred' });
+    expect(saved.goal_constraints).toContainEqual(expect.objectContaining({ node_id: OUTCOME, value: 1.3 }));
+  });
+
+  it.each([{ value: 0, refusal: 'target_not_positive' }, { value: -1, refusal: 'target_not_stated' }])('BUDDY B1: the restated-goal handoff refuses a non-positive at-least target (£$value) before drafting or offering a card', async ({ value, refusal }) => {
+    const message = `I need angel funding of at least £${value} to bring in technical resource.`;
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer).toMatchObject({ ok: false, mutated: false, refusal });
+    expect(offer.proposal_id).toBeUndefined();
+    expect(s.sent).toHaveLength(0);
+    expect(s.writes).toHaveLength(0);
+    expect(s.graph()).toEqual(FX.graph);
+  });
+
+  it('BUDDY B1 contrast: an at-most zero reading keeps the supported comparator, with nothing saved before approval', async () => {
+    const message = 'I need angel funding of at most £0 to bring in technical resource.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 0,
+      unit: '£', constraint_type: 'at_most', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer).toMatchObject({ ok: true, mutated: false, revised_draft: { holds_this_target: true } });
+    const candidate = s.candidateOf(offer).candidate;
+    const goal = candidate.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(candidate.goal_constraints.find((r: Rec) => r.node_id === goal.id)).toMatchObject({
+      operator: '<=', value: 0, provenance: 'inferred' });
+    expect(s.writes).toHaveLength(0);
+  });
+
+  it('the cached call reading belongs to its quantity, never another call with the same figure', async () => {
+    const message = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    const s = await harness(FX.graph, [raw]);
+    const call = { measures: 'angel funding', value: 250000, unit: '£', constraint_type: 'at_least', rationale: message };
+    const first = await dispatchTool('propose_goal_target', JSON.stringify(call), s.context(message) as never, s.caps) as Rec;
+    const other = await dispatchTool('propose_goal_target', JSON.stringify({ ...call, measures: 'technical resource' }), s.context(message) as never, s.caps) as Rec;
+    expect(first).toMatchObject({ ok: true, revised_draft: { holds_this_target: true } });
+    expect(other).toMatchObject({ ok: true, proposal_id: first.proposal_id, revised_draft: { holds_this_target: 'unknown' } });
+    expect(s.sent).toHaveLength(1);
+    expect(s.writes).toHaveLength(0);
+  });
+
+  it('a strict call target retains its strict comparator through the schema, approval and readback', async () => {
+    const message = 'I need angel funding of more than £250,000 to bring in technical resource and allow me to have more time.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer).toMatchObject({ ok: true, mutated: false, revised_draft: { holds_this_target: true } });
+    const prepared = s.candidateOf(offer).candidate;
+    const goal = prepared.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(prepared.goal_constraints.find((r: Rec) => r.node_id === goal.id)).toMatchObject({
+      operator: '>=', operator_as_stated: '>', value: 250000, provenance: 'inferred' });
+    expect(String(offer.public_label)).toContain('Olumi read above £250,000');
+    expect(s.writes).toHaveLength(0);
+    expect(await s.approve(offer)).toMatchObject({ ok: true, applied: true, mutated: true });
+    expect(s.graph().goal_constraints.find((r: Rec) => r.node_id === goal.id)).toMatchObject({
+      operator: '>=', operator_as_stated: '>', value: 250000, provenance: 'inferred' });
+    expect(readGoalRecord(s.graph(), goal.id)?.target).toMatchObject({ raw: 250000, comparator: '>' });
+  });
+
+  it('CONTRAST turn 12: a figure the user did not write about the redraft\u2019s goal is never put on it; still refused, nothing written', async () => {
+    const message = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+    const raw = JSON.parse(FX.turns.find((t: Rec) => t.turn === 10).calls[0].raw_text);
+    raw.goal = { ...raw.goal, metric: 'Technical resource hired', unit: 'people' };
+    const s = await harness(FX.graph, [raw]);
+    const offer = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 250000,
+      unit: '£', constraint_type: 'at_least', rationale: message }), s.context(message) as never, s.caps) as Rec;
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(s.writes).toHaveLength(0);
+  });
+
   it('the recorded conditional £250k statement stays conditional; a qualitative revision never turns it into today’s funding', async () => {
     const recorded = FX.turns.find((t: Rec) => t.turn === 10);
     const raw = JSON.parse(recorded.calls[0].raw_text);

@@ -15,6 +15,12 @@ describe('meaning flags open the card, said once', () => {
       + '£250,000 to ‘Funding secured’ with no numeric target. Approve only if that is what you meant; otherwise say what the target should be.');
   });
 
+  it('goal_target_reading: the user’s figure, the goal Olumi read it for, then what the user does instead of approving', () => {
+    expect(meaningFlagWords({ kind: 'goal_target_reading', figure: 'at least \u00a3250,000', goal: '\u2018Angel funding secured\u2019' }))
+      .toBe('Check this change first: Olumi read at least \u00a3250,000 as the target for \u2018Angel funding secured\u2019, the goal of the '
+        + 'revised model. Approve only if that is what you meant; otherwise say which goal it is for.');
+  });
+
   it('the flag comes first, once, before the card’s own words', () => {
     const card = 'Replace the early draft with a revised one. Check the targets, limits and options on this card before choosing.';
     expect(cardWithMeaningFlags(card, [DROPPED, { ...DROPPED }])).toBe(`${meaningFlagWords(DROPPED)} ${card}`);
