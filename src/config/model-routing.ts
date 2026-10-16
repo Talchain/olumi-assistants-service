@@ -687,20 +687,17 @@ export const EXECUTABLE_RUNTIME_TASKS = Object.freeze(
 );
 
 /**
- * Explicit adapter-capability exceptions for routed tasks.
- *
- * Most LLMAdapter operations are implemented by every real provider. These
- * two are deliberately different: OpenAI exposes compatibility stubs that
- * throw before making a call, while Anthropic and the deterministic Fixtures
- * adapter implement the operation. Keeping the exception beside runtime task
- * authority lets both router execution and admin reporting consume one fact.
+ * Adapter capabilities for routed task names, including inert compatibility
+ * names. Both listed operations are implemented by all three providers.
+ * This map describes adapters; AI_TASK_LIFECYCLE and runtime authority determine
+ * whether a task has a kept executable path.
  */
 export const ROUTER_TASK_PROVIDER_CAPABILITIES = Object.freeze({
   critique_graph: Object.freeze(['anthropic', 'openai', 'fixtures'] as const),
   explain_diff: Object.freeze(['anthropic', 'openai', 'fixtures'] as const),
 } as const satisfies Partial<
   Record<
-    ExecutableRuntimeTask,
+    CeeTask,
     readonly ResolvedModelAssignment['provider'][]
   >
 >);
