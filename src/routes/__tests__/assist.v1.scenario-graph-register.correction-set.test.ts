@@ -26,7 +26,8 @@ vi.mock('../../orchestrator/user-identity.js', async original => ({
 }));
 
 import { tryStructureOriginAnswer } from '../../cee/context-integrity/structure-origin-answer.js';
-import { constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { buildModelFromBrief, constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { runPreparingDraftReplacement } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement-context.js';
 import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -77,7 +78,7 @@ function restoreCard(proposal: StructuredProposal, result: Rec, ctx: AgentToolCo
   return store;
 }
 
-async function world(row: { readonly graph: Rec; readonly brief: string; readonly message: string }, options: { race?: boolean; loseAcknowledgement?: boolean; hideLedger?: boolean } = {}) {
+async function world(row: { readonly graph: Rec; readonly brief: string; readonly message: string }, options: { race?: boolean; loseAcknowledgement?: boolean; hideLedger?: boolean; provider?: (...args: any[]) => Promise<any>; ledger?: Rec; objections?: { finding_id: string; analysis_id: string; statement: string }[] } = {}) {
   let graph = structuredClone(row.graph) as Rec;
   const original = structuredClone(graph);
   const writes: Rec[] = [];
@@ -104,9 +105,9 @@ async function world(row: { readonly graph: Rec; readonly brief: string; readonl
     throw new Error(`No provider, engine or other writer is allowed: ${path}`);
   };
   const proposals = new ProposalStore();
-  const caps = (store = proposals) => createAgentCapabilities(dispatch, store, undefined, 'full', undefined, { turnAuthority: true,
-    readCommittedTurnLedger: async () => ({ first_user_message: row.brief, write_turn_ids: options.hideLedger ? [] : writes.map(w => w.turn_id),
-      messages: [], complete: true }) as never });
+  const caps = (store = proposals) => createAgentCapabilities(dispatch, store, options.provider, 'full', undefined, { turnAuthority: true,
+    readCommittedTurnLedger: async () => ({ first_user_message: row.brief, user_message_turn_ids: ['first'], ...options.ledger, write_turn_ids: options.hideLedger ? [] : writes.map(w => w.turn_id),
+      complete: options.ledger?.complete ?? true }) as never, readStatedObjections: async () => options.objections ?? [] });
   const ctx = { scenario_id: sid, authenticated_user_id: null, request_id: 'native-correction', turn_id: randomUUID(),
     user_turn_text: row.message, user_text: row.message, user_text_complete: true, verified_user_messages: [row.message] } satisfies AgentToolContext;
   return { graph: () => graph, original, writes, sent, proposals, caps, ctx };
@@ -322,7 +323,7 @@ describe('one native governing-outcome correction', () => {
     expect(boundNodeDescriptionForContext(old.description)).toContain('later ambition');
     expect(old.description).toContain('Earlier saved bound: at least £1,300,000');
     expect(old.description).toContain('Earlier saved source quote');
-    expect(old.description).toContain('not kept as current target controls');
+    expect(old.description).toContain('they do not constrain the current goal');
     expect(graph.goal_constraints.some((r: Rec) => r.node_id === 'large_fund')).toBe(false);
     expect(graph.nodes.find((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.find((n: Rec) => n.kind === 'option'));
     const reopened = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
@@ -516,7 +517,7 @@ describe('one native governing-outcome correction', () => {
     const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
     for (const key of ['goal_horizon', 'goal_horizon_months', 'goal_deadline_as_stated', 'horizon_basis',
       'goal_horizon_reference_date', 'goal_horizon_stated_months', 'goal_period']) expect(goal).not.toHaveProperty(key);
-    expect(goal.description).toMatch(/^The larger fund of at least £1.3 million/);
+    expect(goal.description).toMatch(/^Earlier aim \(history, later ambition\): at least £1,300,000/);
     expect(boundNodeDescriptionForContext(goal.description)).toContain('if the evidence supports it');
     expect(goal.description).not.toContain('Current governing goal proposed');
     expect(goal.description).toContain('31 December 2027');
@@ -610,4 +611,153 @@ describe('one native governing-outcome correction', () => {
     expect(w.writes).toHaveLength(1);
   });
 
+  it('ordinary target correction keeps the stated earlier ambition, source, conditions and dissent through cold native save', async () => {
+    const graph = funding(false); graph.nodes[0].label = 'Funding secured';
+    graph.nodes[0].description = 'Priya disputes this ambition unless the investor evidence improves. ' + ambition.repeat(3);
+    const message = source + ' ' + ambition;
+    const w = await world({ graph, brief: ambition, message }); w.ctx.verified_user_messages = [ambition, message];
+    const request = { constraint_type: 'at_least', value: 250000, unit: '£', measures: 'Funding secured', rationale: source, later_ambition_quote: ambition };
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(request), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('The earlier target remains as history and later ambition');
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!;
+    const value = held.operations[0]!.value as Rec;
+    expect(held.operations[0]!.op).toBe('set_goal_target');
+    const goal = value.candidate.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.id).toBe('large_fund'); expect(goal.goal_threshold_raw).toBe(250000);
+    expect(goal.goal_horizon).toEqual({ deadline: '2027-12-31' });
+    expect(goal.description).not.toContain('governing aim before');
+    expect(goal.description).not.toContain('does not set the current goal’s deadline');
+    expect(goal.description).not.toContain('Earlier timing');
+    expect(offered.public_label).toContain('saved target at least £1,300,000');
+    expect(goal.description).toContain(graph.nodes[0].description);
+    expect(boundNodeDescriptionForContext(goal.description)).toContain('Earlier target');
+    expect(boundNodeDescriptionForContext(goal.description)).toContain('£1,300,000');
+    expect(boundNodeDescriptionForContext(goal.description)).toContain('Priya disputes');
+    expect(w.writes).toHaveLength(0);
+    const cold = restoreCard(held, offered, w.ctx);
+    const saved = await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(value.candidate, w.graph())).toBe(true);
+    expect(w.graph().goal_constraints.filter((r: Rec) => r.role === 'goal_target').map((r: Rec) => r.value)).toEqual([250000]);
+    expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(graph.nodes.filter((n: Rec) => n.kind === 'option'));
+    const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
+    expect(read.entities.find((n: Rec) => n.id === 'large_fund').full_label).toContain(ambition);
+    // No copied or unbound later-ambition claim is offered.
+    const unbound = await dispatchTool('propose_goal_target', JSON.stringify({ ...request, later_ambition_quote: 'The later ambition is £9 million.' }), w.ctx, w.caps());
+    expect(unbound).toMatchObject({ ok: false, mutated: false, refusal: 'ambition_not_verified' });
+  });
+
+});
+
+
+// Same synthetic bakery as the prepare-only contract: native saved replacement, no real provider or analysis.
+const bakery = fixture('bakery-prepare-only.json');
+const rebuildRequest = 'Please generate a replacement model for this scenario, retaining our current goal, options and recorded contributions.';
+const framing = 'Olumi proposes checking whether a new market could sell 9999 loaves. This is an assumption, not a user figure.';
+async function bakeryWorld(options: Parameters<typeof world>[1] = {}, change?: (g: Rec) => void) {
+  const seed = await runPreparingDraftReplacement('bakery-seed', () => buildModelFromBrief('bakery-seed', bakery.brief,
+    (async () => { throw new Error('Preparation must not dispatch'); }) as never,
+    (async () => ({ text: JSON.stringify(bakery.draft), status: 'completed' })) as never));
+  expect(seed.ok, JSON.stringify(seed)).toBe(true);
+  const graph = structuredClone(seed.prepared_graph) as Rec;
+  change?.(graph);
+  const calls: Rec[] = [];
+  const provider = vi.fn(async (req: Rec) => { calls.push(req); return { text: JSON.stringify(bakery.draft), status: 'completed' }; });
+  const w = await world({ graph, brief: bakery.brief, message: rebuildRequest }, { provider, ...options });
+  const offer = () => dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), w.ctx, w.caps());
+  return { ...w, offer, calls, provider };
+}
+
+describe('explicit CURRENT rebuild through the native correction writer', () => {
+  it('⭐ prepares the full report with zero writes, cold-restores its own card, saves once and keeps exact sources from an earlier instant', async () => {
+    const w = await bakeryWorld({}, g => { g.nodes[0].description = 'The manager disputes this forecast unless the pilot works.';
+      const goal = g.nodes.find((n: Rec) => n.kind === 'goal'); goal.goal_horizon = { deadline: '2027-06-30' }; goal.goal_deadline_as_stated = 'by the end of June 2027'; });
+    const offered = await w.offer();
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(w.writes).toHaveLength(0); expect(w.sent).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    expect(offered.prepared_graph).toBeUndefined(); expect(offered.pending_action).toBeUndefined();
+    expect(offered.open_questions).toEqual(expect.arrayContaining([expect.stringMatching(/Which date/)]));
+    expect(offered.not_represented).toEqual(expect.arrayContaining([expect.stringMatching(/Keep current setup/)]));
+    expect(w.calls[0].input).toContain('context only, not user source');
+    expect(JSON.stringify(w.calls)).toContain(framing);
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!;
+    const value = held.operations[0]!.value as Rec;
+    expect(value.candidate).toEqual(offered.proposed_model);
+    for (const n of w.original.nodes) {
+      const kept = value.candidate.nodes.find((x: Rec) => x.id === n.id);
+      if (n.user_statements) expect(kept.user_statements).toEqual(n.user_statements);
+      if (n.kind === 'option') expect(kept.interventions).toEqual(n.interventions);
+    }
+    expect(value.construction_report.open_questions).toEqual(offered.open_questions);
+    const oldGoal = w.original.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(value.candidate.nodes.find((n: Rec) => n.id === oldGoal.id)).toEqual(oldGoal);
+    expect(JSON.stringify(value.candidate)).not.toContain('9999');
+    const cold = restoreCard(held, offered, w.ctx);
+    const press = { ...w.ctx, turn_id: randomUUID(), user_turn_text: '', typed_approval_of: pid };
+    const saved = await w.caps(cold).authoriseChange(press, { proposal_id: pid });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(w.sent).toHaveLength(1);
+    expect(approvedGraphHeld(value.candidate, w.graph())).toBe(true);
+    expect(w.graph().nodes.find((n: Rec) => n.id === oldGoal.id)).toEqual(oldGoal);
+    expect(await w.caps(cold).authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, mutated: false, applied: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+  });
+  it('lost acknowledgement: a cold retry recovers only its own native operation and complete candidate', async () => {
+    const w = await bakeryWorld({ loseAcknowledgement: true }); const offered = await w.offer();
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true });
+    const pid = String(offered.proposal_id), held = structuredClone(w.proposals.get(pid)!);
+    const press = { ...w.ctx, user_turn_text: '', typed_approval_of: pid };
+    expect(await w.caps().authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: false, refusal: 'not_confirmed' });
+    const cold = restoreCard(held, offered, w.ctx);
+    expect(await w.caps(cold).authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, mutated: false, applied: true, already_applied: true });
+    expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
+  });
+  it.each(['missing', 'partial', 'earlier', 'assistant', 'chip'])("%s request authority cannot prepare or write", async kind => {
+    const w = await bakeryWorld();
+    const ctx = { ...w.ctx, ...(kind === 'partial' ? { user_text_complete: false } : {}),
+      ...(kind === 'earlier' ? { user_turn_text: 'Please explain the current model.' } : {}),
+      ...(kind === 'assistant' ? { verified_user_messages: [] } : {}),
+      ...(kind === 'chip' ? { typed_approval_of: 'another-card' } : {}) };
+    const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing,
+      ...(kind === 'missing' ? {} : { explicit_rebuild_request: rebuildRequest }) }), ctx, w.caps());
+    expect(out).toMatchObject({ ok: false, mutated: false });
+    expect(w.calls).toHaveLength(0); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+  it.each(['options', 'goal'])('withholds a replacement that loses saved %s', async lost => {
+    const bad = structuredClone(bakery.draft);
+    if (lost === 'options') bad.options.pop(); else bad.goal.metric = 'Other governing outcome';
+    const w = await bakeryWorld({ provider: async () => ({ text: JSON.stringify(bad), status: 'completed' }) });
+    const out = await w.offer();
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' });
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+  it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
+    const w = await bakeryWorld({ ledger });
+    expect(await w.offer()).toMatchObject({ ok: false, mutated: false, refusal: 'history_unreadable' });
+    expect(w.calls).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+  it('a valid card has no authority without its own press; a race writes nothing', async () => {
+    const w = await bakeryWorld({ race: true }); const out = await w.offer();
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true });
+    const pid = String(out.proposal_id);
+    expect(await w.caps().authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+  });
+  it('rechecks a changed conversation and an incomplete candidate before registration', async () => {
+    const ledger: Rec = { complete: true }; const w = await bakeryWorld({ ledger });
+    const out = await w.offer(); expect(out, JSON.stringify(out)).toMatchObject({ ok: true });
+    const pid = String(out.proposal_id);
+    ledger.user_message_turn_ids = ['first', 'later']; ledger.later_user_messages = [{ turn_id: 'later', text: 'Keep the disagreement.' }];
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    delete ledger.user_message_turn_ids; delete ledger.later_user_messages;
+    const held = w.proposals.get(pid)!; const value = structuredClone(held.operations[0]!.value) as Rec;
+    value.candidate.nodes = value.candidate.nodes.filter((n: Rec) => n.kind !== 'option');
+    const forged = createProposal({ ...held, operations: [{ ...held.operations[0]!, value }] }); w.proposals.put(forged);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: forged.proposal_id }, { proposal_id: forged.proposal_id })).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_replacement' });
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
 });

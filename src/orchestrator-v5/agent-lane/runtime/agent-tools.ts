@@ -276,9 +276,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Build the model from the user\u2019s brief when get_canonical_state reports the ' +
       'model is empty. Preserves the user\u2019s own facts, numbers and constraint wording, then ' +
       'adds the options, factors, risks and causal mechanisms that make the question reasonable ' +
-      'to analyse. Report honestly what it says was left out.',
+      'to analyse. Report honestly what it says was left out. With a saved model, call only for the user’s explicit CURRENT request to generate a replacement model; pass that complete verified request verbatim in explicit_rebuild_request. Correction, quotation, hypothetical, negation or an earlier request is not current rebuild permission. Prepare ONE candidate through the existing construction/admission/widening pipeline, using the retained brief, verified corrections, answered context, current aim, sources and dissent; do not revive rejected mechanisms or obsolete aims. Show the complete proposed replacement, retained work, omissions and changed assumptions. Nothing replaces the saved model before this card’s own approval and complete candidate save/readback. Never rebuild automatically to apply a correction.',
     parameters: obj({
-      brief: { type: 'string', description: 'The user\u2019s brief in their own words, verbatim.' },
+      brief: { type: 'string', description: 'For initial construction, the user’s brief verbatim. For an explicitly requested replacement, Olumi’s proposed framing; it is context, never human source.' },
+      explicit_rebuild_request: { type: 'string', description: 'Only for a saved model: the complete verified current typed request verbatim.' },
       whole_request: WHOLE_REQUEST,
     }, ['brief']),
   },
@@ -521,7 +522,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       governing_outcome: { type: 'string', description: 'Only when changing WHICH outcome governs: the existing outcome label/id, or a proposed new outcome label. This is Olumi’s interpretation for review.' },
       goal_change_quote: { type: 'string', description: 'The COMPLETE verified human message supporting this goal change, verbatim, including conditions and uncertainty. A reported or disowned figure is not their target.' },
-      later_ambition_quote: { type: 'string', description: 'The complete verified source that makes the prior aim a later ambition. Without it the prior aim stays history, never automatically a later goal.' },
+      later_ambition_quote: { type: 'string', description: 'For either a target change or a governing-outcome change: the complete verified source that makes the prior saved target a later ambition. Its original figure, source and conditions are retained as non-operative history on the same card. Without it the prior aim stays history, never automatically a later goal.' },
       deadline_words: { type: 'string', description: 'The exact deadline words for the new governing outcome, when stated. Include them in this same card, preserving their source/reference.' },
       remove_mechanisms: { type: 'array', maxItems: 6, items: obj({
         kind: { type: 'string', enum: ['factor', 'risk', 'link'] },
@@ -1122,7 +1123,7 @@ export interface AgentCapabilities {
    * `run_analysis` tool never passes it (`runAgentTool` hands over `(ctx, args)` only).
    */
   runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }, opts?: { readonly afterCommittedChange?: boolean }): Promise<ToolResult>;
-  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
+  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string; explicit_rebuild_request?: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
     assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; revise?: boolean; keep?: boolean }[];

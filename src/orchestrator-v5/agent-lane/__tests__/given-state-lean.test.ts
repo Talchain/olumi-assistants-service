@@ -1,17 +1,9 @@
 /**
  * ⭐ PJ-C1 TOKENS: THE GIVEN STATE AND THE TOOL LIST CARRY NOTHING THE TURN CANNOT USE (#70 5859578339).
  *
- * Measured on the final served graphs of journeys A / C / E (X3 run 194514Z, CEE cd489f1): the state given with every
- * turn is 11.5–12.8k characters, and 1.4–1.6k of it is `existing_links` — `"<from> -> <to>"` for every edge, an exact
- * copy of `links[].from/to`, which the same object also carries. And every populated turn is offered
- * `build_model_from_brief`, which refuses on any model that has entities (`model_already_exists`,
- * agent-capabilities.ts `buildModelFromBrief`) — a schema paid for on every call and never usable.
- *
- * The rules under test:
- *   - the given state has no `existing_links`, and `links` still names every edge, by its endpoints;
- *   - a FRESH packet whose state holds addressable entities withholds `build_model_from_brief`, said as omitted with
- *     its reason; an EMPTY model, an absent packet and a stale one keep it (fail safe, as `get_canonical_state`): the
- *     server's own refusal stays the boundary either way.
+ * Each edge is projected once. The fresh, sufficient packet may omit the equivalent get_canonical_state fetch.
+ * build_model_from_brief remains usable for a CURRENT explicitly requested replacement: its capability checks
+ * the source and produces a complete candidate/own card, never a direct replacement of a populated model.
  */
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -49,7 +41,7 @@ describe('the given state carries each edge once', () => {
   });
 });
 
-describe('a populated model is not offered a build it would refuse', () => {
+describe('a saved model retains the explicit replacement capability', () => {
   const SECRET = 'server-side-secret-value';
   const REV = 'a'.repeat(64);
   const USER = 'user-a';
@@ -59,11 +51,11 @@ describe('a populated model is not offered a build it would refuse', () => {
   const entity = { id: 'opt_a', label: 'Keep Pro at £49', kind: 'option', value: null };
   const names = (r: ReturnType<typeof eligibleTools>) => r.tools.map((t) => t.name);
 
-  it('RED: a FRESH packet with entities → build_model_from_brief withheld, and said so with its reason', () => {
+  it('a fresh populated packet retains explicit replacement while omitting only the equivalent state fetch', () => {
     const r = eligibleTools({ mode: 'full', context: packet({ entities: [entity], structure: {} }), expectation });
     expect(r.freshness.kind).toBe('fresh');
-    expect(names(r)).not.toContain('build_model_from_brief');
-    expect(r.omitted).toContainEqual({ name: 'build_model_from_brief', reason: 'model_already_exists' });
+    expect(names(r)).toContain('build_model_from_brief');
+    expect(r.omitted.map(o => o.name)).not.toContain('build_model_from_brief');
     // The C1 omission is unchanged beside it.
     expect(r.omitted).toContainEqual({ name: 'get_canonical_state', reason: 'context_already_supplied' });
   });
