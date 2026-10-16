@@ -270,6 +270,13 @@ export function approvalChipsFor(
     if (stored!.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
       || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
       || held.public_label !== stored!.public_label) return [];
+    if (stored.operations.some(op => op.op === 'repoint_goal')) {
+      const choice = directionChoiceFor(tool, source);
+      return [{ id: approvalChipIdFor(proposalId), label: 'Change the goal',
+        message: 'Apply the complete goal change shown on this card.', detail: stored.public_label },
+        ...(choice === undefined ? [] : [{ id: 'agent-direction-alternative', label: DIRECTION_CHOICE_LABEL_INSTEAD[choice.alternative],
+          message: DIRECTION_CHOICE_MESSAGE[choice.alternative] }]), AMEND_CHIP];
+    }
     const replacesDraft = stored!.operations.some((op) => op.op === 'replace_draft');
     const riskOccurrence = stored!.operations.some((op) => op.op === 'set_risk_occurrence');
     const usersStatement = stored!.operations.find(recordsUsersStatement);

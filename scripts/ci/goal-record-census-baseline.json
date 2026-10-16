@@ -1,5 +1,5 @@
 {
-  "source_sha": "c762f0a065384db494d81738c17626a5bbf4b66f",
+  "source_sha": "184b428065ca1c3c6bab026db36b9051b0c6f6d0",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -25,7 +25,7 @@
       "src/orchestrator-v5/agent-lane/goal-certainty.ts": 3,
       "src/orchestrator-v5/agent-lane/goal-current-level.ts": 2,
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 4,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 2,
       "src/orchestrator-v5/goal-target/goal-chance-licence.ts": 2,
       "src/orchestrator-v5/goal-target/goal-horizon-verdict.ts": 3,
@@ -89,8 +89,9 @@
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 3,
       "src/orchestrator-v5/agent-lane/model-budgets.ts": 1,
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 3,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 34,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 38,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 16,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 7,
       "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": 15,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 1,
@@ -156,6 +157,7 @@
     "goal_deadline_as_stated": {
       "src/orchestrator-v5/agent-lane/deadline-card.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 2,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 5,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
       "src/schemas/cee-v3.ts": 1
@@ -202,6 +204,7 @@
       "src/orchestrator-v5/agent-lane/proposal-object/record.ts": 1,
       "src/orchestrator-v5/agent-lane/proposal.ts": 2,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts": 3,
       "src/orchestrator-v5/agent-lane/turn-context/selector-signals.ts": 3,
@@ -223,6 +226,7 @@
       "src/orchestrator-v5/agent-lane/decision-input-ask.ts": 1,
       "src/orchestrator-v5/agent-lane/horizon-attestation.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 1,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 2,
       "src/orchestrator-v5/context/graph-hash.ts": 1,
       "src/orchestrator-v5/goal-target/goal-horizon-write.ts": 2,
@@ -268,7 +272,8 @@
       "src/orchestrator-v5/agent-lane/goal-chance-screen-lines.ts": 1,
       "src/orchestrator-v5/agent-lane/guided-sizing.ts": 5,
       "src/orchestrator-v5/agent-lane/method-turn/widen-turn.ts": 2,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 8,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 12,
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/agent-lane/stated-goal-operator-context.ts": 2,
       "src/orchestrator-v5/boundary/request-extensions.ts": 2,
       "src/orchestrator-v5/build-turn-context.ts": 8,
@@ -319,6 +324,7 @@
       "src/schemas/ceeResponses.ts": 1
     },
     "goal_period": {
+      "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 1,
       "src/orchestrator-v5/goal-target/goal-record.ts": 3,
       "src/schemas/cee-v3.ts": 1
     },
@@ -786,7 +792,7 @@
     },
     "threshold_source": {
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 3,
-      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 2,
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 3,
       "src/orchestrator-v5/agent-lane/stated-by-user.ts": 5,
       "src/orchestrator-v5/goal-target/event-by-date-model.ts": 3,
       "src/orchestrator-v5/goal-target/goal-ceiling-pair.ts": 2,
@@ -824,16 +830,16 @@
     "findSoleGoalNode": 1,
     "goalChanceTargetCause": 7,
     "goalDeadlineOf": 1,
-    "goalKindOf": 29,
+    "goalKindOf": 30,
     "goalUnitOf": 5,
-    "goal_constraints": 436,
-    "goal_deadline_as_stated": 11,
+    "goal_constraints": 447,
+    "goal_deadline_as_stated": 12,
     "goal_direction": 104,
-    "goal_horizon": 47,
-    "goal_horizon_months": 43,
+    "goal_horizon": 48,
+    "goal_horizon_months": 44,
     "goal_level_reading": 20,
-    "goal_node_id": 283,
-    "goal_period": 4,
+    "goal_node_id": 288,
+    "goal_period": 5,
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
@@ -852,10 +858,10 @@
     "soleGoalOf": 16,
     "statedGoalTargetOf": 29,
     "success_threshold": 21,
-    "threshold_source": 39,
+    "threshold_source": 40,
     "unit_reading": 79
   },
-  "total_references": 2461,
+  "total_references": 2483,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
