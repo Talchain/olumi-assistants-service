@@ -452,6 +452,35 @@ describe('G1: a trimmed typed message is verified once, never twice', () => {
     expect(store.authorshipWords('session-1').verified).toEqual(turns.map((t) => t.typed));
   });
 
+  // BUDDY-A #3265 B1: by occurrence, never by equal words, across the typed-words cap.
+  it('RED (B1): 45 identical typed messages, past the cap and the window, are 45 verified occurrences', () => {
+    const turns = Array.from({ length: 45 }, () => ({ typed: 'Yes, at least.', reply: 'Noted.' }));
+    const { store } = drive(turns);
+    expect(store.authorshipWords('session-1').verified).toEqual(turns.map((t) => t.typed));
+  });
+
+  it('RED (B1): a unique opening then 44 identical typed messages are 45 verified occurrences, the opening first', () => {
+    const turns = [{ typed: 'I need to decide how to split my time.', reply: 'Noted.' },
+      ...Array.from({ length: 44 }, () => ({ typed: 'Yes, at least.', reply: 'Noted.' }))];
+    const { store } = drive(turns);
+    expect(store.authorshipWords('session-1').verified).toEqual(turns.map((t) => t.typed));
+  });
+
+  it('CONTROL (restart): after a reseed proves the earlier typed words, later typed words past the window are verified once', () => {
+    const store = new HistoryStore();
+    const before = ['Earlier one.', 'Earlier two.', 'Earlier three.'];
+    const rows = before.map((m, i) => ({ request_hash: `agent_turn:${String(i).repeat(64)}`, user_message: m, assistant_message: 'ok',
+      created_at: new Date(Date.UTC(2026, 9, 16, 0, i)).toISOString() })).reverse();
+    store.seed('session-1', historyFromDurableTurns(rows), [], rows, () => true);
+    expect(store.typedWords('session-1'), 'the reseed proved the earlier typed words').toEqual(before);
+    const later = Array.from({ length: 12 }, (_, k) => `After the restart ${k + 1}.`);
+    for (const m of later) {
+      store.recordTyped('session-1', m);
+      store.set('session-1', [...store.get('session-1'), user(m), said('ok')]);
+    }
+    expect(store.authorshipWords('session-1').verified).toEqual([...before, ...later]);
+  });
+
   it('CONTROL: 8 turns or fewer (nothing trimmed) — the typed words, as before', () => {
     const turns = Array.from({ length: 8 }, (_, k) => turn(k + 1));
     const { store } = drive(turns);
