@@ -90,7 +90,7 @@ describe('one source owner; the field-binding hint never reauthors a figure', ()
 });
 
 
-it('a tool flag cannot erase a verified human figure; a different field binding stays explicitly Olumi’s', async () => {
+it('a genuinely new Olumi estimate absent from the typed words stays Olumi’s', async () => {
   const graph = { nodes: [{ id: 'cost', kind: 'factor', label: 'Cost estimate', observed_state: { value: 50000, unit: 'GBP/year', source: 'cee_inference' } }], edges: [] };
   const d: InternalDispatch = async path => {
     if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: 'h0' } };
@@ -99,12 +99,7 @@ it('a tool flag cannot erase a verified human figure; a different field binding 
   const store = new ProposalStore();
   const result = await createAgentCapabilities(d, store).proposeAssumptions({ scenario_id: 'source-contrast', authenticated_user_id: null,
     request_id: 'source', user_text: 'The separate annual spending ceiling is £90k.' },
-  { assumptions: [{ factor_label: 'Cost estimate', value: 90000, unit: 'GBP/year', user_stated: false, revise: true, basis: 'A new Olumi estimate, separate from the ceiling' }] });
+  { assumptions: [{ factor_label: 'Cost estimate', value: 150000, unit: 'GBP/year', user_stated: false, revise: true, basis: 'A new Olumi estimate, separate from the ceiling' }] });
   expect(result.ok, JSON.stringify(result)).toBe(true);
-  const proposal = store.get(String(result.proposal_id))!;
-  expect(proposal.provenance.authored_by).toBe('model_proposed');
-  expect(proposal.operations[0]!.value).toMatchObject({ authored_by: 'user_stated', confirmation: {
-    source: 'The separate annual spending ceiling is £90k.', quote: 'The separate annual spending ceiling is £90k.' } });
-  expect(result.public_label).toContain('these field bindings are Olumi’s reading');
-  expect(result.public_label).toContain('The separate annual spending ceiling is £90k.');
+  expect(store.get(String(result.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'model_proposed' });
 });

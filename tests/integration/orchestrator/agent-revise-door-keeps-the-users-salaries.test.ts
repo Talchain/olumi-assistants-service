@@ -174,9 +174,10 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     expect(rows.size).toBe(0);
     const out = await cold.caps.authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true); expect(rows.size).toBe(1);
+    persisted = JSON.parse(JSON.stringify(persisted)); // persisted bytes on a fresh read, not the proposal object
     for (const [id, value] of [['senior_engineer_annual_salary', 90000], ['junior_engineer_annual_salary', 60000], ['annual_salary_spend', 140000]] as const) {
       expect(os(id).raw_value ?? os(id).value).toBe(value);
-      expect(provenanceOf({ value: os(id) }).origin, JSON.stringify(os(id))).toBe('human');
+      expect(provenanceOf({ value: os(id) }), JSON.stringify(os(id))).toMatchObject({ origin: 'human', role: 'unverified' });
     }
   });
 
