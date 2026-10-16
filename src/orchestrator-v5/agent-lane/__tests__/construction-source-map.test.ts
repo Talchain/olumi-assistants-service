@@ -10,9 +10,13 @@ import { STATEMENTS_INSTRUCTION, buildModelFromBrief } from '../runtime/build-mo
 import { sourceMapOf, subjectKey } from '../construction-source-map.js';
 
 type Rec = Record<string, any>;
-/** The AIE's text (#94 6180604131) with its exact H0/H1 replacements applied (AIE 6183352754; the packet copied byte-identical). */
-const AIE_TEXT = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'utf8')) as { changes: { old: string; replacement: string }[] })
-  .changes.reduce((text, c) => { if (text.split(c.old).length !== 2) throw new Error(`AIE old text not found once: ${c.old.slice(0, 60)}`); return text.replace(c.old, c.replacement); },
+/**
+ * The AIE's text (#94 6180604131) with its exact replacements applied, in order: H0/H1 (AIE 6183352754) and Q1, the whole
+ * sentence with its colon lead-in (AIE disposition 16 Oct on #94 6214201657). Each packet copied byte-identical.
+ */
+const AIE_TEXT = ['tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'tests/fixtures/sys2/aie-quote-lead-in-amendment-v1.json']
+  .flatMap((path) => (JSON.parse(readFileSync(path, 'utf8')) as { changes: { old: string; replacement: string }[] }).changes)
+  .reduce((text, c) => { if (text.split(c.old).length !== 2) throw new Error(`AIE old text not found once: ${c.old.slice(0, 60)}`); return text.replace(c.old, c.replacement); },
     readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8'));
 /** The served capacity brief (`_source`): "between 10 and 30" is a stated range only a clause check can attest. */
 const CAPACITY = JSON.parse(readFileSync('tests/fixtures/drafter-text-3/served-capacity-brief.json', 'utf8')) as { brief: string };
