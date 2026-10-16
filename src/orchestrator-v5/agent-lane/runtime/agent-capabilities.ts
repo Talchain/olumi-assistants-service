@@ -3812,7 +3812,7 @@ export function createAgentCapabilities(
     // Unknown authors and material the canonical carry cannot preserve are source/preservation guards, never consent flags.
     const found = items.filter((i) => i.carry === undefined).map((i) => i.words);
     const warnings: string[] = [];
-    if (items.some(i => i.carry !== undefined)) warnings.push('Your model contains work you edited; check what this revision keeps and replaces.');
+    if (items.some(i => i.carry !== undefined)) warnings.push('Your model contains work you edited.');
     let bound: string[] = [];
     let messages: string[] = [];
     let objections: string[] = [];
@@ -3842,13 +3842,6 @@ export function createAgentCapabilities(
   };
   const DRAFT_GATE_REFUSAL = 'draft_holds_your_work';
   const TARGET_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>': 'above', '>=': 'at least', '<': 'below', '<=': 'at most' };
-  /** The targets in the user's terms: ‘Quantity’ at least 20 (one target, or several joined by "and"). */
-  const targetsInWords = (raw: unknown, targets: readonly { node_id: string; comparator: string; value: number; unit: string }[]): string =>
-    targets.map((t) => {
-      const n = ((raw as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined ?? []).find((x) => x?.id === t.node_id);
-      return `\u2018${typeof n?.label === 'string' ? n.label : t.node_id}\u2019 ${TARGET_COMPARATOR_WORDS[t.comparator] ?? t.comparator} ${targetFigure(t.value, t.unit)}`;
-    }).join(' and ');
-
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; /** The deadline goal's deliverable, when the draft holds one. */ readonly event: string | null;
     /** The card's own sentence on a result withheld for a carried limit (`limitsKeptBy`), when it has one. */ readonly withheld?: string;
@@ -4269,10 +4262,8 @@ export function createAgentCapabilities(
       found.push('this card did not show the earlier-work warning; ask for an updated card');
     }
     if (found.length > 0) {
-      const label = (id: string): string => String((((v.candidate as { nodes?: unknown }).nodes as Array<Record<string, unknown>> | undefined) ?? [])
-        .find((n) => n?.id === id)?.label ?? id);
-      return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced', targetsHeldBy(v.candidate).map((t) => ({
-        words: targetsInWords(v.candidate, [t]), onCanvas: resolveNamed(before, label(t.node_id), () => true).kind !== 'none' }))));
+      // This press failed its rechecked authority/history gate; quantities on the candidate are not the cause.
+      return notApplied(DRAFT_GATE_REFUSAL, draftGateDetail(found, 'replaced', []));
     }
     // The WHOLE approved graph (every top-level member the candidate carries: options, goal_constraints and all), CAS-gated
     // on both of the base's hashes, like the sibling registers (`frame-write-is-cas-gated.test.ts`).
