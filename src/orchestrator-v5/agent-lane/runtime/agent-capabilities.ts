@@ -346,6 +346,7 @@ import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForeca
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { canonicalLabel } from '../model-primitives.js';
 import { approvedGraphHeld, carryHumanItems, humanItemsAfterTheDraft, laterWritesThan, limitsKeptBy, messagesBesidesTheBrief, revisedDraftBrief, targetsHeldBy, type HumanItem } from './draft-replacement.js';
+import { cardWithMeaningFlags, MEANING_FLAG_NOTE, type MeaningFlag } from './meaning-flags.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -3851,7 +3852,8 @@ export function createAgentCapabilities(
 
   /** One revised draft per turn and base: the other target's call, or a retried call, reuses it; nothing is prepared twice. */
   type RevisedDraft = { readonly proposal: StructuredProposal; readonly held: ReturnType<typeof targetsHeldBy>; /** The deadline goal's deliverable, when the draft holds one. */ readonly event: string | null;
-    /** The card's own sentence on a result withheld for a carried limit (`limitsKeptBy`), when it has one. */ readonly withheld?: string }
+    /** The card's own sentence on a result withheld for a carried limit (`limitsKeptBy`), when it has one. */ readonly withheld?: string;
+    /** The card opens with a meaning flag (`meaning-flags.ts`): the offer's note tells the AI to say that change first. */ readonly flagged?: true }
     | { readonly refused: ToolResult; /** The draft gate's findings: each target call names its own canvas step. */ readonly found?: readonly string[] };
   const revisedDrafts = new Map<string, Promise<RevisedDraft>>();
   /** Proposals this turn's `withdraw_proposal` withdrew: a recorded withdrawal, never inferred from the store's absence. */
@@ -3990,11 +3992,29 @@ export function createAgentCapabilities(
     const draftStated = statedOf(candidate, draftGoalNode);
     const stillStated = savedStated !== null && draftStated !== null && draftStated.value === savedStated.value
       && (draftStated.unit ?? '') === (savedStated.unit ?? '');
+    // ⭐ CONFIRM ON THE CARD, NOT REFUSE (PLAN-CONFIRM-NOT-REFUSE step 2, DL 15 Oct 22:37Z): a correction whose redraft DROPS the
+    // governing goal's target (a stated figure or a saved row; BUDDY-A B1 #3257 included) was refused
+    // `revised_draft_drops_stated_target` / `revised_draft_has_no_target`. The detection is unchanged; the card is now OFFERED
+    // and opens with that change in plain words, so it is never silent, and only the user's press saves it.
+    const goalTargetDropped = correction && event === null && draftGoalTargets.length === 0 && draftStated === null
+      && (savedGoalTargets.length > 0 || savedStated !== null);
+    const flags: MeaningFlag[] = [];
+    if (goalTargetDropped) {
+      flags.push({ kind: 'goal_target_change',
+        from: savedGoalTargets.length > 0 ? savedGoalTargets.map((t) => sayRow(g.raw, { ...t, operator: t.comparator })).join(' and ')
+          : `\u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 ${savedStated!.held !== undefined ? `${TARGET_COMPARATOR_WORDS[savedStated!.held] ?? savedStated!.held} ` : ''}`
+            + `${savedStated!.value}${savedStated!.unit !== undefined ? ` ${savedStated!.unit}` : ''}`,
+        to: `\u2018${String(draftGoalNode?.label ?? goal.label)}\u2019 with no numeric target` });
+    }
     // ⛔ BUDDY-A B1 (#3252 r1): a number in a later message proves neither its subject nor its role ("The advertising budget is
     // £250,000 per year", "my earlier £250,000 target is withdrawn"; the statement verifier accepts each). A correction therefore
     // never replaces the saved target by figure presence: a new target goes through the goal contract (propose_goal_target), whose
     // redraft row is Olumi's reading (`limitsKeptBy`: inferred) on ONE card, and only the user's press saves it.
-    if (correction && draftGoalTargets.length === 0 && event === null && savedGoalTargets.length === 0 && savedStated !== null && !stillStated) {
+    // ⛔ A SWAP STAYS REFUSED, NEVER FLAGGED (hard guard: origin labels): the redraft's own figure would be saved as the goal's
+    // stated figure, which every later reader takes as the user's ("keeps the target you stated"), so approving it would make
+    // Olumi's reading the user's words. Converting it needs the figure written as an `inferred` row first.
+    if (correction && draftGoalTargets.length === 0 && event === null && savedGoalTargets.length === 0 && savedStated !== null && !stillStated
+      && !goalTargetDropped) {
       // Never silently: the user's own stated figure would be lost, so nothing is offered; the user says whether it is replaced.
       return notOffered('revised_draft_drops_stated_target', `The revised model would not keep the target you stated for \u2018${String(savedGoalNode?.label ?? goal.label)}\u2019 `
         + `(${savedStated.value}${savedStated.unit !== undefined ? ` ${savedStated.unit}` : ''}), so nothing was offered and the model is unchanged. `
@@ -4005,8 +4025,8 @@ export function createAgentCapabilities(
     /** A correction with no target ROW: the goal stays qualitative, or keeps its own stated figure exactly. */
     const qualitativeKept = correction && draftGoalTargets.length === 0
       && (savedStated === null ? savedGoalTargets.length === 0 && draftStated === null : stillStated);
-    const dropsGoalTarget = correction && savedGoalTargets.length > 0 && draftGoalTargets.length === 0 && !stillStated;
-    if ((draftedTargets.length === 0 || dropsGoalTarget) && event === null && !qualitativeKept) {
+    const dropsGoalTarget = correction && savedGoalTargets.length > 0 && draftGoalTargets.length === 0 && !stillStated && !goalTargetDropped;
+    if ((draftedTargets.length === 0 || dropsGoalTarget) && event === null && !qualitativeKept && !goalTargetDropped) {
       return notOffered('revised_draft_has_no_target', deliverable !== undefined ? noDeliverableDetail(deliverable)
         : NO_TARGET_DETAIL);
     }
@@ -4049,7 +4069,7 @@ export function createAgentCapabilities(
     const goalNow = nodesOf(candidate).find((n) => n?.kind === 'goal');
     const goalWords = `\u2018${typeof goalNow?.label === 'string' ? goalNow.label : goal.label}\u2019`;
     const builtFrom = typedSince.length > 1 ? 'what you have said since' : 'the correction you just gave';
-    const card = (qualitativeKept
+    const card = cardWithMeaningFlags((qualitativeKept
       ? `Replace the early draft with a revised one built from your brief and ${builtFrom}. Its goal, ${goalWords}, `
         + (draftStated === null ? 'has no numeric target, as before. '
           : `keeps the target you stated: ${draftStated.held !== undefined ? `${TARGET_COMPARATOR_WORDS[draftStated.held] ?? draftStated.held} ` : ''}`
@@ -4057,6 +4077,9 @@ export function createAgentCapabilities(
       : newTargets.length > 0
       ? `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave: `
         + `${newTargets.map((t) => sayRow(candidate, { ...t, operator: t.comparator })).join(' and ')}${period} (the draft modelled \u2018${goal.label}\u2019). `
+      // A dropped goal target with no other target: the flag, first on the card, says the goal keeps no numeric target.
+      : goalTargetDropped
+      ? `Replace the early draft with a revised one built from your brief and ${builtFrom}. `
       : `Replace the early draft with a revised one built from your brief and ${correction ? 'the correction' : 'the goal'} you just gave (the draft modelled \u2018${goal.label}\u2019): `
         + `\u2018${event!.deliverable}\u2019, with the deadline date still to be confirmed. `)
       + (limits.limits.some((r) => r.role !== 'goal_target') ? `Limits in the revised draft: ${limits.limits.filter((r) => r.role !== 'goal_target').map((r) => sayRow(candidate, r)).join('; ')}. ` : '')
@@ -4073,7 +4096,7 @@ export function createAgentCapabilities(
       + againstCurrent
       // Said once: a revised draft admitted over the link limit (build-model.ts `revisedDraftOverLinksOnly`).
       + ((out as { admitted_over_limit_because?: unknown }).admitted_over_limit_because === REVISED_DRAFT_MORE_LINKS ? `${REVISED_DRAFT_MORE_LINKS} ` : '')
-      + 'Check the targets, limits and options on this card before choosing.';
+      + 'Check the targets, limits and options on this card before choosing.', flags);
     const candidateHash = createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
     const proposal = createProposal({
       scenario_id: sid,
@@ -4089,7 +4112,8 @@ export function createAgentCapabilities(
       public_label: card,
     });
     proposals.put(proposal);
-    return { proposal, held, event: event?.deliverable ?? null, ...(limits.withheld === undefined ? {} : { withheld: limits.withheld }) };
+    return { proposal, held, event: event?.deliverable ?? null, ...(limits.withheld === undefined ? {} : { withheld: limits.withheld }),
+      ...(flags.length > 0 ? { flagged: true as const } : {}) };
   };
 
   /** This target (or deadline goal) call's answer from the turn's one revised draft: the same card, or why it is not in it. */
@@ -4122,7 +4146,8 @@ export function createAgentCapabilities(
       // limit, and the reply restated the same cause in its own words. The card owns it; the reply points to it.
       // Only when that reason is on the complete current card (a reissued card keeps its words); the card itself, with the
       // reason, reaches this turn's AI as `public_label`, so the facts stay in its working input (AIE #94 6178720067).
-      + (draft.withheld !== undefined && draft.proposal.public_label.includes(draft.withheld) ? ` ${CARD_OWNS_WITHHELD_NOTE}` : '');
+      + (draft.withheld !== undefined && draft.proposal.public_label.includes(draft.withheld) ? ` ${CARD_OWNS_WITHHELD_NOTE}` : '')
+      + (draft.flagged === true ? MEANING_FLAG_NOTE : '');
     /**
      * ⭐ A WITHDRAWN CARD IS RE-ISSUED FRESH, NEVER RETURNED DEAD (served marketing turn 02 on 00a51f7d; Codex
      * CHECK-3020-45e7c1e3 item 1; DL r2): the turn's one draft is reused, so a target call after `withdraw_proposal` returned
@@ -4137,7 +4162,8 @@ export function createAgentCapabilities(
       reissuedDrafts.set(key, reissues);
       draft = { proposal: createProposal({ ...content, base_graph_identity_hash: g.graph_hash,
         provenance: { ...content.provenance, basis: `${content.provenance.basis ?? ''} Offered again after a withdrawal this turn (${reissues}).` } }),
-        held: draft.held, event: draft.event, ...(draft.withheld === undefined ? {} : { withheld: draft.withheld }) };
+        held: draft.held, event: draft.event, ...(draft.withheld === undefined ? {} : { withheld: draft.withheld }),
+        ...(draft.flagged === true ? { flagged: true as const } : {}) };
       revisedDrafts.set(key, Promise.resolve(draft));
     }
     if (proposals.get(draft.proposal.proposal_id) === undefined) proposals.put(draft.proposal);
@@ -6224,7 +6250,8 @@ export function createAgentCapabilities(
         revised_draft: { replaces_goal: goals[0]!.label, correction: true },
         note: 'Nothing has changed yet. Offer this revised-model card and explain briefly what it changes against the current model, in your own '
           + 'words, never its id. It reads everything the user has said since their brief, so never ask them to repeat a fact they already '
-          + 'stated. Only the user pressing that card replaces the model: never call authorise_change for it yourself.' };
+          + 'stated. Only the user pressing that card replaces the model: never call authorise_change for it yourself.'
+          + (draft.flagged === true ? MEANING_FLAG_NOTE : '') };
     },
 
     async proposeRename(ctx, args): Promise<ToolResult> {

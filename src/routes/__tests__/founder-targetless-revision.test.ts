@@ -31,6 +31,7 @@ import { registrationTurnId } from '../../orchestrator-v5/graph-registration/reg
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
 import { readGoalRecord } from '../../orchestrator-v5/goal-target/goal-record.js';
+import { MEANING_FLAG_NOTE, meaningFlagWords } from '../../orchestrator-v5/agent-lane/runtime/meaning-flags.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/founder-57801434-targetless-revision.json', import.meta.url), 'utf8')) as Rec;
@@ -105,7 +106,7 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     expect(reopened.goal_constraints).toContainEqual(expect.objectContaining(eventual));
   });
 
-  it('BUDDY raw stated governing target may not be masked by an unrelated drafted outcome target', async () => {
+  it('BUDDY raw stated governing target is never masked by an unrelated drafted outcome target: the card OPENS with its loss', async () => {
     const graph = structuredClone(FX.graph);
     Object.assign(graph.nodes.find((n: Rec) => n.id === GOAL), { goal_threshold_raw: 1.3, goal_threshold_unit: 'million (currency unspecified)' });
     expect(readGoalRecord(graph, GOAL)?.target).toMatchObject({ raw: 1.3, unit: 'million (currency unspecified)' });
@@ -119,14 +120,18 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
     });
     const s = await harness(graph, raw);
     const offer = await s.revise('Keep the fundraising target at 1.3 million. The advertising budget is £250,000 per year.');
-    expect(offer, 'a separate outcome target cannot license losing the stated governing goal target')
-      .toMatchObject({ ok: false, refusal: 'revised_draft_drops_stated_target' });
-    expect(offer.proposal_id).toBeUndefined();
+    // ⭐ CONFIRM, NOT REFUSE (PLAN-CONFIRM-NOT-REFUSE step 2): a separate outcome target never hides the governing goal's loss.
+    // The card is offered and opens with that loss, by the goal's own saved figure; only the user's press saves it.
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(String(offer.public_label).startsWith(`${meaningFlagWords({ kind: 'goal_target_change',
+      from: '\u2018Funding secured\u2019 1.3 million (currency unspecified)',
+      to: '\u2018Progress on funding, PoC and hiring\u2019 with no numeric target' })} Replace the early draft`), String(offer.public_label)).toBe(true);
+    expect(String(offer.note)).toContain(MEANING_FLAG_NOTE.trim());
     expect(s.writes).toHaveLength(0);
     expect(s.graph()).toEqual(graph);
   });
 
-  it('never-revised goal target dropped by the drafter → refused, even with a separate eventual outcome target', async () => {
+  it('never-revised goal target dropped by the drafter → the card opens with that loss; only the press saves it, eventual outcome target kept', async () => {
     const graph = structuredClone(FX.graph);
     graph.goal_constraints.push({ constraint_id: 'current-funding-target', node_id: GOAL, role: 'goal_target',
       operator: '>=', value: 250000, unit: '£', provenance: 'explicit', value_frame: 'level' });
@@ -139,9 +144,20 @@ describe('founder correction: goal-owned targets, separate outcome targets and e
       return draft;
     });
     const s = await harness(graph, raw); const offer = await s.revise();
-    expect(offer).toMatchObject({ ok: false, refusal: 'revised_draft_has_no_target' });
+    expect(offer, JSON.stringify(offer).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(String(offer.public_label).startsWith(`${meaningFlagWords({ kind: 'goal_target_change',
+      from: '\u2018Funding secured\u2019 at least \u00a3250,000',
+      to: '\u2018Progress on funding, PoC and hiring\u2019 with no numeric target' })} Replace the early draft`), String(offer.public_label)).toBe(true);
+    expect(String(offer.note)).toContain(MEANING_FLAG_NOTE.trim());
     expect(s.writes).toHaveLength(0);
     expect(s.graph()).toEqual(graph);
+    // The press saves exactly what the card said: the goal holds no target row; the eventual outcome target is kept.
+    expect(await s.approve(offer)).toMatchObject({ ok: true, applied: true, mutated: true });
+    const saved = s.graph();
+    const goalNow = saved.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(saved.goal_constraints.filter((r: Rec) => r.node_id === goalNow.id)).toEqual([]);
+    expect(saved.goal_constraints.some((r: Rec) => r.value === 250000)).toBe(false);
+    expect(saved.goal_constraints).toContainEqual(expect.objectContaining({ value: 1.3, unit: 'million (currency unspecified)', role: 'goal_target' }));
   });
 
   it('typed at least £250k for the current goal → provisional source-bound card → approval → readback, eventual ambition kept', async () => {
