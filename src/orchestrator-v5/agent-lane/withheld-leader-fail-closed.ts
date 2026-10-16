@@ -1,5 +1,5 @@
-import { readUnsizedPathLeaderCause, unsizedLinkSentence, unsizedLinkStatement, type UnsizedPathLink } from './unsized-path-cause.js';
-import { placeholderAskWords } from './goal-certainty.js';
+import { readUnsizedPathLeaderCause, unsizedLinkStatement, type UnsizedPathLink } from './unsized-path-cause.js';
+import { placeholderAskWords, unsizedLinkWords } from './goal-certainty.js';
 /**
  * ⛔ AGENT LANE — WHEN THE LEADER IS WITHHELD, NO RANKING SENTENCE REACHES THE USER.
  *
@@ -1182,8 +1182,10 @@ export function goalFigureCoHoldOf(blocks: unknown, graph: unknown, userText?: s
   const subjects = cause !== undefined || Array.isArray(warning.links) ? links.map(l => `${l.from}→${l.to}`) : [];
   // No-dead-end (#2623): the reply says the SAME ask as the warning (one source), only for a Run that recorded the cause
   // (never while a product gate withholds every option: no cause, no invitation).
+  // ⭐ ITEM 3 (PL 19:07Z): the same words as the warning's (`unsizedLinkWords`): a link the user stated a range for is never
+  // invited again; with no stated range anywhere it is today's sentence, byte for byte.
   const words = userDeclinesLink(userText, links) ? unsizedLinkStatement(links)
-    : (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
+    : (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkWords(graph, links);
   return words !== '' ? { why: words, say: words, subjects } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
