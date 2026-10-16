@@ -251,6 +251,26 @@ function joinedAsRange(text: string, low: StatedAmount, high: StatedAmount): boo
     || (/^\s*and\s*$/i.test(between) && /\bbetween\s*$/i.test(text.slice(0, low.index)));
 }
 
+/**
+ * ⭐ G3 (TL 11:18Z, superseding AIE 6180604131's construction interim): every range a text writes, in ANY unit — two
+ * consecutive amounts joined as a range (`joinedAsRange`: "1.5 to 2.5", "1.5–2.5", "between 1.5 and 2.5"), the low end
+ * below the high, both money in one currency or neither money. A provenance check of the quote, never a meaning reader:
+ * whether the pair is a range or a change ("from 15% to 25%") is the AI's own `form`. `findStatedRanges` stays money-only.
+ */
+export function findJoinedRanges(text: string | null | undefined): readonly StatedRange[] {
+  if (typeof text !== "string") return [];
+  const amounts = findStatedAmounts(text);
+  const ranges: StatedRange[] = [];
+  for (let i = 0; i + 1 < amounts.length; i += 1) {
+    const low = amounts[i]!;
+    const high = amounts[i + 1]!;
+    if ((low.kind === "currency") !== (high.kind === "currency") || low.currencyCode !== high.currencyCode) continue;
+    if (!(low.magnitude < high.magnitude) || !joinedAsRange(text, low, high)) continue;
+    ranges.push({ low, high, text: text.slice(low.index, high.index + high.matchedText.length).trim() });
+  }
+  return ranges;
+}
+
 /** A money range the text writes, both ends read in one currency ("£1-2m" → £1,000,000 to £2,000,000). */
 export interface StatedRange {
   readonly low: StatedAmount;
