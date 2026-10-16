@@ -229,21 +229,44 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
     const high = Math.max(Math.abs(st.low), Math.abs(st.high));
     const end = size === low ? 'low' : size === high ? 'high' : null;
     if (end === null || !(low < high)) continue;
-    const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === low && r.high.magnitude === high);
-    // The words the sentence writes, with the unit it writes straight after them ("1.5 to 2.5 percentage points").
-    const after = joined === undefined ? '' : st.quote.slice(joined.high.index + joined.high.matchedText.length);
-    const unitAfter = st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`)
-      ? after.slice(0, st.unit.length + 1) : '';
-    const text = joined === undefined ? `${low} to ${high}${st.unit ? ` ${st.unit}` : ''}` : `${joined.text}${unitAfter}`;
     // ⛔ BUDDY-A #3297 B1: the WHOLE verified quote, never a clause cut at punctuation. A shorter "clause" dropped its speaker
     // and condition ("The supplier estimates that, if the pilot succeeds, …" became only the numbers' clause) and was still
     // said "as the brief puts it"; the AIE disposition keeps the full attributed range with its speaker and conditions.
-    return { low, high, text, end, reported: st.quote };
+    return { low, high, text: rangeTextAsWritten(st, low, high), end, reported: st.quote };
   }
   return null;
 }
+
+/** The words the sentence writes for the range, with the unit it writes straight after them ("1.5 to 2.5 percentage points"). */
+function rangeTextAsWritten(st: UserStatement, low: number, high: number): string {
+  const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === low && r.high.magnitude === high);
+  const after = joined === undefined ? '' : st.quote.slice(joined.high.index + joined.high.matchedText.length);
+  const unitAfter = st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`)
+    ? after.slice(0, st.unit.length + 1) : '';
+  return joined === undefined ? `${low} to ${high}${st.unit ? ` ${st.unit}` : ''}` : `${joined.text}${unitAfter}`;
+}
+
+/**
+ * ⭐ A STATED RANGE SIZES ITS LINK (TL 16:48Z SCIENCE + SYSTEM RULING; G3 #4/#5 class): the range the AI's own VERIFIED
+ * statement gives a directed link the drafter left UNSIZED ("…thinks it could add somewhere between 5 and 9 occupancy
+ * points"), as a whole (`end: 'whole'`): the link's uncertain effect, never one of its ends or its midpoint as the user's
+ * figure. Magnitudes; the link's own direction is the sign. One verified range only (two ranges for one link say nothing
+ * single). `null`: none; `undefined`: a draft without statements. Pure.
+ */
+export function linkEffectStatedRange(model: unknown, brief: string, from: string, to: string): StatedRangeOfLink | null | undefined {
+  const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
+  if (!Array.isArray(m.statements)) return undefined;
+  const said = (sourceMapOf(m.statements, brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [])
+    .filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
+  if (said.length !== 1) return null;
+  const st = said[0]!;
+  const low = Math.min(Math.abs(st.low!), Math.abs(st.high!));
+  const high = Math.max(Math.abs(st.low!), Math.abs(st.high!));
+  if (!(low < high) || Math.sign(st.low!) !== Math.sign(st.high!)) return null;
+  return { low, high, text: rangeTextAsWritten(st, low, high), end: 'whole', reported: st.quote, ...(st.unit !== undefined && st.unit !== '' ? { unit: st.unit } : {}) };
+}
 /** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
-export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };
+export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high' | 'whole'; readonly reported: string; readonly unit?: string };
 
 /**
  * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
