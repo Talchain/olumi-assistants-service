@@ -188,8 +188,8 @@ describe('S5 complete native preparation before an offer', () => {
       user_text: 'Explore delivery capacity; the budget is £40.', user_turn_text: 'Explore delivery capacity; the budget is £40.' };
     const proposed = await caps.proposeStartingPoint(ctx as never, {
       assumptions: [{ factor_label: 'Staffing', value: 0, unit, basis: 'A provisional starting point', user_stated: false }],
-      option_levels: [{ option_label: 'Pilot', factor_label: 'Staffing', value: 2, unit,
-        basis: 'A provisional pilot level', unmodelled_mechanisms: ['Onboarding support'] }],
+      option_levels: [{ option_label: 'Pilot', factor_label: 'Staffing', value: 2,
+        basis: 'A provisional pilot level', unmodelled_mechanisms: ['Onboarding support'], user_stated: false }],
     });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const card = proposals.get(proposed.proposal_id as string)!;
@@ -199,8 +199,10 @@ describe('S5 complete native preparation before an offer', () => {
     const levels = card.operations.filter(op => op.op === 'set_option_intervention');
     expect(levels).toHaveLength(1);
     expect(levels[0]!.path).toBe('pilot::staffing');
-    expect(levels[0]!.value).toMatchObject({ normalised: 0.2, raw: 2, cap: 10, unit,
+    expect(levels[0]!.value).toMatchObject({ normalised: 0.2, raw: 2, cap: 10,
       authored_by: 'model_proposed', unmodelled_mechanisms: ['Onboarding support'] });
+    // Served tool shape (agent-tools.ts option_levels has no unit): the level carries none; the factor's held unit decides.
+    expect(Object.keys(levels[0]!.value as object)).not.toContain('unit');
     // The production callsite remains Founder's lease; this test binds its complete native input to the real stored card.
     const valueOp = card.operations.find(op => op.op === 'set_factor_value')!;
     const value = valueOp.value as { value: number; unit: string; authored_by: string };
