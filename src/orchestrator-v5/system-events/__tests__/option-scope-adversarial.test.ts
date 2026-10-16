@@ -1,6 +1,4 @@
 // S5 adversarial rows for the value writer's quantity-preserving option rewrite (#3299 review probes, cleaned).
-// e2 (GBP onto a unitless count factor whose option is in an unrecognised unit) is a KNOWN limitation of the
-// shared unit classifier and is deliberately not asserted here; see the PR body.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
@@ -11,6 +9,7 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import * as writer from '../factor-value-edit.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../dispatch.js';
+import { applyApprovedFactorValues } from '../option-intervention-edit.js';
 import { createAgentCapabilities } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 
@@ -72,6 +71,17 @@ function tamper(target: string, fn: (g: Graph) => void) {
 }
 const tlCell = (g: Graph, carrier: 'nodes' | 'options' = 'nodes') =>
   mergeInterventionSourceObjects(carrier === 'options' ? g.options![0]! : node(g, 'hire_a_tech_lead')).tech_lead_hires as Dict;
+
+function serviceGraph(): Graph {
+  return projectGraphForPersistence({ nodes: [
+    { id: 'goal', kind: 'goal', label: 'Support capacity', goal_threshold: 0.1 },
+    { id: 'tech_lead_hires', kind: 'factor', label: 'Service cost', scale_frame: 100 },
+    { id: 'hiring_lead_time', kind: 'factor', label: 'Setup time', scale_frame: 12 },
+    { id: 'hire_a_tech_lead', kind: 'option', label: 'Service plan', interventions: {
+      tech_lead_hires: { value: 0.4, raw_value: 40, unit: 'GBP', source: 'cee_hypothesis' } } },
+    { id: 'baseline', kind: 'option', label: 'Current plan', is_baseline: true },
+  ], edges: [{ from: 'tech_lead_hires', to: 'goal', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }] }) as Graph;
+}
 
 async function expectRefusedNothingWritten(values: CommitOptionLevelsInput['values'], blamed?: string) {
   const before = cold();
@@ -145,23 +155,100 @@ describe('#3299 reviewer probes', () => {
     await expectRefusedNothingWritten([HLT, TLH], TLH.factor_id);
   });
   // (e) unit mismatches
+  it.each(['nodes', 'data', 'options'] as const)('e2: GBP onto the UNITLESS hiring factor holding 1 tech lead in %s refuses the whole card', async carrier => {
+    const option = node(persisted, 'hire_a_tech_lead');
+    if (carrier === 'data') {
+      option.data = { interventions: option.interventions };
+      delete option.interventions;
+    } else if (carrier === 'options') {
+      persisted.options = [structuredClone(option)];
+      delete option.interventions;
+    }
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    const result = await expectRefusedNothingWritten([HLT, { ...TLH, unit: 'GBP' }], TLH.factor_id);
+    expect(result.status === 'refused' && result.reason).toBe('value_scope_mismatch');
+  });
+  it('e2: an already capped stored cell still constrains a new factor unit', async () => {
+    tlCell(persisted).cap = 10;
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    await expectRefusedNothingWritten([HLT, { ...TLH, unit: 'GBP' }], TLH.factor_id);
+  });
+  it('e2: GBP on a different factor in the same option cannot authorise GBP on the hiring count', async () => {
+    persisted.nodes.push({ id: 'service_cost', kind: 'factor', label: 'Service cost', scale_frame: 100 });
+    (node(persisted, 'hire_a_tech_lead').interventions as Dict).service_cost = {
+      value: 0.4, raw_value: 40, unit: 'GBP', source: 'cee_hypothesis',
+    };
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    await expectRefusedNothingWritten([HLT, { ...TLH, unit: 'GBP' }], TLH.factor_id);
+  });
+  it.each(['hires', 'GBP'])('shared preparation for %s checks the complete card without mutating or persisting its base', async unit => {
+    const before = cold();
+    const supplied = structuredClone(before);
+    const result = await applyApprovedFactorValues(supplied as never, [
+      { factorId: HLT.factor_id, value: HLT.value, unit: HLT.unit, adopted: true },
+      { factorId: TLH.factor_id, value: TLH.value, unit, adopted: true },
+    ], [], { scenarioId: SCENARIO_ID, turnId: 'prepare-starting-figures', requestId: 'req-preparation', stage: 'frame' });
+    expect(rows.size).toBe(0);
+    expect(cold()).toEqual(before);
+    expect(supplied).toEqual(before);
+    if (unit === 'GBP') {
+      expect(result).toEqual({ kind: 'refused', reason: 'value_scope_mismatch', valueIndex: 1 });
+    } else {
+      expect(result.kind).toBe('applied');
+      if (result.kind !== 'applied') throw new Error('expected prepared whole card');
+      const prepared = result.graph as Graph;
+      expect((node(prepared, HLT.factor_id).observed_state as Dict).raw_value).toBe(3);
+      expect((node(prepared, TLH.factor_id).observed_state as Dict).raw_value).toBe(0);
+      expect(tlCell(prepared)).toEqual({ ...tlCell(before), cap: 10 });
+    }
+  });
   it('e1: GBP onto a count factor that already holds "hires" refuses', async () => {
     node(persisted, TLH.factor_id).observed_state = { value: 0, raw_value: 0, cap: 10, unit: 'hires', source: 'user_assumption' };
     persisted = projectGraphForPersistence(persisted) as Graph;
     await expectRefusedNothingWritten([HLT, { ...TLH, unit: 'GBP' }], TLH.factor_id);
   });
   it('e3: "months" onto a UNITLESS factor whose option holds £40 (recognised family conflict) (expect refuse)', async () => {
-    persisted = projectGraphForPersistence({ nodes: [
-      { id: 'goal', kind: 'goal', label: 'Support capacity', goal_threshold: 0.1 },
-      { id: 'tech_lead_hires', kind: 'factor', label: 'Service cost', scale_frame: 100 },
-      { id: 'hiring_lead_time', kind: 'factor', label: 'Setup time', scale_frame: 12 },
-      { id: 'hire_a_tech_lead', kind: 'option', label: 'Service plan', interventions: {
-        tech_lead_hires: { value: 0.4, raw_value: 40, unit: 'GBP', source: 'cee_hypothesis' } } },
-      { id: 'baseline', kind: 'option', label: 'Current plan', is_baseline: true },
-    ], edges: [{ from: 'tech_lead_hires', to: 'goal', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }] }) as Graph;
-    const r = await door([HLT, { ...TLH, value: 3, unit: 'months' }]);
-    expect(r.status).toBe('refused');
-    expect(rows.size).toBe(0);
+    persisted = serviceGraph();
+    await expectRefusedNothingWritten([HLT, { ...TLH, value: 3, unit: 'months' }], TLH.factor_id);
+  });
+  it.each(['GBP', '£', 'gbp'])('service capacity: %s preserves the stored £40 coordinate and source', async unit => {
+    persisted = serviceGraph();
+    const before = structuredClone(tlCell(persisted));
+    expect((await door([HLT, { ...TLH, value: 20, unit }])).status).toBe('committed');
+    expect(rows.size).toBe(1);
+    expect(tlCell(cold())).toEqual({ ...before, cap: 100 });
+    expect(resolveRawInterventionValue(tlCell(cold()), buildFactorScaleMap(cold().nodes).get(TLH.factor_id)).value).toBe(40);
+    expect([...rows.values()][0]!.write.graph).toEqual(cold());
+  });
+  it('service capacity: USD cannot relabel a stored GBP option even though both are currency', async () => {
+    persisted = serviceGraph();
+    await expectRefusedNothingWritten([HLT, { ...TLH, value: 20, unit: 'USD' }], TLH.factor_id);
+  });
+  it('service capacity: an existing factor coordinate cannot be changed inside an otherwise exact writer postimage', async () => {
+    persisted = serviceGraph();
+    node(persisted, TLH.factor_id).observed_state = { value: 0.2, raw_value: 20, cap: 100, unit: 'GBP', source: 'user_assumption' };
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    tamper(TLH.factor_id, g => { (node(g, TLH.factor_id).observed_state as Dict).unit = 'USD'; });
+    await expectRefusedNothingWritten([HLT, { ...TLH, value: 30, unit: 'GBP' }], TLH.factor_id);
+  });
+  it('an unfamiliar stored unit remains valid when the declaration preserves it exactly', async () => {
+    tlCell(persisted).unit = 'café workloads';
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    const before = structuredClone(tlCell(persisted));
+    expect((await door([HLT, { ...TLH, unit: 'café workloads' }])).status).toBe('committed');
+    expect(rows.size).toBe(1);
+    expect(tlCell(cold())).toEqual({ ...before, cap: 10 });
+    expect(resolveRawInterventionValue(tlCell(cold()), buildFactorScaleMap(cold().nodes).get(TLH.factor_id)).value).toBe(1);
+  });
+  it('an unread stored unit does not prove compatibility with a new currency declaration', async () => {
+    tlCell(persisted).unit = 'café workloads';
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    await expectRefusedNothingWritten([HLT, { ...TLH, unit: 'GBP' }], TLH.factor_id);
+  });
+  it.each(['hires per month', 'months'])('a stored %s coordinate cannot become a bare hiring count', async unit => {
+    tlCell(persisted).unit = unit;
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    await expectRefusedNothingWritten([HLT, TLH], TLH.factor_id);
   });
   // (f) top-level options[] legit
   it('f1: top-level options[] only: commits, cell = before + cap 10, engine reads 1', async () => {
@@ -219,7 +306,9 @@ describe('#3299 reviewer probes', () => {
   it('h2: the same press replayed (same turn id, same base) leaves exactly one row', async () => {
     const base = hash();
     expect((await door([HLT, TLH], base, 'prop-dup#levels')).status).toBe('committed');
+    const afterFirst = cold();
     await door([HLT, TLH], base, 'prop-dup#levels');
     expect(rows.size).toBe(1);
+    expect(cold()).toEqual(afterFirst);
   });
 });
