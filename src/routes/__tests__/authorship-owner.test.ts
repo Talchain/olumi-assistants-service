@@ -160,6 +160,65 @@ describe('G3 #4: option costs written per year, over the period and one-off', ()
   });
 });
 
+describe('BUDDY-A #3302 B1: addition-to-total conversion preserves the authorship owner', () => {
+  it.each([
+    { name: 'unclaimed inferred addition', claim: 'absent', kind: 'additional', flag: 'inferred', owner: 'unclaimed', authorship: 'unknown' },
+    { name: 'rejected claim as an absolute AI proposal', claim: 'rejected', kind: 'absolute', flag: 'ai_proposed', owner: 'unverified', authorship: 'unknown' },
+    { name: 'RED→GREEN: rejected claim as an additional AI proposal', claim: 'rejected', kind: 'additional', flag: 'ai_proposed', owner: 'unverified', authorship: 'unknown' },
+    { name: 'genuine unclaimed additional AI proposal', claim: 'absent', kind: 'additional', flag: 'ai_proposed', owner: 'unclaimed', authorship: 'olumi_estimate' },
+    { name: 'verified user addition despite the AI proposal flag', claim: 'verified', kind: 'additional', flag: 'ai_proposed', owner: 'user', authorship: 'user' },
+    { name: 'legacy additional AI proposal without statements', claim: 'legacy', kind: 'additional', flag: 'ai_proposed', owner: undefined, authorship: 'olumi_estimate' },
+  ])('$name', async ({ claim, kind, flag, owner, authorship }) => {
+    const m = draftOf(COSTS);
+    const label = 'Evening sort shift';
+    const factorLabel = 'Total financial-year spend';
+    const isClaim = (st: Rec) => st.subject.kind === 'option' && st.subject.label === label && st.subject.factor_label === factorLabel;
+    if (claim === 'absent') m.statements = (m.statements as Rec[]).filter((st) => !isClaim(st));
+    if (claim === 'rejected') (m.statements as Rec[]).find(isClaim)!.value = 90001;
+    if (claim === 'legacy') delete m.statements;
+    const factor = (m.factors as Rec[]).find((f) => f.label === factorLabel)!;
+    const intervention = (m.options as Rec[]).find((o) => o.label === label)!.interventions.find((iv: Rec) => iv.factor_label === factorLabel);
+    Object.assign(intervention, { value_kind: kind, provenance: flag, unit: factor.unit });
+    expect(figureSource(m, COSTS.brief_text, { kind: 'option', label, factor_label: factorLabel }, 'level', 90000)).toBe(owner);
+
+    const out = await construct(COSTS.brief_text, [m as unknown as CandidateModel]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(out.writes).toHaveLength(1);
+    const setting = settingOf(out.graph, label, SPEND);
+    expect(setting.raw_value).toBe(90000);
+    expect(setting.value).toBe(0.3);
+    expect(setting.unit).toBe('£ this financial year');
+    expect(setting.source).toBe(authorship === 'user' ? 'brief_extraction' : 'cee_hypothesis');
+    expect(setting.user_material_unverified).toBe(authorship === 'unknown' ? true : undefined);
+    expect(settingAuthorshipOf(setting)).toBe(authorship);
+    expect(settingDisplayOf(setting)).toBe(authorship === 'unknown' ? 'unverified_brief' : authorship === 'user' ? 'from_brief' : 'ai_inferred');
+  });
+
+  it('RED→GREEN, second brief: a rejected retraining-coverage claim stays unknown beside unrelated supplier figures', async () => {
+    const m = draftOf(SCRAP);
+    const label = 'Night-shift retraining';
+    const factorLabel = 'Night-shift retraining coverage';
+    const statement = (m.statements as Rec[]).find((st) => st.subject.kind === 'option' && st.subject.label === label)!;
+    // This sentence gives the camera supplier's £180k and scrap-effect range, never 100% retraining coverage.
+    Object.assign(statement, { field: 'level', form: 'point', value: 100, unit: '%' });
+    const intervention = (m.options as Rec[]).find((o) => o.label === label)!.interventions.find((iv: Rec) => iv.factor_label === factorLabel);
+    Object.assign(intervention, { value_kind: 'additional', provenance: 'ai_proposed', unit: '%' });
+    expect(figureSource(m, SCRAP.brief_text, { kind: 'option', label, factor_label: factorLabel }, 'level', 100)).toBe('unverified');
+
+    const out = await construct(SCRAP.brief_text, [m as unknown as CandidateModel]);
+    expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(out.writes).toHaveLength(1);
+    const setting = settingOf(out.graph, label, 'night_shift_retraining_coverage');
+    expect(setting.raw_value).toBe(100);
+    expect(setting.value).toBe(1);
+    expect(setting.unit).toBe('%');
+    expect(setting.source).toBe('cee_hypothesis');
+    expect(setting.user_material_unverified).toBe(true);
+    expect(settingAuthorshipOf(setting)).toBe('unknown');
+    expect(settingDisplayOf(setting)).toBe('unverified_brief');
+  });
+});
+
 describe('the one authorship owner: a figure the user wrote is theirs, whatever the draft\u2019s own flags say', () => {
   it('precondition: the served draft marks the three costs "inferred", and its own statements quote the user for each', () => {
     const m = draftOf(COSTS);

@@ -1081,9 +1081,9 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
         // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
         // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
         ...(statedFigure ? {} : { derived_total: true }),
-        // TL 14:17Z: an addition the draft says it read out of the brief that no verified statement states is UNKNOWN, so the
-        // total computed from it is too: never the user's, never Olumi's own figure.
-        ...(own !== undefined && own !== 'user' && intervention.provenance !== 'ai_proposed' ? { user_material_unverified: true } : {}),
+        // An unverified owner verdict survives every draft flag. Only an unclaimed `ai_proposed` figure is Olumi's own;
+        // an unclaimed figure the draft says it read from the brief, and any total computed from it, stays UNKNOWN.
+        ...(own === 'unverified' || (own === 'unclaimed' && intervention.provenance !== 'ai_proposed') ? { user_material_unverified: true } : {}),
       } as Iv);
     }
     const changes = [...(option.changes ?? [])];
