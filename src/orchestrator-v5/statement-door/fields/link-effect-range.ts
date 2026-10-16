@@ -6,7 +6,8 @@
  * nothing: the link keeps whatever size it has (Olumi's placeholder), and the card and receipt say so. Every reader of a stated
  * range (`linkHoldsStatedRange`: no re-ask of that link, the Run's limitation words) then reads it as it reads the brief's. Pure.
  */
-import { findJoinedRanges } from '../../../cee/provenance/stated-amounts.js';
+import { linkEffectEndUnits, statedInOneOf } from '../../system-events/link-effect-edit.js';
+import { figuresWritten } from '../../agent-lane/construction-source-map.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
@@ -40,24 +41,32 @@ export const LINK_EFFECT_RANGE_ROW: RoleRow = {
   // "0 to 5 points" is a range of the user's: its low end is a figure, never refused as missing.
   allowsZero: true,
   applies: linkHeld,
-  // The ONE range the statement writes, by the brief path's own range reader (`findJoinedRanges`): its words stay the user's.
-  read: (quote, subject, graph) => {
-    if (!linkHeld(subject, graph)) return { refused: 'That link is not in the model.' };
-    const ranges = findJoinedRanges(quote);
-    if (ranges.length !== 1) return { refused: 'A link’s effect is recorded here only as the ONE range its statement writes, for example “between 4 and 7 points”.' };
-    const r = ranges[0]!;
-    if (!(r.low.magnitude < r.high.magnitude)) return { refused: `“${r.text}” does not give a low end below its high end.` };
-    return { form: 'range', low: r.low.magnitude, high: r.high.magnitude };
+  // ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3329 B1): the AI reads the range and binds it to this link's effect; the
+  // door verifies the quote writes those ends in that unit. This row only says which readings its field takes: a range, never
+  // negated, in the unit this link's TARGET is measured in (the link writer's own comparator). "4–7 months before we can measure
+  // its effect" is months, never this effect; "will not lift it by 4 to 7 points" is never a range of it.
+  read: () => ({ refused: 'Give your reading of the user’s words: the range, its unit as written, and whether it is negated.' }),
+  aiReads: (s, subject, graph) => {
+    if (!linkHeld(subject, graph)) return 'That link is not in the model.';
+    if (s.form !== 'range') return 'A link’s effect is recorded here only as a range the user wrote, for example “between 4 and 7 points”.';
+    if (s.negated === true) return `“${s.quote}” says the effect is NOT that range, so it is not recorded as the link’s range; its question stays open.`;
+    // Two ranges written in one statement ("4 to 7 points, or 2 to 3 in winter") are two readings, never one range: ask which holds.
+    if (figuresWritten(s.quote).filter((r) => r.low < r.high).length > 1) return `“${s.quote}” gives more than one range, so neither is recorded alone; ask which holds.`;
+    const units = linkEffectEndUnits(graph, subject.id, subject.to_id ?? '');
+    const own = units === null ? [] : [...units.target.own, ...(units.target.adopted !== undefined ? [units.target.adopted] : [])];
+    return statedInOneOf(s.unit, own) ? undefined
+      : `“${s.unit ?? ''}” is not the unit ‘${labelOf(graph, subject.to_id)}’ is measured in, so this is not a range of the link’s effect.`;
   },
   readingWords: (statements, subject, _label, graph) => {
     const s = statements[0];
-    return `the effect of ${ends(subject, graph)} is your range, ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)}, as you wrote it`;
+    return `the effect of ${ends(subject, graph)} is a range of ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)} ${s?.unit ?? ''}, from your words`.replace(/ {2,}/gu, ' ');
   },
-  assumptions: () => ['It is kept as your range and does not size this link: the analysis does not use it, and still uses Olumi’s placeholder for this link.'],
+  assumptions: () => ['This is Olumi’s reading of your words. It is kept as your range and does not size this link: the analysis does not use it, '
+    + 'and still uses Olumi’s placeholder for this link.'],
   recordedWords: (statements, subject, _label, graph) => {
     const s = statements[0];
-    return `Recorded: your range for ${ends(subject, graph)} stays as you stated it, ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)}. `
-      + 'It does not size the link; the analysis still uses Olumi’s placeholder for it.';
+    return `Recorded Olumi’s reading of your words, which you chose to use: a range of ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)} ${s?.unit ?? ''} `
+      .replace(/ {2,}/gu, ' ') + `for ${ends(subject, graph)}. It does not size the link; the analysis still uses Olumi’s placeholder for it.`;
   },
   get writer() { return LINK_EFFECT_RANGE_WRITER; },
 };

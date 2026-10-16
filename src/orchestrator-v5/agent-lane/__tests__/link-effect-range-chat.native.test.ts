@@ -118,11 +118,13 @@ const idOf = (g: Dict, label: string): string => (g.nodes as Dict[]).find((n) =>
 const edgeOf = (g: Dict, from: string, to: string): Dict => (g.edges as Dict[]).find((e) => e.from === from && e.to === to)!;
 const ASK = 'How much would the corporate deal lift weekday attendance?';
 
-/** The AI asks; the user answers; the AI calls propose_statement for the deal → attendance link with `quote`. */
-async function answered(g: Dict, answer: string, quote: string) {
+type Reading = { readonly form?: string; readonly low?: number; readonly high?: number; readonly value?: number; readonly unit?: string; readonly negated?: boolean };
+const RANGE: Reading = { form: 'range', low: 4, high: 7, unit: 'points' };
+/** The AI asks; the user answers; the AI calls propose_statement for the deal → attendance link with `quote` and ITS reading of it. */
+async function answered(g: Dict, answer: string, quote: string, reading: Reading = RANGE) {
   question = ASK;
   const from = idOf(g, 'Corporate deal active'); const to = idOf(g, 'weekday attendance');
-  args = { subject: { kind: 'link', id: from, to_id: to, label: 'Corporate deal active', to_label: 'weekday attendance', field: 'effect' }, statements: [{ quote }] };
+  args = { subject: { kind: 'link', id: from, to_id: to, label: 'Corporate deal active', to_label: 'weekday attendance', field: 'effect' }, statements: [{ quote, ...reading }] };
   const w = await world(g);
   const asked = await w.turn('What does the model still need from me?'); expect(asked.statusCode, asked.body).toBe(200);
   phase = 'propose'; emitted = false;
@@ -131,6 +133,10 @@ async function answered(g: Dict, answer: string, quote: string) {
   expect(b._agent?.tool_calls).toContainEqual(expect.objectContaining({ name: TOOL }));
   return { ...w, b, from, to, card: b.suggested_actions?.find((c: Dict) => String(c.id).startsWith('agent-approve-proposal:')) };
 }
+const stillAsked = (g: Dict, option: string, from: string, to: string): void => {
+  expect(selectStrengthenPlaceholder(g, [option])).toMatchObject({ from_id: from, to_id: to });
+  expect(linkHoldsStatedRange(g, from, to)).toBe(false);
+};
 
 beforeEach(() => {
   __setUseAppendV6ForTest(false);
@@ -138,53 +144,76 @@ beforeEach(() => {
 });
 afterEach(async () => { while (apps.length) await apps.pop()!.close(); vi.unstubAllGlobals(); });
 
-describe('a link\'s effect stated as a range in chat is stored through the statement door, and never asked again', () => {
-  it('⭐ the range is kept as the user\'s words and ends, sizes nothing, and no asker asks that link\'s size again', async () => {
+// ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3329 B1 + 22:59Z AMEND): the AI reads the range and binds it to this link's
+// effect; the door verifies only that the quote writes those ends in that unit. The card is Olumi's reading of the user's words and
+// IS the ask: nothing is recorded, and no ask is silenced, until the press adopts it.
+describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the user\'s words, recorded only by the press, then never asked again', () => {
+  it('⭐ the press records Olumi\'s reading (the user\'s words and ends, in their unit), sizes nothing, and no asker asks that link\'s size again', async () => {
     const g = await builtGraph();
     const said = 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.';
     const option = idOf(g, 'Corporate wellness deal');
     const w = await answered(g, said, said);
     const { from, to } = w;
-    // BEFORE: the link is a placeholder its askers ask about.
-    expect(selectStrengthenPlaceholder(g, [option])).toMatchObject({ from_id: from, to_id: to });
+    stillAsked(g, option, from, to);
     expect(w.card, JSON.stringify({ calls: w.b._agent?.tool_calls, toolResults })).toBeDefined();
-    expect(toolResults.map((r) => String(r.public_label ?? '')).join(' ')).toContain('does not size this link');
+    const label = toolResults.map((r) => String(r.public_label ?? '')).join(' ');
+    expect(label).toContain('a range of 4 to 7 points');
+    expect(label).toContain('This is Olumi’s reading of your words.');
+    expect(label).toContain('does not size this link');
+    // The card is the ask: before the press nothing is written and every asker still asks.
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+    stillAsked(stored, option, from, to);
     const approved = await w.turn(w.card.message, w.card); expect(approved.statusCode, approved.body).toBe(200);
     const graphWrites = writes.filter((x) => x.graph !== undefined);
     expect(graphWrites).toHaveLength(1);
     const read = await w.app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
     const cold = clone(read.json().graph);
     expect(graphWrites[0]!.graph).toEqual(cold);
-    // KEPT as the user's: their whole sentence, the range as a range, Olumi's reading flagged; a press record (no attest).
+    // KEPT: the user's whole sentence, the range in THEIR unit, Olumi's reading flagged; a press record (no attest).
     const record = userStatementFor(cold, { kind: 'link', id: from, to_id: to, field: 'effect' })!;
     expect(record.attest).toBeUndefined();
-    expect(record.statements).toEqual([expect.objectContaining({ speaker: 'user', reading: 'olumi', quote: said, form: 'range', low: 4, high: 7 })]);
+    expect(record.statements).toEqual([expect.objectContaining({ speaker: 'user', reading: 'olumi', quote: said, form: 'range', low: 4, high: 7, unit: 'points' })]);
+    expect(String(approved.json().assistant_text ?? '') + JSON.stringify(approved.json())).toContain('Recorded Olumi’s reading of your words, which you chose to use');
     expect(linkHoldsStatedRange(cold, from, to)).toBe(true);
     // SIZES NOTHING: the edge is byte-identical (still Olumi's placeholder).
     expect(edgeOf(cold, from, to)).toEqual(edgeOf(g, from, to));
-    // NEVER ASKED AGAIN: the Strengthen card's selector and the Run's withhold (the link-size ask: link-size-ask.test.ts).
+    // NEVER ASKED AGAIN after the press: the Strengthen card's selector and the Run's withhold (the link-size ask has its own row).
     expect(selectStrengthenPlaceholder(cold, [option])).toBeNull();
     const withheld = placeholderGoalWarning(cold, unsizedLeaderGoalPaths(cold, [option]), GOAL_FIGURES_PLACEHOLDER_PATH) as Dict;
     expect(withheld.first_ask).toBeUndefined();
     expect(withheld.acceptable_links).toBeUndefined();
   }, 60_000);
 
-  it.each([
-    ['two ranges in one statement', 'The corporate deal could lift weekday attendance by 4 to 7 points, or 2 to 3 points in winter.'],
-    ['a single figure, not a range', 'The corporate deal could lift weekday attendance by about 5 points.'],
-  ] as const)('NEGATIVE (%s): no card, nothing written', async (_n, said) => {
+  it('OMITTED NEGATION (BUDDY-A N3, the AI leaves `negated` out): the card shows the whole words as Olumi\'s reading; nothing operative until a press', async () => {
     const g = await builtGraph();
+    const said = 'The corporate deal will not lift weekday attendance by between 4 and 7 points.';
     const w = await answered(g, said, said);
+    expect(w.card).toBeDefined();
+    expect(toolResults.map((r) => String(r.public_label ?? '')).join(' ')).toContain(`“${said}”`);
+    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+    stillAsked(stored, idOf(g, 'Corporate wellness deal'), w.from, w.to);
+  }, 60_000);
+
+  it.each([
+    ['N2 a duration read as points (BUDDY-A)', 'The corporate deal will take between 4 and 7 months before we can measure its effect on weekday attendance.', RANGE],
+    ['N2 a duration in its own unit', 'The corporate deal will take between 4 and 7 months before we can measure its effect on weekday attendance.', { ...RANGE, unit: 'months' }],
+    ['N3 negated, as the AI reads it', 'The corporate deal will not lift weekday attendance by between 4 and 7 points.', { ...RANGE, negated: true }],
+    ['two ranges in one statement', 'The corporate deal could lift weekday attendance by 4 to 7 points, or 2 to 3 points in winter.', RANGE],
+    ['a single figure, not a range', 'The corporate deal could lift weekday attendance by about 5 points.', { form: 'point', value: 5, unit: 'points' }],
+    ['no reading given', 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.', {}],
+  ] as const)('NEGATIVE (%s): no card, nothing written, still asked', async (_n, said, reading) => {
+    const g = await builtGraph();
+    const w = await answered(g, said, said, reading);
     expect(w.b._agent?.tool_calls).toContainEqual(expect.objectContaining({ name: TOOL, ok: false, mutated: false }));
     expect(w.card).toBeUndefined();
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+    stillAsked(stored, idOf(g, 'Corporate wellness deal'), w.from, w.to);
   }, 60_000);
 
   it('NEGATIVE: words the user never typed are never the source (statement_not_found): no card', async () => {
     const g = await builtGraph();
     const w = await answered(g, 'Somewhere between 4 and 7 points, I think.', 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.');
-    expect(toolResults, JSON.stringify(toolResults)).toContainEqual(expect.objectContaining({ ok: false, refusal: 'statement_not_found' }));
+    expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal: 'statement_not_found' }));
     expect(w.card).toBeUndefined();
   }, 60_000);
 });

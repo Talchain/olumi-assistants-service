@@ -88,6 +88,11 @@ export interface RoleRow {
   readonly derives?: boolean;
   /** A stated 0 is a figure of this field, recorded as 0 (a chance of 0%, a level of none), never refused as missing. */
   readonly allowsZero?: boolean;
+  /**
+   * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z): the row reads NOTHING itself. The AI's own reading (`AiReading`) is verified as written
+   * in the quote, and this says why the verified reading is not one this field takes (`undefined`: it is). `read` is then unused.
+   */
+  readonly aiReads?: (statement: UserStatement, subject: DoorSubject, graph: unknown) => string | undefined;
   /** At most this many statements make one reading (a lead's start and its settling-in: 2). */
   readonly maxStatements: number;
   /** The AIE comment id that signed this row's meaning and words. */

@@ -9,6 +9,7 @@
  * approval never makes the reading human-authored. Statements about the same quantity under the same conditions combine
  * only by their ends: a bound is never turned into a point, and Olumi adds no spread beside a user's bound. Pure.
  */
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 
@@ -65,6 +66,8 @@ export interface StatementArgs {
   readonly negated?: unknown;
   readonly conditions?: unknown;
   readonly answering?: unknown;
+  /** The unit the AI reads the figure in, as the sentence writes it (checked only under `StatementRules.unitWritten`). */
+  readonly unit?: unknown;
 }
 
 export interface StatementTexts {
@@ -88,6 +91,12 @@ export interface StatementRules {
   readonly sameFigure?: (quote: string, given: number, stated: number) => boolean;
   /** A stated 0 is a figure of this field ("no budget", "0% now"), never refused as missing (PROMPT sys2; a level or target). */
   readonly allowsZero?: boolean;
+  /**
+   * ⭐ ONE BINDER, its unit (DL-3 22:53Z; BUDDY-A #3329 N2): the AI's own `unit` is required and must be the unit the sentence WRITES
+   * straight after the figure ("between 4 and 7 months" is months, never points). It is then the statement's unit. A literal check of
+   * the quote, never a proof of what the quantity is: the row still decides which units its field takes.
+   */
+  readonly unitWritten?: true;
 }
 
 export type StatementsVerdict =
@@ -98,6 +107,15 @@ const MAX_STATEMENTS = 6;
 const trimmed = (v: unknown, max: number): string | undefined =>
   typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined;
 const figure = (v: unknown, zero = false): number | undefined => (typeof v === 'number' && Number.isFinite(v) && (v > 0 || (zero && v === 0)) ? v : undefined);
+const escapeRe = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** `unit` is written straight after `figure` in the quote (or in the figure itself, "7%"), singular or plural. */
+function unitWrittenAfter(quote: string, figureStated: number, unit: string): boolean {
+  const u = unit.trim().toLowerCase().replace(/\s+/gu, ' ');
+  if (u === '') return false;
+  const after = new RegExp(`^\\s*${escapeRe(u.replace(/(?:es|s)$/u, '')).replace(/ /gu, '\\s+')}(?:es|s)?(?![\\p{L}\\p{N}])`, 'iu');
+  return findStatedAmounts(quote).some((a) => Math.abs(a.magnitude) === Math.abs(figureStated)
+    && (a.matchedText.trim().toLowerCase().endsWith(u) || after.test(quote.slice(a.index + a.matchedText.length))));
+}
 
 export type StatementVerdict =
   | { readonly kind: 'verified'; readonly statement: UserStatement }
@@ -129,7 +147,11 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   // longer cap's silent drop lost the binding the writer re-checks (M4-cohort).
   const answering = trimmed(given?.answering, 1000);
   const negated = given?.negated === true;
-  const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: rules.unit,
+  const givenUnit = rules.unitWritten === true ? trimmed(given?.unit, 60) : undefined;
+  if (rules.unitWritten === true && givenUnit === undefined) return malformed(`Give the unit “${quote}” writes after its figure, as unit. Nothing was prepared.`);
+  const unitRefused = (said: string): StatementVerdict => ({ kind: 'refused', refusal: 'figure_not_in_quote',
+    detail: `“${quote}” does not state ${said} in ${givenUnit}: the unit read is the one written after the figure. Quote the words that state it. Nothing was prepared.` });
+  const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: givenUnit ?? rules.unit,
     ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),
     ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
     ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
@@ -142,6 +164,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+    if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
   }
   // A negative is a figure only where the quote's own words state it as one (`figuresIn`: a net loss, S4); never the Agent's sign.
@@ -151,6 +174,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+  if (givenUnit !== undefined && !unitWrittenAfter(quote, end, givenUnit)) return unitRefused(String(value));
   return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };
 }
 
