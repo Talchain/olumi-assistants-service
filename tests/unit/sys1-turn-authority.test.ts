@@ -218,6 +218,7 @@ describe('SYS1 ordinary Responses transport', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-10-14T12:00:00Z') });
     const res = await (async () => { try { return await turn(); } finally { vi.useRealTimers(); } })(); expect(res.statusCode).toBe(200);
     const bodies = sent.map(s => JSON.parse(s));
+    dump('requests-after.json', JSON.stringify(bodies, null, 2));
     const proof = bodies.map(b => ({ body: sha(JSON.stringify(b)), instructions: sha(b.instructions ?? b.input?.[0]?.content?.[0]?.text ?? ''), tools: jsonSha(b.tools ?? null), schema: jsonSha(b.text?.format?.schema ?? null) }));
     // Baseline is retained BEFORE any production edits, not manufactured from the candidate.
     const result = { proof, assistant_text: res.json().assistant_text };

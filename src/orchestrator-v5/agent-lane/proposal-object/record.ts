@@ -95,6 +95,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   rename_option: 'none', // S5: the option's name, proposed on its card and renamed only by the press: a structural act, not an estimate
   adopt_olumi_option: 'slice_3',
   replace_draft: 'none', // a whole revised draft, approved as one act; nothing in it is a figure this card edits
+  apply_saved_correction: 'none', // canonical targeted edits prepared together; no estimate field on this card
 };
 
 export interface LinkStrengthField {

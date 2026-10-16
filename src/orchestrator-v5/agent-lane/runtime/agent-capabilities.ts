@@ -28,6 +28,9 @@ import { resolveSubject } from '../../statement-door/subject.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
+import { applyStructuralRename } from '../../system-events/structural-rename.js';
+import { applyStructuralDelete } from '../../system-events/structural-delete.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 /** What binds a user's statement to one subject beside their words: their canvas selection, Olumi's preceding question, its asks. */
 const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => ({ ...(ctx.grounded_selection !== undefined ? { selection: ctx.grounded_selection } : {}),
   ...(ctx.preceding_assistant_text !== undefined ? { preceding_ask: ctx.preceding_assistant_text } : {}),
@@ -2524,7 +2527,7 @@ export function createAgentCapabilities(
      * finding wins, at most 3, verbatim). Absent or throwing ⇒ none; the canonical state is then byte-identical to before.
      */
     readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
-    /** B restated goal: the scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`), read only to offer or apply a revised draft. */
+    /** The scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`): draft context and exact-operation recovery. */
     readonly readCommittedTurnLedger?: (scenarioId: string) => Promise<CommittedTurnLedger>;
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
@@ -4244,17 +4247,23 @@ export function createAgentCapabilities(
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
       goal_turn_id?: unknown; operation_id?: unknown; bound_turn_ids?: unknown; draft_context_identity?: unknown };
+    const targeted = parent.operations[0]!.op === 'apply_saved_correction';
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
-      return notApplied('not_applied', 'This revised draft is replaced only by pressing its own card, so nothing was changed.');
+      return notApplied('not_applied', targeted ? 'These changes are saved only by pressing their own card, so nothing was changed.'
+        : 'This revised draft is replaced only by pressing its own card, so nothing was changed.');
     }
     if (before.graph_identity_hash !== v.base_identity) {
-      return notApplied('superseded', 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
+      return notApplied('superseded', targeted ? 'The model changed after this correction was offered, so nothing was saved. Prepare an updated card.'
+        : 'The model changed after this revised draft was offered, so nothing was replaced. Offer it again only if it still applies.');
     }
     // The messages the offer bound (read as its context), then the typed goal's turn; any other message refuses.
     const bound = Array.isArray(v.bound_turn_ids) ? v.bound_turn_ids.filter((t): t is string => typeof t === 'string') : [];
-    const { found, flags, contextIdentity } = await unreviewedDraftGate(ctx, before, { bound, goalTurnId: v.goal_turn_id });
+    // Targeted candidates compose canonical adapters on the saved graph. They do not replace the user's other work
+    // with a new draft; own-card approval, both base hashes and whole-postimage readback below still apply.
+    const { found, flags, contextIdentity }: { found: string[]; flags: MeaningFlag[]; contextIdentity?: string } = targeted ? { found: [], flags: [] }
+      : await unreviewedDraftGate(ctx, before, { bound, goalTurnId: v.goal_turn_id });
     if (typeof v.draft_context_identity === 'string') {
       if (contextIdentity !== v.draft_context_identity && found.length === 0) found.push('the saved history or objections changed after this card was offered; ask for an updated card');
     } else if (flags.length > 0) {
@@ -4279,11 +4288,13 @@ export function createAgentCapabilities(
      * OPERATION_ID_REUSED, SHARE_BY_DATE_SERVER_OWNED …, each "nothing written"), so it is said as not replaced, exactly as
      * the hiring-times apply above says its STALE. Only an AMBIGUOUS failure reads the model back (AIE 6122431786 §4).
      */
-    if (reg.status === 409) {
+    if (reg.status === 409 || (targeted && reg.status >= 400 && reg.status < 500)) {
       const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
       return /STALE/.test(code)
-        ? notApplied('superseded', 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
-        : notApplied('not_applied', 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
+        ? notApplied('superseded', targeted ? 'The model changed just before this correction was written, so nothing was saved. Prepare an updated card.'
+          : 'The model changed just before the revised draft was written, so nothing was replaced. Offer it again only if it still applies.')
+        : notApplied('not_applied', targeted ? 'The correction was refused before anything was written, so the model is unchanged.'
+          : 'The revised draft was refused before anything was written, so nothing was replaced and the model is unchanged.');
     }
     /**
      * ⛔ CONFIRMED FROM STATE, THE WHOLE GRAPH (AIE 0452 AMEND 3): the read-back's canonical identity must be the identity the
@@ -4300,7 +4311,8 @@ export function createAgentCapabilities(
       && targetsHeldBy(v.candidate).every((t) => heldTargets.some((h) => h.node_id === t.node_id && h.comparator === t.comparator && h.value === t.value && h.unit === t.unit));
     if (!landed) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
-        detail: 'The revised draft was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+        detail: targeted ? 'The correction was sent, but the complete saved change could not be confirmed. Offer to check the model again; do not claim it was saved or that it failed.'
+          : 'The revised draft was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
           + 'offer to check the model again, and never say it was replaced or that it was not.' };
     }
     // The receipt as the construction's and the goal level's registrations read it (guests get none: no versions).
@@ -4310,6 +4322,8 @@ export function createAgentCapabilities(
         source_turn_id: registrationTurnId(ctx.scenario_id, v.operation_id) }]
       : [];
     proposals.markApplied(pid, receipts);
+    if (targeted) return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
+      follow_up: 'The changes on your card are saved together in the model.' };
     // A deadline goal is analysed only once its date and the team's time are held: the model's own next step, not a Run. A
     // deadline the user already typed goes on its own card, never asked for again.
     const eventPart = draftedTeamPartOf(after.raw);
@@ -6289,6 +6303,79 @@ export function createAgentCapabilities(
           + (draft.flagged === true ? MEANING_FLAG_NOTE : '') };
     },
 
+    async proposeChangeSet(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const invalid = (detail: string): ToolResult => ({ ok: false, mutated: false, refusal: 'unsupported_change', detail });
+      if (!Array.isArray(args.ops) || args.ops.length < 2 || args.ops.length > 6) {
+        return invalid('A correction card holds two to six targeted changes. Nothing was prepared.');
+      }
+      const before = await readGraph(ctx.scenario_id);
+      if (before === null || before.graph_identity_hash === '') return invalid('The saved model could not be read completely, so nothing was prepared.');
+      let candidate = structuredClone(before.raw);
+      const labels: string[] = [];
+      // Private preparation only: the existing proposers check each request against this candidate. No intermediate
+      // proposal reaches the user's store, and this dispatch has no writer or provider.
+      const held = new ProposalStore();
+      const prepareDispatch: InternalDispatch = async (path) => {
+        if (!path.endsWith('/graph')) throw new Error('Correction preparation cannot dispatch a write');
+        return { status: 200, json: { graph: structuredClone(candidate), brief_text: before.brief_text,
+          graph_hash: computeAnalysisAffectingGraphHash(candidate as never), graph_identity_hash: computeGraphIdentityHash(candidate as never) } };
+      };
+      const prepare = createAgentCapabilities(prepareDispatch, held, undefined, 'full', undefined, { turnAuthority: true });
+      for (const raw of args.ops) {
+        if (!isPlainRecord(raw)) return invalid('One correction could not be read, so nothing was prepared.');
+        let offered: ToolResult;
+        if (raw.op === 'rename') offered = await prepare.proposeRename!(ctx, raw as never);
+        else if (raw.op === 'remove' || (raw.op === 'set_zero' && raw.kind === 'link')) {
+          offered = await prepare.proposeRemoval!(ctx, { ...raw, ...(raw.op === 'set_zero' ? { zero: true } : {}) } as never);
+        } else if (raw.op === 'option_timing' && raw.kind === 'option') {
+          offered = await prepare.proposeStatement!(ctx, { subject: { kind: 'option', label: raw.label, id: raw.id, field: 'lead' },
+            statements: [{ quote: raw.quote, reading_words: raw.reading_words, answering: raw.answering }] });
+        } else return invalid('This correction cannot be composed on the saved model. A whole-model rebuild must be offered separately. Nothing was prepared.');
+        if (!offered.ok || typeof offered.proposal_id !== 'string') return { ...offered, mutated: false };
+        const one = held.get(offered.proposal_id);
+        if (one === undefined || one.operations.length !== 1) return invalid('One correction could not be prepared completely, so nothing was prepared.');
+        const op = one.operations[0]!;
+        const base = computeAnalysisAffectingGraphHash(candidate as never);
+        if (base === null) return invalid('The saved model could not be read completely, so nothing was prepared.');
+        const event = op.op === 'rename_option'
+          ? { kind: 'structural_rename' as const, node_id: op.path, expected_label: String((op.value as { expected_label: string }).expected_label),
+            label: String((op.value as { label: string }).label), base_graph_hash: base }
+          : op.op === 'remove_node' || op.op === 'remove_edge'
+            ? { kind: 'structural_delete' as const, removed_node_ids: op.op === 'remove_node' ? [op.path] : [],
+              removed_edges: op.op === 'remove_edge' ? [{ from: op.path.split('::')[0]!, to: op.path.split('::')[1]! }] : [], base_graph_hash: base }
+            : undefined;
+        if (event !== undefined) {
+          const payload = { kind: 'system_event' as const, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id ?? ctx.request_id,
+            stage: 'frame' as const, event };
+          const params = { payload, requestId: ctx.request_id, persistedGraph: candidate };
+          const result = event.kind === 'structural_rename' ? applyStructuralRename({ ...params, event }) : applyStructuralDelete({ ...params, event });
+          if (result.kind !== 'mutated' || !isPlainRecord(result.mutatedGraph)) return invalid('One correction was refused by the saved model, so nothing was prepared.');
+          candidate = result.mutatedGraph;
+        } else {
+          const member = asMemberOp(op);
+          const approved = member?.op === SET_STATEMENT_RECORD_OP ? approvedStatementRecordOf(member) : undefined;
+          if (approved === undefined) return invalid('This correction has no complete saved-model adapter, so nothing was prepared.');
+          const result = applyStatementRecordEdit(candidate, approved);
+          if (result.kind !== 'mutated') return invalid('The statement could not be prepared on the saved model, so nothing was prepared.');
+          candidate = result.mutatedGraph;
+        }
+        labels.push(one.public_label);
+      }
+      const candidateHash = identityHashOf(computeGraphIdentityHash(candidate as never));
+      if (candidateHash === '') return invalid('The complete correction could not be checked, so nothing was prepared.');
+      const operation_id = constructionOperationId(ctx.scenario_id, `saved_correction:${before.graph_identity_hash}:${candidateHash}`);
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: before.graph_hash,
+        operations: [{ op: 'apply_saved_correction', path: ctx.scenario_id, value: { candidate,
+          base_identity: before.graph_identity_hash, brief_text: before.brief_text, goal_turn_id: ctx.turn_id ?? ctx.request_id, operation_id } }],
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text }, validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Save these changes together:\n${labels.join('\n')}` });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: before.graph_hash,
+        note: 'One card contains all these changes to the saved model. Nothing changes until the user presses it.' };
+    },
+
     async proposeRename(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const kind = args?.kind;
@@ -8077,6 +8164,15 @@ export function createAgentCapabilities(
       }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // A lost response may leave this exact prepared correction committed while its card is still pending. Recover only
+      // from its native registration operation AND the whole approved postimage; another writer's equal graph is no receipt.
+      const correction = pendingAdoption?.operations.length === 1 && pendingAdoption.operations[0]!.op === 'apply_saved_correction'
+        ? pendingAdoption.operations[0]!.value as { operation_id?: unknown; candidate?: unknown; brief_text?: unknown } : undefined;
+      const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string'
+        && correction.brief_text === before.brief_text && approvedGraphHeld(correction.candidate, before.raw)
+        && opts.readCommittedTurnLedger !== undefined
+        && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
+          registrationTurnId(ctx.scenario_id, correction.operation_id as string)), () => false);
       const recovery = proposals.partialProgressOf(args.proposal_id);
       const recoveryDeadline = proposals.get(args.proposal_id)?.operations.find(op => op.op === 'set_goal_deadline');
       if (recovery?.expected_postimage !== undefined && !(recoveryDeadline !== undefined
@@ -8094,10 +8190,15 @@ export function createAgentCapabilities(
         // E5: likewise a hiring-times card, while its own parts, carriers and deadline stand (the team time landing never stales it).
         // A deadline card, while its goal holds the date it was made against (hiring witness 35a66525: link strengths moved the
         // model). The same rule decides its lapse (`heldCardStillApplies`, `lifecycle.ts`).
-        scoped_precondition_holds: (p) => heldCardStillApplies(p, before.raw),
+        scoped_precondition_holds: (p) => (correctionSaved && p.proposal_id === pendingAdoption?.proposal_id)
+          || heldCardStillApplies(p, before.raw),
       });
       if (decision.status === 'already_applied') {
         const op = decision.proposal.operations.length === 1 ? decision.proposal.operations[0] : undefined;
+        if (op?.op === 'apply_saved_correction' && !correctionSaved) return {
+          ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
+          follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
+        };
         if (op?.op === 'set_goal_deadline') {
           const committed = opts.readCommittedTurnLedger !== undefined
             && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
@@ -8122,6 +8223,11 @@ export function createAgentCapabilities(
       }
       if (decision.status !== 'execute') {
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
+      }
+      if (correctionSaved) {
+        proposals.markApplied(decision.proposal.proposal_id, []);
+        return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: decision.proposal.proposal_id, receipts: [],
+          follow_up: 'The changes on that card are already saved in the model. Nothing was applied twice.' };
       }
 
       const scopeRevision = pendingAdoption?.operations.find(op => op.op === 'update_node')?.value as { reconciliation_key?: string } | undefined;
@@ -8712,7 +8818,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === RECORD_STATEMENT_OP) return applyStatement(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_COHORT_FORECAST_OP) return applyCohortForecast(ctx, decision.proposal, before);
-      if (ops.length === 1 && ops[0]!.op === 'replace_draft') return applyReplaceDraft(ctx, decision.proposal, before);
+      if (ops.length === 1 && (ops[0]!.op === 'replace_draft' || ops[0]!.op === 'apply_saved_correction')) return applyReplaceDraft(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
