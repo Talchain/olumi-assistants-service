@@ -3054,7 +3054,9 @@ export async function buildModelFromBrief(
         // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
         // `goal_target_unbound`: a figure the user wrote for something else, which no sentence bound as this goal's target (S2 C4): not set, said.
         // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
-        .filter((l) => /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `stated_range_unsized`: a link whose effect the user stated as a range, which nobody sized: Olumi's provisional size
+        // said against the user's recorded source (AIE 16 Oct), once, never asked again.
+        .filter((l) => /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
