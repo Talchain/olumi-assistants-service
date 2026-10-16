@@ -79,6 +79,18 @@ describe('the verdict (0 LLM)', () => {
       "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 8 more. What's today's level of securing funding?");
   });
 
+  it('#3279 B2 (TL 05:18): a target Olumi READ (saved cee_inference, e.g. a pressed budget card) is "the target", never "your target"; only the source differs', () => {
+    const olumiRead = JSON.parse(JSON.stringify(FIX.paul)) as { nodes: Array<Record<string, unknown>> };
+    const goal = olumiRead.nodes.find((n) => n.id === 'securing_funding')!;
+    expect(goal.threshold_source).toBe('user');
+    goal.threshold_source = 'cee_inference';
+    const theirs = notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))!;
+    const read = notTargetTestableSentence(olumiRead, targetTestabilityOf(olumiRead))!;
+    expect(theirs).toContain('against your target (at least £1,200,000)');
+    expect(read).not.toContain('your target');
+    expect(read).toBe(theirs.replace('against your target (', 'against the target ('));
+  });
+
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
     const v = targetTestabilityOf(withToday(FIX.paul));
     expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_placeholder']);
