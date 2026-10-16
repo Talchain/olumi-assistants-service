@@ -1,5 +1,5 @@
 {
-  "source_sha": "cab2b4119a9c4e6d39c05e426181e72d2053349e",
+  "source_sha": "c762f0a065384db494d81738c17626a5bbf4b66f",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -826,7 +826,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 29,
     "goalUnitOf": 5,
-    "goal_constraints": 445,
+    "goal_constraints": 436,
     "goal_deadline_as_stated": 11,
     "goal_direction": 104,
     "goal_horizon": 47,
@@ -855,7 +855,7 @@
     "threshold_source": 39,
     "unit_reading": 79
   },
-  "total_references": 2472,
+  "total_references": 2461,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }
