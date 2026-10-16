@@ -220,7 +220,6 @@ describe('#3299 reviewer probes', () => {
     const base = hash();
     expect((await door([HLT, TLH], base, 'prop-dup#levels')).status).toBe('committed');
     const second = await door([HLT, TLH], base, 'prop-dup#levels');
-    console.log('H2_SECOND', second.status);
     expect(rows.size).toBe(1);
   });
 });
