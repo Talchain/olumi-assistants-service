@@ -4320,9 +4320,10 @@ function admitOnce(
     // ⛔ STRUCTURE IS NEVER REMOVED TO SATISFY A FIGURE RULE (DL 5916217417): a risk kept out of the calculation keeps its
     // node, its words and its link; the run guard hands PLoT the model without it, and says so. One `node` for both.
     ...model.risks.map((r) => {
-      // ⭐ ONE BINDER (DL-3 22:53Z; BUDDY-A #3327 B1): only the AI's own verified {risk, holds_now} STATEMENT makes this risk the
-      // user's and carries today's condition. The drafter's holds-now receipt (`already_true_evidence`) is words kept with the risk,
-      // never a binding: a whole sentence of the user's there keeps the risk unverified human material, with no already-true credit.
+      // ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3327 B1): the drafter's holds-now receipt (`already_true_evidence`) and
+      // any `holds_now` reading are OLUMI'S READING of the user's words: they never make this risk the user's. The reading's whole
+      // quote is kept (`already_true_quote`) only so the door offers its card, which IS the ask; only the press adopts it, as
+      // Olumi's derived reading (basis olumi), never "you said it is true".
       const receipt = typeof r.already_true_evidence?.quote === 'string' ? [r.already_true_evidence.quote] : [];
       const source = subjectSource(model, brief, { kind: 'risk', label: r.label }, receipt);
       // The drafter's OWN tag saying the risk is Olumi's is honoured where no claim settles its source: it can only keep the risk
@@ -4335,8 +4336,7 @@ function admitOnce(
         reason: 'The risk’s claimed source could not be verified for this field. Its complete claimed words are retained here; it is not an Olumi estimate.',
         severity: 'info',
       });
-      const holdsNow = author.origin === 'human' && author.role !== 'unverified'
-        ? source.statements.find(s => s.field === 'holds_now' && s.statement.form === 'holds_now' && s.statement.negated !== true)?.statement : undefined;
+      const holdsNow = author.origin === 'human' ? source.holdsNowReading : undefined;
       const node = {
         ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
         provenance: author.origin === 'human' ? author.role === 'unverified' ? 'unverified_brief' as const : 'from_brief' as const
@@ -4344,8 +4344,8 @@ function admitOnce(
         ...(author.origin === 'ai' && r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
         ...(author.origin === 'ai' && r.draft_widening !== undefined ? { draft_widening: r.draft_widening, proposed_by: 'olumi' as const,
           analysis_participation: 'retained_excluded' as const } : {}),
-        // Only the source owner's bound statement can carry today's condition; the draft's legacy receipt grants nothing.
-        ...(holdsNow !== undefined ? { already_true_quote: holdsNow.quote } : {}),
+        // Olumi's holds-now reading of the user's whole sentence, for its card only: nothing reads it as true until the press.
+        ...(holdsNow !== undefined ? { already_true_quote: holdsNow } : {}),
       };
       return { label: r.label, kind: 'risk' as const, provenance: author.origin === 'ai' ? 'ai_proposed'
         : author.origin === 'human' && author.role !== 'unverified' ? 'explicit' : 'unverified', node };

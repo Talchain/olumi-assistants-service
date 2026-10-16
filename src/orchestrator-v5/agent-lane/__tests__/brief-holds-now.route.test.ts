@@ -77,10 +77,13 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
     expect(asks(SERVED.graph).join(' ')).toContain(OCCURRENCE);
   });
 
-  it('admission keeps the drafter\'s WHOLE brief sentence on the risk, and the saved node keeps it', () => {
+  // ⭐ DL-3 RULING 23:12Z (BUDDY-A #3327 AMEND): the drafter's reading is OLUMI'S READING of his whole sentence. The sentence is kept
+  // for its card (the card IS the ask, so de659cfd's every-turn occurrence question stays gone), but it never makes the risk his.
+  it('admission keeps the drafter\'s WHOLE brief sentence on the risk as Olumi\'s reading, and the saved node keeps it', () => {
     const node = admittedRisk({ quote: SENTENCE });
     expect(node, 'the risk is admitted').toBeDefined();
     expect(node!.already_true_quote).toBe(SENTENCE);
+    expect(node!.provenance, 'his words, Olumi\'s reading: never verified as his').toBe('unverified_brief');
     const parsed = GraphV3.safeParse({ nodes: [{ id: RISK, kind: 'risk', label: LABEL, already_true_quote: SENTENCE }], edges: [] });
     expect(parsed.success && (parsed.data.nodes[0] as Rec).already_true_quote).toBe(SENTENCE);
   });
@@ -119,8 +122,10 @@ describe('S2 holds now from the brief: the drafter reads it, admission keeps onl
     if ('refused' in w) throw new Error(w.refused);
     const written = applyRiskOccurrenceEdit(g, approvedOf(w.payload)!);
     if (written.kind !== 'mutated') throw new Error(JSON.stringify(written));
-    expect(riskOf(written.mutatedGraph).event_risk.occurrence).toMatchObject({ p_low: 1, p_high: 1, basis: 'user' });
+    // DL-3 RULING 23:12Z: the press adopts Olumi's reading, so the block is Olumi's derived one (AIE 6183711560's), never his.
+    expect(riskOf(written.mutatedGraph).event_risk.occurrence).toMatchObject({ p_low: 1, p_high: 1, basis: 'olumi' });
     expect((buildCanonicalAnalysisReadyFromGraph(written.mutatedGraph) as Rec).may_run).toBe(true);
+    expect(asks(written.mutatedGraph)).toEqual([]);
   });
 
   it('the route issues the holds-now card only over a window from today (its own gate, before the capability’s)', () => {
@@ -164,7 +169,7 @@ describe('the launch period: his answer to its ONE question is his forecast for 
       statements: [expect.objectContaining({ form: 'holds_in_window', quote: ANSWER, answering: WINDOW_ASK })] })]);
     expect(asks(written.mutatedGraph)).toEqual([]);
   });
-  it('CONTRAST: the writer refuses his forecast written as HIS block (basis user), and the from-today "now" written as Olumi’s', () => {
+  it('CONTRAST: the writer refuses his forecast AND the from-today "now" written as HIS block (basis user): both are Olumi’s reading', () => {
     const v = readStatement(launch, holdsNow, LABEL, [{ quote: ANSWER, answering: WINDOW_ASK }], { now: ANSWER }, { asks: doorAsks(launch) });
     if (v.kind !== 'read') throw new Error(JSON.stringify(v));
     const w = RISK_HOLDS_NOW_ROW.writer.approve(v.reading, launch);
@@ -176,8 +181,11 @@ describe('the launch period: his answer to its ONE question is his forecast for 
     if (nowRead.kind !== 'read') throw new Error(JSON.stringify(nowRead));
     const nowWrite = RISK_HOLDS_NOW_ROW.writer.approve(nowRead.reading, today);
     if ('refused' in nowWrite) throw new Error(nowWrite.refused);
-    expect(approvedOf(nowWrite.payload)!.event_risk.occurrence.basis, 'true NOW over a window from today stays his').toBe('user');
-    expect(applyRiskOccurrenceEdit(today, { ...approvedOf(nowWrite.payload)!, event_risk: DERIVED_BLOCK } as never)).toEqual({ kind: 'refused', reason: 'invalid_block' });
+    // DL-3 RULING 23:12Z: true NOW over a window from today is Olumi's derived reading of his words, adopted by his press.
+    expect(approvedOf(nowWrite.payload)!.event_risk.occurrence.basis, 'true NOW over a window from today is Olumi’s reading').toBe('olumi');
+    const nowAsHis = { ...approvedOf(nowWrite.payload)!, event_risk: { ...approvedOf(nowWrite.payload)!.event_risk,
+      occurrence: { ...approvedOf(nowWrite.payload)!.event_risk.occurrence, basis: 'user' } } };
+    expect(applyRiskOccurrenceEdit(today, nowAsHis as never)).toEqual({ kind: 'refused', reason: 'invalid_block' });
   });
   it('CONTRAST (from today): there is no period question, so the same words "answering" it bind nothing and write nothing', () => {
     const today = fromToday(withQuote(SERVED)).graph as Rec;
@@ -279,7 +287,7 @@ const approvals = (body: Rec): Rec[] => ((body.suggested_actions ?? []) as Rec[]
 const graphWrites = (w: ReturnType<typeof world>) => w.writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
 
 describe('S2 holds now from the brief, on the real route: ONE card quoting his sentence, ONE press', () => {
-  it('RED→GREEN: his typed brief → the holds-now card quoting it → the press → the risk holds now as HIS; its ask is gone', async () => {
+  it('RED→GREEN: his typed brief → the holds-now card quoting it → the press → the risk holds now as Olumi’s reading he chose; its ask is gone', async () => {
     const w = world(fromToday(withQuote(SERVED)));
     const turn = await route(w);
     const said = await turn({ message: SERVED.brief_text, source: 'composer' });
@@ -291,14 +299,17 @@ describe('S2 holds now from the brief, on the real route: ONE card quoting his s
     const card = String(cards[0]!.detail);
     expect(card.startsWith('From your message: “')).toBe(true);
     expect(card).toContain(SENTENCE);
-    expect(card).toContain(`Olumi proposes this reading: ‘${LABEL}’ already being true now. How strongly it affects ‘New customers’ is a separate assumption:`);
+    // DL-3 RULING 23:12Z: the derived 100% is SHOWN before the press as Olumi's reading of his words, never his number.
+    expect(card).toContain(`Olumi proposes this reading: ‘${LABEL}’ already being true now. For this reading, Olumi represents that condition as `
+      + 'true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived reading of your words, not a numerical probability you '
+      + 'stated. It does not establish persistence throughout the window or the condition’s effect. How strongly it affects ‘New customers’ is a separate assumption:');
     expect(card.endsWith('Record this reading?')).toBe(true);
     expect(graphWrites(w), 'nothing before the press').toBe(0);
     const pressed = await turn({ message: cards[0]!.message, source: 'chip_click', chip: { id: cards[0]!.id } });
     expect((pressed._agent?.tool_calls as Rec[]).filter((c) => c.name === 'authorise_change'), JSON.stringify(pressed._agent?.tool_calls))
       .toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     expect(graphWrites(w)).toBe(1);
-    expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
+    expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: 3 } });
     expect(asks(w.graph())).toEqual([]);
   }, ROUTE_MS);
 

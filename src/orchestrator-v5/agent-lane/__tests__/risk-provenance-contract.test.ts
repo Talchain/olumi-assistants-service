@@ -147,39 +147,33 @@ describe('draft source → risk admission → retained participation → readine
     expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
   });
 
-  // ⭐ ONE BINDER (DL-3 22:53Z; BUDDY-A #3327 B1 N1, its exact native counterexample): the receipt binds nothing. A whole user
-  // sentence placed ONLY in the risk's receipt, unrelated to the risk and claimed by no statement, keeps its words but never makes
-  // the risk the user's, never says it is already true, and never asks for a time period on its account.
-  it('N1: an unrelated budget sentence ONLY in the risk\'s receipt: unverified human words, no already-true credit or claim', () => {
-    const quote = 'Our budget is £2 million as of 2026-09-01.';
-    const model = draft(); model.risks[0].already_true_evidence = { quote };
-    const { risk, graph, out } = admitted(model, `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
-    expect(risk.user_statements).toBeUndefined();
+  // ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3327 B1 N1 and its 22:59Z AMEND). A holds-now reading is OLUMI'S READING
+  // of the user's whole sentence, from the receipt or from the AI's own {risk, holds_now} statement alike: the words stay the user's,
+  // the risk is never made theirs by it, and the sentence is kept only for its card (the card IS the ask). Nothing reads it as true
+  // until the press, which writes Olumi's derived block (`brief-holds-now.route.test.ts`). The unrelated budget sentence is the
+  // sole-misbind counterexample, through the receipt and through a statement; the negated sentence is the omitted-negation one.
+  const BUDGET = 'Our budget is £2 million as of 2026-09-01.';
+  const NEGATED = 'The specialist role is not unfilled, and the team agrees about its impact.';
+  const GENUINE = 'The specialist role is already unfilled, and the team disagrees about its impact.';
+  const olumisReading = (risk: Rec, graph: Rec, out: { loss: unknown }, quote: string): void => {
+    expect(risk.provenance, 'the user\'s words, Olumi\'s reading: never verified as theirs').toBe('unverified_brief');
+    expect(authorshipOf({ nodeTag: risk.provenance })).toMatchObject({ origin: 'human', role: 'unverified' });
+    expect(risk.already_true_quote, 'kept whole, for its card only').toBe(quote);
+    expect(risk.event_risk, 'non-operative until the press').toBeUndefined();
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
     expect(JSON.stringify(out.loss)).toContain(quote);
-    // Readiness asks only for the risk's own size, exactly as for the same receipt beside a Budget statement claiming it
-    // (BUDDY-A's rivalled control): never "Your brief says … already being true now".
-    const rivalled = draft(); rivalled.risks[0].already_true_evidence = { quote };
-    rivalled.statements.push(entry('Budget', 'factor', 'level', quote, 2000000, 'GBP'));
-    const control = admitted(rivalled, `${BASE} ${quote}`);
-    expect(issuesFor(graph, risk.id)).toEqual(issuesFor(control.graph, control.risk.id));
-    expect(JSON.stringify(issuesFor(graph, risk.id))).not.toContain(quote);
-  });
-
-  it('a genuine receipt alone is still only words: unverified human material, no already-true quote', () => {
-    const quote = 'The specialist role is already unfilled, and the team disagrees about its impact.';
-    const model = draft(); model.risks[0].already_true_evidence = { quote };
-    const { risk, out } = admitted(model, `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('unverified_brief'); expect(risk.already_true_quote).toBeUndefined();
-    expect(JSON.stringify(out.loss)).toContain(quote);
-  });
-
-  it('POSITIVE: the same receipt beside the AI\'s own verified {risk, holds_now} statement is the user\'s: from_brief, quote whole', () => {
-    const quote = 'The specialist role is already unfilled, and the team disagrees about its impact.';
-    const model = draft([riskStatement(quote, { form: 'holds_now' })]); model.risks[0].already_true_evidence = { quote };
-    const { risk } = admitted(model, `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('from_brief'); expect(risk.already_true_quote).toBe(quote);
-  });
+    const said = JSON.stringify(issuesFor(graph, risk.id));
+    expect(said).toContain('Olumi reads this as'); expect(said).not.toMatch(/you said|you stated/i);
+  };
+  it.each([['N1 sole misbind, receipt only', BUDGET, 'receipt'], ['sole misbind, the AI\'s own statement', BUDGET, 'statement'],
+    ['omitted negation, receipt only', NEGATED, 'receipt'], ['genuine, receipt only', GENUINE, 'receipt'],
+    ['genuine, receipt beside the AI\'s own statement', GENUINE, 'both']] as const)(
+    '%s: Olumi\'s reading of the user\'s whole words, never theirs; non-operative until pressed', (_n, quote, via) => {
+      const model = draft(via === 'receipt' ? [] : [riskStatement(quote, { form: 'holds_now' })]);
+      if (via !== 'statement') model.risks[0].already_true_evidence = { quote };
+      const { risk, graph, out } = admitted(model, `${BASE} ${quote}`);
+      olumisReading(risk, graph, out, quote);
+    });
 
   it('a malformed statements list is no complete source: the risk is unknown, as with no list', () => {
     const model = draft(); model.statements = [...model.statements, null, 7];
@@ -217,12 +211,6 @@ describe('draft source → risk admission → retained participation → readine
     expect(JSON.stringify(out.loss)).toContain(quote);
   });
 
-  it('only a bound holds-now statement, not the legacy receipt, supplies the full already-true quote', () => {
-    const quote = 'The specialist role is already unfilled, and the team disagrees about its impact.';
-    const { risk } = admitted(draft([riskStatement(quote, { form: 'holds_now' })]), `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('from_brief'); expect(risk.already_true_quote).toBe(quote);
-    expect(JSON.stringify(risk.user_statements)).toContain(quote);
-  });
 
   it('a human occurrence range remains a range with its whole source and conditions', () => {
     const quote = 'If recruitment is delayed, I estimate between 10% and 30% likelihood of specialist capacity below target.';
