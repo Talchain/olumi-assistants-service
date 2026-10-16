@@ -1767,7 +1767,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     expect(VALIDATION_REGISTRY).toContain('confirmation_template: runAnalysisConfirmationTemplate,');
     // The goal-reading tail is the forwarder's own REBUILD from the handler's graph (AIQ 5895590866 (2)), passed in.
     expect(VALIDATION_REGISTRY).toContain('const goalReadingTail = goalReadingTailOf(outcome);');
-    expect(VALIDATION_REGISTRY).toContain('if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {');
+    expect(VALIDATION_REGISTRY).toContain("if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, '', comparisonPermitted)) {");
     expect(VALIDATION_REGISTRY).toContain(
       "const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';",
     );
@@ -1781,7 +1781,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // still "withheld-able headline, else a locked template".
     // An unadopted Olumi suggestion retained provisionally also cannot produce a leader headline, nor can a Run that compares
     // a capacity-ratio option (its run-by-run comparison is not a shared draw; #3100, AIE 6175233964).
-    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared\n      ? null : buildAnalysisResultHeadline(headlineInput);');
+    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared\n      ? null : headlineParts.text;');
     // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
     // constraint-gap one. The `gated` stance is unaffected and the pin is
     // updated rather than loosened: `summary` is still "withheld-able headline,
@@ -1858,7 +1858,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // locked-template arm.
     // Gate 1 v2 adds only this final pattern; the existing pinned composition stays verbatim below.
     expect(RUN_ANALYSIS).toContain('${separabilityDisclosure}${identicalArmsDisclosure}`;');
-    expect(RUN_ANALYSIS.replace(/\$\{identicalArmsDisclosure\}(?=`;)/g, '')).toContain(
+    expect(RUN_ANALYSIS).toContain(
       // D-ask-1 (2.11) applied to CEE-inferred FACTOR values adds an EIGHTH slot,
       // appended after the participation disclosure — the position its grammar
       // occupies in TAIL_PATTERN and in the egress registry. The `gated` stance
@@ -1867,7 +1867,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       // ⭐ Olumi's GOAL-READING tail (AIQ 5895590866 (2)) sits straight after the headline/template: the egress admits it
       // only by exact equality with the forwarder's own rebuild (`goalReadingTailOf`), at that position, never a pattern.
       // It names no option and asserts no leader, so the `gated` stance is unaffected.
-      'const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;',
+      'const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather

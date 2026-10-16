@@ -84,11 +84,18 @@ import {
   buildUnsetOptionEffectDisclosure,
   collectUnsetOptionEffects,
 } from '../../../coaching/unset-option-effect-disclosure.js';
-import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
+import { buildAnalysisResultHeadlineParts, isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-unset-option-effect-wiring';
+
+// The host no longer emits a win-share/driver lead. Inspect the real composer's
+// result as well as delivered disclosures, so unset-driver suppression still has a positive twin.
+vi.mock('../../../coaching/analysis-result-headline.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../coaching/analysis-result-headline.js')>();
+  return { ...actual, buildAnalysisResultHeadlineParts: vi.fn(actual.buildAnalysisResultHeadlineParts) };
+});
 
 // ============================================================================
 // THE FIXTURE — not written by this lane, deliberately
@@ -366,6 +373,7 @@ describe('wiring — the run_analysis handler consumes the unset-option-effect s
     // winner and then says it never had a value for it.
     expect(summary).not.toContain(DRIVER_CLAUSE);
     expect(summary).not.toContain('because Ramp Delay');
+    expect(vi.mocked(buildAnalysisResultHeadlineParts).mock.results.at(-1)?.value.text).not.toContain('because Ramp Delay');
 
     // The disclosure still ships on this same turn — the two halves are
     // additive, and a "fix" that suppressed the sentence to silence the driver
@@ -383,7 +391,8 @@ describe('wiring — the run_analysis handler consumes the unset-option-effect s
     // discriminate against.
     const summary = await runAndReadSummary(PLUS_NAMEABLE_DRIVER, SENSITIVITY_NAMEABLE_ON_TOP);
 
-    expect(summary).toContain('because Market Conditions is the strongest driver.');
+    expect(vi.mocked(buildAnalysisResultHeadlineParts).mock.results.at(-1)?.value.text).toContain('because Market Conditions is the strongest driver.');
+    expect(summary).toMatch(/^Ran analysis on your current scenario\./);
 
     // The suppression is bound to the UNSET factor by identity, not applied
     // wholesale: `fac_ramp` is still unset here and still never named as the

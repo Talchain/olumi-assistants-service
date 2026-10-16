@@ -104,7 +104,7 @@ describe('the scan itself can see (positive + contrast controls)', () => {
   });
 
   it('finds a known-present EXCLUDED grammar too (contrast control — both classes visible)', () => {
-    expect(SCANNED.get('OBJECTIVE_CONTRADICTION_RE_SRC')).toBe('objective-contradiction.ts');
+    expect(SCANNED.get('SCAFFOLD_DISCLOSURE_RE_SRC')).toBe('scaffold-disclosure.ts');
   });
 
   it('does not invent a grammar that does not exist (negative control)', () => {
@@ -197,7 +197,7 @@ const HANDLER_SRC = readFileSync(HANDLER_PATH, 'utf8');
  * drift.test.ts` already pins the whole line verbatim.
  */
 function extractHandlerAppendOrder(): readonly string[] {
-  const line = /const summary = `\$\{headline \?\? template\}((?:\$\{\w+\})*)`;/.exec(HANDLER_SRC);
+  const line = /const summary = `\$\{summaryHeadline \?\? template\}((?:\$\{\w+\})*)`;/.exec(HANDLER_SRC);
   if (line === null) return [];
   return [...(line[1] as string).matchAll(/\$\{(\w+)\}/g)].map((m) => m[1] as string);
 }
@@ -218,6 +218,8 @@ const HANDLER_APPEND_ORDER = extractHandlerAppendOrder();
 const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'excluded' | 'exact']> = [
   // ⭐ AIQ 5895590866 (2): Olumi's goal readings are admitted by EXACT EQUALITY with the forwarder's own rebuild
   // (`goalReadingTailOf`), never by a registered grammar, so they sit in neither the registry nor its exclusions.
+  ['legacyFiguresDisclosure', 'buildLegacyFiguresDisclosure', 'exact'],
+  ['headlineDisclosures', 'HEADLINE_DISCLOSURES_RE_SRC', 'registered'],
   ['goalReadingDisclosure', 'buildGoalReadingDisclosure', 'exact'],
   ['scaffoldDisclosure', 'SCAFFOLD_ANY_DISCLOSURE_RE_SRC', 'registered'],
   ['constraintGapDisclosure', 'CONSTRAINT_GAP_DISCLOSURE_RE_SRC', 'registered'],
@@ -226,7 +228,7 @@ const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'exclu
   // the tail asserts a LEADER and only ships when `headline !== null`, so
   // `template + tail` is a composition the handler can never emit. Its reason
   // is recorded on TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS and asserted below.
-  ['objectiveContradictionDisclosure', 'OBJECTIVE_CONTRADICTION_RE_SRC', 'excluded'],
+  ['objectiveContradictionDisclosure', 'OBJECTIVE_CONTRADICTION_BOUND_RE_SRC', 'registered'],
   ['unsetOptionEffectDisclosure', 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC', 'registered'],
   ['participationDisclosure', 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC', 'registered'],
   // D-ask-1 (2.11) applied to CEE-INFERRED FACTOR values: the analysis says
@@ -292,19 +294,12 @@ describe('⭐⭐ ORDER — the registry mirrors the run_analysis handler append 
     ).toEqual(expected);
   });
 
-  it('a slot mapped as `excluded` really is on the reasoned-exclusion list', () => {
-    const excludedNames = new Set(TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS.map((e) => e.name));
-    const mappedExcluded = SLOT_FAMILY.filter(([, , d]) => d === 'excluded').map(([, n]) => n);
-    // Pin the precondition: a map with no `excluded` rows would satisfy the
-    // loop below by iterating nothing (trap 13b).
-    expect(mappedExcluded.length).toBeGreaterThan(0);
-    for (const name of mappedExcluded) {
-      expect(
-        excludedNames.has(name),
-        `${name} is composed by the handler and mapped 'excluded' here, but carries no ` +
-          `reasoned exclusion. 'excluded' may not be used to park an unaccounted family.`,
-      ).toBe(true);
-    }
+  it('the comparison-bearing slot requires permission, so registering it never unlocks a withheld leader', () => {
+    const conditional = TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.filter(family => family.requiresComparisonPermission);
+    expect(conditional.map(family => family.name)).toEqual(['OBJECTIVE_CONTRADICTION_BOUND_RE_SRC']);
+    expect(SLOT_FAMILY.find(([slot]) => slot === 'objectiveContradictionDisclosure'))
+      .toEqual(['objectiveContradictionDisclosure', conditional[0]!.name, 'registered']);
+    expect(TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS.some(family => family.name === 'OBJECTIVE_CONTRADICTION_RE_SRC')).toBe(true);
   });
 
   it('every family named in the map really is an exported grammar (no invented names)', () => {

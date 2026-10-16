@@ -70,7 +70,7 @@ export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequ
   // Existing over-period/condition-refusal owners keep their own calculation and truthful withholding reason.
   if (questionText(basis?.open_question) !== undefined || basis?.period_kind === 'over_period' || targetRows.length > 1
     || levelKind === false || questionNodes(savedGraph).some(n => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation')
-    || questionGoal(savedGraph, goalId)?.nonlinear_identity !== undefined
+    || (savedGoal?.nonlinear_identity !== undefined && (!isRec(savedGoal.nonlinear_identity) || savedGoal.nonlinear_identity.operation !== 'sum'))
     || questionGoal(savedGraph, goalId)?.quantity_frame === 'change'
     || asked.frame !== 'level') return { status: 'outside_static_scope', can_show_goal_chance: false, reasons: ['outside_verified_static_level_scope'] };
   if (dispatchedRequest === undefined) {
@@ -81,7 +81,6 @@ export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequ
       reasons: missing.length > 0 ? missing.map(field => `missing_saved_${field}`) : ['not_yet_evaluated'],
       ...(missing.length === 0 ? { note: STATIC_MODEL_SCOPE_NOTE } : {}) };
   }
-  if (levelKind === undefined) return { status: 'unverified', can_show_goal_chance: false, reasons: ['engine_scope_not_verified'] };
   if (calculated === null) return { status: 'unverified', can_show_goal_chance: false, reasons: ['dispatched_inputs_not_recorded'] };
   // Existing missing-target/direction owners keep their precise refusal; no second generic reason is minted.
   if (asked.target === undefined || asked.comparator === undefined) return { status: 'unverified', can_show_goal_chance: false,

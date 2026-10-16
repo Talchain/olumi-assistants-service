@@ -1,10 +1,8 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
-import { goalKindOf } from './goal-kind.js';
-import { assessEvaluatedQuestionScope } from './run-question-scope.js';
-import { readRunOmissionScope, type RunOmissionScope, type RunQuestionScope } from './run-question.js';
+import { readRunOmissionScope, type RunOmissionScope, type RunQuestion } from './run-question.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
-export { deriveRunQuestion, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
+export { deriveRunQuestion, assessRunQuestionScope, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
@@ -281,7 +279,7 @@ export interface GoalChanceLicence {
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
 export interface GoalChanceConstraintInputs {
   /** The handler’s one evaluation, bound to the final request; never persisted or borrowed across requests. */
-  readonly evaluatedQuestionScope?: RunQuestionScope;
+  readonly evaluatedQuestion?: RunQuestion;
   readonly perLimit?: readonly PerLimitVerdict[];
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
@@ -525,22 +523,14 @@ function goalTargetStateOf(
     estimates: NO_ESTIMATES, estimateOnly: false, jointEstimates: undefined, primaryRefused: true });
 }
 
-/** The one evaluated scope assessment, using the existing goal-kind owner and the shared thin kernel. */
-export function assessRunQuestionScope(savedGraph: unknown, dispatchedRequest: unknown, goalId: string): RunQuestionScope {
-  const scope = assessEvaluatedQuestionScope(savedGraph, dispatchedRequest, goalId, goalKindOf(savedGraph) === 'level');
-  return isRec(dispatchedRequest) ? { ...scope, dispatched_input_digest: sentDigest(dispatchedRequest) } : scope;
-}
-
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
-  const carriedScope = constraints.evaluatedQuestionScope;
-  const evaluatedScope = carriedScope !== undefined && isRec(constraints.sentRun)
-    && carriedScope.dispatched_input_digest === sentDigest(constraints.sentRun) ? carriedScope
-    : typeof goalId === 'string' && constraints.sentRun !== undefined
-      ? assessRunQuestionScope(horizonGraph, constraints.sentRun, goalId) : undefined;
+  const evaluatedQuestion = constraints.evaluatedQuestion;
+  const evaluatedScope = evaluatedQuestion !== undefined && evaluatedQuestion.calculated?.quantity.node_id === goalId && isRec(constraints.sentRun)
+    && evaluatedQuestion.scope.dispatched_input_digest === sentDigest(constraints.sentRun) ? evaluatedQuestion.scope : undefined;
   if (evaluatedScope?.status === 'invalid') return null;
   const finalSent = sentGoalThresholdOf(undefined, undefined, goalId, undefined, constraints);
   const capturedThreshold = sentThreshold !== undefined && finalSent !== undefined

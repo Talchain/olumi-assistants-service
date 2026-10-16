@@ -108,7 +108,8 @@ describe('R9 F2 exact Science disclosure with graph labels', () => {
     if (fact.fact_type !== 'run_analysis') throw new Error('missing Run fact');
     const disclosure = ` Olumi supplied the figures for the link from ‘${label}’ to ‘Revenue’. Set your own to see how much it matters.`;
     expect(fact.result.leading_option_id).toBe('a');
-    expect(outcome.assistant_text).toMatch(/^Expand was supported by 80% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Ran analysis on your current scenario\./);
+    expect(fact.result.win_probabilities).toMatchObject({ Expand: 0.8, Hold: 0.1 });
     expect(outcome.assistant_text).toContain(disclosure);
     const confirm = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
     if (typeof confirm !== 'function') throw new Error('Run confirmation must be a forwarder');
