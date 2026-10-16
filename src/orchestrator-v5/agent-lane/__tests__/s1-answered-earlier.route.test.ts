@@ -156,4 +156,15 @@ describe('S1 through the real route: a reply the window dropped still reaches th
     const verified = (sentItem(sent, REASONING_CONTEXT_LABEL).verified_user_statements as Rec[]).map((s) => String(s.text));
     expect(verified.some((t) => t.includes('What is that deadline?'))).toBe(false);
   }, ROUTE_MS * 4);
+
+  it('S4: supplied qualitative baseline and effect bounds stay human context without a host re-ask', async () => {
+    const answers = ['We have no funding.', 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.'];
+    for (const answer of answers) await typed(answer, [say('I have retained that information.')]);
+    agentBodies.length = 0;
+    const coaching = 'Check the model’s representation using your retained figures.';
+    const body = await typed('Explain the current limitation using what I have already told you.', [say(coaching)]);
+    const verified = sentItem(agentBodies[0]!, REASONING_CONTEXT_LABEL).verified_user_statements as Rec[];
+    for (const answer of answers) expect(verified).toContainEqual({ speaker: 'user', source: 'typed', text: answer });
+    expect(body.assistant_text).toBe(coaching);
+  }, ROUTE_MS);
 });

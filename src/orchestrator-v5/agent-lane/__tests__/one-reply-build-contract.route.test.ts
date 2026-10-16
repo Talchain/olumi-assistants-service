@@ -233,6 +233,38 @@ describe('ONE reply contract through the build route', () => {
     narrator = 'Your results are ready. You can view them now or ask me to explain them.';
   };
 
+  it('S4: the automatic reply keeps each supplied exclusion once, with no second host account or stock menu', async () => {
+    useNumericChanceRead();
+    const risks = withOlumiAddedRisks();
+    narrator = risks.map(risk => `‘${risk.label}’ was left out of this calculation; its effect remains unresolved.`).join(' ')
+      + '\n\nCheck evidence for the stated mechanism.';
+    const body = await buildTurn();
+    expect(body.assistant_text).toContain(narrator);
+    expect(body.assistant_text).not.toContain('relies on this not happening');
+    expect(body.assistant_text).not.toContain('Run leaves it out');
+    for (const risk of risks) {
+      expect(sentText()).toContain(String(risk.label));
+      expect(count(body.assistant_text, String(risk.label))).toBe(1);
+    }
+    expect(sentText()).toContain('retained_excluded');
+    expect(sentText()).toContain('The team still needs to test this condition.');
+    expect(body.suggested_actions.map(action => action.id)).not.toEqual(expect.arrayContaining([
+      'agent-next-pre-mortem', 'agent-next-strengthen',
+    ]));
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
+  it('S4: a useful AI move does not acquire the host’s three generic activities', async () => {
+    useNumericChanceRead();
+    currentRead.analysis_state.usable_for_chips = true;
+    narrator = 'Check evidence for the stated mechanism.';
+    const body = await buildTurn();
+    expect(body.assistant_text).toContain(narrator);
+    expect(body.suggested_actions.map(action => action.id)).not.toContain('agent-next-pre-mortem');
+    expect(body.suggested_actions.map(action => action.id)).not.toContain('agent-next-strengthen');
+    await expectStoredAndReplayed(body, lastBuildPayload);
+  });
+
   it('FU1 withheld widened draft: the SENT receipt is typed, no invented risk chance, replay identical', async () => {
     currentRead = structuredClone(FX.read); buildWidened = { options: 0, risks: 3 };
     narrator = 'Olumi built your pricing model.';

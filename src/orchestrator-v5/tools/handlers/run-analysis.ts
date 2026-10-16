@@ -106,12 +106,6 @@ import {
   evaluatedIdentityNodeIds,
   nonlinearIdentityLeaderWithhold,
 } from '../../agent-lane/admit-model.js';
-// D-ask-1 extended to CEE-inferred FACTOR values: the analysis says whose
-// numbers it ran on. See inferred-value-disclosure.ts for the measurement.
-import {
-  buildInferredValueDisclosure,
-  deriveOlumiAuthoredValues,
-} from '../../coaching/inferred-value-disclosure.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
@@ -3060,28 +3054,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const separabilityDisclosure = buildSeparabilityDisclosure(
       headlineDescriptor.separability_withhold,
     );
-    // D-ask-1 (2.11) applied to CEE-INFERRED FACTOR values. Measured on staging
-    // 23 Sep (scenario `e243debd`): the brief stated no numbers, the product
-    // supplied three of its four factor values, and the result named a leading option
-    // without ever saying a single number was ours. The ratified ruling —
-    // "the analysis result must never present [our] numbers as user-provided" —
-    // was plumbed for scaffolded OPTIONS and silent on inferred FACTORS.
-    //
-    // ⚠ POSITION IS LOAD-BEARING: it rides immediately after the participation
-    // disclosure because that is its slot in `TAIL_PATTERN`. The egress
-    // allowlist matches the tail in order, so appending it elsewhere would make
-    // the whole summary fail the grammar and collapse to the locked template.
-    //
-    // Read from the graph the analysis actually RAN on, so the sentence can
-    // never describe a different model than the result it rides on.
-    //
-    // ⭐ A6 (P2 re-measure, 523e18d): it counts EVERY Olumi value the model
-    // carries into the run — factor baselines, option levels and link
-    // strengths — not only baselines. Served journey A said "6 of the values"
-    // over 22.
-    const inferredValueDisclosure = buildInferredValueDisclosure(
-      deriveOlumiAuthoredValues(graphForAnalysis, submittedIds),
-    );
     // ⭐ AIQ 5895379601 (1): Olumi's readings of the goal (its direction, its today level) are said once, through the
     // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
@@ -3096,7 +3068,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       : chanceHeadline + (samplesReduced || statusOutcome.kind !== 'ok' ? ` ${template}` : '');
     const headlineDisclosures = headlineParts.disclosures;
     const composedSummary = (() => {
-      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
       return summary;
     })();
     const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;

@@ -5025,7 +5025,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
       state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       // S-B typed replies own their exits, including an intentional empty list (Science's estimate questions).
-    }, actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
+    }, !aiWroteReply && actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
@@ -5317,7 +5317,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
     const statusText = hostProse ? hostStatusText : aiStatusText;
-    const basis = fastPath !== 'method'
+    const basis = hostProse && fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
       ? conditionalInputBasis({ graph: readbackGraph,
@@ -5368,8 +5368,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
     // BYPASS1: the AI asks for a missing target, objective or deadline itself (R:784); the host keeps K3 and A7's facts.
-    const decisionLines = (await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined))
-      .filter((line) => hostProse || !isDecisionInputAsk(line));
+    const decisionLines = hostProse
+      ? await decisionLinesAskedOnce(readbackGraph, decisionCtx, historyReader, scenarioId, undefined) : [];
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     // BYPASS1 keeps it: it is never said when the reply at rest already asks (the AI's own ask included), so it cannot double.

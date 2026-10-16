@@ -919,7 +919,8 @@ describe('SAY-SHOWN: the first pass tells the AI its `say` is shown, and the ret
     expect(timesIn(b.assistant_text, chance!.say)).toBe(1);
     expect(timesIn(b.assistant_text, 'Compare the staffing assumptions with your team.')).toBe(1);
     const ids = (b.suggested_actions ?? []).map((a: { id: string }) => a.id);
-    expect(ids.length, 'contrast: the Run offers typed actions').toBeGreaterThan(0);
+    // The AI's useful move above survives; the deleted generic activity menu adds no second task.
+    for (const id of ['agent-next-pre-mortem', 'agent-next-what-would-change', 'agent-next-strengthen']) expect(ids).not.toContain(id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
