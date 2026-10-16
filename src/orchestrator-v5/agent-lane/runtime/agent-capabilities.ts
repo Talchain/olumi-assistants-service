@@ -1587,6 +1587,8 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             // Any kind (T4i, DL 14 Oct): an excluded factor, risk or outcome reaches the Agent with its exclusion mark, as an
             // option does, so it is never described as part of the Run.
             ...(n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
+            ...(n.kind === 'risk' && isPlainRecord(n.draft_widening)
+              ? { draft_widening: pickKeys(n.draft_widening, ['provenance', 'hits', 'through', 'affects', 'mechanism', 'relies_on', 'watch_for']) } : {}),
             ...(n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded'
               ? { analysis_participation: n.analysis_participation } : {}),
             // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
@@ -1631,6 +1633,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
+      ...(typeof n.goal_horizon_months === 'number' ? { horizon_months: n.goal_horizon_months } : {}),
       ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
         : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
@@ -10381,6 +10384,7 @@ export function createAgentCapabilities(
        * the turn deadline and the (K, H) prior fact before the one dispatch.
        */
       let firstAnalysis: Record<string, unknown> | undefined;
+      let firstRunFacts: ReturnType<typeof runFactsOf> | undefined;
       /** The read after the first pass, when one ran: the next step is that Run's (its joint, its targets). */
       let postRunState: { raw: unknown; analysis_state: unknown; analysis_ready: unknown; analysis_result: unknown } | undefined;
       if (built.mutated === true && built.replayed !== true && opts.firstAnalysis !== undefined) {
@@ -10403,6 +10407,18 @@ export function createAgentCapabilities(
           analysisResult: read.analysis_result,
           analysisAdmission: read.analysis_admission,
         });
+        if (outcome.ran && read.analysis_result != null) {
+          const evidence = readRunEvidence(read.analysis_run_evidence);
+          const current = isPlainRecord(read.analysis_state) && isPlainRecord(read.analysis_state.run_state)
+            && read.analysis_state.run_state.kind === 'complete_current';
+          firstRunFacts = runFactsOf(read.analysis_result, read.graph, current,
+            runFactsStateOf({ ...(evidence === undefined ? {} : { run_evidence: evidence }) },
+              { analysisState: read.analysis_state, analysisReady: read.analysis_ready }));
+          // The same selected Run's recorded omission, never today's graph's suggested risks.
+          const omitted = runOmittedRisks(read.analysis_result);
+          if (current && omitted !== undefined) firstAnalysis = { ...firstAnalysis,
+            omitted_from_calculation: { scope: 'modelled_effects_only', risks: omitted } };
+        }
         // ⛔ C46 (d): the first pass withholds its leader as unrequested (policy), so the product cause is
         // carried beside that reason, read from the model just built — only where an analysis exists. C46 × R3-4: not of a
         // product the run's engine evaluated, read from the SAME post-run read as the permission.
@@ -10458,6 +10474,7 @@ export function createAgentCapabilities(
         // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
         ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
+        ...(firstRunFacts === undefined ? {} : { run_facts: firstRunFacts }),
       };
     },
 
