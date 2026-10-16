@@ -206,6 +206,8 @@ describe('marketing L20 through the real route: one scoped interpretation card, 
     expect(JSON.stringify(cards)).toContain('15');
     expect(JSON.stringify(cards)).toContain('Olumi');
     expect(JSON.stringify(cards)).toContain(L20);
+    expect(JSON.stringify(cards)).toContain('This card sets only');
+    expect(JSON.stringify(cards)).toContain('other targets or model changes in the quote are left out and will not be saved');
     expect(w.registers).toHaveLength(0); expect(w.read()).toEqual(before);
     expect(providerCalls.filter(p => p === 'whole_candidate')).toHaveLength(0);
   }, 30_000);

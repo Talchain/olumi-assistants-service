@@ -33,7 +33,7 @@ import type { HandlerFact, SetFactorValueHandlerFact } from '@talchain/schemas/o
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
-import { APPROVED_ADOPTION_SOURCE, approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-context.js';
+import { APPROVED_ADOPTION_SOURCE, approvedAdoptionSourceFor, approvedBindingFor } from '../../agent-lane/approved-adoption-context.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -232,6 +232,7 @@ function parseProposalValue(raw: unknown): ParsedValue {
 // construction, closing the review feedback NB #1.)
 
 interface ObservedSnapshot {
+  readonly user_material_unverified?: true;
   readonly value?: number;
   readonly raw_value?: number;
   readonly unit?: string;
@@ -575,8 +576,11 @@ export function createSetFactorValueHandler(): HandlerFn {
     const adoptedSource = appliedProvenance === undefined
       ? approvedAdoptionSourceFor(invocation.context.session_id, targetId, normalised.raw_value)
       : undefined;
+    const unverifiedBinding = appliedProvenance === undefined
+      ? approvedBindingFor(invocation.context.session_id, targetId, normalised.raw_value) : undefined;
 
     const after: ObservedSnapshot = {
+      ...(unverifiedBinding !== undefined ? { user_material_unverified: true as const } : {}),
       value: normalised.value,
       raw_value: normalised.raw_value,
       // The SAME provenance the merged node is stamped with below, so the wire
@@ -870,7 +874,10 @@ export function createSetFactorValueHandler(): HandlerFn {
       // ⭐ S2 (DL 14 Oct; pricing r2 judge finding 5): `user_material_unverified` says a human-written figure's ROLE was never
       // verified (Paul's brief "from £49 to £59 per month", held as today's price). The user's OWN authoring write settles
       // exactly that, so it is cleared by the same rule; an adoption of Olumi's figure (`adoptedSource`) is not that act.
-      if (adoptedSource === undefined) delete (merged as { user_material_unverified?: unknown }).user_material_unverified;
+      if (unverifiedBinding !== undefined) merged.user_material_unverified = true;
+      else if (adoptedSource === undefined || existing.kind !== 'resolved' || existing.raw !== normalised.raw_value) {
+        delete (merged as { user_material_unverified?: unknown }).user_material_unverified;
+      }
       // #2848: `frame_source: 'olumi_convention'` says OLUMI chose this cap. A write that changes the cap makes it
       // someone else's, so the marker (and the factor-detail disclosure it drives) goes with the old cap.
       if (after.cap !== undefined && after.cap !== priorObserved.cap) {

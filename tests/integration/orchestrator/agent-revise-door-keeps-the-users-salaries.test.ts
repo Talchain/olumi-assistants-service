@@ -179,6 +179,46 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
       expect(os(id).raw_value ?? os(id).value).toBe(value);
       expect(provenanceOf({ value: os(id) }), JSON.stringify(os(id))).toMatchObject({ origin: 'human', role: 'unverified' });
     }
+    const later = agent('Please estimate the Senior engineer annual salary.');
+    const estimate = await later.caps.proposeAssumptions(later.ctx, { assumptions: [{ factor_label: 'Senior engineer annual salary',
+      value: 95000, unit: 'GBP/year per engineer', user_stated: false, revise: true, basis: 'A new Olumi estimate' }] });
+    expect(estimate.ok, JSON.stringify(estimate)).toBe(true);
+    expect((await later.caps.authoriseChange(later.ctx, { proposal_id: String(estimate.proposal_id) })).ok).toBe(true);
+    expect(rows.size).toBe(2);
+    expect(provenanceOf({ value: os('senior_engineer_annual_salary') })).toMatchObject({ origin: 'ai', accepted: true });
+    expect(provenanceOf({ value: os('junior_engineer_annual_salary') })).toMatchObject({ origin: 'human', role: 'unverified' });
+  });
+
+  it.each([
+    ['workload is not a saving', 'Move 25% of our workloads to GCP first.', 'GCP unit-cost saving', 25, '%'],
+    ['a goal reduction is not the saving input', 'We want to cut costs by 20%.', 'GCP unit-cost saving', 20, '%'],
+    ['a ceiling is not today’s spend', 'Keep monthly cloud spend under £36k.', 'Baseline monthly cloud spend', 36000, 'GBP/month'],
+    ['a reported account-manager figure keeps its attribution', 'Our Google account manager says GCP would be about 25% cheaper than AWS for our workload.', 'GCP unit-cost saving', 25, '%'],
+  ] as const)('B1: %s remains human/unverified after its own cold press and reopen', async (_name, text, label, value, unit) => {
+    const held = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/served-share-unit-r2-20260930.json', import.meta.url), 'utf8')) as { graph: { nodes: Array<Record<string, unknown>>; edges: unknown[] } };
+    const raw = structuredClone(held.graph);
+    const n = raw.nodes.find(n => n.kind === 'factor' && n.label === label)!;
+    expect(n, 'real served factor').toBeDefined();
+    persisted = projectGraphForPersistence({ ...GraphV3.parse(raw), options: [] });
+    const a = agent(text);
+    const ctx = { ...a.ctx, user_turn_text: _name === 'a goal reduction is not the saving input' ? 'Please correct the GCP saving input.' : text, verified_user_messages: [text] };
+    const p = await a.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: label, value, unit, user_stated: true, revise: true, basis: 'Olumi’s proposed field reading' }] });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const proposal = a.store.get(String(p.proposal_id))!;
+    expect(proposal.operations[0]!.path, JSON.stringify({ proposed: proposal.operations, expected: n.id })).toBe(n.id);
+    expect(proposal.operations[0]!.value).toMatchObject({ authored_by: 'user_stated', user_material_unverified: true, confirmation: { source: text, quote: text } });
+    expect(p.public_label).toContain(text);
+    expect(await a.caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).toMatchObject({ ok: false, mutated: false });
+    expect(rows.size).toBe(0);
+    const encoded = parsePendingAction(JSON.parse(JSON.stringify(proposalPendingAction(proposal,
+      approvalChipsFor([{ name: 'propose_assumptions', ...p } as never], () => ({ proposal, result: p }))[0]!,
+      { scenario_id: SCENARIO_ID, emitted_at_iso: new Date().toISOString() }))));
+    const restored = new ProposalStore();
+    expect(rehydrateProposals([encoded!], restored, { scenario_id: SCENARIO_ID, user_id: 'user-a' })).toBe(1);
+    const out = await agent(text, restored).caps.authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
+    expect(out.ok, JSON.stringify(out)).toBe(true); expect(rows.size).toBe(1);
+    persisted = JSON.parse(JSON.stringify(persisted));
+    expect(provenanceOf({ value: os(String(n.id)) }), JSON.stringify({ id: n.id, os: os(String(n.id)) })).toMatchObject({ origin: 'human', role: 'unverified' });
   });
 
 });

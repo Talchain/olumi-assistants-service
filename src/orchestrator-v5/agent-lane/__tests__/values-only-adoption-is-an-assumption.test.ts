@@ -14,7 +14,7 @@ import { createAgentCapabilities, projectEntity, type InternalDispatch } from '.
 import { observedValueAuthorship, valueSourceAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { ProposalStore } from '../proposal.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
-import { runWithApprovedAdoption } from '../approved-adoption-context.js';
+import { runWithApprovedAdoption, runWithApprovedBindings } from '../approved-adoption-context.js';
 import { censusConfidenceParameters } from '../../admission/analysis-admission.js';
 import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 
@@ -423,32 +423,47 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
 });
 
 describe('nothing outside the verified approval can claim the adoption stamp', () => {
-  const edit = async (graph: unknown, value: number) => {
+  const edit = async (graph: unknown, value: number, bindingExpected = false) => {
     const ev = { kind: 'factor_value_edit' as const, target_id: 'coordination_load', value };
     const res = await applyFactorValueEdit({
       payload: { kind: 'system_event', turn_id: '0b0f6a1e-9f7c-4d5e-8a1b-2c3d4e5f6a7b', scenario_id: SCENARIO, stage: 'frame', event: ev } as never,
       event: ev as never, requestId: 'x', persistedGraph: graph as never, priorFacts: [],
     });
     expect(res.kind, JSON.stringify(res)).toBe('mutated');
-    return ((res as unknown as { mutatedGraph: { nodes: Node[] } }).mutatedGraph.nodes).find((n) => n.id === 'coordination_load')?.observed_state?.source;
+    if (res.kind === 'mutated' && bindingExpected) expect(JSON.stringify(res.response)).toContain('"user_material_unverified":true');
+    return ((res as unknown as { mutatedGraph: { nodes: Node[] } }).mutatedGraph.nodes).find((n) => n.id === 'coordination_load')?.observed_state;
   };
   it('NEGATIVE: a direct system event (no server context — the inspector, or any client) keeps user_override', async () => {
-    expect(await edit(product().graph(), 40)).toBe('user_override');
+    expect((await edit(product().graph(), 40))?.source).toBe('user_override');
   });
   it('NEGATIVE: a context naming ANOTHER target keeps user_override', async () => {
     const src = await runWithApprovedAdoption({ scenarioId: SCENARIO, proposalId: 'p', targetId: 'team_size', rawValue: 40 }, () => edit(product().graph(), 40));
-    expect(src).toBe('user_override');
+    expect(src?.source).toBe('user_override');
   });
   it('NEGATIVE: a context naming ANOTHER value keeps user_override', async () => {
     const src = await runWithApprovedAdoption({ scenarioId: SCENARIO, proposalId: 'p', targetId: 'coordination_load', rawValue: 41 }, () => edit(product().graph(), 40));
-    expect(src).toBe('user_override');
+    expect(src?.source).toBe('user_override');
   });
   it('NEGATIVE: a context naming ANOTHER scenario keeps user_override', async () => {
     const src = await runWithApprovedAdoption({ scenarioId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', proposalId: 'p', targetId: 'coordination_load', rawValue: 40 }, () => edit(product().graph(), 40));
-    expect(src).toBe('user_override');
+    expect(src?.source).toBe('user_override');
   });
   it('CONTROL: the matching context DOES stamp user_assumption (the negatives are not vacuous)', async () => {
     const src = await runWithApprovedAdoption({ scenarioId: SCENARIO, proposalId: 'p', targetId: 'coordination_load', rawValue: 40 }, () => edit(product().graph(), 40));
-    expect(src).toBe('user_assumption');
+    expect(src?.source).toBe('user_assumption');
   });
+  it.each([
+    ['matching identity', SCENARIO, 'coordination_load', 40, true],
+    ['another scenario', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'coordination_load', 40, false],
+    ['another target', SCENARIO, 'team_size', 40, false],
+    ['another point', SCENARIO, 'coordination_load', 41, false],
+  ] as const)('B1 binding marker: %s through the real value writer', async (_name, scenarioId, targetId, rawValue, matches) => {
+    const held = await runWithApprovedBindings([{ scenarioId, proposalId: 'held-source-card', targetId, rawValue,
+      unverifiedBinding: { source: 'A quoted human figure is 40.', quote: 'A quoted human figure is 40.' } }],
+      () => edit(product().graph(), 40, matches));
+    expect(held?.source).toBe('user_override');
+    if (matches) expect(held).toMatchObject({ user_material_unverified: true });
+    else expect(held).not.toHaveProperty('user_material_unverified');
+  });
+
 });
