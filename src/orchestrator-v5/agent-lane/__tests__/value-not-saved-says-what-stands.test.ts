@@ -147,6 +147,14 @@ describe('what still stands is read AFTER the refusal, never from the approved s
   });
 });
 
+it('a refused whole bundle exposes the native rule and actual value identity without a partial save', async () => {
+  const { out, node } = await approveRevision(inContract(served), () => ({
+    status: 'refused', reason: 'value_scope_mismatch', value: { factor_id: TARGET },
+  }));
+  expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'value_scope_mismatch', outcome: `value_refused:${TARGET}` });
+  expect(node.observed_state).toMatchObject({ raw_value: 5, source: 'cee_inference' });
+});
+
 describe('no "Record your figure" on a base the writer would refuse (DL 5924061304)', () => {
   const propose = async (graph: typeof served) => {
     const p = product(graph);

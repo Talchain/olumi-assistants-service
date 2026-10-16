@@ -325,7 +325,7 @@ import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -3245,6 +3245,7 @@ export function createAgentCapabilities(
     let levelsRecorded = 0;
     let levelStop: string | null = null;
     let stopReason: string | undefined;
+    let refusedItem: string | undefined;
     const linksAdded: string[] = [];
     let linksResized: ResizedLinksGroup[] = [];
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
@@ -3280,6 +3281,9 @@ export function createAgentCapabilities(
             : res.frame !== undefined ? `the range for ${labelOf(res.frame.factor_id)}` : 'part of this change';
         levelStop = `${what} was refused, so nothing in this change was written`;
         stopReason = res.reason;
+        refusedItem = res.value !== undefined ? `value_refused:${res.value.factor_id}`
+          : res.frame !== undefined ? `frame_refused:${res.frame.factor_id}`
+            : res.pair !== undefined ? `level_refused:${res.pair.option_id}:${res.pair.factor_id}` : 'batch_refused';
       } else {
         reencodedSiblings.push(...(res.reencoded_siblings ?? []));
         if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '',
@@ -3361,7 +3365,8 @@ export function createAgentCapabilities(
               'say so when you describe what changed.',
           }
         : {
-            refusal: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
+            refusal: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0 ? 'partially_applied' : stopReason ?? 'not_applied',
+            ...(refusedItem !== undefined ? { outcome: refusedItem } : {}),
             detail:
               `${levelStop ?? 'Not every change was recorded'}.` +
               (linksAdded.length > 0 ? ` These links WERE added and stay in the model: ${linksAdded.join('; ')}.` : '') +
@@ -7211,14 +7216,15 @@ export function createAgentCapabilities(
           ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
         });
       }
+      const operations = [...halves[0].operations, ...halves[1].operations];
       const compound = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: halves[0].base_graph_identity_hash,
-        operations: [...halves[0].operations, ...halves[1].operations],
+        operations,
         provenance: { authored_by: 'model_proposed', basis: STARTING_POINT_BASIS },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `${halves[0].public_label}; ${halves[1].public_label}`,
+        public_label: `${figureApprovalWords(operations).heading} ${halves[0].public_label}; ${halves[1].public_label}`,
       });
       replaceEarlierStartingPoints(ctx);
       proposals.put(compound);

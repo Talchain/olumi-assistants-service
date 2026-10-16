@@ -28,6 +28,7 @@ import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
+import { approvalChipsFor } from '../approval-chips.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -172,6 +173,37 @@ describe('the dead end this closes — two proposals, one approval', () => {
 });
 
 describe('propose_starting_point', () => {
+  it('names the refused middle value rather than the last, retaining the complete bundle and writing nothing', async () => {
+    const p = fakeProduct({ base: [...BASE,
+      { id: 'capacity_support', kind: 'factor', label: 'Capacity support', category: 'observable', scale_frame: 100 },
+      { id: 'morale', kind: 'factor', label: 'Morale', category: 'observable', scale_frame: 100 },
+    ] });
+    const store = new ProposalStore();
+    let calls = 0;
+    const caps = createAgentCapabilities(p.d, store, undefined, 'full', undefined, { commitOptionLevels: async input => {
+      calls++;
+      expect(input.values?.map(v => v.factor_id)).toEqual(['capacity_support', 'coordination_load', 'morale']);
+      expect(input.levels).toHaveLength(6);
+      return { status: 'refused', reason: 'value_scope_mismatch', value: { factor_id: 'coordination_load' } };
+    } });
+    const r = await caps.proposeStartingPoint(ctx, { assumptions: [...ASSUMPTIONS,
+      { user_stated: false, factor_label: 'Capacity support', value: 10, unit: 'index points (0-100)', basis: 'uncertain support' },
+      { user_stated: false, factor_label: 'Morale', value: 70, unit: 'index points (0-100)', basis: 'uncertain morale' },
+    ], option_levels: [...LEVELS, ...LEVELS.flatMap(level => [
+      { option_label: level.option_label, factor_label: 'Capacity support', value: 10, basis: 'support held unchanged' },
+      { option_label: level.option_label, factor_label: 'Morale', value: 70, basis: 'morale held unchanged' },
+    ])] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const id = String(r.proposal_id), approved = JSON.stringify(store.get(id)!.operations);
+    expect(store.get(id)!.operations).toHaveLength(9);
+    const out = await caps.authoriseChange({ ...ctx, typed_approval_of: id }, { proposal_id: id });
+    expect(out).toMatchObject({ ok: false, mutated: false, applied: false, refusal: 'value_scope_mismatch', outcome: 'value_refused:coordination_load' });
+    expect(out.detail).toContain('the value for Coordination load was refused');
+    expect(calls).toBe(1);
+    expect(p.posted).toEqual([]);
+    expect(JSON.stringify(store.get(id)!.operations)).toBe(approved);
+    expect(store.outstanding(SCENARIO, USER).map(q => q.proposal_id)).toEqual([id]);
+  });
   it('leaves exactly ONE proposal awaiting approval, carrying both values and levels', async () => {
     const p = fakeProduct();
     const store = new ProposalStore();
@@ -186,6 +218,10 @@ describe('propose_starting_point', () => {
     expect([...kinds].sort()).toEqual(['set_factor_value', 'set_option_intervention']);
     expect(String(r.public_label)).toMatch(/Coordination load = 40/);
     expect(String(r.public_label)).toMatch(/Hire Two Developers sets Team size to 7/);
+    const [card] = approvalChipsFor([{ name: 'propose_starting_point', ok: true, mutated: false,
+      proposal_id: String(r.proposal_id) }], id => ({ proposal: store.get(id)!, result: r }) as never);
+    expect(card!.label).toBe('Use these 3 starting figures');
+    expect(card!.detail).toMatch(/^Review these 3 starting figures\./);
   });
 
   it('(P) RED-first: ONE approval = ONE conditional values write, then each level CAS-gated on OUR previous write', async () => {
@@ -290,7 +326,7 @@ describe('propose_starting_point', () => {
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.mutated).toBe(false);
-    expect(out.refusal).toBe('not_applied');
+    expect(out.refusal).toBe('http 422'); // the native port's actual reason remains visible
     const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
     expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', false, 0], ['option_levels', false, 0]]);
     expect(String(out.detail)).toMatch(/nothing in this change was written/);
