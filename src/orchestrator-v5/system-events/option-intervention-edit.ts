@@ -431,12 +431,11 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
         if (unitComparisonKey(heldUnit) === undefined || unitComparisonKey(heldUnit) === unitComparisonKey(nextUnit)) continue;
         const held = readUnitParts(heldUnit);
         const declared = readUnitParts(nextUnit);
-        // The full existing grammar reads qualified count nouns ("tech leads") without a noun catalogue.
-        // A recognised count declaration on this SAME factor keeps that stored noun/quantity intact;
-        // periods, denominators and scale must still agree. An unread unit is never proof of agreement.
+        // Count nouns remain part of the coordinate: a shared factor/count family does not attest another entity.
+        // Unchanged unfamiliar units passed above; different spellings need the existing full unit identity.
         if (held?.kind === 'count' && declared?.kind === 'count' && unitPhraseFamily(nextUnit) === 'count'
           && unitPhraseFamily(heldUnit) !== 'time'
-          && isDeepStrictEqual({ ...held, noun: null }, { ...declared, noun: null })) continue;
+          && isDeepStrictEqual(held, declared)) continue;
         return false;
       }
     }
@@ -941,23 +940,30 @@ export type OptionInterventionBatchExecutionInput =
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
 
-/**
- * ⭐ N levels (and the links they need) as ONE commit: one append, one handler fact, one read-back, one receipt.
- * All or nothing — a refused target commits NOTHING — and a retry on the same turn id is the store's replay.
- */
-export async function executeOptionInterventionBatch(input: OptionInterventionBatchExecutionInput, store: OptionInterventionStore): Promise<
-  | { readonly kind: 'committed'; readonly response: OlumiResponse; readonly graph: unknown;
-      readonly analysisGraphHash: string; readonly persistedRowId: string;
-      /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
-      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'];
-      /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
-      readonly linksResized?: readonly { from: string; to: string }[];
-      readonly reencodedSiblings?: readonly ReencodedSibling[] }
+type OptionInterventionBatchRefusal = {
+  readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number;
+  readonly frameIndex?: number; readonly linkIndex?: number;
+};
+
+export type OptionInterventionBatchPreparation =
+  | OptionInterventionBatchRefusal
   | { readonly kind: 'unchanged' }
-  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number;
-      readonly linkIndex?: number }
-  | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
-> {
+  | {
+      readonly kind: 'candidate'; readonly graph: EditableGraph; readonly operations: readonly PatchOperation[];
+      readonly analysisGraphHash: string; readonly targetsWritten: readonly OptionLevelTarget[];
+      readonly handlerFacts: readonly unknown[]; readonly targets: readonly OptionLevelTarget[];
+      readonly optionGaps: readonly ApprovedOptionGap[]; readonly values: readonly ApprovedFactorValue[];
+      readonly frames: readonly ApprovedFactorFrame[]; readonly valueConfirmations: readonly string[];
+      readonly linksResized: readonly { from: string; to: string }[]; readonly reencodedSiblings: readonly ReencodedSibling[];
+      readonly gapsChanged: boolean; readonly horizonBasisWrite?: HorizonBasisWrite;
+      readonly teamTime?: ApprovedTeamTime; readonly goalHorizon?: OptionInterventionBatchExecutionInput['goalHorizon'];
+    };
+
+/** Preserve the native door's input refusals before its canonical store read. */
+function validateOptionInterventionBatchInput(input: OptionInterventionBatchExecutionInput):
+  | OptionInterventionBatchRefusal
+  | { readonly kind: 'valid'; readonly optionGaps: readonly ApprovedOptionGap[]; readonly rangeLaws: readonly ApprovedStatementRecord[] }
+{
   // A temporal answer is a single approved judgement, never a compound edit.
   if (input.goalSteady !== undefined && (input.targets.length > 0 || (input.values?.length ?? 0) > 0
     || (input.frames?.length ?? 0) > 0 || (input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined
@@ -1015,20 +1021,23 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     || input.goalHorizon !== undefined || input.teamTime !== undefined)) {
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
-  let before: unknown;
-  let identityBrief: string | null | undefined;
-  let expectedRevision: number | undefined;
-  let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
-  try {
-    if (useAppendV6() || input.identityConfirm?.ceiling_stock !== undefined) {
-      ({ graph: before, revision: expectedRevision, briefText: identityBrief } = await store.loadGraphAndBriefText(input.scenarioId));
-    } else {
-      before = await store.loadGraph(input.scenarioId);
-    }
-    pendings = await store.readMostRecentPendingActions(input.scenarioId, { validation: 'strict' });
-  } catch {
-    return { kind: 'unverified', reason: 'canonical_read_failed', commitAttempted: false };
-  }
+  return { kind: 'valid', optionGaps, rangeLaws };
+}
+
+/**
+ * The native door's complete in-memory candidate: values, final frames, levels, links and gaps on ONE base.
+ * Reused before an offer and immediately before commit. The caller supplies its already-read canonical graph;
+ * this function performs no store read, append, receipt, authorisation or Run.
+ */
+export async function prepareOptionInterventionBatchExecution(
+  input: OptionInterventionBatchExecutionInput,
+  before: unknown,
+  readContext: { readonly briefText?: string | null } = {},
+): Promise<OptionInterventionBatchPreparation> {
+  const validation = validateOptionInterventionBatchInput(input);
+  if (validation.kind === 'refused') return validation;
+  const { optionGaps, rangeLaws } = validation;
+  const identityBrief = readContext.briefText;
   if (optionGaps.length > 0) {
     if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
@@ -1529,6 +1538,47 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
   }
+  return { kind: 'candidate', ...plan, targets, optionGaps, values, frames, valueConfirmations, linksResized,
+    reencodedSiblings: siblingBase.reencoded, gapsChanged, horizonBasisWrite, teamTime, goalHorizon };
+}
+
+/**
+ * ⭐ N levels (and the links they need) as ONE commit: one append, one handler fact, one read-back, one receipt.
+ * All or nothing — a refused target commits NOTHING — and a retry on the same turn id is the store's replay.
+ */
+export async function executeOptionInterventionBatch(input: OptionInterventionBatchExecutionInput, store: OptionInterventionStore): Promise<
+  | { readonly kind: 'committed'; readonly response: OlumiResponse; readonly graph: unknown;
+      readonly analysisGraphHash: string; readonly persistedRowId: string;
+      /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
+      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'];
+      /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
+      readonly linksResized?: readonly { from: string; to: string }[];
+      readonly reencodedSiblings?: readonly ReencodedSibling[] }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number;
+      readonly linkIndex?: number }
+  | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
+> {
+  const validation = validateOptionInterventionBatchInput(input);
+  if (validation.kind === 'refused') return validation;
+  let before: unknown;
+  let identityBrief: string | null | undefined;
+  let expectedRevision: number | undefined;
+  let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
+  try {
+    if (useAppendV6() || input.identityConfirm?.ceiling_stock !== undefined) {
+      ({ graph: before, revision: expectedRevision, briefText: identityBrief } = await store.loadGraphAndBriefText(input.scenarioId));
+    } else {
+      before = await store.loadGraph(input.scenarioId);
+    }
+    pendings = await store.readMostRecentPendingActions(input.scenarioId, { validation: 'strict' });
+  } catch {
+    return { kind: 'unverified', reason: 'canonical_read_failed', commitAttempted: false };
+  }
+  const prepared = await prepareOptionInterventionBatchExecution(input, before, { briefText: identityBrief });
+  if (prepared.kind !== 'candidate') return prepared;
+  const { values, frames, targets, optionGaps, valueConfirmations, linksResized, reencodedSiblings,
+    gapsChanged, horizonBasisWrite, teamTime, goalHorizon, ...plan } = prepared;
   const labelOf = (id: string): string => String(plan.graph.nodes.find(node => node.id === id)?.label ?? id);
   const holds = threadHoldsThroughMutatingCommit({ priorPendingActions: pendings,
     graphAfterCommit: plan.graph, graphHashAfterCommit: plan.analysisGraphHash,
@@ -1538,7 +1588,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
   const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
     .map(resizedLinksSentence);
-  const acknowledgment = [...valueConfirmations, ...resizedLine, ...siblingBase.reencoded.map(c => c.detail),
+  const acknowledgment = [...valueConfirmations, ...resizedLine, ...reencodedSiblings.map(c => c.detail),
     ...(gapsChanged ? optionGaps.map(d => optionGapCardWords(labelOf(d.optionId), d.mechanisms)) : []), ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue,
     ...((f) => (f !== undefined ? { committedFigure: f } : {}))(committedFigureOf(plan.graph, t.optionId, t.factorId, t.modelValue)) })
@@ -1624,7 +1674,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
       analysisGraphHash: plan.analysisGraphHash, persistedRowId: committed.persisted_row_id,
-      modelVersionReceipt: receipt, linksResized, reencodedSiblings: siblingBase.reencoded };
+      modelVersionReceipt: receipt, linksResized, reencodedSiblings: reencodedSiblings };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }

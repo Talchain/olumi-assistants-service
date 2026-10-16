@@ -9,9 +9,13 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import * as writer from '../factor-value-edit.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../dispatch.js';
-import { applyApprovedFactorValues } from '../option-intervention-edit.js';
+import { applyApprovedFactorValues, executeOptionInterventionBatch, prepareOptionInterventionBatchExecution,
+  type OptionInterventionBatchExecutionInput } from '../option-intervention-edit.js';
 import { createAgentCapabilities } from '../../agent-lane/runtime/agent-capabilities.js';
-import { ProposalStore } from '../../agent-lane/proposal.js';
+import { createProposal, ProposalStore } from '../../agent-lane/proposal.js';
+import { getSessionStore } from '../../session/index.js';
+import { runWithApprovedLevelAdoptions } from '../../agent-lane/approved-adoption-context.js';
+import { optionGapsHeld } from '../../agent-lane/unmodelled-mechanisms.js';
 
 type Dict = Record<string, unknown>;
 type Graph = { nodes: (Dict & { id: string; kind: string })[]; edges: Dict[]; options?: Dict[] };
@@ -19,7 +23,8 @@ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/s5-starting-figures/s
 const PROPOSAL = JSON.parse(readFileSync(new URL('./fixtures/s5-starting-figures/served-proposal.json', import.meta.url), 'utf8'));
 const SCENARIO_ID = 'e09de419-4d76-405e-b47e-d2fce5568c31';
 const HLT = { factor_id: 'hiring_lead_time', value: 3, unit: 'months', author: 'model_proposed' as const };
-const TLH = { factor_id: 'tech_lead_hires', value: 0, unit: 'hires', author: 'model_proposed' as const };
+// DL16:52: the supported card keeps the option's held entity unit; the proposer change belongs to Founder.
+const TLH = { factor_id: 'tech_lead_hires', value: 0, unit: 'tech leads', author: 'model_proposed' as const };
 let persisted: Graph = structuredClone(SERVED);
 const rows = new Map<string, { id: string; write: SessionTurnWrite }>();
 const cold = (): Graph => JSON.parse(JSON.stringify(persisted));
@@ -181,7 +186,7 @@ describe('#3299 reviewer probes', () => {
     persisted = projectGraphForPersistence(persisted) as Graph;
     await expectRefusedNothingWritten([HLT, { ...TLH, unit: 'GBP' }], TLH.factor_id);
   });
-  it.each(['hires', 'GBP'])('shared preparation for %s checks the complete card without mutating or persisting its base', async unit => {
+  it.each(['tech leads', 'GBP'])('shared preparation for %s checks the complete card without mutating or persisting its base', async unit => {
     const before = cold();
     const supplied = structuredClone(before);
     const result = await applyApprovedFactorValues(supplied as never, [
@@ -277,17 +282,23 @@ describe('#3299 reviewer probes', () => {
     }
   });
   // (g) served card end to end
-  it('g1: served card via authoriseChange: one commit, both adopted, 1 tech lead, readback agrees, may_run', async () => {
+  it('g1: supported replacement — served card offers 0 tech leads in the held unit → saves the complete card', async () => {
+    const heldUnitProposal = structuredClone(PROPOSAL);
+    heldUnitProposal.operations.find((op: { path: string }) => op.path === TLH.factor_id).value.unit = TLH.unit;
+    heldUnitProposal.public_label = heldUnitProposal.public_label.replace('Tech lead hires = 0 hires', 'Tech lead hires = 0 tech leads');
+    expect(heldUnitProposal.public_label).toContain('Tech lead hires = 0 tech leads');
+    const replacement = createProposal(heldUnitProposal);
+    expect(replacement.proposal_id).not.toBe(PROPOSAL.proposal_id);
     const proposals = new ProposalStore();
-    proposals.put(structuredClone(PROPOSAL));
+    proposals.put(replacement);
     const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: cold(), graph_hash: hash() } }),
       proposals, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-review-card') });
     const result = await caps.authoriseChange({ scenario_id: SCENARIO_ID, authenticated_user_id: null,
-      request_id: 'req-review-card', user_text: 'x', user_turn_text: 'Yes, use those.' } as never, { proposal_id: PROPOSAL.proposal_id });
-    expect(result.ok).toBe(true);
+      request_id: 'req-review-card', user_text: 'x', user_turn_text: 'Yes, use those.' } as never, { proposal_id: replacement.proposal_id });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(rows.size).toBe(1);
     const rb = cold();
-    for (const [id, raw, unit] of [['hiring_lead_time', 3, 'months'], ['tech_lead_hires', 0, 'hires']] as const) {
+    for (const [id, raw, unit] of [['hiring_lead_time', 3, 'months'], ['tech_lead_hires', 0, 'tech leads']] as const) {
       const os = node(rb, id).observed_state as Dict;
       expect(os.raw_value).toBe(raw); expect(os.unit).toBe(unit); expect(os.source).toBe('user_assumption');
     }
@@ -310,5 +321,120 @@ describe('#3299 reviewer probes', () => {
     await door([HLT, TLH], base, 'prop-dup#levels');
     expect(rows.size).toBe(1);
     expect(cold()).toEqual(afterFirst);
+  });
+});
+
+describe('#3305 B1 counted-entity identity through shared preparation', () => {
+  it.each([
+    ['held hiring entity unchanged', 'tech leads', 'tech leads', 'Tech lead hires', 'applied'],
+    ['unattested generic hiring relabel is refused', 'tech leads', 'hires', 'Tech lead hires', 'refused'],
+    ['same counted entity', 'tickets', 'tickets', 'Tickets handled', 'applied'],
+    ['different counted entities', 'tickets', 'hires', 'Tickets handled', 'refused'],
+    ['unproved ASCII entity', 'cafe workloads', 'hires', 'Cafe workloads', 'refused'],
+    ['same unfamiliar unit', 'café workloads', 'café workloads', 'Café workloads', 'applied'],
+    ['wrong family', 'tech leads', 'GBP', 'Tech lead hires', 'refused'],
+    ['period retained', 'tech leads per month', 'hires', 'Tech lead hires', 'refused'],
+    ['denominator retained', 'tech leads per project', 'hires', 'Tech lead hires', 'refused'],
+    ['currency scale retained', '£k', 'GBP', 'Service cost', 'refused'],
+    ['canonical currency alias', 'GBP', '£', 'Service cost', 'applied'],
+  ])('%s', async (_name, heldUnit, declaredUnit, label, expected) => {
+    node(persisted, TLH.factor_id).label = label;
+    tlCell(persisted).unit = heldUnit;
+    persisted = projectGraphForPersistence(persisted) as Graph;
+    const before = cold();
+    const supplied = structuredClone(before);
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No network in the B1 native probe'));
+    const result = await applyApprovedFactorValues(supplied as never, [
+      { factorId: TLH.factor_id, value: 0, unit: declaredUnit, adopted: true },
+    ], [], { scenarioId: SCENARIO_ID, turnId: 'b1-counted-entity', requestId: 'req-b1', stage: 'frame' });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(rows.size).toBe(0);
+    expect(supplied).toEqual(before);
+    expect(cold()).toEqual(before);
+    expect(result.kind).toBe(expected);
+    if (expected === 'refused') {
+      expect(result).toEqual({ kind: 'refused', reason: 'value_scope_mismatch', valueIndex: 0 });
+    } else {
+      if (result.kind !== 'applied') throw new Error('expected valid preparation');
+      const prepared = result.graph as Graph;
+      expect(tlCell(prepared)).toEqual({ ...tlCell(before), cap: 10 });
+      expect((node(prepared, TLH.factor_id).observed_state as Dict).unit).toBe(declaredUnit);
+    }
+  });
+});
+
+describe('#3305 whole native preparation for Founder', () => {
+  const request = (): OptionInterventionBatchExecutionInput => ({
+    scenarioId: SCENARIO_ID, turnId: 'whole-starting-card', requestId: 'req-whole-card', requestHash: 'sha256:whole-card',
+    expectedGraphHash: hash(), stage: 'frame', freshness: 'none', hasExistingAnalysis: false,
+    values: [HLT, TLH].map(v => ({ factorId: v.factor_id, value: v.value, unit: v.unit, adopted: true })),
+    targets: [{ optionId: 'hire_a_tech_lead', factorId: TLH.factor_id, modelValue: 0.2,
+      figure: { raw_value: 2, cap: 10, unit: TLH.unit } }],
+    optionGaps: [{ optionId: 'hire_a_tech_lead', mechanisms: ['Onboarding support'] }], expectedLinks: [],
+  });
+  const inAdoption = <T,>(input: OptionInterventionBatchExecutionInput, work: () => Promise<T>) => runWithApprovedLevelAdoptions(
+    input.targets.map(t => ({ scenarioId: input.scenarioId, proposalId: input.turnId,
+      optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue })), work);
+  afterEach(() => vi.useRealTimers());
+
+  it('the native commit door calls the complete preparation once and owns no copied value/gap preparation', () => {
+    const source = readFileSync(new URL('../option-intervention-edit.ts', import.meta.url), 'utf8');
+    const execution = source.slice(source.indexOf('export async function executeOptionInterventionBatch('),
+      source.indexOf('\n/**\n * The level read'));
+    expect(execution).toContain('commitDirectAnswer(');
+    expect([...execution.matchAll(/\bprepareOptionInterventionBatchExecution\(/g)]).toHaveLength(1);
+    expect(execution).not.toContain('applyApprovedFactorValues(');
+    expect(execution).not.toContain('applyOptionGapDeclarations(');
+  });
+
+  it('prepares values + levels + gaps with no I/O; execution saves that exact complete candidate once', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-16T17:00:00.000Z'));
+    const before = cold();
+    const supplied = structuredClone(before);
+    const input = request();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No network in preparation'));
+    const prepared = await inAdoption(input, () => prepareOptionInterventionBatchExecution(input, supplied));
+    expect(prepared.kind).toBe('candidate');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(rows.size).toBe(0);
+    expect(supplied).toEqual(before);
+    expect(cold()).toEqual(before);
+    if (prepared.kind !== 'candidate') throw new Error('expected complete candidate');
+    const candidate = prepared.graph as Graph;
+    expect((node(candidate, HLT.factor_id).observed_state as Dict).raw_value).toBe(3);
+    expect((node(candidate, TLH.factor_id).observed_state as Dict).raw_value).toBe(0);
+    expect(tlCell(candidate).raw_value).toBe(2);
+    expect(tlCell(candidate).unit).toBe(TLH.unit);
+    expect(tlCell(candidate).source).toBe('cee_hypothesis');
+    expect(optionGapsHeld(candidate, input.optionGaps!)).toBe(true);
+    const committed = await inAdoption(input, () => executeOptionInterventionBatch(input, getSessionStore()));
+    expect(committed.kind).toBe('committed');
+    expect(rows.size).toBe(1);
+    expect(cold()).toEqual(candidate);
+    expect([...rows.values()][0]!.write.graph).toEqual(candidate);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['value', 'level', 'gap', 'links', 'stale'] as const)('the same complete %s refusal reaches preparation and execution with zero partial writes', async fault => {
+    const input = request();
+    const candidate = fault === 'value' ? { ...input, values: [input.values![0]!, { ...input.values![1]!, unit: 'GBP' }] }
+      : fault === 'level' ? { ...input, targets: [{ ...input.targets[0]!, modelValue: 0.3 }] }
+      : fault === 'gap' ? { ...input, optionGaps: [{ optionId: 'keep_current_team', mechanisms: ['Onboarding support'] }] }
+      : fault === 'links' ? { ...input, expectedLinks: ['keep_current_team::tech_lead_hires'] }
+      : { ...input, expectedGraphHash: '0000000000000000' };
+    const reasons = { value: 'value_scope_mismatch', level: 'level_frame_mismatch', gap: 'option_gap_without_level_anchor',
+      links: 'links_mismatch', stale: 'stale_graph' };
+    const before = cold();
+    const supplied = structuredClone(before);
+    const prepared = await inAdoption(candidate, () => prepareOptionInterventionBatchExecution(candidate, supplied));
+    expect(prepared.kind).toBe('refused');
+    if (prepared.kind !== 'refused') throw new Error('expected whole-candidate refusal');
+    expect(prepared.reason).toBe(reasons[fault]);
+    const committed = await inAdoption(candidate, () => executeOptionInterventionBatch(candidate, getSessionStore()));
+    expect(committed).toEqual(prepared);
+    expect(rows.size).toBe(0);
+    expect(cold()).toEqual(before);
+    expect(supplied).toEqual(before);
   });
 });
