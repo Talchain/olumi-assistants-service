@@ -1,4 +1,5 @@
 import { readRunAnalysisOccurrence } from '../orchestrator-v5/types/handler-fact.js';
+import { readRunEvidence, runEvidenceWireOf } from '../orchestrator-v5/agent-lane/run-evidence.js';
 import { runLeaderOf, type RunLeader } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { GOAL_FIGURES_HORIZON_NOT_TESTED } from '../orchestrator/context/option-result-source.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../orchestrator-v5/goal-target/zero-spread-horizon-line.js';
@@ -231,7 +232,7 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const fact = input.runFact != null && !isAnalysisRefusalFact(input.runFact as HandlerFact) ? input.runFact : null;
   const occurrence = fact === null ? undefined : readRunAnalysisOccurrence(fact);
   const question = fact === null ? undefined : deriveRunQuestion({ storedResult: fact.result,
-    runEvidence: { runId: fact.result.run_id, inputSnapshot: fact.result.input_snapshot, occurrence } });
+    runEvidence: readRunEvidence(runEvidenceWireOf(fact)) });
   const recordedRevision = occurrence?.evaluated_scenario_revision ?? null;
   const runRevision = recordedRevision !== null && occurrence?.fact_row_id === input.derivation?.selected_fact_row_id
     && recordedRevision === input.derivation?.run_revision?.value

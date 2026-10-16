@@ -7,7 +7,7 @@ import {
   GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_SHARE_APPROXIMATION,
 } from '../../orchestrator/context/option-result-source.js';
-import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver, STATIC_MODEL_SCOPE_NOTE } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 import { jointWithheldLine } from './goal-targets-joint.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
@@ -313,17 +313,19 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
     .filter(([optionId]) => !goalChanceRangeBarredForAgent(result, optionId)));
   const display = pointDisplayForAgent(result, ranges);
   const hasChance = Object.keys(display).length > 0;
+  const hasRange = Object.keys(rangeDisplay).length > 0;
   const target = rec(agentLicenceRecordOf(result)?.target);
   const shareWords = hasChance && typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit) && isShareCalendarDate(target.by_date)
     ? shareGoalChanceWords(target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) : undefined;
   // ⭐ Recovery Batch C (rulings 18–22): the licence's own words for what this chance is a chance OF, when it carries them.
-  const chanceWords = shareWords ?? (hasChance ? licence?.chance_words : undefined);
+  const carriesStaticQuestion = hasRange && licence?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
+  const chanceWords = shareWords ?? ((hasChance || carriesStaticQuestion) ? licence?.chance_words : undefined);
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
-  const hasRange = Object.keys(rangeDisplay).length > 0;
   const horizon = warningsOf(result).filter((w) => (w.code === GOAL_HORIZON_NOT_TESTED || w.code === GOAL_HORIZON_STEADY_ATTESTED));
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
   return {
-    ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
+    ...((hasChance || carriesStaticQuestion) ? { goal_chance_licence: licence } : {}),
+    ...(hasChance ? { goal_chance_display: display } : {}),
     ...(chanceWords !== undefined ? { goal_chance_words: chanceWords } : {}),
     // ⭐ S7 B2 (SESSION4 05:29Z): a range shown without a point is still a chance on screen, so its disclosures travel with it.
     ...(licence?.notes !== undefined && (hasChance || hasRange || licence.targets !== undefined) ? { goal_chance_notes: licence.notes } : {}),

@@ -50,6 +50,34 @@ describe('one evaluated question on canonical Results and run facts', () => {
     expect(withReadTimeHorizonGate(run, graph())).toBe(run);
   });
 
+  it('range-only Results and coaching retain the recorded quantity instead of saying the whole dated goal was calculated', () => {
+    const run = savedRun();
+    Object.assign(run.enrichment.inference_warnings[0]!, { chance_words: 'chance of ‘Weekly support capacity’ being at least 100 tickets per week' });
+    (run.enrichment.inference_warnings as Record<string, unknown>[]).push({ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Recorded range.',
+      option_ids: ['hire'], range_by_option: { hire: { low_pct: 20, high_pct: 50, low_rounding: 'whole', high_rounding: 'whole',
+        kind: 'link_strength', from: 'hire', to: 'capacity', among: 'unsized_links' } } });
+    const cell = project(run).options.find(o => o.option_id === 'hire')!.cell;
+    expect(cell.kind).toBe('range');
+    if (cell.kind !== 'range') throw new Error('expected the recorded fixture range');
+    expect(cell.face).toContain('being at least 100 tickets per week');
+    expect(cell.face).toContain(STATIC_MODEL_SCOPE_NOTE);
+    expect(cell.face).not.toContain('by March');
+    const facts = runFactsOf(run, graph(), true);
+    expect(facts.chances.goal_chance_words).toBe('chance of ‘Weekly support capacity’ being at least 100 tickets per week');
+    expect(facts.question?.scope.status).toBe('supported_static');
+  });
+
+  it('a retained zero baseline stays zero; conversion is checked on the recorded target scale', () => {
+    const run = savedRun(), zero = graph();
+    Object.assign(zero.nodes[0]!.observed_state!, { value: 0, raw_value: 0, baseline: 0 });
+    Object.assign(run.input_snapshot.factors[0]!, { raw: 0, encoded: 0 });
+    run.enrichment.inference_warnings[0]!.sent_threshold.baseline = 0;
+    run.input_snapshot.sent_digest = sentDigest({ graph: zero, goal_node_id: 'capacity', options: [{ id: 'hire' }, { id: 'hold', is_baseline: true }] });
+    expect(project(run, zero).question?.calculated?.baseline).toBe(0);
+    expect(project(run, zero).question?.scope.status).toBe('supported_static');
+    expect(withReadTimeHorizonGate(run, zero)).toBe(run);
+  });
+
   it.each(['missing_baseline', 'wrong_frame', 'missing_digest'] as const)('a static caveat cannot license %s on Results or readback', mutant => {
     const run = savedRun();
     if (mutant === 'missing_baseline') run.input_snapshot.factors = [];

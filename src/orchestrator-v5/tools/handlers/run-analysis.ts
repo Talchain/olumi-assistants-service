@@ -2969,7 +2969,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Recovery Batch C: the rows the engine was SENT (strict as stated) and the stored rows (role, stated comparator),
       // so a several-targets joint names exactly the conditions ISL counted on each draw.
       // G: the persisted brief as this Run read it (absent → null: an unread source is never "no contradiction").
-      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, perLimit: constraintVerdict.perLimit,
+      { storedConstraints: storedGoalRows, sentConstraints: plotPayload.goal_constraints, sentRun, evaluatedQuestionScope, perLimit: constraintVerdict.perLimit,
         brief: snapshot.briefText ?? null, effects_timing: effectsTiming });
     response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.

@@ -1,4 +1,5 @@
-import { assessRunQuestionReadiness, type RunQuestionScope } from '../../orchestrator-v5/goal-target/run-question.js';
+import type { RunQuestionScope } from '../../orchestrator-v5/goal-target/run-question.js';
+import { assessRunQuestionReadiness } from '../../orchestrator-v5/goal-target/run-question-scope.js';
 /**
  * Shared graph adapters for analysis_ready.
  *

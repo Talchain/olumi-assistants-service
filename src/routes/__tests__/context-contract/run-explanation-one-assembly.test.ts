@@ -5,6 +5,26 @@ import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { capture, captureDir, findState, expected, keysDeep, object, valueAt, seedOf, type Turn, type Witness } from './provider-harness.js';
 
 describe('Explain uses the canonical assembly (serialized provider bytes)', () => {
+  it('S3: the selected Run evidence reaches the serialized interpreter body; absent history is not filled from the graph', async () => {
+    const w = await capture('Run-explanation', 'run2', { readSnapshot: async snapshot => {
+      const g = object(snapshot.graph), nodes = Array.isArray(g.nodes) ? g.nodes.map(object) : [];
+      const goal = nodes.find(n => n.kind === 'goal')!;
+      return { ...snapshot, analysis_run_evidence: { run_id: object(object(snapshot.canonical_analysis_view).run).run_id,
+        input_snapshot: { snapshot_version: 1, sent_digest: 'a'.repeat(64), goal: { node_id: goal.id, target_raw: goal.goal_threshold_raw,
+          unit: goal.goal_threshold_unit, frame: goal.goal_threshold_frame }, options: [], factors: [] },
+        occurrence: { fact_row_id: 'S3-selected-row', evaluated_scenario_revision: expected.synthetic_run_revision } } };
+    } });
+    const q = object(object(findState(w.calls[0].payloads).run_facts).question);
+    expect(q.run_id).toBe(w.seed.captured_execution_run_id);
+    expect(q.evaluated_scenario_revision).toBe(expected.synthetic_run_revision);
+    expect(q.fact_row_id).toBe('S3-selected-row');
+    expect(q.asked).toBeNull();
+    expect(object(q.scope).can_show_goal_chance).toBe(false);
+    expect(object(q.evidence).missing).toContain('historical_model_at_evaluated_revision');
+    expect(w.calls[0].sentBody).toContain('S3-selected-row');
+  }, 60000);
+
+
   it('run2 Explain minus its licensed section equals ordinary converse state', async () => {
     const ordinary = await capture('ordinary-converse', 'run2');
     const explain = await capture('Run-explanation', 'run2');

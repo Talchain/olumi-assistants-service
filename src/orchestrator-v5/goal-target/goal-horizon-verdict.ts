@@ -1,5 +1,6 @@
 /** Science §(ad): one typed horizon verdict for the producer and every reply surface. */
-import { recordedStaticLevelEvidence, STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
+import { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
+import { deriveRunQuestion } from './run-question.js';
 import { goalTargetBasisIn, humanEffectsTimingOf, optionLeadWords, optionTimingAtPeriodEnd, referenceWords } from '../statement-door/fields/goal-timing.js';
 import { periodEndWords } from './goal-target-basis.js';
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
@@ -177,7 +178,7 @@ export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, sto
   const block = recordOf(result);
   if (block === undefined) return result;
   // A request-bound static calculation makes no claim about the held date. A caveat alone cannot grant this permission.
-  if (recordedStaticLevelEvidence(block) !== undefined) return result;
+  if (deriveRunQuestion({ storedResult: block }).scope.status === 'supported_static') return result;
   const enrichment = recordOf(block.enrichment);
   const envelope = enrichment ?? block;
   const warnings = [block.inference_warnings, enrichment?.inference_warnings]

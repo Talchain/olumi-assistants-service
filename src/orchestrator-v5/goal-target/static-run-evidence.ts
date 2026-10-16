@@ -29,7 +29,10 @@ export function recordedStaticLevelEvidence(result: unknown): {
   const bases = factors.filter(f => f?.factor_id === goal.node_id);
   const base = bases.length === 1 ? bases[0] : undefined;
   if (!finite(base?.raw) || !finite(base.encoded) || base.unit !== goal.unit || !close(base.encoded, sent.baseline)
-    || base.raw === 0 || base.encoded === 0 || !close(sent.value, target.value * base.encoded / base.raw)) return undefined;
+) return undefined;
+  const scale = base.raw !== 0 ? base.encoded / base.raw : target.value !== 0 ? sent.value / target.value : undefined;
+  if (scale === undefined ? (base.encoded !== 0 || sent.value !== 0)
+    : scale <= 0 || !close(base.encoded, base.raw * scale) || !close(sent.value, target.value * scale)) return undefined;
   const options = Array.isArray(snapshot.options) ? snapshot.options.map(rec) : [];
   const ids = options.flatMap(o => typeof o?.option_id === 'string' ? [o.option_id] : []);
   if (!Array.isArray(licence.option_ids) || ids.length === 0 || new Set(ids).size !== ids.length
@@ -54,7 +57,10 @@ export function readDispatchedGoalThreshold(request: unknown, goalId: unknown): 
   if (root !== undefined && (!finite(root) || (node !== undefined && root !== node))) return undefined;
   const value = root ?? node;
   if (!finite(value)) return undefined;
-  if (goal.goal_threshold_frame === 'delta') return { value, field: 'goal_threshold', frame: 'delta' };
+  // ISL _resolve_change_threshold: a change quantity’s absolute target is the paired change from its defined zero.
+  if (goal.goal_threshold_frame === 'delta' || (goal.goal_threshold_frame === 'change_abs' && goal.quantity_frame === 'change')) {
+    return { value, field: 'goal_threshold', frame: 'delta' };
+  }
   const observed = rec(goal.observed_state);
   if (goal.goal_threshold_frame !== 'level' || !finite(observed?.baseline)) return undefined;
   const baselines = (Array.isArray(sent.options) ? sent.options.map(rec) : []).filter(o => o?.is_baseline === true);

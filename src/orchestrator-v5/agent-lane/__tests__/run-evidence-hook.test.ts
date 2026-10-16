@@ -79,6 +79,8 @@ describe('§9: the selected Run’s own evidence reaches runFactsOf as state.run
     const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: GRAPH, graph_hash: hashOf(GRAPH), ...analysis } }), new ProposalStore());
     const st = await caps.getCanonicalState({ scenario_id: SCENARIO, authenticated_user_id: 'u', request_id: 'r' } as never);
     expect(st.ok).toBe(true);
+    expect(st).toMatchObject({ run_facts: { question: { run_id: 'run-44', fact_row_id: 'row-44', evaluated_scenario_revision: 44 } } });
+    expect(analysis.canonical_analysis_view).toMatchObject({ question: { run_id: 'run-44', fact_row_id: 'row-44', evaluated_scenario_revision: 44 } });
     expect(runFactsCalls.length, 'run facts were built from this read').toBeGreaterThan(0);
     const state = runFactsCalls.at(-1)![3] as { runEvidence?: unknown };
     expect(state.runEvidence).toEqual({ runId: 'run-44', inputSnapshot: SNAPSHOT, occurrence: { fact_row_id: 'row-44', evaluated_scenario_revision: 44 } });

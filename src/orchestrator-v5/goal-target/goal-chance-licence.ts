@@ -1,7 +1,10 @@
 import { goalHorizonVerdict } from './goal-horizon-verdict.js';
 import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
-import { assessRunQuestionScope } from './run-question.js';
-export { deriveRunQuestion, assessRunQuestionScope, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
+import { goalKindOf } from './goal-kind.js';
+import { assessEvaluatedQuestionScope } from './run-question-scope.js';
+import type { RunQuestionScope } from './run-question.js';
+import { sentDigest } from '../tools/handlers/run-input-digest.js';
+export { deriveRunQuestion, assessRunQuestionReadiness, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 export { STATIC_MODEL_SCOPE_NOTE, STATIC_INPUTS_NOT_RECORDED } from './static-run-evidence.js';
 import { runOmittedRisks } from '../agent-lane/unsized-risk.js';
 import { shareGoalChanceWords } from './share-goal-chance-words.js';
@@ -277,6 +280,8 @@ export interface GoalChanceLicence {
 
 /** What a Run SENT and STORED for its limits and targets, so the several-targets block names exactly the engine's conditions. */
 export interface GoalChanceConstraintInputs {
+  /** The handler’s one evaluation, bound to the final request; never persisted or borrowed across requests. */
+  readonly evaluatedQuestionScope?: RunQuestionScope;
   readonly perLimit?: readonly PerLimitVerdict[];
   readonly storedConstraints?: unknown;
   readonly sentConstraints?: unknown;
@@ -514,19 +519,28 @@ function goalTargetStateOf(
     estimates: NO_ESTIMATES, estimateOnly: false, jointEstimates: undefined, primaryRefused: true });
 }
 
+/** The one evaluated scope assessment, using the existing goal-kind owner and the shared thin kernel. */
+export function assessRunQuestionScope(savedGraph: unknown, dispatchedRequest: unknown, goalId: string): RunQuestionScope {
+  const scope = assessEvaluatedQuestionScope(savedGraph, dispatchedRequest, goalId, goalKindOf(savedGraph) === 'level');
+  return isRec(dispatchedRequest) ? { ...scope, dispatched_input_digest: sentDigest(dispatchedRequest) } : scope;
+}
+
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
   sentThreshold?: SentGoalThreshold, horizonGraph: unknown = graph, constraints: GoalChanceConstraintInputs = {},
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
-  const evaluatedScope = typeof goalId === 'string' && constraints.sentRun !== undefined
-    ? assessRunQuestionScope(horizonGraph, constraints.sentRun, goalId) : undefined;
+  const carriedScope = constraints.evaluatedQuestionScope;
+  const evaluatedScope = carriedScope !== undefined && isRec(constraints.sentRun)
+    && carriedScope.dispatched_input_digest === sentDigest(constraints.sentRun) ? carriedScope
+    : typeof goalId === 'string' && constraints.sentRun !== undefined
+      ? assessRunQuestionScope(horizonGraph, constraints.sentRun, goalId) : undefined;
   if (evaluatedScope?.status === 'invalid') return null;
-  const staticLevel = evaluatedScope?.status === 'supported_static' && sentThreshold?.frame === 'level';
   const finalSent = sentGoalThresholdOf(undefined, undefined, goalId, undefined, constraints);
   const capturedThreshold = sentThreshold !== undefined && finalSent !== undefined
     && sentThreshold.value === finalSent.value && sentThreshold.field === finalSent.field && sentThreshold.frame === finalSent.frame
     && sentThreshold.baseline === finalSent.baseline && sentThreshold.status_quo_option_id === finalSent.status_quo_option_id;
+  const staticLevel = evaluatedScope?.status === 'supported_static' && capturedThreshold && sentThreshold?.frame === 'level';
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   const share = shareByDateGoalForChanceOf(graph);
