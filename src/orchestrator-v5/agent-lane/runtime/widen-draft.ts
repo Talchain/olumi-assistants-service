@@ -30,6 +30,14 @@ export interface WidenDraftInput {
   finalGraph?: (admitted: AdmittedModel) => FinalGraph;
   /** The build owns candidate admission, including construction context and fallback. */
   admit: (candidate: CandidateModel) => AdmittedModel;
+  /**
+   * ⭐ S1 slice 2 / A5 (DL-3 lease; S1-CALL-SITES A5): the build's OWN assembled construction input (`firstConstructInput`:
+   * the retained brief, the conversation in order with each item's speaker and source, the saved model as Olumi's record,
+   * the user's objections), present only when the build has a construction context (a revision or an explicit rebuild).
+   * Without it the widening AI saw only the brief and the draft, so a rebuild could re-add what the user had rejected
+   * (founder a4f055ce T05). Absent on initial construction: the widening input is today's, byte for byte.
+   */
+  constructionInput?: string;
   /** The options arm. Parked 8 Oct (DL 6065138437) and RESTORED on the served seam (Paul, #94 6166259456): the build
    *  sets it. Unset → an options deficiency is diagnosed and logged only. */
   optionsArm?: boolean;
@@ -235,7 +243,8 @@ export async function widenDraft(input: WidenDraftInput): Promise<WidenDraftResu
     const call = async (instructions: string, schema: Rec): Promise<unknown> => {
       calls += 1;
       const response = await input.callStructured({ model: budget.model, instructions,
-        input: JSON.stringify({ brief: input.brief, graph }), schema, max_output_tokens: budget.max_output_tokens,
+        input: JSON.stringify(input.constructionInput === undefined ? { brief: input.brief, graph }
+          : { brief: input.brief, graph, construction_context: input.constructionInput }), schema, max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort }, started + timeoutMs);
       if (response.status === 'incomplete') throw new Error('incomplete widening');
       return JSON.parse(response.text) as unknown;

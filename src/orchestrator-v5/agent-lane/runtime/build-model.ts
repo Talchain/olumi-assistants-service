@@ -2801,7 +2801,9 @@ export async function buildModelFromBrief(
       try { onDraftAdmitted(draft.graph); } catch { /* an observer never costs the build */ }
     }
   }
+  // S1 A5: a build with a construction context hands the widening calls the SAME assembled input its drafter read.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
+    ...(context === undefined ? {} : { constructionInput: firstConstructInput(brief, context) }),
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
     admit: admitWidened, optionsArm: true, risksArm: true });
   if (widened !== null) {
