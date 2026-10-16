@@ -1,6 +1,6 @@
 /** TL11:51: per-figure source is independent of field binding. Preserve the old swap/limit/MRR negatives as
  * explicit Olumi-reading cards, never original human field claims. The shared authorship owner classifies the
- * verified figure; a new Olumi estimate remains Olumi’s, including when its number occurs elsewhere.
+ * verified figure; a new Olumi estimate without a verified human figure remains Olumi’s.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -90,7 +90,7 @@ describe('one source owner; the field-binding hint never reauthors a figure', ()
 });
 
 
-it('an explicitly new Olumi estimate is not laundered into human authorship by a coincident number elsewhere', async () => {
+it('a tool flag cannot erase a verified human figure; a different field binding stays explicitly Olumi’s', async () => {
   const graph = { nodes: [{ id: 'cost', kind: 'factor', label: 'Cost estimate', observed_state: { value: 50000, unit: 'GBP/year', source: 'cee_inference' } }], edges: [] };
   const d: InternalDispatch = async path => {
     if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: 'h0' } };
@@ -101,5 +101,10 @@ it('an explicitly new Olumi estimate is not laundered into human authorship by a
     request_id: 'source', user_text: 'The separate annual spending ceiling is £90k.' },
   { assumptions: [{ factor_label: 'Cost estimate', value: 90000, unit: 'GBP/year', user_stated: false, revise: true, basis: 'A new Olumi estimate, separate from the ceiling' }] });
   expect(result.ok, JSON.stringify(result)).toBe(true);
-  expect(store.get(String(result.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'model_proposed' });
+  const proposal = store.get(String(result.proposal_id))!;
+  expect(proposal.provenance.authored_by).toBe('model_proposed');
+  expect(proposal.operations[0]!.value).toMatchObject({ authored_by: 'user_stated', confirmation: {
+    source: 'The separate annual spending ceiling is £90k.', quote: 'The separate annual spending ceiling is £90k.' } });
+  expect(result.public_label).toContain('these field bindings are Olumi’s reading');
+  expect(result.public_label).toContain('The separate annual spending ceiling is £90k.');
 });

@@ -47,8 +47,9 @@ describe('served R2: the user\'s "about 25% cheaper" on a `share (0-1)` factor',
 
   it('RED: {25, "%"} is read in the factor\'s frame — 0.25, the user\'s — and the card reads 20% → 25%, never 0.2%', async () => {
     const { r, op } = await propose(25, '%');
-    expect(op).toEqual({ value: 0.25, unit: 'share (0-1)', basis: "the team's quote", authored_by: 'user_stated' });
-    expect(r.public_label).toContain(`${LABEL}: 20% → 25% (your figure, in your words:`);
+    expect(op).toEqual({ value: 0.25, unit: 'share (0-1)', basis: "the team's quote", authored_by: 'user_stated',
+      confirmation: { source: R2.sentence, quote: R2.sentence } });
+    expect(r.public_label).toContain(`${LABEL}: 20% → 25% (Olumi’s reading of your quoted figure)`);
     expect(r.public_label).not.toContain('0.2%');
   });
 
@@ -66,7 +67,8 @@ describe('served R2: the user\'s "about 25% cheaper" on a `share (0-1)` factor',
 
   it('CONTROL: {0.25, "share (0-1)"} (the served call that saved) is unchanged', async () => {
     const { op } = await propose(0.25, 'share (0-1)');
-    expect(op).toEqual({ value: 0.25, unit: 'share (0-1)', basis: "the team's quote", authored_by: 'user_stated' });
+    expect(op).toEqual({ value: 0.25, unit: 'share (0-1)', basis: "the team's quote", authored_by: 'user_stated',
+      confirmation: { source: R2.sentence, quote: R2.sentence } });
   });
 });
 
@@ -113,9 +115,12 @@ describe('R2: the approval of the user\'s own figure says it is theirs', () => {
       const { r, op, chip } = await propose(value, unit);
       expect(op?.authored_by, `${value} ${unit}`).toBe('user_stated');
       expect(chip?.detail, `${value} ${unit}`).toBe(r.public_label);
-      expect(chip?.detail).toContain('(your figure, in your words:');
+      expect(chip?.detail).toContain(R2.sentence);
+      expect(chip?.detail).toContain('Your figures stay yours');
+      expect(chip?.detail).toContain('these field bindings are Olumi’s reading');
       expect(chip?.label).not.toMatch(/starting|assumption/i);
-      expect(`${chip?.label} ${chip?.detail}`).not.toMatch(/olumi/i);
+      expect(`${chip?.label} ${chip?.detail}`).not.toMatch(/Olumi[’']s estimate/i);
+      expect(op?.confirmation).toEqual({ source: R2.sentence, quote: R2.sentence });
     }
   });
 

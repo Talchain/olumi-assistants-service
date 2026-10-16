@@ -25,14 +25,16 @@ async function propose(said: string, value: number, unit: string, edit: (g: Json
 describe('the user\'s "25% cheaper" lands first time, as theirs, in the factor\'s own frame (served 2366977 r1)', () => {
   it('RED: {25, "%"} on a proportion factor → 0.25 in its frame, the user\'s, and the card reads 20% → 25% with their sentence', async () => {
     const { r, op } = await propose(EDIT, 25, '%');
-    expect(op).toEqual({ value: 0.25, unit: 'proportion', basis: "the team's quote", authored_by: 'user_stated' });
-    expect(r.public_label).toContain(`GCP saving rate: 20% \u2192 25% (your figure, in your words: "${EDIT}")`);
+    expect(op).toEqual({ value: 0.25, unit: 'proportion', basis: "the team's quote", authored_by: 'user_stated',
+      confirmation: { source: EDIT, quote: EDIT } });
+    expect(r.public_label).toContain(`GCP saving rate: 20% \u2192 25% (Olumi’s reading of your quoted figure)`);
     expect(r.public_label).not.toContain('0.2%');
   });
 
   it('CONTROL: {0.25, "proportion"} (the served-proven write) is unchanged', async () => {
     const { op } = await propose(EDIT, 0.25, 'proportion');
-    expect(op).toEqual({ value: 0.25, unit: 'proportion', basis: "the team's quote", authored_by: 'user_stated' });
+    expect(op).toEqual({ value: 0.25, unit: 'proportion', basis: "the team's quote", authored_by: 'user_stated',
+      confirmation: { source: EDIT, quote: EDIT } });
   });
 
   it('AIQ A: {0.5, "%"} on a 0–1 factor is ambiguous (0.5% or 50%?) → nothing proposed, the user asked', async () => {
@@ -54,8 +56,7 @@ describe('the user\'s "25% cheaper" lands first time, as theirs, in the factor\'
     for (const said of [`${EDIT.slice(0, -1)}, though support would be 10% more expensive.`,
       "Our team's quote shows GCP would be about 25% cheaper than AWS for us. Separately, churn is 3% higher this quarter."]) {
       const { r, op } = await propose(said, 25, '%');
-      // Proposed and saveable, never refused. WHOSE it is with two figures written stays the #2235 ruling (the strict
-      // matcher decides; "GCP" is shared with rival labels here, so Olumi's, said): an under-claim, AIQ's call to widen.
+      // The other figure never creates a direction refusal; source and uncertain binding remain separate.
       expect(op, said).toMatchObject({ value: 0.25, unit: 'proportion' });
       expect(r.direction_conflict, said).toBeUndefined();
     }
@@ -67,10 +68,11 @@ describe('the user\'s "25% cheaper" lands first time, as theirs, in the factor\'
     expect(r.direction_conflict).toEqual([{ label: 'GCP saving rate' }]);
   });
 
-  it('CONTROL: a comparison whose factor concept cannot be read gives no credit → Olumi\'s, said', async () => {
+  it('CONTROL: an unreadable factor concept keeps the human point and explicitly flags Olumi’s binding', async () => {
     const { r, op } = await propose(EDIT, 25, '%', (g) => { g.nodes.find((n: Json) => n.id === 'gcp_saving_rate').label = 'GCP cost ratio'; }, 'GCP cost ratio');
-    expect(op).toMatchObject({ value: 0.25, unit: 'proportion', authored_by: 'model_proposed' });
-    expect(r.not_the_users_figure).toBeDefined();
+    expect(op).toMatchObject({ value: 0.25, unit: 'proportion', authored_by: 'user_stated', confirmation: { source: EDIT, quote: EDIT } });
+    expect(r.public_label).toContain('these field bindings are Olumi’s reading');
+    expect(r.public_label).toContain(EDIT);
   });
 
   it('CONTROL: a level, not a comparison ("Our GCP saving rate is 25%.") keeps today\'s credit', async () => {

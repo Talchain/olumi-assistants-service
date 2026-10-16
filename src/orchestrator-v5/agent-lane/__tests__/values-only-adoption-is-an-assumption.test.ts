@@ -269,7 +269,7 @@ describe('a collaborator changes the same target after our write', () => {
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: 'Monthly budget', value: ours, basis: 'the user said it', revise: true }] } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange({ ...ctx, typed_approval_of: String(proposed.proposal_id) }, { proposal_id: String(proposed.proposal_id) });
     expect(p.byId().monthly_budget.observed_state?.value, 'PRECONDITION: theirs is what the model holds').toBe(theirs);
     expect(applied.changed_since_by_another_writer).toEqual([{ factor: 'Monthly budget', saved: ours, now: theirs }]);
   });

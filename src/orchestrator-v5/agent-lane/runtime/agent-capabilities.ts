@@ -7386,25 +7386,23 @@ export function createAgentCapabilities(
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
-        // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
-        // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
-        // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
+        // These existing field helpers decide only whether the proposed binding needs disclosure on its card.
+        // The shared source owner below decides whose figure it is, independently of that field reading.
         const ownerScope = newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), []);
-        // A comparison whose direction or concept cannot be read credits nobody: Olumi's, and said (AIQ 5907227964).
+        // A comparison whose direction or concept cannot be read needs an explicit Olumi-binding disclosure.
         const readable = !shareFactor || relativeFigureAgainst(node.label, ctx.user_text, Number(a.value) * 100) !== 'unknown';
         const writtenAbout = readable && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, ownerScope);
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
-        // The shared authorship owner reads the verified quantity evidence; a deliberately new Olumi estimate stays Olumi's.
+        // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
         const explicitEstimate = a.user_stated === false && a.revise !== true;
-        const writtenFigure = a.user_stated !== false && figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text);
+        const writtenFigure = figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text);
         const origin = statementOrigin(writtenFigure,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
-        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown',
-          conflict_fields: ['figure_absent'], detail: UNKNOWN_ORIGIN_DETAIL };
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // The existing matcher is only a disclosure hint for the binding; it no longer decides the figure's author.
-        const quote = origin === 'human' && !writtenAbout
+        const quote = origin === 'human' && (!writtenAbout || a.user_stated === false)
           ? [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
             .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? ''
           : null;

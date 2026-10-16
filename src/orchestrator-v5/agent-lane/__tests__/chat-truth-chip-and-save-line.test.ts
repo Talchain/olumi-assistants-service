@@ -205,8 +205,13 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
       { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'original figure', user_stated }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const proposal = store.get(String(r.proposal_id))!;
-    expect(proposal.provenance.authored_by).toBe('user_stated');
+    expect(proposal.provenance.authored_by).toBe(user_stated ? 'user_stated' : 'model_proposed');
     expect(proposal.operations.map(op => (op.value as { authored_by: string }).authored_by)).toEqual(['user_stated']);
+    if (!user_stated) {
+      expect(r.public_label).toContain(ctx.user_text);
+      expect(r.public_label).toContain('these field bindings are Olumi’s reading');
+      expect(proposal.operations[0]!.value).toMatchObject({ confirmation: { source: ctx.user_text, quote: ctx.user_text } });
+    }
     expect(JSON.stringify(graph)).toBe(before);
   });
 

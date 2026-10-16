@@ -153,7 +153,7 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     const ctx = { ...a.ctx, user_turn_text: text, user_text_complete: false, verified_user_messages: [text] };
     const p = await a.caps.proposeAssumptions(ctx, { assumptions: [
       { user_stated: true, factor_label: 'Senior engineer annual salary', value: 90000, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Blue quote', revise: true },
-      { user_stated: true, factor_label: 'Junior engineer annual salary', value: 60000, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Green quote', revise: true },
+      { user_stated: false, factor_label: 'Junior engineer annual salary', value: 60000, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Green quote', revise: true },
       { user_stated: true, factor_label: 'Annual salary spend', value: 140000, unit: 'GBP/year', basis: 'Olumi’s binding of the Orange quote', revise: true },
     ] });
     expect(p.ok, JSON.stringify(p)).toBe(true); expect(p.not_the_users_figure).toBeUndefined();

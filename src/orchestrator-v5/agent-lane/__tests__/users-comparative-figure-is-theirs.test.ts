@@ -57,7 +57,10 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
       expect(r.assumptions).toEqual([expect.objectContaining({ factor: label, your_figure: true })]);
       expect(r.note).not.toMatch(ASSUMPTION_WORDS);
       // The approval shows the factor, before → after in the user's units, and their own sentence, verbatim (AIQ 5902884139).
-      expect(r.public_label).toContain(`${label}: ${rep === 'r0' ? '15%' : '20%'} \u2192 25% (your figure, in your words: "${EDIT}")`);
+      expect(r.public_label).toContain(EDIT);
+      expect(r.public_label).toContain('Your figures stay yours');
+      expect(store.get(r.proposal_id)!.provenance.authored_by).toBe('model_proposed');
+      expect(r.public_label).toContain(`${label}: ${rep === 'r0' ? '15%' : '20%'} \u2192 25% (Olumi’s reading of your quoted figure)`);
     });
   }
 
@@ -77,20 +80,26 @@ describe('the user\'s own comparative figure is theirs, on an approval that show
     expect(r.public_label).not.toContain('in your words');
   });
 
-  it('CONTROL: two figures written → the strict matcher decides, as before (no pairing credited by the card)', async () => {
+  it('CONTROL: two supplied figures retain human source while the proposed pairing stays Olumi’s', async () => {
     const { caps, store } = setup(F.r0);
     const r = await caps.proposeAssumptions(ctxSaying("Our team's quote shows GCP would be about 25% cheaper than AWS, and we'd move 60% of workloads."),
       { assumptions: [{ user_stated: true, factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote', revise: true }] }) as R;
-    expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
-    expect(r.public_label).not.toContain('in your words');
+    expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('user_stated');
+    expect(store.get(r.proposal_id)!.provenance.authored_by).toBe('model_proposed');
+    expect(r.public_label).toContain('these field bindings are Olumi’s reading');
+    expect(store.get(r.proposal_id)!.operations[0]!.value).toMatchObject({ confirmation: {
+      source: "Our team's quote shows GCP would be about 25% cheaper than AWS, and we'd move 60% of workloads." } });
   });
 
-  it('CONTROL: a new value Olumi offers (no revision) is Olumi\'s even when the figure is written', async () => {
+  it('CONTROL: an absent baseline never erases supplied source; the new field binding remains Olumi’s', async () => {
     const g = JSON.parse(JSON.stringify(F.r0)) as Json;
     delete (g.nodes as Json[]).find((n) => n.id === 'gcp_unit_cost_discount')!.observed_state;
     const { caps, store } = setup(g);
     const r = await caps.proposeAssumptions(ctxSaying(EDIT), { assumptions: [{ user_stated: true, factor_label: 'GCP unit-cost discount', value: 0.25, unit: 'share', basis: 'the quote' }] }) as R;
-    expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('model_proposed');
+    expect(authorOf(store, r.proposal_id, 'gcp_unit_cost_discount')).toBe('user_stated');
+    expect(store.get(r.proposal_id)!.provenance.authored_by).toBe('model_proposed');
+    expect(store.get(r.proposal_id)!.operations[0]!.value).toMatchObject({ confirmation: { source: EDIT, quote: EDIT } });
+    expect(r.public_label).toContain('these field bindings are Olumi’s reading');
   });
 });
 
