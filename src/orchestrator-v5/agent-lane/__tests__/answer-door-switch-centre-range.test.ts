@@ -181,7 +181,7 @@ describe('THE RANGE READING ON A PER-ONE LINK (T1b F2, served g1-2633t d3 turn 4
   });
 });
 
-describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their range lands whichever side they write it, beside a range in another unit', () => {
+describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their range lands beside a range in another unit; a range written first is asked', () => {
   /** The same press as MUST-FIX: card, approval, and the real writer storing the user's figure with its range. */
   async function landsWithRange(said: string) {
     const graph = graphOf(D1[0]);
@@ -198,17 +198,16 @@ describe('ITEM 3 2a (TL 16:18Z / AIE 16 Oct): the user\'s figure inside their ra
       natural_effect: { amount: 150, per_source_change: 1, per_source_change_unit: 'switch',
         stated_range: { low: 80, high: 250, text: 'between 80 and 250', end: 'centre' } } });
   }
-  it('⭐ the range written FIRST, the figure after ("between 80 and 250 …, probably about 150")', async () => {
-    await landsWithRange('The starter tier would win between 80 and 250 new subscribers, probably about 150.');
-  });
-  it('⭐ "somewhere between 80 and 250 …, call it 150"', async () => {
-    await landsWithRange('The starter tier would win somewhere between 80 and 250 new subscribers, call it 150.');
-  });
   it('⭐ a money range in the SAME sentence is a separate claim ("…, and it would cost £2k to £3k a month to run")', async () => {
     await landsWithRange('The starter tier would win about 150 new subscribers, between 80 and 250, and it would cost £2k to £3k a month to run.');
   });
   it.each([
-    ['a range BEFORE the figure in another clause (", and"; no unit word, so only the clause rule tells it apart)', 'Last year it was between 80 and 250, and the starter tier would win about 150 new subscribers.'],
+    // ⛔ R3 (BUDDY-A B1 ×2; TL 17:18Z split-after-two): no host reading binds a range written BEFORE the figure to its claim;
+    // until Olumi's card proposes a reading (AIE-gated), it is asked, never stored with a borrowed range.
+    ['the range written FIRST, the figure after (until the card)', 'The starter tier would win between 80 and 250 new subscribers, probably about 150.'],
+    ['"somewhere between 80 and 250 …, call it 150" (until the card)', 'The starter tier would win somewhere between 80 and 250 new subscribers, call it 150.'],
+    ['a range BEFORE the figure in another clause', 'Last year it was between 80 and 250, and the starter tier would win about 150 new subscribers.'],
+    ['BUDDY-A R2: an earlier claim\'s range after a source word', 'We discussed the starter tier — earlier campaigns won between 80 and 250 new subscribers — the starter tier would win about 150 new subscribers.'],
     ['a second range of the same quantity, the range first', 'The starter tier would win between 80 and 250 new subscribers, or 100-300 in a good year, probably about 150.'],
     ['a range in another unit written first, and no range of its own', 'Between 1 and 4 months after launch, the starter tier would win about 150 new subscribers.'],
     // ⛔ BUDDY-A #3311 B1: a range stated for ANOTHER claim, whose words never name the starter tier, is never this link's.
