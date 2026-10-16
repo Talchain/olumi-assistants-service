@@ -347,6 +347,32 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(b.assistant_text).toContain(line.chance);
   });
 
+  it.each([
+    ['Paul said, I supplied 99 links.', 'I supplied 99 links.'],
+    ['You wrote: I supplied 6 values.', 'I supplied 6 values.'],
+    ['When you give 3 values, Olumi estimates 2 links.', 'Olumi estimates 2 links.'],
+  ])('current-claim scope on the route, saved answer and replay: %s', async (nonClaim, falseCurrent) => {
+    const line = estimateScreenLine();
+    const licence = analysisResult.enrichment.inference_warnings[0];
+    licence.olumi_estimate_value_count = 0; // An explicit authored record, never inferred from today's graph.
+    expect(licence.olumi_estimate_link_count).toBe(1);
+    expect(licence.olumi_estimate_value_count).toBe(0);
+    const b = await turn(run(`${line.chance}\n\n${nonClaim} ${falseCurrent}`), 'Run it');
+    const saved = [...rows.values()].find(row => row.assistant_message === b.assistant_text);
+    expect(saved, 'the real append seam retains exactly the wire answer').toBeDefined();
+    expect(b.assistant_text).toContain(nonClaim);
+    // The same words inside reported speech are kept; the separate performed claim is removed.
+    expect(b.assistant_text.split(falseCurrent)).toHaveLength(2);
+    expect(b.assistant_text).toContain(line.chance);
+    expect(saved!.assistant_message).toBe(b.assistant_text);
+    const callsBefore = vi.mocked(fetch).mock.calls.length;
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: lastTurnPayload });
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json()._agent.replayed).toBe(true);
+    expect(replay.json().assistant_text).toBe(b.assistant_text);
+    expect(vi.mocked(fetch).mock.calls.length).toBe(callsBefore);
+  });
+
   it.each(['run', 'follow-up', 'added=0'] as const)('r10 %s: qualified points are labelled on wire, storage and replay', async kind => {
     const line = estimateScreenLine();
     const bare = kind === 'follow-up' ? 'The recorded chance for Raise to £59 is 67%.' : '‘Raise to £59’: about 67% in this model.';
