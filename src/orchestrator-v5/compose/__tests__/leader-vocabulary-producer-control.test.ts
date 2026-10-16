@@ -50,20 +50,18 @@
  * residue there. What this file removes is the excuse for missing a string THE
  * REPO ITSELF WRITES.
  */
-import { describe, it, expect } from 'vitest';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { describe,expect,it } from 'vitest';
 
-import {
-  composeExplainResultsFallback,
-  composeWhatWouldFlipFallback,
-} from '../../tools/handlers/explanation-fallback.js';
 import type { AnalysisProjectionSummary } from '../../context/projection-summaries.js';
 import {
-  textAssertsLeadingOption,
-  textNamesLeadingOption,
+composeExplainResultsFallback,
+composeWhatWouldFlipFallback,
+} from '../../tools/handlers/explanation-fallback.js';
+import {
+textAssertsLeadingOption,
+textNamesLeadingOption,
 } from '../leading-option-egress-guard.js';
-import { tryRunComparisonGate } from '../../routing/run-comparison-gate.js';
-import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
+
 
 /**
  * The branch space of `composeRobustnessVerdict`, which both fallbacks route
@@ -325,22 +323,9 @@ describe('PRODUCER CONTROL — the enforcement scanner sees the repo\'s own temp
  */
 describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
   /** The two option labels the fixture injects. Nothing else names an option. */
-  const OPTION_LABELS = ['Standardise on MacBook Pro', 'Standardise on Dell XPS'] as const;
 
-  function envelope(
-    options: ReadonlyArray<{ id: string; label: string; win: number }>,
-    band: string,
-  ): V2RunResponseEnvelope {
-    return {
-      analysis_status: 'completed',
-      results: options.map((o) => ({
-        option_id: o.id,
-        option_label: o.label,
-        win_probability: o.win,
-      })),
-      robustness_synthesis: { overall_assessment: band },
-    } as unknown as V2RunResponseEnvelope;
-  }
+
+
 
   /**
    * How a run's claim-safety verdict is recorded on the persisted fact — the
@@ -348,8 +333,8 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
    * the legacy shape (every run persisted before #710) and reaches `false`
    * through the reader's fail-closed default.
    */
-  type VerdictShape = 'permitted' | 'withheld' | 'unstamped';
-  const VERDICT_SHAPES = ['permitted', 'withheld', 'unstamped'] as const;
+
+
 
   /**
    * `hash` is explicit (2026-09-06): the gate answers `same_inputs` on two
@@ -357,31 +342,7 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
    * The prior and current envelopes differ in band and probabilities — a
    * model that changed between the runs — so they carry distinct hashes.
    */
-  function runFact(
-    env: V2RunResponseEnvelope,
-    shape: VerdictShape,
-    computedAt: string,
-    hash: string,
-  ): HandlerFact {
-    return {
-      fact_type: 'run_analysis',
-      noop: false,
-      result: {
-        enrichment: env,
-        computed_at: computedAt,
-        graph_hash_at_run: hash,
-        ...(shape === 'unstamped'
-          ? {}
-          : {
-              constraint_verdict: {
-                may_name_leading_option: shape === 'permitted',
-                constraint_verdict_state:
-                  shape === 'permitted' ? 'evaluated_feasible' : 'evaluated_infeasible',
-              },
-            }),
-      },
-    } as unknown as HandlerFact;
-  }
+
 
   /**
    * The gate's branch space for LEADER-DESIGNATING prose, enumerated from the
@@ -392,81 +353,13 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
    * `MARGIN_EPSILON_PP` is 0.5 in `coaching/compare-runs.ts`, so these gaps are
    * chosen to land unambiguously either side of it.
    */
-  const ORDERING = [
-    { name: 'changed', currentTop: 1 },
-    { name: 'unchanged', currentTop: 0 },
-  ] as const;
 
-  const MARGIN = [
-    { name: 'widened', top: 0.7, runner: 0.3 },
-    { name: 'narrowed', top: 0.55, runner: 0.45 },
-    { name: 'unchanged', top: 0.62, runner: 0.38 },
-  ] as const;
 
-  interface ComparisonSample {
-    readonly branch: string;
-    readonly text: string;
-  }
 
-  function everyComparisonOutput(): ComparisonSample[] {
-    const out: ComparisonSample[] = [];
-    // Prior run: MacBook Pro ahead by 24pp, band 'low'.
-    const priorEnv = envelope(
-      [
-        { id: 'a', label: OPTION_LABELS[0], win: 0.62 },
-        { id: 'b', label: OPTION_LABELS[1], win: 0.38 },
-      ],
-      'low',
-    );
-    for (const prior of VERDICT_SHAPES) {
-      for (const current of VERDICT_SHAPES) {
-        for (const order of ORDERING) {
-          for (const margin of MARGIN) {
-            const topLabel = OPTION_LABELS[order.currentTop];
-            const runnerLabel = OPTION_LABELS[order.currentTop === 0 ? 1 : 0];
-            const currentEnv = envelope(
-              [
-                { id: order.currentTop === 0 ? 'a' : 'b', label: topLabel, win: margin.top },
-                {
-                  id: order.currentTop === 0 ? 'b' : 'a',
-                  label: runnerLabel,
-                  win: margin.runner,
-                },
-              ],
-              'high',
-            );
-            const outcome = tryRunComparisonGate({
-              message: 'What changed?',
-              // Newest-first, per the loader convention the pair selector relies on.
-              priorFacts: [
-                runFact(currentEnv, current, '2026-06-07T00:00:00.000Z', 'h-current'),
-                runFact(priorEnv, prior, '2026-06-06T00:00:00.000Z', 'h-prior'),
-              ],
-              freshness: 'fresh',
-              mayNameLeadingOption: true,
-            });
-            // THROW, not `expect`. This runs at COLLECT time, and a
-            // collect-time `expect` is the shape that makes a suite report a
-            // smaller run as green (CLAUDE.md trap 2b). An explicit Error kills
-            // the file loudly and names the branch that stopped comparing.
-            if (!outcome.matched || outcome.mode !== 'compared') {
-              throw new Error(
-                `fixture stopped producing a comparison at ${prior}/${current}/${order.name}/` +
-                  `margin-${margin.name} — every assertion in this file would be vacuous. ` +
-                  `matched=${outcome.matched}` +
-                  (outcome.matched ? ` mode=${outcome.mode}` : ` reason=${outcome.reason}`),
-              );
-            }
-            out.push({
-              branch: `${prior}/${current}/${order.name}/margin-${margin.name}`,
-              text: outcome.assistant_text,
-            });
-          }
-        }
-      }
-    }
-    return out;
-  }
+
+
+
+
 
   /**
    * Split prose into INDEPENDENT CLAUSES — sentences, then coordinated halves.
@@ -475,99 +368,23 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
    * and ${current} scores highest now." is ONE sentence carrying TWO claims, and the
    * second one saturating the scan is exactly how the first stayed invisible.
    */
-  function independentClauses(text: string): string[] {
-    const out: string[] = [];
-    for (const sentence of text.match(/[^.!?]+[.!?]*/g) ?? [text]) {
-      for (const clause of sentence.split(/,\s+(?:and|but|while|whereas)\s+|;\s+/)) {
-        const trimmed = clause.trim();
-        if (trimmed.length > 0) out.push(trimmed);
-      }
-    }
-    return out;
-  }
 
-  const namesAnOption = (clause: string): boolean =>
-    OPTION_LABELS.some((label) => clause.includes(label));
 
-  const samples = everyComparisonOutput();
 
-  const optionNamingClauses = samples.flatMap((s) =>
-    independentClauses(s.text)
-      .filter(namesAnOption)
-      .map((clause) => ({ branch: s.branch, clause })),
-  );
 
-  it('drives the gate across the FULL permission x ordering x margin space', () => {
-    // Non-vacuity for the enumeration itself: an empty or collapsed sweep would
-    // make every assertion below pass by testing nothing.
-    expect(samples).toHaveLength(
-      VERDICT_SHAPES.length * VERDICT_SHAPES.length * ORDERING.length * MARGIN.length,
-    );
-    for (const s of samples) {
-      expect(s.text.length, `${s.branch} produced empty prose`).toBeGreaterThan(40);
-    }
-  });
 
-  it('the fixture actually produces leader-naming prose to measure', () => {
-    // Trap #13 — an absence assertion must first prove it can see a presence.
-    // If the gate stopped naming options at all, the per-clause assertion below
-    // would pass on an empty list. Shapes are counted with the labels blanked,
-    // so this counts DISTINCT TEMPLATES rather than fixture permutations.
-    const shapes = new Set(
-      optionNamingClauses.map(({ clause }) =>
-        OPTION_LABELS.reduce((acc, label) => acc.split(label).join('<OPTION>'), clause),
-      ),
-    );
-    expect(
-      shapes.size,
-      `distinct leader-clause shapes found:\n  ${[...shapes].join('\n  ')}`,
-    ).toBeGreaterThanOrEqual(4);
-  });
 
-  it('EVERY clause that names an option is SEEN by the enforcement scanner', () => {
-    const unseen = optionNamingClauses
-      .filter(({ clause }) => !textAssertsLeadingOption(clause))
-      .map(({ branch, clause }) => `composeComparison @ ${branch}\n      "${clause}"`);
 
-    expect(
-      unseen,
-      'A clause emitted by `composeComparison` (routing/run-comparison-gate.ts) ' +
-        'designates a leading option in prose the ENFORCEMENT scanner cannot see. ' +
-        'Add the phrasing to LEADER_CLAIM_PATTERNS ' +
-        '(compose/leading-option-egress-guard.ts) — do NOT relax this test. The ' +
-        'enforcing consumers decide REPLACE-vs-APPEND on whether they can see a ' +
-        'claim, so a clause they cannot see is a leader claim that ships beside ' +
-        'the disclosure denying it.',
-    ).toEqual([]);
-  });
 
-  it('EVERY clause that names an option is SEEN by the ALARM too', () => {
-    // The two readers are deliberately different (the enforcer carves out
-    // "leads to" / "team leads"), and BOTH consume this gate's output: the
-    // egress guard scans `assistant_text` with the alarm's wide reader, and
-    // `withheld-history-redaction.ts` reads the same prose back as prior-turn
-    // context on a later withheld turn. Asserting only one leaves the other
-    // free to drift.
-    const unseen = optionNamingClauses
-      .filter(({ clause }) => !textNamesLeadingOption(clause))
-      .map(({ branch, clause }) => `composeComparison @ ${branch}\n      "${clause}"`);
 
-    expect(unseen, 'A leader clause is invisible to the ALARM vocabulary.').toEqual([]);
-  });
 
-  it('MUTATION SENTINEL: the fully-withheld arms name NO option at all', () => {
-    // Proves the clause filter DISCRIMINATES rather than matching everything —
-    // and re-pins, from this file's angle, that the withheld substitutions do
-    // not leak a label. If this ever goes red the assertions above are
-    // measuring the wrong thing and their greens are worthless.
-    const withheldBranches = optionNamingClauses.filter(({ branch }) =>
-      /^(?:withheld|unstamped)\/(?:withheld|unstamped)\//.test(branch),
-    );
-    expect(
-      withheldBranches.map(({ branch, clause }) => `${branch}: "${clause}"`),
-      'a both-withheld arm named an option',
-    ).toEqual([]);
-  });
+
+
+
+
+
+
+
 
   it('MUTATION SENTINEL: the leader-FREE sentences are NOT seen', () => {
     // The other half of discrimination: the band shift and the follow-up ship

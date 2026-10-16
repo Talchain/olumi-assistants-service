@@ -465,17 +465,8 @@ export const AI_TASK_LIFECYCLE: Readonly<
     state: 'standalone_route',
     note: 'POST /assist/explain-diff calls getAdapter(explain_diff).',
   },
-  orchestrator: {
-    executable: true,
-    state: 'live_router',
-    note: 'V5 routing resolves the executable model with task id orchestrator.',
-  },
-  routing: {
-    executable: false,
-    state: 'display_only',
-    executableTask: 'orchestrator',
-    note: 'PMS prompt/display name; its modelConfig/default is not consumed by the call.',
-  },
+  orchestrator: { executable: false, state: 'inert_compatibility', note: 'C1 removed the conventional producer; retained only as a compatibility task name.' },
+  routing: { executable: false, state: 'inert_compatibility', note: 'C1 removed the conventional producer; retained only as a compatibility task name.' },
   repair_graph: {
     executable: false,
     state: 'inert_compatibility',
@@ -496,12 +487,7 @@ export const AI_TASK_LIFECYCLE: Readonly<
     state: 'live_router',
     note: 'Pass-2 validation is enabled by default and resolves validate_graph.',
   },
-  m2_graph_review: {
-    executable: false,
-    state: 'feature_gated',
-    gate: 'CEE_V6_DUAL_DRAFT_ENABLED + provisioned prompt + explicit CEE_MODEL_M2_REVIEW',
-    note: 'Code path exists but remains inert unless every activation gate passes.',
-  },
+  m2_graph_review: { executable: false, state: 'inert_compatibility', note: 'C1 removed the conventional producer; retained only as a compatibility task name.' },
   draft_quality_review: {
     executable: true,
     state: 'live_router',
@@ -528,12 +514,7 @@ export const AI_TASK_LIFECYCLE: Readonly<
     note:
       'When its explicit experiment gate is enabled, decision review fans out four provider-specific code-constant Anthropic calls.',
   },
-  readiness_value_estimate: {
-    executable: true,
-    state: 'dedicated_adapter',
-    note:
-      'The readiness value-batch estimate producer calls the shared Anthropic chat boundary with its code-constant prompt and structured-output schema. Reached on a readiness turn only when the value-preserving repair path found nothing AND at least VALUE_BATCH_MIN_CELLS settable cells are open, so a below-floor turn makes no call at all.',
-  },
+  readiness_value_estimate: { executable: false, state: 'inert_compatibility', note: 'C1 removed the conventional producer; retained only as a compatibility task name.' },
   option_factor_map: {
     executable: true,
     state: 'dedicated_adapter',
@@ -549,15 +530,12 @@ export type RuntimeAiTaskId =
   | 'critique_graph'
   | 'decision_review'
   | 'validate_graph'
-  | 'orchestrator'
   | 'clarify_brief'
   | 'explain_diff'
   | 'extraction'
   | 'rolling_summary'
   | 'decision_review_decompose'
-  | 'readiness_value_estimate'
   | 'option_factor_map'
-  | 'm2_graph_review'
   | 'draft_quality_review';
 
 export interface RuntimeAiTaskAuthority {
@@ -589,8 +567,7 @@ export interface RuntimeAiTaskAuthority {
 }
 
 /**
- * The bounded runtime map: only actual LLM call tasks plus the separately
- * gated M2 path. Exact prompt bytes/version/hash remain runtime facts exposed
+ * The bounded runtime map: only remaining LLM call tasks after C1. Exact prompt bytes/version/hash remain runtime facts exposed
  * by prompt metadata; this map pins which authority must supply them.
  */
 export const RUNTIME_AI_TASK_AUTHORITY = {
@@ -675,17 +652,6 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     fallback: 'checked-in draft_quality_review prompt; every failure ships the draft unjudged',
     promotionGate: 'none_no_real_pack',
   },
-  orchestrator: {
-    hasExecutablePath: true,
-    modelAuthority: 'router_task_chain',
-    checkedInModel: TASK_MODEL_DEFAULTS.orchestrator,
-    promptAuthority: 'routing_snapshot_or_checked_in_default',
-    promptTask: 'routing',
-    promptIdentity: 'runtime_source_version_hash',
-    structuredContract: 'Olumi action tool schema + routing validator',
-    fallback: 'checked-in routing prompt snapshot and registered orchestrator model',
-    promotionGate: 'none_no_real_pack',
-  },
   clarify_brief: {
     hasExecutablePath: true,
     modelAuthority: 'router_env_or_global_fallback',
@@ -750,34 +716,6 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     promotionGate: 'none_no_real_pack',
   },
   /**
-   * ⚠ THE ONLY DEDICATED CHAIN WITH NO CHECKED-IN MODEL OF ITS OWN, AND THE ROW
-   * SAYS SO RATHER THAN INVENTING ONE.
-   *
-   * `anthropicValueEstimateCall` passes NO explicit model, so
-   * `chatWithAnthropic` resolves `LLM_MODEL -> FALLBACK_ANTHROPIC_MODEL`. That
-   * is byte-for-byte what the route-v2 call site it replaced did, so recording
-   * a dedicated model id here would describe behaviour this code does not have.
-   * The consequence is real and is the reason it is written down: if `LLM_MODEL`
-   * names a non-Anthropic model the call fails closed at the boundary with
-   * MODEL_PROVIDER_MISMATCH and the readiness turn degrades to the per-cell
-   * chip — the same provider-by-deployment-accident posture explain_diff was
-   * corrected out of, one level down. Giving this task its own env key and
-   * checked-in default is a BEHAVIOUR change and belongs in its own lane.
-   */
-  readiness_value_estimate: {
-    hasExecutablePath: true,
-    modelAuthority: 'dedicated_anthropic_chain',
-    checkedInModel: null,
-    promptAuthority: 'code_constant',
-    promptTask: null,
-    promptIdentity: 'code_hash',
-    structuredContract:
-      'VALUE_ESTIMATE_OUTPUT_SCHEMA (Anthropic Structured Outputs) + a strict Zod re-parse that requires declined_reason on a null value, and an identity filter to the cells asked',
-    fallback:
-      'LLM_MODEL then FALLBACK_ANTHROPIC_MODEL; a non-Anthropic assignment fails before the shared network boundary and the readiness turn degrades to the per-cell chip',
-    promotionGate: 'none_no_real_pack',
-  },
-  /**
    * \u26a0 THE SECOND DEDICATED CHAIN WITH NO CHECKED-IN MODEL OF ITS OWN, and
    * the row says so for the same reason `readiness_value_estimate` does.
    *
@@ -802,17 +740,6 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
       'OPTION_FACTOR_MAP_OUTPUT_SCHEMA (Anthropic Structured Outputs) + a strict Zod re-parse that requires declined_reason on an empty factor list, and an identity filter to the options asked and the factors offered',
     fallback:
       'LLM_MODEL then FALLBACK_ANTHROPIC_MODEL; a non-Anthropic assignment fails before the shared network boundary and the draft proceeds unchanged through the connectivity repair',
-    promotionGate: 'none_no_real_pack',
-  },
-  m2_graph_review: {
-    hasExecutablePath: true,
-    modelAuthority: 'router_task_chain',
-    checkedInModel: TASK_MODEL_DEFAULTS.m2_graph_review,
-    promptAuthority: 'pms_or_checked_in_default',
-    promptTask: 'm2_graph_review',
-    promptIdentity: 'runtime_source_version_hash',
-    structuredContract: 'M2 outputSchema + deterministic review parser',
-    fallback: 'inert unless feature, prompt, explicit model and budget gates all pass',
     promotionGate: 'none_no_real_pack',
   },
 } as const satisfies Readonly<

@@ -55,16 +55,15 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import {
-  normaliseOptionLabel,
-  findCollidingOptionLabel,
-  resolveOptionEffectWrite,
+findCollidingOptionLabel,
+normaliseOptionLabel,
+resolveOptionEffectWrite,
 } from '../option-effect-write.js';
-import { composeDuplicateOptionLabelResponse } from '../../compose/duplicate-option-label-response.js';
-import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
-import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+
+import { GraphV3,type GraphV3T } from '../../../schemas/cee-v3.js';
 
 interface Witness {
   readonly ids: {
@@ -152,130 +151,9 @@ describe('duplicate option label — the escape exit', () => {
     });
   });
 
-  describe('the copy — every constraint the three rejected exits violated', () => {
-    it('names the colliding label EXACTLY ONCE and offers the PROVEN escape', () => {
-      const resp = composeDuplicateOptionLabelResponse({
-        collidingLabel: LBL,
-        collidingCount: 2,
-        stage: 'frame',
-      });
-      const text = resp.assistant_text ?? '';
-      expect(text.split(LBL)).toHaveLength(2); // one occurrence => two split parts
-      // ⚠ DELETE, NOT RENAME — bound to the affordance that is actually LIVE in
-      // the UI at the deployed tip. Rename is fully built there but dark
-      // (`InspectorRouter` never passes `onLabelChange`; `setLabel` authority is
-      // hardcoded 'disabled'), so naming it would replace this dead end with a
-      // new one. If this assertion is ever flipped back to 'rename', the UI half
-      // must be verified live FIRST.
-      expect(text.toLowerCase()).toContain('press delete');
-    });
 
-    it('a three-way collision still quotes the label exactly once', () => {
-      const resp = composeDuplicateOptionLabelResponse({
-        collidingLabel: LBL,
-        collidingCount: 3,
-        stage: 'frame',
-      });
-      expect((resp.assistant_text ?? '').split(LBL)).toHaveLength(2);
-    });
 
-    it('carries no node id and no "Pick one below" — the copy contract, and the dead promise', () => {
-      const resp = composeDuplicateOptionLabelResponse({
-        collidingLabel: LBL,
-        collidingCount: 2,
-        stage: 'frame',
-      });
-      const text = resp.assistant_text ?? '';
-      expect(text).not.toContain('Pick one below');
-      expect(text).not.toMatch(/\b(?:opt|fac)_[a-z0-9]/i);
-      expect(text).not.toContain(SRC);
-      expect(text).not.toContain('dupe0001');
-    });
 
-    it('survives the shipped egress detector — including an ADVERSARIAL label', () => {
-      // The sibling composer's spec screens its own output; this one must too,
-      // and it carries a sharper risk: the label is LLM-authored and is
-      // interpolated VERBATIM. A drafter that mints an option called
-      // "nothing changed" would otherwise trip the detector at egress, where
-      // the guard replaces the whole response.
-      expect(
-        findForbiddenPhraseHit(
-          composeDuplicateOptionLabelResponse({
-            collidingLabel: LBL,
-            collidingCount: 2,
-            stage: 'frame',
-          }).assistant_text ?? '',
-        ),
-      ).toBeNull();
-
-      const adversarial = composeDuplicateOptionLabelResponse({
-        collidingLabel: 'nothing changed',
-        collidingCount: 2,
-        stage: 'frame',
-      }).assistant_text ?? '';
-      // ⚠ RECORDED, NOT ASSERTED CLEAN. The detector DOES fire on this label,
-      // and that is a property of the user's own model content, not of this
-      // copy — the egress guard is the right place for it and it preserves the
-      // chip set (there is none here) while neutralising the text. Pinned so
-      // the behaviour is visible rather than discovered on the wire.
-      expect(findForbiddenPhraseHit(adversarial)).not.toBeNull();
-    });
-
-    it('offers NO chip, because every label-spelled chip re-enters the loop', () => {
-      const resp = composeDuplicateOptionLabelResponse({
-        collidingLabel: LBL,
-        collidingCount: 2,
-        stage: 'frame',
-      });
-      expect(resp.suggested_actions ?? []).toHaveLength(0);
-    });
-  });
-
-  describe('THE LOOP — every route the product offers must lead somewhere', () => {
-    it('emits no route that re-enters the collision, and the rename route resolves it', () => {
-      const g = addOption(base(), SRC, 'dupe0001', LBL);
-      assertCollisionPrecondition(g, LBL, 2);
-
-      const r = run(g, W.wire.t4_chip_message);
-      expect(r).toMatchObject({ kind: 'label_collision' });
-
-      const resp = composeDuplicateOptionLabelResponse({
-        collidingLabel: LBL,
-        collidingCount: 2,
-        stage: 'frame',
-      });
-
-      // (a) NO offered route can re-enter the collision, because none is offered.
-      for (const action of resp.suggested_actions ?? []) {
-        expect(run(g, action.message ?? '')).not.toMatchObject({ kind: 'label_collision' });
-      }
-
-      // (b) THE NAMED ROUTE WORKS. Removing one of the two — the action the copy
-      //     names, and the one verified reachable in the UI — clears the
-      //     collision, and the SAME message then writes, bound to the surviving
-      //     id BY IDENTITY.
-      const raw = JSON.parse(JSON.stringify(g)) as {
-        nodes: Array<Record<string, unknown>>;
-        edges: Array<Record<string, unknown>>;
-      };
-      raw.nodes = raw.nodes.filter((n) => n['id'] !== 'dupe0001');
-      raw.edges = raw.edges.filter((e) => e['from'] !== 'dupe0001' && e['to'] !== 'dupe0001');
-      const after = run(GraphV3.parse(raw), W.wire.t4_chip_message);
-      expect(after).toMatchObject({ kind: 'write', optionId: SRC, factorId: W.ids.factor_id });
-
-      // (c) AND THE TWIN THE COPY NO LONGER CLAIMS: renaming would ALSO clear
-      //     it. Kept so that wiring rename in the UI is a copy change here and
-      //     nothing more — the resolver already supports it.
-      const renamed = JSON.parse(JSON.stringify(g)) as { nodes: Array<Record<string, unknown>> };
-      const target = renamed.nodes.find((n) => n['id'] === 'dupe0001');
-      expect(target).toBeDefined();
-      target!['label'] = 'Subcontract via a second courier partner';
-      expect(run(GraphV3.parse(renamed), W.wire.t4_chip_message)).toMatchObject({
-        kind: 'write',
-        optionId: SRC,
-      });
-    });
-  });
 
   describe('OPPOSITE-DIRECTION TWINS — over-suppression here is worse than the dead end', () => {
     it('the captured near-duplicate pair still writes, to DISTINCT ids', () => {

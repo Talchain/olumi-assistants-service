@@ -33,15 +33,15 @@
  * DO NOT "fix" the fixture to make the arithmetic line up.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 import { enrichGraphWithFactorsAsync } from '../../src/cee/factor-extraction/enricher.js';
-import { transformGraphToV3 } from '../../src/cee/transforms/schema-v3.js';
-import type { GraphT } from '../../src/schemas/graph.js';
 import { buildAnalysisReadyPayload } from '../../src/cee/transforms/analysis-ready.js';
+import { transformGraphToV3 } from '../../src/cee/transforms/schema-v3.js';
 import { computeStructuralReadiness } from '../../src/orchestrator/tools/analysis-ready-helper.js';
-import { extractAnalysisReady } from '../../src/orchestrator/tools/draft-graph.js';
+import type { GraphT } from '../../src/schemas/graph.js';
+
 import { AnalysisReadyPayload } from '../../src/schemas/analysis-ready.js';
-import type { OptionV3T, GraphV3T, NodeV3T } from '../../src/schemas/cee-v3.js';
+import type { GraphV3T,NodeV3T,OptionV3T } from '../../src/schemas/cee-v3.js';
 
 // The attested goal contract — one object, used by every hop below, so the
 // tests compare against a single source of truth rather than restated literals.
@@ -181,66 +181,7 @@ describe('ROADMAP 2.315(a) — analysis_ready carries the attested raw goal trio
     });
   });
 
-  describe('hop 3: extractAnalysisReady (src/orchestrator/tools/draft-graph.ts)', () => {
-    // This hop is a NAMED-FIELD RE-PROJECTION: it rebuilds the payload key by
-    // key rather than spreading it. That is precisely the shape that silently
-    // drops additive fields, so it needs its own guard — a field added at the
-    // builder and not here would vanish on the draft path alone.
-    const pipelineBody = () => ({
-      analysis_ready: {
-        goal_node_id: 'goal_1',
-        status: 'ready',
-        options: [
-          { option_id: 'opt_1', label: 'Option A', status: 'ready', interventions: { fac_spend: 20 } },
-          { option_id: 'opt_2', label: 'Do nothing', status: 'ready', interventions: { fac_spend: 10 } },
-        ],
-        goal_threshold: ATTESTED.goal_threshold,
-        goal_threshold_raw: ATTESTED.goal_threshold_raw,
-        goal_threshold_unit: ATTESTED.goal_threshold_unit,
-        goal_threshold_cap: ATTESTED.goal_threshold_cap,
-      },
-    });
 
-    it('re-projects the attested trio VERBATIM', () => {
-      const extracted = extractAnalysisReady(pipelineBody() as Record<string, unknown>);
-      expect(extracted).toBeDefined();
-
-      const p = extracted as unknown as Record<string, unknown>;
-      expect(p.goal_threshold_raw).toBe(ATTESTED.goal_threshold_raw);
-      expect(p.goal_threshold_unit).toBe(ATTESTED.goal_threshold_unit);
-      expect(p.goal_threshold_cap).toBe(ATTESTED.goal_threshold_cap);
-      expect(p.goal_threshold).toBe(ATTESTED.goal_threshold);
-    });
-
-    it('omits the trio when upstream did not attest one', () => {
-      const body = pipelineBody() as Record<string, unknown>;
-      const ar = body.analysis_ready as Record<string, unknown>;
-      delete ar.goal_threshold_raw;
-      delete ar.goal_threshold_unit;
-      delete ar.goal_threshold_cap;
-
-      const extracted = extractAnalysisReady(body);
-      expect(extracted).toBeDefined();
-
-      // This hop's established idiom is explicit `undefined` (exactly as the
-      // pre-existing `goal_threshold`, `blockers` and `model_adjustments` keys
-      // beside it), so the KEY is present here while the VALUE is undefined.
-      // The trio matches its neighbours rather than introducing a second
-      // convention in the same object literal.
-      const p = extracted as unknown as Record<string, unknown>;
-      expect(p.goal_threshold_raw).toBeUndefined();
-      expect(p.goal_threshold_unit).toBeUndefined();
-      expect(p.goal_threshold_cap).toBeUndefined();
-
-      // What actually matters is the WIRE: JSON serialisation drops
-      // undefined-valued keys, so a consumer still sees a clean absence and
-      // can distinguish "no raw target stated" from "raw target 0".
-      const onTheWire = JSON.parse(JSON.stringify(extracted)) as Record<string, unknown>;
-      expect(onTheWire).not.toHaveProperty('goal_threshold_raw');
-      expect(onTheWire).not.toHaveProperty('goal_threshold_unit');
-      expect(onTheWire).not.toHaveProperty('goal_threshold_cap');
-    });
-  });
 
   describe('hop 4: AnalysisReadyPayload schema (src/schemas/analysis-ready.ts)', () => {
     it('declares the trio and RETAINS it through a parse', () => {
@@ -561,23 +502,5 @@ describe('ROADMAP 2.315(a) — raw is the anchor (cap and unit ride only with ra
     expect(p.goal_threshold).toBe(ATTESTED.goal_threshold);
   });
 
-  it('draft-graph re-projection (hop 3) honours the raw anchor on the same shape', () => {
-    const extracted = extractAnalysisReady({
-      analysis_ready: {
-        goal_node_id: 'goal_1',
-        status: 'ready',
-        options: [
-          { option_id: 'opt_1', label: 'Option A', status: 'ready', interventions: { fac_spend: 20 } },
-          { option_id: 'opt_2', label: 'Do nothing', status: 'ready', interventions: { fac_spend: 10 } },
-        ],
-        goal_threshold: ATTESTED.goal_threshold,
-        goal_threshold_cap: ATTESTED.goal_threshold_cap,
-        goal_threshold_unit: ATTESTED.goal_threshold_unit,
-      },
-    } as Record<string, unknown>) as unknown as Record<string, unknown>;
 
-    expect(extracted.goal_threshold_cap).toBeUndefined();
-    expect(extracted.goal_threshold_raw).toBeUndefined();
-    expect(extracted.goal_threshold).toBe(ATTESTED.goal_threshold);
-  });
 });

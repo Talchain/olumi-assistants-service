@@ -26,30 +26,23 @@
  *    inside the summary text, never on "a summary string exists".
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import {
-  assembleContextPackWithSummary,
-  CONTEXT_PACK_RECENT_TURNS_CAP,
-} from '../../context/context-pack-assembler.js';
-import type { AssembleContextPackInput } from '../../context/context-pack-assembler.js';
-import { buildUserMessage, SUMMARY_PRECEDENCE_INSTRUCTION } from '../../routing/route-with-tool-use.js';
+
+import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
-import {
-  maintainRollingSummaryForCommit,
-  resetRollingSummarySingleFlightForTests,
-} from '../capture.js';
 import type { ConversationHistoryReader } from '../capture.js';
-import { buildConversationSummarySection, loadConversationSummaryForInjection } from '../inject.js';
+import {
+maintainRollingSummaryForCommit,
+resetRollingSummarySingleFlightForTests,
+} from '../capture.js';
 import type { RollingSummaryStorePort } from '../store-adapter.js';
 import type { SummariserModel } from '../summariser.js';
-import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
 
 const SCENARIO = 'aaaaaaaa-0000-4000-8000-000000000000';
 
 /** The load-bearing early fact: stated in TURN 1, never repeated. */
-const EARLY_FACT = 'Manchester';
+
 const EARLY_FACT_SENTENCE = 'The venue must be in Manchester, that is non-negotiable.';
 
 // ---------------------------------------------------------------------------
@@ -137,26 +130,7 @@ function derivingModel(): SummariserModel {
  * hard-coding either location. If the new turn is not threaded, the old value
  * wins and the supersession assertion below goes red.
  */
-function latestConstraintModel(): SummariserModel {
-  return {
-    summarise: vi.fn(async (userMessage: string) => {
-      const matches = [
-        ...userMessage.matchAll(/\[(t\d+)\]\s*USER: ([^\n]*must be[^\n]*)/g),
-      ];
-      const latest = matches.at(-1);
-      return {
-        text: [
-          'DECISION FRAME: Choosing a venue for the product launch.',
-          latest
-            ? `CONSTRAINTS & PREFERENCES: ${latest[2]} [${latest[1]}]`
-            : 'CONSTRAINTS & PREFERENCES: (none)',
-          'RESOLVED: (none)',
-          'OPEN: (none)',
-        ].join('\n'),
-      };
-    }),
-  };
-}
+
 
 function reader(turnsNewestFirst: readonly SessionTurnWithContent[]): ConversationHistoryReader {
   return { readRecent: async () => turnsNewestFirst };
@@ -180,27 +154,7 @@ async function maintain(
 }
 
 /** Assemble the pack + the exact routing prompt, as the turn-executor does. */
-async function assembleLive(
-  turnsNewestFirst: readonly SessionTurnWithContent[],
-  store: RollingSummaryStorePort,
-  message: string,
-): Promise<{ pack: ReturnType<typeof assembleContextPackWithSummary>['contextPack']; prompt: string }> {
-  const outcome = await loadConversationSummaryForInjection({
-    scenarioId: SCENARIO,
-    windowTurnsNewestFirst: turnsNewestFirst,
-    windowDepth: CONTEXT_PACK_RECENT_TURNS_CAP,
-    summaryStore: store,
-  });
-  const input: AssembleContextPackInput = {
-    payload: makeMessagePayload({ message, scenario_id: SCENARIO }),
-    priorTurns: turnsNewestFirst,
-    priorFacts: [],
-    conversationSummary: outcome.section ?? undefined,
-    summarisedTurns: outcome.summarisedTurns,
-  };
-  const { contextPack } = assembleContextPackWithSummary(input);
-  return { pack: contextPack, prompt: buildUserMessage(contextPack, message) };
-}
+
 
 beforeEach(() => {
   resetRollingSummarySingleFlightForTests();
@@ -210,225 +164,19 @@ beforeEach(() => {
 // The cliff, and its removal
 // ---------------------------------------------------------------------------
 
-describe('S4 activation — the 5-turn cliff is closed by the rolling summary', () => {
-  it('beyond-window conversation: turn-1 fact falls off the verbatim window but arrives via the summary, disclosed', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    // cap+3 turns → exactly 3 fall off the window whatever the cap (derive-don't-mirror).
-    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
 
-    // Maintain half — the REAL input-builder feeds the full history to the
-    // summariser (regen: no prior). The deriving model can only echo the
-    // fact if the maintainer actually showed it turn 1.
-    await maintain(history, store, derivingModel());
-    expect(store.stored).not.toBeNull();
-
-    const { pack, prompt } = await assembleLive(history, store, 'So where should we hold it?');
-
-    // THE CLIFF (pre-activation this was the WHOLE story): the verbatim
-    // window does NOT carry the turn-1 fact...
-    expect(JSON.stringify(pack.conversation)).not.toContain(EARLY_FACT);
-
-    // ...but the summary section now does (QUALITY: the named value itself,
-    // not merely "a summary exists"). This line is the RED-first pivot:
-    // before the wiring the prompt contained no trace of the fact at all.
-    expect(pack.conversation_summary).toBeDefined();
-    expect(pack.conversation_summary!.text).toContain(EARLY_FACT);
-    expect(prompt).toContain(EARLY_FACT);
-
-    // Fresh summary (watermark = newest turn): not stale, no note.
-    expect(pack.conversation_summary!.stale).toBe(false);
-
-    // DISCLOSURE (#536 extension): the "N of M turns included" marker now
-    // says how many of the not-shown turns arrive as the summary.
-    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
-    expect(pack.conversation.window?.available).toBe(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
-    expect(pack.conversation.window?.summarised).toBe(3);
-
-    // The code-owned facts-beat-summary precedence instruction rides along.
-    expect(prompt).toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
-
-    // CONTEXT-FAMILY ABLATION: remove ONLY the durable summary family while
-    // keeping the same scenario, history window and user turn. The turn-1
-    // truth disappears from the exact routing prompt. This proves the memory
-    // layer contributes material context rather than decorative bytes.
-    const { contextPack: summaryAblated } = assembleContextPackWithSummary({
-      payload: makeMessagePayload({ message: 'So where should we hold it?', scenario_id: SCENARIO }),
-      priorTurns: history,
-      priorFacts: [],
-    });
-    const ablatedPrompt = buildUserMessage(summaryAblated, 'So where should we hold it?');
-    expect(ablatedPrompt).not.toContain(EARLY_FACT);
-    expect(ablatedPrompt).not.toBe(prompt);
-  });
-
-  it('a later explicit replacement supersedes the turn-1 constraint in durable memory and after reload', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    const initial = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
-    await maintain(initial, store, derivingModel());
-    expect(store.stored!.text).toContain(EARLY_FACT);
-
-    // One later turn explicitly replaces the location constraint. This is an
-    // incremental pass: the summariser sees the prior summary plus only the
-    // new turn. A retention guard that blindly resurrected the old non-empty
-    // slot would leave Manchester in the durable prompt.
-    const replacementTurnNumber = CONTEXT_PACK_RECENT_TURNS_CAP + 4;
-    const updated = [
-      turn(
-        replacementTurnNumber,
-        'The venue must be in Leeds; replace the earlier location constraint.',
-      ),
-      ...initial,
-    ];
-    await maintain(updated, store, latestConstraintModel());
-
-    const reloaded = await store.loadSummary();
-    expect(reloaded!.text).toContain('Leeds');
-    expect(reloaded!.text).not.toContain(EARLY_FACT);
-
-    const { prompt } = await assembleLive(updated, store, 'Where is the venue now?');
-    expect(prompt).toContain('Leeds');
-    expect(prompt).not.toContain(EARLY_FACT);
-  });
-
-  it('the summary is byte-bounded and passes the budget seam untouched (precedence: never trimmed)', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
-    await maintain(history, store, derivingModel());
-
-    const { pack } = await assembleLive(history, store, 'And the catering?');
-    // The budget module budgets graph/analysis only; the summary section is
-    // bounded at WRITE time (SUMMARY_HARD_CAP_CHARS) and must arrive in the
-    // pack EXACTLY as the injector renders it from the stored slots (with
-    // [t:xxxxxxxx] provenance stamps) — untrimmed by the budget seam.
-    const independentRender = buildConversationSummarySection(
-      store.stored!,
-      0,
-      CONTEXT_PACK_RECENT_TURNS_CAP,
-    );
-    expect(pack.conversation_summary!.text).toBe(independentRender.text);
-    expect(pack.conversation_summary!.text.length).toBeGreaterThan(0);
-    expect('context_budget' in pack).toBe(false);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Positive control — below the window the activation is inert
 // ---------------------------------------------------------------------------
 
-describe('S4 activation — positive control (≤ window: byte-identical, no store read)', () => {
-  it('4-turn conversation: no section, no summarised marker, no store read, prompt carries the fact verbatim', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    const history = historyNewestFirst(4);
-    await maintain(history, store, derivingModel());
-    expect(store.stored).not.toBeNull(); // the maintain half DOES run below the window
-    store.loadCalls = 0;
 
-    const { pack, prompt } = await assembleLive(history, store, 'What next?');
-
-    // Below the window every turn is verbatim — nothing to inject, and the
-    // loader must not even read the store.
-    expect(store.loadCalls).toBe(0);
-    expect('conversation_summary' in pack).toBe(false);
-    expect(pack.conversation.window).toEqual({ shown: 4, available: 4 });
-    expect(prompt).not.toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
-
-    // The fact is fully present VERBATIM (turn 1 is inside the window) —
-    // this is also the positive control proving the probe string is visible
-    // to the assertions when it genuinely reaches the prompt.
-    expect(JSON.stringify(pack.conversation)).toContain(EARLY_FACT);
-    expect(prompt).toContain(EARLY_FACT);
-  });
-
-  it('EXACTLY at the window (5 prior turns): gate holds — no store read, no section, no summarised key', async () => {
-    // Boundary pin (review gap on #551): the activation gate is `<=`, not
-    // `<`. A summary EXISTS in the store with its watermark at the newest
-    // turn, so a `<`-mutated gate would read the store and inject a fresh
-    // section end-to-end — the loadCalls / key-absence assertions below all
-    // die under that exact mutation. NOTE the marker contract: at
-    // exactly-window there is NO block in the prompt, so the window marker
-    // carries NO `summarised` key at all — `summarised: 0` is reserved for
-    // a PRESENT block that earned no coverage (floor / withheld); stamping
-    // 0 here would falsely imply a block was injected.
-    const store = new MonotonicRollingSummaryStoreFake();
-    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP);
-    await maintain(history, store, derivingModel());
-    expect(store.stored).not.toBeNull();
-    store.loadCalls = 0;
-
-    const { pack, prompt } = await assembleLive(history, store, 'What next?');
-
-    expect(store.loadCalls).toBe(0);
-    expect('conversation_summary' in pack).toBe(false);
-    expect(pack.conversation.window).toEqual({
-      shown: CONTEXT_PACK_RECENT_TURNS_CAP,
-      available: CONTEXT_PACK_RECENT_TURNS_CAP,
-    });
-    expect(JSON.stringify(pack.conversation.window)).not.toContain('summarised');
-    expect(prompt).not.toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
-    // All five turns verbatim — the turn-1 fact is present without any block.
-    expect(JSON.stringify(pack.conversation)).toContain(EARLY_FACT);
-  });
-
-  it('byte-identity: a ≤window assembly equals an assembly with no summary machinery threaded at all', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    const history = historyNewestFirst(4);
-    await maintain(history, store, derivingModel());
-
-    const { pack } = await assembleLive(history, store, 'What next?');
-    const { contextPack: bare } = assembleContextPackWithSummary({
-      payload: makeMessagePayload({ message: 'What next?', scenario_id: SCENARIO }),
-      priorTurns: history,
-      priorFacts: [],
-    });
-    expect(JSON.stringify(pack)).toBe(JSON.stringify(bare));
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Honesty at the marker when the summary earns no coverage claim
 // ---------------------------------------------------------------------------
 
-describe('S4 activation — summarised marker never overclaims', () => {
-  it('no stored summary retains the already-fetched hot window instead of losing turns 9..N', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
 
-    const { pack, prompt } = await assembleLive(history, store, 'Where were we?');
-
-    expect(pack.conversation_summary).toBeUndefined();
-    expect(pack.conversation.recent_turns).toHaveLength(history.length);
-    expect(pack.conversation.window).toMatchObject({
-      shown: history.length,
-      available: history.length,
-    });
-    expect(pack.conversation.window?.summarised).toBeUndefined();
-    expect(prompt).toContain(EARLY_FACT);
-  });
-
-  it('floor summary (model failed at bootstrap): section discloses itself, summarised is 0', async () => {
-    const store = new MonotonicRollingSummaryStoreFake();
-    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
-    const failing: SummariserModel = {
-      summarise: vi.fn(async () => {
-        throw new Error('model down');
-      }),
-    };
-    await maintain(history, store, failing);
-    expect(store.stored!.generator).toBe('floor');
-
-    const { pack } = await assembleLive(history, store, 'Where were we?');
-    expect(pack.conversation_summary).toBeDefined();
-    expect(pack.conversation_summary!.stale).toBe(true);
-    expect(pack.conversation_summary!.note).toContain('NOT yet summarised');
-    // A floor absorbed NO conversation history — claiming summarised:3
-    // would be the exact lying-coverage class this lane must not ship.
-    // Zero coverage activates the already-fetched hot-window fallback. The
-    // section remains present only to disclose that it absorbed no history.
-    expect(pack.conversation.window?.shown).toBe(history.length);
-    expect(pack.conversation.window?.available).toBe(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
-    expect(pack.conversation.window?.summarised).toBe(0);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // R-2 positive control — the shared fake's guard BITES in this suite

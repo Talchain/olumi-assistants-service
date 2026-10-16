@@ -84,12 +84,11 @@
  * not copied into this file. A fixture the author writes encodes the author's
  * model of the producer rather than the producer (trap 16-inverse).
  */
-import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { buildPostDraftNarrative } from '../post-draft-narrative.js';
+import { describe,expect,it } from 'vitest';
+
 import { deriveGoalObjectiveLabel } from '../../../cee/draft/records/objective-label.js';
-import { elideLabelAtWordBoundary, LABEL_ELISION_MARKER } from '../../../utils/label-elision.js';
-import type { GraphV3T } from '../../../orchestrator/types.js';
+import { elideLabelAtWordBoundary } from '../../../utils/label-elision.js';
 
 const MAX_GOAL_CHARS = 80;
 
@@ -97,8 +96,8 @@ const MAX_GOAL_CHARS = 80;
 const GOVERNED_RUN =
   'tools/graph-evaluator/governed/draft-graph-v5/baseline/run-b9389df-claude-sonnet-4-6.json';
 
-const CONFIRM_QUOTED = /^I've built a first decision model for "([^"]*)"\.$/;
-const CONFIRM_FROM_BRIEF = "I've built a first decision model from your brief.";
+
+
 
 interface GovernedGoal {
   readonly briefId: string;
@@ -143,22 +142,10 @@ function governedGoals(): GovernedGoal[] {
   return goals;
 }
 
-function makeGraph(nodes: unknown[]): GraphV3T {
-  return { nodes, edges: [] } as unknown as GraphV3T;
-}
+
 
 /** The product entry point. Returns the opening line only. */
-function openingLine(goalLabel: string, optionLabel = 'Ship it'): string {
-  const result = buildPostDraftNarrative({
-    graph: makeGraph([
-      { id: 'goal_uxg4', kind: 'goal', provenance: 'from_brief', label: goalLabel },
-      { id: 'opt_uxg4', kind: 'option', label: optionLabel },
-    ]),
-    analysisReady: { status: 'ready' },
-  });
-  expect(result.text.length, 'narrative must be non-empty').toBeGreaterThan(0);
-  return result.text.split('\n')[0] ?? '';
-}
+
 
 // ---------------------------------------------------------------------------
 // Instrument controls — before any claim rests on the corpus.
@@ -198,25 +185,7 @@ describe('UX-GATE-4 corpus controls — the instrument can see', () => {
     expect(new Set(over.map(() => 'deliberation_frame')).size).toBe(1);
   });
 
-  it('⛔ REFUTES THE TEMPTING GENERALISATION: an AUTHORED goal label CAN exceed the budget', () => {
-    /**
-     * The bound is `GOAL_WORD_BOUND = 9` — a WORD bound, not a character
-     * bound. This test exists so nobody re-derives "authored ⇒ short" from the
-     * corpus above and writes it back into a doc-comment, as the first version
-     * of this file's header did.
-     */
-    const longButAuthored =
-      'standardise procurement across international manufacturing subsidiaries and distribution partnerships';
-    const derived = deriveGoalObjectiveLabel(longButAuthored);
-    expect(derived.authored, 'this quote must still be AUTHORED').toBe(true);
-    expect(derived.label.length).toBeGreaterThan(MAX_GOAL_CHARS);
-    expect(derived.label).toBe(
-      'Standardise Procurement Across International Manufacturing Subsidiaries and Distribution Partnerships',
-    );
-    // And the rule therefore suppresses an objective the product itself
-    // authored — the weaker half of the trade, pinned so it stays visible.
-    expect(openingLine(derived.label)).toBe(CONFIRM_FROM_BRIEF);
-  });
+
 
   it('THE RATE, derived not written: the no-quotation opener goes 3/14 → 5/14 on the governed corpus', () => {
     /**
@@ -278,99 +247,7 @@ describe('UX-GATE-4 corpus controls — the instrument can see', () => {
 // The rule.
 // ---------------------------------------------------------------------------
 
-describe('UX-GATE-4 — the opener quotes a goal whole or does not quote it', () => {
-  it('shows NO truncated quotation for any goal in the real governed capture', () => {
-    const goals = governedGoals();
-    let checked = 0;
-    for (const g of goals) {
-      const line = openingLine(g.displayed);
-      const match = CONFIRM_QUOTED.exec(line);
-      if (match) {
-        const quoted = match[1];
-        // Binding by identity: this is the quoted span of THIS goal's opener.
-        expect(
-          quoted.endsWith(LABEL_ELISION_MARKER),
-          `${g.briefId}: opener quotes a fragment — ${JSON.stringify(line)}`,
-        ).toBe(false);
-        // And a quoted span is the goal's own text, whole.
-        expect(quoted, `${g.briefId}: quoted span is not the goal label`).toBe(g.displayed);
-      }
-      checked += 1;
-    }
-    expect(checked, 'no goals were checked').toBe(goals.length);
-  });
 
-  it('falls back to the shipped no-goal sentence for each over-budget goal, by brief id', () => {
-    const over = governedGoals().filter((g) => g.displayed.length > MAX_GOAL_CHARS);
-    expect(over.map((g) => g.briefId).sort()).toEqual(
-      ['06-operations-warehouse', '08-channel-strategy'].sort(),
-    );
-    for (const g of over) {
-      expect(openingLine(g.displayed), `${g.briefId}`).toBe(CONFIRM_FROM_BRIEF);
-    }
-  });
-
-  it('OPPOSITE DIRECTION — a goal that fits is still quoted verbatim, with no marker', () => {
-    const fits = governedGoals().filter((g) => g.displayed.length <= MAX_GOAL_CHARS);
-    expect(fits.length).toBeGreaterThanOrEqual(9);
-    for (const g of fits) {
-      expect(openingLine(g.displayed), `${g.briefId} must still be quoted`).toBe(
-        `I've built a first decision model for "${g.displayed}".`,
-      );
-    }
-  });
-
-  it('OPPOSITE DIRECTION — the longest goal that still fits is quoted, not suppressed', () => {
-    // A 79-char goal drawn from the real captured wire corpus shape: the rule
-    // must not creep inward from the budget it delegates to.
-    const at80 = 'Achieve Fifteen Percent Annual Recurring Revenue Growth Without Worse Attrition!';
-    expect(at80.length).toBe(MAX_GOAL_CHARS);
-    expect(elideLabelAtWordBoundary(at80, MAX_GOAL_CHARS)).toBe(at80);
-    expect(openingLine(at80)).toBe(`I've built a first decision model for "${at80}".`);
-  });
-
-  it('the delegated boundary is the elider\'s, not a second copy of it', () => {
-    const goals = governedGoals();
-    for (const g of goals) {
-      const elided = elideLabelAtWordBoundary(g.displayed, MAX_GOAL_CHARS);
-      const hadToCut = elided !== g.displayed;
-      const line = openingLine(g.displayed);
-      expect(
-        line === CONFIRM_FROM_BRIEF,
-        `${g.briefId}: fallback must fire exactly when the elider had to cut`,
-      ).toBe(hadToCut);
-    }
-  });
-
-  it('the option path is UNTOUCHED — budget 40 still elides and still marks', () => {
-    const result = buildPostDraftNarrative({
-      graph: makeGraph([
-        { id: 'goal_opt_guard', kind: 'goal', provenance: 'from_brief', label: 'Choose a growth strategy' },
-        {
-          id: 'opt_long',
-          kind: 'option',
-          label: 'hold the line on cloud-only for another year',
-        },
-        { id: 'opt_other', kind: 'option', label: 'Ship it' },
-      ]),
-      analysisReady: { status: 'ready' },
-    });
-    const lines = result.text.split('\n');
-    expect(lines.find((l) => l === '• hold the line on cloud-only…')).toBe(
-      '• hold the line on cloud-only…',
-    );
-    // The goal still fits, so the opener still quotes.
-    expect(lines[0]).toBe('I\'ve built a first decision model for "Choose a growth strategy".');
-  });
-
-  it('a goal that is absent still yields the same shipped sentence — the fallback is not a new string', () => {
-    const result = buildPostDraftNarrative({
-      graph: makeGraph([{ id: 'opt_only', kind: 'option', label: 'Ship it' }]),
-      analysisReady: { status: 'ready' },
-    });
-    expect(result.text.split('\n')[0]).toBe(CONFIRM_FROM_BRIEF);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // The closed road stays closed.
@@ -414,13 +291,7 @@ describe('UX-GATE-4 — the refused elision extension is still refused', () => {
     );
   });
 
-  it('but that elision never reaches the opener — suppressed at the seam, not re-cut', () => {
-    const line = openingLine(WITNESSED_GOAL_90);
-    expect(line).toBe(CONFIRM_FROM_BRIEF);
-    expect(line).not.toContain('self-hosted…');
-    expect(line).not.toContain('are asking for a self-hosted');
-    expect(line).not.toContain('"');
-  });
+
 
   it('the authoring authority REFUSES this label — which is why there is no objective to announce', () => {
     const derived = deriveGoalObjectiveLabel(WITNESSED_GOAL_90);

@@ -47,8 +47,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { FastifyRequest } from 'fastify';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 const runUnifiedPipelineMock = vi.fn();
 vi.mock('../../../cee/unified-pipeline/index.js', () => ({
@@ -57,10 +56,10 @@ vi.mock('../../../cee/unified-pipeline/index.js', () => ({
 
 import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import {
-  buildCanonicalAnalysisReadyFromGraph,
-  carryCanonicalOnlyFields,
+buildCanonicalAnalysisReadyFromGraph,
+carryCanonicalOnlyFields,
 } from '../analysis-ready-helper.js';
-import { extractAnalysisReady, handleDraftGraph } from '../draft-graph.js';
+
 
 const CAPTURE = 'src/cee/context-integrity/__tests__/fixtures/live-4day-week.cold-read.json';
 
@@ -72,8 +71,8 @@ interface Node {
 }
 type Graph = { nodes: Node[]; options?: Array<Record<string, unknown>>; [k: string]: unknown };
 
-const STUB_REQUEST = {} as FastifyRequest;
-const BRIEF = 'A decision brief that is comfortably longer than thirty characters.';
+
+
 
 function capture(): Graph {
   const parsed = JSON.parse(readFileSync(CAPTURE, 'utf8')) as { graph: Record<string, unknown> };
@@ -116,104 +115,16 @@ function optionIds(): string[] {
  * under test. The pipeline genuinely cannot supply `may_run`: the admission rule is
  * CEE's, and CEE is the side that holds the graph.
  */
-function pipelineAnalysisReady(graph: Graph): Record<string, unknown> {
-  const canonical = buildCanonicalAnalysisReadyFromGraph(graph);
-  const payload: Record<string, unknown> = { ...canonical };
-  delete payload.may_run;
-  return payload;
-}
+
 
 /** Drive the real draft path with a pipeline body that carries a readiness payload. */
-async function draftTurnFor(
-  graph: Graph,
-  analysisReadyOverride?: Record<string, unknown>,
-): Promise<Awaited<ReturnType<typeof handleDraftGraph>>> {
-  runUnifiedPipelineMock.mockResolvedValue({
-    statusCode: 200,
-    body: {
-      graph,
-      analysis_ready: analysisReadyOverride ?? pipelineAnalysisReady(graph),
-    },
-  });
-  return handleDraftGraph(BRIEF, STUB_REQUEST, 'turn-draft-1');
-}
+
 
 beforeEach(() => {
   runUnifiedPipelineMock.mockReset();
 });
 
-describe('draft turn — analysis_ready.may_run reports the canonical run admission', () => {
-  it('a draft the run WOULD admit carries may_run: true', async () => {
-    const graph = withUnconfiguredOptions(optionIds().slice(0, 1));
 
-    // ── PRECONDITIONS PINNED IN-TEST ────────────────────────────────────────
-    // Without these the assertion could pass on an arm that is simply `ready` —
-    // the state that already worked — or on an arm whose pipeline payload was
-    // never actually consumed. Assert the arm really is the disagreement case,
-    // so a green result is provably about the field under test.
-    const canonical = buildCanonicalAnalysisReadyFromGraph(graph);
-    expect(canonical, 'the arm must produce a readiness payload at all').toBeDefined();
-    expect(canonical!.status, 'PRECONDITION: this arm must NOT be strictly ready').not.toBe(
-      'ready',
-    );
-    expect(
-      resolveRunAdmission(graph).willProceed,
-      'PRECONDITION: the run path must nevertheless admit this graph',
-    ).toBe(true);
-
-    const result = await draftTurnFor(graph);
-
-    expect(
-      result.analysisReady,
-      'PRECONDITION: the draft path must have produced a readiness payload',
-    ).toBeDefined();
-    expect(
-      result.analysisReady!.status,
-      'PRECONDITION: the pipeline payload (not the canonical fallback) is the one on the block',
-    ).not.toBe('ready');
-
-    expect(result.analysisReady!.may_run).toBe(true);
-  });
-
-  it('OPPOSITE DIRECTION — a draft the run would REFUSE carries may_run: false, not absent', async () => {
-    const graph = withUnconfiguredOptions(optionIds().slice(0, 2));
-
-    const canonical = buildCanonicalAnalysisReadyFromGraph(graph);
-    expect(canonical, 'the arm must produce a readiness payload at all').toBeDefined();
-    expect(canonical!.status, 'PRECONDITION: this arm must NOT be strictly ready').not.toBe(
-      'ready',
-    );
-    expect(
-      resolveRunAdmission(graph).willProceed,
-      'PRECONDITION: the run path must REFUSE this graph',
-    ).toBe(false);
-
-    const result = await draftTurnFor(graph);
-
-    expect(result.analysisReady, 'the draft path must produce a payload').toBeDefined();
-    // Absence is the OVER-PERMISSIVE failure the consumer doctrine turns into
-    // "unknown, fall back" — on a refusing graph that re-opens the offer-and-refuse
-    // harm. Assert presence separately from value so the two failures are distinct.
-    expect(
-      'may_run' in result.analysisReady!,
-      'a refusing draft must SAY so — absence is not acceptable here',
-    ).toBe(true);
-    expect(result.analysisReady!.may_run).toBe(false);
-  });
-
-  it('a fully configured draft carries may_run: true', async () => {
-    const graph = capture();
-
-    expect(
-      resolveRunAdmission(graph).willProceed,
-      'PRECONDITION: the unmodified capture must be admissible',
-    ).toBe(true);
-
-    const result = await draftTurnFor(graph);
-
-    expect(result.analysisReady!.may_run).toBe(true);
-  });
-});
 
 describe('draft turn — bound to the canonical assessment by identity, not by coincidence', () => {
   const arms = (): Array<{ name: string; graph: Graph }> => {
@@ -234,53 +145,9 @@ describe('draft turn — bound to the canonical assessment by identity, not by c
     expect(new Set(verdicts).size, 'the corpus must contain BOTH verdicts').toBe(2);
   });
 
-  it.each(arms())(
-    'arm $name — the draft turn publishes exactly the canonical turn payload verdict',
-    async ({ graph }) => {
-      const canonicalMayRun = buildCanonicalAnalysisReadyFromGraph(graph)?.may_run;
-      expect(canonicalMayRun, 'the canonical builder must have a verdict for this arm').toBeTypeOf(
-        'boolean',
-      );
 
-      const result = await draftTurnFor(graph);
 
-      // The spec: SAME assessment, not merely "a boolean". Equality with the
-      // canonical builder's answer for the same graph is what "reports the same
-      // assessment as any other turn" means operationally.
-      expect(result.analysisReady!.may_run).toBe(canonicalMayRun);
-    },
-  );
 
-  it('THE PIPELINE IS NOT THE AUTHORITY — a contradictory upstream may_run does not survive', async () => {
-    // The admission rule belongs to the side that holds the graph.
-    //
-    // ⚠ WHY THIS TEST PINS ITS OWN MECHANISM. A mutant that made the payload's own
-    // verdict win survived this case, and the reason is instructive: on the draft
-    // path `payload.may_run` is ALWAYS undefined by the time the carry runs, because
-    // `extractAnalysisReady`'s named-field re-projection has already dropped it
-    // (demonstrated by execution, not assumed). So without the assertion below this
-    // test would pass because of an UPSTREAM drop while reading as if it proved the
-    // carry overrules. Pin the drop as the mechanism it is; the carry's own
-    // precedence is proved directly in the unit block below, where a payload that
-    // really does carry a contradictory verdict can be constructed.
-    const graph = withUnconfiguredOptions(optionIds().slice(0, 2));
-    expect(
-      resolveRunAdmission(graph).willProceed,
-      'PRECONDITION: CEE must refuse this graph',
-    ).toBe(false);
-
-    const lying = pipelineAnalysisReady(graph);
-    lying.may_run = true;
-
-    expect(
-      extractAnalysisReady({ analysis_ready: lying })?.may_run,
-      'MECHANISM: the named-field re-projection drops the pipeline verdict upstream',
-    ).toBeUndefined();
-
-    const result = await draftTurnFor(graph, lying);
-
-    expect(result.analysisReady!.may_run).toBe(false);
-  });
 });
 
 /**

@@ -12,33 +12,30 @@
  * stamped it would be declined by the post-apply GraphV3 parse. The door stamps the product's existing literal for a figure
  * the user typed in chat, `USER_EDIT_SOURCE` (the goal-current-level precedent) — imported, never spelled here.
  */
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe,expect,it,vi } from 'vitest';
 
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../../adapters/llm/types.js';
-import type { PendingAction } from '../../session/pending-action.js';
-import {
-  buildAddFactorTransaction,
-  GM_HELD_USER_TODAY_KEY,
-  isNewFactorTarget,
-  isUserTodayObservedState,
-  levelRangePointBasis,
-  readUserTodayMember,
-  stampNewUserTodayLevels,
-  USER_TODAY_SOURCE,
-} from '../add-factor-transaction.js';
-import { hypothesisEdgeValue, isAffectsTarget } from '../add-option-transaction.js';
-import { dispatchAddFactorTransaction } from '../../handlers/add-factor-dispatch.js';
-import { executeGmHeldResume, readGmHeldResume } from '../../handlers/gm-held-execute.js';
-import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
-import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { framedObservedState, defaultFrameFor } from '../../agent-lane/admit-model.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import { ObservedStateV3 } from '../../../schemas/cee-v3.js';
-import { _resetConfigCache } from '../../../config/index.js';
+import { defaultFrameFor,framedObservedState } from '../../agent-lane/admit-model.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { dispatchAddFactorTransaction } from '../../handlers/add-factor-dispatch.js';
+import { executeGmHeldResume,readGmHeldResume } from '../../handlers/gm-held-execute.js';
+import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import type { PendingAction } from '../../session/pending-action.js';
+import {
+buildAddFactorTransaction,
+GM_HELD_USER_TODAY_KEY,
+isNewFactorTarget,
+isUserTodayObservedState,
+levelRangePointBasis,
+readUserTodayMember,
+stampNewUserTodayLevels,
+USER_TODAY_SOURCE,
+} from '../add-factor-transaction.js';
+import { hypothesisEdgeValue,isAffectsTarget } from '../add-option-transaction.js';
 
 type Json = Record<string, any>;
 
@@ -372,44 +369,11 @@ vi.mock('../../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../../turn-executor.js');
 
-function payload(message: string): MessageTurnPayload {
-  return { kind: 'message', source: 'composer', turn_id: `t-${randomUUID()}`, scenario_id: SCENARIO_ID, message, turn_class: 'decide', stage: 'analyse' };
-}
 
-describe('PJ-E-FIG — consent-all ("Yes, all of them.") over two live add-factor holds', () => {
-  beforeEach(() => {
-    appendCalls.length = 0;
-    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
-    _resetConfigCache();
-  });
-  afterEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-    _resetConfigCache();
-  });
 
-  it('C1: the ONE commit carries EACH hold\'s figure on its own factor, read from its own member — never a factor landed valueless', async () => {
-    const one = (label: string) => ({ factors: [{ label, link: { to_id: OUTCOME, effect_direction: 'positive' } }] });
-    const senior = hold(one('Senior engineer salary'), [SENIOR]).pendingActions[0] as PendingAction;
-    const junior = hold(one('Junior engineer salary'), [JUNIOR]).pendingActions[0] as PendingAction;
-    pendingActionsForRead = [senior, junior];
 
-    await runTurnExecutor(payload('Yes, all of them.'), 'req-pj-e-fig-consent-all', {
-      routingAdapter: {
-        chatWithTools: vi.fn<(a: ChatWithToolsArgs, o: { requestId: string }) => Promise<ChatWithToolsResult>>()
-          .mockImplementation(async () => { throw new Error('routing adapter must NOT be called on a deterministic consent-all resume'); }),
-      },
-    });
 
-    const commits = appendCalls.filter((w) => w.graph !== undefined && w.graph !== null);
-    expect(commits, JSON.stringify(appendCalls.map((w) => w.assistantMessage))).toHaveLength(1);
-    const g = commits[0]!.graph as Json;
-    expect(nodeOf(g, 'fac_senior_engineer_salary')?.observed_state).toEqual(SENIOR);
-    expect(nodeOf(g, 'fac_junior_engineer_salary')?.observed_state).toEqual(JUNIOR);
-  });
-});
 
 describe('DL ruling on #2235: the hold records WHY each figure is the user\'s — read back FAIL-CLOSED', () => {
   const os = { value: 0.12, raw_value: 120000, cap: 1000000, declared_scale: 'unit_interval', unit: 'GBP/year', source: 'user_override' };

@@ -30,12 +30,12 @@ STDIN_DATA=$(cat || true)
 #   path                                                                  covers
 #   --------------------------------------------------------------------  -------------------------
 SMOKE_TESTS=(
-  src/orchestrator-v5/__tests__/turn-executor.test.ts                                 # turn-executor routing
-  src/orchestrator-v5/routing/__tests__/route-with-tool-use-forced-explanation.test.ts # forced-intent analytical pills
+  src/orchestrator-v5/agent-lane/__tests__/agent-add-option-held-seam.test.ts          # C1: retained held writer and Agent route
+  src/orchestrator-v5/__tests__/b2-run-evaluated-revision.test.ts                      # C1: kept chip Run evaluated-revision contract
   src/orchestrator-v5/handlers/__tests__/chip-click-dispatch.test.ts                  # run_analysis chip dispatch
   src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch.test.ts                  # edit-graph dispatch
   src/orchestrator-v5/context/__tests__/freshness.test.ts                             # analysis-freshness derivation
-  src/orchestrator-v5/__tests__/turn-executor-recovery-chips.test.ts                  # bounded routing fallback
+  src/orchestrator-v5/__tests__/turn-executor-commit-floor-degraded.test.ts           # C1: retained held writer CAS/fence floor
   tests/unit/validators/b1-drift.test.ts                                              # B1 boundary validator (INGRESS drift -> typed fallback)
   tests/unit/mc25.coaching-boundary-validation.test.ts                                # B1 boundary validator (EGRESS/response-side pass+fail)
   src/orchestrator-v5/context/__tests__/context-pack-assembler.test.ts                # context-pack assembly

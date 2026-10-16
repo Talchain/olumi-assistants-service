@@ -19,34 +19,24 @@
  * prompt-loader mocks for the edit path.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
+import { randomUUID } from 'node:crypto';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { config } from '../../../src/config/index.js';
-import { setTestSink } from '../../../src/utils/telemetry.js';
 import {
-  HELD_SCIENCE_VOCABULARY_PATTERN,
-  findForbiddenPhraseHit,
-  findSuccessClaimHit,
-} from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
-import { ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER } from '../../../src/orchestrator/add-risk-rejection-guidance.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-} from '../../../src/adapters/llm/types.js';
-import {
-  ADD_RISK_SCENARIO_ID as EDIT_SCENARIO_ID,
-  CAP1_SCENARIO_ID as SCENARIO_ID,
-  PARTIAL_GRAPH,
-  PRICING_GRAPH,
-  PRIOR_RA_TURN,
-  TARGETED_ADD_RISK_OPS,
-  makeBlankProjectionFreshFact,
-  makeEditProposalResponse,
+ADD_RISK_SCENARIO_ID as EDIT_SCENARIO_ID,
+PARTIAL_GRAPH,
+PRICING_GRAPH,
+PRIOR_RA_TURN,
+CAP1_SCENARIO_ID as SCENARIO_ID,
+TARGETED_ADD_RISK_OPS,
+makeBlankProjectionFreshFact,
+makeEditProposalResponse,
 } from '../../../src/orchestrator-v5/__tests__/coaching-fixtures.js';
 import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
+import { ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER } from '../../../src/orchestrator/add-risk-rejection-guidance.js';
+import { setTestSink } from '../../../src/utils/telemetry.js';
 
 // ────────────────────────────────────────────────────────────────────
 // Mocks
@@ -110,7 +100,7 @@ vi.mock('../../../src/adapters/llm/router.js', () => ({
   getMaxTokensFromConfig: vi.fn().mockReturnValue(undefined),
 }));
 
-const { runTurnExecutor } = await import('../../../src/orchestrator-v5/turn-executor.js');
+
 const { dispatchEditGraph } = await import('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js');
 
 // ────────────────────────────────────────────────────────────────────
@@ -118,24 +108,9 @@ const { dispatchEditGraph } = await import('../../../src/orchestrator-v5/handler
 // via src/orchestrator-v5/__tests__/coaching-fixtures.ts)
 // ────────────────────────────────────────────────────────────────────
 
-function mkCap1Payload(): MessageTurnPayload {
-  return makeMessagePayload({
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message: 'How can we improve this?',
-    stage: 'analyse',
-  });
-}
 
-function throwingRoutingAdapter() {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () => {
-        throw new Error('Routing adapter must NOT be called on the deterministic canonical_rich path');
-      }),
-  };
-}
+
+
 
 // ────────────────────────────────────────────────────────────────────
 // Cap-2A fixtures (shared with edit-graph-add-risk-flag-seam.test.ts via
@@ -194,47 +169,14 @@ afterEach(() => {
   setTestSink(null);
 });
 
-function adviceEvent(): Record<string, unknown> | undefined {
-  return events.find((e) => e.event === 'v5.post_analysis_advice_gate')?.data;
-}
+
 
 // ────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────
 
 describe('coaching capabilities combined — non-interference proven, not asserted', () => {
-  it('Cap-1 leg: repeated runs produce identical grounded answer and gate telemetry', async () => {
-    const alone = await runTurnExecutor(mkCap1Payload(), 'req-cap1-alone', {
-      routingAdapter: throwingRoutingAdapter(),
-      graphState: PARTIAL_GRAPH as never,
-    });
-    const aloneEvent = adviceEvent();
-    const aloneText = (alone.response as { assistant_text?: string }).assistant_text ?? '';
 
-    // Both flags ON.
-    events = [];
-    const both = await runTurnExecutor(mkCap1Payload(), 'req-cap1-both', {
-      routingAdapter: throwingRoutingAdapter(),
-      graphState: PARTIAL_GRAPH as never,
-    });
-    const bothEvent = adviceEvent();
-    const bothText = (both.response as { assistant_text?: string }).assistant_text ?? '';
-
-    // RED-proven reach: first committed as `expect(bothEvent!.matched).toBe(false)`
-    // and FAILED (matched=true), proving the gate activates under the combined
-    // posture (transcript in the evidence pack).
-    expect(bothEvent).toBeDefined();
-    expect(bothEvent!.matched).toBe(true);
-    expect(bothEvent!.copy_source).toBe('canonical_rich');
-    expect(bothEvent!.loop_enabled).toBe(true);
-
-    // Non-interference: byte-identical answer and identical gate outcome fields.
-    expect(bothText).toBe(aloneText);
-    expect(bothEvent!.matched).toBe(aloneEvent!.matched);
-    expect(bothEvent!.copy_source).toBe(aloneEvent!.copy_source);
-    expect(bothEvent!.routing_path).toBe(aloneEvent!.routing_path);
-    expect(bothEvent!.deterministic).toBe(aloneEvent!.deterministic);
-  });
 
   it('Cap-2A leg: repeated runs produce identical placeholder guidance and chips', async () => {
     const alone = await runCap2aRejectionTurn('bbbbbbb1-0000-4000-8000-000000000001');
@@ -252,45 +194,5 @@ describe('coaching capabilities combined — non-interference proven, not assert
     expect(both.response.suggested_actions).toEqual(alone.response.suggested_actions);
   });
 
-  it('neutrality: both paths\' user-facing copy (prose AND chips) carries no held-science vocabulary and no success claims', async () => {
 
-    const cap1 = await runTurnExecutor(mkCap1Payload(), 'req-neutrality-cap1', {
-      routingAdapter: throwingRoutingAdapter(),
-      graphState: PARTIAL_GRAPH as never,
-    });
-    const cap1Response = cap1.response as {
-      assistant_text?: string;
-      suggested_actions?: ReadonlyArray<{ label?: string; prompt?: string; message?: string }>;
-    };
-    const cap2a = await runCap2aRejectionTurn('bbbbbbb3-0000-4000-8000-000000000003');
-
-    // Chips are user-facing copy too (review fix): scan their label/prompt/
-    // message text alongside the prose, so a flag-gated chip cannot smuggle
-    // held-science wording past the neutrality evidence.
-    const chipTexts = [
-      ...(cap1Response.suggested_actions ?? []),
-      ...(cap2a.response.suggested_actions ?? []),
-    ].flatMap((c) => {
-      const chip = c as { label?: string; prompt?: string; message?: string };
-      return [chip.label, chip.prompt, chip.message].filter(
-        (s): s is string => typeof s === 'string' && s.length > 0,
-      );
-    });
-
-    const proseTexts = [
-      cap1Response.assistant_text ?? '',
-      cap2a.response.assistant_text ?? '',
-      ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER,
-    ];
-    for (const text of proseTexts) expect(text.length).toBeGreaterThan(0);
-
-    for (const text of [...proseTexts, ...chipTexts]) {
-      expect(findSuccessClaimHit(text)).toBeNull();
-      expect(findForbiddenPhraseHit(text)).toBeNull();
-      // Canonical superset pattern (the per-suite copies had diverged; one
-      // dropped 'vulnerable', others lacked driver/causal/evpi/voi).
-      expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
-      expect(text.toLowerCase()).not.toContain('must flow through');
-    }
-  });
 });

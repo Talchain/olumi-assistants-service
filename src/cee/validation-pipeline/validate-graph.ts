@@ -17,7 +17,7 @@
  */
 
 import { getSystemPrompt, getSystemPromptSnapshot } from '../../adapters/llm/prompt-loader.js';
-import type { PromptAttributionCollector } from '../../orchestrator/pipeline/prompt-attribution.js';
+import type { PromptAttributionCollector } from '../../orchestrator/pipeline/diagnostic-trace.js';
 import { getAdapter, getMaxTokensFromConfig } from '../../adapters/llm/router.js';
 import { isDraftTruncated } from '../../adapters/llm/draft-budget.js';
 import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';

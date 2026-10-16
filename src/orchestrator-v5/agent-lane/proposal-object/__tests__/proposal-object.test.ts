@@ -4,18 +4,18 @@ import { timingGated } from '../../../../../tests/helpers/scaling-ratio.js';
  * inflight/lane-edit-panel-DESIGN.md). Pure rows; the route-level journey is `held-proposal-user-in-control-seam.test.ts`.
  * Fixtures are the add-risk door's REAL batch shape (`add-risk-transaction.ts` + `hypothesisEdgeValue`).
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
-import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { findForbiddenPhraseHit } from '../../../compose/forbidden-user-facing-phrases.js';
+import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { GM_HELD_HANDLER_ID } from '../../../handlers/edit-graph-referee-gate.js';
 import { hypothesisEdgeValue } from '../../../routing/add-option-transaction.js';
-import { tryShortConfirmResume } from '../../../routing/deterministic-short-confirm.js';
+
 import type { PendingAction } from '../../../session/pending-action.js';
-import { amendHeldOperations, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../amend.js';
-import { FIELD_CLASS_BY_OP, declinedProposalOf, heldChangeName, issuedTurnIdsForProposalRecords, proposalIssuances, productHoldRecord, proposalFieldsWire, proposalRecord, type ProposalIssuingRow } from '../record.js';
-import { PROPOSAL_IDLE_TTL_MS, reconcileHeldProposals, refreshedHold } from '../lifecycle.js';
-import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../reply.js';
+import { amendHeldOperations,parseProposalEdits,proposalEditsDigest,readUserEdits } from '../amend.js';
+import { PROPOSAL_IDLE_TTL_MS,reconcileHeldProposals } from '../lifecycle.js';
+import { FIELD_CLASS_BY_OP,declinedProposalOf,heldChangeName,issuedTurnIdsForProposalRecords,productHoldRecord,proposalFieldsWire,proposalIssuances,proposalRecord,type ProposalIssuingRow } from '../record.js';
+import { editsRefusedSentence,heldDeclineSentence,heldLapseSentence,userEditsReceipt } from '../reply.js';
 
 const SID = '5c0e1d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f';
 const graph = {
@@ -405,21 +405,7 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
     }
   });
 
-  it('a hold KEPT by the Agent lane (marked) never binds a bare "yes" on the conventional route — retention is not consent; an unmarked hold is untouched', async () => {
-    const now = Date.parse('2026-10-07T10:00:00.000Z');
-    // Kept by the Agent lane's lifecycle (marked): offered a minute ago, or an hour ago, a bare "yes" binds neither.
-    for (const emitted of ['2026-10-07T09:59:00.000Z', '2026-10-07T09:00:00.000Z']) {
-      const kept = refreshedHold(hold({ emitted_at_iso: emitted }), now);
-      const bare = tryShortConfirmResume({ message: 'yes', pendingActions: [kept], currentTurnIndex: 3, nowMs: now });
-      expect(bare.matched && bare.dispatch === 'pending_action', emitted).toBe(false);
-    }
-    // (Its exact card words resolve it by the label pick, `turn-executor.ts` `tryProposalOrdinalSelect`, as before —
-    // the route-level seam test approves kept proposals across turns through that path.)
-    // CONTROL: an UNMARKED hold (every conventional hold, every existing fixture) still binds a bare "yes" exactly as before.
-    const unmarked = hold({ emitted_at_iso: '2026-10-07T09:59:00.000Z', expires_at_iso: '2099-01-01T00:00:00.000Z' });
-    const legacy = tryShortConfirmResume({ message: 'yes', pendingActions: [unmarked], currentTurnIndex: 3, nowMs: now });
-    expect(legacy.matched && legacy.dispatch === 'pending_action' ? legacy.pending.chip_id : undefined).toBe('gmh_aaaaaaaaaaaa');
-  });
+
 });
 
 

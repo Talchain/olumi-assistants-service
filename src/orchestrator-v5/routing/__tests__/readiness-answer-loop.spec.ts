@@ -24,14 +24,13 @@
  * edited — it is a historic record (trap 14b).
  */
 
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { describe,expect,it } from 'vitest';
 
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
-import { buildRepairPairChipMessage } from '../../configure-option-chip-text.js';
-import { composeReadinessIntakeResponse } from '../readiness-intake.js';
-import { selectAnswerableBlockers } from '../readiness-answer-chips.js';
+
+
 
 const CAPTURE = JSON.parse(
   readFileSync(
@@ -93,9 +92,7 @@ function graphWithConfiguredOptions(configuredCount: number): Graph {
 }
 
 /** Every option unconfigured — the witnessed fresh-draft arm (6 blockers). */
-function zeroConfiguredGraph(): Graph {
-  return graphWithConfiguredOptions(0);
-}
+
 
 /**
  * Exactly ONE option left unconfigured.
@@ -107,172 +104,28 @@ function zeroConfiguredGraph(): Graph {
  * correct for questions 1..n-1 and goes BLANK at question n. Any corpus that
  * never runs to completion passes it. This is the guard that does not.
  */
-function finalQuestionGraph(): Graph {
-  return graphWithConfiguredOptions(5);
-}
 
-function labelOf(graph: Graph, id: string | undefined): string {
-  const node = graph.nodes.find((n) => String(n.id) === id);
-  return node === undefined ? '' : String(node.label);
-}
 
-const STAGE = 'analysing' as Parameters<typeof composeReadinessIntakeResponse>[1];
+
+
+
 
 describe('readiness answer loop — the blocked model gets an answerable route', () => {
-  it('PINS THE CENTRE OF GRAVITY: the readiness arm offers at least one chip on an open model', () => {
-    // The typed `analysis_readiness` chip routes here correctly and, at
-    // pristine, arrives at prose with NO affordance whatsoever. Three branches
-    // of this composer return `suggested_actions: []`; that is the whole gap.
-    const result = composeReadinessIntakeResponse(zeroConfiguredGraph(), STAGE);
-    expect(result.outcome).toBe('readiness_open');
-    expect(result.response.suggested_actions.length).toBeGreaterThan(0);
-  });
 
-  it('offers the IDENTITY-CARRYING repair chip for MISSING_OPTION_VALUE, naming the producer\'s own option AND factor', () => {
-    const graph = zeroConfiguredGraph();
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    const missing = assessment.blockingIssues.find((i) => i.code === 'MISSING_OPTION_VALUE');
-    expect(missing, 'capture must yield a MISSING_OPTION_VALUE blocker').toBeDefined();
-    // BIND BY IDENTITY — the producer's ids, resolved to the producer's labels.
-    // Never a value predicate another blocker could satisfy.
-    const optionLabel = labelOf(graph, missing!.option_id);
-    const factorLabel = labelOf(graph, missing!.factor_id);
-    expect(optionLabel.length, 'option label resolves from the capture').toBeGreaterThan(0);
-    expect(factorLabel.length, 'factor label resolves from the capture').toBeGreaterThan(0);
 
-    const messages = composeReadinessIntakeResponse(graph, STAGE).response.suggested_actions.map(
-      (a) => a.message,
-    );
-    // The sentence is DERIVED from the estate's single configure-option copy
-    // authority, not transcribed here — if that builder changes, this moves
-    // with it rather than going quietly stale.
-    expect(messages).toContain(buildRepairPairChipMessage(optionLabel, factorLabel));
-  });
 
-  it('⭐⭐ THE FABRICATION BOUNDARY: no chip carries a value the PRODUCT chose', () => {
-    // ⚠ THIS GUARD EXISTS BECAUSE THE OBVIOUS DESIGN IS THE FORBIDDEN ONE, and
-    // the next person to read this file will want to build it.
-    //
-    // A calibrated row — `Small · 0.25` / `Moderate · 0.5` / `Large · 0.8` —
-    // is the natural answer mechanic and turns a typed sentence into a click.
-    // The estate has ALREADY ruled against it, in three places
-    // (`configure-option-chip-text.ts` on `buildRepairPairChipMessage`,
-    // `routing/configure-option-clarify.ts`, and by the conforming example of
-    // `compose/repair-value-ask-response.ts`, whose value is documented as
-    // "The user's value, verbatim"):
-    //
-    //   a chip may carry a value the USER has already stated;
-    //   a chip may NEVER carry a value the PRODUCT chose,
-    //   because it reads as the product's recommendation and puts a
-    //   fabricated intervention one click away.
-    //
-    // So the loop completes the IDENTIFICATION and leaves the number to the
-    // user. If that rule is ever revisited, this test is the place it gets
-    // revisited — deliberately, with the posture in view, not by accident.
-    const graphs = [zeroConfiguredGraph(), graphWithConfiguredOptions(2), finalQuestionGraph()];
-    for (const graph of graphs) {
-      for (const action of composeReadinessIntakeResponse(graph, STAGE).response.suggested_actions) {
-        // `buildConfigureOptionAdvisedFormat` is the value-BEARING sentence.
-        // Its shape is `Set the X option's effect on Y to <n>`; a digit after
-        // "to" is exactly what the router's writer consumes.
-        expect(
-          /\boption's effect on\b.*\bto\s+\d/.test(action.message),
-          `chip proposes a product-chosen value: ${action.message}`,
-        ).toBe(false);
-      }
-    }
-  });
 
-  it('⭐ FINAL QUESTION: still offers an answer chip when repairProposal is NULL (blockingIssues < 2)', () => {
-    const graph = finalQuestionGraph();
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    // Pin the PRECONDITION in-test, so this can never pass by accident on a
-    // graph that happens to still have a proposal (trap 13b).
-    expect(assessment.blockingIssues.length).toBe(1);
-    expect(assessment.repairProposal, 'the ≥2 gate must genuinely be shut here').toBeNull();
 
-    const result = composeReadinessIntakeResponse(graph, STAGE);
-    // ⚠ BIND TO AN *ANSWER* CHIP, NOT TO "any chip". The first version of this
-    // assertion read `suggested_actions.length > 0` and PASSED under the
-    // mutant that reintroduced the defect — because at this point the run
-    // already proceeds, so the Run chip alone satisfied it. A guard that the
-    // defect walks straight through is worse than none: it reports coverage
-    // it does not provide.
-    const answerChips = result.response.suggested_actions.filter((a) =>
-      a.id.startsWith('chip_readiness_answer_'),
-    );
-    expect(answerChips.length, 'the last question must still be answerable').toBeGreaterThan(0);
-  });
 
-  it('an OPTION_NEEDS_MAPPING blocker (no factor_id) gets a configure chip, never a fabricated value sentence', () => {
-    const graph = zeroConfiguredGraph();
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    const mapping = assessment.blockingIssues.find((i) => i.code === 'OPTION_NEEDS_MAPPING');
-    expect(mapping, 'capture must yield an OPTION_NEEDS_MAPPING blocker').toBeDefined();
-    // The producer does not know which factor this option moves — that is the
-    // blocker. A value sentence cannot be composed without inventing the
-    // factor, so the loop must ask which factor FIRST.
-    expect(mapping!.factor_id).toBeUndefined();
 
-    const optionLabel = labelOf(graph, mapping!.option_id);
-    // Configure everything EXCEPT the unmapped option, so it is the one the
-    // loop must be asking about.
-    const mappingOnly = structuredClone(graphWithConfiguredOptions(6)) as Graph;
-    for (const node of mappingOnly.nodes) {
-      if (String(node.id) === mapping!.option_id) node.interventions = {};
-    }
-    const actions = composeReadinessIntakeResponse(mappingOnly, STAGE).response.suggested_actions;
-    for (const action of actions) {
-      expect(
-        action.message.startsWith('Set '),
-        `must not compose a value sentence for an unmapped option: ${action.message}`,
-      ).toBe(false);
-    }
-    expect(actions.some((a) => a.message.includes(optionLabel))).toBe(true);
-  });
 
-  it('never emits more chips than the deployed 3-chip cap can render', () => {
-    // `SuggestedChips` slices to 3 (observed in the deployed bundle,
-    // 2026-08-20). Emitting more would silently drop affordances the copy
-    // may have promised.
-    for (const graph of [zeroConfiguredGraph(), finalQuestionGraph()]) {
-      expect(composeReadinessIntakeResponse(graph, STAGE).response.suggested_actions.length)
-        .toBeLessThanOrEqual(3);
-    }
-  });
 
-  it('OFFERS, never DEMANDS — every blocker here is obligation:offered', () => {
-    const graph = zeroConfiguredGraph();
-    const assessment = assessCanonicalAnalysisReadiness(graph);
-    // Precondition pinned in-test: if a `required` blocker ever appears here
-    // this assertion is about a different world and must be re-derived.
-    expect(assessment.blockingIssues.every((i) => i.obligation === 'offered')).toBe(true);
 
-    const text = composeReadinessIntakeResponse(graph, STAGE).response.assistant_text;
-    // `user_stated` and only `user_stated` earns a demand
-    // (`obligation-provenance.ts`). Structure OLUMI authored may be OFFERED to
-    // the user; it may never be demanded of them.
-    for (const demand of [/\byou must\b/i, /\byou need to\b/i, /\brequired\b/i, /\byou have to\b/i]) {
-      expect(demand.test(text), `demand phrasing over an offered blocker: ${demand}`).toBe(false);
-    }
-  });
 
-  it('when the run WILL proceed, it says so, names what it leaves out, and offers the run', () => {
-    // ⭐ "TWO ANSWERS, NOT SIX". `PLOT_MIN_COMPARISON_OPTIONS = 2`, so the
-    // finish line moves TOWARD the user: with two options configured the
-    // comparison runs and exclusion honestly carries the rest. The loop must
-    // STOP ASKING here — continuing to ask for values that no longer block
-    // anything manufactures an obligation the blockers do not carry.
-    const graph = zeroConfiguredGraph();
-    const admission = resolveRunAdmission(graph);
-    expect(admission.willProceed, 'zero-configured capture must NOT proceed').toBe(false);
 
-    const twoConfigured = graphWithConfiguredOptions(2);
-    expect(resolveRunAdmission(twoConfigured).willProceed, 'two configured options must proceed').toBe(true);
 
-    const result = composeReadinessIntakeResponse(twoConfigured, STAGE);
-    expect(result.response.suggested_actions.some((a) => a.action_type === 'run_analysis')).toBe(true);
-  });
+
+
 
   it('⭐ THE LADDER: admission flips at TWO configured options, and the proposal vanishes at ONE blocker', () => {
     // This table IS the design, and every row is derived by executing the
@@ -306,57 +159,9 @@ describe('readiness answer loop — the blocked model gets an answerable route',
     ]);
   });
 
-  it('the answerable filter binds by BLOCKER CODE, not merely by having an option', () => {
-    // ⚠ ADDED BECAUSE A MUTANT SURVIVED. Deleting the code check left every
-    // assertion green: structural blockers were still excluded, but only
-    // INCIDENTALLY — they carry no `option_id`. A blocker that DOES name an
-    // option and DOES need human input, but is not about a missing effect
-    // (a constraint review, a unit mismatch), would have been offered a
-    // "set the value" chip it cannot answer. Tested on the selector directly,
-    // bound by code identity.
-    const base = {
-      issue_id: 'probe_1',
-      option_id: 'opt_1',
-      repairability: 'human_input_required',
-      message: 'probe',
-    } as unknown as Parameters<typeof selectAnswerableBlockers>[0][number];
 
-    const answerable = { ...base, code: 'MISSING_OPTION_VALUE' } as typeof base;
-    const notAnswerable = { ...base, code: 'CONSTRAINT_REVIEW_REQUIRED' } as typeof base;
 
-    // Positive control FIRST — without it, "excludes X" could pass on a
-    // selector that excludes everything.
-    expect(selectAnswerableBlockers([answerable]).map((i) => i.issue_id)).toEqual(['probe_1']);
-    expect(selectAnswerableBlockers([notAnswerable])).toEqual([]);
-  });
 
-  it('reads as English: every sentence in the composed answer starts with a capital', () => {
-    // ⚠ ADDED AFTER READING THE OUTPUT. The suite was fully green while the
-    // product emitted "…to run. four options are still unset" — a spelled
-    // number opening a sentence. Chip counts, phrasing bans and identity
-    // bindings are all blind to it.
-    for (const graph of [zeroConfiguredGraph(), graphWithConfiguredOptions(2), finalQuestionGraph()]) {
-      const text = composeReadinessIntakeResponse(graph, STAGE).response.assistant_text;
-      for (const sentence of text.split(/(?<=[.!?])\s+/)) {
-        const trimmed = sentence.trim();
-        if (trimmed.length === 0) continue;
-        const first = trimmed[0]!;
-        if (!/[a-zA-Z]/.test(first)) continue; // bullets, digits — not sentence starts
-        expect(first, `lower-case sentence start: "${trimmed.slice(0, 60)}"`).toBe(first.toUpperCase());
-      }
-    }
-  });
 
-  it('DISCRIMINATION CONTROL: a structural blocker gets no value chip', () => {
-    // Without this, "offers a chip" could be satisfied by a builder that
-    // attaches a value chip to everything. A model with no goal is not
-    // answerable with a number, and must not be offered one.
-    const graph = structuredClone(CAPTURE.draft_graph) as Graph;
-    graph.nodes = graph.nodes.filter((n) => n.kind !== 'goal');
-    const result = composeReadinessIntakeResponse(graph, STAGE);
-    expect(result.outcome).toBe('goal_missing');
-    for (const action of result.response.suggested_actions) {
-      expect(action.message.startsWith('Set ')).toBe(false);
-    }
-  });
+
 });

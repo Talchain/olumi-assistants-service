@@ -1,3 +1,4 @@
+import { _resetConfigCache } from '../../config/index.js';
 /**
  * GATE 1 — THE DURABLE TURN IDENTITY IS THE CLIENT'S, NOT THIS HTTP REQUEST'S.
  *
@@ -38,15 +39,10 @@
  * a UUID" would pass on the defect, because a request id is a UUID too.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import { makeMessagePayload } from './fixtures.js';
 import { readIngressTurnIdentity } from '../../orchestrator/turn-fence-prehandler.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-  ToolResponseBlock,
-} from '../../adapters/llm/types.js';
+import { makeMessagePayload } from './fixtures.js';
 
 const appendCalls: Array<{ scenario_id: string; turn_id: string }> = [];
 
@@ -59,14 +55,18 @@ vi.mock('../session/index.js', () => ({
     readRecent: async () => [],
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    readMostRecentPendingActions: async () => [{ id: 'pa-identity', scenario_id: SCENARIO_ID, chip_id: 'gmh_identity',
+      action: { kind: 'apply_proposed_change', inline_patch: { handler_id: 'graph_management_held_v1' }, public_message: PAYLOAD.message },
+      preconditions: {}, expires_at_turn_count: 2, expires_at_iso: '2099-12-31T23:59:59.000Z', emitted_at_iso: '2026-10-16T00:00:00.000Z' }],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
   }),
   resetSessionStoreForTests: () => {},
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+const { runHeldProposalApproval } = await import('../handlers/approve-held-proposal.js');
+const runTurnExecutor = (p: typeof PAYLOAD, requestId: string, _options?: unknown) => runHeldProposalApproval({ ...p,
+  source: 'chip', chip: { id: 'gmh_identity' } }, requestId);
 
 /** The client's durable operation identity — what a retry would reuse. */
 const CLIENT_TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -82,52 +82,14 @@ const PAYLOAD = makeMessagePayload({
   stage: 'analyse',
 });
 
-/**
- * A proposal the validator REFUSES, so the turn reaches a TurnExecutor commit
- * without running a handler or calling a provider. The commit is what this
- * suite is about; which recoverable code produced it is not.
- */
-const REFUSED_PROPOSAL = {
-  intent_class: 'execute',
-  action: {
-    handler_id: 'not_a_real_handler',
-    entity: {
-      id: 'opt_a',
-      kind: 'option',
-      resolution_status: 'resolved',
-      resolution_method: 'id_match',
-    },
-    parameters: {},
-  },
-  user_facing_summary: 'Looking at that now.',
-};
-
-function mkToolUseResult(input: unknown): ChatWithToolsResult {
-  const content: ToolResponseBlock[] = [
-    { type: 'tool_use', id: 'tu-1', name: OLUMI_ACTION_TOOL_NAME, input: input as Record<string, unknown> },
-  ];
-  return {
-    content,
-    stop_reason: 'tool_use',
-    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
-    model: 'claude-sonnet-4-6',
-    latencyMs: 50,
-  };
-}
-
-function routingAdapter(): { chatWithTools: unknown } {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () => mkToolUseResult(REFUSED_PROPOSAL)),
-  };
-}
+const routingAdapter = () => undefined; // Approval is deterministic.
 
 beforeEach(() => {
-  appendCalls.length = 0;
+  appendCalls.length = 0; vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
+  _resetConfigCache();
 });
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.restoreAllMocks(); vi.unstubAllEnvs(); _resetConfigCache();
 });
 
 describe('Gate 1 — the committed turn identity is the client\'s durable one', () => {

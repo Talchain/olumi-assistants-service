@@ -24,31 +24,27 @@
 import { createHash } from 'node:crypto';
 
 import {
-  beforeEach,
-  afterEach,
-  describe,
-  expect,
-  it,
-  vi,
-  type MockInstance,
+afterEach,
+beforeEach,
+describe,
+expect,
+it,
+vi,
+type MockInstance,
 } from 'vitest';
 
 import * as telemetry from '../../../utils/telemetry.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { assembleContextPack, CONTEXT_PACK_RECENT_TURNS_CAP } from '../context-pack-assembler.js';
 import { applyContextBudgetToAssemblyInputs } from '../context-budget-enforcement.js';
+import { assembleContextPack,CONTEXT_PACK_RECENT_TURNS_CAP } from '../context-pack-assembler.js';
 import { CONTEXT_POLICY } from '../context-policy.js';
-import type { DisplaySafeGraph } from '../../format/format-graph-for-context.js';
+
 import {
-  buildUserMessage,
-  CONTEXT_BUDGET_INSTRUCTION,
-} from '../../routing/route-with-tool-use.js';
-import {
-  analysisSummaryFixture,
-  overBudgetCompactGraph,
-  priorTurnsFixture,
-  underBudgetCompactGraph,
+analysisSummaryFixture,
+overBudgetCompactGraph,
+priorTurnsFixture,
+underBudgetCompactGraph,
 } from './context-budget-fixtures.js';
 
 const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
@@ -180,62 +176,7 @@ afterEach(() => {
 });
 
 describe('context budget enforcement at assembly (O-3)', () => {
-  it('degrades an over-budget graph per the budget module policy and discloses in-pack', () => {
-    const bigGraph = overBudgetCompactGraph();
-    const pack = assembleContextPack({
-      payload: BASE_PAYLOAD,
-      priorTurns: priorTurnsFixture(2),
-      priorFacts: [],
-      compactedGraph: bigGraph,
-      compactedConstraints: null,
-      analysis: analysisSummaryFixture(),
-    });
 
-    expect(pack.graph_context).toEqual({ status: 'unavailable' });
-
-    // Structure preserved: the module NEVER deletes nodes or edges.
-    expect(pack.graph.counts.nodes).toBe(bigGraph.nodes.length);
-    expect(pack.graph.counts.edges).toBe(bigGraph.edges.length);
-    expect(pack.graph.edges).toHaveLength(bigGraph.edges.length);
-
-    // Pass-2 field drops are visible in the LLM-facing display projection:
-    // no node carries `category` or `intervention_summary` any more.
-    const displayGraph = pack.display_graph as DisplaySafeGraph;
-    expect(displayGraph.nodes.length).toBeGreaterThan(0);
-    for (const node of displayGraph.nodes) {
-      expect(node).not.toHaveProperty('category');
-      expect(node).not.toHaveProperty('intervention_summary');
-    }
-
-    // The trimmed compact graph (handler-facing slot) lost the trim-ladder
-    // fields while keeping label/value/unit.
-    const firstNode = pack.graph.nodes[0] as Record<string, unknown>;
-    expect(firstNode).not.toHaveProperty('type');
-    expect(firstNode).not.toHaveProperty('category');
-    expect(firstNode).not.toHaveProperty('source');
-    expect(firstNode.label).toBeDefined();
-
-    // In-pack disclosure marker (#536 pattern — never a silent drop).
-    expect(pack.context_budget).toBeDefined();
-    const truncations = pack.context_budget?.truncations ?? [];
-    const graphRecord = truncations.find((t) => t.section === 'graph');
-    expect(graphRecord).toBeDefined();
-    expect(graphRecord!.original_chars).toBeGreaterThan(graphRecord!.kept_chars);
-    expect(graphRecord!.kept_chars).toBe(
-      JSON.stringify(bigGraphTrimmedProbe(pack)).length,
-    );
-
-    // Prompt-byte binding: a REAL graph cut carries the marker and its
-    // interpretation together. Neither assertion can pass on a hand-built
-    // disclosure or an instruction that never reaches the model.
-    const prompt = buildUserMessage(pack, 'Which model facts matter here?');
-    expect(prompt).toContain('"context_budget": {');
-    expect(prompt).toContain('"section": "graph"');
-    expect(prompt.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
-    expect(CONTEXT_BUDGET_INSTRUCTION).toContain(
-      'This disclosure does not change `graph_context` or `analysis_context` authority',
-    );
-  });
 
   it('emits v5.context_truncation with disclosed:true for a budget trim', () => {
     assembleContextPack({
@@ -263,109 +204,9 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(budgetCut!.strategy).toBe('field_trim');
   });
 
-  it('trims an over-budget analysis to 3 drivers, drops tensions, and discloses', () => {
-    const pack = assembleContextPack({
-      payload: BASE_PAYLOAD,
-      priorTurns: [],
-      priorFacts: [],
-      compactedGraph: underBudgetCompactGraph(),
-      compactedConstraints: null,
-      analysis: analysisSummaryFixture({ inflate: true }),
-    });
 
-    expect(pack.analysis).not.toBeNull();
-    expect(pack.analysis!.top_drivers.length).toBeLessThanOrEqual(3);
 
-    const truncations = pack.context_budget?.truncations ?? [];
-    const analysisRecord = truncations.find((t) => t.section === 'analysis');
-    expect(analysisRecord).toBeDefined();
-    expect(analysisRecord!.original_chars).toBeGreaterThan(
-      analysisRecord!.kept_chars,
-    );
 
-    // The sibling REAL analysis cut reaches the identical code-owned
-    // interpretation; there is no graph-only special case.
-    const prompt = buildUserMessage(pack, 'What does the analysis show?');
-    expect(prompt).toContain('"context_budget": {');
-    expect(prompt).toContain('"section": "analysis"');
-    expect(prompt.split(CONTEXT_BUDGET_INSTRUCTION)).toHaveLength(2);
-    expect(prompt).toContain(
-      'This disclosure does not change `graph_context` or `analysis_context` authority',
-    );
-  });
-
-  it('positive control: an under-budget context is untrimmed, unmarked, and byte-identical to base', () => {
-    const graph = underBudgetCompactGraph();
-    const analysis = analysisSummaryFixture();
-    const pack = assembleContextPack({
-      payload: BASE_PAYLOAD,
-      priorTurns: priorTurnsFixture(2),
-      priorFacts: [],
-      compactedGraph: graph,
-      compactedConstraints: null,
-      analysis,
-    });
-
-    // No marker key at all (key-absence doctrine — byte identity).
-    expect('context_budget' in pack).toBe(false);
-
-    // Exact absence arm: under budget means no marker and no instruction. This
-    // guards against turning a conditional disclosure into generic prompt
-    // boilerplate or making key absence imply a cut occurred.
-    const prompt = buildUserMessage(pack, 'What matters here?');
-    expect(prompt).not.toContain('"context_budget"');
-    expect(prompt).not.toContain(CONTEXT_BUDGET_INSTRUCTION);
-
-    // Nothing trimmed: node/edge arrays flow through by reference and the
-    // five-driver projection survives (CONTEXT_PACK_TOP_DRIVER_CAP = 5).
-    expect(pack.graph.nodes).toBe(graph.nodes);
-    expect(pack.graph.edges).toBe(graph.edges);
-    expect(pack.analysis!.top_drivers).toHaveLength(5);
-
-    // Byte-identity against the base-commit golden (same fixture, no wiring).
-    //
-    // ⚠ THE GOLDEN IS NOT RE-CAPTURED, DELIBERATELY. Context/Memory V5
-    // defect 2 added ONE key to the display-safe analysis projection
-    // (`analysis_not_current_note`), which this fixture triggers because it
-    // wires no freshness verdict and the disclosure is fail-closed. Swapping
-    // the hash for a fresh capture would retire the only evidence that the
-    // budget wiring is byte-neutral — and would do so silently, which is
-    // exactly what a golden exists to prevent.
-    //
-    // Instead the delta is SUBTRACTED and the ORIGINAL hash still asserted.
-    // That proves two things at once, where a re-capture proved neither:
-    // everything except the intended key is unchanged from the base commit,
-    // and the intended key is genuinely the whole delta. If a later change
-    // touches anything else in this pack, this line REDs as it always has.
-    const withoutFreshnessDisclosure = assembleUnderBudgetPack();
-    const displayAnalysis = withoutFreshnessDisclosure.display_analysis as
-      | Record<string, unknown>
-      | null;
-    expect(
-      displayAnalysis?.analysis_not_current_note,
-      'precondition: this fixture wires no freshness, so the fail-closed disclosure must be present — ' +
-        'if it is absent the subtraction below is vacuous and proves nothing',
-    ).toBeTypeOf('string');
-    delete displayAnalysis?.analysis_not_current_note;
-    subtractEvidenceGapDisclosureDelta(displayAnalysis);
-    subtractGoalsProjectionDelta(withoutFreshnessDisclosure);
-    subtractGraphContextDelta(withoutFreshnessDisclosure);
-    subtractEdgeBandVocabularyDelta(withoutFreshnessDisclosure);
-    subtractRecentChangesStatusDelta(withoutFreshnessDisclosure);
-
-    expect(sha256(JSON.stringify(withoutFreshnessDisclosure))).toBe(
-      UNDER_BUDGET_GOLDEN_SHA256,
-    );
-
-    // And no budget-truncation telemetry fired.
-    const budgetCuts = emitSpy.mock.calls.filter(
-      ([event, payload]) =>
-        event === TelemetryEvents.V5ContextTruncation &&
-        (payload as Record<string, unknown>).site ===
-          'context-budget-enforcement.applyContextBudgetToAssemblyInputs',
-    );
-    expect(budgetCuts).toHaveLength(0);
-  });
 
   it('O-2 scope guard: the O-3 graph/analysis seam never cuts the conversation window', () => {
     // ⚠ RETARGETED 2026-08-15 (Context/Memory V5 defect 3), and the reason is
@@ -478,13 +319,3 @@ describe('context budget enforcement at assembly (O-3)', () => {
  * not an estimate. (pack.graph nodes/edges ARE the trimmed compact
  * arrays on the compacted path.)
  */
-function bigGraphTrimmedProbe(pack: {
-  graph: { nodes: readonly unknown[]; edges: readonly unknown[] };
-}): unknown {
-  return {
-    nodes: pack.graph.nodes,
-    edges: pack.graph.edges,
-    _node_count: pack.graph.nodes.length,
-    _edge_count: pack.graph.edges.length,
-  };
-}

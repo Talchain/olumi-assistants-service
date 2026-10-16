@@ -45,18 +45,18 @@
  *    this lane reachable at all. Without that pin the whole spec could pass
  *    while testing an unreachable branch.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: vi.fn().mockResolvedValue('You are editing a graph.'),
   getSystemPromptMeta: vi.fn().mockReturnValue(null),
 }));
 
+import type { LLMAdapter } from '../../../../src/adapters/llm/types.js';
 import { handleEditGraph } from '../../../../src/orchestrator/tools/edit-graph.js';
 import type { ConversationContext } from '../../../../src/orchestrator/types.js';
-import type { LLMAdapter } from '../../../../src/adapters/llm/types.js';
 import { GoalConstraintSchema } from '../../../../src/schemas/assist.js';
-import { shouldSuppressEditDispatchForValueUpdate } from '../../../../src/orchestrator/routing/value-update-gate.js';
+
 import { findSuccessClaimHit } from '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 
 /** The user's utterance from the defect report. */
@@ -151,13 +151,7 @@ describe('edit_graph constraint shortcut — receipt honesty (ROADMAP 2.1041)', 
     expect(GoalConstraintSchema.safeParse(found[0]).success).toBe(false);
   });
 
-  it('PRECONDITION: the utterance is NOT suppressed by the real router, so this lane is reachable', () => {
-    // Clause D suppresses `add|apply|put|place` + the literal noun
-    // "constraint". "keep churn under 5%" carries neither, so route-v2 sends it
-    // here rather than to the D1 add_constraint handler. If this ever flips,
-    // every assertion below is about a dead branch and must be re-derived.
-    expect(shouldSuppressEditDispatchForValueUpdate(CONSTRAINT_UTTERANCE)).toBe(false);
-  });
+
 
   it('writes no constraint that the contract would reject', async () => {
     const result = await handleEditGraph(
@@ -210,32 +204,7 @@ describe('edit_graph constraint shortcut — receipt honesty (ROADMAP 2.1041)', 
     expect(result.assistantText).toMatch(/analysis|scored?\b|score against/i);
   });
 
-  it('offers a phrasing the REAL router sends to the sanctioned constraint handler', async () => {
-    const result = await handleEditGraph(
-      makeContext(),
-      CONSTRAINT_UTTERANCE,
-      makeForbiddenAdapter(),
-      'req-constraint-honesty',
-      'turn-constraint-honesty',
-    );
 
-    // A silent turn is its own failure mode: the user asked for a limit and
-    // must be told something. `assistantText` is `string | null`, so pin it.
-    expect(typeof result.assistantText).toBe('string');
-    const assistantText = result.assistantText as string;
-
-    // Pull the quoted example out of the copy and hand it to the real gate.
-    // This is the anti-dead-end pin: a receipt may only recommend a phrasing
-    // that route-v2 actually suppresses into the D1 add_constraint lane.
-    const quoted = assistantText.match(/["“]([^"”]+)["”]/);
-    expect(quoted, `honest receipt must quote a suggested phrasing: ${assistantText}`).not.toBeNull();
-
-    const suggestion = quoted![1];
-    expect(
-      shouldSuppressEditDispatchForValueUpdate(suggestion),
-      `suggested phrasing "${suggestion}" is NOT routed to the add_constraint handler — the receipt points at a dead end`,
-    ).toBe(true);
-  });
 
   it('the honest copy carries no success-claim language, per the real guard', async () => {
     const result = await handleEditGraph(

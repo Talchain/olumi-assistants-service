@@ -16,21 +16,21 @@
  * "and N more changes" — the multi-op pins below fail there by design.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
+import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 import {
-  clampLabel,
-  describeChangeset,
-  describeHeldOperationsSubject,
+clampLabel,
+describeChangeset,
+describeHeldOperationsSubject,
 } from '../describe-changeset.js';
 import {
-  buildGmHeldAssistantText,
-  buildGmHeldPublicCopy,
-  describeHeldOperationsSubject as refereeGateSeam,
+buildGmHeldAssistantText,
+buildGmHeldPublicCopy,
+describeHeldOperationsSubject as refereeGateSeam,
 } from '../edit-graph-referee-gate.js';
 import { buildGmHeldAppliedReceipt } from '../gm-held-execute.js';
-import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
-import { isValueUpdatePhrasing } from '../../../orchestrator/routing/value-update-gate.js';
+
 
 const GRAPH = {
   nodes: [
@@ -86,16 +86,7 @@ describe('consented fixed-outcome removal copy', () => {
   } } };
   const removal = { op: 'remove_edge', path: 'hybrid::funding' };
 
-  it('names the change of meaning on the offer and receipt without inventing an outcome', () => {
-    const subject = describeHeldOperationsSubject([change, removal], graph)!;
-    expect(subject).toContain("stop fixing 'Capital Raised' under 'Hybrid Syndicate'");
-    for (const text of [buildGmHeldAssistantText(subject, 2), buildGmHeldAppliedReceipt([subject])]) {
-      expect(text).toContain("stop fixing 'Capital Raised' under 'Hybrid Syndicate'");
-      expect(text).not.toContain('0.575');
-      expect(findForbiddenPhraseHit(text)).toBeNull();
-    }
-    expect(isValueUpdatePhrasing(buildGmHeldPublicCopy(subject).message)).toBe(false);
-  });
+
 
   it('does not claim a released outcome from map absence without its paired link removal', () => {
     expect(describeHeldOperationsSubject([change], graph)).not.toContain('stop fixing');
@@ -167,20 +158,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
     expect(d!.subject).toBe("add option 'Outsource hiring'");
   });
 
-  it('add_node of kind constraint stays plain (never "add ... constraint", which the value-update gate claims)', () => {
-    const d = describeChangeset(
-      [
-        {
-          op: 'add_node',
-          path: 'con-x',
-          value: { id: 'con-x', kind: 'constraint', label: 'Budget cap' },
-        },
-      ],
-      GRAPH,
-    );
-    expect(d!.subject).toBe("add 'Budget cap'");
-    expect(isValueUpdatePhrasing(d!.subject)).toBe(false);
-  });
+
 
   it('add_node without a label is honestly generic, never silent', () => {
     const d = describeChangeset(
@@ -502,16 +480,7 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
     }
   });
 
-  it('the unrecognised-reference fallback copy stays outside the value-update gate', () => {
-    const s = describeHeldOperationsSubject(
-      [{ op: 'remove_edge', path: 'garbage' }],
-      GRAPH,
-    )!;
-    const copy = buildGmHeldPublicCopy(s);
-    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
-    expect(isValueUpdatePhrasing(copy.label)).toBe(false);
-    expect(findForbiddenPhraseHit(copy.message)).toBeNull();
-  });
+
 
   it('the referee gate re-exports the SAME function — no second same-named implementation can drift', () => {
     // The two-same-named-`generateGraphHash` class: a duplicate
@@ -535,71 +504,7 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
   });
 });
 
-describe('routing safety — the new copy must not trip the value-update gate', () => {
-  it('a value-bearing chip message avoids the set/update-to phrasing the gate claims', () => {
-    const subject = describeHeldOperationsSubject(
-      [
-        {
-          op: 'update_node',
-          path: 'fac-marketing',
-          value: { observed_state: { value: 0.8 } },
-        },
-      ],
-      GRAPH,
-    );
-    const copy = buildGmHeldPublicCopy(subject);
-    expect(copy.message).toBe("Yes, make 'Marketing' 0.8.");
-    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
-    expect(isValueUpdatePhrasing(copy.label)).toBe(false);
-  });
 
-  it('the multi-op F7 chip message also stays outside the gate', () => {
-    const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(F7_BATCH, GRAPH));
-    expect(isValueUpdatePhrasing(copy.message)).toBe(false);
-  });
-
-  // ⚠ CONTRAST CONTROL (added 2026-09-14 with the `change` admission).
-  // Without it, every assertion above passes if the gate simply goes dead —
-  // an absence probe that cannot see a presence proves nothing. These are
-  // genuine USER value-instructions and MUST stay claimed, in the same run.
-  it('CONTRAST: a genuine user value-instruction IS still claimed by the gate', () => {
-    for (const message of [
-      "change Marketing to 0.8",
-      "set Marketing to 0.8",
-      "update Marketing to 0.8",
-      "Change Annual CRM Spend to £63,000.",
-    ]) {
-      expect(isValueUpdatePhrasing(message)).toBe(true);
-    }
-  });
-
-  // EVERY value-bearing clause shape, not just the tunable one. The copy
-  // constraint applies to all of them, and only the tunable shape was
-  // covered before — so the goal-target and edge-strength clauses were
-  // relying on the same exclusion with nothing pinning them.
-  it('every value-bearing clause shape stays outside the gate', () => {
-    const shapes = [
-      "make 'Marketing' 0.8",
-      'make a part of the model 0.8',
-      "make the target for 'Revenue' 0.8",
-      'make a target 0.8',
-      "make the strength of the link from 'Sales' to 'Revenue' 0.3",
-    ];
-    for (const subject of shapes) {
-      const copy = buildGmHeldPublicCopy(subject);
-      expect(isValueUpdatePhrasing(copy.message)).toBe(false);
-      expect(isValueUpdatePhrasing(copy.label)).toBe(false);
-      // DISCRIMINATION PIN — the PRE-fix wording of this same clause (the
-      // only difference being `make <subject> <v>` vs `change <subject> to
-      // <v>`) IS claimed. So the `false` above is the reword doing work, not
-      // a dead gate. ⚠ Written backwards first (`toBe(false)`) and caught by
-      // the test failing; the reword is load-bearing precisely because this
-      // is true.
-      const preFix = subject.replace(/^make /, 'change ').replace(/ ([^ ]+)$/, ' to $1');
-      expect(isValueUpdatePhrasing(`Yes, ${preFix}.`)).toBe(true);
-    }
-  });
-});
 
 // clampLabel is the shared 60/57-ellipsis truncation reused by the F4 per-part
 // replay-chip label in edit-graph-dispatch.ts (which previously re-implemented

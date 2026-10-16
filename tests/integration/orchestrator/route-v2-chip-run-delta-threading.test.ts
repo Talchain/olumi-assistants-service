@@ -12,10 +12,10 @@
  * whether it carries `priorFacts`. Mocked seam: the chip dispatcher (the dispatcher's own half — that it
  * returns the post-dispatch window, gated — is `chip-click-run-delta-window.test.ts`).
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import Fastify from 'fastify';
+import type { HandlerFact,RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { FastifyInstance } from 'fastify';
-import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import Fastify from 'fastify';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 
@@ -30,9 +30,7 @@ vi.mock('../../../src/config/index.js', () => ({
 
 // The executor is mocked only to prove the chip turn never falls through to it.
 const runTurnExecutorMock = vi.fn();
-vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({
-  runTurnExecutor: runTurnExecutorMock,
-}));
+
 
 const dispatchDeterministicChipClickMock = vi.fn();
 vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', () => ({

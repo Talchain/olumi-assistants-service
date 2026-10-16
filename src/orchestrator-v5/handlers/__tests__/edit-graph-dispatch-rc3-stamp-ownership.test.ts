@@ -4,17 +4,16 @@
  * At that head add stripping does not touch update_node, off/shadow skip the
  * governing referee, and the replacement apply port has no stamp screen.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import type { LLMAdapter } from '../../../adapters/llm/types.js';
-import { GraphV3 } from '../../../schemas/cee-v3.js';
-import type { ConversationContext, PatchOperation } from '../../../orchestrator/types.js';
-import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { _resetConfigCache } from '../../../config/index.js';
+import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
+import type { ConversationContext,PatchOperation } from '../../../orchestrator/types.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { buildReadyGraph } from '../../graph-management/__tests__/fixtures.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
-import type { CommitMetadata } from '../../commit.js';
-import { createApplyOperations, modelRevisionOf, type ApplyOperationsStore } from '../../apply-operations.js';
+
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 const { persisted } = vi.hoisted(() => ({ persisted: { graph: null as unknown } }));
@@ -43,7 +42,7 @@ vi.mock('../../../adapters/llm/prompt-loader.js', async (importOriginal) => ({
 
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
-import { dispatchEditGraph, mergeAppliedGraphForPersistence } from '../edit-graph-dispatch.js';
+import { dispatchEditGraph,mergeAppliedGraphForPersistence } from '../edit-graph-dispatch.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 const TURN = '22222222-2222-4222-8222-222222222222';
@@ -115,25 +114,7 @@ describe('rc3-generic-stamp-ownership', () => {
     expectUnstampedOrphan(before);
   });
 
-  it.each(['whole', 'pointer', 'nested-merge', 'add'])('rc3-apply-port-%s: generic consent cannot author the server stamp', async (variant) => {
-    const before = orphanGraph();
-    const operation = variant === 'pointer'
-      ? { op: 'update_node', path: `/nodes/${RISK}/relies_on/option_id`, value: STAMP.option_id }
-      : variant === 'nested-merge' ? genericWrites[3]![1]
-      : variant === 'add' ? { op: 'add_node', path: 'risk_fake', value: { id: 'risk_fake', kind: 'risk', label: 'Fake precondition', relies_on: STAMP } }
-      : genericWrites[0]![1];
-    const store = { loadGraph: vi.fn(async () => persisted.graph), readRecent: vi.fn(async () => [{
-      id: 'rc3-row', scenario_id: SCENARIO, turn_id: TURN,
-      request_hash: (vi.mocked(commitDirectAnswer).mock.calls.at(-1)?.[1] as CommitMetadata | undefined)?.request_hash,
-    }]) } as unknown as ApplyOperationsStore;
-    const outcome = await createApplyOperations({ scenarioId: SCENARIO, requestId: 'rc3-port', store })({
-      proposalId: 'rc3-proposal', idempotencyKey: TURN, modelRevision: modelRevisionOf(before)!,
-      operations: [{ kind: 'edit_graph', summary: 'Update the risk', detail: { operations: [operation] } }],
-    });
-    expect(outcome.ok).toBe(false);
-    expect(commitDirectAnswer).not.toHaveBeenCalled();
-    expectUnstampedOrphan(persisted.graph);
-  });
+
 
   it('rc3-merge-stamp: persistence merge cannot introduce a stamp absent from the stored node', () => {
     const before = orphanGraph();

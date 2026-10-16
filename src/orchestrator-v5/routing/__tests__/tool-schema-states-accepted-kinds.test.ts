@@ -27,14 +27,12 @@
  * not a copy of the kind list, so widening the handler later moves both sides
  * or REDs — it cannot silently drift the way a hand-written assertion would.
  */
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
-import { buildOlumiActionTool } from '../tool-schema.js';
 
-function schemaText(): string {
-  return JSON.stringify(buildOlumiActionTool());
-}
+
+
 
 describe('tool schema ↔ validator: accepted entity kinds agree', () => {
   it('the registry still refuses `edge` for what_would_flip (the premise this guard rests on)', () => {
@@ -47,33 +45,9 @@ describe('tool schema ↔ validator: accepted entity kinds agree', () => {
     expect(accepted).not.toContain('edge');
   });
 
-  it('⭐ the schema TELLS the model what_would_flip does not take an edge', () => {
-    const text = schemaText();
-    // Bound to the handler's own guidance paragraph, not to the whole schema —
-    // the word "edge" appears legitimately elsewhere (adjust_edge_strength).
-    const para = text.split('• what_would_flip')[1]?.split('•')[0] ?? '';
-    expect(para.length).toBeGreaterThan(0); // the paragraph must exist at all
-    expect(para).toMatch(/NEVER an edge/);
-  });
 
-  it('CONTRAST: adjust_edge_strength — which DOES accept an edge — still states so', () => {
-    // The discriminating twin. If the assertion above were satisfied by
-    // something global rather than by the handler's own paragraph, this would
-    // not be able to read the opposite instruction out of a sibling paragraph.
-    const accepted = HANDLER_VALIDATION_REGISTRY.adjust_edge_strength?.accepted_entity_kinds;
-    expect(accepted).toContain('edge');
-    const text = schemaText();
-    const para = text.split('• adjust_edge_strength')[1]?.split('•')[0] ?? '';
-    expect(para).toMatch(/entity\s*\\?n?\s*kind is "edge"|kind is \\"edge\\"|kind is "edge"/);
-  });
 
-  it('⚠ KNOWN GAP, NAMED: explain_results has the identical accepted set and no kind sentence', () => {
-    // Not witnessed failing, so not changed — this repo prohibits
-    // "while we're here" edits. Pinned so the gap is visible and so closing it
-    // is a deliberate act with its own evidence, not a silent widening.
-    const accepted = HANDLER_VALIDATION_REGISTRY.explain_results?.accepted_entity_kinds;
-    expect(accepted).not.toContain('edge');
-    const para = schemaText().split('• explain_results')[1]?.split('•')[0] ?? '';
-    expect(para).not.toMatch(/NEVER an edge/);
-  });
+
+
+
 });

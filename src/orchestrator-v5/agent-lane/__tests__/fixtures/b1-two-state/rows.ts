@@ -5,8 +5,6 @@ import { composeProposalReply } from '../../../proposal-reply.js';
 import { sayFigure, sayFigureExactly, sayFigureRead, sayFigureAsWritten, twoStateLevelWords } from '../../../say-figure.js';
 import { figureInUserUnits } from '../../../approval-chips.js';
 import { formatFactorValue, formatFactorValueApprox } from '../../../../compose/format-factor-value.js';
-import { buildWarrantDemotion } from '../../../../compose/warrant-demotion.js';
-import type { ProposalAction } from '../../../../routing/types.js';
 
 const original = readFileSync(new URL('./WIDEN.wire.txt', import.meta.url), 'utf8');
 const wire = JSON.parse(readFileSync(new URL('./turn-004-WIDEN-1791343253849.json', import.meta.url), 'utf8'));
@@ -62,13 +60,6 @@ export const rows: readonly { name: string; check: () => void }[] = [
     for (const stated_by of ['user', 'user_to_confirm']) {
       const actual = compose({ ok: true, mutated: false, proposal_id: 'factor', held_message: 'Yes, add X.', factors: [{ label: 'X', affects: 'Y', current_value: { value: 1, unit: 'binary', stated_by, quote: 'on' }, how_strongly: 'not known yet: Olumi uses a placeholder strength for the link, not an estimate' }] }, 'propose_new_factor');
       assert.ok(actual!.includes(stated_by === 'user' ? '‘X’ is switched on,' : '‘X’: on,'));
-    }
-  } },
-  { name: 'factor-value warrant demotion says off/on', check: () => {
-    for (const value of [0, 1]) {
-      const action = { handler_id: 'set_factor_value', entity: { id: 'switch', kind: 'node', label: 'X', resolution_status: 'resolved', resolution_method: 'label_match' }, parameters: [{ name: 'value', value: { value, unit: 'binary' }, source: 'user_explicit', operator: 'set' }], cited_context_fields: [] } as ProposalAction;
-      const built = buildWarrantDemotion(action, []);
-      assert.equal(built.ok && built.changeDescription, `setting "X" to ${value === 1 ? 'on' : 'off'}`);
     }
   } },
   { name: 'ordinary shared-format outputs retain their bytes; nonstates stay numeric', check: () => {

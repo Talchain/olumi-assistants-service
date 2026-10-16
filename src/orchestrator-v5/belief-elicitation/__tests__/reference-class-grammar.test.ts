@@ -20,13 +20,13 @@
  * K and N transposed, or that captured the whole sentence as the class,
  * fails every row.
  */
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import { PRODUCT_COACHING_PROMPTS } from '../../routing/process-meta-intake.js';
+
 import {
-  REFERENCE_CLASS_CONFIRM_PREFIX,
-  isReferenceClassCollapseHazard,
-  recogniseReferenceClass,
+REFERENCE_CLASS_CONFIRM_PREFIX,
+isReferenceClassCollapseHazard,
+recogniseReferenceClass,
 } from '../reference-class-grammar.js';
 
 interface PositiveRow {
@@ -176,21 +176,7 @@ describe('T1 negatives — HAND-WRITTEN corpus (notices an over-eager recogniser
   });
 });
 
-describe('T1 negatives — DERIVED corpus (notices a consumer drifting from the list)', () => {
-  it('no product coaching prompt triggers the recogniser', () => {
-    // Derived from the canonical constant, so prompts added later are covered.
-    expect(PRODUCT_COACHING_PROMPTS.length).toBeGreaterThan(0);
-    for (const prompt of PRODUCT_COACHING_PROMPTS) {
-      expect(recogniseReferenceClass(prompt).kind).toBe('none');
-    }
-  });
 
-  it('including the outside-view prompt itself — the ASK must not be read as an ANSWER', () => {
-    const outsideView = PRODUCT_COACHING_PROMPTS.find((p) => p.startsWith('Take the outside view'));
-    expect(outsideView).toBeDefined();
-    expect(recogniseReferenceClass(outsideView!).kind).toBe('none');
-  });
-});
 
 describe('T3 — the refusal taxonomy: ask, never guess', () => {
   it('K > N CLARIFIES — never swaps, never clamps', () => {

@@ -15,8 +15,8 @@
  * integration test (see `tests/integration/orchestrator/route-v2-chip-click-explain.test.ts`).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -93,14 +93,12 @@ vi.mock('../../tools/registry.js', async () => {
 // and assert zero invocations on every test in this suite. This is the
 // canonical Phase 2b assertion — the dispatcher must NOT hit the Sonnet
 // routing prompt, even though it shares COMMIT/COMPOSE with TurnExecutor.
-vi.mock('../../routing/route-with-tool-use.js', () => ({
-  routeWithToolUse: routeWithToolUseSpy,
-}));
+
 
 import {
-  dispatchDeterministicChipClick,
-  isDeterministicChipClickActionType,
-  DETERMINISTIC_CHIP_ACTION_TYPES,
+DETERMINISTIC_CHIP_ACTION_TYPES,
+dispatchDeterministicChipClick,
+isDeterministicChipClickActionType,
 } from '../chip-click-dispatch.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

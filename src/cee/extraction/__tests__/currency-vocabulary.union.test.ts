@@ -131,6 +131,7 @@ export function carriesCurrencyVocabulary(source: string): boolean {
  * multiplier") that an adversarial review had to catch — a registry entry that
  * teaches the checker to stop looking is trap 7b's exact shape.
  */
+// C1: remove only inventory keys whose modules were deleted; all surviving counts and assertions stay exact.
 const REVIEWED: Readonly<Record<string, string>> = {
   // ── THE CANONICAL VOCABULARY ─────────────────────────────────────────────
   "utils/currency-alphabet.ts":
@@ -151,9 +152,6 @@ const REVIEWED: Readonly<Record<string, string>> = {
   "cee/signals/currency-signal.ts":
     "code -> {symbol, code} map, 5 entries (GBP/USD/EUR/AUD/CAD). AGREES with the canonical " +
     "map on all 5 (asserted in Part A below) but is hand-written and short by five.",
-  "orchestrator/tools/draft-graph.ts":
-    "an INLINE re-spelling of currency-signal.ts's 5-entry map inside `signalFromCurrencyCode`. " +
-    "Function-local, so nothing can import it and no derived guard can compare it.",
   "cee/factor-extraction/display-value.ts":
     "`CURRENCY_SYMBOLS` recognition Set mixing symbols and ISO codes " +
     "(£/$/€/¥/₹/GBP/USD/EUR), plus a symbol->prefix ladder in `currencyPrefix`.",

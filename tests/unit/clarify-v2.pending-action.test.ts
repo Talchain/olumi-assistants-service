@@ -10,17 +10,16 @@
  * (the parser cannot import the schemas module, so the mirror is pinned
  * here instead — trap-12 discipline: a mirror must fail loud on drift).
  */
-import { describe, it, expect } from "vitest";
+import { describe,expect,it } from "vitest";
 
+import { PENDING_ACTION_KIND_SAFETY,tryClarificationResume } from "../../src/orchestrator-v5/routing/clarification-resume.js";
 import {
-  parsePendingAction,
-  RESUMABLE_ACTION_TYPES,
-  CHIP_DERIVABLE_ACTION_TYPES,
-  CONFIRMATION_EXPECTING_ACTION_TYPES,
+CHIP_DERIVABLE_ACTION_TYPES,
+CONFIRMATION_EXPECTING_ACTION_TYPES,
+parsePendingAction,
+RESUMABLE_ACTION_TYPES,
 } from "../../src/orchestrator-v5/session/pending-action.js";
-import { PENDING_ACTION_KIND_SAFETY } from "../../src/orchestrator-v5/routing/clarification-resume.js";
-import { tryClarificationResume } from "../../src/orchestrator-v5/routing/clarification-resume.js";
-import { tryShortConfirmResume } from "../../src/orchestrator-v5/routing/deterministic-short-confirm.js";
+
 import { DRAFT_GRAPH_MAX_BRIEF_LENGTH } from "../../src/schemas/assist.js";
 
 const NOW = Date.parse("2026-07-16T12:00:00Z");
@@ -99,16 +98,5 @@ describe("clarify_v2_round — resumer ownership boundaries", () => {
     expect(result.matched).toBe(false);
   });
 
-  it("a bare 'yes' short-confirm never resumes it through TurnExecutor synthesis", () => {
-    const result = tryShortConfirmResume({
-      message: "yes",
-      pendingActions: [pending],
-      nowMs: NOW,
-      currentTurnIndex: 1,
-    });
-    expect(result.matched).toBe(false);
-    if (result.matched === false) {
-      expect(result.skip_reason).toBe("kind_not_yet_resumable");
-    }
-  });
+
 });

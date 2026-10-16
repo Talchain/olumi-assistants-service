@@ -50,15 +50,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 import {
-  OLUMI_ACTION_TOOL,
-  buildOlumiActionTool,
-  buildForcedPillTool,
-} from '../routing/tool-schema.js';
-import {
-  buildAddOptionGrounding,
-  buildProposeAddOptionTool,
-} from '../tools/propose-add-option.js';
-import {
   buildProposeStructuralEditTool,
   buildStructuralEditGrounding,
   type StructuralEditGrounding,
@@ -67,21 +58,6 @@ import {
 const SRC_ROOT = join(fileURLToPath(new URL('../../', import.meta.url)));
 
 /** A grounded add-option model, so its tool schema is built the way it is served. */
-const ADD_OPTION_GROUNDING = buildAddOptionGrounding({
-  nodes: [
-    { id: 'dec_mrr', kind: 'decision', label: 'MRR Growth Strategy' },
-    { id: 'goal_mrr', kind: 'goal', label: 'Reach £250,000 MRR' },
-    {
-      id: 'fac_churn',
-      kind: 'factor',
-      label: 'Monthly churn',
-      category: 'controllable',
-      observed_state: { value: 0.05, unit: 'percent' },
-    },
-  ],
-  edges: [{ from: 'dec_mrr', to: 'goal_mrr' }],
-})!;
-
 const GROUNDING: StructuralEditGrounding = buildStructuralEditGrounding({
   nodes: [
     { id: 'dec_mrr', kind: 'decision', label: 'MRR Growth Strategy' },
@@ -110,28 +86,11 @@ const SERVED_TOOL_SCHEMAS: readonly {
   readonly label: string;
   readonly schema: unknown;
 }[] = [
-  { label: 'olumi_action (base advert)', schema: OLUMI_ACTION_TOOL.input_schema },
-  { label: 'olumi_action (served)', schema: buildOlumiActionTool().input_schema },
-  {
-    label: 'olumi_action (forced pill: explain_results)',
-    schema: buildForcedPillTool('explain_results').input_schema,
-  },
-  {
-    label: 'olumi_action (forced pill: what_would_flip)',
-    schema: buildForcedPillTool('what_would_flip').input_schema,
-  },
   {
     label: 'propose_structural_edit',
     schema: buildProposeStructuralEditTool(GROUNDING).input_schema,
   },
-  {
-    // The add-option text leg's focused tool. It CONSTRUCTS its own schema
-    // (nested objects under `links.items` and `clarification`), so the
-    // adapter's top-level-only `additionalProperties` injection cannot rescue
-    // it — exactly the shape that 400'd `propose_structural_edit` twice.
-    label: 'propose_add_option',
-    schema: buildProposeAddOptionTool(ADD_OPTION_GROUNDING).input_schema,
-  },
+
 ];
 
 /**
@@ -148,9 +107,7 @@ const SERVED_TOOL_SCHEMAS: readonly {
  */
 const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'adapters/llm/anthropic.ts',
-  'orchestrator-v5/routing/tool-schema.ts',
   'orchestrator-v5/tools/propose-structural-edit.ts',
-  'orchestrator-v5/tools/propose-add-option.ts',
 ];
 
 interface ObjectNode {

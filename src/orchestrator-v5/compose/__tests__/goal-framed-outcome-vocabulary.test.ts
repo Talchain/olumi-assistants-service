@@ -94,7 +94,7 @@ const SRC = resolve(HERE, '../../..');
  */
 const COVERED_EMITTERS: readonly string[] = [
   'orchestrator-v5/coaching/analysis-result-headline.ts',
-  'orchestrator-v5/routing/run-comparison-gate.ts',
+  // C1 deleted run-comparison-gate; the remaining three emitters keep every vocabulary prohibition.
   'orchestrator-v5/coaching/objective-contradiction.ts',
   'orchestrator-v5/signals/coaching-signals.ts',
 ];

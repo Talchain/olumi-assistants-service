@@ -33,20 +33,14 @@
  * DGAI-shaped request echo).
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync,readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import ts from 'typescript';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { __setUseAppendV6ForTest } from '../append-v6-flag.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-} from '../../adapters/llm/types.js';
 
 // ---------------------------------------------------------------------------
 // Stateful session-store mock — mirrors the RPC's p_graph semantics
@@ -104,30 +98,20 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
+
 
 // ---------------------------------------------------------------------------
 // Golden fixtures (captured EXP-01 graphs)
 // ---------------------------------------------------------------------------
 
-const RICH_PERSISTED_GRAPH = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/exp01/rich-persisted-graph.json', import.meta.url),
-    'utf8',
-  ),
-) as Record<string, unknown>;
 
-const ECHO_GRAPH_STATE = JSON.parse(
-  readFileSync(
-    new URL('./fixtures/exp01/echo-graph-state.json', import.meta.url),
-    'utf8',
-  ),
-) as Record<string, unknown>;
+
+
 
 /** EXP-01 run_analysis anchor — hash of the rich persisted graph. */
-const RICH_HASH = 'b3ebb23cfb03df1d';
 
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+
 
 // ---------------------------------------------------------------------------
 // Payload / adapter helpers. Gate 1 (identifier proof): scenario_id,
@@ -136,80 +120,16 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 // cannot pass accidentally.
 // ---------------------------------------------------------------------------
 
-const SCENARIO_ID = '49769b89-37c7-4c98-a278-4e389fa1cfc1';
 
-function payload(message: string, turnId: string): MessageTurnPayload {
-  return {
-    kind: 'message',
-    source: 'composer',
-    turn_id: turnId,
-    scenario_id: SCENARIO_ID,
-    message,
-    turn_class: 'frame',
-    stage: 'analyse',
-  };
-}
 
-function throwingRoutingAdapter() {
-  return {
-    chatWithTools: vi
-      .fn<
-        (
-          args: ChatWithToolsArgs,
-          opts: { requestId: string },
-        ) => Promise<ChatWithToolsResult>
-      >()
-      .mockImplementation(async () => {
-        throw new Error('routing adapter must NOT be called on this path');
-      }),
-  };
-}
 
-function installPriorRunAnalysisFact(graphHashAtRun: string): void {
-  priorTurns = [
-    {
-      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      scenario_id: SCENARIO_ID,
-      user_id: null,
-      turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-      turn_class: 'handler',
-      handler_id: 'run_analysis',
-      request_hash: 'sha256:prev',
-      response_emitted: true,
-      llm_calls_used: 1,
-      duration_ms: 42,
-      created_at: '2026-06-11T23:33:33.796+00:00',
-    },
-  ];
-  priorFacts = [
-    {
-      fact_type: 'run_analysis',
-      fact_version: 1,
-      noop: false,
-      result: {
-        scenario_id: SCENARIO_ID,
-        leading_option_id: 'opt_hire_local',
-        summary: 'Hire Two Senior Engineers Locally currently leads.',
-        graph_hash_at_run: graphHashAtRun,
-        computed_at: '2026-06-11T23:33:33.000Z',
-        enrichment: { analysis_status: 'completed' },
-        win_probabilities: { opt_hire_local: 0.76 },
-      },
-    },
-  ];
-}
+
+
+
+
 
 /** Drive the deterministic value-update pre-route (EXP-01 J5c shape). */
-async function runSetFactorValueTurn(requestId: string, turnId: string) {
-  return runTurnExecutor(
-    payload('Set the Local Senior Hire Indicator factor to 1.0.', turnId),
-    requestId,
-    {
-      routingAdapter: throwingRoutingAdapter(),
-      graphState: clone(ECHO_GRAPH_STATE) as never,
-    },
-  );
-}
+
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
@@ -234,182 +154,7 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('D1 mutation commits the persisted-base merge (V5-D1-SHAPE-01)', () => {
-  it('decisive live-faithful case (J5c): set_factor_value commits a graph that retains goal_node_id + options[] byte-for-byte AND carries the new factor value; rerun is legitimately stale', async () => {
-    installPriorRunAnalysisFact(RICH_HASH);
-    currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
 
-    await runSetFactorValueTurn(
-      'req-d1shape-j5c',
-      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11',
-    );
-
-    const mutationWrite = appendCalls.at(-1)!;
-    expect(mutationWrite.handler_id).toBe('set_factor_value');
-    expect(mutationWrite.graph).toBeDefined();
-    const committed = mutationWrite.graph as Record<string, unknown>;
-
-    // THE FIX — server-authoritative top-level fields survive from the
-    // persisted base. Pre-fix the committed graph was the echo-shaped
-    // mutated_graph: no goal_node_id, no options[] (scorecard J5c
-    // options → 0; canonical state loss, not a guaranteed analysis
-    // outage — readiness re-derives goal/options from node kinds).
-    expect(committed.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
-    expect(JSON.stringify(committed.options)).toBe(
-      JSON.stringify(RICH_PERSISTED_GRAPH.options),
-    );
-
-    // The intended mutation IS applied.
-    const mutatedNode = (
-      committed.nodes as Array<{ id: string; observed_state?: { value?: number } }>
-    ).find((n) => n.id === 'fac_local_hire');
-    expect(mutatedNode?.observed_state?.value).toBe(1);
-
-    // Freshness: a real mutation makes the prior analysis LEGITIMATELY
-    // stale — the committed graph's analysis-affecting hash moved off
-    // the run anchor, and rerun would re-anchor on a graph that still
-    // carries goal_node_id + options[] (run_analysis can execute).
-    const committedHash = computeAnalysisAffectingGraphHash(committed as never);
-    expect(committedHash).not.toBe(RICH_HASH);
-    expect(currentPersistedGraph).toBe(committed);
-
-    await runTurnExecutor(
-      payload('what changed?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12'),
-      'req-d1shape-post',
-      {
-        routingAdapter: {
-          chatWithTools: vi.fn().mockResolvedValue({
-            content: [{ type: 'text', text: 'The factor moved.' }],
-            stop_reason: 'end_turn',
-            usage: { input_tokens: 10, output_tokens: 20 },
-            model: 'claude-sonnet-4-6',
-            latencyMs: 50,
-          } as unknown as ChatWithToolsResult),
-        },
-        graphState: clone(ECHO_GRAPH_STATE) as never,
-      },
-    );
-    const freshness = events
-      .filter(
-        (e) =>
-          e.event === 'v5.analysis_freshness.derived' &&
-          e.data.dispatch_path === 'turn_executor_pre_handler',
-      )
-      .at(-1);
-    expect(freshness!.data.freshness).toBe('stale');
-    expect(freshness!.data.reason).toBe('graph_hash_diverged');
-    expect(freshness!.data.current_graph_hash).toBe(committedHash);
-  });
-
-  it('Gate 1 identifier proof: the strict persisted read is keyed by the SCENARIO id — the same value the commit targets — not the turn or request id', async () => {
-    // Legacy OFF graph-only reread census; ON reuses the captured combined snapshot.
-    __setUseAppendV6ForTest(false);
-    currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
-    const turnId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa13';
-    const requestId = 'req-d1shape-idproof';
-
-    await runSetFactorValueTurn(requestId, turnId);
-
-    expect(appendCalls.at(-1)!.graph).toBeDefined();
-    expect(loadGraphCalls.length).toBeGreaterThan(0);
-    const strictReadId = loadGraphCalls.at(-1);
-    expect(strictReadId).toBe(SCENARIO_ID);
-    expect(strictReadId).not.toBe(turnId);
-    expect(strictReadId).not.toBe(requestId);
-  });
-
-  it('fail closed: a degraded strict read aborts the commit — STATE_COMMIT_FAILED error envelope, zero rows appended, scenarios.graph untouched', async () => {
-    // Legacy OFF graph-only reread fault injection; ON combined failure is covered in the CAS sibling.
-    __setUseAppendV6ForTest(false);
-    currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
-    const pristine = JSON.stringify(currentPersistedGraph);
-    loadGraphError = new Error('session store unreachable');
-
-    const { response } = await runSetFactorValueTurn(
-      'req-d1shape-degraded',
-      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14',
-    );
-
-    // Nothing persisted: no turn row, no facts, no graph. The handler
-    // facts assert the mutation was applied, so committing them without
-    // the graph would corrupt canonical state.
-    expect(appendCalls).toHaveLength(0);
-    expect(JSON.stringify(currentPersistedGraph)).toBe(pristine);
-    // Pin the commit-failure envelope directly (Codex follow-up):
-    // STATE_COMMIT_FAILED maps to wire error_code 'INTERNAL_ERROR'
-    // (INTERNAL_TO_WIRE), is the retryable transient class
-    // (details.retryable), and STEP 7's catch stamps phase:'commit' —
-    // together these identify the commit-abort path, not a generic
-    // internal error.
-    const errorBlock = (
-      response.blocks as Array<{
-        type: string;
-        error_code?: string;
-        details?: Record<string, unknown>;
-      }>
-    ).find((b) => b.type === 'error');
-    expect(errorBlock).toBeDefined();
-    expect(errorBlock!.error_code).toBe('INTERNAL_ERROR');
-    expect(errorBlock!.details).toMatchObject({ retryable: true, phase: 'commit' });
-    const completed = events.find((e) => e.event === 'turn_executor.completed');
-    expect(completed?.data.failure_type).toBe('INTERNAL_ERROR');
-    expect(completed?.data.commit_performed).toBe(false);
-  });
-
-  it('genuinely-empty persisted graph: strict read returns null → the ingress-shaped mutated graph is the first valid write (no fail-closed, no invention)', async () => {
-    currentPersistedGraph = null;
-
-    await runSetFactorValueTurn(
-      'req-d1shape-empty',
-      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa15',
-    );
-
-    const mutationWrite = appendCalls.at(-1)!;
-    expect(mutationWrite.handler_id).toBe('set_factor_value');
-    expect(mutationWrite.graph).toBeDefined();
-    const committed = mutationWrite.graph as Record<string, unknown>;
-    const mutatedNode = (
-      committed.nodes as Array<{ id: string; observed_state?: { value?: number } }>
-    ).find((n) => n.id === 'fac_local_hire');
-    expect(mutatedNode?.observed_state?.value).toBe(1);
-    // Nothing invented: the echo never carried options[], so the first
-    // write doesn't either.
-    expect(committed.options).toBeUndefined();
-  });
-
-  it('no-op value update (set to the current value) still commits the FULL merged shape — no strip on no-op', async () => {
-    currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
-
-    // fac_local_hire currently 0 in the fixture; set it to 0 again.
-    await runTurnExecutor(
-      payload(
-        'Set the Local Senior Hire Indicator factor to 0.',
-        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa16',
-      ),
-      'req-d1shape-noop',
-      {
-        routingAdapter: throwingRoutingAdapter(),
-        graphState: clone(ECHO_GRAPH_STATE) as never,
-      },
-    );
-
-    const write = appendCalls.at(-1)!;
-    // Whether the handler treats this as a mutation or a no-op, the
-    // persisted graph must NOT lose its shape.
-    if (write.graph !== undefined && write.graph !== null) {
-      const committed = write.graph as Record<string, unknown>;
-      expect(committed.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
-      expect(JSON.stringify(committed.options)).toBe(
-        JSON.stringify(RICH_PERSISTED_GRAPH.options),
-      );
-    }
-    const persisted = currentPersistedGraph as Record<string, unknown>;
-    expect(persisted.goal_node_id).toBe(RICH_PERSISTED_GRAPH.goal_node_id);
-    expect(JSON.stringify(persisted.options)).toBe(
-      JSON.stringify(RICH_PERSISTED_GRAPH.options),
-    );
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Gate 2 invariant — mutated_graph emitter enumeration.
@@ -504,13 +249,6 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
       'orchestrator-v5/tools/handlers/set-factor-value.ts',
       'orchestrator-v5/tools/handlers/add-constraint.ts',
       'orchestrator-v5/tools/handlers/adjust-edge-strength.ts',
-      // A1 multi-edit — compound value-update chaining forwards the
-      // `set_factor_value` handler's OWN mutated_graph, chained across parts.
-      // The graph is therefore a D1 ingress-echo mutation that never deletes
-      // nodes (the contract this guard protects) by construction — it is not a
-      // novel producer. Scoped to this small, purpose-built module rather than
-      // exempting the whole turn-executor. See its module doc.
-      'orchestrator-v5/compound-value-update-chain.ts',
     ]);
 
     const offenders: string[] = [];

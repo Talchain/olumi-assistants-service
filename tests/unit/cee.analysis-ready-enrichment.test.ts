@@ -4,8 +4,8 @@
  * - intervention_details construction including CEE-6 echo stripping (CEE-9, Task 4)
  */
 
-import { describe, it, expect } from "vitest";
-import { buildAnalysisReadyPayload, labelMatchesBaseline } from "../../src/cee/transforms/analysis-ready.js";
+import { describe,expect,it } from "vitest";
+import { buildAnalysisReadyPayload,labelMatchesBaseline } from "../../src/cee/transforms/analysis-ready.js";
 // ROADMAP 1.162 — statically imported, NOT `await import(...)` inside the test body.
 //
 // This module graph costs ~1.1s to resolve on an idle machine and was measured
@@ -21,8 +21,8 @@ import { buildAnalysisReadyPayload, labelMatchesBaseline } from "../../src/cee/t
 // `vi.resetModules()`, so the dynamic import returned the same cached module
 // object a static import yields. Behaviour is identical; only the accounting
 // changes. Do NOT reintroduce a lazy import here to "speed up" the file.
-import { extractAnalysisReady } from "../../src/orchestrator/tools/draft-graph.js";
-import type { OptionV3T, GraphV3T, NodeV3T } from "../../src/schemas/cee-v3.js";
+
+import type { GraphV3T,NodeV3T,OptionV3T } from "../../src/schemas/cee-v3.js";
 
 // ============================================================================
 // Helpers
@@ -408,48 +408,7 @@ describe("is_baseline — staging regression labels", () => {
     }
   });
 
-  it("intervention_details survives extractAnalysisReady round-trip", () => {
-    // Build a payload with intervention_details via the real pipeline
-    const factorNode = {
-      id: "fac_cost", kind: "factor", label: "Cost",
-      observed_state: { raw_value: 50000, unit: "GBP", value: 0.5 },
-      display_value: "£50,000",
-    } as unknown as NodeV3T;
-    const graph = makeGraph([factorNode]);
-    graph.edges = [{ from: "opt_a", to: "fac_cost" }] as any;
 
-    const options = [
-      makeOption("opt_a", "Option A", {
-        interventions: { fac_cost: { value: 0.5, source: "brief_extraction", target_match: { confidence: "high" } } },
-      }),
-    ];
 
-    const payload = buildAnalysisReadyPayload(options, "goal_1", graph);
-    expect(payload.options[0].intervention_details).toBeDefined();
-    expect(Object.keys(payload.options[0].intervention_details!).length).toBeGreaterThan(0);
 
-    // Now round-trip through extractAnalysisReady (simulates pipeline → draft-graph.ts)
-    const body = { analysis_ready: payload };
-    const extracted = extractAnalysisReady(body as any);
-    expect(extracted).toBeDefined();
-    expect(extracted!.options[0].intervention_details).toBeDefined();
-    expect(extracted!.options[0].intervention_details!["fac_cost"]).toBeDefined();
-    expect(extracted!.options[0].intervention_details!["fac_cost"].display_value).toBe("£50,000");
-  });
-
-  it("empty intervention_details is omitted after extractAnalysisReady", () => {
-    const body = {
-      analysis_ready: {
-        options: [
-          { id: "opt_a", label: "Option A", status: "ready", interventions: { fac_x: 0.5 }, intervention_details: {} },
-        ],
-        goal_node_id: "goal_1",
-        status: "ready",
-      },
-    };
-
-    const extracted = extractAnalysisReady(body as any);
-    expect(extracted).toBeDefined();
-    expect(extracted!.options[0]).not.toHaveProperty("intervention_details");
-  });
 });

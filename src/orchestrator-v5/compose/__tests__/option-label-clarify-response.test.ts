@@ -43,64 +43,29 @@
  * natural phrasings for this sentence ("no changes were made", "I have added")
  * are exactly the ones the egress guard replaces WHOLESALE.
  */
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
+
 
 import {
-  composeOptionLabelClarifyResponse,
-  OPTION_LABEL_CLARIFY_UNCHANGED_SENTENCE,
-} from '../option-label-clarify-response.js';
-import {
-  findForbiddenPhraseHit,
-  findSuccessClaimHit,
+findForbiddenPhraseHit,
+findSuccessClaimHit,
 } from '../forbidden-user-facing-phrases.js';
 
-const PROPOSED = 'Geographic expansion';
-const DECISION = 'Geographic expansion strategy';
 
-function compose() {
-  return composeOptionLabelClarifyResponse({
-    proposedLabel: PROPOSED,
-    decisionLabel: DECISION,
-    stage: 'decide',
-  });
-}
+
+
+
 
 describe('composeOptionLabelClarifyResponse — the ask, not the silent decline', () => {
-  it('names the rejected label AND the decision it collided with, both verbatim', () => {
-    const text = compose().assistant_text;
-    // Bound by IDENTITY (the exact strings), never by a value predicate: a
-    // generic "that is the decision" sentence naming neither would satisfy a
-    // looser assertion while telling the user nothing they can act on.
-    expect(text).toContain(`"${PROPOSED}"`);
-    expect(text).toContain(`"${DECISION}"`);
-  });
 
-  it('⭐ ASKS FOR THE NAME — it does not invent one, and does not merely decline', () => {
-    const text = compose().assistant_text;
-    expect(text).toContain('?');
-    // The ask must be about the NAME. A question about a factor/edge/value is
-    // the generic edit-lane copy this exit exists to replace.
-    expect(text.toLowerCase()).toContain('call');
-  });
 
-  it('states the model is unchanged, using the VERBATIM already-proven sentence', () => {
-    // Taken from `duplicate-option-label-response.ts` / `option-effect-ask-response.ts`,
-    // which ship it today — so it is proven against FORBIDDEN_USER_FACING_PHRASES
-    // rather than re-invented here (the banned variants "nothing changed" /
-    // "no change was made" read perfectly and are landmines).
-    expect(OPTION_LABEL_CLARIFY_UNCHANGED_SENTENCE).toBe('I have not changed the model.');
-    expect(compose().assistant_text).toContain(OPTION_LABEL_CLARIFY_UNCHANGED_SENTENCE);
-  });
 
-  it('⚠ SHIPS NO CHIP — every spellable replay re-enters the rejection', () => {
-    expect(compose().suggested_actions).toEqual([]);
-  });
 
-  it('⭐ the composed bytes pass the egress guards BY EXECUTION', () => {
-    const text = compose().assistant_text;
-    expect(findForbiddenPhraseHit(text), `forbidden phrase in: ${text}`).toBeNull();
-    expect(findSuccessClaimHit(text), `success claim in: ${text}`).toBeNull();
-  });
+
+
+
+
+
 
   it('POSITIVE CONTROL — the guards used above can actually fire', () => {
     // Without this, the five assertions above could pass by testing nothing
@@ -109,7 +74,5 @@ describe('composeOptionLabelClarifyResponse — the ask, not the silent decline'
     expect(findSuccessClaimHit('I have added the option.')).not.toBeNull();
   });
 
-  it('is a functional direct answer on the stage it was given', () => {
-    expect(compose().stage_indicator).toBe('decide');
-  });
+
 });

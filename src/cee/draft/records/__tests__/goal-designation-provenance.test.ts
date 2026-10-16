@@ -63,7 +63,6 @@ import {
   type AuthoredLabelRefusal,
 } from "../objective-label.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
-import { buildPostDraftNarrative } from "../../../../orchestrator-v5/coaching/post-draft-narrative.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../../..");
@@ -106,10 +105,9 @@ interface Observed {
   readonly wireLabel: string | undefined;
   readonly labelAuthored: boolean;
   readonly disclosureQuote: string | undefined;
-  readonly assistantText: string;
 }
 
-/** Drive the WHOLE seam: records → projector → V3 wire → assistant narrative. */
+/** Drive the retained seam: records → projector → V3 wire. C1 deleted the narrative. */
 function drive(goalQuote: string, brief: string): Observed {
   const projection = projectRecordsToGraph(recordsFor(goalQuote), brief);
   const goalNode = projection.graph.nodes.find((n) => n.kind === "goal");
@@ -137,11 +135,6 @@ function drive(goalQuote: string, brief: string): Observed {
   }
   const wireGoal = wireNodes.find((n) => n.kind === "goal");
 
-  const narrative = buildPostDraftNarrative({
-    graph: v3.graph,
-    briefText: brief,
-  } as never) as unknown as { text?: string };
-
   return {
     goalNodeId: goalNode.id,
     recordClass: record?.provenance_class,
@@ -150,7 +143,6 @@ function drive(goalQuote: string, brief: string): Observed {
     wireLabel: wireGoal?.label as string | undefined,
     labelAuthored: wireGoal?.label_authored === true,
     disclosureQuote: record?.quote,
-    assistantText: narrative.text ?? "",
   };
 }
 
@@ -165,11 +157,10 @@ function reasonOf(quote: string): string {
 //    An absence assertion is vacuous until the probe is shown seeing a presence.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("the seam under test is reachable and discriminating", () => {
-  it("projects a goal node and reaches the wire and the narrative", () => {
+  it("projects a goal node and reaches the wire", () => {
     const o = drive("cut churn below 3% a month", "Our goal is to cut churn below 3% a month.");
     expect(o.recordClass, "record class must be observable").toBeTypeOf("string");
     expect(o.wireProvenance, "wire provenance must be observable").toBeTypeOf("string");
-    expect(o.assistantText.length, "narrative must be non-empty").toBeGreaterThan(0);
   });
 
   it("DISCRIMINATES: the two directions produce different verdicts on the same seam", () => {
@@ -198,12 +189,6 @@ describe("a goal the user never designated does not wear the user's badge", () =
     expect(o.wireProvenance, "wire provenance").toBe("ai_inferred");
     // Bound by IDENTITY to the exported constant, never to a copied string.
     expect(o.disclosureQuote).toBe(GOAL_SPAN_CHOSEN_BY_CEE);
-  });
-
-  it("the false quotation stops — the opener no longer asserts the question as the user's goal", () => {
-    const o = drive(GOVERNED_QUESTION_AS_GOAL, GOVERNED_QUESTION_BRIEF);
-    expect(o.assistantText).not.toContain(`for "${GOVERNED_QUESTION_AS_GOAL}"`);
-    expect(o.assistantText).toContain("from your brief");
   });
 
   it("nothing the user WROTE is lost — only the DESIGNATION is withdrawn", () => {
@@ -324,10 +309,6 @@ describe("an EXPLICITLY DESIGNATED objective keeps the user's badge and its quot
       expect(o.recordClass, "record class").toBe("stated");
       expect(o.wireProvenance, "wire provenance").toBe("from_brief");
       expect(o.sourceQuote, "the user's verbatim").toBe(quote);
-      // Bound by IDENTITY: this node's own label, in the opener, in quotes.
-      expect(o.assistantText, "the narrative quotes it back as theirs").toContain(
-        `for "${o.wireLabel}"`,
-      );
       expect(o.disclosureQuote, "no CEE disclosure may be attached").toBeUndefined();
     },
   );

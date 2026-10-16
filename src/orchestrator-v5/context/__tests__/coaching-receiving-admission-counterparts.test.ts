@@ -23,18 +23,13 @@
  * These four counterparts are the receiving contract. (1) is the new behaviour; (2)-(4) pin the
  * behaviour that must NOT move.
  */
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { assembleContextPack } from '../context-pack-assembler.js';
 import { withheldLeaderInputNoteForState } from '../withheld-leader-projection.js';
-import { analysisSummaryFixture } from './context-budget-fixtures.js';
-import { underBudgetCompactGraph } from './context-budget-fixtures.js';
-import {
-  ANALYSIS_CONTEXT_INSTRUCTION,
-  PROVISIONAL_FIGURES_INSTRUCTION,
-  buildUserMessage,
-} from '../../routing/route-with-tool-use.js';
+import { analysisSummaryFixture,underBudgetCompactGraph } from './context-budget-fixtures.js';
+
 
 const BASE_PAYLOAD = makeMessagePayload();
 
@@ -65,33 +60,7 @@ function leaderFields(pack: ReturnType<typeof assembleContextPack>): {
 }
 
 describe('receiving counterparts for the coaching claim authorities', () => {
-  it('(1) provisionally quantified AND genuinely separable — comparative information survives, QUALIFIED', () => {
-    const pack = assembleContextPack({
-      ...COMMON,
-      modelFacingClaimSafety: { status: 'qualified', mode: 'quantified_provisional' },
-    });
 
-    // Paul's ruling: caveat, NOT withhold. The comparative material the person
-    // asked about must still reach the coach.
-    const permitted = assembleContextPack({
-      ...COMMON,
-      modelFacingClaimSafety: { status: 'permitted' },
-    });
-    expect(leaderFields(pack)).toEqual(leaderFields(permitted));
-
-    // …and the coach must be TOLD it is provisional, or "caveat" is a hope, not
-    // a contract. The marker and its instruction are emitted by one condition.
-    expect(pack.analysis_context).toEqual({ status: 'provisional_figures' });
-    // ⚠ BOUND BY IDENTITY to the exact instruction constants, not by a phrase.
-    //   My first cut asserted the wording "could not be established", which an
-    //   unrelated always-rendered graph-status instruction ALSO contains — so it
-    //   could pass without either analysis instruction being emitted at all.
-    const message = buildUserMessage(pack, BASE_PAYLOAD.message);
-    expect(message).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
-    // The unavailable-analysis instruction must NOT be borrowed for this case:
-    // the analysis IS established here, it is merely not settled.
-    expect(message).not.toContain(ANALYSIS_CONTEXT_INSTRUCTION);
-  });
 
   it('(2) not separable / unknown separation — no invented ordering reaches the coach', () => {
     const pack = assembleContextPack({
@@ -110,20 +79,7 @@ describe('receiving counterparts for the coaching claim authorities', () => {
     expect(pack.display_analysis).not.toBeNull();
   });
 
-  it('(3) genuine constraint / identity / currentness restriction keeps its unavailable route', () => {
-    const pack = assembleContextPack({
-      ...COMMON,
-      modelFacingClaimSafety: {
-        status: 'withheld',
-        constraintVerdictState: null,
-        provenance: 'fail_closed_unavailable',
-      },
-    });
-    expect(pack.analysis_context).toEqual({ status: 'unavailable' });
-    const message = buildUserMessage(pack, BASE_PAYLOAD.message);
-    expect(message).toContain(ANALYSIS_CONTEXT_INSTRUCTION);
-    expect(message).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
-  });
+
 
   /**
    * ⭐⭐ THE FALL-THROUGH THE REVIEWER NAMED, pinned at the receiving OUTPUT.

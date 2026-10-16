@@ -27,36 +27,33 @@
  */
 
 import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-  type MockInstance,
+afterEach,
+beforeEach,
+describe,
+expect,
+it,
+vi,
+type MockInstance,
 } from 'vitest';
 
+import type { CompactEdge,CompactNode,GraphV3Compact } from '../../../orchestrator/context/graph-compact.js';
 import * as telemetry from '../../../utils/telemetry.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import {
-  assembleContextPack,
-  CONTEXT_PACK_RECENT_TURNS_CAP,
-  PERSISTED_MESSAGE_CAP,
+assembleContextPack,
+CONTEXT_PACK_RECENT_TURNS_CAP,
+PERSISTED_MESSAGE_CAP,
 } from '../context-pack-assembler.js';
 import {
-  CONTEXT_PACK_CEILING_CUT_ORDER,
-  CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
-  CONTEXT_POLICY,
+CONTEXT_PACK_CEILING_CUT_ORDER,
+CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
+CONTEXT_POLICY,
 } from '../context-policy.js';
-import { analysisSummaryFixture, priorTurnsFixture } from './context-budget-fixtures.js';
-import type { CompactEdge, CompactNode, GraphV3Compact } from '../../../orchestrator/context/graph-compact.js';
-import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import { measureModelFacingContextPackChars } from '../model-facing-context-pack.js';
-import {
-  ANALYSIS_CONTEXT_INSTRUCTION,
-  buildUserMessage,
-} from '../../routing/route-with-tool-use.js';
+import { analysisSummaryFixture,priorTurnsFixture } from './context-budget-fixtures.js';
+
 
 const BASE_PAYLOAD = Object.freeze(makeMessagePayload());
 
@@ -148,57 +145,7 @@ const OVERFLOW = { turns: CONTEXT_PACK_RECENT_TURNS_CAP, graphNodes: 10, labelCh
 const PATHOLOGICAL = { turns: CONTEXT_PACK_RECENT_TURNS_CAP, graphNodes: 20, labelChars: 700 } as const;
 
 describe('whole-pack context ceiling — overflow determinism (defect 3)', () => {
-  it('preserves the exact unavailable-analysis marker and sanction through a real ceiling cut', () => {
-    const pack = assembleContextPack({
-      payload: BASE_PAYLOAD,
-      priorTurns: fatTurns(OVERFLOW.turns),
-      priorTurnsTotal: 40,
-      priorFacts: [],
-      brief: 'Should we expand into the EU next year, or consolidate at home?',
-      compactedGraph: bulkyCompactGraph(
-        OVERFLOW.graphNodes,
-        OVERFLOW.labelChars,
-      ),
-      compactedConstraints: null,
-      analysis: analysisSummaryFixture(),
-      coaching: {
-        draft_coaching: null,
-        decision_review: {
-          produced_at: '2026-08-27T09:00:00.000Z',
-          narrative_summary: 'UNAVAILABLE_REVIEW_CANARY',
-        },
-        last_coaching_signal: {
-          signal_id: 'FIRST_ANALYSIS_COMPLETE',
-          turn_id: 'turn-analysis-canary',
-          produced_at: '2026-08-27T09:00:00.000Z',
-        },
-      },
-      modelFacingClaimSafety: {
-        status: 'withheld',
-        constraintVerdictState: null,
-        provenance: 'fail_closed_unavailable',
-      },
-    });
 
-    expect(ceilingEvents()).toHaveLength(1);
-    expect(pack.conversation.recent_turns.length).toBeLessThan(
-      CONTEXT_PACK_RECENT_TURNS_CAP,
-    );
-    expect(pack.analysis_context).toEqual({ status: 'unavailable' });
-    expect(pack.coaching).toEqual({
-      draft_coaching: null,
-      decision_review: null,
-      last_coaching_signal: null,
-    });
-    expect(measureModelFacingContextPackChars(pack)).toBeLessThanOrEqual(
-      TOTAL_BUDGET!,
-    );
-    const prompt = buildUserMessage(pack, 'same current message');
-    expect(prompt).toContain('"analysis_context": {');
-    expect(prompt.split(ANALYSIS_CONTEXT_INSTRUCTION)).toHaveLength(2);
-    expect(prompt).not.toContain('UNAVAILABLE_REVIEW_CANARY');
-    expect(prompt).not.toContain('FIRST_ANALYSIS_COMPLETE');
-  });
 
   it('trims the verbatim conversation OLDEST-first until the pack fits the policy total', () => {
     // Precondition (trap #13b — a guard whose discrimination is unpinned is a
@@ -528,130 +475,7 @@ describe('whole-pack context ceiling — never-trimmed protection', () => {
   });
 });
 
-describe('whole-pack context ceiling — authorised model bytes only', () => {
-  it('withholds a huge Decision Review before budgeting so it cannot evict conversation', () => {
-    const coaching = {
-      draft_coaching: {
-        scenario_id: BASE_PAYLOAD.scenario_id,
-        produced_at: '2026-04-29T00:00:00.000Z',
-        summary: 'DRAFT_COACHING_MUST_SURVIVE',
-        strengthen_items: [],
-        widening_log: null,
-        bias_signals: null,
-      },
-      decision_review: {
-        produced_at: '2026-04-30T00:00:00.000Z',
-        narrative_summary: `WITHHELD_DECISION_REVIEW_CANARY_${'x'.repeat(100_000)}`,
-        nested: {
-          conclusion: 'WITHHELD_NESTED_REVIEW_CANARY',
-        },
-      },
-      last_coaching_signal: {
-        signal_id: 'FIRST_ANALYSIS_COMPLETE' as const,
-        turn_id: 'turn-signal-kept',
-        produced_at: '2026-04-30T00:00:01.000Z',
-      },
-    } as const;
-    const common = {
-      payload: BASE_PAYLOAD,
-      priorTurns: fatTurns(CONTEXT_PACK_RECENT_TURNS_CAP),
-      priorTurnsTotal: CONTEXT_PACK_RECENT_TURNS_CAP,
-      priorFacts: [],
-      graphContext: { status: 'canonical' as const },
-      compactedGraph: bulkyCompactGraph(3, 20),
-      compactedConstraints: null,
-      analysis: analysisSummaryFixture(),
-      displayAnalysisSource: analysisSummaryFixture(),
-      coaching,
-    };
 
-    const withheld = assembleContextPack({
-      ...common,
-      modelFacingClaimSafety: {
-        status: 'withheld',
-        constraintVerdictState: 'unevaluated',
-        provenance: 'scenario_fact',
-      },
-    });
-
-    expect(withheld.coaching.decision_review).toBeNull();
-    expect(withheld.conversation.recent_turns).toHaveLength(
-      CONTEXT_PACK_RECENT_TURNS_CAP,
-    );
-    expect(measureModelFacingContextPackChars(withheld)).toBeLessThanOrEqual(
-      TOTAL_BUDGET!,
-    );
-    expect(JSON.stringify(withheld)).not.toContain(
-      'WITHHELD_DECISION_REVIEW_CANARY',
-    );
-    const withheldPrompt = buildUserMessage(withheld, 'same current message');
-    expect(withheldPrompt).not.toContain('WITHHELD_DECISION_REVIEW_CANARY');
-    expect(withheldPrompt).not.toContain('WITHHELD_NESTED_REVIEW_CANARY');
-    expect(withheldPrompt).toContain('DRAFT_COACHING_MUST_SURVIVE');
-    expect(withheldPrompt).toContain('turn-signal-kept');
-    expect(ceilingEvents()).toHaveLength(0);
-
-    const permitted = assembleContextPack({
-      ...common,
-      modelFacingClaimSafety: { status: 'permitted' },
-    });
-    const [permittedCut] = ceilingEvents();
-    expect(permitted.coaching.decision_review).toBe(coaching.decision_review);
-    expect(permitted.conversation.recent_turns).toHaveLength(
-      CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS,
-    );
-    expect(permittedCut?.floor_reached).toBe(true);
-    expect(permittedCut?.pack_total_chars_after as number).toBeGreaterThan(
-      TOTAL_BUDGET!,
-    );
-  });
-
-  it('does not let a huge hidden raw analysis evict model-facing conversation', () => {
-    const displayAnalysis = analysisSummaryFixture();
-    const smallRaw = analysisSummaryFixture();
-    const hugeRaw = {
-      ...smallRaw,
-      constraint_infeasible_note: `RAW_HOT_ANALYSIS_CANARY_${'z'.repeat(1_900_000)}`,
-    };
-    const common = {
-      payload: BASE_PAYLOAD,
-      priorTurns: fatTurns(CONTEXT_PACK_RECENT_TURNS_CAP),
-      priorTurnsTotal: CONTEXT_PACK_RECENT_TURNS_CAP,
-      priorFacts: [],
-      graphContext: { status: 'canonical' as const },
-      compactedGraph: bulkyCompactGraph(3, 20),
-      compactedConstraints: null,
-      displayAnalysisSource: displayAnalysis,
-      modelFacingClaimSafety: { status: 'permitted' as const },
-    };
-    const control = assembleContextPack({
-      ...common,
-      analysis: smallRaw,
-    });
-    const pack = assembleContextPack({
-      ...common,
-      analysis: hugeRaw,
-    });
-
-    expect(JSON.stringify(pack.analysis)).toContain('RAW_HOT_ANALYSIS_CANARY');
-    expect(pack.conversation.recent_turns).toHaveLength(
-      CONTEXT_PACK_RECENT_TURNS_CAP,
-    );
-    expect(control.conversation.recent_turns).toHaveLength(
-      CONTEXT_PACK_RECENT_TURNS_CAP,
-    );
-    expect(buildUserMessage(pack, 'same current message')).toBe(
-      buildUserMessage(control, 'same current message'),
-    );
-    expect(buildUserMessage(pack, 'same current message')).not.toContain(
-      'RAW_HOT_ANALYSIS_CANARY',
-    );
-    expect(pack.display_analysis).toEqual(control.display_analysis);
-    expect(pack.focus).toEqual(control.focus);
-    expect(pack.context_budget).toEqual(control.context_budget);
-    expect(ceilingEvents()).toHaveLength(0);
-  });
-});
 
 describe('whole-pack context ceiling — the declared cut order is the EXECUTED one', () => {
   it('declares conversation as a ceiling-cut section', () => {

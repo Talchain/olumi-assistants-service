@@ -5,13 +5,13 @@
  * Agent turn is a claim row, then the Agent's internal sub-turns (the turn executor's `sha256:` rows), then the Agent's
  * answer row (`agent_turn:`). `readRecent` answers newest first, so the fixture is reversed for the readers.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
-import { conversationAsSeen, isAgentAnswerRow, withTextAsSeen, AGENT_ANSWER_REQUEST_HASH_PREFIX } from '../conversation-as-seen.js';
-import { historyFromDurableTurns, DURABLE_SEED_TURNS, DURABLE_SEED_ROWS_READ } from '../../agent-lane/history-store.js';
-import { maintainRollingSummaryForCommit } from '../../rolling-summary/capture.js';
 import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
-import { assembleExplicitGenerateBrief } from '../../routing/assemble-explicit-generate-brief.js';
+import { DURABLE_SEED_ROWS_READ,DURABLE_SEED_TURNS,historyFromDurableTurns } from '../../agent-lane/history-store.js';
+import { maintainRollingSummaryForCommit } from '../../rolling-summary/capture.js';
+import { AGENT_ANSWER_REQUEST_HASH_PREFIX,conversationAsSeen,isAgentAnswerRow,withTextAsSeen } from '../conversation-as-seen.js';
+
 import type { SessionTurnWithContent } from '../conversation-content.js';
 
 const A = (x: string) => `agent_turn:${x.repeat(64).slice(0, 64)}`;
@@ -54,27 +54,7 @@ describe('AIQ row 1 — the Agent’s memory rebuilt after a redeploy holds only
   });
 });
 
-describe('AIQ row 2 — brief assembly never selects a sub-turn’s text', () => {
-  const base = { message: 'Yes, build the model now please', source: 'chip_click' as const, persistedBriefText: null };
-  const PARAPHRASE = 'The user wants to decide whether to raise the Pro plan price from £49 to £59 a month for 1,500 subscribers.';
 
-  it('RED: a newer brief-shaped sub-turn paraphrase loses to the user’s own brief', () => {
-    // The Agent's first turn only: its claim, the build's first-analysis sub-turn, and the answer row carrying the brief.
-    const firstTurn = [row('a096', A('7'), BRIEF, 'drafted'), row('8f22e3d6', S('9'), null, 'ran'), row('a096:claim', A('7'), null, null)];
-    const recentTurns = [row('sub', S('1'), PARAPHRASE, 'ok'), ...firstTurn];
-    expect(assembleExplicitGenerateBrief({ ...base, recentTurns })).toEqual({ brief: BRIEF, source: 'recent_turn' });
-  });
-
-  it('RED: when only a sub-turn is brief-shaped, no turn is used as the brief', () => {
-    const recentTurns = [row('sub', S('1'), PARAPHRASE, 'ok'), row('745a:claim', A('b'), null, null), row('745a', A('b'), 'Run the analysis', 'done')];
-    expect(assembleExplicitGenerateBrief({ ...base, recentTurns })).toBeNull();
-  });
-
-  it('CONTROL: an orchestrator-only conversation (no Agent rows) reads every row, exactly as before', () => {
-    const recentTurns = [row('t2', S('2'), 'thanks', 'ok'), row('t1', S('1'), BRIEF, 'ok')];
-    expect(assembleExplicitGenerateBrief({ ...base, recentTurns })).toEqual({ brief: BRIEF, source: 'recent_turn' });
-  });
-});
 
 describe('the predicate', () => {
   it('only the Agent route’s hash marks an answer row; conversationAsSeen keeps order and falls back only when there is no Agent row', () => {

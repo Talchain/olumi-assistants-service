@@ -35,20 +35,13 @@
  * PRESENT_PAIR, over the SAME assertions.
  */
 
-import { describe, it, expect } from 'vitest';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { describe,expect,it } from 'vitest';
 
-import { assembleContextPack } from '../context-pack-assembler.js';
-import {
-  buildUserMessage,
-  RUN_DELTA_INSTRUCTION,
-} from '../../routing/route-with-tool-use.js';
-import { makeMessagePayload } from '../../__tests__/fixtures.js';
+
 import { buildRunDelta } from '../../coaching/build-run-delta.js';
-import { observeSerialisedPack } from './observe-serialised-pack.js';
-import { PRESENT_PAIR, REFUSED_PAIR } from './run-delta-fixtures.js';
+import { PRESENT_PAIR,REFUSED_PAIR } from './run-delta-fixtures.js';
 
-const MESSAGE = 'should I be worried about that?';
+
 
 /**
  * Fact fixtures live in ./run-delta-fixtures.ts — shared with the
@@ -56,21 +49,7 @@ const MESSAGE = 'should I be worried about that?';
  * the two cannot drift apart silently.
  */
 
-function render(priorFacts: readonly HandlerFact[]): {
-  prompt: string;
-  serialised: Record<string, unknown>;
-} {
-  const pack = assembleContextPack({
-    payload: makeMessagePayload({ scenario_id: 'scen-run-delta-wire', message: MESSAGE }),
-    priorTurns: [],
-    priorFacts,
-    priorFactsReadOk: true,
-    graphContext: { status: 'canonical' },
-    mayNameLeadingOption: true,
-  });
-  const prompt = buildUserMessage(pack, MESSAGE);
-  return { prompt, serialised: observeSerialisedPack(prompt) };
-}
+
 
 describe('run_delta reaches the rendered routing prompt', () => {
   /**
@@ -93,36 +72,7 @@ describe('run_delta reaches the rendered routing prompt', () => {
     expect(refused.reason).toBe('insufficient_runs');
   });
 
-  it('PRESENT — the producer-computed delta reaches the model, bound by identity', () => {
-    const { serialised } = render(PRESENT_PAIR);
 
-    // IDENTITY: the slice's own subtree, never a substring of the whole prompt.
-    const delta = serialised.run_delta as Record<string, unknown> | undefined;
-    expect(delta, '`run_delta` is absent from the serialised pack the model receives').toBeDefined();
-
-    // The consequence itself: leader change, named by ID (never by label).
-    const leader = delta!.leader as Record<string, unknown>;
-    expect(leader.changed).toBe(true);
-    expect(leader.prior_leading_option_id).toBe('opt-a');
-    expect(leader.current_leading_option_id).toBe('opt-b');
-
-    // Per-option movement WITH its noise verdict — the half that makes the
-    // number sayable. A movement with no verdict is exactly the fabrication
-    // the producer exists to prevent.
-    const wins = delta!.win_probabilities as ReadonlyArray<Record<string, unknown>>;
-    const a = wins.find((w) => w.option_id === 'opt-a');
-    expect(a, 'the option under test must be present by ID').toBeDefined();
-    expect(a!.prior).toBe(0.62);
-    expect(a!.current).toBe(0.45);
-    expect(
-      ['signal', 'within_noise', 'not_noise_qualified'],
-      'every movement must carry a noise verdict',
-    ).toContain(a!.noise_verdict);
-
-    // Attribution + provenance ride along so the claim is auditable.
-    expect(delta!.attribution_case).toBeDefined();
-    expect(delta!.pair_provenance).toBeDefined();
-  });
 
   /**
    * ⛔ THE FROZEN SLOT MUST NOT BE PROJECTED. `flip_thresholds` is emitted
@@ -133,39 +83,14 @@ describe('run_delta reaches the rendered routing prompt', () => {
    * precisely a naive reader. Serialising `[]` would hand the model a
    * computed-looking answer to a question nothing asked.
    */
-  it('FROZEN SLOT — flip_thresholds is stripped, not passed through as an empty claim', () => {
-    const { serialised } = render(PRESENT_PAIR);
-    const delta = serialised.run_delta as Record<string, unknown>;
-    expect(Object.keys(delta)).not.toContain('flip_thresholds');
-    // CONTRAST CONTROL of plausible magnitude: the sibling keys ARE there, so
-    // the assertion above is not passing on an empty/missing subtree.
-    expect(Object.keys(delta).length).toBeGreaterThanOrEqual(4);
-    expect(Object.keys(delta)).toContain('win_probabilities');
-  });
+
 
   /**
    * ⭐ THE DISCRIMINATING TWIN. On a pair the producer refuses, the prompt must
    * say NOTHING about what changed. Absence staying absent is the property;
    * a suite that only checked the present case could not see it.
    */
-  it('REFUSED — a pair the producer refuses puts NO comparison in front of the model', () => {
-    const { serialised } = render(REFUSED_PAIR);
 
-    expect(serialised.run_delta, 'a REFUSAL must project no key at all').toBeUndefined();
-    expect(Object.keys(serialised)).not.toContain('run_delta');
-
-    // No consequence content anywhere on the pack under another name.
-    const asText = JSON.stringify(serialised);
-    expect(asText).not.toContain('attribution_case');
-    expect(asText).not.toContain('noise_verdict');
-    expect(asText).not.toContain('prior_leading_option_id');
-
-    // CONTRAST CONTROL, same run, plausible magnitude: the instrument can see
-    // the pack, and the pack demonstrably CONSUMED this fact array — so the
-    // zeros above cannot be the assembler simply never receiving the facts.
-    expect(Object.keys(serialised).length).toBeGreaterThan(5);
-    expect(Object.keys(serialised)).toContain('recent_changes');
-  });
 
   /**
    * ⛔⛔ THE ABSENCE GUARD ITSELF. The licence text must reach the model on the
@@ -178,33 +103,9 @@ describe('run_delta reaches the rendered routing prompt', () => {
    * test REDs while every other test in this file stays green — which is the
    * discrimination, since the present arm cannot see this property at all.
    */
-  it('ABSENCE GUARD — the model is told not to infer a consequence when the field is absent', () => {
-    const { prompt, serialised } = render(REFUSED_PAIR);
 
-    // PRECONDITION: this really is the absent arm.
-    expect(serialised.run_delta).toBeUndefined();
 
-    // The guard is RENDERED on precisely that turn.
-    expect(
-      prompt.includes(RUN_DELTA_INSTRUCTION),
-      'the run_delta licence is NOT rendered on a refused turn — the absence rule is dead text',
-    ).toBe(true);
 
-    // And it genuinely FORBIDS inference rather than merely mentioning absence.
-    expect(RUN_DELTA_INSTRUCTION).toContain('IF NO `run_delta` BLOCK APPEARS ABOVE, YOU DO NOT KNOW WHAT CHANGED');
-    expect(RUN_DELTA_INSTRUCTION).toContain('NEVER means nothing changed');
-    // The flip-threshold silence is the SECOND absence and fails the same way.
-    expect(RUN_DELTA_INSTRUCTION).toContain('THAT SILENCE IS NOT A FINDING');
-  });
-
-  it('ABSENCE GUARD — the same licence is rendered on the present turn too', () => {
-    const { prompt, serialised } = render(PRESENT_PAIR);
-    expect(serialised.run_delta).toBeDefined();
-    expect(prompt.includes(RUN_DELTA_INSTRUCTION)).toBe(true);
-    // Rendered EXACTLY once — a duplicated licence block would be a second
-    // emission site, which is how two chokepoints for one permission start.
-    expect(prompt.split(RUN_DELTA_INSTRUCTION)).toHaveLength(2);
-  });
 
   /**
    * The leader half of the wire, pinned separately. `mayNameLeadingOption` is
@@ -212,54 +113,13 @@ describe('run_delta reaches the rendered routing prompt', () => {
    * not remove the delta — it silently strips the leader ids, which is the
    * quieter failure and needs its own red.
    */
-  it('LEADER PERMISSION — an unentitled turn keeps the delta but names no leader', () => {
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: 'scen-run-delta-wire', message: MESSAGE }),
-      priorTurns: [],
-      priorFacts: PRESENT_PAIR,
-      priorFactsReadOk: true,
-      graphContext: { status: 'canonical' },
-      mayNameLeadingOption: false,
-    });
-    const delta = observeSerialisedPack(buildUserMessage(pack, MESSAGE)).run_delta as
-      | Record<string, unknown>
-      | undefined;
 
-    expect(delta, 'withholding the leader must not delete the whole consequence').toBeDefined();
-    const leader = delta!.leader as Record<string, unknown>;
-    expect(leader.prior_leading_option_id).toBeUndefined();
-    expect(leader.current_leading_option_id).toBeUndefined();
-    // Indeterminate folds to false — a false "your leader changed" rewrites the
-    // user's decision; a false "nothing changed" merely withholds.
-    expect(leader.changed).toBe(false);
-    // ⛔ RE-PINNED (AIQ F1 on #2378, CURRENT-READ-v1 row 9: leader_claim.permitted === false → no shares). The old
-    // contrast here said the shares "are NOT leader claims and survive"; they are — "opt-a 62% → 45%, opt-b 38% → 55%"
-    // names the withheld leader by arithmetic. The shares go; the consequence itself stays (contrast below).
-    expect(delta!.win_probabilities).toEqual([]);
-    expect(delta!.attribution_case, 'the delta itself survives the withheld leader').toEqual(expect.any(String));
-  });
 
   /**
    * The fail-closed default, pinned. A caller that does not thread the
    * permission must get NO leader ids — never a promoted claim.
    */
-  it('FAIL-CLOSED — an unthreaded permission names no leader', () => {
-    const pack = assembleContextPack({
-      payload: makeMessagePayload({ scenario_id: 'scen-run-delta-wire', message: MESSAGE }),
-      priorTurns: [],
-      priorFacts: PRESENT_PAIR,
-      priorFactsReadOk: true,
-      graphContext: { status: 'canonical' },
-      // mayNameLeadingOption deliberately NOT passed.
-    });
-    const delta = observeSerialisedPack(buildUserMessage(pack, MESSAGE)).run_delta as
-      | Record<string, unknown>
-      | undefined;
-    expect(delta).toBeDefined();
-    const leader = delta!.leader as Record<string, unknown>;
-    expect(leader.prior_leading_option_id).toBeUndefined();
-    expect(leader.current_leading_option_id).toBeUndefined();
-  });
+
 
   /**
    * ⭐ RUN_DELTA_IS_STRUCTURAL_NOT_PROSE — measured, not assumed.
@@ -278,45 +138,5 @@ describe('run_delta reaches the rendered routing prompt', () => {
    * REDs and THE GATE becomes load-bearing for it: re-check the sanctioning
    * then, and do NOT delete this test to make it quiet.
    */
-  it('RUN_DELTA_IS_STRUCTURAL_NOT_PROSE — the block carries ids and numbers, never quotable text', () => {
-    const proseLeaves = (v: unknown): string[] => {
-      const out: string[] = [];
-      const walk = (x: unknown): void => {
-        if (typeof x === 'string') {
-          if (x.trim().split(/\s+/).length >= 4) out.push(x.trim());
-          return;
-        }
-        if (Array.isArray(x)) return x.forEach(walk);
-        if (x && typeof x === 'object') Object.values(x as object).forEach(walk);
-      };
-      walk(v);
-      return out;
-    };
 
-    const { serialised } = render(PRESENT_PAIR);
-    const delta = serialised.run_delta as Record<string, unknown>;
-    expect(delta, 'precondition: the field must be present to be measured').toBeDefined();
-
-    expect(
-      proseLeaves(delta),
-      'run_delta has gained free text. THE GATE now covers this field and its ' +
-        'sanctioning must be re-checked — do not delete this test.',
-    ).toEqual([]);
-
-    // ⭐ CONTRAST CONTROL WITH A DIFFERENT EXPECTED ANSWER, same walker, same
-    // invocation (trap 20: a blind instrument can fake agreement, but it cannot
-    // fake a discrimination it is not making). The instruction block IS prose,
-    // so a walker returning zero for BOTH would be reporting on itself rather
-    // than on the data.
-    //
-    // ⚠ THE MAGNITUDE IS 1, NOT 12, AND THAT IS THE CORRECT ANSWER — this
-    // control was first written expecting `> 5` and RED-ed at `1`, which is how
-    // it earned its place. `RUN_DELTA_INSTRUCTION` is `[...].join('\n')`, i.e.
-    // ONE string by the time anything walks it, so a leaf-counting walker sees
-    // a single (very long) leaf. Asserting a plausible-looking bigger number
-    // here would have been a control tuned to a guess about its own subject.
-    const instructionLeaves = proseLeaves(RUN_DELTA_INSTRUCTION);
-    expect(instructionLeaves).toHaveLength(1);
-    expect(instructionLeaves[0]!.split(/\s+/).length).toBeGreaterThan(100);
-  });
 });

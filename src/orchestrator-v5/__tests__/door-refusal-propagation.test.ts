@@ -55,10 +55,6 @@ import { authorisationTurnId } from '../agent-lane/runtime/agent-capabilities.js
 import { TURN_RESPONSE_HEADROOM_MS } from '../../config/timeouts.js';
 import { markDraftGraphWriteFailed } from '../build-turn-context.js';
 import { log } from '../../utils/telemetry.js';
-const provider = vi.hoisted(() => ({ draft: vi.fn() }));
-vi.mock('../../orchestrator/tools/draft-graph.js', async load => ({
-  ...await load<typeof import('../../orchestrator/tools/draft-graph.js')>(), handleDraftGraph: provider.draft,
-}));
 vi.mock('../../orchestrator/plot-client.js', async load => ({
   ...await load<typeof import('../../orchestrator/plot-client.js')>(), createPLoTClient: () => ({
     run: async () => JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')),
@@ -144,8 +140,6 @@ beforeEach(() => {
   // The process-wide proposal store memoises an approved operation by (scenario, turn, proposal): this file reuses one
   // fixed request id and proposal across apps, so each test starts with that proposal's memo forgotten (isolation only).
   agentProposals.discard(adoptionProposal().proposal_id);
-  provider.draft.mockResolvedValue({ blocks: [], assistantText: 'A shared model.', latencyMs: 0, strengthenItems: [],
-    coachingSummary: null, coachingWideningLog: null, coachingBiasSignals: null, draftWarnings: [], graphOutput: GRAPH });
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'completed',
     output: [{ type: 'message', content: [{ type: 'output_text', text: 'Consider the assumptions together.' }] }] }), { status: 200 })));
 });

@@ -1,17 +1,15 @@
 {
-  "source_sha": "711b4d2f3cf53aec273556a0313e38242eeb5921",
+  "source_sha": "00eee4b54a539b5e46228c1e6c42562a2bc47c39",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
       "src/orchestrator-v5/context/context-pack-assembler.ts": 1,
       "src/orchestrator-v5/context/context-pack-schema.ts": 1,
       "src/orchestrator-v5/context/context-policy.ts": 1,
-      "src/orchestrator-v5/context/goal-target-record.ts": 4,
-      "src/orchestrator-v5/turn-executor.ts": 2
+      "src/orchestrator-v5/context/goal-target-record.ts": 4
     },
     "findSoleGoalNode": {
-      "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 1,
-      "src/orchestrator-v5/turn-executor.ts": 2
+      "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 1
     },
     "goalChanceTargetCause": {
       "src/orchestrator-v5/goal-target/goal-chance-gate.ts": 2,
@@ -57,7 +55,6 @@
       "src/cee/draft/records/label-bound.ts": 1,
       "src/cee/draft/records/objective-label.ts": 1,
       "src/cee/draft/records/projector.ts": 1,
-      "src/cee/dual-draft/merge.ts": 1,
       "src/cee/factor-extraction/goal-label-target.ts": 2,
       "src/cee/llm-output-store.ts": 2,
       "src/cee/magnitude/frame-defaulted-links.ts": 2,
@@ -126,7 +123,6 @@
       "src/orchestrator-v5/goal-target/run-question-scope.ts": 2,
       "src/orchestrator-v5/goal-target/stated-goal-target.ts": 3,
       "src/orchestrator-v5/graph-management/field-safety.ts": 1,
-      "src/orchestrator-v5/handlers/draft-graph-dispatch.ts": 3,
       "src/orchestrator-v5/handlers/edit-graph-dispatch.ts": 3,
       "src/orchestrator-v5/handlers/size-new-factor-links.ts": 1,
       "src/orchestrator-v5/model-management/compare.ts": 12,
@@ -147,7 +143,6 @@
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 2,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
       "src/orchestrator-v5/tools/handlers/set-factor-value.ts": 1,
-      "src/orchestrator-v5/turn-executor.ts": 14,
       "src/orchestrator/context/constraint-feasibility.ts": 11,
       "src/orchestrator/graph-structure-validator.ts": 5,
       "src/orchestrator/shared/referent-resolver.ts": 1,
@@ -316,10 +311,8 @@
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
       "src/orchestrator-v5/tools/registry.ts": 1,
-      "src/orchestrator-v5/turn-executor.ts": 9,
       "src/orchestrator/plot-client.ts": 4,
       "src/orchestrator/tools/analysis-ready-helper.ts": 15,
-      "src/orchestrator/tools/draft-graph.ts": 5,
       "src/orchestrator/types.ts": 2,
       "src/routes/scenario-graph-analysis-read.ts": 2,
       "src/routes/selected-run-figures.ts": 5,
@@ -420,12 +413,9 @@
       "src/orchestrator-v5/system-events/structural-rename.ts": 1,
       "src/orchestrator-v5/tools/handlers/add-constraint.ts": 3,
       "src/orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts": 2,
-      "src/orchestrator-v5/turn-executor.ts": 2,
       "src/orchestrator/context/constraint-feasibility.ts": 2,
       "src/orchestrator/context/graph-compact.ts": 1,
-      "src/orchestrator/routing/value-update-gate.ts": 1,
       "src/orchestrator/tools/analysis-ready-helper.ts": 6,
-      "src/orchestrator/tools/draft-graph.ts": 3,
       "src/orchestrator/types.ts": 2,
       "src/schemas/analysis-ready.ts": 5,
       "src/schemas/assist.ts": 1,
@@ -619,9 +609,7 @@
       "src/orchestrator-v5/tools/handlers/run-analysis.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-input-residual.ts": 1,
       "src/orchestrator-v5/tools/handlers/run-input-snapshot.ts": 3,
-      "src/orchestrator-v5/turn-executor.ts": 3,
       "src/orchestrator/context/constraint-feasibility.ts": 2,
-      "src/orchestrator/routing/value-update-gate.ts": 1,
       "src/orchestrator/types.ts": 1,
       "src/schemas/analysis-ready.ts": 5,
       "src/schemas/assist.ts": 1,
@@ -710,7 +698,6 @@
       "src/orchestrator-v5/agent-lane/admit-model.ts": 1,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 4,
       "src/orchestrator/tools/analysis-ready-helper.ts": 3,
-      "src/orchestrator/tools/draft-graph.ts": 2,
       "src/utils/goal-threshold-trio.ts": 2
     },
     "quantity_frame": {
@@ -837,30 +824,30 @@
     }
   },
   "counts": {
-    "extractPersistedGoalTarget": 14,
-    "findSoleGoalNode": 3,
+    "extractPersistedGoalTarget": 12,
+    "findSoleGoalNode": 1,
     "goalChanceTargetCause": 7,
     "goalDeadlineOf": 1,
     "goalKindOf": 29,
     "goalUnitOf": 5,
-    "goal_constraints": 466,
+    "goal_constraints": 448,
     "goal_deadline_as_stated": 11,
     "goal_direction": 102,
     "goal_horizon": 47,
     "goal_horizon_months": 43,
     "goal_level_reading": 20,
-    "goal_node_id": 298,
+    "goal_node_id": 284,
     "goal_period": 4,
     "goal_scope": 48,
     "goal_sense_reading": 15,
     "goal_stated_as": 3,
-    "goal_threshold": 260,
+    "goal_threshold": 254,
     "goal_threshold_cap": 168,
     "goal_threshold_cap_provenance": 38,
     "goal_threshold_frame": 147,
-    "goal_threshold_raw": 248,
+    "goal_threshold_raw": 244,
     "goal_threshold_unit": 225,
-    "pickGoalThresholdTrio": 18,
+    "pickGoalThresholdTrio": 16,
     "quantity_frame": 45,
     "readHeldGoalComparator": 20,
     "resolveGoalDirection": 31,
@@ -872,7 +859,7 @@
     "threshold_source": 43,
     "unit_reading": 79
   },
-  "total_references": 2526,
+  "total_references": 2478,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

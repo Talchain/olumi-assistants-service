@@ -40,16 +40,18 @@
  * asserts it is NOT — proving the assertion above can actually SEE an unmarked
  * call in both directions rather than being vacuously green.
  */
-import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { dirname,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { describe,expect,it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTE_V2 = resolve(HERE, '../../orchestrator/route-v2.ts');
 const OUTPUT_SAFETY = resolve(HERE, '../compose/output-safety.ts');
 const CHIP_CLICK_DISPATCH = resolve(HERE, '../handlers/chip-click-dispatch.ts');
-const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
+const TURN_EXECUTOR = resolve(HERE, '../handlers/approve-held-proposal.ts');
+type HeldRun = Awaited<ReturnType<typeof import('../handlers/approve-held-proposal.js').runHeldProposalApproval>>;
+const claimPermissionIsRequired: Record<never, never> extends Pick<HeldRun, 'mayNameLeadingOption'> ? false : true = true;
 
 interface SendCall {
   readonly offset: number;
@@ -203,13 +205,9 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
     ).not.toContain('run.mayNameLeadingOption ??');
 
     const executor = readFileSync(TURN_EXECUTOR, 'utf8');
-    expect(executor).toMatch(/^\s{2}mayNameLeadingOption:\s*boolean;/m);
-    expect(
-      executor,
-      'mayNameLeadingOption was made optional again on TurnExecutorRunResult. Optional is ' +
-        'what the `?? true` at the route grew out of: a producer that forgets the field must ' +
-        'fail to compile, which is the doctrine EgressSanitiseOpts already applies.',
-    ).not.toMatch(/^\s{2}mayNameLeadingOption\?:/m);
+    expect(claimPermissionIsRequired).toBe(true); // The full tsc gate also proves this field cannot become optional.
+    expect(executor).toContain('mayNameLeadingOption: verdict.may_name_leading_option,');
+    expect(executor).toContain('mayNameLeadingOption: false,');
   });
 
   it('POSITIVE CONTROL: the turn_executor `?? true` pin can FAIL', () => {
@@ -222,11 +220,8 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
     expect(reverted).toContain('run.mayNameLeadingOption ??');
 
     const executor = readFileSync(TURN_EXECUTOR, 'utf8');
-    const revertedType = executor.replace(
-      /^(\s{2})mayNameLeadingOption: boolean;/m,
-      '$1mayNameLeadingOption?: boolean;',
-    );
-    expect(revertedType).toMatch(/^\s{2}mayNameLeadingOption\?:/m);
+    const revertedType = executor.replace('mayNameLeadingOption: verdict.may_name_leading_option,', 'mayNameLeadingOption: true,');
+    expect(revertedType).not.toContain('mayNameLeadingOption: verdict.may_name_leading_option,');
   });
 
   it('the chip_click exit has NO `?? true` fallback left, and cannot regrow one', () => {

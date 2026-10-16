@@ -9,15 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWithTurnFence } from '../session/turn-fence.js';
 import type { SessionTurnWrite } from '../session/store.js';
 import Fastify, { type FastifyRequest } from 'fastify';
-import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
-const ports = vi.hoisted(() => ({ draft: vi.fn(), edit: vi.fn(), store: vi.fn(), routeDispatch: vi.fn() }));
-vi.mock('../../orchestrator/tools/draft-graph.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../orchestrator/tools/draft-graph.js')>(),
-  handleDraftGraph: ports.draft,
-}));
+const ports = vi.hoisted(() => ({ edit: vi.fn(), store: vi.fn(), routeDispatch: vi.fn() }));
 vi.mock('../../orchestrator/tools/edit-graph.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../orchestrator/tools/edit-graph.js')>(),
   handleEditGraph: ports.edit,
@@ -54,10 +49,8 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { computeGraphIdentityHash } from '../context/graph-identity.js';
-import { dispatchDraftGraph } from '../handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../handlers/edit-graph-dispatch.js';
 import { dispatchSystemEvent, dispatchOptionLevelsBatch, commitOptionLevelsInProcess, holdAddRiskInProcess, holdAddFactorInProcess, commitLimitEditInProcess, commitLimitAddInProcess, commitOptionStatusInProcess } from '../system-events/dispatch.js';
-import { createApplyOperations, modelRevisionOf } from '../apply-operations.js';
 import registerRoute from '../../routes/assist.v1.scenario-graph-register.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -94,7 +87,6 @@ function baseGraph() {
  */
 function harness(options: { failGraphReadAt?: number; missingV4?: boolean } = {}) {
   ports.edit.mockClear();
-  ports.draft.mockClear();
   const tables: Record<string, Row[]> = {
     scenarios: [{ id: SCENARIO, user_id: null, graph: baseGraph(),
       brief_text: 'Compare holding £49 with raising the price to £59.',
@@ -285,19 +277,6 @@ describe.each([true, false])('graph writer rollback flag-OFF contract (model ver
     _resetConfigCache();
   });
   it('keeps the PR-owned revision calls absent across every door family', async () => {
-    // draft
-    await (async () => {
-    const h = harness();
-    ports.draft.mockResolvedValue({ blocks: [], assistantText: 'Draft output available.', latencyMs: 1,
-      strengthenItems: [], coachingSummary: null, coachingWideningLog: null,
-      coachingBiasSignals: null, draftWarnings: [], graphOutput: baseGraph(),
-    } satisfies DraftGraphResult);
-    const result = await dispatchDraftGraph({ payload: message('Compare raising the price to £59 with holding £49.'),
-      requestId: 'flag-off-draft', request: { headers: {} } as FastifyRequest });
-    expect(result.commitPerformed).toBe(true);
-    expectLegacyAppend(h);
-    assertFlagOff(h, 'draft', false);
-    })();
     // edit — mismatched ingress
     await (async () => {
     const h = harness();
@@ -368,22 +347,6 @@ describe.each([true, false])('graph writer rollback flag-OFF contract (model ver
       assertFlagOff(h, 'register', true);
     } finally { ports.routeDispatch.mockReset(); await app.close(); }
     })();
-    // replacement apply
-    await (async () => {
-    const h = harness();
-    const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'flag-off-apply', store: h.store });
-    const result = await apply({ proposalId: 'flag-off-proposal', idempotencyKey: TURN,
-      modelRevision: modelRevisionOf(baseGraph())!, reconcile: true,
-      operations: [{ kind: 'set_option_effect', summary: 'Raise the price intervention on the increase option',
-        detail: { operations: [{ op: 'update_node', path: '/nodes/opt_raise/data/interventions/fac_price',
-          value: { value: 0.65 }, old_value: null, impact: 'moderate',
-          rationale: 'The user confirmed the price intervention.' }] } }],
-    });
-    expect(result.ok, JSON.stringify(result)).toBe(true);
-    expectLegacyAppend(h);
-    assertFlagOff(h, 'replacement apply', true);
-    })();
-
     // Every system-event graph writer, including the shared factor/range read.
     const hash = computeAnalysisAffectingGraphHash(baseGraph() as never)!;
     const events = [

@@ -1,20 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import { config } from '../../config/index.js';
-import { buildTurnContext, type BuildTurnContextOptions } from '../build-turn-context.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
-import { assembleContextPack, assembleContextPackWithSummary } from '../context/context-pack-assembler.js';
-import { overBudgetCompactGraph, priorTurnsFixture } from '../context/__tests__/context-budget-fixtures.js';
+import { buildTurnContext,type BuildTurnContextOptions } from '../build-turn-context.js';
+import { assembleContextPackWithSummary } from '../context/context-pack-assembler.js';
 import { RecentMutationSchema } from '../context/context-pack-schema.js';
-import { computeGraphIdentityHash, computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
+import { computeGraphIdentityHash,computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import type { ModelVersionRecord } from '../model-management/types.js';
 import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
 import type { CommittedMutationTurnRef } from '../types/recent-mutation-transition.js';
-import { buildUserMessage, CONTEXT_BUDGET_INSTRUCTION } from '../routing/route-with-tool-use.js';
+
+import { createMockSessionStore,makeSessionTurnRow } from '../../../tests/utils/mock-session-store.js';
 import { tryStateQueryGuard } from '../routing/state-query-guard.js';
 import { makeMessagePayload } from './fixtures.js';
-import { createMockSessionStore, makeSessionTurnRow } from '../../../tests/utils/mock-session-store.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 const OWNER = '22222222-2222-4222-8222-222222222222';
@@ -101,40 +100,7 @@ describe('durable versioned rename -> continuing reasoning', () => {
   beforeEach(() => { config.cee.modelVersionsEnabled = true; });
   afterEach(() => { config.cee.modelVersionsEnabled = originalFlag; });
 
-  it('uses the exact old mutation outside hot20, through fresh context/pack/prompt and effect answer', async () => {
-    const f = setup();
-    const source = structuredClone({ parent: f.parent, child: f.child, facts: f.facts });
-    const first = await f.read();
-    const cold = await f.read();
-    expect(first.context.prior_facts).toEqual([]);
-    expect(first.context.prior_facts.recent_changes_status).toBe('complete');
-    expect(first.pack.recent_changes).toEqual([{
-      action: 'graph_edited', transition: 'node_label_changed',
-      summary: `Renamed "${OLD}" to "${NEW}".`, target_label: NEW,
-    }]);
-    expect(RecentMutationSchema.safeParse(first.pack.recent_changes[0]).success).toBe(true);
-    expect(first.answer).toMatchObject({ matched: true, dispatch: 'with_recent_change' });
-    if (!first.answer.matched) throw new Error('effect question must be admitted');
-    expect(first.answer.assistant_text).toBe(`From the saved model history: Renamed "${OLD}" to "${NEW}".`);
-    expect(cold.answer).toEqual(first.answer);
-    const prompt = buildUserMessage(cold.pack, message);
-    expect(prompt).toContain(OLD);
-    expect(prompt).toContain(NEW);
-    expect(prompt).toContain('node_label_changed');
-    for (const hidden of [ref.conversation_row_id, ref.source_turn_id, ref.owner_user_id, ref.mutation_id]) {
-      expect(prompt).not.toContain(hidden);
-    }
-    // The existing pack contains its scenario identity; the new edit slice
-    // must not add any internal linkage or the unchanged numerical value.
-    const editBytes = JSON.stringify(cold.pack.recent_changes);
-    for (const hidden of Object.values(ref)) expect(editBytes).not.toContain(hidden);
-    expect(editBytes).not.toContain('0.5');
-    expect(f.reader.getVersionForCommittedTurn).toHaveBeenCalledWith(SCENARIO, ref.source_turn_id, ref.mutation_id);
-    expect(f.reader.getVersion).toHaveBeenCalledWith(SCENARIO, f.parent.id);
-    expect(f.durableRead).toHaveBeenCalledTimes(2); // one existing history query per fresh context
-    expect(f.writes).not.toHaveBeenCalled();
-    expect({ parent: f.parent, child: f.child, facts: f.facts }).toEqual(source);
-  });
+
 
   it.each(['missing lineage', 'flag off', 'version read throws', 'wrong owner', 'wrong parent', 'extra value change'])(
     'retains the receipt/history and generic safety on %s', async (arm) => {
@@ -171,28 +137,7 @@ describe('durable versioned rename -> continuing reasoning', () => {
     expect(answer.assistant_text).toContain('withheld');
   });
 
-  it('retains the typed rename through actual graph and whole-pack budget cuts', async () => {
-    const { context, pack: small } = await setup().read();
-    const turns = priorTurnsFixture(22);
-    const pack = assembleContextPack({
-      payload, priorTurns: turns, priorTurnsTotal: 41,
-      priorFacts: context.prior_facts, priorFactsReadOk: context.prior_facts_read_ok,
-      compactedGraph: overBudgetCompactGraph(), compactedConstraints: null, analysis: null,
-    });
-    // Both cuts must actually occur; the typed historical fact is not graph
-    // detail and does not inherit the graph's weaker display authority.
-    expect(pack.context_budget?.truncations.map(cut => cut.section)).toContain('graph');
-    expect(pack.conversation.recent_turns.length).toBeLessThan(turns.length);
-    expect(pack.recent_changes).toEqual(small.recent_changes);
-    expect(pack.recent_changes_status).toBe('complete');
-    const prompt = buildUserMessage(pack, message);
-    expect(prompt).toContain(CONTEXT_BUDGET_INSTRUCTION);
-    expect(prompt).toContain('node_label_changed');
-    expect(prompt).toContain(OLD);
-    expect(prompt).toContain(NEW);
-    const answer = tryStateQueryGuard({ message, contextPack: pack });
-    expect(answer).toEqual(tryStateQueryGuard({ message, contextPack: small }));
-  });
+
 
   it('keeps byte-identical receipts bound to their distinct occurrence IDs, not payloads', async () => {
     const f = setup();

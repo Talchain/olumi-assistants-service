@@ -4,15 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { log } from '../../utils/telemetry.js';
 import Fastify, { type FastifyRequest } from 'fastify';
-import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
-const ports = vi.hoisted(() => ({ draft: vi.fn(), edit: vi.fn(), store: vi.fn(), routeDispatch: vi.fn() }));
-vi.mock('../../orchestrator/tools/draft-graph.js', async importOriginal => ({
-  ...await importOriginal<typeof import('../../orchestrator/tools/draft-graph.js')>(),
-  handleDraftGraph: ports.draft,
-}));
+const ports = vi.hoisted(() => ({ edit: vi.fn(), store: vi.fn(), routeDispatch: vi.fn() }));
 vi.mock('../../orchestrator/tools/edit-graph.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../orchestrator/tools/edit-graph.js')>(),
   handleEditGraph: ports.edit,
@@ -49,10 +44,8 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { computeGraphIdentityHash } from '../context/graph-identity.js';
-import { dispatchDraftGraph } from '../handlers/draft-graph-dispatch.js';
 import { dispatchEditGraph } from '../handlers/edit-graph-dispatch.js';
 import { dispatchSystemEvent, dispatchOptionLevelsBatch, commitOptionLevelsInProcess, holdAddRiskInProcess, holdAddFactorInProcess, commitLimitEditInProcess, commitLimitAddInProcess, commitOptionStatusInProcess } from '../system-events/dispatch.js';
-import { createApplyOperations, modelRevisionOf } from '../apply-operations.js';
 import registerRoute from '../../routes/assist.v1.scenario-graph-register.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -89,7 +82,6 @@ function baseGraph() {
  */
 function harness(options: { failGraphReadAt?: number; renameInFlight?: boolean; bareReturn?: boolean; missingRpc?: boolean; advanceAfterFirstGraphRead?: boolean; appendError?: Row } = {}) {
   ports.edit.mockClear();
-  ports.draft.mockClear();
   const tables: Record<string, Row[]> = {
     scenarios: [{ id: SCENARIO, user_id: null, graph: baseGraph(),
       ...(options.advanceAfterFirstGraphRead ? { graph: { ...baseGraph(), snapshot: 'A' } } : {}),
@@ -368,8 +360,9 @@ describe('commit B server authority and real append doors', () => {
   });
   it('D1 merges A/r7 and submits r7 even when a subsequent read would return B/r8', async () => {
     const h = harness({ advanceAfterFirstGraphRead: true });
-    const { runTurnExecutor } = await import('../turn-executor.js');
-    await runTurnExecutor(message('Set Price to 0.7'), 'identity-d1', { graphState: baseGraph() });
+    await dispatchSystemEvent({ payload: { kind: 'system_event', scenario_id: SCENARIO,
+      turn_id: TURN, stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'fac_price', value: 0.7 } } as SystemEventTurnPayload,
+      requestId: 'identity-d1' });
     const write = h.rpcCalls.find(call => call.args.p_graph != null);
     expect(write).toBeDefined();
     expect(write!.args.p_expected_revision).toBe(7);
@@ -417,19 +410,6 @@ function assertFlagOn(h: ReturnType<typeof harness>, door: string, _forbidStateR
 describe.each([true, false])('CAS-ON door population (model versions=%s)', versionsEnabled => {
   beforeEach(() => { vi.stubEnv('CEE_MODEL_VERSIONS_ENABLED', String(versionsEnabled)); _resetConfigCache(); });
   it('routes every graph-bearing door family through revision CAS', async () => {
-    // draft
-    await (async () => {
-    const h = harness();
-    ports.draft.mockResolvedValue({ blocks: [], assistantText: 'Draft output available.', latencyMs: 1,
-      strengthenItems: [], coachingSummary: null, coachingWideningLog: null,
-      coachingBiasSignals: null, draftWarnings: [], graphOutput: baseGraph(),
-    } satisfies DraftGraphResult);
-    const result = await dispatchDraftGraph({ payload: message('Compare raising the price to £59 with holding £49.'),
-      requestId: 'flag-off-draft', request: { headers: {} } as FastifyRequest });
-    expect(result.commitPerformed).toBe(true);
-    expect(h.rpcCalls.some(c => ['append_turn_atomic_v6', 'append_turn_atomic_v4r'].includes(c.name))).toBe(true);
-    assertFlagOn(h, 'draft', false);
-    })();
     // edit — mismatched ingress
     await (async () => {
     const h = harness();
@@ -489,22 +469,6 @@ describe.each([true, false])('CAS-ON door population (model versions=%s)', versi
       assertFlagOn(h, 'register', true);
     } finally { ports.routeDispatch.mockReset(); await app.close(); }
     })();
-    // replacement apply
-    await (async () => {
-    const h = harness();
-    const apply = createApplyOperations({ scenarioId: SCENARIO, requestId: 'flag-off-apply', store: h.store });
-    const result = await apply({ proposalId: 'flag-off-proposal', idempotencyKey: TURN,
-      modelRevision: modelRevisionOf(baseGraph())!, reconcile: true, expectedRevision: 7, beforeAppend: async revision => { expect(revision).toBe(7); },
-      operations: [{ kind: 'set_option_effect', summary: 'Raise the price intervention on the increase option',
-        detail: { operations: [{ op: 'update_node', path: '/nodes/opt_raise/data/interventions/fac_price',
-          value: { value: 0.65 }, old_value: null, impact: 'moderate',
-          rationale: 'The user confirmed the price intervention.' }] } }],
-    });
-    expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(h.rpcCalls.some(c => ['append_turn_atomic_v6', 'append_turn_atomic_v4r'].includes(c.name))).toBe(true);
-    assertFlagOn(h, 'replacement apply', true);
-    })();
-
     // Every system-event graph writer, including the shared factor/range read.
     const hash = computeAnalysisAffectingGraphHash(baseGraph() as never)!;
     const events = [

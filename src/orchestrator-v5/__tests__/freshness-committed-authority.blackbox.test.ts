@@ -27,18 +27,16 @@ import { stampRunAnalysisProjection } from '../context/analysis-projection-polic
  * compares both derive from the SAME committed graph via the single normaliser
  * authority.
  */
-import { describe, it, expect } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { describe,expect,it } from 'vitest';
 
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
-import type { EnrichedTurnContext } from '../build-turn-context.js';
-import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
-import type { FreshnessDerivation } from '../context/freshness.js';
-import { deriveContextReadiness } from '../context/readiness.js';
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
+
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
@@ -219,92 +217,3 @@ describe('item 4 — post-CAS: the committed row is the single authority for bot
 // single-source invariant at the readiness seam (the deeper full-turn e2e —
 // compose ContextPack + finalize sharing the derivation — holds by
 // construction; a full driven-turn assertion would be its own lane).
-
-function makeContext(persistedGraph: unknown, priorFacts: readonly RunAnalysisHandlerFact[]): EnrichedTurnContext {
-  return {
-    prior_turns: [],
-    prior_facts: priorFacts,
-    prior_facts_with_turn: [],
-    scenarioBriefText: null,
-    persistedGraph,
-    most_recent_pending_actions: [],
-  } as unknown as EnrichedTurnContext;
-}
-
-function makeFreshness(overrides: Partial<FreshnessDerivation>): FreshnessDerivation {
-  return {
-    freshness: 'none',
-    reason: 'no_successful_run_analysis_fact',
-    selected_fact_index: null,
-    graph_hash_at_run: null,
-    current_graph_hash: null,
-    computed_at: null,
-    ...overrides,
-  };
-}
-
-describe('item 7 — coach context revision == visible revision', () => {
-  it('the coach-facing readiness identifies the SAME committed revision the turn ships on the wire', () => {
-    const committedHash = analysisHash(COMMITTED_GRAPH);
-    const fact = mkRunAnalysisFact(committedHash);
-    // The one derivation that also drives the wire + the coach ContextPack.
-    const freshness = makeFreshness({
-      freshness: 'fresh',
-      reason: 'graph_hash_match',
-      selected_fact_index: 0,
-      graph_hash_at_run: committedHash,
-      current_graph_hash: committedHash,
-    });
-
-    const readiness = deriveContextReadiness({
-      context: makeContext(COMMITTED_GRAPH, [fact]),
-      freshness,
-      recentChangeCount: 0,
-      contextPackChars: 1000,
-    });
-
-    // (a) coach revision == wire revision — sourced from the SAME derivation.
-    expect(readiness.current_graph_hash).toBe(freshness.current_graph_hash);
-    expect(readiness.latest_analysis_graph_hash).toBe(freshness.graph_hash_at_run);
-
-    // (b) == the committed graph the USER sees (item 4 chain: committed row).
-    expect(readiness.current_graph_hash).toBe(committedHash);
-
-    // (c) the coach's structural picture is drawn from the committed graph,
-    // not any ingress graph — same revision, end to end.
-    expect(readiness.graph_node_count).toBe(COMMITTED_GRAPH.nodes.length);
-    expect(readiness.graph_edge_count).toBe(COMMITTED_GRAPH.edges.length);
-
-    // (d) fresh ⇒ the analysis revision and the shown-graph revision coincide.
-    expect(readiness.latest_analysis_graph_hash).toBe(readiness.current_graph_hash);
-  });
-
-  it('a revision split is SURFACED, never papered over: readiness mirrors freshness verbatim', () => {
-    // If the committed row had moved on (stale), the coach must SEE stale — the
-    // readiness cannot silently report the old revision as current.
-    const ranAgainstHash = analysisHash(COMMITTED_GRAPH);
-    const currentCommittedHash = analysisHash(DIVERGED_COMMITTED_GRAPH);
-    const fact = mkRunAnalysisFact(ranAgainstHash);
-    const freshness = makeFreshness({
-      freshness: 'stale',
-      reason: 'graph_hash_diverged',
-      selected_fact_index: 0,
-      graph_hash_at_run: ranAgainstHash,
-      current_graph_hash: currentCommittedHash,
-    });
-
-    const readiness = deriveContextReadiness({
-      context: makeContext(DIVERGED_COMMITTED_GRAPH, [fact]),
-      freshness,
-      recentChangeCount: 1,
-      contextPackChars: 1000,
-    });
-
-    // The coach sees the CURRENT committed revision as current, and the (older)
-    // analysis revision as what the run used — a truthful, non-matching pair.
-    expect(readiness.latest_analysis_freshness).toBe('stale');
-    expect(readiness.current_graph_hash).toBe(currentCommittedHash);
-    expect(readiness.latest_analysis_graph_hash).toBe(ranAgainstHash);
-    expect(readiness.current_graph_hash).not.toBe(readiness.latest_analysis_graph_hash);
-  });
-});

@@ -53,20 +53,16 @@
  * sequence completes for one kind and not the other, so a later reader cannot
  * re-derive "the follow-up always arms" from the risk case alone.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
-import { setTestSink } from '../../utils/telemetry.js';
-import { makeMessagePayload } from './fixtures.js';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
-import type { PendingAction } from '../session/pending-action.js';
-import { runCompoundGoals } from '../../cee/unified-pipeline/stages/repair/compound-goals.js';
 import {
-  renderDirectionClarifications,
-  type DirectionUnresolvedItem,
+renderDirectionClarifications,
+type DirectionUnresolvedItem,
 } from '../../cee/compound-goal/direction-gate.js';
+import { runCompoundGoals } from '../../cee/unified-pipeline/stages/repair/compound-goals.js';
+import { setTestSink } from '../../utils/telemetry.js';
+import type { PendingAction } from '../session/pending-action.js';
 
 const appendCalls: Array<Record<string, unknown>> = [];
 let mockedPendingActions: ReadonlyArray<PendingAction> = [];
@@ -89,10 +85,10 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
-const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+
+
 
 /** The user's own sentence, in the shape the regex extractor reads. */
 const BRIEF_LIMIT_SENTENCE = 'We need to keep monthly churn under 4%.';
@@ -138,66 +134,13 @@ const TWO_LIMITS_ONE_NUMBER = `${BRIEF_LIMIT_SENTENCE} ${SECOND_LIMIT_SENTENCE}`
  * edge, and no `observed_state.baseline`. `f-churn-factor` is byte-identical
  * apart from `kind`, which is the whole discrimination.
  */
-function answerTurnGraph(churnKind: 'risk' | 'factor'): GraphV3T {
-  return {
-    nodes: [
-      { id: 'g-revenue', kind: 'goal', label: 'Revenue' },
-      { id: 'f-quality', kind: 'factor', label: 'Product quality' },
-      { id: 'n-churn', kind: churnKind, label: 'Monthly churn' },
-    ],
-    edges: [
-      {
-        from: 'f-quality',
-        to: 'n-churn',
-        strength: { mean: -0.5, std: 0.1 },
-        exists_probability: 0.9,
-        effect_direction: 'negative',
-      },
-    ],
-    goal_constraints: [],
-  } as unknown as GraphV3T;
-}
+
 
 /**
  * The ORDINARY route the prose answer actually takes: the router's own
  * `add_constraint` tool call naming the node the user picked.
  */
-function addConstraintToolCallAdapter() {
-  const chatWithTools = vi
-    .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-    .mockImplementation(async () => ({
-      content: [
-        {
-          type: 'tool_use',
-          id: 'tu-followthrough',
-          name: OLUMI_ACTION_TOOL_NAME,
-          input: {
-            intent_class: 'execute',
-            action: {
-              handler_id: 'add_constraint',
-              entity: {
-                id: 'n-churn',
-                kind: 'node',
-                resolution_status: 'resolved',
-                resolution_method: 'id_match',
-              },
-              parameters: [
-                { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
-                { name: 'value', value: 4, source: 'user_explicit' },
-                { name: 'unit', value: '%', source: 'user_explicit' },
-              ],
-              cited_context_fields: ['graph.nodes'],
-            },
-          } as Record<string, unknown>,
-        },
-      ] as unknown as ChatWithToolsResult['content'],
-      stop_reason: 'tool_use' as const,
-      usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
-      model: 'mock',
-      latencyMs: 0,
-    }));
-  return { adapter: { chatWithTools }, chatWithTools };
-}
+
 
 /**
  * The user's answer to the card, in the form the card itself asks for.
@@ -215,26 +158,14 @@ function addConstraintToolCallAdapter() {
  * `deriveStatedTargetBaselinePercent` finds nothing to mint and the elicitation
  * cell is the one that fires. That is the same shape the EMIT pin uses.
  */
-const ANSWER_MESSAGE = 'That limit is on monthly churn. Keep monthly churn under 4%.';
 
-function payload(message: string): MessageTurnPayload {
-  return makeMessagePayload({
-    turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    scenario_id: SCENARIO_ID,
-    stage: 'analyse',
-    message,
-  });
-}
+
+
 
 /** The committed graph's constraint rows, or `[]` when nothing committed. */
-function committedConstraints(): ReadonlyArray<Record<string, unknown>> {
-  const graph = appendCalls[0]?.['graph'] as { goal_constraints?: unknown[] } | undefined;
-  return (graph?.goal_constraints ?? []) as ReadonlyArray<Record<string, unknown>>;
-}
 
-function committedPendings(): ReadonlyArray<PendingAction> {
-  return (appendCalls[0]?.['pending_actions'] ?? []) as ReadonlyArray<PendingAction>;
-}
+
+
 
 beforeEach(() => {
   appendCalls.length = 0;
@@ -463,70 +394,5 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    */
   it('KNOWN-DROPPED — two distinct metrics sharing one number: the second gets NO ask, of any reason', () => {
     expect(allAsks(TWO_LIMITS_ONE_NUMBER)).toEqual(['target_unmatched|monthly churn']);
-  });
-});
-
-describe('STEP 3 — answering it dispatches add_constraint, and the cell decides the follow-up', () => {
-  it('⭐ RISK TARGET — the constraint commits AND the baseline question is armed in the same commit', async () => {
-    const { adapter, chatWithTools } = addConstraintToolCallAdapter();
-    const { response, telemetry } = await runTurnExecutor(
-      payload(ANSWER_MESSAGE),
-      'req-followthrough-risk',
-      { routingAdapter: adapter, graphState: answerTurnGraph('risk') },
-    );
-
-    expect(telemetry.failure_type).toBeNull();
-    // The prose answer really did take the LLM route — this is the weak link
-    // the file exists to exercise, so assert it was the one used.
-    expect(chatWithTools).toHaveBeenCalled();
-
-    // ⭐ PRECONDITION, ASSERTED BEFORE ANY CLAIM ABOUT THE QUESTION: the
-    // constraint genuinely minted on the named target. Without this a green
-    // "no pending" would be indistinguishable from a fixture that never
-    // reached the handler at all.
-    expect(appendCalls).toHaveLength(1);
-    const rows = committedConstraints();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ node_id: 'n-churn', operator: '<=', value: 4, unit: '%' });
-
-    // The join: the same commit carries the armed baseline question.
-    const elicit = committedPendings().filter(
-      (p) => p.action.kind === 'elicit_target_baseline',
-    );
-    expect(elicit).toHaveLength(1);
-    expect(elicit[0]!.action).toMatchObject({
-      kind: 'elicit_target_baseline',
-      target_id: 'n-churn',
-      target_label: 'Monthly churn',
-    });
-    // And the user is actually asked, in the receipt.
-    expect(response.assistant_text).toContain(
-      'Roughly what percentage is Monthly churn at right now?',
-    );
-  });
-
-  it('⭐ FACTOR TARGET — the constraint still commits, and NO baseline question is armed', async () => {
-    const { adapter } = addConstraintToolCallAdapter();
-    const { telemetry } = await runTurnExecutor(
-      payload(ANSWER_MESSAGE),
-      'req-followthrough-factor',
-      { routingAdapter: adapter, graphState: answerTurnGraph('factor') },
-    );
-
-    expect(telemetry.failure_type).toBeNull();
-
-    // ⭐ THE SAME PRECONDITION, AND IT IS WHAT MAKES THIS CASE MEAN ANYTHING.
-    // The write happened; only the follow-up differs. A fixture that failed to
-    // commit would satisfy the "no pending" assertion for the wrong reason.
-    expect(appendCalls).toHaveLength(1);
-    const rows = committedConstraints();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ node_id: 'n-churn', operator: '<=', value: 4, unit: '%' });
-
-    // `mintEligible` excludes `factor` deliberately: a baseline there is inert
-    // because ISL refuses the conversion. So the sequence stops here.
-    expect(
-      committedPendings().filter((p) => p.action.kind === 'elicit_target_baseline'),
-    ).toHaveLength(0);
   });
 });

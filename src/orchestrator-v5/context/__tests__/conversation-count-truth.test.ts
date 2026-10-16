@@ -39,16 +39,16 @@
  * silent-drop tests must go red.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import {
-  assembleContextPack,
-  projectConversation,
-  CONTEXT_PACK_RECENT_TURNS_CAP,
+assembleContextPack,
+CONTEXT_PACK_RECENT_TURNS_CAP,
+projectConversation,
 } from '../context-pack-assembler.js';
 import { ContextPackSchema } from '../context-pack-schema.js';
-import { buildUserMessage } from '../../routing/route-with-tool-use.js';
+
 import { priorTurnsFixture } from './context-budget-fixtures.js';
 
 const PAYLOAD = Object.freeze(makeMessagePayload());
@@ -79,46 +79,11 @@ describe('conversation length — the number the coach is given', () => {
     expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
   });
 
-  it('the SERIALISED PROMPT — what the model actually reads — carries 78 and never 20', () => {
-    const prompt = buildUserMessage(packWith(TRUE_TOTAL), 'How long have we been talking?');
-    expect(prompt).toContain(`"turn_count": ${TRUE_TOTAL}`);
-    expect(prompt).toContain(`"available": ${TRUE_TOTAL}`);
-    // The exact bytes the pre-fix build emitted, which the coach then read
-    // back to the user as the total.
-    expect(prompt).not.toContain(`"turn_count": ${READ_WINDOW}`);
-    expect(prompt).not.toContain(`"available": ${READ_WINDOW}`);
-  });
 
-  it('discloses the shortfall IN WORDS, with both numbers, inside the prompt', () => {
-    const prompt = buildUserMessage(packWith(TRUE_TOTAL), 'anything');
-    const notice = packWith(TRUE_TOTAL).conversation.window?.notice ?? '';
-    expect(notice).not.toBe('');
-    // Both numbers, because a disclosure that only says "some are missing"
-    // still lets the coach count the visible turns and assert that as
-    // the total — the failure this replaces.
-    expect(notice).toContain(String(TRUE_TOTAL));
-    expect(notice).toContain(String(CONTEXT_PACK_RECENT_TURNS_CAP));
-    expect(notice).toContain('the true total is 78');
-    expect(notice).toContain('Do not describe the turns above as the whole conversation');
-    // 78 − 8 = 70 not shown.
-    expect(notice).toContain('70 earlier ones are not shown');
-    // JSON.stringify escapes nothing here, so the sentence reaches the model
-    // intact.
-    expect(prompt).toContain('the true total is 78');
-  });
 
-  it('says NOTHING when the pack genuinely shows the whole conversation (no noise)', () => {
-    const whole = assembleContextPack({
-      payload: PAYLOAD,
-      priorTurns: priorTurnsFixture(CONTEXT_PACK_RECENT_TURNS_CAP),
-      priorTurnsTotal: CONTEXT_PACK_RECENT_TURNS_CAP,
-      priorFacts: [],
-      analysis: null,
-    });
-    expect(whole.conversation.window?.notice).toBeUndefined();
-    expect(whole.conversation.turn_count).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
-    expect(buildUserMessage(whole, 'x')).not.toContain('INCOMPLETE');
-  });
+
+
+
 
   it('discloses the gap even when the whole 20-turn window fits under the store cap', () => {
     // 12 stored, 8 shown: no store cap involved at all, but four turns are

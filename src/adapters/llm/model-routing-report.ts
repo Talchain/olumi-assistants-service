@@ -119,28 +119,7 @@ const DEDICATED_MODEL_CHAINS: Record<
     requiredProvider: 'anthropic',
   },
   /**
-   * ⚠ NOT A TYPO: this chain reads the GLOBAL `LLM_MODEL`, not a task-specific
-   * env key, because `anthropicValueEstimateCall` sends no explicit model and
-   * `chatWithAnthropic` therefore resolves `LLM_MODEL -> FALLBACK_ANTHROPIC_MODEL`.
-   * Reporting a dedicated key it does not read would be the mirror this seam
-   * exists to avoid. `whitespaceMeansUnset: false` mirrors `resolveAnthropicModel`,
-   * whose `||` treats "" as unset and a whitespace-only value as set — the report
-   * must agree with the resolver, not with what the resolver ought to do.
-   *
-   * `requiredProvider: 'anthropic'` makes the hazard VISIBLE rather than silent:
-   * with `LLM_MODEL` pointing at another provider this row reports
-   * `configuration_error`, which is what the call does at runtime.
-   */
-  readiness_value_estimate: {
-    configuredModel: () => config.llm.model,
-    envKey: 'LLM_MODEL',
-    defaultModel: FALLBACK_ANTHROPIC_MODEL,
-    defaultKey: 'FALLBACK_ANTHROPIC_MODEL',
-    whitespaceMeansUnset: false,
-    requiredProvider: 'anthropic',
-  },
-  /**
-   * Same posture as the row above, and NOT a copy-paste oversight:
+   * The remaining option–factor mapper uses the shared Anthropic fallback:
    * `anthropicOptionFactorMapCall` also sends no explicit model, so the GLOBAL
    * `LLM_MODEL` is genuinely what it reads. `requiredProvider: 'anthropic'`
    * makes a non-Anthropic assignment report `configuration_error` here, which

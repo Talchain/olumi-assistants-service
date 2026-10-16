@@ -27,21 +27,16 @@
  * REDs and forces re-derivation.
  */
 
-import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { readFileSync,readdirSync,statSync } from 'node:fs';
+import { join,resolve } from 'node:path';
+import { describe,expect,it } from 'vitest';
+
 
 import {
-  evaluateAnalysisElection,
-  ANALYSIS_ELECTION_DEMOTION_TEXT,
-  ANALYSIS_ELECTION_REFUSAL_ACK_TEXT,
-  GATED_ANALYSIS_HANDLER_ID,
-} from '../analysis-election-gate.js';
-import {
-  carriesExplicitAnalysisRefusal,
-  looksLikeExplicitAnalysisRequest,
-  looksLikeImperativeRerun,
+carriesExplicitAnalysisRefusal,
+looksLikeExplicitAnalysisRequest,
+looksLikeImperativeRerun,
 } from '../analytical-intent.js';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
@@ -108,13 +103,7 @@ describe('MUST-DEMOTE — the served prompt’s own DO-NOT-ROUTE corpus', () => 
     expect(DO_NOT_ROUTE_CORPUS).toContain('Why is the leading option winning?');
   });
 
-  it.each(DO_NOT_ROUTE_CORPUS)('demotes %j', (message) => {
-    const outcome = evaluateAnalysisElection({
-      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message,
-    });
-    expect(outcome.kind).toBe('demoted');
-  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -160,141 +149,27 @@ const EMITTED_CHIP_MESSAGES = deriveEmittedRunAnalysisChipMessages();
  * named with the construction that produces it, so this stays a derivation
  * note and not a wish-list.
  */
-const CONSTRUCTED_CHIP_MESSAGES: readonly string[] = [
-  // chip-generator.ts `promptChip('floor_rerun_analysis', …)` — a PROMPT chip,
-  // so it carries no `action_type` and re-enters routing as ordinary text.
-  // That makes it the single most important entry here.
-  'Please re-run the analysis.',
-  // handlers/auto-run-after-draft.ts `AUTO_RUN_TURN_MESSAGE`. It normally
-  // arrives as a chip_click and never reaches this gate, but if the sanctioned
-  // auto-run's own sentence were inadmissible that would be a contradiction
-  // worth REDing on.
-  'Run a provisional analysis of the drafted model.',
-];
+
 
 describe('MUST-ADMIT (P8) — the product can accept the sentences it prints', () => {
   it('the source scan found the emitted chip messages (positive control — trap 13)', () => {
     // A scanner that silently matched nothing would make the it.each below
     // vacuous. The floor is the count measured at 293da078; it may grow.
-    expect(EMITTED_CHIP_MESSAGES.length).toBeGreaterThanOrEqual(6);
+    expect(EMITTED_CHIP_MESSAGES.length).toBe(5); // C1 deleted the conventional emitters; pin the remaining source set exactly.
     expect(EMITTED_CHIP_MESSAGES).toContain('Run analysis.');
     expect(EMITTED_CHIP_MESSAGES).toContain('Re-run the analysis.');
   });
 
-  it.each([...EMITTED_CHIP_MESSAGES, ...CONSTRUCTED_CHIP_MESSAGES])(
-    'admits the product-emitted chip message %j',
-    (message) => {
-      const outcome = evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      });
-      expect(outcome.kind).toBe('admitted');
-    },
-  );
 
-  it('the demotion copy’s OWN offer is admissible (the P8 acceptance path)', () => {
-    // The demoted turn tells the user to say "run the analysis". If the gate
-    // then demoted that, the product would be asking for something it refuses
-    // — preamble P8's exact defect. The offered phrase is EXTRACTED from the
-    // shipped copy, so editing the copy without checking cannot pass.
-    const quoted = /"([^"]+)"/.exec(ANALYSIS_ELECTION_DEMOTION_TEXT);
-    expect(quoted, 'demotion copy no longer contains a quoted offer').not.toBeNull();
-    const outcome = evaluateAnalysisElection({
-      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message: quoted![1]!,
-    });
-    expect(outcome.kind).toBe('admitted');
-  });
+
+
 });
 
 // ---------------------------------------------------------------------------
 // 3. The four discriminating twins, at predicate level
 // ---------------------------------------------------------------------------
 
-describe('the four discriminating twins (predicate level)', () => {
-  it('TWIN A — the measured P0 message is DEMOTED', () => {
-    const outcome = evaluateAnalysisElection({
-      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message: 'Use your best guess for the rest and draft the model now.',
-    });
-    expect(outcome.kind).toBe('demoted');
-    expect(outcome.kind === 'demoted' && outcome.reason).toBe('no_explicit_analysis_request');
-  });
 
-  it.each([
-    // ⚠ ONE CASE PER (VERB × OBJECT-PRESENCE) CELL. Two mutants that deleted a
-    // verb from one of the two pattern sources SURVIVED an earlier green suite
-    // because the sources overlapped and every case here happened to carry an
-    // object. The object-LESS rows are what make the object-less pattern
-    // observable, and the `re-` rows are what make its inflection observable.
-    'Run the analysis.',        // run   + object   (the ambiguous verb)
-    'Run analysis.',            // run   + bare noun object
-    'Re-run the analysis.',     // rerun + object
-    'Rerun the numbers.',       // rerun + object, other noun
-    'Analyse this decision.',   // analyse  + object
-    'Analyse.',                 // analyse  + NO object
-    'Simulate the model.',      // simulate + object
-    'Simulate.',                // simulate + NO object
-    'Re-analyse.',              // re-analyse + NO object
-  ])('TWIN B (opposite direction) — explicit intent %j is ADMITTED', (message) => {
-    expect(
-      evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      }).kind,
-    ).toBe('admitted');
-  });
-
-  it.each([
-    'Add an option for delaying six months.',
-    'Set the capex to 250000.',
-    'Can you split that factor in two?',
-    'Fill in the missing values for me.',
-    'Thanks, that looks right.',
-    'Draft the model now.',
-  ])('TWIN C — ordinary clarification / repair / edit / chat %j is DEMOTED', (message) => {
-    expect(
-      evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      }).kind,
-    ).toBe('demoted');
-  });
-
-  it.each([
-    // Refusal outranks everything (the shared negation veto).
-    "Don't run the analysis yet.",
-    'No need to re-run the analysis.',
-    'Do not run the analysis on this version.',
-    // A question ABOUT analysing is not a request to analyse (the shared
-    // interrogative veto). The served prompt's word is "explicit requests".
-    'Should I run the analysis?',
-    'Do we need to re-run the analysis?',
-    'Is the analysis still valid?',
-    'Is it worth running the analysis now?',
-  ])('TWIN C (veto arm) — refusals and questions %j are DEMOTED', (message) => {
-    expect(
-      evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      }).kind,
-    ).toBe('demoted');
-  });
-
-  it('TWIN D — a demoted election still carries an answer (no silent substitution)', () => {
-    const outcome = evaluateAnalysisElection({
-      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message: 'Use your best guess for the rest and draft the model now.',
-    });
-    expect(outcome.kind).toBe('demoted');
-    const text = outcome.kind === 'demoted' ? outcome.assistant_text : '';
-    expect(text.trim().length).toBeGreaterThan(0);
-    // It must never claim the analysis ran, is running, or is about to.
-    expect(text).not.toMatch(/\b(?:running|I will run|analysis is complete|results are)\b/i);
-    // It must invite the model work the user actually asked about.
-    expect(text).toMatch(/\bmodel\b/i);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // 3b. THE BARE IMPERATIVE — the founder's "Rerun."
@@ -330,83 +205,15 @@ describe('the four discriminating twins (predicate level)', () => {
  * separation is asserted, not asserted-about.
  */
 describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', () => {
-  it('the founder\'s exact turn-6 message is ADMITTED', () => {
-    // Bound by IDENTITY: this exact string, this exact outcome. Not a value
-    // predicate another message could satisfy (CLAUDE.md trap 19).
-    const outcome = evaluateAnalysisElection({
-      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message: 'Rerun.',
-    });
-    expect(outcome.kind).toBe('admitted');
-    expect(outcome.kind === 'admitted' && outcome.reason).toBe('explicit_analysis_request');
-  });
 
-  it.each([
-    'Rerun.',
-    'Re-run.',
-    'rerun',
-    'RERUN.',
-    'Rerun!',
-    '  Rerun.  ',
-    're-run.',
-    'Rerun .',
-  ])('MUST-FIRE — a message that is nothing but the verb, %j, is ADMITTED', (message) => {
-    expect(
-      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message }).kind,
-    ).toBe('admitted');
-  });
 
-  it.each([
-    // Every must-fire row above has its OPPOSITE-DIRECTION TWIN here, in the
-    // same order (trap 22b: a corpus that tests one direction is a guard
-    // watching one door).
-    ['Rerun.', 'Rerun?'],            // instruction vs question
-    ['Re-run.', 'Re-runs.'],         // verb vs plural noun
-    ['rerun', 'reruns'],             // verb vs plural noun, no punctuation
-    ['RERUN.', 'RERUN COSTS.'],      // verb vs noun-modifier, case-insensitive
-    ['Rerun!', 'Rerun what?'],       // instruction vs question with an object
-    ['  Rerun.  ', '  The rerun.  '],// verb vs determiner + noun
-    ['re-run.', 're-run cost.'],     // verb vs compound noun
-    ['Rerun .', 'Rerun later.'],     // verb vs verb + adjunct (not bare)
-  ])('TWIN — %j is admitted but its neighbour %j is still DEMOTED', (_fire, decline) => {
-    expect(
-      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message: decline })
-        .kind,
-    ).toBe('demoted');
-  });
 
-  it.each([
-    // The four nominal readings this repo RECORDS as having once wrongly
-    // EXECUTED a re-run (see `IMPERATIVE_RERUN_PATTERNS`' ⚠ note). They are
-    // questions about a PAST run and must never be read as instructions.
-    'What changed in the re-run?',
-    'Show me the re-run results.',
-    'How long did the rerun take?',
-    'Was the rerun better?',
-    // Refusals — the shared negation veto must still outrank the new pattern.
-    "Don't rerun.",
-    'Do not rerun.',
-    'Never rerun.',
-    // Interrogatives — the shared interrogative veto must still fire.
-    'Should I rerun?',
-    'Do we rerun?',
-  ])('UNCHANGED — %j stays DEMOTED (the shared safety envelope still governs)', (message) => {
-    expect(
-      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message }).kind,
-    ).toBe('demoted');
-  });
 
-  it('the homograph the object rule is defended for was ALREADY admitted — this change cannot worsen it', () => {
-    // Pinned so the load-bearing argument for this change cannot silently
-    // become false. If this ever flips to `demoted`, the justification above
-    // is stale and TWIN E must be re-argued, not merely re-run.
-    expect(
-      evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message: 'Rerun analysis showed a different leader.',
-      }).kind,
-    ).toBe('admitted');
-  });
+
+
+
+
+
 
   /**
    * ⭐ THE HONEST GAP — A SAMPLED FLOOR, NOT THE SET (trap 22f's rule for
@@ -533,72 +340,14 @@ describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', 
    * so a green here is evidence about the ANCHORS, not about the predicate
    * being inert.
    */
-  it.each([
-    // A genuine bare imperative on line 1, then a QUESTION about a past run.
-    // With `m` this is read as an explicit request to compute, and the
-    // question is answered by destroying the result it asks about.
-    'Rerun.\nWhat changed?',
-    // A bare `rerun` line inside a plainly NOMINAL message — the exact class
-    // the block comment says the anchors exclude.
-    'Notes:\nrerun\nThe rerun was slow.',
-  ])(
-    'the `m` flag is ABSENT and that is load-bearing — the multi-line message %j stays DEMOTED',
-    (message) => {
-      // Bound by IDENTITY to this exact string (trap 19), and asserted at the
-      // GATE, so what is pinned is the outcome the user gets.
-      const outcome = evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      });
-      expect(outcome.kind).toBe('demoted');
-      expect(looksLikeExplicitAnalysisRequest(message)).toBe(false);
-      // POSITIVE CONTROL, same predicate, same run: the single-line form the
-      // whole PR exists to admit must still be admitted. Without this the
-      // assertion above would pass just as happily against a predicate that
-      // had stopped matching anything at all.
-      expect(looksLikeExplicitAnalysisRequest('Rerun.')).toBe(true);
-    },
-  );
+
 });
 
 // ---------------------------------------------------------------------------
 // 4. The gate is inert on every other handler, and is MONOTONE
 // ---------------------------------------------------------------------------
 
-describe('scope', () => {
-  it.each([
-    'edit_graph',
-    'set_factor_value',
-    'add_constraint',
-    'explain_results',
-    'what_would_flip',
-    'explain_from_structure',
-    'adjust_edge_strength',
-  ])('is inert on %s, whatever the message says', (handlerId) => {
-    // Bound by IDENTITY (the handler id), never by a value predicate another
-    // handler could satisfy.
-    for (const message of ['Run the analysis.', 'Draft the model now.', '']) {
-      expect(evaluateAnalysisElection({ electedHandlerId: handlerId, message }).kind).toBe(
-        'not_analysis_election',
-      );
-    }
-  });
 
-  it('never turns a non-analysis election INTO one (the monotonicity claim)', () => {
-    // The gate's only reachable non-inert outcomes are `admitted` (unchanged
-    // behaviour) and `demoted` (handler suppressed). There is no arm that
-    // produces an analysis, which is what makes a false positive strictly
-    // no worse than today's staging behaviour.
-    const kinds = new Set(
-      ['run_analysis', 'edit_graph'].flatMap((h) =>
-        ['Run the analysis.', 'Draft the model now.'].map(
-          (m) => evaluateAnalysisElection({ electedHandlerId: h, message: m }).kind,
-        ),
-      ),
-    );
-    expect([...kinds].sort()).toEqual(['admitted', 'demoted', 'not_analysis_election']);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // 5. The honest gap, pinned EXACTLY (trap 22f)
@@ -734,17 +483,7 @@ describe('the demotion payoff — ask on a phrasing miss, never on a refusal', (
    * PROVENANCE: the ordinary-English corpus measured against the serving-tip
    * predicate on 15 Sep 2026. Every member demotes; none contains a negator.
    */
-  const ORDINARY_ENGLISH_REQUESTS: readonly string[] = [
-    'ok lets see the numbers',
-    'ok go ahead',
-    "let's see what it says",
-    'show me the results',
-    'so which one wins?',
-    'I think we are ready',
-    'go on then',
-    'crunch it',
-    'work it out',
-  ];
+
 
   /**
    * PROVENANCE: the negation-veto corpus already recorded verbatim on
@@ -752,62 +491,13 @@ describe('the demotion payoff — ask on a phrasing miss, never on a refusal', (
    * existed, each dispatched a real `run_analysis`. These are the messages an
    * offer would be arguing with.
    */
-  const EXPLICIT_REFUSALS: readonly string[] = [
-    'Don’t run the analysis.',
-    "Don't re-run it.",
-    'Do not re-run the analysis.',
-    'Never re-run this automatically.',
-    'I do not want to re-run anything.',
-    'No need to re-run.',
-  ];
 
-  it.each(ORDINARY_ENGLISH_REQUESTS)(
-    'GREEN — %j is demoted WITH an offered run_analysis, and asks a question',
-    (message) => {
-      const outcome = evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      });
-      // Bound by identity: this exact message, this exact outcome shape.
-      expect(outcome.kind).toBe('demoted');
-      expect(outcome.kind === 'demoted' && outcome.offer).toEqual({ kind: 'run_analysis' });
-      // The user-visible half. A demotion that offers in the type but still
-      // instructs in the prose has not removed the defect.
-      expect(outcome.kind === 'demoted' && outcome.assistant_text).toBe(
-        ANALYSIS_ELECTION_DEMOTION_TEXT,
-      );
-      expect(ANALYSIS_ELECTION_DEMOTION_TEXT).toContain('?');
-    },
-  );
 
-  it.each(EXPLICIT_REFUSALS)(
-    'RED — %j is demoted with NO offer (the product does not argue with a refusal)',
-    (message) => {
-      const outcome = evaluateAnalysisElection({
-        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-        message,
-      });
-      expect(outcome.kind).toBe('demoted');
-      expect(outcome.kind === 'demoted' && outcome.offer).toBeUndefined();
-      expect(outcome.kind === 'demoted' && outcome.assistant_text).toBe(
-        ANALYSIS_ELECTION_REFUSAL_ACK_TEXT,
-      );
-      // The refusal acknowledgement must not end up asking the same question.
-      expect(ANALYSIS_ELECTION_REFUSAL_ACK_TEXT).not.toContain('?');
-    },
-  );
 
-  it('an ADMITTED election still carries no offer (monotonicity is unchanged)', () => {
-    // The offer arm exists only on the suppressed path. If an admitted
-    // election ever carried one, the gate would be arming consent for a run
-    // it is simultaneously dispatching.
-    const outcome = evaluateAnalysisElection({
-      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
-      message: 'Run the analysis now.',
-    });
-    expect(outcome.kind).toBe('admitted');
-    expect('offer' in outcome).toBe(false);
-  });
+
+
+
+
 
   it('the refusal split is driven by the SHARED negation veto, not a second list', () => {
     // Trap 12 — the two readers must not be able to disagree about what a

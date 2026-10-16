@@ -52,27 +52,23 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
 import { baselineOverrideReach } from '../../context/baseline-override-reach.js';
-import { tryRunComparisonGate } from '../../routing/run-comparison-gate.js';
-import { detectCoachingSignal, INERT_EDIT_TAIL } from '../../signals/coaching-signals.js';
-import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { createSetFactorValueHandler } from '../../tools/handlers/set-factor-value.js';
-import {
-  BASELINE_REPLACED_BY_OPTIONS_NARRATIVE,
-  STALENESS_NARRATIVE,
-} from '../../tools/handlers/set-factor-value.js';
-import type { HandlerInvocation } from '../../tools/registry.js';
+
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { ProposalAction } from '../../routing/types.js';
+import { detectCoachingSignal,INERT_EDIT_TAIL } from '../../signals/coaching-signals.js';
+import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
+import { BASELINE_REPLACED_BY_OPTIONS_NARRATIVE,createSetFactorValueHandler,STALENESS_NARRATIVE } from '../../tools/handlers/set-factor-value.js';
+import type { HandlerInvocation } from '../../tools/registry.js';
 
 import { deriveEditComparisonReach } from '../edit-comparison-reach.js';
 import { licenceToReportMovementDirection } from '../movement-direction-licence.js';
-import { collectZeroEffectFactors, zeroEffectReasonFor } from '../zero-effect-factors.js';
+import { collectZeroEffectFactors,zeroEffectReasonFor } from '../zero-effect-factors.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The capture, transcribed.
@@ -974,76 +970,3 @@ describe('the re-run sentence after an inert edit', () => {
 //    drift, which is what `run-comparison-gate.ts`'s own register-parity note
 //    exists to prevent.
 // ─────────────────────────────────────────────────────────────────────────────
-
-describe('run-comparison gate: the same movement gate', () => {
-  function gateFact(enrichment: Record<string, unknown>, computedAt: string): HandlerFact {
-    return {
-      fact_type: 'run_analysis',
-      noop: false,
-      result: {
-        enrichment,
-        computed_at: computedAt,
-        graph_hash_at_run: `h-${computedAt}`,
-        constraint_verdict: {
-          may_name_leading_option: true,
-          constraint_verdict_state: 'evaluated_feasible' as const,
-        },
-      },
-    } as unknown as HandlerFact;
-  }
-
-  function ask(prior: Record<string, unknown>, current: Record<string, unknown>): string {
-    const out = tryRunComparisonGate({
-      message: 'What changed?',
-      // Newest-first, per the loader convention the pair selector relies on.
-      priorFacts: [
-        gateFact(current, '2026-09-03T01:00:00.000Z'),
-        gateFact(prior, '2026-09-03T00:00:00.000Z'),
-      ],
-      freshness: 'fresh',
-      mayNameLeadingOption: true,
-    });
-    expect(out.matched).toBe(true);
-    if (!out.matched) throw new Error('gate did not match');
-    expect(out.mode).toBe('compared');
-    return out.assistant_text;
-  }
-
-  it('⭐ THE CAPTURE: the sub-noise movement gets no direction here either', () => {
-    const text = ask(PRIOR_ENVELOPE, CURRENT_ENVELOPE);
-    expect(text).toContain('Continue With Founder-Led Sales still leads');
-    expect(text).not.toContain('widened');
-    expect(text).not.toContain('narrowed');
-    expect(text).toContain('moved by less than this model varies between runs');
-  });
-
-  it('POSITIVE CONTROL: a licensed movement keeps its direction and magnitude', () => {
-    const text = ask(PRIOR_ENVELOPE, captureEnvelope({ founder: 0.72, hire: 0.2767, sdr: 0.0033 }));
-    expect(text).toContain('Its lead has widened by about');
-    expect(text).toContain('percentage points');
-  });
-
-  it('⭐ a mixed pair never borrows the noise wording here either', () => {
-    const text = ask(
-      captureEnvelope({ founder: 0.55, hire: 0.3805, sdr: 0.0695 }),
-      captureEnvelope({ founder: 0.72, hire: 0.3805, sdr: 0.0 }),
-    );
-    expect(text).toContain('cannot tell whether the movement in the size of its lead');
-    expect(text).not.toContain('less than this model varies');
-    expect(text).not.toContain('widened');
-  });
-
-  it('no sample size ⇒ says it cannot tell, and never borrows the noise wording', () => {
-    const noSamples = (founder: number): Record<string, unknown> => ({
-      analysis_status: 'completed',
-      results: [
-        { option_id: OPT_FOUNDER, option_label: 'Continue With Founder-Led Sales', win_probability: founder },
-        { option_id: OPT_HIRE, option_label: 'Hire a Dedicated Sales Team', win_probability: 1 - founder },
-      ],
-    });
-    const text = ask(noSamples(0.55), noSamples(0.62));
-    expect(text).toContain('cannot tell whether the movement in the size of its lead');
-    expect(text).not.toContain('less than this model varies');
-    expect(text).not.toContain('widened');
-  });
-});

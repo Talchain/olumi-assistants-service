@@ -1,4 +1,4 @@
-/** B2 producer-c: real read B → handler → both commit paths → RPC fact element; no providers. */
+/** B2 producer-c: real read B → handler → kept chip commit path → RPC fact element; no providers. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
@@ -18,11 +18,9 @@ const holder: { current: SessionStore } = { current: createNoopSessionStore() };
 vi.mock('../session/index.js', () => ({ getSessionStore: () => holder.current, resetSessionStoreForTests: () => {} }));
 const { loadScenarioSnapshotForRunAnalysis } = await import('../build-turn-context.js');
 const { createRunAnalysisHandler } = await import('../tools/handlers/run-analysis.js');
-const { runTurnExecutor } = await import('../turn-executor.js');
 const { dispatchChipClickRunAnalysis } = await import('../handlers/chip-click-dispatch.js');
 const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
 const { buildAnalysisRefusalFact } = await import('../context/analysis-refusal-continuity.js');
-const { runWithBoundAnalysisSnapshot, AnalysisSnapshotDivergedError } = await import('../run-analysis-snapshot-binding.js');
 
 type Rec = Record<string, any>;
 type Element = { handler_id: string; payload: Rec; evaluated_scenario_revision?: number };
@@ -94,18 +92,10 @@ function harness(opts: { revision?: number; legacy?: boolean; status?: string; e
   const registry: HandlerRegistry = new Map([['run_analysis', async (invocation) => {
     const outcome = await handler(invocation); outcomes.push(outcome); return outcome;
   }]]);
-  const routingAdapter = { chatWithTools: vi.fn(async () => ({
-    content: [{ type: 'tool_use', id: 'b2-route', name: 'olumi_action', input: {
-      intent_class: 'execute', action: { handler_id: 'run_analysis',
-        entity: { id: 'a', kind: 'option', resolution_status: 'resolved', resolution_method: 'id_match' },
-        parameters: [], cited_context_fields: [] },
-    } }], stopReason: 'tool_use', usage: { input_tokens: 10, output_tokens: 20 }, model: 'test', latencyMs: 1,
-  })) };
-  const run = async (path: 'routed' | 'chip', turn = '00000000-0000-4000-8000-000000000041') => {
+  const run = async (path: 'chip', turn = '00000000-0000-4000-8000-000000000041') => {
     const payload = makeMessagePayload({ scenario_id: SCENARIO, turn_id: turn, stage: 'analyse', turn_class: 'decide', message: 'run analysis',
       ...(path === 'chip' ? { source: 'chip_click', chip: { action_type: 'run_analysis' } } : {}) });
-    if (path === 'chip') return dispatchChipClickRunAnalysis({ payload, requestId: turn, handlerRegistry: registry });
-    return runTurnExecutor(payload, turn, { routingAdapter: routingAdapter as never, handlerRegistry: registry, graphState: structuredClone(graph) as never });
+    return dispatchChipClickRunAnalysis({ payload, requestId: turn, handlerRegistry: registry });
   };
   return { run, store, writes, outcomes, snapshots, reads, plotClient, calls: serial.calls, currentRevision: () => revision };
 }
@@ -123,7 +113,7 @@ function assertStrict(element: Element) {
 afterEach(() => { vi.restoreAllMocks(); _resetConfigCache(); });
 
 describe('B2 frozen evaluated revision on the fact ROW', () => {
-  it.each(['routed', 'chip'] as const)('DECISIVE %s: read B 41, affecting edit 42 during PLoT, row 41; rerun 42/new id', async (path) => {
+  it.each(['chip'] as const)('DECISIVE %s: read B 41, affecting edit 42 during PLoT, row 41; rerun 42/new id', async (path) => {
     const h = harness();
     await h.run(path);
     const first = runElement(h);
@@ -189,17 +179,6 @@ describe('B2 frozen evaluated revision on the fact ROW', () => {
     expect(h.outcomes).toHaveLength(0);
     for (const e of elements(h)) expect(e).not.toHaveProperty('evaluated_scenario_revision');
     expect(elements(h).some((e) => e.payload.result.run_id)).toBe(false);
-  });
-
-  it('read A/read B divergence uses the existing recovery, without a stamped element', async () => {
-    const h = harness({ divergence: true }); const out = await h.run('routed') as Rec;
-    expect(h.plotClient.run).not.toHaveBeenCalled();
-    expect(out.telemetry.commit_performed).toBe(true);
-    expect(out.telemetry.failure_type).toBeNull();
-    expect(h.outcomes).toHaveLength(0);
-    for (const e of elements(h)) expect(e).not.toHaveProperty('evaluated_scenario_revision');
-    await expect(runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: computeAnalysisAffectingGraphHash(graphAt()) },
-      () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'divergence', h.store))).rejects.toBeInstanceOf(AnalysisSnapshotDivergedError);
   });
 
   it('two Runs in one write use their own ids; non-analysis/refusal/unmapped facts have no key', async () => {

@@ -27,29 +27,17 @@
  * must still be written. Measured at this tip, the two messages differ only in
  * the classifier's own trigger — `effect_vocab` vs `option_value_set`.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
-import { setTestSink } from '../../utils/telemetry.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { safeLabel } from '../compose/helpers.js';
-import { detectConfigureOptionIntent } from '../routing/configure-option-intent.js';
-import { optionCueMatches } from '../routing/option-intervention-guard.js';
+import type { GraphV3T } from '../../schemas/cee-v3.js';
+import { setTestSink } from '../../utils/telemetry.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
 import { resolveOptionEffectWrite } from '../routing/option-effect-write.js';
 import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
-import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
-import { makeMessagePayload } from './fixtures.js';
-import type { PendingAction } from '../session/pending-action.js';
-import type {
-  ChatWithToolsArgs,
-  ChatWithToolsResult,
-  ToolResponseBlock,
-} from '../../adapters/llm/types.js';
-import type { GraphV3T } from '../../schemas/cee-v3.js';
 
 interface AppendWrite {
   graph?: unknown;
@@ -82,10 +70,10 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
-const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
-const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+
+
 
 // ---------------------------------------------------------------------------
 // THE CAPTURED GRAPH AND ITS IDENTITIES.
@@ -111,65 +99,33 @@ const J18 = JSON.parse(
 const OPTION_ID = J18.ids.option_id;
 const FACTOR_ID = J18.ids.factor_id;
 /** The outstanding pair, in the handler's own `from→to` edge spelling. */
-const OUTSTANDING_EDGE = `${OPTION_ID}→${FACTOR_ID}`;
+
 /** A factor → outcome link. Nothing is outstanding on it (asserted below). */
-const UNRELATED_EDGE = '4d3256b4→ce6b11d2';
+
 
 /**
  * Two captured outstanding cells, used for the stale-A / current-B identity
  * regression. Keeping B on its own captured factor makes the B→B opposite
  * independent of whether B actually has an edge to stale A's factor.
  */
-const STALE_OPTION_ID = 'e755ec33';
-const CURRENT_OPTION_ID = OPTION_ID;
-const STALE_FACTOR_ID = J18.ids.two_option_factor_id;
-const STALE_FACTOR_LABEL = J18.ids.two_option_factor_label;
-const CURRENT_FACTOR_ID = FACTOR_ID;
-const CURRENT_FACTOR_LABEL = J18.ids.factor_label;
 
-function capturedLabel(id: string): string {
-  const label = J18.draft_graph.nodes.find((node) => node.id === id)?.label;
-  if (typeof label !== 'string' || label.trim().length === 0) {
-    throw new Error(`Captured fixture has no label for ${id}`);
-  }
-  return label;
-}
 
-const STALE_OPTION_LABEL = capturedLabel(STALE_OPTION_ID);
-const CURRENT_OPTION_LABEL = capturedLabel(CURRENT_OPTION_ID);
-const STALE_EDGE = `${STALE_OPTION_ID}→${STALE_FACTOR_ID}`;
-const CURRENT_EDGE = `${CURRENT_OPTION_ID}→${CURRENT_FACTOR_ID}`;
-const CURRENT_OPTION_OPINION =
-  `I would say ${CURRENT_OPTION_LABEL} drives ${STALE_FACTOR_LABEL} fairly strongly, about 0.6.`;
-const CURRENT_OPTION_SELF_OPINION =
-  `I would say ${CURRENT_OPTION_LABEL} drives ${CURRENT_FACTOR_LABEL} fairly strongly, about 0.6.`;
-const ELLIPTICAL_STALE_OPTION_OPINION =
-  `I would say it drives ${STALE_FACTOR_LABEL} fairly strongly, about 0.6.`;
 
-function recordedEffectAsk(
-  optionId: string,
-  optionLabel: string,
-  factorId: string,
-  factorLabel: string,
-): PendingAction {
-  return {
-    id: `pa-${optionId}-${factorId}`,
-    scenario_id: SCENARIO_ID,
-    chip_id: 'chip_configure_option_clarify',
-    action: {
-      kind: 'elicit_option_effect',
-      option_id: optionId,
-      option_label: optionLabel,
-      factor_id: factorId,
-      factor_label: factorLabel,
-      attempt: 1,
-    },
-    preconditions: {},
-    expires_at_turn_count: 12,
-    expires_at_iso: '2099-09-01T23:59:59.000Z',
-    emitted_at_iso: '2026-09-01T14:00:00.000Z',
-  } as PendingAction;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 function graph(): GraphV3T {
   return JSON.parse(JSON.stringify(J18.draft_graph)) as GraphV3T;
@@ -180,26 +136,20 @@ function graph(): GraphV3T {
  * imperative — so INV-1 finds no mutation warrant and the proposal is DEMOTED
  * to the "Adjust this link" chip rather than executed.
  */
-const OPINION_NO_WARRANT = 'I would say it drives sales headcount fairly strongly, about 0.6.';
+
 /** Defect B, effect-framed with the option referred to only by a pronoun. */
-const EFFECT_FRAMED = `Set its effect on ${J18.ids.factor_label} to 0.8.`;
+
 /** Defect B's TWIN: the same factor, the same value, an ordinary baseline edit. */
-const BASELINE_EDIT = `Set ${J18.ids.factor_label} to 0.8.`;
+
 
 /**
  * The chip literal the browser witness captured, verbatim. Bound as a string
  * because it is the user-visible artefact under test — `warrant-demotion.ts`'s
  * `CHIP_COPY.adjust_edge_strength.label`, the estate's only producer of it.
  */
-const WITNESSED_CHIP_LABEL = 'Adjust this link';
 
-function payload(message: string): MessageTurnPayload {
-  return makeMessagePayload({
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    message,
-  });
-}
+
+
 
 /**
  * A turn arriving on the ROUTING flag the UI actually sets. Used ONLY to prove
@@ -211,37 +161,14 @@ function payload(message: string): MessageTurnPayload {
  * literal, against a contrast control of 21 for `source: 'chip'`. User-authored
  * text ships under it every day.
  */
-function routingFlagPayload(
-  message: string,
-  source: 'chip' | 'chip_click' = 'chip_click',
-): MessageTurnPayload {
-  return makeMessagePayload({
-    turn_id: `t-${randomUUID()}`,
-    scenario_id: SCENARIO_ID,
-    source,
-    message,
-  });
-}
+
 
 /**
  * Emit a REAL demotion and hand back its chip copy plus the pending the product
  * actually persisted. Nothing here is authored: both are whatever
  * `emitProposedChange` produced on a warrantless mutating turn.
  */
-async function emitRealDemotion(
-  targetId: string,
-  targetLabel: string,
-): Promise<{ chipMessage: string; pendings: readonly unknown[] }> {
-  const { response } = await runTurnExecutor(
-    payload('I would say sales headcount matters quite a lot here, roughly 0.8.'),
-    `req-demote-${randomUUID()}`,
-    { routingAdapter: setFactorValueAdapter(targetId, targetLabel), graphState: graph() },
-  );
-  const pendings = appendCalls.flatMap((c) =>
-    Array.isArray(c.pending_actions) ? (c.pending_actions as unknown[]) : [],
-  );
-  return { chipMessage: (response.suggested_actions ?? [])[0]?.message ?? '', pendings };
-}
+
 
 
 /**
@@ -254,7 +181,7 @@ async function emitRealDemotion(
  * instead of chosen by eye — the only factor-kind node outside the outstanding
  * set.
  */
-const UNBLOCKED_FACTOR_ID = '24931e51';
+
 /**
  * ⚠ The label must MATCH the id. Passing the outstanding factor's label with a
  * different id tripped `ENTITY_RESOLUTION_AMBIGUOUS` ("Did you mean … or …?"),
@@ -262,103 +189,25 @@ const UNBLOCKED_FACTOR_ID = '24931e51';
  * guard — a control failing for the wrong reason is as useless as one passing
  * for the wrong reason.
  */
-const UNBLOCKED_FACTOR_LABEL = 'NHS Data Regulation Outcome';
 
-function mkToolUseResult(input: unknown): ChatWithToolsResult {
-  const content: ToolResponseBlock[] = [
-    { type: 'tool_use', id: 'tu-1', name: OLUMI_ACTION_TOOL_NAME, input: input as Record<string, unknown> },
-  ];
-  return {
-    content,
-    stop_reason: 'tool_use',
-    usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
-    model: 'claude-sonnet-4-6',
-    latencyMs: 50,
-  };
-}
 
-function edgeStrengthAdapter(edgeId: string) {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () =>
-        mkToolUseResult({
-          intent_class: 'execute',
-          action: {
-            handler_id: 'adjust_edge_strength',
-            entity: {
-              id: edgeId,
-              kind: 'edge',
-              label: edgeId,
-              resolution_status: 'resolved',
-              resolution_method: 'label_match',
-            },
-            parameters: [{ name: 'strength', value: 0.6, source: 'user_explicit' }],
-            cited_context_fields: [],
-          },
-        }),
-      ),
-  };
-}
 
-function setFactorValueAdapter(
-  targetId: string = FACTOR_ID,
-  targetLabel: string = J18.ids.factor_label,
-) {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () =>
-        mkToolUseResult({
-          intent_class: 'execute',
-          action: {
-            handler_id: 'set_factor_value',
-            entity: {
-              id: targetId,
-              kind: 'node',
-              label: targetLabel,
-              resolution_status: 'resolved',
-              resolution_method: 'label_match',
-            },
-            parameters: [{ name: 'value', value: { value: 0.8 }, source: 'user_explicit' }],
-            cited_context_fields: [],
-          },
-        }),
-      ),
-  };
-}
+
+
+
+
 
 /** Every graph write this turn made. Empty === the model is untouched. */
-function graphWrites(): AppendWrite[] {
-  return appendCalls.filter((c) => c.graph !== undefined && c.graph !== null);
-}
+
 
 /** Any node's own value, by IDENTITY. */
-function nodeValue(g: unknown, id: string): unknown {
-  const nodes = (g as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
-  const node = nodes.find((n) => n.id === id) as
-    | { observed_state?: { value?: unknown } }
-    | undefined;
-  return node?.observed_state?.value;
-}
+
 
 /** TRAP 19 — the factor by IDENTITY, never "the node whose value is 0.8". */
-function factorValue(g: unknown): unknown {
-  const nodes = (g as { nodes?: Array<Record<string, unknown>> }).nodes ?? [];
-  const node = nodes.find((n) => n.id === FACTOR_ID) as
-    | { observed_state?: { value?: unknown } }
-    | undefined;
-  return node?.observed_state?.value;
-}
+
 
 /** The edge's strength, by IDENTITY (`from`/`to`), never by position. */
-function edgeStrength(g: unknown, from: string, to: string): unknown {
-  const edges = (g as { edges?: Array<Record<string, unknown>> }).edges ?? [];
-  const e = edges.find((x) => x.from === from && x.to === to) as
-    | { strength?: { mean?: unknown } }
-    | undefined;
-  return e?.strength?.mean;
-}
+
 
 /**
  * ⭐⭐ IS THE PAIR STILL OUTSTANDING, ACCORDING TO PERSISTED STATE?
@@ -370,16 +219,10 @@ function edgeStrength(g: unknown, from: string, to: string): unknown {
  * catch that is to read the outcome back out of persistence rather than trust
  * the handler's return value.
  */
-function pairStillOutstanding(g: unknown, optionId: string, factorId: string): boolean {
-  return deriveMissingEffectPairs(buildCanonicalAnalysisReadyFromGraph(g)).some(
-    (p) => p.optionId === optionId && p.factorId === factorId,
-  );
-}
+
 
 /** The persisted graph, or — when the turn wrote nothing — the graph it started from. */
-function stateAfterTurn(): unknown {
-  return persistedGraph ?? graph();
-}
+
 
 beforeEach(() => {
   pendingActionsForRead = [];
@@ -392,427 +235,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('DEFECT A — the offer against the product’s own blocker', () => {
-  it('⭐ THE WITNESSED OFFER IS NEVER MINTED: no "Adjust this link" chip on the outstanding pair’s edge', async () => {
-    const { response } = await runTurnExecutor(
-      payload(OPINION_NO_WARRANT),
-      'req-effect-ask-edge-refused',
-      { routingAdapter: edgeStrengthAdapter(OUTSTANDING_EDGE), graphState: graph() },
-    );
 
-    const chipLabels = (response.suggested_actions ?? []).map((c) => c.label);
-    expect(chipLabels).not.toContain(WITNESSED_CHIP_LABEL);
-    // …and nothing was written either way.
-    expect(graphWrites()).toHaveLength(0);
-    // ⭐⭐ PERSISTED STATE MATCHES THE RECEIPT — read back, bound by identity.
-    // The witnessed build said "Applied" while `options_ready` stayed 0/4; a
-    // receipt that describes an intention rather than an outcome IS the defect.
-    // The receipt here says nothing changed, so persistence must agree:
-    expect(edgeStrength(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(1);
-    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
-    // The refusal NAMES the entity — the whole point of the fix.
-    expect(response.assistant_text).toContain(J18.ids.factor_label);
-    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
-  });
 
-  it('⭐ POSITIVE CONTROL — the SAME adapter on an UNRELATED edge still offers the chip', async () => {
-    // Without this the assertion above could pass because the harness never
-    // produces that chip at all (trap 13: an absence needs a presence first).
-    const { response } = await runTurnExecutor(
-      payload(OPINION_NO_WARRANT),
-      'req-effect-ask-edge-control',
-      { routingAdapter: edgeStrengthAdapter(UNRELATED_EDGE), graphState: graph() },
-    );
-    const chipLabels = (response.suggested_actions ?? []).map((c) => c.label);
-    expect(chipLabels).toContain(WITNESSED_CHIP_LABEL);
-  });
-});
 
-describe('P1 — a current option identity cannot release a stale recorded-pair proposal', () => {
-  function seedStaleAsk(): void {
-    pendingActionsForRead = [
-      recordedEffectAsk(
-        STALE_OPTION_ID,
-        STALE_OPTION_LABEL,
-        STALE_FACTOR_ID,
-        STALE_FACTOR_LABEL,
-      ),
-    ];
-  }
 
-  it('RED — explicit B refuses proposed A without minting A details, replay, chip or write', async () => {
-    seedStaleAsk();
-    const optionLabels = graph().nodes
-      .filter((node) => node.kind === 'option')
-      .map((node) => node.label);
-    const nonOptionLabels = graph().nodes
-      .filter((node) => node.kind !== 'option')
-      .map((node) => node.label);
-    // The review counterexample: the existing broad classifier is FALSE, so
-    // this route is protected only if the identity mismatch remains fail-closed.
-    expect(detectConfigureOptionIntent(CURRENT_OPTION_OPINION, optionLabels).matched).toBe(false);
-    expect(optionCueMatches(CURRENT_OPTION_OPINION, optionLabels, nonOptionLabels)).toEqual([
-      optionLabels.indexOf(CURRENT_OPTION_LABEL),
-    ]);
 
-    const { response } = await runTurnExecutor(
-      payload(CURRENT_OPTION_OPINION),
-      'req-stale-a-current-b-refused',
-      { routingAdapter: edgeStrengthAdapter(STALE_EDGE), graphState: graph() },
-    );
 
-    expect(graphWrites()).toHaveLength(0);
-    expect(edgeStrength(stateAfterTurn(), STALE_OPTION_ID, STALE_FACTOR_ID)).toBe(1);
-    expect((response.suggested_actions ?? []).map((chip) => chip.label)).not.toContain(
-      WITNESSED_CHIP_LABEL,
-    );
-    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
 
-    const surfaced = JSON.stringify({
-      assistant_text: response.assistant_text,
-      suggested_actions: response.suggested_actions ?? [],
-    });
-    expect(surfaced).not.toContain(STALE_OPTION_ID);
-    expect(surfaced).not.toContain(STALE_OPTION_LABEL);
-    expect(surfaced).not.toContain(
-      safeLabel({ label: STALE_OPTION_LABEL, kind: undefined }),
-    );
-  });
 
-  it('OPPOSITE — current B plus proposed B keeps the B-specific refusal', async () => {
-    seedStaleAsk();
-    const { response } = await runTurnExecutor(
-      payload(CURRENT_OPTION_SELF_OPINION),
-      'req-current-b-proposed-b',
-      { routingAdapter: edgeStrengthAdapter(CURRENT_EDGE), graphState: graph() },
-    );
 
-    expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text).toContain(
-      safeLabel({ label: CURRENT_OPTION_LABEL, kind: undefined }),
-    );
-    expect(response.assistant_text).not.toContain(
-      safeLabel({ label: STALE_OPTION_LABEL, kind: undefined }),
-    );
-  });
 
-  it('OPPOSITE — no current option cue plus proposed A keeps recorded A', async () => {
-    seedStaleAsk();
-    const { response } = await runTurnExecutor(
-      payload(ELLIPTICAL_STALE_OPTION_OPINION),
-      'req-elliptical-recorded-a',
-      { routingAdapter: edgeStrengthAdapter(STALE_EDGE), graphState: graph() },
-    );
 
-    expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text).toContain(
-      safeLabel({ label: STALE_OPTION_LABEL, kind: undefined }),
-    );
-    expect(response.assistant_text).not.toContain(
-      safeLabel({ label: CURRENT_OPTION_LABEL, kind: undefined }),
-    );
-  });
-});
-
-describe('DEFECT B — the effect-framed sentence whose option is a pronoun', () => {
-  it('⭐ THE WITNESSED WRITE NEVER LANDS: the factor’s own value is untouched', async () => {
-    const { response } = await runTurnExecutor(
-      payload(EFFECT_FRAMED),
-      'req-effect-ask-factor-refused',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-
-    expect(graphWrites()).toHaveLength(0);
-    expect(persistedGraph).toBeNull();
-    // ⭐⭐ PERSISTED STATE MATCHES THE RECEIPT. The witnessed build badged
-    // "Applied" while the FACTOR's own value had moved instead. Read it back:
-    expect(factorValue(stateAfterTurn())).toBe(0.5);
-    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
-    // The refusal names BOTH the entity and the option it is still waiting on.
-    // The option is asserted through `safeLabel` — the estate's own user-facing
-    // renderer — rather than as the raw 84-character brief fragment, because
-    // that renderer TRUNCATES and the raw form never reaches a screen.
-    expect(response.assistant_text).toContain(J18.ids.factor_label);
-    expect(response.assistant_text).toContain(
-      safeLabel({ label: J18.ids.option_label, kind: undefined }),
-    );
-    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
-    // …and it names the FIELD the request would have moved instead. This is the
-    // half the witnessed "Applied" badge never carried.
-    expect(response.assistant_text).toContain(`${J18.ids.factor_label}'s own value`);
-  });
-
-  it('⭐⭐ THE SENTENCE THE REFUSAL ADVISES ROUTES BACK AND BINDS THE SAME PAIR — no dead end', async () => {
-    // The estate's most expensive recurring defect is advising a phrasing the
-    // product cannot execute (P8, `option-effect-write.ts`'s header). A refusal
-    // that hands the user an unroutable exemplar has replaced a wrong write with
-    // a loop, which is not an improvement. So: take the exemplar OUT of the
-    // rendered copy and feed it to the writer.
-    const { response } = await runTurnExecutor(
-      payload(EFFECT_FRAMED),
-      'req-effect-ask-exemplar-routes',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    const quoted = /"([^"]+)"/.exec(response.assistant_text);
-    expect(quoted).not.toBeNull();
-    const exemplar = quoted![1]!;
-    // ⚠ ADDED AFTER A SURVIVING MUTANT, and the mutant is EQUIVALENT FOR
-    // ROUTING — demonstrated, not asserted (trap 13c). Reverting
-    // `buildOptionEffectReference` to its single form renders the empty option
-    // ref as a DOUBLE SPACE ("the  option's effect on …"), and
-    // `resolveOptionEffectWrite` normalises whitespace, so it still binds
-    // `4abad64d::4d3256b4` — measured both ways at `207b05f9`. The branch is
-    // load-bearing for the SENTENCE THE USER READS AND RETYPES, not for the
-    // router, so it is pinned where it actually bites.
-    expect(exemplar).not.toMatch(/ {2}/);
-    expect(response.assistant_text).not.toMatch(/ {2}/);
-    // Bound by identity to the pair the refusal was about — not merely "it
-    // matched something".
-    expect(resolveOptionEffectWrite({ message: `${exemplar}.`, graph: graph() })).toMatchObject({
-      matched: true,
-      kind: 'write',
-      optionId: OPTION_ID,
-      factorId: FACTOR_ID,
-    });
-  });
-
-  it('⭐⭐ CORRECT THE MUTATION IN ONE CLICK — the chip carries the user\'s own value and lands on the option\'s effect', async () => {
-    // Founder requirement 1: the write must land on the thing the user meant.
-    // The turn is refused rather than redirected mid-flight (a routing change
-    // at the highest-blast-radius seam in the estate), and the correction is
-    // offered as ONE CLICK through the path already proven to write option
-    // interventions honestly.
-    const { response } = await runTurnExecutor(
-      payload(EFFECT_FRAMED),
-      'req-effect-ask-one-click',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    const chips = response.suggested_actions ?? [];
-    expect(chips).toHaveLength(1);
-    // The chip carries the USER'S value (0.8), not a value the product invented.
-    expect(chips[0]!.label).toContain('0.8');
-    // …and its replay message binds the RIGHT pair, by identity.
-    expect(resolveOptionEffectWrite({ message: chips[0]!.message, graph: graph() })).toMatchObject({
-      matched: true,
-      kind: 'write',
-      optionId: OPTION_ID,
-      factorId: FACTOR_ID,
-      value: 0.8,
-    });
-  });
-
-  it('⭐ A HEDGE IS NEVER LAUNDERED INTO AN EXACT FIGURE — no value chip on "about 0.6"', async () => {
-    // The opposite restraint, and it is the P5 half. `readOptionEffectValue` is
-    // anchored on `to <number>`, so "…strongly, about 0.6" yields no value and
-    // the product asks for one rather than putting a figure in the user's mouth.
-    const { response } = await runTurnExecutor(
-      payload(OPINION_NO_WARRANT),
-      'req-effect-ask-hedge-no-value',
-      { routingAdapter: edgeStrengthAdapter(OUTSTANDING_EDGE), graphState: graph() },
-    );
-    const chips = response.suggested_actions ?? [];
-    expect(chips.map((c) => c.label)).not.toContain(WITNESSED_CHIP_LABEL);
-    for (const c of chips) expect(c.label).not.toMatch(/0\.6/);
-  });
-
-  it('⭐⭐ OPPOSITE-DIRECTION TWIN — the SAME factor and value WITHOUT effect framing still writes', async () => {
-    const before = factorValue(graph());
-    await runTurnExecutor(payload(BASELINE_EDIT), 'req-effect-ask-factor-twin', {
-      routingAdapter: setFactorValueAdapter(),
-      graphState: graph(),
-    });
-
-    expect(graphWrites().length).toBeGreaterThan(0);
-    expect(factorValue(persistedGraph)).toBe(0.8);
-    expect(factorValue(persistedGraph)).not.toBe(before);
-
-    // ⭐⭐ THE RECEIPT IS CHECKED AGAINST PERSISTENCE, NOT AGAINST ITSELF. The
-    // `graph_patch` fact is what the UI renders the card from; if it and the
-    // persisted graph can disagree, the card is describing an intention. Bound
-    // by identity (`target_id`), never by "the fact whose value is 0.8".
-    const facts = (appendCalls.find((c) => Array.isArray(c.handler_facts)
-      && (c.handler_facts as unknown[]).length > 0)?.handler_facts ?? []) as Array<{
-        fact_type?: string;
-        result?: { target_id?: string; status?: string; after?: { value?: unknown } };
-      }>;
-    const receipt = facts.find(
-      (f) => f.fact_type === 'set_factor_value' && f.result?.target_id === FACTOR_ID,
-    );
-    expect(receipt).toBeDefined();
-    expect(receipt!.result!.status).toBe('applied');
-    expect(receipt!.result!.after!.value).toBe(factorValue(persistedGraph));
-
-    // …and the honest half: this write did NOT answer the effect ask, and the
-    // model still says so. A baseline edit must not silently clear a blocker.
-    expect(pairStillOutstanding(persistedGraph, OPTION_ID, FACTOR_ID)).toBe(true);
-  });
-});
-
-describe('THE REVIEW N=2 — the demotion chip the prose gate could not see', () => {
-  /**
-   * The demotion chips are minted from ONE path with copy that is CONTENT-FREE
-   * BY DESIGN (`compose/warrant-demotion.ts:50-52`) — neither message carries
-   * `effect`, `intervention` or `configure`. A prose-gated factor arm therefore
-   * could not fire on one, while its edge twin (identity) refused. The verbatim
-   * witnessed defect-A sentence got OPPOSITE verdicts per handler.
-   *
-   * ⚠⚠ THE GATE IS THE CONSUMED PENDING, NOT `payload.source`. The first cut
-   * gated on `source === 'chip_click'`, which measurement REFUTED: that flag is
-   * a ROUTING signal the UI promotes onto anything carrying a routable
-   * `action_type`, so it also carries user-authored text. Genuine provenance is
-   * the pending action — the product minted `apply_proposed_change` itself.
-   * Derived by round trip at this tip, not assumed.
-   */
-  it('THE TWIN: a real demotion chip resumed on the OUTSTANDING pair writes NOTHING', async () => {
-    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
-    // POSITIVE CONTROLS on the fixture itself (trap 13): the round trip really
-    // produced the content-free chip and a pending, else the replay proves nothing.
-    expect(chipMessage).toBe('Set that value in my model.');
-    expect(pendings).toHaveLength(1);
-    expect(chipMessage.toLowerCase()).not.toMatch(/\b(effects?|interventions?|configur)/);
-
-    pendingActionsForRead = pendings;
-    appendCalls.length = 0;
-    persistedGraph = null;
-
-    const { response } = await runTurnExecutor(
-      routingFlagPayload(chipMessage),
-      'req-effect-ask-chip-refused',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    expect(graphWrites()).toHaveLength(0);
-    expect(factorValue(stateAfterTurn())).toBe(0.5);
-    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
-    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
-  });
-
-  it('OPPOSITE DIRECTION — the same resume on an UNBLOCKED factor still LANDS', async () => {
-    const { chipMessage, pendings } = await emitRealDemotion(
-      UNBLOCKED_FACTOR_ID,
-      UNBLOCKED_FACTOR_LABEL,
-    );
-    pendingActionsForRead = pendings;
-    appendCalls.length = 0;
-    persistedGraph = null;
-
-    await runTurnExecutor(
-      routingFlagPayload(chipMessage),
-      'req-effect-ask-chip-control',
-      {
-        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
-        graphState: graph(),
-      },
-    );
-    expect(graphWrites().length).toBeGreaterThan(0);
-  });
-
-  /**
-   * ⚠⚠ THIS PIN WAS DELIBERATELY REVERSED, AND THE REASON MATTERS MORE THAN THE
-   * ASSERTION. It read:
-   *
-   *   "AND THE TYPED TWIN IS UNCHANGED — the same copy typed by hand still
-   *    writes … the gate is on the PROVENANCE of the turn, not on the string.
-   *    The identical bytes with no pending to consume are the user's own words,
-   *    and they write."
-   *
-   * That reasoning is sound about `payload.source`, which is a field someone
-   * ELSE fills in. It is NOT sound about a string CEE MINTS ITSELF. Measured at
-   * `1647d99b` from a real round trip, this exact case is the witnessed defect:
-   * the factor's own value moved 0.5 → 0.8 under *"Updated Sales Headcount -
-   * Hybrid Maintained from 0.5 to 0.8."* — because the copy is CONTENT-FREE by
-   * design, so the proposal was rebuilt from conversation history, not from
-   * anything anybody typed.
-   *
-   * "The user's own words" was the premise, and it is false for these three
-   * sentences specifically: nobody types them. The load-bearing opposite
-   * direction — free-typed prose still writes — is not weakened by declining
-   * them; it is pinned below by the NEAR-MISS twin, which differs by one word
-   * and must still write.
-   */
-  it('THE TYPED TWIN IS DECLINED — nobody types the product\'s own content-free copy', async () => {
-    const before = factorValue(graph());
-    const { response } = await runTurnExecutor(
-      payload('Set that value in my model.'),
-      'req-effect-ask-chip-typed-twin',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    expect(graphWrites()).toHaveLength(0);
-    expect(factorValue(stateAfterTurn())).toBe(before);
-    expect(response.assistant_text.toLowerCase()).toContain('no longer available');
-  });
-});
-
-describe('REGRESSION — the guard must NOT read the ROUTING flag', () => {
-  /**
-   * `MessageBubble.tsx:616` is the ONLY production UI sender of a
-   * `set_factor_value` chip: label "Calibrate <X>", message "Help me calibrate
-   * <X>", carrying NO value. It ships as `source: 'chip_click'` because the UI
-   * promotes anything with a routable `action_type` (`buildPayload.ts:155`).
-   *
-   * MEASURED before this gate was corrected: it drew "I haven't changed anything
-   * … would have moved <factor>'s own value instead" — the product answering a
-   * plain request for HELP with a refusal about writing to the wrong field,
-   * differing from the composer-sourced turn only by a transport flag.
-   */
-  // BOTH spellings of the routing flag. The contract union is exactly four —
-  // `composer | chip | chip_click | retry` (schemas 0.48.0,
-  // `dist/boundary/enums.d.ts:24`) — and the contract's own reader,
-  // `turn-payload.js:720`'s `isChipSource`, names BOTH. A regression that named
-  // only one would leave half the question untested.
-  it.each(['chip', 'chip_click'] as const)(
-    'the Calibrate affordance on an OUTSTANDING factor is not refused (source: %s)',
-    async (source) => {
-      const { response } = await runTurnExecutor(
-        routingFlagPayload(`Help me calibrate ${J18.ids.factor_label}`, source),
-        `req-calibrate-not-refused-${source}`,
-        { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-      );
-      expect(response.assistant_text).not.toContain("I haven't changed anything");
-      expect(response.assistant_text).not.toContain("'s own value instead");
-    },
-  );
-
-  it('⭐ AND THE DERIVATION IS EXERCISED, NOT INJECTED — the same turn WITH a pending refuses', async () => {
-    // ⚠ A PARAMETER PASSED AS A LITERAL CAN NEVER TEST HOW IT IS DERIVED. The
-    // module spec hands `chipOriginated` in by hand; this case and its twin
-    // above reach the arm through the REAL `turnIsChipOriginated` expression in
-    // the turn executor, so a change to what that reads is visible here.
-    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
-    pendingActionsForRead = pendings;
-    appendCalls.length = 0;
-    persistedGraph = null;
-    const { response } = await runTurnExecutor(
-      routingFlagPayload(chipMessage, 'chip'),
-      'req-derivation-exercised',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text).toContain("I haven't changed anything");
-  });
-});
-
-describe('the one-click correction degrades HONESTLY when its value cannot be rendered safely', () => {
-  it('⭐ an unsafe-precision value yields NO chip rather than a chip the finaliser would drop', async () => {
-    // ⚠ REVIEW FINDING: the earlier `toHaveLength(1)` passed only because the
-    // fixture value is 0.8. High-precision decimals are refused by the chip
-    // raw-decimal safety rule, so the correction silently becomes unavailable.
-    // That degradation is to NO CHIP, never to a false receipt — but it must be
-    // asserted, so the next reader learns the rule instead of inheriting a
-    // fixture that hides it.
-    const { response } = await runTurnExecutor(
-      payload(`Set its effect on ${J18.ids.factor_label} to 0.6667.`),
-      'req-effect-ask-unsafe-precision',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    expect(graphWrites()).toHaveLength(0);
-    const chips = response.suggested_actions ?? [];
-    for (const c of chips) expect(c.label).not.toContain('0.6667');
-    // …and it degrades to an ASK, not to silence.
-    expect(chips).toHaveLength(1);
-    // …and the copy still asks, so the turn is not a dead end.
-    expect(response.assistant_text).toContain(J18.ids.factor_label);
-  });
-});
 
 describe('⭐⭐ THE CORRECTION CHIP CARRIES THE OPTION IT NAMED — it does not re-resolve at click time', () => {
   const OTHER_OPTION_ID = '939d4630';
@@ -840,18 +273,7 @@ describe('⭐⭐ THE CORRECTION CHIP CARRIES THE OPTION IT NAMED — it does not
     expect(outstanding.map((p) => p.optionId)).toEqual([OTHER_OPTION_ID]);
   });
 
-  it('⭐ the chip binds the option the copy NAMED, not whatever is outstanding at click time', async () => {
-    const { response } = await runTurnExecutor(
-      payload(EFFECT_FRAMED),
-      'req-effect-ask-chip-identity',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    const chip = (response.suggested_actions ?? [])[0]!;
-    // Resolved against the SHIFTED graph — offer time and click time differ.
-    expect(resolveOptionEffectWrite({ message: chip.message, graph: shiftedGraph() })).toMatchObject(
-      { matched: true, kind: 'write', optionId: OPTION_ID, factorId: FACTOR_ID, value: 0.8 },
-    );
-  });
+
 
   it('⭐⭐ DISCRIMINATING TWIN — the option-LESS form binds the WRONG option on the same graph', () => {
     // This is the defect the fix removes, kept as a live discriminator. Without
@@ -910,174 +332,19 @@ describe('⭐⭐ THE CORRECTION CHIP CARRIES THE OPTION IT NAMED — it does not
  */
 describe('⭐⭐ THE EXPIRED OFFER — a chip whose offer is gone is declined, never honoured', () => {
   /** The real pending with only the CLOCK moved — still carried, wall-expired. */
-  function wallExpire(pendings: readonly unknown[]): readonly unknown[] {
-    return pendings.map((p) => ({
-      ...(p as Record<string, unknown>),
-      expires_at_iso: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    }));
-  }
 
-  it('⭐⭐ THE WITNESSED WRITE NEVER LANDS — pending ABSENT, nothing is written', async () => {
-    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
-    // POSITIVE CONTROLS on the fixture (trap 13): the round trip really produced
-    // the content-free chip and a pending, else the replay proves nothing.
-    expect(chipMessage).toBe('Set that value in my model.');
-    expect(pendings).toHaveLength(1);
 
-    pendingActionsForRead = [];
-    appendCalls.length = 0;
-    persistedGraph = null;
 
-    const { response } = await runTurnExecutor(
-      routingFlagPayload(chipMessage),
-      'req-expired-offer-replay',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
 
-    expect(graphWrites()).toHaveLength(0);
-    expect(persistedGraph).toBeNull();
-    // ⭐⭐ PERSISTED STATE MATCHES THE RECEIPT — read BACK, bound by identity,
-    // through the SAME canonical readiness the on-screen blocker is composed
-    // from. This is the assertion the witnessed "Updated … from 0.5 to 0.8"
-    // receipt could not survive.
-    expect(factorValue(stateAfterTurn())).toBe(0.5);
-    expect(pairStillOutstanding(stateAfterTurn(), OPTION_ID, FACTOR_ID)).toBe(true);
-    // …and the decline is HONEST about why, and offers a route onward.
-    expect(response.assistant_text.toLowerCase()).toContain('no longer available');
-    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
-    expect(response.assistant_text).not.toContain('0.8');
-    expect(response.suggested_actions ?? []).toHaveLength(1);
-  });
 
-  it('⭐ POSITIVE CONTROL — the SAME replay WITH its pending present is NOT declined', async () => {
-    // Without this the assertion above could pass because the harness cannot
-    // write at all. Same chip, same factor, same adapter — only the pending
-    // differs, so the decline is provably the pending's absence and nothing else.
-    const { chipMessage, pendings } = await emitRealDemotion(
-      UNBLOCKED_FACTOR_ID,
-      UNBLOCKED_FACTOR_LABEL,
-    );
-    pendingActionsForRead = pendings;
-    appendCalls.length = 0;
-    persistedGraph = null;
-    const { response } = await runTurnExecutor(
-      routingFlagPayload(chipMessage),
-      'req-expired-offer-control-live',
-      {
-        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
-        graphState: graph(),
-      },
-    );
-    expect(graphWrites().length).toBeGreaterThan(0);
-    expect(response.assistant_text.toLowerCase()).not.toContain('no longer available');
-  });
 
-  it('⭐ THE DISCRIMINATING TWIN — the SAME chip on the SAME factor, pending REMOVED, declines', async () => {
-    // The pair, on the LIVENESS axis alone: the case above writes, this one
-    // does not, and the only difference between the two runs is the pending.
-    const { chipMessage } = await emitRealDemotion(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL);
-    pendingActionsForRead = [];
-    appendCalls.length = 0;
-    persistedGraph = null;
-    const { response } = await runTurnExecutor(
-      routingFlagPayload(chipMessage),
-      'req-expired-offer-twin-dead',
-      {
-        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
-        graphState: graph(),
-      },
-    );
-    expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text.toLowerCase()).toContain('no longer available');
-  });
 
-  it('⚠ MEASURED MECHANISM — a WALL-EXPIRED pending is STILL RESUMED, and still refused as wrong-field', async () => {
-    // Recorded because the obvious reading of the TTL is wrong and the next
-    // reader will otherwise "fix" the guard to consult `isExpired`. The
-    // label-pick resume at turn-executor.ts:4684 filters on KIND ONLY (its local
-    // is named `liveProposals` — a misnomer), so this pending is consumed, the
-    // #1067 identity arm fires, and the refusal names the FIELD rather than the
-    // expiry. Both outcomes are safe; they are DIFFERENT, and the difference is
-    // evidence about which bound actually applies.
-    const { chipMessage, pendings } = await emitRealDemotion(FACTOR_ID, J18.ids.factor_label);
-    pendingActionsForRead = wallExpire(pendings);
-    appendCalls.length = 0;
-    persistedGraph = null;
-    const { response } = await runTurnExecutor(
-      routingFlagPayload(chipMessage),
-      'req-expired-offer-wall-expired',
-      { routingAdapter: setFactorValueAdapter(), graphState: graph() },
-    );
-    expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text).toContain("I haven't changed anything");
-    expect(response.assistant_text.toLowerCase()).not.toContain('no longer available');
-  });
 
-  it('⭐⭐ OPPOSITE DIRECTION — a legitimate free-typed baseline edit STILL WRITES, no pending anywhere', async () => {
-    // THE LOAD-BEARING HALF. A user typing an ordinary instruction with no offer
-    // in flight is the common case, and it must be untouched.
-    const before = factorValue(graph());
-    pendingActionsForRead = [];
-    appendCalls.length = 0;
-    persistedGraph = null;
-    await runTurnExecutor(payload(BASELINE_EDIT), 'req-expired-offer-opposite-prose', {
-      routingAdapter: setFactorValueAdapter(),
-      graphState: graph(),
-    });
-    expect(graphWrites().length).toBeGreaterThan(0);
-    expect(factorValue(persistedGraph)).toBe(0.8);
-    expect(factorValue(persistedGraph)).not.toBe(before);
-  });
 
-  it('⭐⭐ SCOPE PIN — a NON-MUTATING proposal on the same expired replay is NOT declined', async () => {
-    // The guard's handler set is DERIVED (`isProposedChangeActionType` — the
-    // three mutations the demotion path can offer) and this is what makes that
-    // conjunct load-bearing rather than decorative: identical turn, identical
-    // absent pending, a handler that cannot write. It must pass through.
-    //
-    // ⚠ TWO EARLIER CHOICES FOR THIS PIN WERE REJECTED BY MEASUREMENT, because
-    // each would have passed for the WRONG REASON: `explain_result` and
-    // `analysis_readiness` are NOT in this harness's registry and both return
-    // HANDLER_NOT_FOUND, so `validationResult.valid` is false and the guard
-    // could never have fired. `explain_from_structure` validates (measured:
-    // `validator_outcome: "valid"`), so the proposal genuinely reaches the
-    // chokepoint and genuinely is not claimed.
-    pendingActionsForRead = [];
-    appendCalls.length = 0;
-    persistedGraph = null;
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-        .mockImplementation(async () =>
-          mkToolUseResult({
-            intent_class: 'execute',
-            action: {
-              handler_id: 'explain_from_structure',
-              entity: {
-                id: FACTOR_ID,
-                kind: 'node',
-                label: J18.ids.factor_label,
-                resolution_status: 'resolved',
-                resolution_method: 'label_match',
-              },
-              parameters: [],
-              cited_context_fields: [],
-            },
-          }),
-        ),
-    };
-    const { response } = await runTurnExecutor(
-      routingFlagPayload('Set that value in my model.'),
-      'req-expired-offer-nonmutating',
-      { routingAdapter: adapter, graphState: graph() },
-    );
-    expect(response.assistant_text.toLowerCase()).not.toContain('no longer available');
-    // ⚠ MEASURED: this handler DOES append a graph row (an explain turn commits
-    // the unchanged graph), so `graphWrites().length === 0` is NOT the property
-    // here — asserting it would have made the pin fail for a reason unrelated to
-    // the guard. The property is that nothing was MUTATED, bound by identity.
-    expect(factorValue(stateAfterTurn())).toBe(0.5);
-  });
+
+
+
+
 
   /**
    * ⭐⭐⭐ THE COVERAGE UNION — the ONE way this guard degrades in silence.
@@ -1144,27 +411,5 @@ describe('⭐⭐ THE EXPIRED OFFER — a chip whose offer is gone is declined, n
     expect(GRAPH_MUTATING_HANDLER_IDS.has('explain_from_structure')).toBe(false);
   });
 
-  it('⭐⭐ THE NEAR-MISS TWIN — one extra word and it is a real sentence again, and it WRITES', async () => {
-    // The sharpest proof that the recogniser is EXACT rather than fuzzy: these
-    // bytes differ from the chip copy by the single word "please", and the
-    // product must treat them as the user's own instruction.
-    const before = factorValue(graph());
-    pendingActionsForRead = [];
-    appendCalls.length = 0;
-    persistedGraph = null;
-    await runTurnExecutor(
-      payload('Set that value in my model please.'),
-      'req-expired-offer-near-miss',
-      {
-        routingAdapter: setFactorValueAdapter(UNBLOCKED_FACTOR_ID, UNBLOCKED_FACTOR_LABEL),
-        graphState: graph(),
-      },
-    );
-    expect(graphWrites().length).toBeGreaterThan(0);
-    // TRAP 19 — bound by IDENTITY to the node the adapter named, never "the
-    // node whose value is 0.8".
-    expect(nodeValue(persistedGraph, UNBLOCKED_FACTOR_ID)).toBe(0.8);
-    // …and the outstanding factor this file is otherwise about is untouched.
-    expect(factorValue(stateAfterTurn())).toBe(before);
-  });
+
 });

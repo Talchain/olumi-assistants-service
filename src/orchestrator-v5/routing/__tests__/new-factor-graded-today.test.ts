@@ -15,32 +15,29 @@
  * same base A1's rows use. Every row runs the REAL builder, dispatch/referee hold, `readGmHeldResume` and
  * `executeGmHeldResume`; the consent-all row runs the REAL turn executor.
  */
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe,expect,it,vi } from 'vitest';
 
-import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../../adapters/llm/types.js';
 import type { PendingAction } from '../../session/pending-action.js';
 
-import {
-  buildAddOptionsTransaction,
-  GM_HELD_GRADED_TODAY_KEY,
-  GM_HELD_SWITCH_FACTORS_KEY,
-  readGradedTodayMember,
-  stampNewGradedTodayLevels,
-  stampNewSwitchFactors,
-} from '../add-option-transaction.js';
-import { dispatchAddOptionTransaction } from '../../handlers/add-option-dispatch.js';
-import { executeGmHeldResume, readGmHeldResume } from '../../handlers/gm-held-execute.js';
-import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { checkPersistedGraphInvariants } from '../../persisted-graph-invariants.js';
+import { heldFigureOwnerOf,inputOriginOf,provenanceOf,valueAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
+import { defaultFrameFor,framedObservedState } from '../../agent-lane/admit-model.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { dispatchAddOptionTransaction } from '../../handlers/add-option-dispatch.js';
+import { executeGmHeldResume,readGmHeldResume } from '../../handlers/gm-held-execute.js';
+import { checkPersistedGraphInvariants } from '../../persisted-graph-invariants.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
-import { framedObservedState, defaultFrameFor } from '../../agent-lane/admit-model.js';
-import { heldFigureOwnerOf, inputOriginOf, provenanceOf, valueAuthorshipOf } from '../../../cee/provenance/provenance-of.js';
-import { _resetConfigCache } from '../../../config/index.js';
+import {
+buildAddOptionsTransaction,
+GM_HELD_GRADED_TODAY_KEY,
+GM_HELD_SWITCH_FACTORS_KEY,
+readGradedTodayMember,
+stampNewGradedTodayLevels,
+stampNewSwitchFactors,
+} from '../add-option-transaction.js';
 
 type Json = Record<string, any>;
 
@@ -50,9 +47,7 @@ const FX = JSON.parse(
 const { _provenance: _p, ...GRAPH } = FX;
 const STORED = projectGraphForPersistence(structuredClone(GRAPH)) as Json;
 const HASH = computeAnalysisAffectingGraphHash(STORED as never)!;
-const BASE = JSON.parse(
-  readFileSync(new URL('./fixtures/a1-base-contrast-770a477c.json', import.meta.url), 'utf8'),
-) as { specs: Record<string, Json> };
+
 
 const SCENARIO_ID = randomUUID();
 const OPT = 'np570001';
@@ -336,43 +331,3 @@ vi.mock('../../session/index.js', () => ({
   }),
   resetSessionStoreForTests: () => undefined,
 }));
-
-const { runTurnExecutor } = await import('../../turn-executor.js');
-
-function payload(message: string): MessageTurnPayload {
-  return { kind: 'message', source: 'composer', turn_id: `t-${randomUUID()}`, scenario_id: SCENARIO_ID, message, turn_class: 'decide', stage: 'analyse' };
-}
-
-describe('PJ-A1 £49 — consent-all ("Yes, all of them.") over two live GM holds', () => {
-  beforeEach(() => {
-    appendCalls.length = 0;
-    vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'live');
-    _resetConfigCache();
-  });
-  afterEach(() => {
-    vi.clearAllMocks();
-    vi.unstubAllEnvs();
-    _resetConfigCache();
-  });
-
-  it('RED: the ONE commit carries the SECOND hold\'s stated £49 on its new graded factor, read from its own member', async () => {
-    const graded = hold(structuredClone(BASE.specs.existing!)).pendingActions[0] as PendingAction;
-    const withToday = hold(GRADED_SPEC(), [{ label: LABEL, observed_state: STATED }]).pendingActions[0] as PendingAction;
-    expect(((graded.action as Json).inline_patch as Json)[GM_HELD_GRADED_TODAY_KEY]).toBeUndefined();
-    expect(((withToday.action as Json).inline_patch as Json)[GM_HELD_GRADED_TODAY_KEY]).toEqual([{ factor_id: FAC, observed_state: STATED }]);
-    pendingActionsForRead = [graded, withToday];
-
-    await runTurnExecutor(payload('Yes, all of them.'), 'req-pj-a1-consent-all', {
-      routingAdapter: {
-        chatWithTools: vi.fn<(a: ChatWithToolsArgs, o: { requestId: string }) => Promise<ChatWithToolsResult>>()
-          .mockImplementation(async () => { throw new Error('routing adapter must NOT be called on a deterministic consent-all resume'); }),
-      },
-    });
-
-    const commits = appendCalls.filter((w) => w.graph !== undefined && w.graph !== null);
-    expect(commits, JSON.stringify(appendCalls.map((w) => w.assistantMessage))).toHaveLength(1);
-    const g = commits[0]!.graph as Json;
-    expect(nodeOf(g, 'opt64')?.interventions?.pro_plan_price).toMatchObject({ value: 0.32, raw_value: 64 });
-    expect(nodeOf(g, FAC)?.observed_state).toEqual(STATED);
-  });
-});

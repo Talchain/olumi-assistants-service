@@ -1,19 +1,6 @@
-/**
- * V5 product-state continuity (foamy-bee tranche) — ownership invariant.
- *
- * `composeStateQueryChip` is the home for the state-query continuity
- * chip. The chip-generator's post-mutation rule deliberately does NOT
- * read `priorFacts` — that's the structural fix from P1-6. If a future
- * agent calls `composeStateQueryChip` from anywhere other than the
- * state-query guard's dispatch block in turn-executor, the ownership
- * boundary is broken and the chip could surface on unrelated converse
- * turns again.
- *
- * This test grep-scans the production source tree (excluding tests and
- * the module itself) and asserts there is exactly ONE callsite. If that
- * count drifts, the test fails with an explicit pointer to the
- * regression and a list of all detected callsites for triage.
- */
+/** C1 retired the sole conventional state-query caller. Pin the complete
+ * production call population at zero so an unrelated conversation cannot
+ * regain its continuity chip without an explicit ownership review. */
 
 import { describe, expect, it } from 'vitest';
 import { readdirSync, statSync } from 'node:fs';
@@ -38,7 +25,7 @@ function walkTsFiles(dir: string, out: string[] = []): string[] {
 }
 
 describe('composeStateQueryChip — ownership boundary', () => {
-  it('has exactly one production callsite (turn-executor.ts state-query guard block)', () => {
+  it('has no production callsite after the conventional state-query guard was retired', () => {
     // Match ACTUAL invocations only: `composeStateQueryChip(` with an open
     // paren, in the COMMENT-STRIPPED view of each file
     // (scripts/ci/strip-source-comments.mjs, the shared literal-aware
@@ -61,19 +48,16 @@ describe('composeStateQueryChip — ownership boundary', () => {
 
     const callFiles = new Set(callLines.map((l) => l.split(':')[0]));
 
-    // Expected: one and only one call site, in turn-executor.ts. If a
-    // future change reuses this function from another module, the
-    // ownership boundary has drifted and the chip could surface on
-    // unrelated converse turns. Failure shows the offending lines so
-    // triage is one click.
+    // C1 removed the executor caller; a new production call is an ownership change.
     expect(
       callFiles.size,
-      `expected 1 production file invoking composeStateQueryChip(); found ${callFiles.size}:\n${[...callFiles].join('\n')}`,
-    ).toBe(1);
-    expect(callFiles.has('src/orchestrator-v5/turn-executor.ts')).toBe(true);
+      `expected 0 production files invoking composeStateQueryChip(); found ${callFiles.size}:\n${[...callFiles].join('\n')}`,
+    ).toBe(0);
+    // C1 deleted the sole executor caller; any new caller must reopen the ownership review.
+    expect([...callFiles]).toEqual([]);
     expect(
       callLines.length,
-      `expected exactly 1 production call line; got:\n${callLines.join('\n')}`,
-    ).toBe(1);
+      `expected exactly 0 production call lines; got:\n${callLines.join('\n')}`,
+    ).toBe(0);
   }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 });

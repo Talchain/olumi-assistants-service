@@ -47,26 +47,21 @@
  * advertised-vs-accepted divergence and not the cap guards.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import { buildGraphLookup } from '../graph-lookup-adapter.js';
-import { resolveRelativeFactorDelta } from '../resolve-relative-factor-delta.js';
-import { OLUMI_ACTION_TOOL } from '../tool-schema.js';
-import type { ProposalAction, ProposalParameter } from '../types.js';
+
+
+import type { ProposalAction,ProposalParameter } from '../types.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
-import { validateToolCall, type GraphLookup } from '../validator.js';
+import { validateToolCall,type GraphLookup } from '../validator.js';
 
 // ---------------------------------------------------------------------------
 // DERIVE the advertised arms from the REAL tool object
 // ---------------------------------------------------------------------------
 
-interface JsonSchemaNode {
-  readonly type?: string;
-  readonly anyOf?: readonly JsonSchemaNode[];
-  readonly properties?: Readonly<Record<string, JsonSchemaNode>>;
-  readonly items?: JsonSchemaNode;
-}
+
 
 /**
  * Walk the ACTUAL exported tool object to the `parameters[].value` node.
@@ -77,58 +72,13 @@ interface JsonSchemaNode {
  * (CLAUDE.md trap 13). The cardinality assertions in the first test are the
  * positive control for this walk.
  */
-function advertisedValueNode(): JsonSchemaNode {
-  const root = OLUMI_ACTION_TOOL.input_schema as unknown as JsonSchemaNode;
-  const action = root.properties?.action;
-  if (!action) throw new Error('tool schema: input_schema.properties.action is missing');
-  const parameters = action.properties?.parameters;
-  if (!parameters) throw new Error('tool schema: action.properties.parameters is missing');
-  const items = parameters.items;
-  if (!items) throw new Error('tool schema: parameters.items is missing');
-  const value = items.properties?.value;
-  if (!value) throw new Error('tool schema: parameters.items.properties.value is missing');
-  return value;
-}
+
 
 /** The advertised top-level type tokens for `value`, derived, sorted. */
-function advertisedValueTypes(): readonly string[] {
-  const node = advertisedValueNode();
-  const arms = node.anyOf;
-  if (!arms || arms.length === 0) {
-    throw new Error('tool schema: parameters.items.properties.value.anyOf is empty or absent');
-  }
-  return arms
-    .map((a, i) => {
-      if (typeof a.type !== 'string') {
-        throw new Error(`tool schema: value.anyOf[${i}] has no concrete "type"`);
-      }
-      return a.type;
-    })
-    .slice()
-    .sort();
-}
+
 
 /** The advertised type tokens for the INNER `{ value, unit?, cap? }` wrapper. */
-function advertisedInnerValueTypes(): readonly string[] {
-  const objectArm = advertisedValueNode().anyOf?.find((a) => a.type === 'object');
-  if (!objectArm) throw new Error('tool schema: value.anyOf has no object arm');
-  const inner = objectArm.properties?.value;
-  if (!inner) throw new Error('tool schema: object arm has no inner "value" property');
-  if (typeof inner.type === 'string') return [inner.type];
-  const arms = inner.anyOf;
-  if (!arms || arms.length === 0) {
-    throw new Error('tool schema: inner value has neither a type nor a non-empty anyOf');
-  }
-  return arms
-    .map((a, i) => {
-      if (typeof a.type !== 'string') {
-        throw new Error(`tool schema: inner value.anyOf[${i}] has no concrete "type"`);
-      }
-      return a.type;
-    })
-    .slice()
-    .sort();
-}
+
 
 // ---------------------------------------------------------------------------
 // MEASURE the acceptor by driving the REAL chain
@@ -178,10 +128,7 @@ function makeProposal(param: Partial<ProposalParameter> & { value: unknown }): P
  * rewrite first (turn-executor.ts, STEP 1.5), then `validateToolCall`.
  * Returns the SHAPE verdict plus the rejection enum for diagnosis.
  */
-const SHAPE_REFUSAL_REASONS: ReadonlySet<string> = new Set([
-  'parameter_schema_mismatch',
-  'missing_value',
-]);
+
 
 /**
  * ⚠⚠ THE ACCEPTED DIRECTION IS BOUND BY `valid`, NOT BY A NEGATION.
@@ -212,205 +159,16 @@ const SHAPE_REFUSAL_REASONS: ReadonlySet<string> = new Set([
  * refusal is DIAGNOSED rather than silently rebadged — the reviewer's point
  * that a semantic refusal must be asserted as itself, not swallowed.
  */
-function shapeVerdict(param: Partial<ProposalParameter> & { value: unknown }): {
-  readonly valid: boolean;
-  readonly shapeAccepted: boolean;
-  readonly rejectionReason: string | undefined;
-  readonly errorCode: string | undefined;
-} {
-  let action = makeProposal(param);
-  const rel = resolveRelativeFactorDelta(action, GRAPH);
-  if (rel.resolved) action = rel.action;
-  const result = validateToolCall(action, GRAPH, HANDLER_VALIDATION_REGISTRY);
-  if (result.valid) {
-    return { valid: true, shapeAccepted: true, rejectionReason: undefined, errorCode: undefined };
-  }
-  const reason = result.error.details?.rejection_reason;
-  const rejectionReason = typeof reason === 'string' ? reason : undefined;
-  const rawCode: unknown = result.error.code;
-  return {
-    valid: false,
-    // FAIL CLOSED — see the note above. A refusal is only "not a shape
-    // refusal" when it NAMES a reason that is not one.
-    shapeAccepted: rejectionReason !== undefined && !SHAPE_REFUSAL_REASONS.has(rejectionReason),
-    rejectionReason,
-    errorCode: typeof rawCode === 'string' ? rawCode : undefined,
-  };
-}
+
 
 /** One representative value per advertised top-level arm. */
-const REPRESENTATIVE: Readonly<Record<string, Partial<ProposalParameter> & { value: unknown }>> = {
-  number: { value: 40000, operator: 'set', unit: '£' },
-  object: { value: { value: 40000, unit: '£', cap: 100000 }, operator: 'set' },
-  // The only string form the chain accepts: a SIGNED percent delta.
-  string: { value: '+5%', operator: 'increase' },
-};
+
 
 // ---------------------------------------------------------------------------
 
-describe('DERIVED GUARD — advertised `value` types ⊆ accepted `value` types', () => {
-  it('the schema walk finds a non-empty, correctly-shaped advert (positive control)', () => {
-    // POSITIVE CONTROL for every assertion below. If the walk silently
-    // returned nothing, the subset test would pass over an empty set and
-    // certify a divergence it never looked at.
-    const types = advertisedValueTypes();
-    expect(types.length).toBeGreaterThan(0);
-    expect(types).toEqual(['number', 'object', 'string']);
 
-    const inner = advertisedInnerValueTypes();
-    expect(inner.length).toBeGreaterThan(0);
-    // The `{ value, unit?, cap? }` wrapper: every consumer requires a
-    // numeric inner value (set-factor-value.ts SetFactorValueValueSchema,
-    // validator.ts parseValueParameter, resolve-relative-factor-delta.ts).
-    expect(inner).toEqual(['number']);
-  });
 
-  it('every advertised top-level arm is accepted by the live acceptor chain', () => {
-    const advertised = advertisedValueTypes();
-  const unaccepted: Array<{
-      type: string;
-      rejectionReason: string | undefined;
-      errorCode: string | undefined;
-    }> = [];
 
-    for (const type of advertised) {
-      const representative = REPRESENTATIVE[type];
-      // A newly-advertised arm with no representative is a FAILURE, not a
-      // skip — otherwise adding an arm silently escapes this guard.
-      expect(
-        representative,
-        `tool schema advertises value type "${type}" but this guard has no representative for it. ` +
-          'Add one (and prove an acceptor takes it) — do not delete the arm from the advert ' +
-          'without checking every handler first.',
-      ).toBeDefined();
-      const verdict = shapeVerdict(representative!);
-      // ⚠ `valid`, not `shapeAccepted`. The advert is only honest if the live
-      // chain actually TAKES the representative. Reading "not refused on
-      // shape" as "accepted" let this loop certify two of the three arms
-      // against a target that had been deleted from the fixture.
-      if (!verdict.valid) {
-        unaccepted.push({
-          type,
-          rejectionReason: verdict.rejectionReason,
-          errorCode: verdict.errorCode,
-        });
-      }
-    }
-
-    expect(
-      unaccepted,
-      'The tool schema advertises a `value` type the live chain does not accept. ' +
-        'A `parameter_schema_mismatch` / `missing_value` here is the advertised-vs-accepted ' +
-        'divergence this guard exists for: the model is told to send something the product ' +
-        'then rejects. ANY OTHER code (ENTITY_NOT_FOUND, ENTITY_KIND_MISMATCH, ' +
-        'ENTITY_RESOLUTION_SUSPICIOUS) means the FIXTURE broke, not the advert — the guard ' +
-        'is no longer measuring what it claims and must be repaired before it is believed.',
-    ).toEqual([]);
-  });
-
-  it('`boolean` is NOT advertised — it has zero acceptors', () => {
-    // Regression pin for the removed arm. No registered handler reads a
-    // boolean out of `parameters[].value` (swept across all 7 handlers in
-    // the registry, contrast-controlled against string/number hits in the
-    // same files). Re-advertising it would recreate the divergence.
-    expect(advertisedValueTypes()).not.toContain('boolean');
-    expect(advertisedInnerValueTypes()).not.toContain('boolean');
-
-    // And prove the claim rather than asserting it: a boolean IS refused
-    // on shape, so the arm would be pure advertisement if restored.
-    const verdict = shapeVerdict({ value: true, operator: 'set' });
-    expect(verdict.shapeAccepted).toBe(false);
-    // Caught by the handler's declared Zod parameter schema, not by the
-    // structural precheck — the generic loop runs first.
-    expect(verdict.rejectionReason).toBe('parameter_schema_mismatch');
-  });
-});
-
-describe('KNOWN DIVERGENCE — the advertised `string` arm is accepted only as a percent delta', () => {
-  /**
-   * The `string` arm CANNOT be removed from the advert: it is load-bearing
-   * for `add_constraint`, whose mandatory `constraint_type` parameter is a
-   * z.enum(['at_least','at_most']) string routed through this same shared
-   * `parameters[].value` schema (plus its `label` and `unit`). Narrowing
-   * `value` to number-only makes a valid add_constraint call
-   * unrepresentable in the advertised schema.
-   *
-   * So for `set_factor_value` the string arm is honest only for the
-   * sub-language `resolve-relative-factor-delta.ts` implements. Everything
-   * else is refused. That gap is REAL and is recorded here rather than left
-   * invisible to the suite, which is how it shipped in the first place.
-   *
-   * ⚠ CORRECTED (#1283 review) — THE STRENGTH OF THIS PIN WAS OVERSTATED.
-   * It said the pin "REDs if the set grows or shrinks". It does not. The
-   * expected value is derived by FILTERING `REFUSED_STRINGS` and comparing to
-   * that same array's own labels, so it bites on an EDIT TO THE ARRAY and is
-   * blind to the refused LANGUAGE growing: a newly-refused string form nobody
-   * has listed here changes nothing it can observe. That is the weak form of
-   * the pattern (CLAUDE.md trap 12d — a derived guard proves agreement, never
-   * completeness), and the honest claim is narrower: it pins that every
-   * member of these two hand-written corpora still lands on the side this
-   * file says it does. Only a corpus sourced from outside the author's head
-   * could bound the language itself.
-   */
-  const ACCEPTED_STRINGS: ReadonlyArray<[string, Partial<ProposalParameter> & { value: unknown }]> =
-    [
-      ['signed increase', { value: '+5%', operator: 'increase' }],
-      ['signed decrease', { value: '-10%', operator: 'decrease' }],
-      ['signless percent WITH a delta operator', { value: '5%', operator: 'increase' }],
-    ];
-
-  const REFUSED_STRINGS: ReadonlyArray<[string, Partial<ProposalParameter> & { value: unknown }]> = [
-    // A bare numeric string — the single most likely model output once the
-    // advert says "string is fine".
-    ['bare numeric string', { value: '40000', operator: 'set' }],
-    // Signless percent WITHOUT a delta operator: "set to 5%" is absolute,
-    // not relative. The resolver refuses to guess, and nothing else parses it.
-    ['signless percent, operator set', { value: '5%', operator: 'set' }],
-    ['unit-bearing string', { value: '£40k', operator: 'set' }],
-    ['prose', { value: 'twenty thousand', operator: 'set' }],
-    ['empty string', { value: '', operator: 'set' }],
-  ];
-
-  it.each(ACCEPTED_STRINGS)('ACCEPTED: %s', (_label, param) => {
-    const verdict = shapeVerdict(param);
-    // IDENTITY-BOUND, the same standard the refused direction already meets.
-    // `shapeAccepted` alone was satisfiable by an error about something else
-    // entirely — assert that the live chain actually took the value, and name
-    // the code when it did not so a broken fixture cannot masquerade as a
-    // passing advert.
-    expect(verdict.valid, `refused with code=${verdict.errorCode} reason=${verdict.rejectionReason}`).toBe(
-      true,
-    );
-    expect(verdict.rejectionReason).toBeUndefined();
-  });
-
-  it.each(REFUSED_STRINGS)('KNOWN-REFUSED: %s', (_label, param) => {
-    const verdict = shapeVerdict(param);
-    expect(verdict.shapeAccepted).toBe(false);
-    expect(verdict.rejectionReason).toBe('parameter_schema_mismatch');
-  });
-
-  it('the known-refused set is pinned EXACTLY — it must not grow or shrink silently', () => {
-    const refused = REFUSED_STRINGS.filter(([, p]) => !shapeVerdict(p).shapeAccepted).map(
-      ([label]) => label,
-    );
-    expect(refused).toEqual([
-      'bare numeric string',
-      'signless percent, operator set',
-      'unit-bearing string',
-      'prose',
-      'empty string',
-    ]);
-    const accepted = ACCEPTED_STRINGS.filter(([, p]) => shapeVerdict(p).valid).map(
-      ([label]) => label,
-    );
-    expect(accepted).toEqual([
-      'signed increase',
-      'signed decrease',
-      'signless percent WITH a delta operator',
-    ]);
-  });
-});
 
 describe('PARAMETER_INVALID is attributable from logs — the measured branch', () => {
   /**

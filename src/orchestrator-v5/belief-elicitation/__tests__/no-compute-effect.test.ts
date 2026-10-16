@@ -12,7 +12,7 @@
  *         module on the compute boundary — the ISL adapter, the PLoT client,
  *         the analysis handlers, or the ISL contracts; AND
  *     (b) the COMPLETE set of modules in `src/` that load anything from
- *         `belief-elicitation/` is exactly the three named consumers below,
+ *         `belief-elicitation/` is exactly the one named grammar consumer below,
  *         none of which is on the compute path for the reference-class data.
  *
  *   NOT CLAIMED: that the analysis payload is byte-identical under some
@@ -80,9 +80,9 @@ const COMPUTE_BOUNDARY_PATHS: readonly string[] = [
 /**
  * Resolve every import edge into this feature, RELATIVE SPECIFIERS INCLUDED.
  *
- * ⚠ The turn-executor imports `'./belief-elicitation/index.js'`. A substring
- * match on the full module path misses that edge entirely and reports zero
- * consumers — an absence claim that passes because the instrument is blind.
+ * C1 deleted the executor and pre-route; the kept CEE point guard imports the
+ * grammar. Resolve against each importer's directory rather than assuming an
+ * absolute spelling for that surviving edge.
  * Resolving each specifier against its importer's directory is what makes
  * the manifest real; the positive control below asserts it.
  */
@@ -109,8 +109,6 @@ function deriveConsumers(): string[] {
  * with the reason it is not a compute path.
  */
 const PERMITTED_CONSUMERS: Readonly<Record<string, string>> = {
-  'orchestrator-v5/turn-executor.ts':
-    'the pre-route: composes a direct answer, commits with handler_facts: [] and pending_actions: []',
   'cee/belief-elicitation/index.ts':
     'the 2.722 guard: imports the grammar predicate only, to ASK instead of collapsing',
 };
@@ -126,18 +124,12 @@ describe('T7 — the compute boundary exists and is named', () => {
 
   it('the module manifest is non-empty and complete', () => {
     const files = listSourceFiles(MODULE_DIR);
-    expect(files.length).toBeGreaterThanOrEqual(5);
+    // C1 deleted the pre-route/arithmetic modules; only the shared collapse grammar remains.
+    expect(files.length).toBe(1);
     const names = files.map((f) => relative(MODULE_DIR, f)).sort();
     // Named so a file ADDED to this module is visible in the diff of this
     // test, not silently absorbed.
-    expect(names).toEqual([
-      'beta-posterior.ts',
-      'index.ts',
-      'reference-class-block.ts',
-      'reference-class-disclosure.ts',
-      'reference-class-elicitation.ts',
-      'reference-class-grammar.ts',
-    ]);
+    expect(names).toEqual(['reference-class-grammar.ts']);
   });
 });
 
@@ -176,13 +168,9 @@ describe('T7 (b) — the COMPLETE set of consumers, derived from the import grap
   });
 
   it('POSITIVE CONTROL — the consumer detector CAN see a real edge (it resolves relative imports)', () => {
-    // The turn-executor imports this feature as `'./belief-elicitation/
-    // index.js'` — a RELATIVE specifier that a naive substring match on the
-    // full module path would MISS entirely, silently reporting zero
-    // consumers and passing. Resolving to an absolute path is what makes
-    // the manifest real; this control is what proves the resolution works.
+    // C1's remaining point-extraction guard still supplies a real relative import edge.
     expect(consumersRaw()).toContainEqual(
-      expect.objectContaining({ file: 'orchestrator-v5/turn-executor.ts' }),
+      expect.objectContaining({ file: 'cee/belief-elicitation/index.ts', specifier: '../../orchestrator-v5/belief-elicitation/reference-class-grammar.js' }),
     );
     expect(deriveConsumers().length).toBeGreaterThan(0);
   });
@@ -205,30 +193,15 @@ describe('T7 (b) — the COMPLETE set of consumers, derived from the import grap
   });
 });
 
-describe('T7 — the pre-route commits nothing to the model', () => {
-  it('the executor pre-route passes EMPTY handler_facts and pending_actions', () => {
-    const executor = readFileSync(resolve(REPO_SRC, 'orchestrator-v5/turn-executor.ts'), 'utf8');
-    // Anchored on CODE, not on prose: an end-anchor inside a comment can be
-    // matched by the pre-route's own docstring (it happened while writing
-    // this test, and the region came back as pure prose).
-    const start = executor.indexOf('const referenceClass = recogniseReferenceClass(');
-    expect(start).toBeGreaterThan(-1);
-    const end = executor.indexOf('const calibrationOnly = classifyCalibrationMessage(', start);
-    expect(end).toBeGreaterThan(start);
-    const region = executor.slice(start, end);
-    expect(region).toContain('handler_facts: []');
-    expect(region).toContain('pending_actions: []');
-    expect(region).toContain('llm_calls_used: 0');
-    // No graph is written on this path — `commitTurn` is called without one.
-    expect(region).not.toMatch(/\bgraph:\s/);
+// C1 retired the pre-route; preserve negative write/reintroduction guards on its sole surviving grammar consumer.
+describe('T7 — the retired pre-route cannot commit to the model', () => {
+  it('the sole remaining grammar consumer has no graph/turn write calls', () => {
+    expect(deriveConsumers()).toEqual(['cee/belief-elicitation/index.ts']);
+    const consumer = readFileSync(resolve(REPO_SRC, 'cee/belief-elicitation/index.ts'), 'utf8');
+    expect(consumer).not.toMatch(/\b(?:commitDirectAnswer|appendCheckedGraphWrite|commitTurn|applyPatchOperations)\s*\(/);
   });
-
-  it('the pre-route runs BEFORE the calibration pre-route (I6 ordering)', () => {
-    const executor = readFileSync(resolve(REPO_SRC, 'orchestrator-v5/turn-executor.ts'), 'utf8');
-    const referenceClass = executor.indexOf('const referenceClass = recogniseReferenceClass(');
-    const calibration = executor.indexOf('const calibrationOnly = classifyCalibrationMessage(');
-    expect(referenceClass).toBeGreaterThan(-1);
-    expect(calibration).toBeGreaterThan(-1);
-    expect(referenceClass).toBeLessThan(calibration);
+  it('no surviving consumer imports the retired reference-class or calibration pre-route', () => {
+    expect(consumersRaw().filter(e => /belief-elicitation\/index\.js$/.test(e.specifier))).toEqual([]);
+    expect(listSourceFiles(REPO_SRC).map(f => relative(REPO_SRC, f))).not.toContain('orchestrator-v5/turn-executor.ts');
   });
 });

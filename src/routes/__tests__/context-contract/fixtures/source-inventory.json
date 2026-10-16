@@ -7,12 +7,10 @@
   "src/adapters/llm/usage-tracking.ts",
   "src/cee/decision-review/invoke.ts",
   "src/cee/draft-quality/judge.ts",
-  "src/cee/dual-draft/m2-review.ts",
   "src/cee/unified-pipeline/stages/coaching-pass.ts",
   "src/cee/validation-pipeline/validate-graph.ts",
   "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
   "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts",
-  "src/orchestrator-v5/routing/route-with-tool-use.ts",
   "src/orchestrator/tools/edit-graph.ts",
   "src/routes/agent-v1-turn.ts",
   "src/routes/assist.v1.decision-review.ts"
@@ -33,10 +31,6 @@
    "assembler": "judgeDraftCoverage",
    "reason": "Draft-time quality judge over the draft graph and brief; carries no Run facts."
   },
-  "src/cee/dual-draft/m2-review.ts": {
-   "assembler": "reviewDraftGraph",
-   "reason": "Draft-time review over the draft graph and brief; carries no Run facts."
-  },
   "src/cee/unified-pipeline/stages/coaching-pass.ts": {
    "assembler": "runStageCoachingPass",
    "reason": "Draft-pipeline coaching stage over the draft graph and brief; carries no Run facts."
@@ -49,18 +43,13 @@
    "assembler": "buildModelFromBrief",
    "reason": "Construction: the user's brief and a compact graph; no Run facts."
   },
-  "src/orchestrator/tools/edit-graph.ts": {
-   "assembler": "handleEditGraph",
-   "reason": "V2 edit tool builds its own context; on staging it ran about once in 24 h (10 Oct), not on the served path."
-  },
   "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": {
    "kind": "construction_stage",
    "reason": "Widening pass over the admitted draft: signals come from assembleGuidanceSignals (turn-context/guidance-signals.ts) and the candidate model; carries no Run facts."
   },
-  "src/orchestrator-v5/routing/route-with-tool-use.ts": {
-   "kind": "transport_only",
-   "via": "assembleContextPackWithSummary",
-   "reason": "The V5 router's input is the ContextPack built by the canonical assembler, serialised by buildUserMessage."
+  "src/orchestrator/tools/edit-graph.ts": {
+   "assembler": "handleEditGraph",
+   "reason": "V2 edit tool builds its own context; on staging it ran about once in 24 h (10 Oct), not on the served path."
   },
   "src/routes/agent-v1-turn.ts": {
    "kind": "route",

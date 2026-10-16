@@ -21,23 +21,23 @@
  *      new compose function would silently bypass the contract.
  */
 
-import { describe, it, expect, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { describe,expect,it,vi } from 'vitest';
 
 import {
-  composeDirectAnswerResponse,
-  composeClarifyResponse,
-  composeToolCallResponse,
+composeClarifyResponse,
+composeDirectAnswerResponse,
+composeToolCallResponse,
 } from '../compose.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import { composeUnsupportedActionResponse } from '../compose/unsupported-action-response.js';
+
+import { AnalysisReadyPayload as CeeAnalysisReadyPayloadSchema } from '../../schemas/analysis-ready.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import type { ComposeContext } from '../compose/types.js';
 import { composeValidationFailure } from '../compose/validation-failure-responses.js';
+import type { FreshnessDerivation } from '../context/freshness.js';
 import { finaliseV5Response } from '../response-finaliser.js';
 import type { ValidationError } from '../routing/validator.js';
-import type { ComposeContext } from '../compose/types.js';
-import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import type { FreshnessDerivation } from '../context/freshness.js';
-import { AnalysisReadyPayload as CeeAnalysisReadyPayloadSchema } from '../../schemas/analysis-ready.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────
 
@@ -118,15 +118,7 @@ describe('finaliser contract — composers do not set analysis_ready', () => {
     expect('analysis_ready' in out.response).toBe(false);
   });
 
-  it('composeUnsupportedActionResponse output omits analysis_ready', () => {
-    const out = composeUnsupportedActionResponse({
-      handlerId: 'add_node',
-      context: fixtureContext(),
-      stage: 'frame',
-      hasAnalysis: false,
-    });
-    expect('analysis_ready' in out.response).toBe(false);
-  });
+
 });
 
 // ─── Group 2: finaliser behaviour ─────────────────────────────────────────
@@ -407,16 +399,6 @@ describe('finaliser contract — schema sweep across compose surface', () => {
     {
       name: 'composeValidationFailure',
       build: () => composeValidationFailure(err, ctx, 'frame').response,
-    },
-    {
-      name: 'composeUnsupportedActionResponse',
-      build: () =>
-        composeUnsupportedActionResponse({
-          handlerId: 'add_node',
-          context: ctx,
-          stage: 'frame',
-          hasAnalysis: false,
-        }).response,
     },
   ];
 

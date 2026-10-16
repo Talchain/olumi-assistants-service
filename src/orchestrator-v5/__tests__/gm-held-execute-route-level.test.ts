@@ -23,18 +23,18 @@
  *    NO graph commit — byte-identical posture to base (the flag gate).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
+import type { ChatWithToolsArgs,ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { _resetConfigCache } from '../../config/index.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { findForbiddenPhraseHit } from '../compose/forbidden-user-facing-phrases.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { PROPOSAL_SUPERSEDED_RESPONSE } from '../routing/proposed-change-synthesis.js';
-import { _resetConfigCache } from '../../config/index.js';
 
 const SCENARIO_ID = randomUUID();
 const GM_PROPOSAL_REF = 'gmh_aaaaaaaaaaaa';
@@ -168,7 +168,13 @@ vi.mock('../session/index.js', () => ({
   resetSessionStoreForTests: () => undefined,
 }));
 
-const { runTurnExecutor } = await import('../turn-executor.js');
+const { runHeldProposalApproval } = await import('../handlers/approve-held-proposal.js');
+const { resolveProposalRenderCopy } = await import('../compose/proposed-change.js');
+// Approval now names the stored card; all graph/source/receipt assertions below are unchanged.
+const runTurnExecutor = (p: MessageTurnPayload, requestId: string, options?: Parameters<typeof runHeldProposalApproval>[2] & { routingAdapter?: unknown }) => {
+  const held = pendingActionsForRead[0]!;
+  return runHeldProposalApproval({ ...p, source: 'chip', chip: { id: held.chip_id }, message: resolveProposalRenderCopy(held.action).message }, requestId, options);
+};
 
 function payload(message: string): MessageTurnPayload {
   return {
@@ -192,19 +198,7 @@ function throwingRoutingAdapter() {
   };
 }
 
-function textRoutingAdapter(text: string) {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockResolvedValue({
-        content: [{ type: 'text', text }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 20, output_tokens: 20 } as ChatWithToolsResult['usage'],
-        model: 'claude-sonnet-4-6',
-        latencyMs: 20,
-      }),
-  };
-}
+
 
 function setGmMode(mode: string): void {
   vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', mode);
@@ -250,15 +244,8 @@ describe('GM held-execute — live mode applies the confirmed hold (RED on base)
 
     pendingActionsForRead = [];
     replayAppendedHistory = true;
-    const followUpAdapter = textRoutingAdapter('Let us inspect another assumption.');
-    await runTurnExecutor(payload('What else should I inspect?'), 'req-gm-held-follow-up', {
-      routingAdapter: followUpAdapter,
-    });
-
-    expect(followUpAdapter.chatWithTools).toHaveBeenCalledTimes(1);
-    const modelInput = String(
-      followUpAdapter.chatWithTools.mock.calls[0]![0].messages[0]?.content ?? '',
-    );
+    const { loadRecentConversationTurns } = await import('../build-turn-context.js');
+    const modelInput = JSON.stringify(await loadRecentConversationTurns(SCENARIO_ID, 'req-held-readback'));
     expect(modelInput).toContain(durableReceipt);
     expect(modelInput).not.toContain('What you selected is not in the model I can see');
     expect(appendCalls[0]?.pending_actions).toEqual([]);
@@ -349,21 +336,4 @@ describe('GM held-execute — live mode applies the confirmed hold (RED on base)
     expect(write.graph).toBeUndefined();
     expect(String(write.assistantMessage ?? '')).toBe(INVALID_RECOVERY_TEXT);
   });
-});
-
-describe('GM held-execute — flag-gated inertness (must pass at base AND after wiring)', () => {
-  it.each(['shadow', 'off'])(
-    'mode=%s: "yes" on an executable GM held pending stays decline-with-clarify, NO graph commit',
-    async (mode) => {
-      setGmMode(mode);
-      await runTurnExecutor(payload('yes'), `req-gm-held-${mode}`, {
-        routingAdapter: throwingRoutingAdapter(),
-      });
-      expect(appendCalls).toHaveLength(1);
-      const write = lastAppend();
-      expect(write.graph).toBeUndefined();
-      expect((write.handler_facts as unknown[]) ?? []).toHaveLength(0);
-      expect(String(write.assistantMessage ?? '')).toBe(INVALID_RECOVERY_TEXT);
-    },
-  );
 });

@@ -2,10 +2,10 @@
  * Two guards, both scoped so unrelated PRs never trip them: (1) the explicit manifest may only shrink (≤ census n);
  * (2) a NEW file that sends a model request must be classified. The transport census is classified completely.
  */
-import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readdirSync,readFileSync } from 'node:fs';
+import { join,relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describe,expect,it } from 'vitest';
 
 const root = fileURLToPath(new URL('../../../..', import.meta.url));
 const base = 'src/orchestrator-v5/';
@@ -25,7 +25,6 @@ export const ASSEMBLERS = [
   { file: 'src/cee/decision-review/invoke.ts', symbol: 'buildDecisionReviewUserMessage' },
   { file: 'src/cee/decision-review/decompose.ts', symbol: 'buildSlices' },
   { file: 'src/cee/validation-pipeline/validate-graph.ts', symbol: 'callValidateGraph' },
-  { file: 'src/cee/dual-draft/m2-review.ts', symbol: 'reviewDraftGraph' },
   { file: 'src/cee/unified-pipeline/stages/coaching-pass.ts', symbol: 'runStageCoachingPass' },
   { file: 'src/cee/draft-quality/judge.ts', symbol: 'judgeDraftCoverage' },
   { file: `${base}agent-lane/runtime/build-model.ts`, symbol: 'buildModelFromBrief' },
@@ -33,7 +32,8 @@ export const ASSEMBLERS = [
 // 17 → 22: added build/draft specialists A18–A22; 22 → 21: #2900 removed A6. Target: 1.
 // 21 → 19: C1 deleted the replacement projection and read-results assembler.
 // #2900's opt-in getCanonicalState section remains A1 (its fact projection remains A3).
-const BASELINE_N = 19;
+// C1 group 2 removed the unreachable dual-draft review assembler.
+const BASELINE_N = 18;
 interface MappedTransport { assembler?: string; kind?: string; via?: string; reason: string }
 const known = JSON.parse(readFileSync(new URL('./fixtures/source-inventory.json', import.meta.url), 'utf8')) as {
   transport_files: string[]; infrastructure: string[]; unclassified_census_gap: string[]; mapped: Record<string, MappedTransport>;

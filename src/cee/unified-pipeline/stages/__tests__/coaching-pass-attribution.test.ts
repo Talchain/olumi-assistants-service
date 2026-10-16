@@ -16,7 +16,7 @@
  * is the half that can see it.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 vi.mock('../../../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -24,13 +24,13 @@ vi.mock('../../../../utils/telemetry.js', () => ({
   TelemetryEvents: {},
 }));
 
-import { runStageCoachingPass, COACHING_PROMPT_HASH, COACHING_PROMPT_VERSION } from '../coaching-pass.js';
-import { PromptAttributionCollector } from '../../../../orchestrator/pipeline/prompt-attribution.js';
 import {
-  DRAFT_REQUEST_BUDGET_MS,
-  LLM_POST_PROCESSING_HEADROOM_MS,
+DRAFT_REQUEST_BUDGET_MS,
+LLM_POST_PROCESSING_HEADROOM_MS,
 } from '../../../../config/timeouts.js';
+import { PromptAttributionCollector } from "../../../../orchestrator/pipeline/diagnostic-trace.js";
 import type { StageContext } from '../../types.js';
+import { COACHING_PROMPT_HASH,COACHING_PROMPT_VERSION,runStageCoachingPass } from '../coaching-pass.js';
 
 function requestStartForRemaining(remainingMs: number): number {
   const elapsed = DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS - remainingMs;

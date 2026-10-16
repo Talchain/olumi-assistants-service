@@ -17,9 +17,9 @@
  * (its own zero-LLM member), not the LLM edit lane's `edit_graph`.
  * MUTATION-CHECK (revert the sendFinalised200 label at route-v2.ts → RED).
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import Fastify,{ type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 
 import type { PendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
 
@@ -138,9 +138,7 @@ const runTurnExecutorMock = vi.fn(async () => ({
   },
 }));
 const dispatchEditGraphMock = vi.fn(async () => ({ response: FALLTHROUGH_RESPONSE, commitPerformed: true }));
-vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({
-  runTurnExecutor: runTurnExecutorMock,
-}));
+
 vi.mock('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js')>();
   return { ...actual, dispatchEditGraph: dispatchEditGraphMock };

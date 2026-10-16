@@ -107,7 +107,7 @@ function collectMints(): Mint[] {
  */
 const KNOWN_UNHYPHENATED_SPELLING: readonly string[] = [
   'orchestrator-v5/compose/chip-generator.ts',
-  'orchestrator-v5/turn-executor.ts',
+  // C1 deleted the legacy executor mint; the surviving chip-generator drift is still exact.
 ];
 
 describe('⭐⭐ ROADMAP 2.621 — every mint of the re-run chip, swept from source', () => {
@@ -159,7 +159,7 @@ describe('⭐⭐ ROADMAP 2.621 — every mint of the re-run chip, swept from sou
     ).toBe(false);
   });
 
-  it('⚠ the label/message drift is EXACTLY the two recorded files — a third fails here', () => {
+  it('⚠ the label/message drift is EXACTLY the remaining recorded file — a third fails here', () => {
     const drifted = [
       ...new Set(
         collectMints()

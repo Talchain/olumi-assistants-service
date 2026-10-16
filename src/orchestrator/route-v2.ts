@@ -1,3 +1,4 @@
+import { buildCommitFailureBoundaryError, failedTurnReply } from '../orchestrator-v5/commit-failure-boundary.js';
 /** Internal canvas writes, stored-card approval and Run dispatch. Conversation uses /agent/v1/turn. */
 import { prepareHorizonBasisForWrite } from '../orchestrator-v5/goal-target/horizon-basis-provenance.js';
 
@@ -97,7 +98,6 @@ import type { FastifyInstance } from 'fastify';
 
 import type {
   BoundaryError,
-  OrchestratorTurnPayload,
 } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
@@ -127,10 +127,6 @@ import type {
 
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 
-import {
-  GRAPH_CONFLICT_RECOVERY_COPY_MODE,
-  GRAPH_CONFLICT_RECOVERY_KEYS,
-} from '../orchestrator-v5/graph-conflict-recovery-keys.js';
 
 // ROADMAP 1.233 — the Layer-2 gate's own reason type. Imported so the
 // `claim_safety.withheld_projection_reason` stamp below is checked against the
@@ -169,7 +165,7 @@ import {
   type GuidedSizing,
 } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 
-import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
+import { runHeldProposalApproval } from '../orchestrator-v5/handlers/approve-held-proposal.js';
 
 import {
   MODEL_WRITE_OWNERSHIP_REFUSAL_BODY,
@@ -1980,32 +1976,7 @@ function logFinalisedResponse(
   );
 }
 
-export function buildCommitFailureBoundaryError(params: {
-  readonly validator: string;
-  readonly reason: string;
-  readonly retryable: boolean;
-  readonly requestId: string;
-  readonly stage: OrchestratorTurnPayload['stage'];
-  readonly errorCode?: BoundaryError['error'];
-  readonly preStageExtras?: Record<string, unknown>;
-  readonly postStageExtras?: Record<string, unknown>;
-}): BoundaryError {
-  return {
-    error: params.errorCode ?? 'INTERNAL_ERROR',
-    boundary: 'B1',
-    direction: 'egress',
-    validator: params.validator,
-    details: {
-      retryable: params.retryable,
-      reason: params.reason,
-      ...(params.preStageExtras ?? {}),
-      stage: params.stage,
-      ...(params.postStageExtras ?? {}),
-    },
-    request_id: params.requestId,
-    retryable: params.retryable,
-  };
-}
+export { buildCommitFailureBoundaryError } from '../orchestrator-v5/commit-failure-boundary.js';
 
 /**
  * V5 status-keyed Reply contract — the type-system half of the response
@@ -2988,13 +2959,9 @@ export async function ceeOrchestratorRouteV2(
       // The conventional composer and explanation paths have no entry here.
       // The route decides the HTTP status for executor results and preserved
       // ownership refusals; see the status/body matrix in the file header.
-      let run: Awaited<ReturnType<typeof runTurnExecutor>>;
+      let run: Awaited<ReturnType<typeof runHeldProposalApproval>>;
       try {
-        run = await runTurnExecutor(ingress, requestId, {
-          graphState: extensions.graphState,
-          analysisState: extensions.analysisState,
-          selectedElements: extensions.selectedElements,
-        });
+        run = await runHeldProposalApproval(ingress, requestId, { graphState: extensions.graphState, selectedElements: extensions.selectedElements });
       } catch (error) {
         if (error instanceof ModelWriteOwnershipRefused) {
           await markDraftGraphWriteFailed(
@@ -3029,83 +2996,8 @@ export async function ceeOrchestratorRouteV2(
       // sending an OlumiResponse on 500 causes it to degrade to a generic
       // parse_error → INTERNAL_ERROR, losing the typed retryable signal.
       if (run.telemetry.commit_performed === false) {
-        const failureType = run.telemetry.failure_type;
-        // Retryable per failure class — read from the response envelope's
-        // error-block details (populated by buildFailureResponse), with a
-        // conservative false default if the shape drifts.
-        const retryable = extractRetryableFlag(run.response);
-        // failure_type is either a BoundaryErrorCode enum member or null
-        // (for successful turns — unreachable here because commit_performed
-        // is false). Fall back to INTERNAL_ERROR if null to keep the wire
-        // shape honest.
-        //
-        // Note: `stage` aids client-side triage — a commit failure in
-        // `analyse` stage vs `frame` stage has different user implications
-        // ("the analysis ran but didn't save" vs "we couldn't frame the
-        // decision"). `stages_completed` is positioned *after* stage inside
-        // details, preserving the pre-refactor insertion order.
-        // F4 — a graph CAS conflict (GRAPH_DIVERGED) is NOT an infra failure: it
-        // is a recoverable divergence. Return HTTP 409 with the explicit
-        // refresh-and-reconfirm recovery metadata (lifted from the failure
-        // response's error block) instead of the uniform 500, so the UI can
-        // refresh canonical state and reconfirm rather than blind-retrying the
-        // same stale base. All other commit failures keep the uniform 500.
-        const isGraphConflict = failureType === 'GRAPH_DIVERGED';
-        const conflictRecovery = isGraphConflict
-          ? extractGraphConflictRecovery(run.response)
-          : undefined;
-        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
-          validator: 'turn_commit',
-          reason: isGraphConflict
-            ? 'graph_write_conflict'
-            : 'state_commit_failed_or_turn_runtime_failure',
-          retryable,
-          requestId,
-          stage: ingress.stage,
-          errorCode: failureType ?? 'INTERNAL_ERROR',
-          preStageExtras: {
-            failure_type: failureType,
-            ...(conflictRecovery ?? {}),
-          },
-          postStageExtras: { stages_completed: run.telemetry.stages_completed },
-        });
-        if (isGraphConflict) {
-          log.warn(
-            {
-              request_id: requestId,
-              failure_type: failureType,
-              stages_completed: run.telemetry.stages_completed,
-            },
-            'V5 turn — graph CAS conflict; returning 409 with refresh-reconfirm BoundaryError envelope'
-          );
-          // 409: recoverable divergence — nothing clobbered (txn rolled back).
-          return reply.code(409).send(
-            withRevisionConflictWire(boundaryError, {
-              conflict_category:
-                typeof conflictRecovery?.conflict_category === 'string'
-                  ? conflictRecovery.conflict_category
-                  : '',
-              expected:
-                typeof conflictRecovery?.expected === 'number'
-                  ? conflictRecovery.expected
-                  : undefined,
-              current:
-                typeof conflictRecovery?.current === 'number'
-                  ? conflictRecovery.current
-                  : undefined,
-            })
-          );
-        }
-        log.error(
-          {
-            request_id: requestId,
-            failure_type: failureType,
-            stages_completed: run.telemetry.stages_completed,
-          },
-          'V5 turn completed without commit — returning 500 with BoundaryError envelope'
-        );
-        // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
-        return reply.code(500).send(boundaryError);
+        const failure = failedTurnReply(run, ingress.stage, requestId);
+        return reply.code(failure.status).send(failure.json);
       }
 
       // Egress label-resolution graph. Prefer the AUTHORITATIVE graph the turn
@@ -3128,94 +3020,15 @@ export async function ceeOrchestratorRouteV2(
               })()
             : null;
       return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
-        analysisReady: run.analysisReady,
-        graph: turnGraph,
-        // T1 claim safety — READ off the executor's run result, which took it
-        // from the stamp the run_analysis handler persisted on the fact.
-        // Never re-derived at the route (CLAUDE.md trap #12).
-        //
-        // F6 — the `?? true` is GONE and cannot regrow: the field is REQUIRED on
-        // `TurnExecutorRunResult`, so an exit that fails to carry it fails to
-        // compile. The default was dead (the ROADMAP 1.233 hoist populates the
-        // field on every exit) and that is exactly why it was dangerous: a
-        // latent, unexercised re-arming point that would have silently licensed
-        // the next exit family to ship unguarded.
+        analysisReady: run.analysisReady, graph: turnGraph,
         mayNameLeadingOption: run.mayNameLeadingOption,
-        claimConstraintVerdictState:
-          run.mayNameLeadingOptionConstraintVerdictState,
+        claimConstraintVerdictState: run.mayNameLeadingOptionConstraintVerdictState,
         leaderWithheldBecauseUnsizedPath: run.leaderWithheldBecauseUnsizedPath,
         leaderWithheldBecauseUnrequested: run.leaderWithheldBecauseUnrequested,
-        // …and its evidence. REQUIRED on the run result for the same reason the
-        // boolean is: a value reported without its provenance is a value no walk
-        // can falsify.
         mayNameLeadingOptionProvenance: run.mayNameLeadingOptionProvenance,
-        // The run-over-run consequence block's input. Present on this exit
-        // because the executor loaded the facts; omitted elsewhere, which the
-        // finaliser reads as "no facts in scope" and stamps nothing.
-        ...(run.priorFacts ? { priorFacts: run.priorFacts } : {}),
-        // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
-        // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
-        // the honest reading for a permitted turn or a non-explanation handler.
-        ...(run.withheldExplanationReason !== undefined
-          ? { withheldExplanationReason: run.withheldExplanationReason }
-          : {}),
-        // WHICH handler declined, for the diagnostic trace only. Absent ⇒
-        // nothing stamped, which is the honest reading for every turn that did
-        // not take the recoverable-handler path.
-        ...(run.handlerRefusal !== undefined
-          ? { handlerRefusal: run.handlerRefusal }
-          : {}),
-        ...(run.freshness ? { freshness: run.freshness } : {}),
-        // G3 — the scenario-bound verdict, beside the wire-bound one. Absent
-        // unless a durable reasoning authority licensed it; the seam then changes
-        // nothing, so every other exit family stays byte-identical.
-        ...(run.scenarioFreshness
-          ? { scenarioFreshness: run.scenarioFreshness }
-          : {}),
-        requestStartedAt: routeStartedAt,
-        scenarioId: ingress.scenario_id,
-        turnId: ingress.turn_id,
-        userMessage: ingress.message,
-        ...(run.coachingDelivery
-          ? { coachingDelivery: run.coachingDelivery }
-          : {}),
-        // Observability: thread the turn's real per-stage timings so the
-        // flag-gated minimal diagnostic trace records the routing LLM call in
-        // `_diagnostic_trace.llm_calls` (was structurally always empty on
-        // turn_executor turns). Present only when timings capture is enabled.
-        ...(run.turnTimings ? { turnTimings: run.turnTimings } : {}),
-        // V5 M5 (read-only): thread the turn-executor's full canonical analysis
-        // state into the flag-gated `_context_summary` diagnostic. When present
-        // it supersedes the route's freshness-derived partial state (adds
-        // degraded detection + contradictions over the unified fact chain).
-        ...(run.canonicalState ? { canonicalState: run.canonicalState } : {}),
-        // T4 Slice 2: the once-per-turn canonical context frame. When present,
-        // the context-summary diagnostic is projected from the frame alone.
-        ...(run.frame ? { frame: run.frame } : {}),
-        // ROADMAP 1.42: thread the turn-executor's VERBATIM captured reasoning
-        // into the flag-gated `_reasoning` sidecar (see sendFinalised200 ctx
-        // jsdoc). Undefined when the flag was off or no thinking was captured.
-        ...(run.reasoning ? { reasoning: run.reasoning } : {}),
-        // ROADMAP 1.132: thread the turn-executor's validated answer shape
-        // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
-        // ctx docs above).
-        ...(run.answerShape ? { answerShape: run.answerShape } : {}),
-        // SELECTION-AWARE ANSWERING (hop 4b) — ⚠ THIS LINE IS THE WIRE'S SECOND
-        // HALF. `projectGroundedSelection` and the executor capture can both be
-        // fully green while the capability is DARK if this line is missing:
-        // that is chronic failure #1, one dispatch-thread further down than the
-        // hop-4 line it mirrors. Neutering it MUST turn the route-level wire
-        // test red.
-        ...(run.groundedSelection
-          ? { groundedSelection: run.groundedSelection }
-          : {}),
-        // ROADMAP 1.132 (F1): thread the turn-executor's declared answer kind so
-        // the egress synthesiser shapes ONLY substantive answers (coach / converse /
-        // text_only model prose AND the deterministic post-analysis advice-gate /
-        // run-comparison explanations) — never the deterministic clarify / receipt /
-        // recovery / decline copy this same path can emit. Verified fail-closed
-        // against the FINAL text at the executor's finalise seam.
-        ...(run.answerKind ? { answerKind: run.answerKind } : {}),
+        priorFacts: run.priorFacts, freshness: run.freshness, scenarioFreshness: run.scenarioFreshness,
+        requestStartedAt: routeStartedAt, scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id, userMessage: ingress.message, answerKind: run.answerKind,
       });
     }
   );
@@ -3229,56 +3042,3 @@ export async function ceeOrchestratorRouteV2(
  * any shape drift, which is the safer default (don't advertise retryability
  * we're not sure about).
  */
-function extractRetryableFlag(response: unknown): boolean {
-  if (!response || typeof response !== 'object') return false;
-  const blocks = (response as { blocks?: unknown }).blocks;
-  if (!Array.isArray(blocks) || blocks.length === 0) return false;
-  const errBlock = blocks.find(
-    (b: unknown) =>
-      b != null && typeof b === 'object' && (b as { type?: unknown }).type === 'error',
-  );
-  if (!errBlock || typeof errBlock !== 'object') return false;
-  const details = (errBlock as { details?: unknown }).details;
-  if (!details || typeof details !== 'object') return false;
-  return (details as { retryable?: unknown }).retryable === true;
-}
-
-/**
- * F4 — pull the graph-conflict recovery metadata out of the failure
- * response's error-block details so it can be forwarded onto the 409
- * BoundaryError envelope (A2's UI refresh/reconfirm leg reads it). Returns
- * undefined on any shape drift — the 409 status alone still carries the
- * recoverable signal.
- *
- * A-2: DERIVED from `GRAPH_CONFLICT_RECOVERY_KEYS`, the same manifest the
- * producers are compile-bound to (`satisfies GraphConflictFailureDetails` in
- * turn-executor.ts). The old hand allowlist here FAILED SILENT — a key added
- * at a producer never reached the wire (`fence_verdict` had to be hand-added
- * when the fence landed). Now a new key is either in the manifest (and flows
- * end-to-end) or a compile error at the producer; there is no silent third
- * state. Per-key copy semantics live beside the manifest.
- */
-function extractGraphConflictRecovery(
-  response: unknown,
-): Record<string, unknown> | undefined {
-  if (!response || typeof response !== 'object') return undefined;
-  const blocks = (response as { blocks?: unknown }).blocks;
-  if (!Array.isArray(blocks) || blocks.length === 0) return undefined;
-  const errBlock = blocks.find(
-    (b: unknown) =>
-      b != null && typeof b === 'object' && (b as { type?: unknown }).type === 'error',
-  );
-  if (!errBlock || typeof errBlock !== 'object') return undefined;
-  const details = (errBlock as { details?: unknown }).details;
-  if (!details || typeof details !== 'object') return undefined;
-  const d = details as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const key of GRAPH_CONFLICT_RECOVERY_KEYS) {
-    if (GRAPH_CONFLICT_RECOVERY_COPY_MODE[key] === 'string') {
-      if (typeof d[key] === 'string') out[key] = d[key];
-    } else if (key in d) {
-      out[key] = d[key];
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
-}

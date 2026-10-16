@@ -1147,6 +1147,7 @@ import { reconcileGoalScope } from '../reconcile-goal-scope.js';
 import { noSuchLinkUserWords } from '../no-direct-link.js';
 import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
+import { approveHeldProposal } from '../../handlers/approve-held-proposal.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
 const deadlineRefusalDetail = {
@@ -2849,7 +2850,7 @@ export function createAgentCapabilities(
         userEdits = amended.userEdits;
       }
     }
-    const r = await dispatch('/orchestrate/v2/turn', {
+    const r = await approveHeldProposal(dispatch, {
       kind: 'message',
       // The edits are part of the confirm's identity: the same card pressed with other values is another request.
       turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}${edits !== undefined ? `:${proposalEditsDigest(edits)}` : ''}`),

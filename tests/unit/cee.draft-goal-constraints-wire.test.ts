@@ -23,11 +23,11 @@
  * blocker that stops the obvious fix.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe,expect,it } from "vitest";
 
-import { runCompoundGoals } from "../../src/cee/unified-pipeline/stages/repair/compound-goals.js";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
-import { draftResultToOlumiResponse } from "../../src/orchestrator-v5/handlers/draft-graph-dispatch.js";
+import { runCompoundGoals } from "../../src/cee/unified-pipeline/stages/repair/compound-goals.js";
+
 
 /**
  * Mirrors the live staging scenario: a brief carrying a hard budget cap, and
@@ -49,9 +49,7 @@ const LIVE_BRIEF =
  * finds nothing, so the projection must omit the key entirely rather than
  * emit an empty array.
  */
-const NO_CONSTRAINT_BRIEF =
-  "Should we launch the new product this year? " +
-  "We would like it to go well and are weighing the options.";
+
 
 function makeGraph() {
   return {
@@ -121,12 +119,7 @@ function buildLiveGraphOutput(
 }
 
 /** Minimal MessageTurnPayload the composer reads (scenario_id + stage). */
-const PAYLOAD: any = {
-  scenario_id: "scn_test",
-  turn_id: "turn_test",
-  stage: "frame",
-  message: LIVE_BRIEF,
-};
+
 
 describe("draft goal_constraints — the chain UP TO the V5 projection (controls)", () => {
   it("POSITIVE CONTROL: the regex extractor alone populates goal_constraints (from_llm:0, from_regex:1)", () => {
@@ -149,96 +142,9 @@ describe("draft goal_constraints — the chain UP TO the V5 projection (controls
   });
 });
 
-function composeWire(brief: string = LIVE_BRIEF) {
-  const { graphOutput } = buildLiveGraphOutput(brief);
 
-  const result: any = {
-    graphOutput,
-    assistantText: null,
-    analysisReady: null,
-    strengthenItems: [],
-    coachingSummary: null,
-    coachingBiasSignals: [],
-    coachingWideningLogObject: null,
-  };
 
-  // The REAL composer that builds the `/orchestrate/v2/turn` response body.
-  const response = draftResultToOlumiResponse(result, PAYLOAD, true, "req_test", PAYLOAD.message);
 
-  // Serialize for real: `undefined` vanishes silently through JSON emission,
-  // so an object-level assertion can pass on a value the client never sees.
-  return JSON.stringify(response);
-}
-
-describe("draft goal_constraints — THE PROJECTION (draft-graph-dispatch.ts:261-269)", () => {
-  it("draft_graph carries EXACTLY the four base keys PLUS goal_constraints", () => {
-    const reparsed = JSON.parse(composeWire());
-
-    // The graph itself rode onto the wire — so the assertion below is a
-    // targeted claim about goal_constraints, not about an empty response.
-    expect(reparsed.draft_graph).toBeDefined();
-    expect(reparsed.draft_graph.nodes.length).toBeGreaterThan(0);
-
-    // Exact key-set, so ANY future change to the projection turns this red
-    // and forces the author here. Was the four base keys before the fix;
-    // goal_constraints is the fifth and the only addition.
-    expect(Object.keys(reparsed.draft_graph).sort()).toEqual([
-      "edge_count",
-      "edges",
-      "goal_constraints",
-      "node_count",
-      "nodes",
-    ]);
-  });
-
-  it("goal_constraints survives into the serialized V5 wire BYTES", () => {
-    // Promoted from the `it.fails` pin landed by PR #514, which characterised
-    // this exact assertion as known-open. It is asserted against the
-    // SERIALIZED bytes on purpose: `undefined` vanishes silently through JSON
-    // emission, so an object-level assertion can pass on a value the client
-    // never receives.
-    const wire = composeWire();
-    expect(wire).toContain('"goal_constraints"');
-
-    const reparsed = JSON.parse(wire);
-    const constraints = reparsed.draft_graph.goal_constraints;
-    expect(Array.isArray(constraints)).toBe(true);
-    expect(constraints.length).toBeGreaterThan(0);
-
-    // The payload is the real extracted constraint, not an empty husk: the
-    // budget cap from the brief, bound to a node that exists in the graph.
-    const c = constraints[0];
-    expect(typeof c.constraint_id).toBe("string");
-    expect(["<=", ">="]).toContain(c.operator);
-    expect(typeof c.value).toBe("number");
-    // node_id must resolve against the sibling nodes array — the contract
-    // states CEE drops any constraint that does not.
-    const nodeIds = reparsed.draft_graph.nodes.map((n: any) => n.id);
-    expect(nodeIds).toContain(c.node_id);
-  });
-
-  it("OMISSION: a brief with no constraint omits the key ENTIRELY (never `[]`)", () => {
-    // Byte-identity guarantee for the flag-off / no-constraint case: the
-    // pre-0.18.0 wire had four keys and no goal_constraints, and a brief that
-    // carries no hard constraint must still produce exactly that. Emitting an
-    // empty array instead would change every no-constraint response on the
-    // wire for no benefit.
-    const wire = composeWire(NO_CONSTRAINT_BRIEF);
-    const reparsed = JSON.parse(wire);
-
-    // Positive control: the graph still rode onto the wire, so this is a
-    // targeted absence claim and not a vacuous assertion about an empty body.
-    expect(reparsed.draft_graph.nodes.length).toBeGreaterThan(0);
-
-    expect(Object.keys(reparsed.draft_graph).sort()).toEqual([
-      "edge_count",
-      "edges",
-      "node_count",
-      "nodes",
-    ]);
-    expect(wire).not.toContain('"goal_constraints"');
-  });
-});
 
 describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)", () => {
   /**
@@ -315,41 +221,5 @@ describe("draft goal_constraints — the contract pin (now UNBLOCKED at 0.18.0)"
     }
   });
 
-  it("the REAL validateEgress passes the composed response (no EGRESS_CONTRACT_VIOLATION)", async () => {
-    // The production egress validator, not a re-implementation. This is the
-    // gate that would have replaced the whole draft response with the
-    // EGRESS_CONTRACT_VIOLATION fallback envelope had the field been threaded
-    // without the contract bump — so it is the assertion that proves the fix
-    // actually ships rather than merely type-checks.
-    const { validateEgress } = await import("../../src/validators/b1.js");
 
-    const { graphOutput } = buildLiveGraphOutput();
-    const response = draftResultToOlumiResponse(
-      {
-        graphOutput,
-        assistantText: null,
-        analysisReady: null,
-        strengthenItems: [],
-        coachingSummary: null,
-        coachingBiasSignals: [],
-        coachingWideningLogObject: null,
-      } as any,
-      PAYLOAD,
-      true,
-      "req_egress",
-      PAYLOAD.message,
-    );
-
-    const egress: any = validateEgress(response, "req_egress");
-
-    // Positive control: the response we are validating genuinely carries the
-    // field, so a pass here is a pass ON the constraint-bearing payload.
-    expect((response as any).draft_graph.goal_constraints.length).toBeGreaterThan(0);
-
-    expect(egress.ok).toBe(true);
-    const blocks = (egress.response ?? response).blocks ?? [];
-    expect(
-      blocks.some((b: any) => b?.error_code === "EGRESS_CONTRACT_VIOLATION"),
-    ).toBe(false);
-  });
 });

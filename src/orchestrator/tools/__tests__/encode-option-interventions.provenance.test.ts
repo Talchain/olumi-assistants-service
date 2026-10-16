@@ -40,7 +40,6 @@ import {
   encodeOptionInterventionsForEdit,
 } from '../encode-option-interventions.js';
 import { applyPatchOperations } from '../../patch-applier.js';
-import { selectAnswerableBlockers } from '../../../orchestrator-v5/routing/readiness-answer-chips.js';
 import {
   classifyIssueObligation,
   classifyValueSource,
@@ -77,7 +76,7 @@ const assess = (graph: unknown) => assessCanonicalAnalysisReadiness(graph);
  * instead of turning every guard below into a pass-by-absence.
  */
 function firstSettableCell(graph: unknown): { option_id: string; factor_id: string } {
-  const answerable = selectAnswerableBlockers(assess(graph).blockingIssues);
+  const answerable = assess(graph).blockingIssues;
   const issue = answerable.find(
     (i) =>
       typeof i.option_id === 'string'

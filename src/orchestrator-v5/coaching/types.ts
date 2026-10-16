@@ -18,7 +18,7 @@
  * with different shapes; they do not interfere.
  */
 
-import type { StrengthenItem } from '../../orchestrator/tools/draft-graph.js';
+import type { StrengthenItem } from '../../orchestrator/types.js';
 
 export type { StrengthenItem };
 

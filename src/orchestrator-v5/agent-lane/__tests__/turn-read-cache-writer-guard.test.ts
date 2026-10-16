@@ -14,6 +14,7 @@ import { join } from 'node:path';
 
 const ROOT = join(__dirname, '../../../..');
 const ROUTE = readFileSync(join(ROOT, 'src/routes/agent-v1-turn.ts'), 'utf8');
+const HELD = readFileSync(join(ROOT, 'src/orchestrator-v5/handlers/approve-held-proposal.ts'), 'utf8');
 
 function sources(dir: string): string[] {
   const out: string[] = [];
@@ -63,21 +64,34 @@ describe('the read cache sees every write the Agent turn can make', () => {
       // The door is called directly inside readCache.around, or through the turn-fence wrapper inside it (F1b B8) — and
       // the option-status door also inside the Agent sub-turn mark, as the HTTP dispatch it replaced was (MG #2471, DL P2).
       const before = ROUTE.slice(ROUTE.lastIndexOf('\n', i) + 1, i);
+      // C1: the held port awaits its typed reply inside the same cache epoch before revision-conflict promotion.
+      if (ROUTE.slice(i).startsWith('commitHeldProposalInProcess(')) {
+        expect(before).toMatch(/return undoRefusedWrite\(\(\) => readCache\.around\(async \(\) => promoteRevisionConflictResponse\(await $/);
+      } else {
       expect(before, ROUTE.slice(i, i + 60)).toMatch(/readCache\.around\(\(\) => (?:runAsAgentSubturn\(input\.scenario_id, \(\) => )?(?:runFencedInProcessWrite\([^()]*, \(\) => )?$/);
+      }
     }
   });
 
   it('F1b B8: every in-process door that commits a graph write claims the turn fence first', () => {
     const commits = [...ROUTE.matchAll(/\b(commit\w+InProcess)\(input/g)];
-    expect(commits.map((m) => m[1]).sort(), 'control: the seven committing doors').toEqual(['commitLimitAddInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionLevelsInProcess', 'commitOptionRenameInProcess', 'commitOptionStatusInProcess', 'commitStructuralDeleteInProcess']);
+    expect(commits.map((m) => m[1]).sort(), 'control: the eight committing doors').toEqual(['commitHeldProposalInProcess', 'commitLimitAddInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionLevelsInProcess', 'commitOptionRenameInProcess', 'commitOptionStatusInProcess', 'commitStructuralDeleteInProcess']);
     for (const m of commits) {
       const line = ROUTE.slice(ROUTE.lastIndexOf('\n', m.index!) + 1, m.index!);
+      // C1: the held door owns its existing sub-turn/fence claim internally, preserving its exact typed 409 mapper.
+      if (m[1] === 'commitHeldProposalInProcess') {
+        const door = HELD.slice(HELD.indexOf('export async function commitHeldProposalInProcess'));
+        expect(door).toMatch(/return runAsAgentSubturn\(payload\.scenario_id, \(\) => runWithPendingTurnFence\(payload\.scenario_id, payload\.turn_id, async \(\) => \{\s*await admitCurrentTurnFence\(\);/);
+        expect(door.indexOf('await admitCurrentTurnFence();')).toBeLessThan(door.indexOf('await runHeldProposalApproval('));
+      } else {
       expect(line, m[1]).toMatch(/runFencedInProcessWrite\(input\.scenario_id, input\.turn_id, \(\) => $/);
+      }
     }
   });
 
   it('the capabilities write through the counting dispatch, and it reads through the cache', () => {
-    expect(ROUTE).toMatch(/createAgentCapabilities\(\s*countingDispatch,/);
+    // C1: decorate the counting dispatch with its held port; ordinary writes still use that same dispatch.
+    expect(ROUTE).toMatch(/createAgentCapabilities\(\s*bindHeldApprovalWriter\(countingDispatch,/);
     expect(ROUTE).toMatch(/const countingDispatch[^]*?return readingDispatch\(path, body\);/);
     expect(ROUTE).toMatch(/const readingDispatch: typeof dispatch = readCache\.dispatch;/);
   });

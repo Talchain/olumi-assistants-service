@@ -21,11 +21,11 @@
  * hash functions (`computeAnalysisAffectingGraphHash`), since the Agent only compares its own before/after reads.
  * Every model call to anything but OpenAI throws; route-v2's LLM router throws if touched at all.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { asSent } from './helpers/as-sent.js';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify,{ type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
+import { asSent } from './helpers/as-sent.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -149,10 +149,23 @@ const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ ty
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 /** The inner requests the Agent sent to route-v2, in order. */
 let inner: Record<string, unknown>[] = [];
+let httpHeldApprovals = 0;
 /** Runs inside the inner request's preHandler — BEFORE route-v2 reads the store (a writer racing the confirm). */
 let onInner: ((body: Record<string, unknown>) => void) | undefined;
 /** Runs as route-v2's answer to an inner request is sent — AFTER it has decided. */
 let onInnerSent: ((body: Record<string, unknown>) => void) | undefined;
+
+// The same races now surround the direct retained writer, rather than an HTTP sub-turn.
+vi.mock('../../handlers/approve-held-proposal.js', async (original) => {
+  const actual = await original<typeof import('../../handlers/approve-held-proposal.js')>();
+  return { ...actual, ...(process.env.C1_LEGACY_APPROVAL_MUTANT === '1' ? { approveHeldProposal: (dispatch: import('../runtime/agent-capabilities.js').InternalDispatch, payload: unknown) => dispatch('/orchestrate/v2/turn', payload) } : {}), commitHeldProposalInProcess: async (...args: Parameters<typeof actual.commitHeldProposalInProcess>) => {
+    const body = args[0] as unknown as Record<string, unknown>;
+    inner.push(body); onInner?.(body);
+    const result = await actual.commitHeldProposalInProcess(...args);
+    onInnerSent?.(body);
+    return result;
+  } };
+});
 
 describe('(A0) the Agent adds an option through the typed add-option seam — linked from the decision, one approval, one commit', () => {
   async function buildApp(): Promise<FastifyInstance> {
@@ -162,7 +175,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const { computeGraphIdentityHash } = await import('../../context/graph-identity.js');
     const a = Fastify({ logger: false });
-    a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
+    a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { if (/^gmh_/.test((req.body as { chip?: { id?: string } }).chip?.id ?? '')) httpHeldApprovals += 1; inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
     a.addHook('onSend', async (req, _reply, payload) => { if (req.url === '/orchestrate/v2/turn') onInnerSent?.(req.body as Record<string, unknown>); return payload; });
     a.post('/assist/v1/scenarios/:id/graph', async (req) => {
       graphReads += 1;
@@ -189,7 +202,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; httpHeldApprovals = 0; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -216,6 +229,26 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     return turn({ message });
   };
   const newOption = () => graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Test £54 at release');
+
+  it.each([
+    { brief: 'founder pricing', factor: 'Price', unit: 'GBP', label: 'Test £54 at release', message: 'Add an option: test £54 at release.' },
+    { brief: 'team capacity', factor: 'Team capacity', unit: 'hours/week', label: 'Add contractor', message: 'Add an option "Add contractor", setting Team capacity to 54 hours/week.' },
+  ])('[C1 direct writer] $brief: a named approval commits once without calling the conventional turn endpoint', async ({ factor, unit, label, message }) => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map(node => node.kind === 'factor'
+      ? { ...node, label: factor, observed_state: { value: 0.245, raw_value: 49, unit, cap: 200 } }
+      : node.kind === 'option' ? { ...node, interventions: { fac_price: { value: node.id === 'opt_a' ? 0.245 : 0.295, raw_value: node.id === 'opt_a' ? 49 : 59, unit } } } : node) });
+    script = [() => fnCall('propose_new_option', { label, acts_on: [{ factor_label: factor, direction: 'positive', level: { value: 54, unit } }], rationale: 'The user asked for it.' }), () => say('Shall I add it?')];
+    const approve = approveChipOf(await turn({ message }))!;
+    expect(approve).toBeDefined();
+    const beforeWrites = store.append.mock.calls.filter(([write]) => write.graph != null).length;
+    const result = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(result._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(store.append.mock.calls.filter(([write]) => write.graph != null)).toHaveLength(beforeWrites + 1);
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(httpHeldApprovals).toBe(0);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
 
   it('CONTROL (passes at base): the REAL route-v2 in this harness mints ONE gmh_ hold for a typed add-option chip turn, with the decision edge, and no LLM', async () => {
     graphOf.set(SCENARIO, seedGraph());
