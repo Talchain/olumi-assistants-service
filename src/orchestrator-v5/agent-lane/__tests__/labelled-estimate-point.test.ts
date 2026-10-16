@@ -195,9 +195,9 @@ describe('GP round 4: a point shown with goal-path estimates carries the RC4 lab
     } finally { spy.mockRestore(); }
   });
   it('the record check removes a false count and preserves the correctly labelled point', () => {
-    const narration = "Olumi supplied 99 links. Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
+    const narration = "Olumi's estimates feed 99 links. Raise to £59: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 1 relationship (see Check estimates).";
     const guarded = narratorCountGuard(narration, estimatesOf(graph()));
-    expect(guarded.removed).toEqual(['Olumi supplied 99 links.']);
+    expect(guarded.removed).toEqual(["Olumi's estimates feed 99 links."]);
     expect(guarded.text).toContain('using Olumi\'s estimates for 1 relationship');
     const run = result();
     run.enrichment.inference_warnings[0].olumi_estimate_link_count = 1;
