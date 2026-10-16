@@ -234,12 +234,16 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
     const after = joined === undefined ? '' : st.quote.slice(joined.high.index + joined.high.matchedText.length);
     const unitAfter = st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`)
       ? after.slice(0, st.unit.length + 1) : '';
-    return { low, high, text: joined === undefined ? `${low} to ${high}${st.unit ? ` ${st.unit}` : ''}` : `${joined.text}${unitAfter}`, end };
+    const text = joined === undefined ? `${low} to ${high}${st.unit ? ` ${st.unit}` : ''}` : `${joined.text}${unitAfter}`;
+    // The clause that states it, with its own speaker (AIE: "the supplier … reckons …"), split at the sentence's own
+    // punctuation; the whole sentence when no shorter clause holds the range.
+    const clause = st.quote.split(/[,;:]\s+|\s+[—–]\s+/).map((c) => c.trim()).find((c) => c.includes(joined?.text ?? text));
+    return { low, high, text, end, reported: clause !== undefined && clause.length <= 220 ? clause : st.quote };
   }
   return null;
 }
-/** A link size's stated range, as `natural_effect.stated_range` holds it (A4). */
-export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high' };
+/** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the clause that reports it. */
+export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };
 
 /**
  * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds

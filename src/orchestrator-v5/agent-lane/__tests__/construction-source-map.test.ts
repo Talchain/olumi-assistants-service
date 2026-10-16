@@ -98,12 +98,21 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
     expect((without.graph.nodes as Rec[]).some((n) => n.user_statements !== undefined)).toBe(false);
   });
 
-  it('two figures written side by side are not a range by themselves: "between 10 and 30" stays unknown, retained, until the clause check (step 2)', () => {
+  // ⭐ G3 (TL 11:18Z; AIE range disposition 16 Oct, CONFIRM): the interim "unknown until step 2" is superseded for construction.
+  // A range verifies where the quote writes both ends JOINED as one ("between 10 and 30"); the AI's form is its reading.
+  it('a range the sentence writes JOINED ("between 10 and 30") verifies as written; the AI\u2019s form is its reading of it', () => {
     const quote = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
     const map = sourceMapOf([{ quote, subject: { kind: 'factor', label: 'Specialist capacity', to_label: null, factor_label: null }, field: 'level', form: 'range',
       value: null, low: 10, high: 30, unit: 'tickets per week', qualifier: 'about', conditions: null }], CAPACITY.brief);
+    expect(map.refused).toEqual([]);
+    expect(map.verified.get(subjectKey({ kind: 'factor', label: 'Specialist capacity' }, 'level'))).toEqual([expect.objectContaining({ form: 'range', low: 10, high: 30, quote })]);
+  });
+  it('NEGATIVE (AIE 6180604131 kept): two figures NOT joined as a range never pair, so a "range" over them is refused', () => {
+    const quote = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
+    const map = sourceMapOf([{ quote, subject: { kind: 'factor', label: 'Specialist capacity', to_label: null, factor_label: null }, field: 'level', form: 'range',
+      value: null, low: 20, high: 30, unit: 'tickets per week', qualifier: 'about', conditions: null }], CAPACITY.brief);
     expect(map.verified.size).toBe(0);
-    expect(map.refused).toEqual([expect.objectContaining({ index: 0, refusal: 'figure_not_in_quote', quote, given: expect.objectContaining({ low: 10, high: 30 }) })]);
+    expect(map.refused).toEqual([expect.objectContaining({ index: 0, refusal: 'figure_not_in_quote', quote, given: expect.objectContaining({ low: 20, high: 30 }) })]);
   });
 
   it('nothing past the per-draft limit is dropped: it is retained whole, unchecked, its authorship unknown', () => {
