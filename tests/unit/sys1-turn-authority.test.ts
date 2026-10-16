@@ -409,6 +409,7 @@ describe('S1T2 residual Responses sites', () => {
       const body = JSON.parse(bytes);
       return { body: sha(bytes), instructions: sha(body.instructions), tools: jsonSha(body.tools ?? null), schema: jsonSha(body.text?.format?.schema ?? null), consumed: consumed[i] };
     });
+    dump(`sites-${site}-after.json`, JSON.stringify(attempts.map(bytes => JSON.parse(bytes)), null, 2));
     if (process.env.SYS1_CAPTURE_SITES === '1') {
       captured[site] = proof;
       if (residualSites.every(s => captured[s])) writeFileSync(`${golden}/sites-before.json`, JSON.stringify(captured, null, 2) + '\n');

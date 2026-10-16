@@ -220,6 +220,18 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(reasons.option_a!.message).toBe("Not shown. It can't yet be tested against your target.");
   });
 
+  it('#3279 BUDDY-A: the R6 fallback for a target Olumi READ (saved cee_inference) says "the target"; only the source differs', () => {
+    const graph = controlGraph();
+    graph.nodes.find((n: Rec) => n.id === 'factor').label = `Sales ${'very long label '.repeat(40)}`.trim();
+    const ownPath = [{ from: 'factor', to: 'goal' }];
+    const theirs = perOptionTargetReasons(graph, notTestable(graph), new Map([['option_a', ownPath]]), ['option_a']);
+    const read = structuredClone(graph);
+    read.nodes.find((n: Rec) => n.id === 'goal').threshold_source = 'cee_inference';
+    const olumi = perOptionTargetReasons(read, notTestable(read), new Map([['option_a', ownPath]]), ['option_a']);
+    expect(theirs.option_a!.message).toBe("Not shown. It can't yet be tested against your target.");
+    expect(olumi.option_a!.message).toBe("Not shown. It can't yet be tested against the target.");
+  });
+
   it('R8 Agent view (Codex r1 P2): the panel prose never reaches the model; the projection is exactly the pre-S6 one', () => {
     const served = read('s-e-goals/b9-unseen1-df15c8c-readback').j;
     const scoped = scopeTargetNotTestableWithRanges(served.analysis_result.enrichment, served.graph) as Rec;

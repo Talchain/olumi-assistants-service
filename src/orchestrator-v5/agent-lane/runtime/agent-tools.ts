@@ -497,9 +497,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
       + '"keep churn under 5%"). For a quantity already in the model, this prepares one target change and returns its id for '
-      + 'authorise_change after the user approves the shown values. If a quantity is absent, Olumi may instead return a '
-      + 'revised-draft card: only the user pressing that card can replace the draft. Never call authorise_change for a '
-      + 'revised-draft replacement, and never show its id. Give the figure exactly as the user '
+      + 'authorise_change after the user approves the shown values. A restated quantity is offered as a targeted correction '
+      + 'to the saved goal, retaining all options and settings. Show the complete card, including any uncertain binding or '
+      + 'measurement change; only its own approval saves it. Never replace the model for this target correction or show its id. Give the figure exactly as the user '
       + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
       + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
@@ -1053,7 +1053,7 @@ export interface AgentCapabilities {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
-    /** What the figure is a figure OF, in the user's words: a quantity the draft lacks may get a revised-draft card (B). */
+    /** What the figure is a figure OF, in the user's words; a restatement corrects the saved goal on its own card. */
     measures?: string;
   }): Promise<ToolResult>;
   /** SYSTEM 1: the user's own statement about ONE subject, read, bound and verified by the ONE door, as ONE card. */
