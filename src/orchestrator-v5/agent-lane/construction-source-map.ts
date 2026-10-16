@@ -177,7 +177,12 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
   const key = subjectKey({ kind: 'goal', label: metric }, 'target');
   // TL 09:18Z (2): a sentence whose figure the AI ALSO read as another subject's or field's ("We have a budget of £40,000." as the
   // budget's level and the goal's target) has a competing reading; it is not the user's target, and the card offers Olumi's.
-  const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
+  // Only for ONE written amount (BUDDY-A B1 on #3284): "We currently have 10,000 customers and need monthly revenue of at least
+  // £10,000." writes two amounts, so the customers' reading of one is no rival to the target the other states. A net loss's
+  // signed reading is the same written amount (`figuresWritten` lists it straight after it).
+  const timesWritten = (quote: string): number => figuresWritten(quote).filter((f, k, all) =>
+    (states(f.low) || states(f.high)) && !(k > 0 && f.low < 0 && all[k - 1]!.low === -f.low)).length;
+  const rivalled = (quote: string): boolean => timesWritten(quote) < 2 && [...map.verified.entries()].some(([other, statements]) => other !== key
     && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
   return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote))
     .map((s) => s.quote);
