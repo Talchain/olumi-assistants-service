@@ -34,7 +34,7 @@ import { describe, it, expect } from 'vitest';
 
 import { buildConstraintDisclosureFromState } from '../constraint-gap-disclosure.js';
 import { composeWithheldReasonTail } from '../../compose/withheld-reason-tail.js';
-import { GRAPH_MUTATING_HANDLER_IDS } from '../../routing/mutation-consent.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../../routing/__tests__/retired-layer-inputs.fixture.js';
 import { getDefaultRegistry } from '../../tools/registry.js';
 
 const ONE = [{ constraint_id: 'c1', label: 'Keep churn at or below 3%' }] as const;

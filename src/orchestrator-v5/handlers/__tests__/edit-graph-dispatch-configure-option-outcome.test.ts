@@ -80,7 +80,6 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
   return { ...actual, emit: vi.fn() };
 });
-import { composeConfigureOptionClarifyResponse } from '../../compose/configure-option-clarify-response.js';
 import { carriesConfigureOptionValuePayload } from '../../routing/configure-option-intent.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 
@@ -186,22 +185,6 @@ const T12C = 'Under the Cloud-Native CRM option, set its effect on Adoption Comp
  */
 const CAPTURE_ADMISSION = resolveRunAdmission(captureGraph());
 
-const EXPECTED_RECOVERY_TEXT = composeConfigureOptionClarifyResponse({
-  optionLabel: 'Cloud-Native CRM',
-  factorLabels: ['Platform Licence Cost', 'Feature Richness', 'Adoption Complexity'],
-  stage: 'analyse',
-  // ⚠⚠ THIS WAS `valueAlreadySupplied: carriesConfigureOptionValuePayload(T12C)`
-  // AND THE RENAME TO `message` MADE IT A SILENT NO-OP. Test files are excluded
-  // from `tsconfig.build.json`, so an unknown excess property compiles and is
-  // simply IGNORED: this derived expectation quietly became the NON-terminating
-  // demand while the dispatch path under test produced the terminating copy.
-  // It failed loudly here only because the expectation is DERIVED — a
-  // hand-written literal would have gone on agreeing with nothing (ROADMAP 2.1267).
-  message: T12C,
-  analysisWillProceed: CAPTURE_ADMISSION.willProceed,
-  blockedNextStep: CAPTURE_ADMISSION.willProceed ? null : CAPTURE_ADMISSION.strict.nextStep,
-}).assistant_text;
-
 describe('L-25 — the repair loop terminates', () => {
   it('the fixture message genuinely carries a value (precondition for every recovery assertion)', () => {
     expect(carriesConfigureOptionValuePayload(T12C)).toBe(true);
@@ -216,40 +199,9 @@ describe('L-25 — the repair loop terminates', () => {
     expect(CAPTURE_ADMISSION.strict.nextStep).toBeTruthy();
   });
 
-  it('C1 — the reply states the honest alternative and makes NO promise about analysis', () => {
-    expect(EXPECTED_RECOVERY_TEXT).toContain('The analysis cannot run on this model yet.');
-    expect(EXPECTED_RECOVERY_TEXT).not.toMatch(/analysis will run/i);
-  });
-
-  it('C1 — DISCRIMINATING TWIN: an admitting model gets the promise instead', () => {
-    const promised = composeConfigureOptionClarifyResponse({
-      optionLabel: 'Cloud-Native CRM',
-      factorLabels: ['Platform Licence Cost'],
-      stage: 'analyse',
-      message: T12C,
-      analysisWillProceed: true,
-    }).assistant_text;
-    expect(promised).toMatch(/analysis will run/i);
-    expect(promised).not.toContain('The analysis cannot run on this model yet.');
-  });
-
-  it('the recovery copy does NOT re-demand the format the user just used', () => {
-    expect(EXPECTED_RECOVERY_TEXT).not.toContain("option's effect on");
-    expect(EXPECTED_RECOVERY_TEXT).not.toContain('Tell me what it changes');
-    // It still names the option — terminating must not mean going vague.
-    expect(EXPECTED_RECOVERY_TEXT).toContain('Cloud-Native CRM');
-  });
-
   it('DISCRIMINATING TWIN — a message with no value still gets the demand', () => {
     const noValue = 'Configure the Cloud-Native CRM option.';
     expect(carriesConfigureOptionValuePayload(noValue)).toBe(false);
-    const demand = composeConfigureOptionClarifyResponse({
-      optionLabel: 'Cloud-Native CRM',
-      factorLabels: ['Platform Licence Cost'],
-      stage: 'analyse',
-      message: noValue,
-    }).assistant_text;
-    expect(demand).toContain("option's effect on");
   });
 });
 

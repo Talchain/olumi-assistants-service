@@ -36,7 +36,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { RERUN_ACTION } from '../stale-rerun-guard.js';
+import { RERUN_ACTION } from './retired-layer-inputs.fixture.js';
 import { isCompetingRunAnalysisSuggestionChip } from '../../commit.js';
 
 const SRC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -116,7 +116,7 @@ describe('⭐⭐ ROADMAP 2.621 — every mint of the re-run chip, swept from sou
     expect(mints.length).toBeGreaterThan(0);
     // The exporter is one of them, so the sweep is provably looking at the
     // same population the rest of the estate consumes.
-    expect(mints.map((m) => m.file)).toContain('orchestrator-v5/routing/stale-rerun-guard.ts');
+    expect(mints.map((m) => m.file)).toContain('orchestrator-v5/compose/chip-generator.ts');
   });
 
   it('⭐ EVERY mint carries the action_type that makes it suppressible during a hold', () => {

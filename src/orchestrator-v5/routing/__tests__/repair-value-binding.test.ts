@@ -17,13 +17,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  REPAIR_BARE_VALUE_KNOWN_DROPPED,
-  deriveMissingEffectPairs,
-  matchBareRepairValue,
-  resolveRepairValueBinding,
-} from '../repair-value-binding.js';
-import { QUALITATIVE_VALUE_KNOWN_DROPPED } from '../../compose/configure-option-clarify-response.js';
+import { REPAIR_BARE_VALUE_KNOWN_DROPPED, deriveMissingEffectPairs, matchBareRepairValue, resolveRepairValueBinding } from '../repair-value-binding.js';
+import { QUALITATIVE_VALUE_KNOWN_DROPPED } from './retired-layer-inputs.fixture.js';
 import type { AnalysisReadyPayload } from '../../compose/analysis-ready-emit.js';
 
 // ── the claim predicate ─────────────────────────────────────────────────────

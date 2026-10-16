@@ -40,12 +40,12 @@
  *       → COVERED by the hand-written corpus in `mutation-consent.test.ts`,
  *         which is the only guard that can notice a short list.
  */
-import { existsSync,readFileSync,readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe,expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { getDefaultRegistry } from '../../tools/registry.js';
-import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from './retired-layer-inputs.fixture.js';
 
 const SRC_ROOT = new URL('../../../', import.meta.url).pathname;
 const HANDLERS_DIR = join(SRC_ROOT, 'orchestrator-v5/tools/handlers');
@@ -85,44 +85,6 @@ describe('DERIVED: GRAPH_MUTATING_HANDLER_IDS matches the modules that can mutat
   });
 });
 
-/**
- * ⭐ A COMMENT THAT CITES A GUARANTEE BY FILENAME IS A CLAIM, AND IT WAS
- * FALSE (ROADMAP 2.628, fixed 6 Aug 2026).
- *
- * `mutation-consent.ts` told every reader that the handler-id list could not
- * drift because `__tests__/graph-mutating-handler-ids.test.ts` derived it.
- * NO SUCH FILE HAS EVER EXISTED. The derivation was real — it lives in THIS
- * file — but nobody could have discovered that from the citation, and a
- * reader who went looking and found nothing would reasonably conclude the
- * guarantee was absent.
- *
- * This is the estate's dominant defect (CLAUDE.md trap 12) wearing a
- * comment's clothes: a hand-maintained pointer that drifts silently and reads
- * as reassurance either way. Deriving it costs three lines.
- */
-describe('DERIVED: every test file the consent module cites by name exists', () => {
-  const MODULE_DIR = join(SRC_ROOT, 'orchestrator-v5/routing');
-  const CITING_MODULES = ['mutation-consent.ts'] as const;
-
-  const citations = CITING_MODULES.flatMap((moduleName) => {
-    // readFileSync, not grep: `edit-graph-referee-gate.ts` in this tree
-    // carries a NUL sentinel and plain grep is blind to such files
-    // (CLAUDE.md trap 17).
-    const body = readFileSync(join(MODULE_DIR, moduleName), 'utf8');
-    return [...body.matchAll(/__tests__\/[\w.-]+\.test\.ts/g)].map((m) => ({
-      moduleName,
-      cited: m[0],
-    }));
-  });
-
-  it('the scan found citations at all (positive control — an empty scan would pass every assertion below)', () => {
-    expect(citations.length).toBeGreaterThan(0);
-  });
-
-  it.each(citations)('$moduleName cites $cited, and it exists', ({ cited }) => {
-    expect(existsSync(join(MODULE_DIR, cited))).toBe(true);
-  });
-});
 
 describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor commit closure', () => {
   const INTERNAL_OPTION_WRITER = 'orchestrator-v5/system-events/option-intervention-edit.ts';
@@ -137,15 +99,6 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
   const KNOWN_UNCOVERED_WRITERS: readonly string[] = [
     // The exact stored-card gesture authorises this extracted writer; it has no prose-consent backstop.
     'orchestrator-v5/handlers/approve-held-proposal.ts',
-    // ⚠ UNCOVERED, and NOT "covered by a different mechanism" — corrected
-    // 6 Aug 2026 (ROADMAP 2.628a) after this entry claimed the GM referee
-    // "HOLDS every structural op". Measured in `graph-management/referee.ts`:
-    // `rename_node` and `update_node/edge_field` are would_apply-ELIGIBLE and
-    // apply regardless of the user's words; the referee never reads the
-    // message. This dispatch is reached from `route-v2.ts` on
-    // `editIntentDetected`, never through `runTurnExecutor`, so neither
-    // consent layer sees it. Recorded as an open gap.
-    'orchestrator-v5/handlers/edit-graph-dispatch.ts',
     // First-draft persistence — there is no prior model to protect.
     // The inspector value edit: a UI direct manipulation. It carries no
     // conversational message, so there is no consent clause to honour.

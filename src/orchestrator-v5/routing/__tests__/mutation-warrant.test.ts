@@ -22,22 +22,11 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import {
-  hasMutationWarrantSignal,
-  hasConstraintMutationSignal,
-  detectMutationWarrant,
-  CONSTRAINT_MUTATION_SIGNAL_PATTERNS,
-  buildMutationWarrantDemotionText,
-  buildResidualConstraintDisclosure,
-  hasExplicitNoModelChangeIntent,
-} from '../mutation-warrant.js';
+import { hasMutationWarrantSignal, hasConstraintMutationSignal, detectMutationWarrant, CONSTRAINT_MUTATION_SIGNAL_PATTERNS, buildMutationWarrantDemotionText, buildResidualConstraintDisclosure, hasExplicitNoModelChangeIntent } from '../mutation-warrant.js';
 import { hasMutationSignal } from '../analytical-intent.js';
-import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from './retired-layer-inputs.fixture.js';
 import { TYPED_CHIP_MUTATION_ACTION_TYPES } from '../typed-chip-mutation-proposal.js';
-import {
-  EDIT_GRAPH_POSITIVE_REGEX,
-  EDIT_GRAPH_NEGATIVE_REGEX,
-} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
+import { EDIT_GRAPH_POSITIVE_REGEX, EDIT_GRAPH_NEGATIVE_REGEX } from '../../../orchestrator/routing/edit-graph-intent-regex.js';
 
 /**
  * CONSTRAINT PHRASINGS A USER ACTUALLY WRITES. Every one of these is an

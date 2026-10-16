@@ -53,7 +53,6 @@ import { asksForOwnJudgement } from '../judgement-request.js';
 import { hasMutationWarrantSignal, isEditRequestShape } from '../mutation-warrant.js';
 import { isStateQueryQuestionShape, tryStateQueryGuard } from '../state-query-guard.js';
 import { tryPostAnalysisAdviceGate } from '../post-analysis-advice-gate.js';
-import { tryStaleRerunGuard } from '../stale-rerun-guard.js';
 
 /** Lifted verbatim from `state-query-guard.structure-origin.test.ts`. */
 const WITNESS_GRAPH = {
@@ -397,10 +396,9 @@ describe('a brief reference is not permission to replace a conversation with an 
   });
 
   it.each(['fresh', 'stale', 'unknown'] as const)(
-    'the witnessed request also clears the two following conversational gates when analysis is %s',
+    'the witnessed request clears the retained advice gate when analysis is %s',
     (freshness) => {
       const message = reasoningRequests[0];
-      expect(tryStaleRerunGuard({ message, freshness }).matched).toBe(false);
       expect(tryPostAnalysisAdviceGate({
         message,
         freshness,

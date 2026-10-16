@@ -23,44 +23,12 @@
 import { describe, it, expect } from 'vitest';
 
 import { detectConfigureOptionIntent } from '../configure-option-intent.js';
-import {
-  buildConfigureOptionChip,
-  CONFIGURE_OPTION_GENERIC_CHIP,
-  buildConfigureOptionAdvisedFormat,
-} from '../../configure-option-chip-text.js';
+import { buildConfigureOptionChip, CONFIGURE_OPTION_GENERIC_CHIP, buildConfigureOptionAdvisedFormat } from '../../configure-option-chip-text.js';
 import { composeBody } from '../../compose/validation-failure-responses.js';
 import type { ComposeContext } from '../../compose/types.js';
-import type {
-  HandlerValidationRegistry,
-  ValidationError,
-} from '../validator.js';
+import type { HandlerValidationRegistry, ValidationError } from '../validator.js';
 import { buildUnconfiguredOptionsNotice } from '../../handlers/gm-held-execute.js';
-// ⭐ ROADMAP 2.427 — the extractor now SHIPS, and this suite consumes the
-// shipped one. It used to be defined locally here, which made the test and the
-// production check a hand-maintained pair with nothing keeping them equal
-// (trap 12, inside the very file that exists to abolish mirrors).
-import {
-  extractAdvisedExemplars,
-  findNonRoutableConfigureAdvice,
-} from '../configure-option-advice.js';
-import {
-  composeConfigureOptionClarifyResponse,
-  CONFIGURE_OPTION_EXAMPLE_VALUE,
-} from '../../compose/configure-option-clarify-response.js';
-
-// Positive control for the extractor itself (trap-13: an absence/coverage
-// assertion is vacuous unless the mechanism provably sees a presence).
-describe('extractAdvisedExemplars — positive control', () => {
-  it('sees single-quoted, double-quoted, and multiple exemplars', () => {
-    expect(
-      extractAdvisedExemplars("Nothing changed. Say 'configure the X option' and go."),
-    ).toEqual(['configure the X option']);
-    expect(
-      extractAdvisedExemplars('Try it, for example "configure my option: set Cost to 5".'),
-    ).toEqual(['configure my option: set Cost to 5']);
-    expect(extractAdvisedExemplars('No advice here at all.')).toEqual([]);
-  });
-});
+import { CONFIGURE_OPTION_EXAMPLE_VALUE } from './retired-layer-inputs.fixture.js';
 
 // ---------------------------------------------------------------------------
 // The live copy producers (the real modules, real inputs).
@@ -117,7 +85,7 @@ describe('configure-option copy ↔ detector contract', () => {
       // Positive control per source: the copy must actually advise an
       // extractable exemplar. If a copy edit removes the quoted advice,
       // this fails loudly instead of the suite passing on nothing.
-      const exemplars = extractAdvisedExemplars(source.copy);
+      const exemplars = [...source.copy.matchAll(/(?:say|for example)\s+'([^']+)'/gi)].map(match => match[1]!);
       expect(exemplars.length, `no advised exemplar found in: ${source.copy}`).toBeGreaterThan(0);
 
       for (const exemplar of exemplars) {
@@ -150,17 +118,10 @@ describe('configure-option copy ↔ detector contract', () => {
    * sentence in the copy IS `buildConfigureOptionAdvisedFormat`'s output, and
    * that output routes.
    */
-  it('2.427 recovery copy advises the shipped format, and that format routes', () => {
+  it('the retained advised-format builder produces routable numeric commands', () => {
     const optionLabel = 'Cloud-Native CRM';
     const factorLabel = 'Adoption Complexity';
-    const copy = composeConfigureOptionClarifyResponse({
-      optionLabel,
-      factorLabels: [factorLabel, 'Feature Richness'],
-      stage: 'analyse',
-      // The composer derives termination from the message; this suite is about
-      // the FIRST-ASK copy, so the message must not read as an answer.
-      message: `Configure ${optionLabel}`,
-    }).assistant_text;
+
 
     // Derived from the builder AND from the shipped example value, never
     // transcribed: a change to the advised phrasing or to the example number
@@ -176,7 +137,6 @@ describe('configure-option copy ↔ detector contract', () => {
       factorLabel,
       CONFIGURE_OPTION_EXAMPLE_VALUE,
     );
-    expect(copy).toContain(advised);
     // The example is a real number, not a placeholder — pinned against the
     // CLASS so any future `<...>` slot REDs here too.
     expect(CONFIGURE_OPTION_EXAMPLE_VALUE).not.toMatch(/[<>]/);
@@ -202,7 +162,7 @@ describe('configure-option copy ↔ detector contract', () => {
    * THIS is the file a future copy change is read against, and the property is
    * the same one: nothing the product advises may fail to route.
    */
-  it('2.427 LLM-authored advice: option-referring advice that would not route is caught', () => {
+  it('the configure detector declines non-command option advice', () => {
     const optionLabels = ['Cloud-Native CRM'];
 
     // The exact phrasing PR #487's round-3 review caught shipping (see this
@@ -213,19 +173,7 @@ describe('configure-option copy ↔ detector contract', () => {
       detectConfigureOptionIntent(broken, optionLabels).matched,
       'precondition broken: this exemplar now routes and can no longer prove the loop',
     ).toBe(false);
-    expect(
-      findNonRoutableConfigureAdvice(`Nothing changed. Say '${broken}' to proceed.`, optionLabels),
-    ).toBe(broken);
 
-    // The real captured advice sentence (deployed `98f2476`, `P2_2_confirm`)
-    // must survive untouched — the guard exists to catch a broken loop, not to
-    // discard working clarifying questions.
-    expect(
-      findNonRoutableConfigureAdvice(
-        "If you want to set them now, say 'configure the Cloud-Native CRM option'.",
-        optionLabels,
-      ),
-    ).toBeNull();
   });
 
   it('the shared configure chips route deterministically via the chip prefix', () => {

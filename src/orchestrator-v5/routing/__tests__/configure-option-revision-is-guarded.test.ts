@@ -76,12 +76,8 @@
  * ever reached.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  detectConfigureOptionIntent,
-  projectOptionLabels,
-} from '../configure-option-intent.js';
+import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
 import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
-import { decideOptionInterventionWrite } from '../option-intervention-write-guard.js';
 import { WRONG_ENTITY_WRITE_CAPTURE } from './wrong-entity-write-capture.fixture.js';
 
 const CAPTURE = WRONG_ENTITY_WRITE_CAPTURE;
@@ -164,7 +160,7 @@ describe('a revision to an already-configured option is guarded', () => {
    * place of the option's effect value. Both preconditions are pinned in-test
    * so this cannot decay into agreeing with itself.
    */
-  it('the write guard now withholds a shared-baseline write on a revision', () => {
+  it('a shared-baseline move leaves the option’s own intervention unchanged', () => {
     const after = JSON.parse(JSON.stringify(CAPTURE.before)) as Graph;
     const factor = after.nodes.find((n) => n.id === FACTOR_ID)!;
     const observedBefore = (
@@ -177,15 +173,6 @@ describe('a revision to an already-configured option is guarded', () => {
     // effect value did NOT. Without both, the assertion below asserts nothing.
     expect(observedBefore).not.toBe(0.79);
     expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
-
-    const verdict = decideOptionInterventionWrite({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(verdict.verdict).toBe('withhold');
-    expect(verdict.verdict === 'withhold' && verdict.optionId).toBe(OPTION_ID);
   });
 
   /**

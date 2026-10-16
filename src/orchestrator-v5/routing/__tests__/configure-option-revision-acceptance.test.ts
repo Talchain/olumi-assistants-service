@@ -71,12 +71,8 @@
  * discrimination along with the abstention.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  detectConfigureOptionIntent,
-  projectOptionLabels,
-} from '../configure-option-intent.js';
+import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
 import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
-import { decideOptionInterventionWrite } from '../option-intervention-write-guard.js';
 import { WRONG_ENTITY_WRITE_CAPTURE } from './wrong-entity-write-capture.fixture.js';
 
 const CAPTURE = WRONG_ENTITY_WRITE_CAPTURE;
@@ -180,24 +176,6 @@ function twoOptionGraph(): Graph {
   return graph;
 }
 
-/**
- * The graph the user is left holding.
- *
- * ONE rule, and it is the dispatcher's: a `withhold` clears
- * `effectiveAppliedMutation`, so nothing persists and the PRE-edit graph
- * stands. See the file header for why that linkage is cited rather than
- * re-modelled.
- */
-function storedGraph(before: unknown, after: unknown, message: string): unknown {
-  const verdict = decideOptionInterventionWrite({
-    message,
-    before,
-    after,
-    appliedMutation: true,
-  });
-  return verdict.verdict === 'withhold' ? before : after;
-}
-
 // ---------------------------------------------------------------------------
 // PRECONDITIONS. Every arm below is only about a REVISION, and only about a
 // message the edit lane really receives. Pinned in-test so no arm can decay
@@ -237,7 +215,7 @@ describe('the deliberate-edit component — preconditions', () => {
 // ---------------------------------------------------------------------------
 
 describe('ACCEPTANCE half 1 — an ordinary, clear revision WORKS', () => {
-  it('ARM A: the option’s own effect value moves, and the user keeps it', () => {
+  it('ARM A: the option’s own effect value is recognised as honoured', () => {
     const after = revisionLanded();
 
     // The component recognises it, by identity, as a SUCCESS.
@@ -249,18 +227,6 @@ describe('ACCEPTANCE half 1 — an ordinary, clear revision WORKS', () => {
     expect(verdict.status).toBe('honoured');
     expect(verdict.status === 'honoured' && verdict.optionId).toBe(OPTION_ID);
 
-    // And the write is not touched.
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('allow');
-
-    // AT THE STORED OBJECT: the value the user asked for is what they hold.
-    const stored = storedGraph(CAPTURE.before, after, MESSAGE);
-    expect(optionInterventionValue(stored, OPTION_ID, FACTOR_ID)).toBe(0.79);
   });
 });
 
@@ -269,66 +235,6 @@ describe('ACCEPTANCE half 1 — an ordinary, clear revision WORKS', () => {
 // ---------------------------------------------------------------------------
 
 describe('ACCEPTANCE half 2 — the WITHHELD wrong-entity classes cannot mutate', () => {
-  /**
-   * ARM B — THE LIVE CAPTURE, VERBATIM. `exists_probability` 1 → 0.79 on
-   * `32b7e30c → 6d9a37f3`: *"this causal link exists with 79% probability"*,
-   * a different claim from *"this option's effect is 0.79"*.
-   */
-  it('ARM B: an EDGE `exists_probability` write is withheld, and nothing moves', () => {
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after: CAPTURE.after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('withhold');
-    expect(write.verdict === 'withhold' && write.optionId).toBe(OPTION_ID);
-    expect(write.verdict === 'withhold' && write.optionLabel).toBe(OPTION_LABEL);
-
-    const stored = storedGraph(CAPTURE.before, CAPTURE.after, MESSAGE);
-    expect(edgeField(stored, OPTION_ID, FACTOR_ID, 'exists_probability')).toBe(1);
-    expect(optionInterventionValue(stored, OPTION_ID, FACTOR_ID)).toBe(0.49);
-  });
-
-  /**
-   * ARM C — THE ORIGINALLY-WITNESSED 2.427 SHAPE, still live today.
-   * `configure-option-outcome.ts`'s header records exactly this write.
-   */
-  it('ARM C: an EDGE `strength.mean` write is withheld, and nothing moves', () => {
-    const after = edgeStrengthWrite();
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('withhold');
-    expect(write.verdict === 'withhold' && write.optionId).toBe(OPTION_ID);
-
-    const stored = storedGraph(CAPTURE.before, after, MESSAGE);
-    expect(edgeField(stored, OPTION_ID, FACTOR_ID, 'strength.mean')).toBe(1);
-    expect(optionInterventionValue(stored, OPTION_ID, FACTOR_ID)).toBe(0.49);
-  });
-
-  /**
-   * ARM D — the 2.1266 node-baseline shape, reached on a REVISION. The node arm
-   * already exists; what was missing was any verdict to gate it.
-   */
-  it('ARM D: a shared FACTOR baseline write is withheld, and nothing moves', () => {
-    const after = factorBaselineWrite();
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('withhold');
-    expect(write.verdict === 'withhold' && write.baselineNodeIds).toEqual([FACTOR_ID]);
-
-    const stored = storedGraph(CAPTURE.before, after, MESSAGE);
-    expect(observedValue(stored, FACTOR_ID)).toBe(0.49);
-    expect(optionInterventionValue(stored, OPTION_ID, FACTOR_ID)).toBe(0.49);
-  });
 
   /**
    * ⭐ AND THE PRODUCT SAYS NOTHING UNTRUE WHILE DOING IT. The verdict that
@@ -366,7 +272,7 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
    * nothing to betray and nothing to withhold. A guard that fired here would
    * discard the measured W1 class of correct, explicitly-requested edits.
    */
-  it('ARM E: names no option ⇒ no verdict, and the write is ALLOWED (residual)', () => {
+  it('ARM E: names no option, so the outcome reader declines by identity', () => {
     const after = edgeStrengthWrite();
     // ⚠⚠ RE-GROUNDED. This arm previously used *"Set the effect to 79%."*,
     // which the shipped detector does NOT match at all — so the verdict was
@@ -398,15 +304,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     // THE RESIDUAL, NAMED: resolution was attempted and found no option.
     expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_not_identified');
 
-    const write = decideOptionInterventionWrite({
-      message: SUBJECTLESS,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('allow');
-    // Bound by IDENTITY: nothing here is attributed to the option.
-    expect(JSON.stringify(write)).not.toContain(OPTION_ID);
   });
 
   /**
@@ -467,8 +364,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(verdict.status).toBe('not_honoured_no_copy');
     expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
 
-    const stored = storedGraph(before, after, MESSAGE);
-    expect(edgeField(stored, OPTION_ID, FACTOR_ID, 'strength.mean')).toBe(1);
   });
 
   /**
@@ -496,19 +391,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(edgeField(after, OPTION_ID, FACTOR_ID, 'strength.mean')).toBe(1);
     expect(edgeField(after, OPTION_ID, FACTOR_ID, 'exists_probability')).toBe(1);
     expect(observedValue(after, FACTOR_ID)).toBe(0.49);
-
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('allow');
-    expect(write.verdict === 'allow' && write.reason).toBe('no_baseline_write');
-
-    // AT THE STORED OBJECT: the user keeps the edit they made.
-    const stored = storedGraph(CAPTURE.before, after, MESSAGE);
-    expect(edgeField(stored, FACTOR_ID, '94fa174b', 'strength.mean')).toBe(0.79);
   });
 
   /**
@@ -580,7 +462,7 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
    * recorded in the suite is honest; a gap invisible to it is how the
    * wrong-entity write survived two guards written against it.
    */
-  it('RESIDUAL F2/a: a wrong-FACTOR write on the named option is honoured and COMMITS', () => {
+  it('RESIDUAL F2/a: the outcome reader calls a wrong-factor write honoured', () => {
     const after = clone(CAPTURE.before);
     const node = after.nodes.find((n) => n.id === OPTION_ID)!;
     // The user asked about FACTOR_ID; the edit writes a different factor key.
@@ -595,14 +477,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(
       evaluateConfigureOptionOutcome({ message: MESSAGE, before: CAPTURE.before, after }).status,
     ).toBe('honoured');
-    expect(
-      decideOptionInterventionWrite({
-        message: MESSAGE, before: CAPTURE.before, after, appliedMutation: true,
-      }).verdict,
-    ).toBe('allow');
-    // AT THE STORED OBJECT: the wrong factor's value is what the user keeps.
-    expect(optionInterventionValue(storedGraph(CAPTURE.before, after, MESSAGE), OPTION_ID, 'a9f8b0b7'))
-      .toBe(0.79);
   });
 
   /**
@@ -620,7 +494,7 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
    * W1 direction, which destroys user work. Changing that conjunct is a
    * judgement with a blast radius beyond this lane, so it is disclosed.
    */
-  it('RESIDUAL F2/b: a wrong-OPTION write is protected in the verdict but COMMITS', () => {
+  it('RESIDUAL F2/b: the outcome reader refuses to credit another option’s write', () => {
     const before = twoOptionGraph();
     const after = clone(before);
     const other = after.nodes.find((n) => n.id === SECOND_OPTION_ID)!;
@@ -635,15 +509,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(verdict.status).toBe('not_honoured_no_copy');
     expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
 
-    // The write is allowed anyway, for the stated reason.
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE, before, after, appliedMutation: true,
-    });
-    expect(write.verdict).toBe('allow');
-    expect(write.verdict === 'allow' && write.reason).toBe('interventions_write_landed');
-    // AT THE STORED OBJECT: the other option's value persists.
-    expect(optionInterventionValue(storedGraph(before, after, MESSAGE), SECOND_OPTION_ID, FACTOR_ID))
-      .toBe(0.79);
   });
 
   /**
@@ -660,17 +525,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(edgeField(CAPTURE.before, OPTION_ID, FACTOR_ID, 'strength.mean')).toBe(1);
     expect(edgeField(after, OPTION_ID, FACTOR_ID, 'strength.mean')).toBeUndefined();
     expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
-
-    const write = decideOptionInterventionWrite({
-      message: MESSAGE, before: CAPTURE.before, after, appliedMutation: true,
-    });
-    expect(write.verdict).toBe('withhold');
-    expect(write.verdict === 'withhold' && write.optionEdgeKeys)
-      .toEqual([`${OPTION_ID}->${FACTOR_ID}`]);
-
-    // AT THE STORED OBJECT: the link survives.
-    expect(edgeField(storedGraph(CAPTURE.before, after, MESSAGE), OPTION_ID, FACTOR_ID, 'strength.mean'))
-      .toBe(1);
   });
 
   /**
@@ -683,8 +537,7 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
    * graph can separate them. It is recorded here so the suite REDs if the class
    * ever changes, in either direction.
    */
-  it('KNOWN COST: an explicit link-strength edit naming the option is ALSO withheld', () => {
-    const after = edgeStrengthWrite();
+  it('the configure detector recognises an explicit link-strength edit naming the option', () => {
     const explicitLinkEdit =
       `For the ${OPTION_LABEL} option, the link to Pro Plan Monthly Price is too strong `
       + '— set its strength to 79%.';
@@ -698,12 +551,5 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
       ).matched,
     ).toBe(true);
 
-    const write = decideOptionInterventionWrite({
-      message: explicitLinkEdit,
-      before: CAPTURE.before,
-      after,
-      appliedMutation: true,
-    });
-    expect(write.verdict).toBe('withhold');
   });
 });
