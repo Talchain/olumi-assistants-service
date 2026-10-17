@@ -5,6 +5,7 @@ import type { RunOmittedRisk } from '../agent-lane/unsized-risk.js';
 import { askedQuestionOf, dispatchedQuestionOf, STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
 export { STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
+import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { recordedStaticLevelEvidence, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 
 import { goalChanceScopeOf } from './goal-chance-licence.js';
@@ -76,9 +77,9 @@ const questionText = (v: unknown): string | undefined => typeof v === 'string' &
 const questionNumber = (v: unknown): number | undefined => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 
 /**
- * Projection of ONE saved Run. No current graph argument exists deliberately. A historical model is usable only when its
- * immutable revision equals this occurrence's evaluated revision. A digest is not a recoverable request; missing fields
- * remain missing, even if today's model, the percentiles or another screen appear to agree.
+ * Projection of ONE saved Run. Its retained question describes its frozen saved read and final request, not a replacement
+ * model. An external historical model is usable only at the evaluated revision. A digest is not a recoverable request;
+ * missing fields remain missing, even if today's model, the percentiles or another screen appear to agree.
  */
 export function deriveRunQuestion(input: {
   readonly runEvidence?: SelectedRunEvidence;
@@ -92,15 +93,23 @@ export function deriveRunQuestion(input: {
   const snapshot = isRec(suppliedSnapshot) ? suppliedSnapshot : undefined;
   const goal = isRec(snapshot?.goal) ? snapshot.goal : undefined;
   const revision = evidence?.occurrence?.evaluated_scenario_revision;
-  const evaluatedRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
-  const saved = evaluatedRevision !== null && input.historicalModel?.revision === evaluatedRevision ? input.historicalModel.graph : undefined;
+  const occurrenceRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
   const resultId = isRec(input.storedResult) ? questionText(input.storedResult.run_id) : undefined;
   const runId = questionText(evidence?.runId) ?? resultId ?? null;
+  const retained = resultId !== undefined && evidence?.runId !== undefined && resultId !== evidence.runId ? undefined
+    : readRecordedRunQuestion(evidence?.evaluatedQuestion ?? (isRec(input.storedResult) && isRec(input.storedResult.enrichment)
+      ? input.storedResult.enrichment[RUN_QUESTION_EVIDENCE_KEY] : undefined), {
+      runId, revision: occurrenceRevision, inputSnapshot: snapshot,
+      graphHashAtRun: isRec(input.storedResult) ? input.storedResult.graph_hash_at_run : undefined,
+    });
+  // A new Run retains its own frozen read revision before persistence; an occurrence, when present, must agree.
+  const evaluatedRevision = occurrenceRevision ?? retained?.evaluated_scenario_revision ?? null;
+  const saved = evaluatedRevision !== null && input.historicalModel?.revision === evaluatedRevision ? input.historicalModel.graph : undefined;
   const missing: string[] = [];
   if (snapshot === undefined) missing.push('input_snapshot');
   if (evaluatedRevision === null) missing.push('evaluated_scenario_revision');
   if (questionText(evidence?.occurrence?.fact_row_id) === undefined) missing.push('fact_row_id');
-  if (saved === undefined) missing.push('historical_model_at_evaluated_revision');
+  if (saved === undefined && (retained?.graph_hash_at_run == null || evaluatedRevision === null)) missing.push('historical_model_at_evaluated_revision');
   if (runId === null || (resultId !== undefined && evidence?.runId !== undefined && resultId !== evidence.runId)) missing.push('selected_run_identity');
   const goalId = questionText(goal?.node_id) ?? (isRec(input.dispatchedRequest) ? questionText(input.dispatchedRequest.goal_node_id) : undefined);
   const identityMismatch = resultId !== undefined && evidence?.runId !== undefined && resultId !== evidence.runId;
@@ -110,11 +119,12 @@ export function deriveRunQuestion(input: {
     quantity: { node_id: recorded.goal_id, ...(recorded.label === undefined ? {} : { label: recorded.label }) },
     target: recorded.target, comparator: recorded.comparator, unit: recorded.unit, frame: 'level',
   };
-  const asked = saved === undefined || goalId === undefined ? recordedAsked : askedQuestionOf(saved, goalId);
+  const asked = retained !== undefined ? retained.asked
+    : saved === undefined || goalId === undefined ? recordedAsked : askedQuestionOf(saved, goalId);
   // The final request is usable only when the selected Run's own existing digest binds it.
   const requestBound = isRec(input.dispatchedRequest) && snapshot?.sent_digest === sentDigest(input.dispatchedRequest);
   const exact = requestBound ? dispatchedQuestionOf(input.dispatchedRequest) : null;
-  const evaluatedInputs: RunQuestionSide | null = exact ?? (recorded === undefined ? null : {
+  const evaluatedInputs: RunQuestionSide | null = retained !== undefined ? retained.calculated : exact ?? (recorded === undefined ? null : {
     ...recordedAsked!, option_ids: recorded.option_ids, baseline: recorded.baseline, encoded_baseline: recorded.encoded_baseline,
     encoded_target: recorded.encoded_target, horizon: undefined,
   }) ?? (goal === undefined || goalId === undefined ? null : {
@@ -123,8 +133,18 @@ export function deriveRunQuestion(input: {
     option_ids: (Array.isArray(snapshot?.options) ? snapshot.options.filter(isRec) : []).flatMap(o => typeof o.option_id === 'string' ? [o.option_id] : []),
   });
   // Retained evaluated inputs attest the calculation; they cannot recover an original horizon/reference never retained.
-  if (saved === undefined) missing.push('asked_horizon_and_reference_at_evaluated_revision', 'asked_options_at_evaluated_revision');
-  if (exact === null && recorded === undefined) missing.push('dispatched_goal_threshold', 'dispatched_goal_baseline');
+  if (saved === undefined && retained === undefined) missing.push('asked_horizon_and_reference_at_evaluated_revision', 'asked_options_at_evaluated_revision');
+  const notDispatched = retained === undefined ? [] : [
+    ...(retained.dispatched_goal_threshold === null ? ['dispatched_goal_threshold'] : []),
+    ...(retained.dispatched_goal_baseline === null ? ['dispatched_goal_baseline'] : []),
+  ];
+  const notBound = retained?.asked == null ? [] : [
+    ...(retained.asked.horizon === undefined ? ['asked_horizon_at_evaluated_revision'] : []),
+    ...(retained.asked.reference === undefined ? ['asked_reference_at_evaluated_revision'] : []),
+  ];
+  if (retained === undefined && exact === null && recorded === undefined) missing.push('dispatched_goal_threshold', 'dispatched_goal_baseline');
+  missing.push(...notDispatched);
+  missing.push(...notBound);
   if (exact === null && recorded !== undefined && !recorded.static_scope_declared) missing.push('calculation_scope_at_evaluated_revision');
   const scope = goalChanceScopeOf(input.storedResult, evidence);
   const calculated = evaluatedInputs === null || scope.status !== 'supported_static' ? evaluatedInputs
@@ -133,7 +153,8 @@ export function deriveRunQuestion(input: {
     ...(!identityMismatch && runId !== null ? readRunOmissionScope(input.storedResult)?.risks ?? [] : [])
       .map(risk => ({ field: 'risk', ...risk, scope: 'modelled_effects_only' as const })),
     ...(asked?.horizon === undefined ? [] : [{ field: 'horizon', reason: scope.status === 'supported_static' ? 'not_calculated' : 'not_verified', asked: asked.horizon }]),
-    ...missing.map(field => ({ field, reason: 'not_recorded' })),
+    ...missing.map(field => ({ field, reason: notDispatched.includes(field) ? 'not_dispatched'
+      : notBound.includes(field) ? 'not_bound_in_saved_model' : 'not_recorded' })),
   ];
   return { run_id: runId, fact_row_id: questionText(evidence?.occurrence?.fact_row_id) ?? null,
     evaluated_scenario_revision: evaluatedRevision, asked, calculated, omitted, scope,

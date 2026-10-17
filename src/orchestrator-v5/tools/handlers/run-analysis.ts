@@ -144,7 +144,7 @@ import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js'
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
-import { buildRunInputSnapshot, runIdFor, sentDigest } from './run-input-snapshot.js';
+import { buildRunInputSnapshot, recordRunQuestion, RUN_QUESTION_EVIDENCE_KEY, runIdFor, sentDigest } from './run-input-snapshot.js';
 import type { RunAnalysisProbe } from './run-analysis-probe.js';
 import {
   carryLevelLimitBaselines,
@@ -615,6 +615,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const frozenRevision = typeof evaluatedScenarioRevision === 'number'
       && Number.isSafeInteger(evaluatedScenarioRevision) && evaluatedScenarioRevision >= 0
       ? evaluatedScenarioRevision : undefined;
+    const questionGraphAtRead = structuredClone(snapshot.rawPersistedGraph ?? snapshot.graph);
     const shareChanceBlocked = shareChanceRunBlock(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (shareChanceBlocked !== null) {
       throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
@@ -1409,6 +1410,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const runInputSnapshot = inputSnapshot === null || seedReuse.seed === undefined
       ? inputSnapshot
       : { ...inputSnapshot, sent_digest: sentDigest(plotPayload) };
+    const evaluatedQuestion = recordRunQuestion({ runId, revision: frozenRevision, graphHashAtRun,
+      savedGraph: questionGraphAtRead, dispatchedRequest: plotPayload, inputSnapshot: runInputSnapshot });
     log.info(
       { event: 'run_analysis.seed_reuse', request_id: invocation.requestId, scenario_id: args.scenario_id, reason: seedReuse.reason },
       'run_analysis seed decision',
@@ -3131,6 +3134,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
     // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same
     // bound Run (`persistedFactorReviewFor`). A Run fact stored before this change keeps its enrichment and is still read.
+    const { [RUN_QUESTION_EVIDENCE_KEY]: _providerQuestion, ...runEnrichment } = response as Record<string, unknown>;
+    if (evaluatedQuestion !== undefined) runEnrichment[RUN_QUESTION_EVIDENCE_KEY] = evaluatedQuestion;
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -3146,7 +3151,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        enrichment: stampRunAnalysisProjection(runEnrichment),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

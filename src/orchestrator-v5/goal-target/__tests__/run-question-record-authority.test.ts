@@ -10,11 +10,98 @@ import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.j
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
 import * as snapshotBuilder from '../../tools/handlers/run-input-snapshot.js';
+import { readRunEvidence, runEvidenceWireOf } from '../../agent-lane/run-evidence.js';
+import { SupabaseSessionStore } from '../../session/supabase-store.js';
+import { SessionLRUCache } from '../../session/cache.js';
+import * as seedReuse from '../../coaching/seed-reuse.js';
 
 const stored = () => ({ ...structuredClone(captured.result), run_id: captured.evidence.run_id,
   input_snapshot: structuredClone(captured.evidence.input_snapshot), graph_hash_at_run: 'saved-capture' });
 const evidence = () => ({ runId: captured.evidence.run_id, inputSnapshot: structuredClone(captured.evidence.input_snapshot),
   occurrence: captured.evidence.occurrence });
+
+describe('the evaluated-question producer survives the actual Run-fact writer and cold reader', () => {
+  it.each([true, false])('records asked and final dispatched inputs even when scoring threshold present=%s', async hasThreshold => {
+    const graph = structuredClone(captured.graph);
+    const goal = graph.nodes.find(node => node.id === 'weekly_support_capacity')! as Record<string, unknown>;
+    Object.assign(goal, { goal_horizon_months: 6, goal_deadline_as_stated: 'by March' });
+    if (!hasThreshold) delete goal.goal_threshold;
+    const scenarioId = 'bc0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c';
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(scenarioId, 'question-record', {
+      loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: captured.brief, revision: 5 })),
+      readMostRecentPendingActions: vi.fn(async () => []),
+    } as never);
+    let outbound: Record<string, unknown> | undefined;
+    const transport = vi.fn(async (request: Record<string, unknown>) => {
+      outbound = structuredClone(request);
+      return { ...structuredClone(minimal), option_comparison: structuredClone(captured.result.enrichment.option_comparison) };
+    });
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: transport, validatePatch: vi.fn() } as never });
+    // Exercise the real final seed assignment; seed eligibility has its own existing tests.
+    const seed = vi.spyOn(seedReuse, 'decideSeedReuse').mockReturnValue({ seed: '17', reason: 'reused' });
+    const outcome = await handler({
+      payload: { scenario_id: scenarioId, turn_id: 'question-record' }, requestId: 'question-record',
+      context: {}, signal: new AbortController().signal, orientationText: '',
+    } as never).finally(() => seed.mockRestore());
+    expect(transport).toHaveBeenCalledTimes(1);
+    const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+    if (fact?.fact_type !== 'run_analysis' || fact.noop || outbound === undefined) throw new Error('Expected one actual Run');
+    expect(outbound.seed).toBe('17');
+    const key = snapshotBuilder.RUN_QUESTION_EVIDENCE_KEY;
+    const retained = fact.result.enrichment?.[key] as snapshotBuilder.RecordedRunQuestion;
+    expect(retained).toMatchObject({ run_id: fact.result.run_id, evaluated_scenario_revision: 5,
+      graph_hash_at_run: fact.result.graph_hash_at_run, sent_digest: snapshotBuilder.sentDigest(outbound),
+      asked: { target: 100, baseline: 80, horizon: { months: 6, as_stated: 'by March' } },
+      calculated: { baseline: 80, encoded_baseline: 0.16, option_ids: expect.arrayContaining(['add_one_specialist', 'keep_current_staffing']) },
+      dispatched_goal_threshold: hasThreshold ? 0.2 : null, dispatched_goal_baseline: 0.16 });
+    expect(retained.calculated?.target).toBe(hasThreshold ? 100 : undefined);
+    expect(retained.calculated?.encoded_target).toBe(hasThreshold ? 0.2 : undefined);
+    // The existing no-graph Run append path: capture the actual RPC payload and hydrate its JSON bytes with a fresh cache.
+    let rows: Record<string, unknown>[] = [];
+    const rpc = vi.fn(async (_fn: string, args: Record<string, unknown>) => {
+      rows = JSON.parse(JSON.stringify(args.p_handler_facts)).map((row: Record<string, unknown>) => ({ ...row,
+        id: 'question-fact', v5_conversation_turn_id: 'question-turn', created_at: '2026-10-17T01:00:00Z' }));
+      return { data: 'question-turn', error: null };
+    });
+    const chain = { select: () => chain, in: () => chain, order: () => chain, abortSignal: () => chain,
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve) };
+    const client = { rpc, from: vi.fn(() => chain) };
+    const cache = () => new SessionLRUCache({ maxScenarios: 2, maxTurnsPerScenario: 4 });
+    await new SupabaseSessionStore(client as never, cache(), { defaultReadLimit: 20 }).append({
+      scenario_id: scenarioId, turn_id: 'question-record', turn_class: 'handler', handler_id: 'run_analysis',
+      request_hash: 'question-record', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
+      handler_facts: [fact], run_evaluated_revisions: { [fact.result.run_id!]: 5 },
+    });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rows[0]?.evaluated_scenario_revision).toBe(5);
+    const [cold] = await new SupabaseSessionStore(client as never, cache(), { defaultReadLimit: 20 }).readFactsFor(['question-turn']);
+    if (cold?.fact_type !== 'run_analysis') throw new Error('Expected cold Run fact');
+    expect(cold.result.enrichment?.[key]).toEqual(retained);
+    const runEvidence = readRunEvidence(runEvidenceWireOf(cold));
+    expect(runEvidence?.evaluatedQuestion).toEqual(retained);
+    expect(runEvidence?.occurrence).toEqual({ fact_row_id: 'question-fact', evaluated_scenario_revision: 5 });
+    const publicResult = buildAnalysisResultBlock(cold);
+    expect(publicResult.enrichment).not.toHaveProperty(key);
+    const later = structuredClone(graph);
+    Object.assign(later.nodes.find(node => node.id === goal.id)!, { goal_threshold_raw: 999, goal_horizon_months: 12 });
+    const facts = runFactsOf(publicResult, later, false, { runEvidence });
+    const view = projectCanonicalAnalysisView({ graph: later, runFact: cold });
+    expect(facts.question?.asked).toEqual(retained.asked);
+    expect(view.question?.asked).toEqual(retained.asked);
+    const calculated = { ...retained.calculated, ...(hasThreshold ? { scope: 'static' } : {}) };
+    expect(facts.question?.calculated).toEqual(calculated);
+    expect(view.question?.calculated).toEqual(calculated);
+    expect(facts.question?.evaluated_scenario_revision).toBe(5);
+    expect(facts.chances.goal_chance_display).toBeUndefined(); // Stale reading retains identity, never a new chance.
+    expect(view.options.some(option => option.cell.kind === 'figure' || option.cell.kind === 'range')).toBe(false);
+    if (!hasThreshold) {
+      expect(view.question?.scope.can_show_goal_chance).toBe(false);
+      expect(facts.question?.omitted).toContainEqual({ field: 'dispatched_goal_threshold', reason: 'not_dispatched' });
+      expect(facts.question?.omitted).not.toContainEqual({ field: 'dispatched_goal_threshold', reason: 'not_recorded' });
+    }
+  });
+});
 
 describe('S3 single evaluated-input authority — independent capacity capture247ae5b4', () => {
   it('the saved80 /100 /level /≥ /tickets per week inputs retain the Run’s recorded static limitation', () => {

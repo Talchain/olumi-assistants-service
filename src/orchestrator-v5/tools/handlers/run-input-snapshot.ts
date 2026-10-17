@@ -32,6 +32,9 @@ import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/ed
 import { factorAuthorshipDigest, linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
 import { STATED_LEVEL_STD } from './stated-level-spread.js';
 import { effectiveLinkExistenceProbability } from '../../goal-target/held-user-links.js';
+import { z } from 'zod';
+import { GoalPeriod } from '@talchain/schemas';
+import { askedQuestionOf, dispatchedQuestionOf } from '../../goal-target/run-question-scope.js';
 
 type Rec = Record<string, unknown>;
 
@@ -279,4 +282,77 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   // The contract's bounds and one-row-per-input rules decide; a refusal records NO snapshot (never a partial one).
   const parsed = RunInputSnapshotSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
+}
+
+/** Descriptive evidence on the existing Run fact, independent of permission to show any result. */
+export const RUN_QUESTION_EVIDENCE_KEY = '__cee_evaluated_question';
+const QuestionSideSchema = z.object({
+  quantity: z.object({ node_id: z.string().min(1).max(200), label: z.string().max(200).optional() }).strict(),
+  target: z.number().finite().optional(), comparator: z.enum(['>=', '>', '<=', '<']).optional(),
+  unit: z.string().max(64).optional(), frame: z.string().max(32).optional(),
+  horizon: z.object({ months: z.number().finite().optional(), deadline: z.string().max(200).optional(), as_stated: z.string().max(4000).optional() }).strict().optional(),
+  reference: z.string().max(4000).optional(), period: GoalPeriod.optional(),
+  option_ids: z.array(z.string().min(1).max(200)).max(200).optional(), baseline: z.number().finite().optional(),
+  encoded_target: z.number().finite().optional(), encoded_baseline: z.number().finite().optional(),
+}).strict();
+const RecordedQuestionSchema = z.object({
+  run_id: z.string().min(1).max(200),
+  evaluated_scenario_revision: z.number().int().nonnegative().refine(Number.isSafeInteger).nullable(),
+  graph_hash_at_run: z.string().min(1).nullable(), sent_digest: z.string().regex(/^[a-f0-9]{64}$/u),
+  asked: QuestionSideSchema.nullable(), calculated: QuestionSideSchema.nullable(),
+  // null records a known absence on this request; an absent record is historical evidence not retained.
+  dispatched_goal_threshold: z.number().finite().nullable(), dispatched_goal_baseline: z.number().finite().nullable(),
+}).strict();
+export type RecordedRunQuestion = z.infer<typeof RecordedQuestionSchema>;
+
+/** The saved read and FINAL request, captured before dispatch. Never a licence or an output-statistic inference. */
+export function recordRunQuestion(input: {
+  runId: string; revision: number | undefined; graphHashAtRun: string | null;
+  savedGraph: unknown; dispatchedRequest: Rec; inputSnapshot: RunInputSnapshot | null;
+}): RecordedRunQuestion | undefined {
+  const snapshot = input.inputSnapshot;
+  if (snapshot === null || snapshot.sent_digest !== sentDigest(input.dispatchedRequest)) return undefined;
+  const goalId = typeof input.dispatchedRequest.goal_node_id === 'string' ? input.dispatchedRequest.goal_node_id : undefined;
+  const dispatched = dispatchedQuestionOf(input.dispatchedRequest);
+  const threshold = dispatched?.encoded_target ?? null;
+  // A raw target can ride the graph without a scoring threshold. It belongs to ASKED, never to a performed comparison.
+  const calculated = dispatched === null ? null : { ...dispatched, ...(threshold === null ? { target: undefined } : {}) };
+  const parsed = RecordedQuestionSchema.safeParse({ run_id: input.runId,
+    evaluated_scenario_revision: input.revision ?? null, graph_hash_at_run: input.graphHashAtRun,
+    sent_digest: snapshot.sent_digest,
+    asked: goalId === undefined ? null : askedQuestionOf(input.savedGraph, goalId), calculated,
+    dispatched_goal_threshold: threshold, dispatched_goal_baseline: dispatched?.encoded_baseline ?? null });
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** Only the selected fact's own revision and dispatched-input digest can bind this descriptive record. */
+export function readRecordedRunQuestion(value: unknown, identity: {
+  runId: string | null; revision?: number | null; graphHashAtRun?: unknown; inputSnapshot: unknown;
+}): RecordedRunQuestion | undefined {
+  const parsed = RecordedQuestionSchema.safeParse(value);
+  if (!parsed.success || !isRec(identity.inputSnapshot)) return undefined;
+  const r = parsed.data;
+  const goal = isRec(identity.inputSnapshot.goal) ? identity.inputSnapshot.goal : undefined;
+  const calculated = r.calculated;
+  if (calculated !== null) {
+    const ids = Array.isArray(identity.inputSnapshot.options)
+      ? identity.inputSnapshot.options.filter(isRec).map(option => option.option_id) : undefined;
+    // Shared retained fields must agree. The baseline/threshold encodings are separate actual request fields;
+    // never derive them from these raw values or force an invalid dispatch to look consistent.
+    if (goal === undefined || calculated.quantity.node_id !== goal.node_id
+      || (calculated.target !== undefined && calculated.target !== goal.target_raw)
+      || calculated.unit !== goal.unit || calculated.frame !== goal.frame
+      || JSON.stringify(calculated.option_ids) !== JSON.stringify(ids)) return undefined;
+    const factors = Array.isArray(identity.inputSnapshot.factors) ? identity.inputSnapshot.factors.filter(isRec) : [];
+    const baselines = factors.filter(factor => factor.factor_id === goal.node_id);
+    if ((calculated.baseline !== undefined && (baselines.length !== 1 || baselines[0]!.raw !== calculated.baseline))
+      || r.dispatched_goal_threshold !== (calculated.encoded_target ?? null)
+      || r.dispatched_goal_baseline !== (calculated.encoded_baseline ?? null)
+      || (r.dispatched_goal_threshold === null && calculated.target !== undefined)) return undefined;
+  } else if (r.dispatched_goal_threshold !== null || r.dispatched_goal_baseline !== null) {
+    return undefined;
+  }
+  return r.run_id === identity.runId && (identity.revision == null || r.evaluated_scenario_revision === identity.revision)
+    && r.sent_digest === identity.inputSnapshot.sent_digest
+    && (identity.graphHashAtRun === undefined || r.graph_hash_at_run === identity.graphHashAtRun) ? r : undefined;
 }
