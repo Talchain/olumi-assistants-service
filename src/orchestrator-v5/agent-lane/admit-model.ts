@@ -3866,6 +3866,15 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
  * with": ⛔ BUDDY-A #3312 B1, a statement records no source-change basis ("adding 10 support staff … between 40 and 55 points"
  * against Olumi's 5 per 1 staff = 50 per 10, inside it), so no comparison between the two is proven. Pure.
  */
+/** The user's range, said as theirs beside the separate approximation Olumi's estimate is (G3 a735 green core). */
+function statedRangeBesideEstimateEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
+  const said = range.reported.trim();
+  const reason = `"${source.label}" → "${target.label}": "${said}", as the brief puts it. The current calculation uses a separate `
+    + `approximation, Olumi's: ${sized.statement ?? 'its own size'}, not that range.`;
+  return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_beside_estimate`,
+    before: { low: range.low, high: range.high, text: range.text }, after: sized.natural_effect?.amount ?? null, reason, severity: 'info' } as RepairEntry;
+}
+
 function statedRangeUnsizedEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const ne = sized.natural_effect;
   const held = ne === undefined ? undefined
@@ -5051,14 +5060,6 @@ function admitOnce(
     // conversation" is not located), so retiring it here would demote real user figures.
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
-    // ⭐ G3 a735 (DL-3 GO 17 Oct; CONTRACT A: ONE authorship owner, never the drafter's own flag): a size that is one END of the one
-    // range the AI's own VERIFIED statement gives THIS link is said with that range (A4, as the brief reports it: `range` below).
-    // Served: the drafter sized "would cut leakage by between 3 and 5" at its low end and flagged it `inferred`, so the user's range
-    // was saved as Olumi's estimate with no range. An Olumi size that is no end of this link's verified range stays Olumi's, and a
-    // denied range (`negated`) earns nothing.
-    // ⛔ BUDDY-A #3356 R1 B1: only in the unit the edge's own natural size is said in ("percentage points" on a percentage level).
-    if (source !== undefined && target !== undefined && typeof brief === 'string' && typeof l.effect_amount === 'number'
-      && (linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount, naturalAmountUnitOf(magnitudeNodeFor(target))) ?? null) !== null) return true;
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
     // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
@@ -5207,6 +5208,12 @@ function admitOnce(
     if (sourceRange !== undefined && framed.outcome !== 'user_stated' && framed.outcome !== 'estimate') {
       loss.push(statedRangeUnsizedEntry(l, sourceRange, framed, source, target));
     }
+    // ⭐ G3 a735 GREEN CORE (DL-3 ruling B, 17 Oct; AIE A3 13:11Z; spec §1): a link OLUMI sized whose effect the user stated as a
+    // range keeps Olumi's estimate, a separate approximation, and the user's range is said beside it as theirs, as the brief puts it.
+    // A drafted end of their range is Olumi's choice, never the user's figure (three BUDDY-A rounds on crediting it: stopped).
+    const besideEstimate = !user_stated && typeof l.effect_amount === 'number' && typeof brief === 'string'
+      ? linkEffectStatedRange(model, brief, source.label, target.label) ?? undefined : undefined;
+    if (besideEstimate !== undefined && framed.outcome === 'estimate') loss.push(statedRangeBesideEstimateEntry(l, besideEstimate, framed, source, target));
     sizing.set(`${l.from}::${l.to}`, l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
       ? framed : sizeLink(statement, source, unframed));
   }
