@@ -19,7 +19,7 @@ import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 
 type Rec = Record<string, any>;
 const TEXT = JSON.parse(readFileSync('tests/fixtures/drafter-text-3/drafter-text-3.json', 'utf8')) as
-  { goal_is_the_aim: string; date_not_asked: string; unknowns_description: string; goal_level_in_other_words: string };
+  { goal_is_the_aim: string; current_aim_not_later_ambition: string; date_not_asked: string; unknowns_description: string; goal_level_in_other_words: string };
 const HIRING_BRIEF = (JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007.json', 'utf8')) as Rec).brief as string;
 const HIRING_DRAFT = JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007-draft.json', 'utf8')) as Rec;
 const CAPACITY_BRIEF = (JSON.parse(readFileSync('tests/fixtures/drafter-text-3/served-capacity-brief.json', 'utf8')) as Rec).brief as string;
@@ -97,6 +97,21 @@ describe('what the drafter is sent', () => {
     const rule = instructions.indexOf('It is where things stand today, never the target.');
     expect(rule, 'contrast: the goal-level rule is sent').toBeGreaterThan(-1);
     expect(instructions.indexOf(TEXT.goal_level_in_other_words)).toBe(rule + 'It is where things stand today, never the target. '.length);
+  });
+
+  // ⭐ G1 (AIE AMEND 17 Oct on Lane A 6229024284): the build framed its goal on a later ambition's figure. The AIE's sentence
+  // replaces the old ambition sentence inside the same goal paragraph. Whether the drafter now behaves so is AI behaviour,
+  // judged on the served build, never here. SYNTHETIC brief: neither a journey's brief nor the AIE's own example.
+  it('5. a current aim and a later one: the AIE\'s sentence is sent once, in place of the old ambition sentence, the paragraph\'s other rules kept', async () => {
+    const brief = 'Our current aim is to reach 40 paying clinics by the end of next year; one day we would like to serve 500. '
+      + 'Should we hire a second sales lead or a partnerships manager?';
+    const sent = (await firstRequest(brief)).instructions as string;
+    expect(sent.split(TEXT.current_aim_not_later_ambition)).toHaveLength(2);
+    expect(TEXT.goal_is_the_aim).toContain(TEXT.current_aim_not_later_ambition);
+    expect(sent).not.toContain('Preserve an eventual ambition separately from the current task');
+    // Contrasts in the same request: the rules beside it in that paragraph are still sent.
+    for (const kept of ['explicit later framing supersedes earlier framing where they conflict', 'preserve their AND meaning, common reference and window',
+      'A date is not automatically the goal', 'If the governing meaning is unclear, retain the original words and ask']) expect(sent).toContain(kept);
   });
 });
 describe('AIE-10 (prompt/AIE-REVIEW-20261015.md): the first-draft default no longer revives carrying on as now', () => {
