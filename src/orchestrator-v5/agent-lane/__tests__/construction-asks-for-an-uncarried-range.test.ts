@@ -105,9 +105,8 @@ describe('A4 guarantee: a written money range no link carries is asked of the re
     expect(inputs).toHaveLength(2);
     expect(inputs[1]).toContain('Construction issues:');
     expect(inputs[1]).toContain('£1-2 million');
-    // ⛔ AUDIT §1 CONTROL: a build with no revision context repairs on the brief ALONE, byte for byte as before (the first request
-    // carries its range notes; the repair's issues ask the range instead). Only a revision's repair takes the first request's context.
-    expect(inputs[1]!.startsWith(`${BRIEF}\n\nConstruction issues: `), inputs[1]!.slice(0, 300)).toBe(true);
+    // The repair retains the frozen first input, including the range notes, before its own issues/candidate suffix.
+    expect(inputs[1]!.startsWith(`${inputs[0]}\n\nConstruction issues: `), inputs[1]!.slice(0, 300)).toBe(true);
     expect(dealLink(graph)?.provenance?.magnitude).toBe('user_stated');
     expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
   });

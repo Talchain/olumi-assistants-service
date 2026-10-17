@@ -112,7 +112,8 @@ describe('E6 (3): with the risks arm unset, nothing is added; the thin-draft off
     const provider = vi.fn<CallStructuredModel>();
     const admit = vi.fn(() => { throw new Error('no re-admission expected'); });
     const out = await widenDraft({ admitted: { nodes: E6_DRAFT.nodes, edges: E6_DRAFT.edges, goal_constraints: [] } as unknown as AdmittedModel,
-      candidate: {} as never, brief: 'We need to decide whether to hire a Tech lead or two developers.', callStructured: provider,
+      candidate: {} as never, brief: 'We need to decide whether to hire a Tech lead or two developers.',
+      constructionInput: 'We need to decide whether to hire a Tech lead or two developers.', callStructured: provider,
       deadlineAt: Date.now() + 60_000, admit });
     expect(out).toBeNull();
     expect(provider).not.toHaveBeenCalled();
