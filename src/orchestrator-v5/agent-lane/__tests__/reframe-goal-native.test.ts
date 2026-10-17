@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
 import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
-import { applyQualitativeReframe } from '../runtime/goal-repoint.js';
+import { applyQualitativeReframe } from '../runtime/agent-capabilities.js';
 
 const cases = [
   { name: 'warehousing', goal: 'Average dispatch delay', value: 6, unit: 'days', comparator: '<=',

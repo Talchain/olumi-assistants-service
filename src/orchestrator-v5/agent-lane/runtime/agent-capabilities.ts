@@ -2538,7 +2538,7 @@ interface QualitativeReframeRequest {
 const identityOf = (g: unknown): string => computeGraphIdentityHash(g as never)?.value ?? '';
 
 /** A qualitative repoint uses the same old-goal node for history, and introduces no operative number or new store. */
-function prepareQualitativeReframe(ctx: AgentToolContext, before: GraphRead, request: Partial<Record<keyof QualitativeReframeRequest, unknown>>,
+function prepareQualitativeReframe(ctx: AgentToolContext, before: Pick<GraphRead, 'raw' | 'graph_hash' | 'graph_identity_hash' | 'brief_text'>, request: Partial<Record<keyof QualitativeReframeRequest, unknown>>,
   at: string): { refused: string } | { candidate: Record<string, unknown>; new_id: string; words: string; source_line: string } {
   const nodes = Array.isArray(before.raw.nodes) ? before.raw.nodes.filter(isPlainRecord) : [];
   const old = nodes.find(n => n.id === request?.goal_id && n.kind === 'goal');
@@ -2599,9 +2599,9 @@ function proposeQualitativeReframe(ctx: AgentToolContext, before: GraphRead, req
 }
 
 /** Apply only this frozen qualitative repoint through the existing complete-candidate CAS register and readback. */
-async function applyQualitativeReframe(ctx: AgentToolContext, parent: StructuredProposal, before: GraphRead,
+export async function applyQualitativeReframe(ctx: AgentToolContext, parent: StructuredProposal, before: Pick<GraphRead, 'raw' | 'graph_hash' | 'graph_identity_hash' | 'brief_text'>,
   proposals: ProposalStore, dispatch: (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>,
-  read: () => Promise<GraphRead | null>): Promise<ToolResult> {
+  read: () => Promise<Pick<GraphRead, 'raw' | 'graph_hash' | 'graph_identity_hash' | 'brief_text'> | null>): Promise<ToolResult> {
   const op = parent.operations[0], v = isPlainRecord(op?.value) ? op.value : {};
   const bound = isPlainRecord(v.qualitative_reframe) ? v.qualitative_reframe : {};
   const no = (refusal: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal });
