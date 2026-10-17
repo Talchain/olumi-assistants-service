@@ -103,11 +103,13 @@ const said = (out: Record<string, unknown>) => (out.not_represented as string[] 
 const LOW: Size = { amount: 1000000, per: 1, by: 'explicit' };
 
 describe('A4: "deals between £1-2 million" is £1,000,000 per deal, the low end of the range, said with it as a floor', () => {
-  it('the drafter is told to put a per-one money size on the countable → goal link, at the LOW end of a range', async () => {
+  it('the drafter is told to put a per-one money size on the countable → goal link; a RANGE for it is recorded on that link, never sized at an end (A3)', async () => {
     const { instructions } = await build(deals({ deals: LOW }));
     expect(instructions.length).toBeGreaterThanOrEqual(1);
     expect(instructions[0]).toContain('A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING');
-    expect(instructions[0]).toContain('When the brief gives a RANGE for that size, use its LOW end.');
+    // ⭐ A3 (spec v2.1 A1/A3, AIE): the LOW-end rule is retired; the range stays on its link, both ends as written.
+    expect(instructions[0]).toContain('When the brief gives a RANGE for that size, leave the link\u2019s size null and record the range in `statements` on that link, both ends as written: a range is not one size, so never use an end or a middle as the size.');
+    expect(instructions[0]).not.toMatch(/LOW end/u);
   });
 
   it('RED: deals → goal at £1,000,000 per deal, tagged explicit → the user\'s size, carrying the range it is the low end of', async () => {

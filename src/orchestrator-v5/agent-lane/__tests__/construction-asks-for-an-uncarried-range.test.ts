@@ -278,9 +278,10 @@ describe('A4 guarantee: every other shape keeps the first draft', () => {
 const T2_A = "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?";
 const T2_C = "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?";
 const T2_D1 = "I need some help framing a prioritisation conflict for our sprint planning on Monday.\nSales is breathing down my neck because they have this huge enterprise prospect—like potentially our biggest deal of the quarter—but the prospect is saying they won’t sign unless we can promise an AI reporting module by next month. The sales rep is saying it's a \"make or break\" thing.\nBut my lead engineer just showed me the data on our new trial signup flow and it’s a total mess. We're losing like 15% of people before they even finish setting up their profile because of a bug in the integration step. If we don't fix that now, we're basically burning marketing budget.\nEngineering says they only have bandwidth to tackle one of these properly in the upcoming sprint. I need to write an update for the leadership team explaining what we're going to do, but honestly, I'm stuck. How should I approach this trade-off? What am I missing here?";
+// ⭐ A3 (spec v2.1 A1/A3, AIE): the per-one note keeps the countable and its per-one link, and records the range; never an end.
 const PER_ONE = 'If it is a money size PER ONE of something the brief names (per deal, per contract, per customer), apply the '
-  + 'per-one rule: keep that countable as its own quantity, link it to the money goal, and size that link per one at the LOW '
-  + 'end of "£1-2 million" (effect_provenance "explicit").';
+  + 'per-one rule: keep that countable as its own quantity, link it to the money goal per one (`effect_per_source_change` 1), leave the '
+  + 'size null, and record "£1-2 million" in `statements` as that link\u2019s range, both ends as written.';
 
 describe('A4 first pass: the written range is asked of the FIRST construct', () => {
   it('RED: Paul\'s brief → the FIRST call already asks the per-one rule of "£1-2 million"; a draft that carries it is ONE call', async () => {
