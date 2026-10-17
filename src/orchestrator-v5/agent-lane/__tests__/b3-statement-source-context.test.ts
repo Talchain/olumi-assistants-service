@@ -19,7 +19,15 @@ describe('B3: complete source facts in the actual serialized request', () => {
     expect(w.calls.length).toBeGreaterThan(0);
     for (const c of w.calls) {
       const facts = object(findState(c.payloads).run_facts);
-      expect(object(facts.capability)).toMatchObject({ declaration_version: 1, authority: 'cee_source_contract', engine_attestation: 'unverified' });
+      expect(object(facts.capability)).toMatchObject({
+        calculation: 'Static goal levels from a baseline plus each option’s paired change.',
+        evidence: 'Source contracts only; engine execution has not been independently verified.',
+      });
+      expect(object(facts.capability).limits).toContain('This analysis route requires at least 2 options.');
+      expect(JSON.stringify(facts.capability)).not.toMatch(/goalChanceLicenceForAgent|leaderLicenceFromState|minimum_option_count|Inference-Service-Layer|plot-lite-service/);
+      expect(c.sentBody).toContain("reading:'olumi' marks the structured binding and interpretation as Olumi’s, not a new human assertion");
+      expect(c.sentBody).toContain('unknown statement approval stays unknown');
+      expect(c.sentBody).toContain('it does not establish that this Run executed, is current, may run or may quote a chance or leader');
       expect(object(object(facts.input_basis).factor_starting_values).coverage).toBe('material_factor_starting_values_only');
       expect(facts).not.toHaveProperty('may_run');
       expect(c.sentBody.split('Lead with the supported current finding or precise limitation')).toHaveLength(2);
