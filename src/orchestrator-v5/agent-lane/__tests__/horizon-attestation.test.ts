@@ -126,8 +126,9 @@ describe('attestHorizon: the brief confirms the drafter\'s month count, or it is
       expect(attestHorizon(brief, { horizon_months: claim })).toEqual({ months: null, wording: '', status: 'absent', unbound: 'in the next 6-12 months' });
     }
     expect(attestHorizon(withDeadline('within 6 to 12 months'), { horizon_months: null })).toEqual({ months: null, wording: '', status: 'absent', unbound: 'within 6 to 12 months' });
-    expect(attestHorizon(withDeadline('over the last 6-12 months'), { horizon_months: null }).status).toBe('absent');
-    expect(attestHorizon(withDeadline('with a runway of 6-12 months'), { horizon_months: null }).status).toBe('absent');
+    // Exactly absent, not even asked for a role (R2: a status-only check could not tell "unbound" from out).
+    expect(attestHorizon(withDeadline('over the last 6-12 months'), { horizon_months: null })).toEqual({ months: null, wording: '', status: 'absent' });
+    expect(attestHorizon(withDeadline('with a runway of 6-12 months'), { horizon_months: null })).toEqual({ months: null, wording: '', status: 'absent' });
   });
 
   it('⭐ the range\'s role: outside the goal\'s own target statement its words come back unbound, never a deadline', () => {
