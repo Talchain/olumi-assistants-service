@@ -10,7 +10,6 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { verifyStatements } from '../user-statements.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
-import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 import { priorAimDescription } from './goal-repoint.js';
 
