@@ -25,6 +25,7 @@ const rec = (value: unknown): Rec | undefined => value !== null && typeof value 
 // MOVED bytes: DGAI src/canvas/runView/runView.ts:25, :27
 // @ 8f53cea7eb4cb04bea5bd54b3f06d2f076d5cc8c. No new copy.
 const RUN_AGAIN_FOR_CHANCE = 'Run the analysis again to see the chance.';
+const UNKNOWN_RUN_FIGURES = 'This earlier Run may be out of date. Run the analysis again.';
 const OPTION_CHANCE_WITHHELD = 'Olumi can’t yet say its chance of meeting your goal, in this model.';
 
 const OPTION_CHANCE_NOT_SHOWN = 'Chance not shown yet';
@@ -91,7 +92,13 @@ export interface CanonicalAnalysisView {
   readonly question?: RunQuestion;
   readonly schema: 'canonical_analysis_view.v1';
   readonly source: 'stored_run_facts';
+  /** Also supplied for a selected Run whose currentness is unknown. */
   readonly face_when_stale?: string;
+  /** Display-only history; never current options, a leader or a driver. */
+  readonly historical_figures?: {
+    readonly chance_words?: string;
+    readonly options: readonly { readonly option_id: string; readonly option_label?: string; readonly display: string }[];
+  };
   readonly run: {
     readonly run_id: string | null;
     readonly graph_hash_at_run: string | null;
@@ -103,10 +110,10 @@ export interface CanonicalAnalysisView {
     readonly revision: number | null;
     readonly run_revision: number | null;
     readonly run_revision_source?: 'recorded' | 'legacy_unknown';
-    readonly basis: 'analysis_graph_hash_interim' | 'recorded_run_revision';
+    readonly basis: 'analysis_graph_hash_interim';
     readonly reason: FreshnessDerivation['reason'] | null;
     readonly limitation: 'Hash equality cannot detect brief, framing or stage changes.'
-      | 'No analysis hash was available; only the scenario revision was compared.';
+      | 'Currentness is unknown because an analysis hash is unavailable.';
   };
   readonly leader_licence: LeaderLicence;
   /** ⭐ S7 / UI Q3: who leads, from the SAME builder the AI's Run facts use (`runLeaderOf`); the UI computes no leader. */
@@ -149,6 +156,8 @@ export interface CanonicalAnalysisViewInput {
   readonly analysisReady?: unknown;
   /** The already gated public result, never a recovered historical result. */
   readonly currentResult?: OlumiResponse['blocks'][number] | null;
+  /** Same selected Run through the existing block builder; history cannot reopen current claims. */
+  readonly historicalResult?: OlumiResponse['blocks'][number] | null;
 }
 
 /**
@@ -238,11 +247,22 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const runRevision = recordedRevision !== null && occurrence?.fact_row_id === input.derivation?.selected_fact_row_id
     && recordedRevision === input.derivation?.run_revision?.value
     ? recordedRevision : null;
-  const revisionBasis = input.derivation?.basis === 'recorded_run_revision' && runRevision !== null;
   const freshness = fact === null ? undefined : input.derivation?.freshness;
   const current = fact !== null && input.analysisState?.run_state.kind === 'complete_current'
     && input.currentResult?.type === 'analysis_result';
   const result = current ? withGoalChanceReadback(input.currentResult, fact?.result, fact === null ? undefined : readRunEvidence(runEvidenceWireOf(fact))) : null;
+  const historical = fact !== null && freshness === 'unknown' && input.historicalResult?.type === 'analysis_result'
+    && (occurrence?.fact_row_id === undefined || occurrence.fact_row_id === input.derivation?.selected_fact_row_id)
+    ? withGoalChanceReadback(input.historicalResult, fact.result, readRunEvidence(runEvidenceWireOf(fact))) : null;
+  const past = goalChanceFactsForAgent(historical, input.graph, historical !== null);
+  // Keep only the Run's licensed displays and stored chance words, never graph-derived faces, units or drivers.
+  const historicalFigures = [
+    ...Object.entries(past.goal_chance_display ?? {}),
+    ...Object.entries(past.goal_chance_range_display ?? {}).map(([id, range]) => [id, range.range] as const),
+  ].map(([option_id, display]) => {
+    const label = past.goal_chance_licence?.option_labels_by_option?.[option_id];
+    return { option_id, display, ...(label === undefined ? {} : { option_label: label }) };
+  });
   const staticClaim = question?.scope.status === 'supported_static';
   const facts = goalChanceFactsForAgent(result, input.graph, current);
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
@@ -258,7 +278,12 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   return {
     schema: 'canonical_analysis_view.v1', source: 'stored_run_facts',
     ...(question === undefined ? {} : { question }),
-    ...(fact !== null && freshness === 'stale' ? { face_when_stale: RUN_AGAIN_FOR_CHANCE } : {}),
+    ...(fact !== null && (freshness === 'stale' || freshness === 'unknown')
+      ? { face_when_stale: freshness === 'unknown' ? UNKNOWN_RUN_FIGURES : RUN_AGAIN_FOR_CHANCE } : {}),
+    ...(historicalFigures.length === 0 ? {} : { historical_figures: {
+      ...(past.goal_chance_words === undefined ? {} : { chance_words: past.goal_chance_words }),
+      options: historicalFigures,
+    } }),
     run: fact === null ? null : {
       run_id: fact.result.run_id ?? null,
       graph_hash_at_run: fact.result.graph_hash_at_run ?? null,
@@ -268,9 +293,9 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
       stale: freshness === 'stale' ? true : freshness === 'fresh' ? false : null,
       revision: typeof input.revision === 'number' && Number.isSafeInteger(input.revision) && input.revision >= 0 ? input.revision : null,
       run_revision: runRevision, run_revision_source: runRevision === null ? 'legacy_unknown' : 'recorded',
-      basis: revisionBasis ? 'recorded_run_revision' : 'analysis_graph_hash_interim',
+      basis: 'analysis_graph_hash_interim',
       reason: fact === null ? null : input.derivation?.reason ?? null,
-      limitation: revisionBasis ? 'No analysis hash was available; only the scenario revision was compared.'
+      limitation: freshness === 'unknown' ? 'Currentness is unknown because an analysis hash is unavailable.'
         : 'Hash equality cannot detect brief, framing or stage changes.',
     },
     leader_licence: leaderLicenceFromState(input.analysisState, input.analysisReady),

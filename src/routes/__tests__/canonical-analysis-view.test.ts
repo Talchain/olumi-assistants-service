@@ -93,6 +93,13 @@ describe('canonical analysis view — one stored Run and the existing licences',
     const barred = await project(input({ graph, currentResult: result([licence, warning, range,
       { code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', message: 'The identity was not evaluated.' }]) }));
     expect(cell(barred, 'raise').kind).toBe('withheld');
+    const historical = await project(input({ graph, currentResult: null, derivation: { freshness: 'unknown' },
+      historicalResult: result([licence, warning, range]) }));
+    expect(historical.historical_figures?.options).toEqual([
+      { option_id: 'keep', display: 'about 63%' },
+      { option_id: 'raise', display: 'between about 23% and 90%' },
+    ]);
+    expect(historical.options).toEqual([]);
   });
 
   it('DATA-NONE: malformed or duplicate licences never fall back to raw probabilities or win shares', async () => {
@@ -106,28 +113,90 @@ describe('canonical analysis view — one stored Run and the existing licences',
     const args = input();
     args.derivation = deriveAnalysisFreshness([args.runFact], 'changed-analysis-hash');
     args.analysisState = { ...args.analysisState, run_state: { kind: 'complete_stale', computed_at: args.runFact.result.computed_at } };
+    args.historicalResult = args.currentResult;
     const view = await project(args);
     expect(view.staleness).toMatchObject({ stale: true, revision: 7, run_revision: null, basis: 'analysis_graph_hash_interim' });
     expect(view.staleness.limitation).toBe('Hash equality cannot detect brief, framing or stage changes.');
     expect(view.options).toEqual([]);
+    expect(view).not.toHaveProperty('historical_figures');
     expect(view.run).toMatchObject({ run_id: args.runFact.result.run_id, graph_hash_at_run: args.runFact.result.graph_hash_at_run });
   });
 
   it('DATA-UNKNOWN: an unreadable/unknown result never becomes fresh or never run', async () => {
-    const args = input({ revision: undefined, currentResult: null, analysisState: null, derivation: null, runFact: null });
+    const args = input({ revision: undefined, currentResult: null, analysisState: null, derivation: null, runFact: null,
+      historicalResult: result([licence]) });
     const view = await project(args);
     expect(view.staleness.stale).toBeNull();
     expect(view.staleness.revision).toBeNull();
     expect(view.run).toBeNull();
     expect(view.options).toEqual([]);
+    expect(view).not.toHaveProperty('historical_figures');
   });
 
   it('DATA-REFUSAL: a refusal fact is not a Run and supplies no identity or figures', async () => {
     const refused = buildAnalysisRefusalFact({ scenarioId: saved.scenario_id, graphHash: 'refused-hash', reasonCode: 'analysis_not_ready', computedAt: '2026-10-08T12:00:00.000Z' });
-    const view = await project(input({ runFact: refused }));
+    const view = await project(input({ runFact: refused, historicalResult: result([licence]), derivation: { freshness: 'unknown' } }));
     expect(view.run).toBeNull();
     expect(view.options).toEqual([]);
     expect(view.staleness.stale).toBeNull();
+    expect(view).not.toHaveProperty('historical_figures');
+  });
+
+  it.each(['Revenue', 'Delivery capacity'].flatMap(topic => [
+    { topic, stored: false, current: true }, { topic, stored: true, current: false }, { topic, stored: false, current: false },
+  ]))('R4 history: $topic stored hash=$stored current hash=$current stays unknown with labelled licensed figures', async ({ topic, stored, current }) => {
+    const args = input();
+    if (!stored) delete args.runFact.result.graph_hash_at_run;
+    args.runFact.result.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED')
+      .option_labels_by_option = { raise_prices_10: `${topic}: earlier A`, launch_49_starter_tier: `${topic}: earlier B`, keep_pricing_as_it_is: `${topic}: earlier C` };
+    bindRunAnalysisOccurrence({ fact: args.runFact, fact_row_id: 'selected-history', evaluated_scenario_revision: 7 });
+    args.derivation = deriveAnalysisFreshness([args.runFact], current ? saved.current_read.computed_against_hash : null,
+      undefined, { currentScenarioRevision: 7 });
+    args.analysisState = { ...args.analysisState, run_state: { kind: 'unknown_degraded', cause: 'store_unreadable' }, leader_claim: { permitted: false } };
+    args.historicalResult = buildAnalysisResultBlock(args.runFact);
+    args.currentResult = null;
+    // Today's unrelated labels/units must never rewrite the selected Run's stored figures or credit.
+    args.graph = { nodes: [{ id: 'unrelated', kind: 'goal', label: `${topic} changed to £2m`, goal_threshold_unit: '£' }], edges: [] };
+    const before = JSON.stringify(args);
+    const view = await project(args);
+    expect(args.derivation.freshness).toBe('unknown');
+    expect(view.staleness).toMatchObject({ stale: null, run_revision: 7, run_revision_source: 'recorded', basis: 'analysis_graph_hash_interim' });
+    expect(view.staleness.limitation).toBe('Currentness is unknown because an analysis hash is unavailable.');
+    expect(view.face_when_stale).toBe('This earlier Run may be out of date. Run the analysis again.');
+    expect(view.historical_figures?.options).toEqual([
+      { option_id: 'raise_prices_10', option_label: `${topic}: earlier A`, display: 'about 47%' },
+      { option_id: 'launch_49_starter_tier', option_label: `${topic}: earlier B`, display: 'about 52%' },
+      { option_id: 'keep_pricing_as_it_is', option_label: `${topic}: earlier C`, display: 'less than 1%' },
+    ]);
+    expect(JSON.stringify(view.historical_figures)).not.toMatch(/£|changed|driver|authored_by/);
+    expect(view.options).toEqual([]);
+    expect(view.leader_licence).toBe('withheld');
+    expect(view.leader.option_id).toBeNull();
+    expect(view.run.run_id).toBe(args.runFact.result.run_id);
+    expect(JSON.stringify(args)).toBe(before);
+  });
+
+  it('R4 history keeps malformed/duplicate licences and scoped withholds closed', async () => {
+    for (const warnings of [[], [licence, licence], [{ ...licence, form: 'future_form' }], [licence, warning]]) {
+      const args = input({ graph, currentResult: null, derivation: { freshness: 'unknown' },
+        analysisState: { run_state: { kind: 'unknown_degraded' }, leader_claim: { permitted: false } },
+        historicalResult: result(warnings) });
+      const view = await project(args);
+      expect(view.historical_figures?.options ?? []).toEqual(warnings.includes(warning)
+        ? [{ option_id: 'keep', display: 'about 63%' }] : []);
+      expect(view.options).toEqual([]);
+    }
+  });
+
+  it('R4 history refuses figures from a known different selected row with the same revision', async () => {
+    const args = input({ currentResult: null });
+    bindRunAnalysisOccurrence({ fact: args.runFact, fact_row_id: 'foreign-history', evaluated_scenario_revision: 7 });
+    args.derivation = { freshness: 'unknown', selected_fact_row_id: 'selected-history', run_revision: { value: 7, source: 'recorded' } };
+    args.historicalResult = buildAnalysisResultBlock(args.runFact);
+    const view = await project(args);
+    expect(view.staleness.run_revision).toBeNull();
+    expect(view).not.toHaveProperty('historical_figures');
+    expect(view.options).toEqual([]);
   });
 });
 

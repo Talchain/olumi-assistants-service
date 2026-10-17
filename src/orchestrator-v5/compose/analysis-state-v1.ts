@@ -1,4 +1,3 @@
-import { readRunAnalysisOccurrence } from '../types/handler-fact.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { GOAL_SCOPE_UNRESOLVED_REASON } from '../../schemas/goal-scope.js';
 import type { GoalScopeClaimInput } from './goal-scope-claim-input.js';
@@ -1087,18 +1086,7 @@ export function composeAnalysisStateV1(
       computed_at: canonical.computed_at,
     },
   );
-  const occurrenceFact = input.runFactBinding?.selectedFact;
-  const occurrence = occurrenceFact === undefined ? undefined : readRunAnalysisOccurrence(occurrenceFact);
-  const recordedOccurrenceMatches = canonical.basis === 'recorded_run_revision'
-    && canonical.graph_hash_at_run === null
-    && occurrence !== undefined && occurrence.fact_row_id === canonical.selected_fact_row_id
-    && occurrence.evaluated_scenario_revision !== null
-    && occurrence.evaluated_scenario_revision === canonical.run_revision?.value
-    && occurrenceFact?.fact_type === 'run_analysis'
-    && occurrenceFact.result === input.runFactBinding?.selectedResult
-    && occurrenceFact.result.scenario_id === input.runFactBinding?.scenarioId
-    && occurrenceFact.result.computed_at === canonical.computed_at;
-  if (binding !== undefined && binding.status !== 'match' && !recordedOccurrenceMatches) {
+  if (binding !== undefined && binding.status !== 'match') {
     const reason = binding.status === 'mismatch'
       ? WITHHELD_RUN_IDENTITY_CONFLICT
       : WITHHELD_RUN_IDENTITY_UNCONFIRMED;
