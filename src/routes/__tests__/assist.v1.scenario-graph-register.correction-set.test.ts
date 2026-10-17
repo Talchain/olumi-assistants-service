@@ -941,6 +941,58 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });
+  it.each(['unchanged', 'relabelled', 'additional'])('B2: an intermediate quantity is %s without silently duplicating its causal path', async change => {
+    const seedDraft = structuredClone(bakery.draft) as Rec;
+    seedDraft.factors.push({ label: 'Shop footfall', role: 'observable', baseline_known: false, baseline_value: null,
+      unit: null, provenance: 'ai_proposed', plausible_max: 100 });
+    seedDraft.links = seedDraft.links.filter((l: Rec) => l.from !== 'Loyalty card running');
+    const link = { direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null,
+      effect_provenance: null, definitional: null, basis: null, source_quote: null };
+    seedDraft.links.push({ ...link, from: 'Loyalty card running', to: 'Shop footfall' },
+      { ...link, from: 'Shop footfall', to: 'weekly loaves sold' });
+    const seed = await runPreparingDraftReplacement('b2-seed', () => buildModelFromBrief('b2-seed', bakery.brief,
+      async () => { throw new Error('Preparation must not dispatch'); },
+      (async () => ({ text: JSON.stringify(seedDraft), status: 'completed' })) as never));
+    expect(seed.ok).toBe(true);
+    const proposed = change === 'relabelled'
+      ? JSON.parse(JSON.stringify(seedDraft).split('Shop footfall').join('Customer footfall')) : structuredClone(seedDraft);
+    if (change === 'additional') {
+      proposed.factors.push({ label: 'Repeat purchase frequency', role: 'observable', baseline_known: false, baseline_value: null,
+        unit: null, provenance: 'ai_proposed', plausible_max: 100 });
+      proposed.links.push({ ...link, from: 'Loyalty card running', to: 'Repeat purchase frequency' },
+        { ...link, from: 'Repeat purchase frequency', to: 'weekly loaves sold' });
+    }
+    const w = await world({ graph: seed.prepared_graph as Rec, brief: bakery.brief, message: rebuildRequest },
+      { provider: async () => ({ text: JSON.stringify(proposed), status: 'completed' }) });
+    const saved = w.original.nodes.find((n: Rec) => n.label === 'Shop footfall');
+    expect(saved).toBeDefined();
+    expect(w.original.nodes.filter((n: Rec) => n.kind === 'option').every((n: Rec) => !n.interventions?.[saved.id])).toBe(true);
+    expect(assessCanonicalAnalysisReadiness(w.original).safeToAnalyse).toBe(true);
+    const offered = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), w.ctx, w.caps());
+    if (change === 'relabelled') {
+      expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' });
+      expect(offered.follow_up).toContain('Shop footfall'); expect(offered.follow_up).toContain('Customer footfall');
+      expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
+      expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+      return;
+    }
+    expect(offered).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
+    const cold = restoreCard(held, offered, w.ctx), caps = w.caps(cold);
+    expect(await caps.authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+    const press = { ...w.ctx, user_turn_text: '', typed_approval_of: pid };
+    expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
+    expect(w.graph().nodes.filter((n: Rec) => n.label === 'Shop footfall')).toHaveLength(1);
+    expect(w.graph().nodes.some((n: Rec) => n.label === 'Customer footfall')).toBe(false);
+    expect(w.graph().nodes.some((n: Rec) => n.label === 'Repeat purchase frequency')).toBe(change === 'additional');
+    const incident = (graph: Rec) => graph.edges.filter((e: Rec) => e.from === saved.id || e.to === saved.id);
+    expect(incident(w.graph())).toEqual(incident(w.original));
+    expect(assessCanonicalAnalysisReadiness(w.graph()).safeToAnalyse).toBe(true);
+    expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+  });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });
     // DL04:00 ACK: the former 'partial' row lives at the actual durable source gate, not a sticky authorship flag.

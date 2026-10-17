@@ -607,6 +607,18 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
     if (found.length > 1 || (found.length === 0 && !copyAbsent(option))) return missing(`the identity of saved option “${String(option.label)}”`, 'saved_option');
     if (found.length === 0) kept.push(`the complete saved option “${String(option.label)}”`);
   }
+  // An absent quantity plus a new same-kind neighbour-sharing quantity may be a relabel. Copying the old one
+  // would keep two causal mechanisms without establishing that they are different quantities.
+  for (const saved of oldNodes.filter(n => n.kind !== 'option' && matches(n, newNodes).length === 0)) {
+    const neighbours = new Set(recs(before.edges).flatMap(e => e.from === saved.id ? [e.to] : e.to === saved.id ? [e.from] : []));
+    const possible = newNodes.find(added => added.kind === saved.kind && matches(added, oldNodes).length === 0
+      && recs(draft.edges).some(e => {
+        const id = e.from === added.id ? e.to : e.to === added.id ? e.from : undefined;
+        const neighbour = newNodes.find(n => n.id === id);
+        return neighbour !== undefined && matches(neighbour, oldNodes).some(n => neighbours.has(n.id));
+      }));
+    if (possible !== undefined) return missing(`the distinct identities of saved “${String(saved.label)}” and proposed “${String(possible.label)}”`, 'recorded_reasoning');
+  }
   for (const option of oldNodes.filter(n => n.kind === 'option')) {
     for (const id of Object.keys(mergeInterventionSourceObjects(option as never))) {
       const saved = oldNodes.find(n => n.id === id);
