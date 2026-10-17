@@ -252,10 +252,11 @@ describe('Explain scoped assembly safety', () => {
       // B2: evaluated-question scope sentence only; SENT instructions reverse byte-for-byte to AIE-04.
       // S4: two competing finding-first copies removed; record-first ordering owned once by RUN_FACTS_USE.
       // AIE current-finding-first replacement; duplicate rerun-plan instruction retired, factual context retained.
-      // B record-grounded qualitative coaching: exact existing RUN_FACTS_USE addition, AIE #94 advice 6229216131.
-      // 46551 UTF-8 bytes from the actual mocked sent request; removing only that addition reproduces ef9d6733….
-      // Mechanical request/instruction pin changes require Claude challenge; generated response quality remains unverified.
-      .toBe('14bd262eea4b0e0e73d61639742627be2ae5466f477cda0a40db61b46865f235');
+      // AIE current-qualification clarification replaces the earlier B coaching addition in the same RUN_FACTS_USE.
+      // 46692 UTF-8 bytes from the actual mocked sent request: swapping only this passage reproduces14bd262e…,
+      // removing it reproduces the pre-prompt ef9d6733…. All11 pins, including the run-facts literal, require Claude challenge.
+      // The literal and3 request assertions preserve currently applicable disclosure/scope/scientific qualifications; generation remains unverified.
+      .toBe('9393589037c2bbe99943e2b6e4bd74df5dcea94b3f3c8288b79e3d45d98ab098');
   },60000);
 });
 

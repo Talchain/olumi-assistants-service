@@ -586,9 +586,10 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       const calls = modelBodies.filter(isInterpretingCall);
       expect(calls, 'one interpreting call over this Run').toHaveLength(1);
       const sent = modelSentBodies[modelBodies.indexOf(calls[0]!)];
-      expect(sent?.split('When a Run or Explain withholds a chance, use its recorded reason once and still answer the qualitative question')).toHaveLength(2);
-      expect(sent).toContain('Do not repeat an unchanged limitation already acknowledged in the retained conversation unless asked');
-      expect(sent).toContain('never invent an optimal allocation');
+      // AIE clarification: stock explanation may shorten; each current scientific/scope/must_say qualification stays.
+      expect(sent?.split("When a Run or Explain withholds a chance, use its current recorded reason once and still answer the user's qualitative question")).toHaveLength(2);
+      expect(sent).toContain('Avoid repeated stock explanations of an unchanged capability limit, but keep every currently applicable must_say disclosure, scientific condition and scope note beside the finding or number it qualifies, once in this response');
+      expect(sent).toContain('once in this response; never invent an optimal allocation.');
       const chance = (interpretingRequestOf(calls[0]!) as Sent).canonical_state?.analysis?.goal_chance;
       expect(chance?.say, 'the control: the interpreting call reads this Run\'s withheld say').toEqual(expect.any(String));
       return chance!;
