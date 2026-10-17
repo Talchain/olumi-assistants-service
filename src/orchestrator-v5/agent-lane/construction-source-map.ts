@@ -132,7 +132,22 @@ export function statesLossBefore(quote: string, index: number): boolean {
   return LOSS_BEFORE.test(quote.slice(0, index));
 }
 
-/** The drafter's `statements`, each verified once against the brief. Anything malformed, unverified or unchecked is retained whole as unknown. */
+/**
+ * ⭐ G3 a735 (DL-3 GO 17 Oct; CONTRACT A): an EFFECT's sign is its link's direction, never the AI's figure, and every range reader
+ * takes the ends as magnitudes (`linkEffectRangeEnd`, `linkEffectStatedRange`). Served: the AI wrote "would cut leakage by between
+ * 3 and 5" as −5 to −3, the verifier (positive ends only) refused the whole statement as malformed, and the user's range reached no
+ * record and no reader, so the drafted low end was saved as Olumi's. Two negative ends are checked as the magnitudes the words
+ * write (−5 to −3 → 3 to 5); the AI's sign is dropped, never trusted. A range across zero, and any other form or field, is as given.
+ */
+function writtenEndsOfSignedRange(low: unknown, high: unknown): { readonly low: number; readonly high: number } | undefined {
+  return typeof low === 'number' && typeof high === 'number' && Number.isFinite(low) && Number.isFinite(high) && low < 0 && high < 0
+    ? { low: -high, high: -low } : undefined;
+}
+
+/**
+ * The drafter's `statements`, each verified once against the brief. Anything malformed, unverified or unchecked is retained whole as
+ * unknown. A statement the AI marks `negated` keeps that denial (the verifier's own carrier), so it never reads as a supplied effect.
+ */
 export function sourceMapOf(raw: unknown, brief: string): SourceMap {
   const verified = new Map<string, UserStatement[]>();
   const refused: RefusedStatement[] = [];
@@ -156,7 +171,9 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
       return;
     }
     const key = subjectKey(subject, field);
-    const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: r['low'], high: r['high'], qualifier: r['qualifier'], conditions: r['conditions'] }],
+    const ends = field === 'effect' && form === 'range' ? writtenEndsOfSignedRange(r['low'], r['high']) : undefined;
+    const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: ends?.low ?? r['low'], high: ends?.high ?? r['high'],
+      qualifier: r['qualifier'], conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}) }],
       { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
     verified.set(key, [...(verified.get(key) ?? []), ...v.statements]);
