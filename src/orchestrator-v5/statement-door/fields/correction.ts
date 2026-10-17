@@ -79,7 +79,8 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
   if (source === undefined || source.form !== 'describes' || source.low !== undefined || source.high !== undefined
     || !wholeStatementIn(source.source, source.quote)) return undefined;
   const keys = new Set<string>();
-  for (const raw of value.edits) {
+  const edits: readonly ApprovedCorrectionEdit[] = value.edits;
+  for (const raw of edits) {
     if (!rec(raw) || !rec(raw.subject) || !rec(raw.expected_node) || !rec(raw.retirement)
       || typeof raw.retirement.quote !== 'string' || raw.retirement.quote.trim() === ''
       || !['whole', 'part'].includes(String(raw.retirement.scope)) || !['historical', 'retracted'].includes(String(raw.retirement.disposition))
@@ -87,14 +88,14 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
       || (raw.retirement.scope === 'part' && raw.retained.length === 0)
       || typeof raw.reading_words !== 'string' || raw.reading_words.trim() === '') return undefined;
     const record = userStatementRecordOf(raw.record);
-    if (record === undefined || record.subject_key !== subjectKey(raw.subject as unknown as DoorSubject)
+    if (record === undefined || record.subject_key !== subjectKey(raw.subject)
       || (raw.expected_record !== null && userStatementRecordOf(raw.expected_record) === undefined)) return undefined;
     if (keys.has(record.subject_key)) return undefined;
     keys.add(record.subject_key);
     if (raw.legacy !== undefined && (!rec(raw.legacy) || !['already_true_quote', 'dependency'].includes(String(raw.legacy.field))
       || typeof raw.legacy.expected !== 'string' || !(raw.legacy.replacement === null || typeof raw.legacy.replacement === 'string'))) return undefined;
   }
-  return value as unknown as StatementCorrection;
+  return { ...value, source, edits };
 }
 
 /** The native postimage. Expected records/nodes are checked before any member changes; a refusal changes nothing. */
@@ -185,7 +186,8 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     || !wholeStatementIn(texts.now ?? '', request.quote) || !Array.isArray(request.edits) || request.edits.length === 0) return { refused: 'correction_not_stated' };
   const edits: ApprovedCorrectionEdit[] = [];
   let source: UserStatement | undefined;
-  for (const e of request.edits) {
+  const requested: readonly CorrectionEditRequest[] = request.edits;
+  for (const e of requested) {
     if (!rec(e) || !rec(e.subject)) return { refused: 'invalid_statement' };
     const node = nodeOf(graph, e.subject?.id);
     if (node === undefined) return { refused: 'node_not_found' };

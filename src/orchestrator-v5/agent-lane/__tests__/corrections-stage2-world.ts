@@ -15,6 +15,7 @@ vi.mock('../../../orchestrator/user-identity.js', async original => ({
 import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js';
 import graphRoute from '../../../routes/assist.v1.scenario-graph.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import type { ToolResult } from '../runtime/agent-tools.js';
 import { dispatchTool, type AgentToolContext } from '../runtime/agent-tools.js';
 import { ProposalStore, type StructuredProposal } from '../proposal.js';
 import { proposalPendingAction, rehydrateProposals } from '../durable-proposal.js';
@@ -62,9 +63,9 @@ export async function correctionWorld(original: Rec, message: string) {
     offer: (tool: string, args: unknown) => dispatchTool(tool, JSON.stringify(args), ctx, caps()),
     press: (pid: string, store = proposals, own = true) => caps(store).authoriseChange({ ...ctx, turn_id: randomUUID(), user_turn_text: '',
       ...(own ? { typed_approval_of: pid } : {}) }, { proposal_id: pid }),
-    chips: (tool: string, result: Rec) => approvalChipsFor([{ name: tool, ok: true, mutated: false, proposal_id: result.proposal_id }],
+    chips: (tool: string, result: ToolResult) => approvalChipsFor([{ name: tool, ok: true, mutated: false, proposal_id: result.proposal_id }],
       pid => ({ proposal: proposals.get(pid)!, result, args: {} })),
-    restoreCard: (proposal: StructuredProposal, result: Rec, tool = 'propose_statement') => {
+    restoreCard: (proposal: StructuredProposal, result: ToolResult, tool = 'propose_statement') => {
       const chip = approvalChipsFor([{ name: tool, ok: true, mutated: false, proposal_id: proposal.proposal_id }],
         () => ({ proposal, result, args: {} }))[0]!;
       const pending = proposalPendingAction(proposal, chip, { scenario_id: scenario, emitted_at_iso: new Date().toISOString() });

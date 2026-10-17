@@ -32,12 +32,12 @@ interface QualitativeReframeRequest {
   readonly label: string;
 }
 export interface ReframeRead {
-  readonly raw: Rec; readonly graph_hash: string; readonly graph_identity_hash: string; readonly brief_text?: string;
+  readonly raw: Rec; readonly graph_hash: string; readonly graph_identity_hash: string; readonly brief_text?: string | null;
 }
 const identityOf = (g: unknown): string => computeGraphIdentityHash(g as never)?.value ?? '';
 
 /** A qualitative repoint uses the same old-goal node for history, and introduces no operative number or new store. */
-function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: QualitativeReframeRequest,
+function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: Partial<Record<keyof QualitativeReframeRequest, unknown>>,
   at: string): { refused: string } | { candidate: Rec; new_id: string; words: string; source_line: string } {
   const nodes = Array.isArray(before.raw.nodes) ? before.raw.nodes.filter(rec) : [];
   const old = nodes.find(n => n.id === request?.goal_id && n.kind === 'goal');
@@ -108,7 +108,7 @@ export async function applyQualitativeReframe(ctx: AgentToolContext, parent: Str
     || before.graph_identity_hash !== v.base_identity || before.brief_text !== v.brief_text) return no('superseded');
   // Recreate only the deterministic native projection from the card's frozen source, never a new AI reading.
   const sourceContext = { ...ctx, user_turn_text: bound.source_line, user_text: bound.source_line };
-  const prepared = prepareQualitativeReframe(sourceContext, before, bound.request as unknown as QualitativeReframeRequest, bound.at);
+  const prepared = prepareQualitativeReframe(sourceContext, before, bound.request, bound.at);
   if ('refused' in prepared || !isDeepStrictEqual(prepared.candidate, v.candidate) || op.path !== prepared.new_id
     || parent.public_label !== prepared.words) return no('incomplete_goal_postimage');
   const registered = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, { graph: v.candidate,
