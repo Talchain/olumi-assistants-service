@@ -12,7 +12,7 @@
  * - hiring: the T1H negative r3 capture's read after its approval.
  */
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
@@ -43,7 +43,7 @@ const store = {
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
-  readRecent: vi.fn(async () => []),
+  readRecent: vi.fn(async (): Promise<Json[]> => []),
   readMostRecentPendingActions: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
@@ -87,6 +87,9 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     return JSON.parse(textOf(item).slice(REASONING_CONTEXT_LABEL.length).trim());
   };
   beforeAll(async () => {
+    for (const [, target] of readFileSync(new URL(import.meta.url), 'utf8').matchAll(/vi\.mock\(['"]([^'"]+)['"]/g)) {
+      expect(existsSync(new URL(target!.replace(/\.js$/, '.ts'), import.meta.url)), `mock target exists: ${target}`).toBe(true);
+    }
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Json;
       bodies.push(body);
@@ -155,6 +158,27 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     expect(historyBinding.read, 'the real route supplies the rebuild history reader').toBeTypeOf('function');
     const history = historyBinding.read!() as Json[];
     for (const text of [...statements, ...priorReplies]) expect(history.map(textOf)).toContain(text);
+  }, 60_000);
+
+  it('R3 cold-session rebuild history is read after this request\'s durable reseed', async () => {
+    READ = { scenario_id: randomUUID(), graph_hash: 'synthetic-cold-history',
+      brief_text: 'Explore shift coverage and the evidence behind the reported delay.',
+      graph: { nodes: [], edges: [] } };
+    const scenario = READ.scenario_id as string;
+    const durableUser = 'The night team disputes the mechanism.';
+    const durableOlumi = 'Which shift does that concern?';
+    store.readRecent.mockImplementation(async () => [{ request_hash: 'agent_turn:synthetic-durable-context', user_message: durableUser,
+      assistant_message: durableOlumi, created_at: '2026-10-17T00:00:00Z' }]);
+    historyBinding.read = undefined;
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: scenario, agent_session_id: randomUUID(), turn_id: randomUUID(), message: 'What should we look at next?' } });
+      expect(r.statusCode, r.body).toBe(200);
+    } finally { store.readRecent.mockResolvedValue([]); }
+    expect(historyBinding.read, 'reader bound').toBeTypeOf('function');
+    const texts = (historyBinding.read!() as Json[]).map(textOf);
+    expect(texts, 'durable user answer reseeded before the reader is read').toContain(durableUser);
+    expect(texts, 'durable Olumi question reseeded before the reader is read').toContain(durableOlumi);
   }, 60_000);
 
   it.each(Object.keys(CONTEXT_BRIEFS).flatMap(brief => ['chat', 'Explain'].map(path => ({ brief, path }))))(
