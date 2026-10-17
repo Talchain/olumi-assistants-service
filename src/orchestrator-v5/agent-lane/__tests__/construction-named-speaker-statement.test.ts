@@ -11,7 +11,8 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We need to bring in at least £600k of new contract value this year.';
-const SPEECH = "Priya, sales lead: 'More referrals mean more contracts signed, because the client already trusts us.'";
+// Double marks bound a speech; single marks cannot (an apostrophe is the same mark): DL-3 16:14Z.
+const SPEECH = 'Priya, sales lead: “More referrals mean more contracts signed, because the client already trusts us.”';
 const BRIEF = `${AIM} ${SPEECH} We could hire a second salesperson or start a referral scheme.`;
 const GOAL = 'New contract value';
 const REFERRALS = 'Referrals';
@@ -59,18 +60,41 @@ const relationRecord = (graph: Rec): Rec | undefined => {
 };
 
 describe('a person the brief quotes by name keeps their words, whole, on the link they are about', () => {
-  it('⭐ RED → GREEN, real build → register: "Name, role: \'…\'" closed after its full stop is recorded verbatim, speaker included', async () => {
+  it('⭐ RED → GREEN, real build → register: "Name, role: “…”" closed after its full stop is recorded verbatim, speaker included', async () => {
     const record = relationRecord(await saved(draft(SPEECH)));
     expect(record?.statements, 'the named speech is recorded').toEqual([expect.objectContaining({ speaker: 'user', quote: SPEECH, form: 'describes' })]);
   });
 
   it('⛔ #3363 B1 (BUDDY-A), real path: a two-sentence speech with an earlier qualification is kept whole; its last sentence alone records nothing', async () => {
-    const qualified = "Priya, sales lead: 'This is only true if the pilot works. More referrals mean more contracts signed, because the client already trusts us.'";
-    const tail = "More referrals mean more contracts signed, because the client already trusts us.'";
+    const qualified = 'Priya, sales lead: “This is only true if the pilot works. More referrals mean more contracts signed, because the client already trusts us.”';
+    const tail = 'More referrals mean more contracts signed, because the client already trusts us.”';
     const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
     const whole = relationRecord(await saved(draft(qualified), brief));
     expect(whole?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
     expect(relationRecord(await saved(draft(tail), brief)), 'the tail loses Priya and her condition').toBeUndefined();
+  });
+
+  it('⛔ #3363 B1 R2 A (BUDDY-A), real path: a plural possessive inside the speech and its full stop OUTSIDE the closing mark never free its last sentence', async () => {
+    const qualified = "Priya, sales lead: “This is only true if the users' pilot works. More referrals mean more contracts signed, because the client already trusts us”.";
+    const tail = 'More referrals mean more contracts signed, because the client already trusts us”.';
+    const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
+    expect(relationRecord(await saved(draft(qualified), brief))?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
+    expect(relationRecord(await saved(draft(tail), brief)), 'the tail loses Priya and her condition').toBeUndefined();
+  });
+
+  it('⛔ DL-3 16:14Z, real path: the same speech in SINGLE marks cannot be bounded: neither all of it nor its tail is recorded as anyone\'s, and no speaker is asserted', async () => {
+    const qualified = "Priya, sales lead: 'This is only true if the users' pilot works. More referrals mean more contracts signed, because the client already trusts us'.";
+    const tail = "More referrals mean more contracts signed, because the client already trusts us'.";
+    const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
+    for (const quote of [qualified, tail, 'More referrals mean more contracts signed, because the client already trusts us.']) {
+      expect(relationRecord(await saved(draft(quote), brief)), quote).toBeUndefined();
+    }
+  });
+
+  it('⛔ #3363 B1 R2 B (BUDDY-A), real path: a year written "\'27" opens no speech; the complete sentence after it is recorded', async () => {
+    const said = 'More referrals mean more contracts signed, because the client already trusts us.';
+    const brief = `${AIM} The plan starts in '27. ${said} We could hire a second salesperson or start a referral scheme.`;
+    expect(relationRecord(await saved(draft(said), brief))?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: said })]);
   });
 
   it('CONTRAST: the same words without their speaker are not the brief\'s whole statement, so nothing is recorded for them', async () => {

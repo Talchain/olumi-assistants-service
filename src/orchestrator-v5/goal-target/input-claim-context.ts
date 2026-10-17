@@ -244,48 +244,30 @@ const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'"
  * of `message`, verbatim in one spelling (`plainQuote`). It starts at the message's start or after . ! ? ; or a line, and
  * ends at the message's end or before one. A colon does not end a statement ("Alice says: …" keeps its speaker), so a
  * substring that drops "Alice says …", "Olumi suggested …" or "I disagree" is not whole.
- * ⛔ T1 HOST P07 (pilot 17 Oct): a full stop may be followed by the quotation mark that closes a person's words
- * ("Sam, site lead: 'Crews start early.'"), at either end of a statement. Without it, every quoted speech was refused as
+ * ⛔ T1 HOST P07 (pilot 17 Oct): a full stop may be followed by the double quotation mark that closes a person's words
+ * ("Sam, site lead: “Crews start early.”"), at either end of a statement. Without it, every quoted speech was refused as
  * "not a whole statement" and its attribution was lost.
+ * ⛔ #3363 B1 (BUDDY-A R1–R2; DL-3 16:14Z: stop parsing apostrophes): a statement never starts or ends inside someone's quoted
+ * words, since none of their sentences is whole without the speaker and the rest of what they said. Only double marks (straight,
+ * typographic, « ») delimit speech. A single mark is a letter like any other ("'27", "don't", "the users' pilot"), so speech an
+ * attribution opens with one ("Priya, sales lead: '…") cannot be bounded: nothing from that attribution to the paragraph's end is
+ * whole. Those words stay the brief's, unverified, with no speaker asserted.
  */
-const ENDS = /[.!?;]['"]*$/;
+const ENDS = /[.!?;]["»]*$/;
 export function wholeStatementIn(message: string, quote: unknown): boolean {
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
   const text = plainQuote(message);
-  const regions = quotationRegions(text);
   return said !== '' && quoteSpansIn(text, said).some((at) =>
-    /(?:^|[.!?;\n]['"]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
-    // ⛔ #3363 B1 (BUDDY-A): a statement never starts or ends inside someone's quoted words: their sentences are not whole
-    // without the speaker and the rest of what they said ("This is only true if the pilot works.").
-    && !insideQuotation(regions, at) && !insideQuotation(regions, at + said.length));
+    /(?:^|[.!?;\n]["»]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
+    && !insideSpeech(text, at) && !insideSpeech(text, at + said.length) && !/:\s*'/u.test(paragraphTo(text, at + said.length)));
 }
-
-/**
- * The quotations a text holds, as [opening mark, closing mark] index pairs. A mark opens one after the start, a space or the
- * attribution's punctuation ("Priya:'…"), never inside a word (an apostrophe: "don't", "Priya's"). It closes at the LAST mark
- * that follows punctuation before the next opening ("…the users' plan works. More referrals help.'"), else at the first
- * closing mark ("the 'fast track' option"); with none, it runs to the end.
- */
-function quotationRegions(text: string): readonly (readonly [number, number])[] {
-  const regions: [number, number][] = [];
-  for (const mark of ['"', "'"]) {
-    const opens = (i: number): boolean => text[i] === mark && (i === 0 || /[\s([:;,\u2014\u2013-]/u.test(text[i - 1]!)) && /\S/u.test(text[i + 1] ?? '');
-    const closes = (i: number): boolean => text[i] === mark && i > 0 && /\S/u.test(text[i - 1]!) && /^(?:$|[\s.,;:!?)\]])/u.test(text.slice(i + 1, i + 2));
-    for (let i = 0; i < text.length; i += 1) {
-      if (!opens(i)) continue;
-      let next = text.length;
-      for (let j = i + 1; j < text.length; j += 1) if (opens(j)) { next = j; break; }
-      const candidates = [...Array(next - i - 1).keys()].map((k) => i + 1 + k).filter(closes);
-      const close = [...candidates].reverse().find((j) => /[.!?,;]/u.test(text[j - 1]!)) ?? candidates[0] ?? text.length;
-      regions.push([i, close]);
-      i = close;
-    }
-  }
-  return regions;
-}
-/** `at` lies inside a quotation (after its opening mark, up to and including its closing one). */
-const insideQuotation = (regions: readonly (readonly [number, number])[], at: number): boolean =>
-  regions.some(([open, close]) => open < at && at <= close);
+/** The text of `at`'s paragraph up to `at`. */
+const paragraphTo = (text: string, at: number): string => text.slice(text.lastIndexOf('\n', at - 1) + 1, at);
+/** `at` lies inside double-marked speech: an odd number of " before it in its paragraph, or a « not yet closed by ». */
+const insideSpeech = (text: string, at: number): boolean => {
+  const before = paragraphTo(text, at);
+  return before.split('"').length % 2 === 0 || before.lastIndexOf('«') > before.lastIndexOf('»');
+};
 
 /** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */
 export function namesBothEnds(text: string, nodes: readonly Entity[], from: string, to: string): boolean {
