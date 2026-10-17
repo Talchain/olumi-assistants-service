@@ -94,8 +94,13 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
   it('the map is RECORDED, nothing else moves: the graphs are equal but for the verified statement now held on its node (AIE 6183705670)', async () => {
     const without = await build(SERVED.draft);
     const withStatements = await build({ ...SERVED.draft, statements: [legacyLevel(), legacyLevel({ value: 15 })] });
-    const bare = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map(({ user_statements: _u, ...n }) => n) });
-    expect(bare(withStatements.graph)).toEqual(without.graph);
+    // The ONE other move (Lane A risk-source owner): the map is now the risks' source, so a risk no verified statement claims is
+    // Olumi's ('ai_inferred'), where with no list its source is unknown. Nothing else differs.
+    const risksOf = (g: Rec): Rec[] => (g.nodes as Rec[]).filter((n) => n.kind === 'risk');
+    expect(risksOf(withStatements.graph).map((n) => n.provenance)).toEqual(risksOf(without.graph).map(() => 'ai_inferred'));
+    expect(risksOf(without.graph).map((n) => n.provenance)).toEqual(risksOf(without.graph).map(() => undefined));
+    const bare = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map(({ user_statements: _u, ...n }) => (n.kind === 'risk' ? { ...n, provenance: undefined } : n)) });
+    expect(bare(withStatements.graph)).toEqual(bare(without.graph));
     const held = (withStatements.graph.nodes as Rec[]).filter((n) => Array.isArray(n.user_statements));
     expect(held.map((n) => [n.label, n.user_statements.map((r: Rec) => r.field)])).toEqual([[legacyLevel().subject.label, ['level']]]);
     expect((without.graph.nodes as Rec[]).some((n) => n.user_statements !== undefined)).toBe(false);

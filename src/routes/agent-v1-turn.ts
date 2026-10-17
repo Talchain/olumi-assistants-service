@@ -2,6 +2,8 @@ import { STATIC_MODEL_SCOPE_NOTE } from '../orchestrator-v5/goal-target/static-r
 import { readRecordedRun, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { withoutUnsizedLinkInvitation } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
+import { buildBaselineHoldSuffix } from '../orchestrator-v5/coaching/scaffold-disclosure.js';
+import { figuresIn } from '../orchestrator-v5/agent-lane/licensed-chance-lines.js';
 import { postResponses } from '../adapters/llm/openai.js';
 import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-card.js';
 import { projectStatedObjections, STATED_OBJECTIONS_CAP } from '../orchestrator-v5/context/stated-objections.js';
@@ -681,7 +683,7 @@ function withCellHorizon(text: string, graph: unknown, cells: readonly Canonical
  * withheld line and bound, each target on its own (matched by its words; the card names options by the canvas), the status
  * quo by assumption, and the notes. `null` when the view carries no goal-chance detail.
  */
-function cardDetailLinesOf(view: unknown): { has(line: string): boolean } | null {
+function cardDetailLinesOf(view: unknown): { has(line: string): boolean; disclosures: readonly string[] } | null {
   const card = view as { goal_chance?: CanonicalGoalChanceDetail;
     question?: { scope?: { status?: unknown; note?: unknown } };
     options?: readonly { cell?: { kind?: unknown; face?: unknown } }[] } | null | undefined;
@@ -698,7 +700,22 @@ function cardDetailLinesOf(view: unknown): { has(line: string): boolean } | null
     ...(staticOnCard ? [STATIC_MODEL_SCOPE_NOTE] : []),
   ]);
   const targetLeads = (detail?.targets?.per_target ?? []).map(t => `On its own, the chance of ${t.words}, in this model: `);
-  return { has: line => exact.has(line) || targetLeads.some(lead => line.startsWith(lead)) };
+  const findings = new Set((card?.options ?? []).flatMap(({ cell }) => typeof cell?.face === 'string' ? [cell.face] : []));
+  return { disclosures: [...exact], has: line => exact.has(line) || findings.has(line) || targetLeads.some(lead => line.startsWith(lead)) };
+}
+
+type RunCard = { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
+  staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: CanonicalAnalysisCell }[] };
+
+/** The interpreter and final reply use the same current-card identity test; a value match is never a binding. */
+function boundRunCard(view: unknown, scenarioId: string, runIdentity: unknown, analysisResult: unknown): RunCard | undefined {
+  if (!validCanonicalAnalysisView(view)) return undefined;
+  const card = view as RunCard;
+  return card.staleness?.stale === false && typeof card.run?.run_id === 'string' && card.run.run_id !== ''
+    && compareAnalysisRunFactIdentity(runIdentity, { scenario_id: scenarioId, graph_hash_at_run: card.run.graph_hash_at_run,
+      computed_at: card.run.computed_at }).status === 'match'
+    && (analysisResult as { computed_against_hash?: unknown } | null | undefined)?.computed_against_hash === card.run.graph_hash_at_run
+    ? card : undefined;
 }
 
 /** The latest successful build's typed receipt owns the draft words; narrator prose is never a receipt. */
@@ -3605,8 +3622,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * implemented change"). The same canonical assembly, asked-once handling, rerun plan from the selected delta (the
      * comparison #3036 gives the model) and tool-less call; `admit` false spends no call.
      */
+    let interpretedCardIdentity: unknown;
     const interpretSelectedRun = async (st: Awaited<ReturnType<typeof readBackState>>, runDelta: unknown,
-      conversation: readonly unknown[], admit: boolean, briefText: unknown) => {
+      conversation: readonly unknown[], admit: boolean, briefText: unknown, freshRunIdentity?: unknown) => {
       let admitted = admit;
       // The same completed canonical assembly the ordinary Agent reads: no stored result/enrichment packet.
       const canonicalAfterRun: Awaited<ReturnType<typeof capabilities.getCanonicalState>> = { ...await capabilities.getCanonicalState(toolCtx, { section: 'run_explanation' }),
@@ -3637,8 +3655,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof target?.say === 'string' ? { target_testability: askedOnce(target, 'say') } : {}),
         ...(typeof sensitivity?.say === 'string' ? { decision_sensitivity: askedOnce(sensitivity, 'say') } : {}),
       };
+      const canonicalFacts = runFactsContext(canonicalAfterRun).facts;
+      const interpreterFacts = canonicalFacts.run_facts as Record<string, unknown> | undefined;
+      // Only a fresh Run can deliver a card in THIS response. Explain and historical/stale/foreign cards own nothing here.
+      const shownCard = admitted && interpreterFacts?.current === true
+        && (st.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current'
+        ? boundRunCard(st.canonicalAnalysisView, scenarioId, freshRunIdentity, st.analysisResult) : undefined;
+      const shown = shownCard === undefined ? undefined : { run_id: shownCard.run!.run_id,
+        findings: shownCard.options.flatMap(({ option_id, cell }) => cell.kind !== 'none' && typeof cell.face === 'string' && cell.face !== ''
+          ? [{ option_id, text: cell.face }] : []),
+        disclosures: cardDetailLinesOf(shownCard)?.disclosures ?? [] };
+      if (shown !== undefined) interpretedCardIdentity = freshRunIdentity;
       const runForInterpreter = {
-        ...runFactsContext(canonicalAfterRun).facts,
+        ...canonicalFacts,
+        ...(shown === undefined || interpreterFacts === undefined ? {} : {
+          run_facts: { ...interpreterFacts, shown_on_card: shown } }),
         ...(goalChanceNow === undefined ? {} : { analysis: { ...selectedRun, goal_chance: goalChanceNow } }),
         ...(sectionNow === undefined ? {} : { run_explanation: sectionNow }),
       };
@@ -4448,7 +4479,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const pressedForInterpretation = autoRunIdentity === undefined && selected;
       const interpretedRun = !selected ? undefined
         : await interpretSelectedRun(autoRead, currentRead?.run_delta, result.items, true,
-          selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined);
+          selectedRead?.status === 200 ? selectedRead.json.brief_text : undefined, interpretRunIdentity);
       if (interpretedRun?.admitted === true) {
         const said = interpretedRun.interpreted?.answer
           ?? interpretedRun.rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true });
@@ -5416,8 +5447,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);
     // The turn cache sees this turn's writes only. Recheck other writers before licensing the additive UI view.
-    const canonicalViewMayShip = validCanonicalAnalysisView(composedRead.canonicalAnalysisView)
+    const canonicalViewBasisCurrent = (validCanonicalAnalysisView(composedRead.canonicalAnalysisView) || interpretedCardIdentity !== undefined)
       && await canonicalViewBasisUnchanged(store, scenarioId, composedRead);
+    const canonicalViewMayShip = validCanonicalAnalysisView(composedRead.canonicalAnalysisView) && canonicalViewBasisCurrent;
     let wireBody = {
       ...finalised,
       ...(narrationStatus !== undefined && narrationKey !== undefined
@@ -5533,17 +5565,30 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return own === undefined ? undefined : { scenario_id: scenarioId, ...(own as Record<string, unknown>) };
     })();
     const cardView = ranAnalysisThisTurn && analysisResult !== undefined && canonicalViewMayShip
-      ? composedRead.canonicalAnalysisView as { run?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown };
-        staleness?: { stale?: unknown }; options: readonly { option_id: string; cell: { kind?: unknown; face?: unknown; reasons?: unknown } }[] }
-      : undefined;
-    const cardBound = cardView !== undefined && cardView.staleness?.stale === false
-      && typeof cardView.run?.run_id === 'string' && cardView.run.run_id !== ''
-      && compareAnalysisRunFactIdentity(thisTurnRun, { scenario_id: scenarioId, graph_hash_at_run: cardView.run.graph_hash_at_run,
-        computed_at: cardView.run.computed_at }).status === 'match'
-      && (analysisResult as { computed_against_hash?: unknown }).computed_against_hash === cardView.run.graph_hash_at_run;
+      ? boundRunCard(composedRead.canonicalAnalysisView, scenarioId, thisTurnRun, analysisResult) : undefined;
+    const cardBound = cardView !== undefined;
     const selectedRunCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
     // A disclosure is retired only when THIS turn's bound, shown chance already owns it.
     const cardDetail = cardBound ? cardDetailLinesOf(composedRead.canonicalAnalysisView) : null;
+    if (cardBound && Array.isArray(wireBody.blocks)) {
+      // The result block remains a complete fallback unless this SAME response's bound card owns the exact fact.
+      // Keep distinct qualifications (for example, excluded model parts); never retire a summary merely because AI replied.
+      const detail = (composedRead.canonicalAnalysisView as { goal_chance?: CanonicalGoalChanceDetail }).goal_chance;
+      const noChange = detail?.status_quo;
+      const nodes = (readbackGraph as { nodes?: { id?: unknown; label?: unknown }[] } | undefined)?.nodes;
+      const held = Array.isArray(nodes) ? nodes.find(node => node.id === noChange?.option_id) : undefined;
+      const baselineSuffix = noChange !== undefined && held !== undefined && typeof held.label === 'string'
+        ? buildBaselineHoldSuffix([{ option_id: noChange.option_id, label: held.label }]).trim() : null;
+      const owned = [...cardView.options.flatMap(({ cell }) => cell.kind !== 'none' && typeof cell.face === 'string' ? [cell.face] : []),
+        ...(cardDetail?.disclosures ?? []), ...(baselineSuffix === null ? [] : [baselineSuffix])];
+      wireBody = { ...wireBody, blocks: wireBody.blocks.map((block, index) => {
+        // Only index0 is this route's selected final-read result (installed above); other blocks carry no card binding.
+        if (index !== 0 || block.type !== 'analysis_result' || typeof block.summary !== 'string') return block;
+        let summary = block.summary;
+        for (const line of owned) if (line !== '') summary = withoutDisclosure(summary, line, { keep: 0 });
+        return summary === block.summary ? block : { ...block, summary: summary.trim() };
+      }) };
+    }
     const estimatesOnCard = cardBound && goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent)
       .some(line => line.olumi_estimate_link_count !== undefined);
     if (estimatesOnCard && basis !== null) {
@@ -5629,12 +5674,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (cardDetail !== null) {
         const recordNotes = goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, selectedRunCurrent);
         let text = wireBody.assistant_text;
+        const cardIds = new Set(cardView!.options.map(option => option.option_id));
+        const readNodes = (readbackGraph as { nodes?: unknown } | undefined)?.nodes;
+        const emptyLabels = (Array.isArray(readNodes) ? readNodes : [])
+          .filter((node): node is Record<string, unknown> => node !== null && typeof node === 'object' && !Array.isArray(node))
+          .filter(node => node.kind === 'option' && typeof node.id === 'string' && cardIds.has(node.id))
+          .flatMap(node => typeof node.label === 'string' ? [node.label] : []);
+        const protectedTexts = userTextsForEgress(
+          [...histories.typedWords(sessionId), ...(typedNow !== null ? [typedNow] : [])], recentRowsForEgress);
+        const figureInChat = figuresIn(text).length > 0;
+        const statusQuoLine = (composedRead.canonicalAnalysisView as { goal_chance?: CanonicalGoalChanceDetail }).goal_chance?.status_quo?.line;
         for (const line of new Set([...decisionLines, ...recordNotes])) {
-          if (cardDetail.has(line)) text = withoutDisclosure(text, line);
+          // A repeated figure still owes its qualifications in chat. The status-quo row is a separate card-owned finding.
+          if (cardDetail.has(line) && (!figureInChat || line === statusQuoLine)) {
+            text = withoutDisclosure(text, line, { keep: 0, emptyLabels, protectedTexts });
+          }
         }
         wireBody = { ...wireBody, assistant_text: text };
       }
 
+    }
+    if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
+      // A card promised to the interpreter can be withdrawn by the final read. If the SAME Run is still current,
+      // its complete existing screen words return to chat. A stale/different Run never borrows those earlier figures.
+      if (!cardBound && canonicalViewBasisCurrent && interpretedCardIdentity !== undefined && selectedRunCurrent
+        && compareAnalysisRunFactIdentity(interpretedCardIdentity, { scenario_id: scenarioId,
+          graph_hash_at_run: (analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
+          computed_at: (analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at }).status === 'match') {
+        wireBody = { ...wireBody, assistant_text: withDisclosures(String(wireBody.assistant_text ?? ''), [
+          ...screenLines.flatMap(line => [line.chance, line.depends]),
+          ...goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, true), ...decisionLines,
+        ], { missingSentencesOnly: true }) };
+      }
     }
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate

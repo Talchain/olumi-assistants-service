@@ -1,3 +1,4 @@
+import G2_CAPTURED from './fixtures/g2-2b073341-coaching.json';
 import { unsizedLinkSentence, UNSIZED_PATH_LEADER_CAUSE_KEY } from '../unsized-path-cause.js';
 /** Real Agent route with mocked transport: one reply, recorded figures, source, scope and durable replay. */
 import { readFileSync } from 'node:fs';
@@ -42,6 +43,7 @@ let lastTurnPayload: Json;
 let runCompleted = false;
 let nb1SavedBasis = false;
 let nb1MovedBasis = false;
+let moveBasisAtInterpretation = false;
 let canonicalReadOverride: ((view: ReturnType<typeof projectCanonicalAnalysisView>) => unknown) | undefined;
 let warn: ReturnType<typeof vi.spyOn>;
 vi.mock('../reply/compose-reply.js', async original => {
@@ -79,6 +81,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 let callModelOutputs: Record<string, unknown>[][] = [];
+const sentBodies: Json[] = [];
 type Body = { assistant_text: string; canonical_analysis_view?: ReturnType<typeof projectCanonicalAnalysisView>; blocks?: Json[]; _answer_shape?: AnswerShape; _agent: { tool_calls: { name: string; ok: boolean }[]; replayed?: boolean } };
 
 describe('S4c through the route: the screen’s range line is in the Run narration', () => {
@@ -86,6 +89,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       const req = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      sentBodies.push(req);
+      if (moveBasisAtInterpretation && req.tool_choice === 'none' && Array.isArray(req.tools) && req.tools.length === 0) nb1MovedBasis = true;
       if ((req['tool_choice'] as { name?: unknown } | undefined)?.name === 'give_provisional_view') {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify(VIEW), call_id: 'forced' }] }), { status: 200 });
       }
@@ -125,7 +130,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { warn.mockRestore(); await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { extraRunBlocks = []; nb1SavedBasis = false; nb1MovedBasis = false; runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
+  beforeEach(() => { moveBasisAtInterpretation = false; sentBodies.length = 0; extraRunBlocks = []; nb1SavedBasis = false; nb1MovedBasis = false; runCompleted = false; canonicalReadOverride = undefined; warn.mockClear(); rows.clear(); recentRows = []; forwardedText = 'ok'; READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); composeInput = undefined; composition = undefined; });
   const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
@@ -245,6 +250,95 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
       }
       expect(rows.get(lastTurnPayload.turn_id)?.assistant_message).toBe(b.assistant_text);
     }, 60000);
+
+  it.each([...G2_CAPTURED.map(row => ({ ...row, mode: 'bound' })),
+    ...['absent', 'stale', 'foreign', 'moved', 'card_only'].map(mode => ({ ...G2_CAPTURED[0], mode }))])('G2 $turn $mode: actual Run producer and route keep the figure/qualification while owning removed formatting', async captured => {
+    // Script a NEW native Run over the captured saved graph. Missing old private snapshots are never reconstructed.
+    // Its input reply below is synthetic: the served capture did not retain raw provider text.
+    const graph = structuredClone(captured.read.graph);
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, `g2-${captured.turn}`, {
+      loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: captured.read.brief_text, revision: 1 })),
+      readMostRecentPendingActions: vi.fn(async () => []),
+    } as never);
+    const transport = vi.fn(async () => ({ ...structuredClone(minimal),
+      option_comparison: structuredClone(captured.read.analysis_result.enrichment.option_comparison) }));
+    const outcome = await createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: transport, validatePatch: vi.fn() } as never })({
+      payload: { scenario_id: SCENARIO, turn_id: `g2-${captured.turn}` }, requestId: `g2-${captured.turn}`,
+      context: {}, signal: new AbortController().signal, orientationText: '',
+    } as never);
+    const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+    if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected actual native Run producer');
+    expect(transport).toHaveBeenCalledTimes(1);
+    READ = { graph, graph_hash: fact.result.graph_hash_at_run,
+      analysis_ready: captured.read.current_read.analysis_ready,
+      analysis_state: { ...structuredClone(captured.read.analysis_state),
+        run_state: { kind: 'complete_current', computed_at: fact.result.computed_at } } };
+    analysisResult = { type: 'analysis_result', ...fact.result, computed_against_hash: fact.result.graph_hash_at_run };
+    nb1SavedBasis = true;
+    if (captured.mode === 'absent') canonicalReadOverride = () => undefined;
+    if (captured.mode === 'stale') canonicalReadOverride = view => ({ ...view, staleness: { ...view.staleness, stale: true } });
+    if (captured.mode === 'foreign') canonicalReadOverride = view => ({ ...view, run: view.run === null ? null : { ...view.run, computed_at: '2000-01-01T00:00:00.000Z' } });
+    const chance = goalChanceFactsForAgent(analysisResult, graph, true);
+    const notes = [STATIC_MODEL_SCOPE_NOTE, ...(chance.goal_chance_notes ?? [])];
+    let at = 0;
+    // The captured host footer is not raw AI output; exclude it from the scripted interpreter input.
+    let synthetic = captured.served_assistant_text.replace(captured.served_host_basis, '').replace(/^- $/gmu, () => `- ${notes[at++ % notes.length]}`);
+    const baseline = (projectCanonicalAnalysisView({ graph, revision: 1,
+      runFact: fact as never, analysisState: READ.analysis_state, currentResult: analysisResult } as never)
+      .goal_chance as { status_quo?: { line?: string } } | undefined)?.status_quo?.line;
+    if (baseline) synthetic = synthetic.replace('- **Keep current staffing:** ', `- **Keep current staffing:** ${baseline}`);
+    const { turn_id: _recordedTurn, scenario_id: _recordedScenario, ...request } = captured.request;
+    if (captured.mode === 'moved') {
+      moveBasisAtInterpretation = true;
+      synthetic = 'Check the saved hiring condition before acting on the comparison.';
+    }
+    if (captured.mode === 'card_only') synthetic = 'The comparison relies on the saved hiring condition, an Olumi suggestion outside the calculation. Watch whether the vacancy stays open; this qualitative condition supplies no likelihood or effect size.';
+    const cardShows = captured.mode === 'bound' || captured.mode === 'card_only';
+    const b = await turn(run(synthetic), request.message, request);
+    expect(b.assistant_text).not.toContain('Not confirmed from your brief');
+    expect(count(b.assistant_text, 'The starting values for')).toBe(1);
+    const pct = ({ '02': 40, '05': 67, '08': 76 } as Record<string, number>)[captured.turn];
+    if (cardShows) {
+      expect(b.canonical_analysis_view?.staleness.stale).toBe(false);
+      expect(b.assistant_text).not.toMatch(/^\s*[-*+]\s*$/mu);
+      if (captured.turn === '02' && captured.mode !== 'card_only') expect(b.assistant_text, 'an independently retained exclusion is not an empty section')
+        .toContain('the chance does not include it.');
+      expect(b.assistant_text).not.toMatch(/^- \*\*Keep current staffing:\*\*\s*$/mu);
+      const cell = b.canonical_analysis_view?.options.find(row => row.option_id === 'add_one_specialist')?.cell;
+      expect(cell).toMatchObject({ kind: 'figure', face: expect.stringContaining(`about ${pct}%`) });
+      expect(cell).toMatchObject({ face: expect.stringContaining(STATIC_MODEL_SCOPE_NOTE) });
+      expect(count(b.assistant_text, STATIC_MODEL_SCOPE_NOTE), 'a repeated chat figure keeps its own qualification; the card-only answer does not repeat it')
+        .toBe(captured.mode === 'card_only' ? 0 : 1);
+    } else if (captured.mode === 'moved') {
+      expect(b.canonical_analysis_view, 'the final concurrent revision invalidates the promised card').toBeUndefined();
+      expect(b.assistant_text, 'no earlier figures may be restored from a withdrawn promise').not.toContain('about 40%');
+    } else {
+      expect(count(b.assistant_text, STATIC_MODEL_SCOPE_NOTE), 'without the bound card the current scope stays in chat').toBe(1);
+    }
+    if (captured.mode !== 'moved') expect(b.assistant_text).toContain('Olumi');
+    const interpretations = sentBodies.filter(body => body.tool_choice === 'none' && body.tools?.length === 0);
+    expect(interpretations, 'the fresh Run has exactly one interpreter').toHaveLength(1);
+    const packet = JSON.parse(interpretations[0].input.at(-1).content[0].text).canonical_state;
+    if (cardShows || captured.mode === 'moved') expect(packet.run_facts.shown_on_card).toMatchObject({ run_id: fact.result.run_id,
+      disclosures: expect.arrayContaining([STATIC_MODEL_SCOPE_NOTE]) });
+    else expect(packet.run_facts.shown_on_card, 'absent/stale/foreign cards own no current words').toBeUndefined();
+    const dependency = packet.entities.find((node: Json) => node.id === 'specialist_hiring_delay');
+    expect(dependency).toMatchObject({ analysis_participation: 'retained_excluded', added_by: 'olumi',
+      draft_widening: { mechanism: 'relies_on', relies_on: 'Hiring for Add one specialist', watch_for: 'Vacancy remains open' } });
+    expect(interpretations[0].instructions).toContain('Use applicable stored dependencies and watch-for conditions');
+    const summary = b.blocks?.find(block => block.type === 'analysis_result')?.summary;
+    if (cardShows) {
+      expect(summary).not.toContain('was analysed as no change');
+      expect(summary).not.toContain(`about ${pct}%`);
+      expect(summary).not.toContain(STATIC_MODEL_SCOPE_NOTE);
+    } else {
+      expect(summary).toContain(`about ${pct}%`);
+      expect(summary).toContain('was analysed as no change');
+      expect(summary).toContain(STATIC_MODEL_SCOPE_NOTE);
+    }
+    expect(summary, 'the unique model exclusion remains in the fallback block').toContain('kept out of the calculation');
+  }, 60000);
 
   it.each(['bound', 'absent', 'stale', 'foreign', 'explain'] as const)(
     'C3: the static scope is said once, only on the bound current card (%s)', async mode => {

@@ -84,7 +84,7 @@ describe('typed current-level sentence authority', () => {
         expect(limitedLevelAsks(graph)[0]?.estimate).toBeNull();
         expect(structureProvenance(n)).toBe('unattributed');
         const basis = conditionalInputBasis({ graph, admission: { semantic_signals: { material_parameters_awaiting_user_node_ids: [n.id] } }, analysedOptionIds: graph.nodes.filter((x: any) => x.kind === 'option').map((x: any) => x.id) });
-        expect(basis).toContain(`"${label}": Not confirmed from your brief`);
+        expect(basis).toContain(`The starting value for "${label}" has not been verified as today's level.`);
         expect(basis).not.toMatch(/Olumi/i);
         expect(estimatedLimitIn(graph)).toBeNull();
         const unmarked = { ...graph, nodes: graph.nodes.map((x: any) => x.id === n.id ? { ...x, observed_state: { ...os, user_material_unverified: undefined } } : x) };

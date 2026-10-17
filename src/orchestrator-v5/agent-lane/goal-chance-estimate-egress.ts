@@ -1,12 +1,12 @@
 import { agentLicenceRecordOf, goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent, checkScreenLineClaims } from './goal-chance-screen-lines.js';
-import { withoutDisclosure } from './disclosure.js';
+import { withoutDisclosure, withDisclosures } from './disclosure.js';
 import { recordedSentencesOf } from './recorded-sentence.js';
 import { STATIC_MODEL_SCOPE_NOTE } from '../goal-target/static-run-evidence.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { rankingCodesIn, rankingLabelContext } from './withheld-leader-fail-closed.js';
-import { isLicensedChanceLine, licensedChancesOf } from './licensed-chance-lines.js';
+import { figuresIn, isLicensedChanceLine, licensedChancesOf } from './licensed-chance-lines.js';
 import { goalChanceWithheldForAgent } from './goal-chance-withheld.js';
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from './run-explanation.js';
 import { checkEstimatesOf } from './actions/state.js';
@@ -65,6 +65,10 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
     analysisResult: context.analysisResult }) : null;
   const counts: EstimateCountRecord | null = producerCensus === null ? licenceCounts
     : { count: producerCensus.count, values: producerCensus.values.length, links: producerCensus.links.length };
+  const displayIds = new Set([...(counted?.option_ids ?? []), ...(counted?.withheld_option_ids ?? [])]);
+  const emptyLabels = (Array.isArray(rec(context.graph)?.nodes) ? rec(context.graph)!.nodes as unknown[] : [])
+    .map(rec).filter((node): node is Rec => node?.kind === 'option' && typeof node.id === 'string' && displayIds.has(node.id))
+    .flatMap(node => typeof node.label === 'string' ? [node.label] : []);
   const staticScope = counted?.notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
   const chanceFacts = goalChanceFactsForAgent(context.analysisResult, context.graph, context.current);
   const legacyScopeLine = staticScope ? chanceFacts.goal_horizon_line : undefined;
@@ -85,7 +89,7 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
         const findings = screenLines.map(line => line.chance);
         let rest = countedText;
         if (findings.length > 0) {
-          for (const finding of findings) rest = withoutDisclosure(rest, finding, { keep: 0, protectedTexts: sourceTexts });
+          for (const finding of findings) rest = withoutDisclosure(rest, finding, { keep: 0, protectedTexts: sourceTexts, emptyLabels });
           countedText = `${findings.join(' ')}\n\n${rest}`;
         } else {
           const limitation = goalChanceWithheldForAgent(context.analysisResult, context.graph)?.say;
@@ -96,15 +100,22 @@ export function withEstimateGoalPointsAtEgress<T extends { assistant_text?: unkn
     }
     // Only exact sentences from this Run's record are deduplicated; source quotations remain opaque.
     for (const sentence of new Set(screenLines.flatMap(line => recordedSentencesOf(line.depends)))) {
-      countedText = withoutDisclosure(countedText, sentence, { keep: 1, protectedTexts: sourceTexts });
+      countedText = withoutDisclosure(countedText, sentence, { keep: 1, protectedTexts: sourceTexts, emptyLabels });
     }
-    const scopeOnCard = context.disclosureOnCard?.has(STATIC_MODEL_SCOPE_NOTE) === true;
+    // Only exact current card-owned findings can leave chat. A paraphrase which still states a percentage keeps its
+    // required qualifications here, even beside a qualified card. The existing numeric reader remains authoritative.
+    for (const line of screenLines) if (context.disclosureOnCard?.has(line.chance)) {
+      countedText = withoutDisclosure(countedText, line.chance, { keep: 0, protectedTexts: sourceTexts, emptyLabels });
+    }
+    const figureInChat = figuresIn(countedText).length > 0;
+    const scopeOnCard = !figureInChat && context.disclosureOnCard?.has(STATIC_MODEL_SCOPE_NOTE) === true;
     const ownsStaticInProse = withoutDisclosure(countedText, STATIC_MODEL_SCOPE_NOTE, { keep: 0, protectedTexts: sourceTexts }) !== countedText;
     let text = legacyScopeLine !== undefined && (scopeOnCard || ownsStaticInProse)
       ? withoutDisclosure(countedText, legacyScopeLine, { keep: 0, protectedTexts: sourceTexts }) : countedText;
     for (const note of new Set(chanceFacts.goal_chance_notes ?? [])) {
-      text = withoutDisclosure(text, note, { keep: context.disclosureOnCard?.has(note) ? 0 : 1, protectedTexts: sourceTexts });
+      text = withoutDisclosure(text, note, { keep: !figureInChat && context.disclosureOnCard?.has(note) ? 0 : 1, protectedTexts: sourceTexts, emptyLabels });
     }
+    if (figureInChat && context.disclosureOnCard != null) text = withDisclosures(text, chanceFacts.goal_chance_notes ?? [], { missingSentencesOnly: true });
     return text === value.assistant_text ? value : { ...value, assistant_text: text };
   };
   const licence = agentLicenceRecordOf(context.analysisResult);
