@@ -98,6 +98,15 @@ describe('the evaluated-question producer survives the actual Run-fact writer an
     expect(view.options.some(option => option.cell.kind === 'figure' || option.cell.kind === 'range')).toBe(false);
     if (!hasThreshold) {
       expect(view.question?.scope.can_show_goal_chance).toBe(false);
+      expect(view.question?.scope.reasons).toEqual(['goal_chance_not_licensed']);
+      expect(facts.question?.scope.reasons).toEqual(['goal_chance_not_licensed']);
+      for (const changed of [{ run_id: 'foreign' }, { sent_digest: '0'.repeat(64) }, { evaluated_scenario_revision: 6 }]) {
+        const foreign = { ...runEvidence, evaluatedQuestion: { ...retained, ...changed } };
+        const rejected = runFactsOf(publicResult, later, false, { runEvidence: foreign });
+        expect(rejected.question?.scope).toMatchObject({ can_show_goal_chance: false,
+          reasons: ['evaluated_question_not_fully_recorded'] });
+        expect(rejected.chances.goal_chance_display).toBeUndefined();
+      }
       expect(facts.question?.omitted).toContainEqual({ field: 'dispatched_goal_threshold', reason: 'not_dispatched' });
       expect(facts.question?.omitted).not.toContainEqual({ field: 'dispatched_goal_threshold', reason: 'not_recorded' });
     }

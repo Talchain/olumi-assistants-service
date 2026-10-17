@@ -43,11 +43,24 @@ describe('Run question: evaluated inputs and saved revision, never today’s mod
     expect(JSON.stringify(checked.response)).not.toContain('probability_of_goal');
   });
 
+  it('a stated target150 with an inconsistent encoded comparison stays a conversion failure, never a missing user target', () => {
+    const graph = saved(); graph.nodes[0]!.goal_threshold_raw = 150;
+    const sent = request(); sent.graph.nodes[0]!.goal_threshold_raw = 150;
+    const checked = withEvaluatedGoalChanceInputs({ option_comparison: [{ option_id: 'hire', probability_of_goal: 0.6 }] },
+      graph, 'capacity', sent);
+    expect(checked.scope).toMatchObject({ status: 'invalid', can_show_goal_chance: false,
+      reasons: ['unverified_target_conversion'] });
+    expect(JSON.stringify(checked.response)).not.toContain('probability_of_goal');
+  });
+
   it('a later revision never supplies run N’s missing asked question', () => {
     const later = saved(); later.nodes[0]!.goal_threshold_raw = 150;
-    const q = deriveRunQuestion({ runEvidence: evidence(), historicalModel: { revision: 13, graph: later } });
+    const selected = evidence();
+    const q = deriveRunQuestion({ runEvidence: selected, historicalModel: { revision: 13, graph: later } });
     expect(q.asked).toBeNull();
-    expect(q.calculated?.target).toBe(100);
+    // Raw100 was retained, but the encoded comparison was not: never call that a performed target.
+    expect(selected.inputSnapshot.goal.target_raw).toBe(100);
+    expect(q.calculated?.target).toBeUndefined();
     expect(q.evaluated_scenario_revision).toBe(12);
     expect(q.evidence.missing).toContain('historical_model_at_evaluated_revision');
   });
@@ -96,8 +109,12 @@ describe('Run question: evaluated inputs and saved revision, never today’s mod
 
   it('another request cannot supply the inputs missing from this Run’s snapshot', () => {
     const other = request(); other.graph.nodes[0]!.goal_threshold_raw = 150;
-    const q = deriveRunQuestion({ runEvidence: evidence(), historicalModel: { revision: 12, graph: saved() }, dispatchedRequest: other });
-    expect(q.calculated?.target).toBe(100);
+    const selected = evidence();
+    const q = deriveRunQuestion({ runEvidence: selected, historicalModel: { revision: 12, graph: saved() }, dispatchedRequest: other });
+    // The matching saved question still asks100; an unbound request cannot turn its raw snapshot into a calculation.
+    expect(q.asked?.target).toBe(100);
+    expect(selected.inputSnapshot.goal.target_raw).toBe(100);
+    expect(q.calculated?.target).toBeUndefined();
     expect(q.calculated?.encoded_target).toBeUndefined();
     expect(q.scope.status).toBe('unverified');
   });

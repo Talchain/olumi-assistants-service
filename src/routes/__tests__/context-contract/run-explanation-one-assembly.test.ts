@@ -221,7 +221,7 @@ describe('Explain scoped assembly safety', () => {
       expect(keysDeep(c.payloads)).not.toContain('factor_evppi');
     }
   },60000);
-  it('Explain instruction bytes retain the approved sha256', async () => {
+  it('Explain instruction bytes retain the canonical sha256', async () => {
     const w = await capture('Run-explanation','run2');
     expect(createHash('sha256').update(String(w.calls[0].body.instructions)).digest('hex'))
       // G (12 Oct, AIE #94 6133027121): the selected-Run scope line and its range/headline/ranking edits: 39,550 → 39,914 bytes
@@ -252,8 +252,11 @@ describe('Explain scoped assembly safety', () => {
       // B2: evaluated-question scope sentence only; SENT instructions reverse byte-for-byte to AIE-04.
       // S4: two competing finding-first copies removed; record-first ordering owned once by RUN_FACTS_USE.
       // AIE current-finding-first replacement; duplicate rerun-plan instruction retired, factual context retained.
-      // 46189 UTF-8 bytes from the actual mocked sent request; Claude challenge required.
-      .toBe('ef9d6733715e728ee13452dac5bfbbcbaa25cc6bbb59bf9221ad5789d481d6b6');
+      // AIE current-qualification clarification replaces the earlier B coaching addition in the same RUN_FACTS_USE.
+      // 46692 UTF-8 bytes from the actual mocked sent request: swapping only this passage reproduces14bd262e…,
+      // removing it reproduces the pre-prompt ef9d6733…. All11 pins, including the run-facts literal, require Claude challenge.
+      // The literal and3 request assertions preserve currently applicable disclosure/scope/scientific qualifications; generation remains unverified.
+      .toBe('9393589037c2bbe99943e2b6e4bd74df5dcea94b3f3c8288b79e3d45d98ab098');
   },60000);
 });
 
