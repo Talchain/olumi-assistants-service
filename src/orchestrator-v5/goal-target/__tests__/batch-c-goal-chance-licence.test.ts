@@ -623,6 +623,24 @@ describe('independent check r1 — item 1: a percentage quantity changed by an a
     expect(l.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');
   });
 
+  it.each(['change_abs', 'change_rel'] as const)('N1 R2: a level quantity with a %s target checks zero change, never level75 against change10', frame => {
+    const g = capacityChange({ quantity_frame: undefined, goal_threshold_frame: frame, goal_threshold_unit: '%',
+      goal_target_basis: { ...CAPACITY_BASIS, target_frame: frame,
+        effect_unit: frame === 'change_abs' ? CAPACITY_BASIS.effect_unit : '% of today’s development capacity per added person, at month three' } });
+    // A non-root anchored level, not directly set by an option: the evaluated facts establish the paired reference.
+    g.edges = [{ from: 'cost', to: 'productivity' }];
+    expect((g.nodes as Rec[])[0]).toMatchObject({ goal_threshold_raw: 10, goal_threshold_unit: '%',
+      observed_state: { raw_value: 75, unit: '%' }, goal_target_basis: { quantity_frame: 'level', target_frame: frame } });
+    const l = wordsOf(g);
+    expect(l).not.toBeNull();
+    expect(l.withheld_reason_by_option?.carry_on?.reason).not.toBe('reference_moved');
+    expect(l.pct_by_option).not.toHaveProperty('carry_on');
+    const contradiction = hiringRun();
+    (contradiction.option_comparison as Rec[]).find(row => row.option_id === 'carry_on')!.probability_of_goal = 1;
+    const rejected = goalChanceLicenceOf(contradiction, g, 'productivity', () => false, undefined, g, hiringConstraints(g))!;
+    expect(rejected.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
+  });
+
   it('RED (level, stated on the node): quantity frame "level" — the same points sentence', () => {
     const l = wordsOf(capacityChange({ quantity_frame: 'level', goal_target_basis: CAPACITY_BASIS }));
     expect(l.chance_words).toBe('chance of ‘Development capacity’ being at least 10 percentage points higher than today at three months');

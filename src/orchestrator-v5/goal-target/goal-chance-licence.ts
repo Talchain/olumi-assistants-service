@@ -369,7 +369,7 @@ export function statusQuoReadingOf(a: {
   readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined;
   /** The same LEVEL reference in raw units, only when retained on the verified dispatched request. No row-scale inference. */
   readonly rawReference?: number;
-  /** Exact side of the held LEVEL target at its recorded raw reference, independently of output residue. */
+  /** Exact side in the held target's frame: today's raw level or zero change, independently of output residue. */
   readonly referenceChance?: 0 | 1;
   /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
   readonly zeroChange?: 0 | 1;
@@ -745,8 +745,11 @@ export function goalChanceLicenceOf(
       reference: changeQuantity ? 0 : levelToday,
       ...(changeQuantity || rawLevelReference === undefined ? {} : { rawReference: rawLevelReference }),
       // N1: residue must not turn a wrong-side exact 0/1 into an assumed reference and leak it through a joint.
-      ...(!changeQuantity && finite(today) && goalState?.unit === target.unit
-        ? { referenceChance: exactComparisonSide(today, held, target.value) } : {}),
+      // The quantity/samples may be levels while the TARGET asks for a change. Compare zero change with that
+      // change target, never today's level with a change amount (75% today is not a +10-point target).
+      ...(!changeQuantity ? { referenceChance: changeFrame !== undefined
+        ? exactComparisonSide(0, held, target.value)
+        : finite(today) && goalState?.unit === target.unit ? exactComparisonSide(today, held, target.value) : undefined } : {}),
       // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
       ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
