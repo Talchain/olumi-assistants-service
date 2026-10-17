@@ -3,6 +3,7 @@ import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOpti
 import { readDispatchedGoalThreshold, recordedStaticScopeDeclared, recordedStaticLevelEvidence, hasRecordedLevelCalculation, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 import { readRunOmissionScope, type RunOmissionScope, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
 import { assessEvaluatedQuestionScope, STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
+import { sameUnit } from '../agent-lane/same-unit.js';
 import { goalKindOf } from './goal-kind.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
 export { deriveRunQuestion, type RunQuestion, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
@@ -375,6 +376,8 @@ export function statusQuoReadingOf(a: {
   readonly zeroChange?: 0 | 1;
 }): StatusQuoReading {
   if (!a.paired) return a.forecast ? 'projection' : 'unknown';
+  // A paired reference never establishes the target's side when its unit/frame evidence is unsupported, even with exact centres.
+  if (a.referenceChance === undefined && a.zeroChange === undefined) return 'moved';
   const row = a.row;
   if (row === undefined) return 'assumed';
   const p = row.probability_of_goal;
@@ -726,7 +729,7 @@ export function goalChanceLicenceOf(
     const sentGraph = isRec(constraints.sentRun.graph) ? constraints.sentRun.graph : undefined;
     const goals = Array.isArray(sentGraph?.nodes) ? sentGraph.nodes.filter(isRec).filter(n => n.id === goalId && n.kind === 'goal') : [];
     const state = goals.length === 1 && isRec(goals[0]!.observed_state) ? goals[0]!.observed_state : undefined;
-    return finite(state?.raw_value) && state.unit === target.unit ? state.raw_value : undefined;
+    return finite(state?.raw_value) && sameUnit(state.unit, target.unit) ? state.raw_value : undefined;
   })();
   // The goal's quantity frame as Olumi's validated reading holds it (`goalTargetBasisOf` keeps a reading only while its frame
   // equals the node's: 'change', else 'level'); read once, here.
@@ -751,7 +754,7 @@ export function goalChanceLicenceOf(
       // change target, never today's level with a change amount (75% today is not a +10-point target).
       ...(!changeQuantity ? { referenceChance: changeFrame !== undefined
         ? exactComparisonSide(0, held, target.value)
-        : finite(today) && goalState?.unit === target.unit ? exactComparisonSide(today, held, target.value) : undefined } : {}),
+        : finite(today) && sameUnit(goalState?.unit, target.unit) ? exactComparisonSide(today, held, target.value) : undefined } : {}),
       // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
       ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
@@ -1183,9 +1186,10 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     const held = stored.find(x => x.constraint_id === row.constraint_id);
     const state = isRec(n.observed_state) ? n.observed_state : undefined;
     // Raw level and held raw target, with recorded unit/value identity. Never compare an encoded centre with a raw target.
-    const side = finite(state?.raw_value) && finite(held?.value) && typeof state?.unit === 'string'
-      && state.unit === held?.unit && row.unit === held.unit && row.value === held.value
+    const side = finite(state?.raw_value) && finite(held?.value) && sameUnit(state?.unit, held?.unit)
+      && sameUnit(row.unit, held?.unit) && row.value === held?.value
       ? exactComparisonSide(state.raw_value, row.operator, held.value) : undefined;
+    if (side === undefined) return 'moved';
     return typeof p === 'number' && ((p !== 0 && p !== 1) || (side !== undefined && p !== side)) ? 'moved' : 'assumed';
   };
   const targetRows = sent.filter((r) => stored.some((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE));

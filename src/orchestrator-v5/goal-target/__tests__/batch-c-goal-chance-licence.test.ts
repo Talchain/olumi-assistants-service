@@ -1216,6 +1216,37 @@ describe('N1: a fixed target at today’s level keeps its EXACT probability side
     expect(cell).toMatchObject({ kind: 'withheld', face: 'Chance not shown yet' });
     expect((cell as Rec).face).not.toMatch(/0%|100%/);
   });
+
+  it.each((['primary', 'secondary'] as const).flatMap(subject => ['>=', '>', '<=', '<'].map(operator => ({ subject, operator }))))(
+    'unit follow-up $subject $operator: exact centres never supply an unsupported target side', ({ subject, operator }) => {
+      const { g, run, threshold, constraints } = boundary(subject, operator, true);
+      const node = (g.nodes as Rec[]).find(n => n.id === (subject === 'primary' ? 'new_customers' : 'conversion_rate'))!;
+      (node.observed_state as Rec).unit = subject === 'primary' ? 'new customers' : 'percent';
+      (run.option_comparison as Rec[]).find(r => r.option_id === 'carry_on')!.outcome = {
+        p10: 0.4, p50: 0.4, p90: 0.4, mean: 0.4, std: 0,
+      };
+      const l = goalChanceLicenceOf(run, g, 'new_customers', () => false, threshold, g, constraints)!;
+      expect(l.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
+      expect(l.pct_by_option).not.toHaveProperty('carry_on');
+      if (l.targets!.joint.status === 'licensed') expect(l.targets!.joint.pct_by_option).not.toHaveProperty('carry_on');
+    });
+
+  it.each([false, true])('unit follow-up: existing GBP/£ authority retains a supported side and rejects its contradiction (%s)', contradiction => {
+    const { g, run, threshold, constraints } = boundary('secondary', '>=', contradiction);
+    const node = (g.nodes as Rec[]).find(n => n.id === 'conversion_rate')!;
+    node.label = 'Cash buffer';
+    (node.observed_state as Rec).unit = '£';
+    (g.goal_constraints as Rec[]).find(r => r.constraint_id === 'target:conversion_rate')!.unit = 'GBP';
+    constraints.sentConstraints = wireGoalConstraints(constraints.storedConstraints);
+    const l = goalChanceLicenceOf(run, g, 'new_customers', () => false, threshold, g, constraints)!;
+    if (contradiction) {
+      expect(l.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
+      expect(l.pct_by_option).not.toHaveProperty('carry_on');
+    } else {
+      expect(l.pct_by_option.carry_on).toBe(40);
+      expect(l.withheld_option_ids ?? []).not.toContain('carry_on');
+    }
+  });
 });
 
 describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the Run sent — targets AND limits', () => {
