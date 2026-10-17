@@ -3862,8 +3862,9 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
 function statedRangeOtherUnitEntry(l: CandidateLink, range: { readonly low: number; readonly high: number; readonly quote: string },
   source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const said = range.quote.trim();
-  const reason = `"${source.label}" → "${target.label}": "${said}", as the brief puts it. That range is not written in "${naturalAmountUnitOf(target)}", `
-    + 'the unit this link\'s effect is measured in, so Olumi has not sized the link from it: the link holds Olumi\'s provisional placeholder, not that range.';
+  // The AIE's words (prompt/AIE-UNIT-REFERENCE-WORDING-20261017-v1.json, 16:04Z): never "cannot be converted", never the user's figure.
+  const reason = `"${source.label}" → "${target.label}": "${said}", as stated in the brief. Olumi has not converted this range into `
+    + `"${naturalAmountUnitOf(target)}" for this effect. The model currently holds a separate provisional Olumi estimate, not the stated range.`;
   return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_other_unit`,
     before: { low: range.low, high: range.high, effect_amount: l.effect_amount ?? null }, after: null, reason, severity: 'warn' } as RepairEntry;
 }
