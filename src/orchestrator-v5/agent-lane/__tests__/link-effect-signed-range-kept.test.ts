@@ -25,10 +25,12 @@ const BRIEF_LB = BRIEF.replace(RANGE, RANGE_LB);
  * BUDDY-A #3356 R2 B1: a goal in metres and the sentence's own unit as written. Control: all in "metres" (a bare "6 m" reads as
  * six million). Counterexample: the goal and the statement in "m", the sentence in "mm" ("m" is a prefix of "mm").
  */
-type Metres = 'metres' | 'mm';
-const unitOfMetres = (w: Metres): string => (w === 'metres' ? 'metres' : 'm');
+type Metres = 'metres' | 'mm' | 'borrowed';
+const unitOfMetres = (w: Metres): string => (w === 'mm' ? 'm' : 'metres');
+/** R3 (BUDDY-A): the range in mm, and a DIFFERENT quantity written as "6 metres" later in the same sentence. */
+const writtenAfter = (w: Metres): string => (w === 'borrowed' ? '6 mm a day while the conveyor platform stands 6 metres high' : `6 ${w} a day`);
 const inMetres = (text: string, written: Metres): string => text.replace('at most 30 kg', `at most 30 ${unitOfMetres(written)}`)
-  .replace('about 40 kg', `about 40 ${unitOfMetres(written)}`).replace('6 kg a day', `6 ${written} a day`);
+  .replace('about 40 kg', `about 40 ${unitOfMetres(written)}`).replace('6 kg a day', writtenAfter(written));
 const PRE = 'Pre-order system in use';
 const DEL = 'Smaller daily deliveries';
 const WASTE = 'Daily food waste';
@@ -140,6 +142,18 @@ describe('a stated effect range stays the user\'s, on its link (G3 a735)', () =>
     const control = edgeFrom(admitted(draft({ metres: 'metres' }), briefIn('metres')), PRE);
     expect(control.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: -4, amount_unit: 'metres', stated_range: { low: 4, high: 6, end: 'low' } } });
     const graph = await registered(draft({ metres: 'mm' }), briefIn('mm'));
+    const pre = graph.nodes.find((n: Rec) => n.label === PRE);
+    const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
+    const saved = graph.edges.find((e: Rec) => e.from === pre.id && e.to === waste.id);
+    expect(saved.provenance.magnitude).toBe('olumi_estimate');
+    expect(saved.provenance.natural_effect?.stated_range).toBeUndefined();
+    expect(saved.provenance.basis).toBe('Uses the stated lower end as a provisional planning effect.');
+  });
+
+  it('⛔ BUDDY-A #3356 R3 B1, real build → register: the unit is read at THIS range\'s high end, never at another equal figure ("4 and 6 mm … a platform 6 metres high")', async () => {
+    const brief = inMetres(BRIEF, 'borrowed');
+    expect(brief).toContain('between 4 and 6 mm a day while the conveyor platform stands 6 metres high');
+    const graph = await registered(draft({ metres: 'borrowed' }), brief);
     const pre = graph.nodes.find((n: Rec) => n.label === PRE);
     const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
     const saved = graph.edges.find((e: Rec) => e.from === pre.id && e.to === waste.id);

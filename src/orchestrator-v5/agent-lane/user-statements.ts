@@ -110,12 +110,15 @@ const trimmed = (v: unknown, max: number): string | undefined =>
   typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined;
 const figure = (v: unknown, zero = false): number | undefined => (typeof v === 'number' && Number.isFinite(v) && (v > 0 || (zero && v === 0)) ? v : undefined);
 const escapeRe = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** `unit` is written straight after `figure` in the quote (or in the figure itself, "7%"), singular or plural; a whole word ("m" is never "mm"). */
-export function unitWrittenAfter(quote: string, figureStated: number, unit: string): boolean {
+/**
+ * `unit` is written straight after `figure` in the quote (or in the figure itself, "7%"), singular or plural; a whole word ("m" is
+ * never "mm"). `at`: only the figure written at that index (one occurrence, never another figure equal to it, BUDDY-A #3356 R3).
+ */
+export function unitWrittenAfter(quote: string, figureStated: number, unit: string, at?: number): boolean {
   const u = unit.trim().toLowerCase().replace(/\s+/gu, ' ');
   if (u === '') return false;
   const after = new RegExp(`^\\s*${escapeRe(u.replace(/(?:es|s)$/u, '')).replace(/ /gu, '\\s+')}(?:es|s)?(?![\\p{L}\\p{N}])`, 'iu');
-  return findStatedAmounts(quote).some((a) => Math.abs(a.magnitude) === Math.abs(figureStated)
+  return findStatedAmounts(quote).some((a) => (at === undefined || a.index === at) && Math.abs(a.magnitude) === Math.abs(figureStated)
     && (a.matchedText.trim().toLowerCase().endsWith(u) || after.test(quote.slice(a.index + a.matchedText.length))));
 }
 
