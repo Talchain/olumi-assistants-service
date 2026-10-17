@@ -1871,8 +1871,7 @@ export async function buildModelFromBrief(
     event_by_date_prompted: briefAttestsEventByDate(brief) || deliverableWrittenIn(brief, attestedDeliverable),
   };
   const buildInstructions = buildInstructionsForBrief(brief, construction);
-  // ⭐ S1 A5: the ONE assembled construction input, built once: the drafter reads it, and a build with a context hands the very
-  // same string to its widening calls (BUDDY-A early challenge: reuse the build-owned result, never a second assembly).
+  // One frozen construction base for the drafter, both retry branches and both widening arms.
   const constructInput = firstConstructInput(brief, context);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
@@ -2304,8 +2303,8 @@ export async function buildModelFromBrief(
               ? `${buildInstructions} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
               : `${buildInstructions}  Repair only the listed construction issues while retaining every option, risk hypothesis, complete source statement, range, qualification, attributed disagreement, question, causal direction and path to the goal. Correct the action setting that is missing; do not replace its uncertain downstream response with a fixed intervention, invent a probability, or move a learning window into a deadline to clear validation. Preserve the existing supported readings and expose an unsupported numeric representation honestly.`,
           input: askedNow.length > 0
-            ? `${context === undefined ? brief : firstConstructInput(brief, context)}\n\nConstruction issues: ${JSON.stringify(askedNow)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(previous)}`
-            : `${context === undefined ? brief : firstConstructInput(brief, context)}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
+            ? `${constructInput}\n\nConstruction issues: ${JSON.stringify(askedNow)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(previous)}`
+            : `${constructInput}\n\nYour previous model, to shrink: ${JSON.stringify(previous)}`,
           max_output_tokens: budget.max_output_tokens,
           reasoning_effort: budget.reasoning_effort,
           // The redraft of an unattested event goal re-chooses the goal (unpinned); a second size retry keeps the goal it chose.
@@ -2812,9 +2811,8 @@ export async function buildModelFromBrief(
       try { onDraftAdmitted(draft.graph); } catch { /* an observer never costs the build */ }
     }
   }
-  // S1 A5: a build with a construction context hands the widening calls the SAME assembled input its drafter read.
   const widened = wideningCallStructured === undefined ? null : await widenDraft({ admitted, candidate: admissionCandidate, brief, callStructured: wideningCallStructured, deadlineAt,
-    ...(context === undefined ? {} : { constructionInput: constructInput }),
+    constructionInput: constructInput,
     finalGraph: (admission) => finalFor(admission).prePersistGraph,
     admit: admitWidened, optionsArm: true, risksArm: true });
   if (widened !== null) {

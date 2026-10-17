@@ -4,7 +4,7 @@
  * return) gave its DRAFTER the retained conversation, the saved model and the user's objections (`firstConstructInput`), but
  * never its widening calls, so a rebuild's widening could re-add a risk the user had rejected (founder a4f055ce T05: "this
  * risk … connects to nothing"). Now the widening calls get the SAME assembled input the drafter read, under
- * `construction_context`, and only when there is a context: initial construction is byte-identical (the sys1 golden pins it).
+ * `construction_context`, including initial construction. Repair/size reuse that frozen base, too.
  * Through the real build with scripted providers. SYNTHETIC brief and conversation.
  */
 import { describe, expect, it } from 'vitest';
@@ -33,33 +33,34 @@ const statement = (quote: string, subject: Rec, field: string, form: string, fig
   ({ quote, subject: { to_label: null, factor_label: null, ...subject }, field, form, value: null, low: null, high: null, ...figures, unit, qualifier: null, conditions: null });
 const switchFactor = (label: string): Rec => ({ label, role: 'controllable', baseline_known: false, baseline_value: 0, unit: '0/1', provenance: 'inferred', plausible_max: 1 });
 /** levers: the non-status-quo options' switches; extra: Olumi's own factors on the goal (enough of them forces a size retry). */
-function draftText(levers: readonly string[] = ['Corporate deal active', 'Referral scheme running'], extra = 0): string {
+function draftText(levers: readonly string[] = ['Corporate deal active', 'Referral scheme running'], extra = 0,
+  source = { level: LEVEL, target: TARGET, metric: 'weekday attendance', options: ['Corporate wellness deal', 'Referral scheme'] }): string {
   const extras = Array.from({ length: extra }, (_, i) => `Olumi factor ${i + 1}`);
   return JSON.stringify({
-    goal: { kind: null, deliverable: null, metric: 'weekday attendance', operator: '>=', target_stated: true, value: 55, unit: '%', horizon_months: null,
+    goal: { kind: null, deliverable: null, metric: source.metric, operator: '>=', target_stated: true, value: 55, unit: '%', horizon_months: null,
       provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 45, baseline_provenance: 'explicit', scope: null, quantity_frame: 'level',
       basis: { reference: 'today', denominator: null, period_months: null, period_kind: 'at_end', effect_unit: 'percentage points', effects_at_period_end: false, also_required: null, open_question: null },
-      source_quote: TARGET, deadline_words: null },
+      source_quote: source.target, deadline_words: null },
     constraints: [],
     options: [
       { label: 'Keep current setup', provenance: 'ai_proposed', changes: [], interventions: [], added_capacity: null, is_status_quo: true },
-      ...levers.map((f, i) => ({ label: ['Corporate wellness deal', 'Referral scheme'][i]!, provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+      ...levers.map((f, i) => ({ label: source.options[i]!, provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
         interventions: [{ factor_label: f, value: 1, value_kind: 'absolute', unit: '0/1', provenance: 'inferred' }] })),
     ],
     factors: [...levers, ...extras].map(switchFactor),
     risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
-    links: [...levers, ...extras].map((from) => ({ from, to: 'weekday attendance', direction: 'positive', provenance: 'ai_proposed',
+    links: [...levers, ...extras].map((from) => ({ from, to: source.metric, direction: 'positive', provenance: 'ai_proposed',
       effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null })),
     statements: [
-      statement(LEVEL, { kind: 'goal', label: 'weekday attendance' }, 'level', 'point', { value: 45 }, '%'),
-      statement(TARGET, { kind: 'goal', label: 'weekday attendance' }, 'target', 'lower_bound', { value: 55 }, '%'),
+      statement(source.level, { kind: 'goal', label: source.metric }, 'level', 'point', { value: 45 }, '%'),
+      statement(source.target, { kind: 'goal', label: source.metric }, 'target', 'lower_bound', { value: 55 }, '%'),
     ],
   });
 }
 const DRAFT = draftText();
 
 /** The real build; every drafter and widening request is recorded as SENT. Widening replies add nothing unless given. */
-async function built(context?: ConstructionContext, opts: { brief?: string; drafts?: readonly string[]; widen?: (req: Rec) => string } = {}): Promise<{ drafter: Rec[]; widening: Rec[]; graph: Rec; result: Rec }> {
+async function built(context?: ConstructionContext, opts: { brief?: string; drafts?: readonly string[]; widen?: (req: Rec) => string; afterFirst?: () => void } = {}): Promise<{ drafter: Rec[]; widening: Rec[]; graph: Rec; result: Rec }> {
   const drafter: Rec[] = []; const widening: Rec[] = [];
   const drafts = opts.drafts ?? [DRAFT];
   let graph: Rec | undefined;
@@ -67,7 +68,7 @@ async function built(context?: ConstructionContext, opts: { brief?: string; draf
     if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { registered: true, model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   }) as never,
-  (async (req: Rec) => { drafter.push(structuredClone(req)); return { text: drafts[Math.min(drafter.length - 1, drafts.length - 1)]!, status: 'completed' }; }) as never,
+  (async (req: Rec) => { drafter.push(structuredClone(req)); if (drafter.length === 1) opts.afterFirst?.(); return { text: drafts[Math.min(drafter.length - 1, drafts.length - 1)]!, status: 'completed' }; }) as never,
   undefined, undefined,
   (async (req: Rec) => { widening.push(structuredClone(req)); return { text: opts.widen?.(req) ?? '{}', status: 'completed' }; }) as never,
   undefined, context) as Rec;
@@ -157,20 +158,83 @@ describe('S1 A5: the widening calls read the same assembled context as the draft
       if (v.raw_value === 100000) expect(v.source).toBe('cee_hypothesis');
     }
   });
-  it('CONTRAST (no context, a RANGE brief): the drafter gets its construction notes, widening still gets today\'s { brief, graph }', async () => {
+  it('initial RANGE brief: widening carries the exact first input, including construction notes', async () => {
     const RANGE_BRIEF = `${BRIEF} Each corporate deal is worth between £2,000 and £5,000 a year.`;
     const { drafter, widening } = await built(undefined, { brief: RANGE_BRIEF });
     expect(drafter[0]!.input).toContain('Construction notes');
-    for (const call of widening) expect(call.input).toBe(JSON.stringify({ brief: RANGE_BRIEF, graph: inputOf(call).graph }));
+    for (const call of widening) expect(call.input).toBe(JSON.stringify({ brief: RANGE_BRIEF, graph: inputOf(call).graph, construction_context: drafter[0]!.input }));
   });
-  it('CONTRAST (initial construction): no context → the widening input is today\'s { brief, graph }, byte for byte', async () => {
+  it('initial construction: widening carries the exact shared envelope, with brief and graph unchanged', async () => {
     const { drafter, widening } = await built();
     expect(widening.length).toBeGreaterThan(0);
     expect(drafter[0]!.input).toBe(firstConstructInput(BRIEF));
     for (const call of widening) {
       const input = JSON.parse(call.input as string) as Rec;
-      expect(Object.keys(input)).toEqual(['brief', 'graph']);
-      expect(call.input).toBe(JSON.stringify({ brief: BRIEF, graph: input.graph }));
+      expect(Object.keys(input)).toEqual(['brief', 'graph', 'construction_context']);
+      expect(call.input).toBe(JSON.stringify({ brief: BRIEF, graph: input.graph, construction_context: drafter[0]!.input }));
     }
+  });
+});
+
+const briefs = [
+  { name: 'distribution', metric: 'on-time dispatch', level: 'Currently 45% of orders leave on time.',
+    target: 'We need on-time dispatch to reach at least 55%.', options: ['Use a dispatch checklist', 'Train the evening team'] },
+  { name: 'laboratory', metric: 'verified sample labels', level: 'Currently 45% of samples have verified labels.',
+    target: 'We need verified sample labels to reach at least 55%.', options: ['Use a labelling checklist', 'Train the bench team'] },
+];
+
+describe('A2/A3/A5 share the frozen first context across both briefs', () => {
+  it.each(briefs.flatMap(source => (['repair', 'size'] as const).map(branch => ({ ...source, branch }))))(
+    '$name $branch retains exact base, pairs, source and conditions in the retry and both widening arms', async source => {
+      const brief = `${source.level} ${source.target} Option one: ${source.options[0]}. Option two: ${source.options[1]}.`;
+      const pair = answeredEarlierItem([{ olumi: 'Which work does this cover?', reply: 'The evening shift only, if the checks are complete.', reply_source: 'typed' }]);
+      const conversation = [
+        { speaker: 'user' as const, source: 'typed' as const, text: 'Our current aim is understanding the bottleneck; later we may expand. Keep the night team’s dissent and the missing evidence.' },
+        { speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: 'Revenue was £999000 last year; another speaker’s forecast is 77%. Neither is this model’s target.' },
+      ];
+      const context: ConstructionContext = { retained: { brief, conversation, items: [pair] }, objections: ['Do not revive the withdrawn target.'] };
+      const first = JSON.parse(draftText(['Checklist active'], source.branch === 'size' ? 20 : 0, source)) as Rec;
+      if (source.branch === 'repair') {
+        first.factors[0].unit = 'points'; first.factors[0].baseline_value = null;
+        first.options[1].interventions[0].unit = 'points';
+      }
+      const frozen = firstConstructInput(brief, structuredClone(context));
+      const { drafter, widening } = await built(context, { brief, drafts: [JSON.stringify(first), draftText(['Checklist active'], 0, source)],
+        afterFirst: () => { conversation.push({ speaker: 'unknown', source: 'stored, origin not verified', text: 'A later unrelated £123456 belongs to somebody else.' }); } });
+      expect(drafter).toHaveLength(2);
+      expect(drafter[0]!.input).toBe(frozen);
+      const boundary = source.branch === 'repair' ? '\n\nConstruction issues:' : '\n\nYour previous model, to shrink:';
+      const at = (drafter[1]!.input as string).indexOf(boundary);
+      expect(at, 'the intended retry branch really ran').toBeGreaterThan(0);
+      expect((drafter[1]!.input as string).slice(0, at)).toBe(frozen);
+      expect(widening.filter(isOptionsCall)).toHaveLength(1);
+      expect(widening.filter(call => !isOptionsCall(call))).toHaveLength(1);
+      for (const call of widening) {
+        expect(inputOf(call).construction_context).toBe(frozen);
+        expect(inputOf(call).brief).toBe(brief);
+      }
+    });
+
+  it.each(briefs)('$name: an unrelated typed quantity and another speaker cannot author a context-only figure', async source => {
+    const brief = `${source.level} ${source.target} Option one: ${source.options[0]}. Revenue was £100000 as of 2026-09-01.`;
+    const quote = 'Advertising spend is £100000.';
+    const context: ConstructionContext = { retained: { brief, conversation: [
+      { speaker: 'unknown', source: 'stored, origin not verified', text: quote },
+    ] } };
+    const draft = JSON.parse(draftText(['Checklist active'], 0, source)) as Rec;
+    draft.factors.push({ label: 'Advertising spend', role: 'observable', baseline_known: true, baseline_value: 100000,
+      unit: '£', provenance: 'explicit', plausible_max: 200000 });
+    draft.links.push({ ...draft.links[0], from: 'Advertising spend' });
+    draft.statements.push(statement(quote, { kind: 'factor', label: 'Advertising spend' }, 'level', 'point', { value: 100000 }, '£'));
+    const { graph, widening } = await built(context, { brief, drafts: [JSON.stringify(draft)] });
+    expect(widening.length).toBeGreaterThan(0);
+    const node = (graph.nodes as Rec[]).find(n => n.label === 'Advertising spend');
+    expect(node, 'the unknown-source figure is retained provisionally, so the negative is not vacuous').toBeDefined();
+    expect(node!.user_statements ?? [], 'context and matching revenue cannot become a human source').toEqual([]);
+    expect(node!.observed_state?.source).not.toBe('brief_extraction');
+    expect(node!.observed_state?.source).not.toBe('user_specified');
+    const genuine = await built(undefined, { brief: `${brief} ${quote}`, drafts: [JSON.stringify(draft)] });
+    const human = (genuine.graph.nodes as Rec[]).find(n => n.label === 'Advertising spend');
+    expect(human?.user_statements?.length, 'the same whole statement is recorded when actually typed').toBeGreaterThan(0);
   });
 });
