@@ -168,8 +168,8 @@ describe('D3: a numeric quote cannot ground a figure-free describes estimate', (
   it('a time percentage elsewhere in the whole statement does not become a figure for a unit-free experience estimate', async () => {
     const quote = "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.";
     const w = await goalWorld(g => { g.nodes.push({ id: 'marketing_experience', kind: 'factor', label: 'Marketing experience', scale_frame: 100, provenance: 'from_brief' }); }, quote);
-    const r = await w.caps().proposeAssumptions(w.ctx, { assumptions: [{ factor_label: 'Marketing experience', value: 20, unit: '', user_stated: false,
-      basis: 'Olumi proposes an experience estimate from the qualitative description, not from the time limit.', statements: [{ quote, form: 'describes' }] }] });
+    const r = await dispatchTool('propose_assumptions', JSON.stringify({ assumptions: [{ factor_label: 'Marketing experience', value: 20, unit: '', user_stated: false,
+      basis: 'Olumi proposes an experience estimate from the qualitative description, not from the time limit.', statements: [{ quote, form: 'describes' }] }] }), w.ctx, w.caps());
     expect(r.ok, JSON.stringify(r)).toBe(true); expect(r.public_label).toContain(quote);
     expect(r.public_label).toContain('Olumi’s figure from them is its own estimate, not yours');
     expect(w.proposals.get(String(r.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'model_proposed', value: 20 });
