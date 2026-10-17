@@ -6,7 +6,7 @@ import { prepareRequestedRebuild } from '../runtime/draft-replacement.js';
 import { levelFrameOf, projectModelContext } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { HistoryStore, answeredEarlierItem, ANSWERED_EARLIER_LABEL } from '../history-store.js';
-import { BRIEF_LABEL, turnContextItems } from '../turn-context.js';
+import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
 
 const cases = [
   { name: 'distribution', factor: 'Dispatch updates', risk: 'Service disruption', retained: 'delayed scans', withdrawn: 'the entire shift has stopped',
@@ -66,26 +66,36 @@ async function savedWorld(row: typeof cases[number], options: Parameters<typeof 
 const project = (g: Rec) => projectModelContext({ nodes: g.nodes, edges: g.edges, raw: g } as never) as Rec;
 const jsonAfter = (input: string, label: string) => JSON.parse(input.split(`${label} `)[1]!);
 const noRef = ({ ref: _ref, ...n }: Rec) => n;
+const constructionCarriers = (input: string): { conversation: Rec[]; items: Rec[] } => {
+  const [conversation, items = '[]'] = input.split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!
+    .split(`${LATER_MESSAGES_CONTEXT_LEAD} `)[1]!.split('\n\n');
+  return { conversation: JSON.parse(conversation!), items: JSON.parse(items) };
+};
+const pairsIn = (items: Rec[]): Rec[] => items.flatMap(i => i.content.flatMap((p: Rec) =>
+  [ANSWERED_EARLIER_LABEL, REASONING_CONTEXT_LABEL].some(label => p.text.startsWith(label))
+    ? JSON.parse(p.text.slice(p.text.indexOf('\n') + 1)).answered_pairs : []));
+
 
 describe.each(cases)('R3 $name class', row => {
-  it.each(['recent', 'trimmed'] as const)('answered context preserves the %s pair and its recorded origin', placement => {
+  it.each(['recent', 'trimmed'] as const)('real rebuild preserves the %s pair and its recorded origin', async placement => {
     const pair = { olumi: row.question, reply: row.answer, reply_source: 'typed' as const };
     const conversation = placement === 'recent' ? [{ role: 'assistant', content: row.question }, { role: 'user', content: row.answer }]
       : [answeredEarlierItem([pair, { ...pair, reply_source: 'unknown' }])!];
-    const items = turnContextItems({ now: new Date(at), briefText: '', conversation, request, verifiedUserMessages: [row.answer] });
-    const input = firstConstructInput('', { retained: { brief: '', conversation: [], items } });
-    const forwarded = JSON.parse(input.split(`${LATER_MESSAGES_CONTEXT_LEAD} []\n\n`)[1] ?? '[]');
-    expect(forwarded).toEqual(items);
-    if (placement === 'recent') expect(forwarded.slice(-3, -1)).toEqual(conversation);
-    else {
-      const held = forwarded.find((i: Rec) => i.content?.[0]?.text?.startsWith(ANSWERED_EARLIER_LABEL));
-      expect(JSON.parse(held.content[0].text.split('\n')[1]).answered_pairs).toEqual([
-        { olumi: { speaker: 'olumi', source: "the end of Olumi's reply, not a user statement", text: row.question },
-          response: { speaker: 'user', source: 'typed', text: row.answer } },
-        { olumi: { speaker: 'olumi', source: "the end of Olumi's reply, not a user statement", text: row.question },
-          response: { speaker: 'unknown', source: 'stored, origin not verified', text: row.answer } },
-      ]);
-    }
+    const calls: Rec[] = [];
+    const w = await savedWorld(row, { readTurnHistory: () => conversation, provider: async req => {
+      calls.push(structuredClone(req)); return { text: JSON.stringify(structuredDraft(row)), status: 'completed' };
+    } });
+    await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), w.ctx, w.caps());
+    const { items } = constructionCarriers(calls[0]!.input);
+    expect(pairsIn(items)).toEqual(placement === 'recent' ? [{
+      olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: row.question },
+      response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: row.answer },
+    }] : [
+      { olumi: { speaker: 'olumi', source: "the end of Olumi's reply, not a user statement", text: row.question },
+        response: { speaker: 'user', source: 'typed', text: row.answer } },
+      { olumi: { speaker: 'olumi', source: "the end of Olumi's reply, not a user statement", text: row.question },
+        response: { speaker: 'unknown', source: 'stored, origin not verified', text: row.answer } },
+    ]);
   });
 
   it('Q1 complete records reach construction; stale drafted claims cannot overwrite saved correction or borrow credit', async () => {
@@ -159,7 +169,11 @@ it('ONE combined real explicit rebuild → structured stub → restored own card
   const input = calls[0]!.input as string;
   const beforeModel = input.split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!;
   const items = JSON.parse(beforeModel.split('\n\n').at(-1)!);
-  expect(items).toEqual([pairItem]);
+  expect(items.find((i: Rec) => i.content[0].text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(pairItem);
+  expect(pairsIn(items).map(p => [p.olumi.text, p.response.text])).toEqual([
+    ['Which assumptions remain disputed?', 'The night team still disputes the mechanism.'],
+    [row.question, row.answer], [row.question, row.answer],
+  ]);
   expect(jsonAfter(input, CURRENT_MODEL_CONTEXT_LEAD).recorded_reasoning).toEqual(project(saved).recorded_reasoning);
   const pid = String(offered.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, offered, 'propose_change');
   expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
@@ -172,30 +186,28 @@ it('ONE combined real explicit rebuild → structured stub → restored own card
   expect(w.writes).toHaveLength(writes + 1);
 });
 
-it('construction input contains each user statement exactly once by identity across both briefs', async () => {
+it('construction preserves each answered-pair identity once and distinct typed statements as typed across both briefs', async () => {
   for (const row of cases) {
     const calls: Rec[] = [];
     const recent = 'The night team still disputes the mechanism.';
+    const other = 'The day team has not checked the evidence yet.';
     const pairItem = answeredEarlierItem([{ olumi: row.question, reply: row.answer, reply_source: 'typed' }])!;
     const w = await savedWorld(row, { readTurnHistory: () => [pairItem,
       { role: 'assistant', content: 'Which assumptions remain disputed?' }, { role: 'user', content: recent }],
       provider: async req => { calls.push(structuredClone(req)); return { text: JSON.stringify(structuredDraft(row)), status: 'completed' }; } });
-    w.ctx.verified_user_messages = [recent, request, recent];
+    w.ctx.verified_user_messages = [recent, request, other];
     await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), w.ctx, w.caps());
-    const input = (calls[0]!.input as string).split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!;
-    const [conversation, items] = input.split(`${LATER_MESSAGES_CONTEXT_LEAD} `)[1]!.split('\n\n').map(s => JSON.parse(s));
-    const identities: string[] = [input.split('\n\n')[0]!];
-    const collect = (value: unknown): void => {
-      if (typeof value === 'string') {
-        identities.push(value);
-        const payload = value.slice(value.indexOf('\n') + 1);
-        if (payload.startsWith('{')) collect(JSON.parse(payload));
-      } else if (Array.isArray(value)) value.forEach(collect);
-      else if (value !== null && typeof value === 'object') Object.values(value).forEach(collect);
-    };
-    collect(conversation); collect(items);
-    for (const statement of [w.f.brief, recent, request, row.answer]) {
-      expect.soft(identities.filter(text => text === statement || text === `${BRIEF_LABEL}\n${statement}`), statement).toHaveLength(1);
-    }
+    const { conversation, items } = constructionCarriers(calls[0]!.input);
+    expect(conversation.slice(1)).toEqual([recent, request, other].map(text => ({ speaker: 'user', source: 'typed', text })));
+    expect(items).toHaveLength(2);
+    expect(items.find((i: Rec) => i.content[0].text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(pairItem);
+    const context = JSON.parse(items.find(i => i.content[0].text.startsWith(REASONING_CONTEXT_LABEL))!.content[0].text.split('\n')[1]);
+    expect(context.verified_user_statements).toEqual([]);
+    expect(pairsIn(items)).toEqual([
+      { olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: 'Which assumptions remain disputed?' },
+        response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: recent } },
+      { olumi: { speaker: 'olumi', source: "the end of Olumi's reply, not a user statement", text: row.question },
+        response: { speaker: 'user', source: 'typed', text: row.answer } },
+    ]);
   }
 });

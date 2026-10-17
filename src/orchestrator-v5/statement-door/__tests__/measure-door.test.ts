@@ -169,7 +169,7 @@ describe('M3a: ONE press moves only the two members, and records the user’s wo
     expect(goal.measured_in).toBe(MEASURE);
     const plain = projectModelContext({ nodes: R4.nodes, edges: R4.edges, raw: R4, analysis_state: undefined, analysis_ready: false } as never);
     expect(plain.goal).toMatchObject({ id: 'productivity' });
-    expect(plain.goal).not.toHaveProperty('user_statements');
+    expect(((plain.recorded_reasoning ?? []) as Rec[]).find(n => n.id === (plain.goal as Rec).id)).toBeUndefined();
   });
 });
 

@@ -1125,6 +1125,7 @@ describe('78ca founder: complete current source through the existing correction 
     expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining(originalSaid));
     expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: source, source })]));
     expect(read.entities.find((n: Rec) => n.id === 'funding_secured').full_label).toContain('Your source stays yours');
+    expect(savedGoal.user_statements.find((r: Rec) => r.field === 'target').statements.map((s: Rec) => s.quote)).toEqual(expect.arrayContaining([quote, source]));
     expect(read.recorded_reasoning.find((n: Rec) => n.id === savedGoal.id).user_statements).toEqual(savedGoal.user_statements);
     expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
