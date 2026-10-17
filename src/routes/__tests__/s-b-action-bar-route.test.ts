@@ -14,7 +14,7 @@ import { installOwnershipHarness } from "../../../tests/utils/ownership-route-ha
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { SessionTurnWrite } from '../../orchestrator-v5/session/store.js';
+import type { SessionAppendOptions, SessionTurnWrite } from '../../orchestrator-v5/session/store.js';
 import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js';
 import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
@@ -146,7 +146,7 @@ const client = {
 };
 const coldStore = () => {
   realStore = new SupabaseSessionStore(client as never, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 50 }), { defaultReadLimit: 20 });
-  port.append.mockImplementation((w: SessionTurnWrite) => realStore.append(w));
+  port.append.mockImplementation((w: SessionTurnWrite, options?: SessionAppendOptions) => realStore.append(w, options));
   port.readRecent.mockImplementation((s: string, n?: number) => realStore.readRecent(s, n));
   port.readCommittedTurn.mockImplementation((s: string, t: string) => realStore.readCommittedTurn(s, t));
   port.readLatestAnswerOffers.mockImplementation((s: string) => realStore.readLatestAnswerOffers(s));
@@ -471,7 +471,7 @@ describe('S-B slice 2a through the real routes', () => {
   it('the live bar reads the PERSISTED approval carrier, like the reload (Codex r1 P1-1 on #2766)', async () => {
     setSizedPremortemState(paulGraph());
     // The persistence floor (or a concurrent decline) leaves no approval on the row this turn writes.
-    port.append.mockImplementation((w: SessionTurnWrite) => realStore.append({ ...w, pending_actions: [] }));
+    port.append.mockImplementation((w: SessionTurnWrite, options?: SessionAppendOptions) => realStore.append({ ...w, pending_actions: [] }, options));
     const card = await press('agent-next-pre-mortem');
     expect(card._agent?.tool_calls?.map(c => c.name)).toEqual(['propose_link_strengths']);
     expect(agentProposals.get(agentProposals.outstanding(scenario, OWNER)[0]!.proposal_id)!.operations).toEqual([

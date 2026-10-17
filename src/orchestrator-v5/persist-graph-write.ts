@@ -27,7 +27,7 @@ import {
   formatViolations,
   PersistedGraphInvariantError,
 } from './persisted-graph-invariants.js';
-import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
+import type { SessionAppendOptions, SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
 import { preconditionRiskLinkViolations } from '../orchestrator/graph-structure-validator.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
@@ -58,6 +58,8 @@ export function assertNoPreconditionRiskLinks(graph: unknown): void {
 export interface CheckedGraphAppendParams {
   /** The write, already projected and hashed by the caller. */
   readonly write: SessionTurnWrite;
+  /** Process-local reply preparation, never part of the persisted write. */
+  readonly prepare?: SessionAppendOptions['prepare'];
   /** The store to append through. Callers resolve their own. */
   readonly store: SessionStore;
   readonly horizonBasisWrite?: import('./goal-target/goal-steady-write.js').HorizonBasisWrite;
@@ -385,8 +387,8 @@ export async function appendCheckedGraphWrite(
           ...(params.write.expectedRevision !== undefined ? { expectedRevision: params.write.expectedRevision } : {}),
         },
     );
-    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
-    const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
+    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite, params.prepare === undefined ? undefined : { prepare: params.prepare });
+    const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId, prepare: params.prepare });
     if (!('status' in outcome)) return outcome;
     if (attempt === 2) {
       log.warn({ event: 'v5.agent_answer.latest_moved_exhausted', scenario_id: write.scenario_id, source, attempts: 3 },
