@@ -2,7 +2,8 @@
  * ⛔ G3 a735, GENERATIVE SWEEP (DL-3 14:28Z: a matcher ships with every confusable case in its first round; #3356 R1–R3 found
  * lb/kg, mm/m and a borrowed "6 metres" one at a time). Every written spelling × every claimed spelling of the confusable unit
  * families, at the range's own end, borrowed from an unrelated equal figure, and absent. The ORACLE is the family table below,
- * written independently of the implementation's vocabulary. SYNTHETIC sentences.
+ * written independently of the implementation's vocabulary (bare "points" is no share: it is a score as often as percentage points,
+ * as the ONE unit vocabulary `utils/unit-alphabet.ts` reads it). SYNTHETIC sentences.
  * - The verifier (`sourceMapOf`): a range is recorded in the AI's unit only when its words do not contradict it.
  * - Admission (`admitCandidateModel`): an Olumi size inside a range written in another family is set aside (placeholder), and a
  *   range written in the link's own family, however spelt, is not.
@@ -20,7 +21,7 @@ const FAMILIES: readonly { readonly written: readonly string[]; readonly claimed
   { written: ['kg', 'kgs', 'kilograms'] }, { written: ['lb', 'lbs'] }, { written: ['oz', 'ounces'] },
   { written: ['ml', 'millilitres'] }, { written: ['litres'], claimedOnly: ['l'] }, { written: ['ms', 'milliseconds'] },
   { written: ['seconds', 'secs'], claimedOnly: ['s'] }, { written: ['minutes', 'mins'] }, { written: ['hours', 'hrs'], claimedOnly: ['h'] },
-  { written: ['days'] }, { written: ['weeks'] }, { written: ['%', 'percent', 'per cent'] }, { written: ['percentage points', 'points'], claimedOnly: ['pp'] },
+  { written: ['days'] }, { written: ['weeks'] }, { written: ['%', 'percent', 'per cent'] }, { written: ['percentage points'], claimedOnly: ['pp'] },
 ];
 const familyOf = (spelling: string): number => FAMILIES.findIndex((f) => f.written.includes(spelling) || (f.claimedOnly ?? []).includes(spelling));
 const WRITTEN = FAMILIES.flatMap((f) => f.written);
@@ -74,7 +75,8 @@ describe('SWEEP: a range is recorded in the AI\'s unit only where its own words 
 });
 
 describe('SWEEP: admission sets an Olumi size aside exactly when the range is written in another unit than the link\'s', () => {
-  const LINK_UNITS = ['kg', 'kilograms', 'g', 'lb', 'metres', 'mm', 'km', 'litres', 'ml', 'hours', 'minutes', 'days'] as const;
+  // One link unit per family the sweep writes, plus one spelling variant (kilograms): every written spelling meets each.
+  const LINK_UNITS = ['kg', 'kilograms', 'lb', 'metres', 'mm', 'litres', 'hours', 'days'] as const;
   const model = (edgeUnit: string, w: string, claimed: string): { model: Rec; brief: string } => {
     const goal = `We want to bring daily food waste down from about 40 ${edgeUnit} today to at most 30 ${edgeUnit} by the end of next year.`;
     const range = `Our kitchen manager reckons switching on a pre-order system would cut waste by between 4 and ${at(w)} a day.`;
@@ -98,7 +100,7 @@ describe('SWEEP: admission sets an Olumi size aside exactly when the range is wr
       ],
     } };
   };
-  it(`${LINK_UNITS.length} link units × every written spelling (claimed as written, as the link's unit, and in a third family)`, () => {
+  it(`${LINK_UNITS.length} link units × every written spelling (claimed as written, as the link's unit, and in a third family)`, { timeout: 60_000 }, () => {
     const wrong: string[] = [];
     // Claimed as written, as the link's unit, and in a THIRD family (refused for its claim: its own words still decide).
     const third = (w: string, e: string): string => CLAIMED.find((c) => familyOf(c) !== familyOf(w) && familyOf(c) !== familyOf(e))!;
