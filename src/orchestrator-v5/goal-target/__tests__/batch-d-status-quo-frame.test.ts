@@ -90,7 +90,9 @@ describe('D2: the served capacity status quo, read in its own frame (run 3, norm
 
   it('CONTRAST: a genuinely moved row still says it moved, in the recorded frame (zero spread, away from today\'s 0.16)', () => {
     const l = licence(runEnvelope({ p10: 0.18, p50: 0.18, p90: 0.18, mean: 0.18 }), RECORDED);
-    expect(reasonOf(l)).toMatchObject({ reason: 'reference_moved', line: SERVED_LINE });
+    // Keep the captured SERVED_LINE historical; this newly derived reason uses the AIE's neutral wording.
+    expect(reasonOf(l)).toMatchObject({ reason: 'reference_moved',
+      line: 'Chance not shown: Olumi cannot verify this Run’s result for carrying on as now against the reference for ‘Weekly support capacity’.' });
     expect(l!.status_quo).toBeUndefined();
   });
 

@@ -588,7 +588,7 @@ describe('readback RESPONSE → LICENCE — capacity: a percentage LEVEL raised 
     expect(JSON.stringify(licence)).not.toMatch(/by assumption/);
     expect(licence.withheld_option_ids).toContain('carry_on_with_the_current_team');
     expect(licence.withheld_reason_by_option?.carry_on_with_the_current_team).toEqual({ reason: 'reference_moved',
-      line: 'Not shown: this run’s result for carrying on as now doesn’t match ‘Development capacity’ as it stands today in the model, so it needs checking first.' });
+      line: 'Chance not shown: Olumi cannot verify this Run’s result for carrying on as now against the reference for ‘Development capacity’.' });
     expect(goalChanceCellFacesForAgent(view, JSON.parse(bytes), true).has('carry_on_with_the_current_team')).toBe(false);
   });
 });
