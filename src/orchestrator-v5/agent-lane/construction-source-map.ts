@@ -22,8 +22,7 @@ import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
-import { sameUnit } from './same-unit.js';
-import { periodNoun, shareKind } from '../../utils/unit-alphabet.js';
+import { carrierCompatible, readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -171,98 +170,29 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
       conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}) }],
       { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
-    // ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R2–R3): an EFFECT range is never read in a unit its own words do not give it: one borrowed
-    // from an unrelated equal figure ("between 4 and 6 mm … a platform 6 metres high" is never a range in metres), or a different
-    // word written at the range ("6 mm" is not "m"). It is kept whole as unknown, never recorded as the user's range in that unit.
-    if (field === 'effect' && form === 'range' && v.statements.some(rangeUnitNotItsOwn)) {
-      kept('unit_not_written', `“${quote}” does not write ${text(r['unit'], 60) ?? 'that unit'} at that range, so it is not read in that unit. Nothing was prepared.`, key);
-      return;
-    }
-    verified.set(key, [...(verified.get(key) ?? []), ...v.statements]);
+    verified.set(key, [...(verified.get(key) ?? []), ...(field === 'effect' && form === 'range' ? v.statements.map(withOwnRangeUnit) : v.statements)]);
   });
   return { verified, refused };
 }
 
 /**
- * ⛔ G3 a735 (DL-3 14:28Z: a matcher ships with its generative sweep): the closed vocabulary of the unit families a range is
- * confusable in — SI length, mass, volume and time with their prefixes, imperial weight and length, percent against percentage
- * points. A word outside it reads as `undefined`: no evidence either way. Never a conversion: only "the same unit" or "not".
+ * ⛔ G3 a735 (BUDDY-A #3356 R1–R5; DL-3 16:1xZ: ONE unit authority, never convert): an effect range is the user's range in the AI's
+ * unit only where that unit states the COMPLETE unit its words write at the range's own high end, read by the estate's one tail
+ * reader (`statedTailParts`): C3 (`carrierCompatible`) finds no part in conflict AND no part (period, denominator, base, qualifier)
+ * that only one side states, so "4 and 6 kg per week" is never kg, nor kg per day. A count's noun may hold words around the AI's
+ * ("extra visitors" holds "visitors", C3's own rule). "6 crates" is never kg, and a unit written anywhere else in the sentence
+ * certifies nothing. Otherwise the range is still recorded, whole, with NO unit: never relabelled, never converted. A currency is
+ * the amounts' own symbol (`figuresWritten` reads it with them).
  */
-const UNIT_WORDS: Readonly<Record<string, string>> = {
-  mm: 'mm', millimetre: 'mm', millimeter: 'mm', cm: 'cm', centimetre: 'cm', centimeter: 'cm', m: 'm', metre: 'm', meter: 'm',
-  km: 'km', kilometre: 'km', kilometer: 'km', inch: 'in', ft: 'ft', foot: 'ft', feet: 'ft', mile: 'mi',
-  mg: 'mg', milligram: 'mg', g: 'g', gram: 'g', kg: 'kg', kilogram: 'kg', kilo: 'kg', tonne: 't', lb: 'lb', pound: 'lb', oz: 'oz', ounce: 'oz',
-  ml: 'ml', millilitre: 'ml', milliliter: 'ml', l: 'l', litre: 'l', liter: 'l',
-  // Time and shares come from the ONE unit vocabulary (`utils/unit-alphabet.ts`); only abbreviations it does not spell are here.
-  ms: 'ms', millisecond: 'ms', s: 't:second', sec: 't:second', min: 't:minute', h: 't:hour',
-};
-const unitWord = (w: string): string | undefined => {
-  const x = w.toLowerCase();
-  const own = UNIT_WORDS[x] ?? (x.endsWith('s') ? UNIT_WORDS[x.slice(0, -1)] : undefined) ?? (x.endsWith('es') ? UNIT_WORDS[x.slice(0, -2)] : undefined);
-  if (own !== undefined) return own;
-  const period = periodNoun(x);
-  return period === null ? undefined : `t:${period}`;
-};
-/** The unit family words START with, or `undefined`. A share ("%", "per cent", "percentage points") is read whole, longest first. */
-function unitLeading(text: string): string | undefined {
-  const words = text.trimStart().split(/\s+/u).slice(0, 3).map((w) => w.replace(/[.,;:!?)]+$/u, ''));
-  for (let n = words.length; n >= 1; n -= 1) {
-    const share = words[0] === '' ? null : shareKind(words.slice(0, n).join(' '));
-    if (share !== null) return `share:${share}`;
-  }
-  if (/^\s*%/u.test(text)) return 'share:percent';
-  const w = /^\s*(\p{L}+)/u.exec(text)?.[1];
-  return w === undefined ? undefined : unitWord(w);
-}
-/** A unit string's family: its first word that names one ("kg a day" → kg; "calendar days" → a day; "% of bottles" → a percent). */
-export function unitFamily(unit: string): string | undefined {
-  const words = unit.trim().split(/[\s/]+/u);
-  for (let i = 0; i < words.length; i += 1) {
-    const f = unitLeading(words.slice(i).join(' '));
-    if (f !== undefined) return f;
-  }
-  return undefined;
-}
-/** The unit the words write at a range's own high end (straight after it, or as its "%"), or `undefined`. */
-function unitAtRange(quote: string, high: { readonly index: number; readonly matchedText: string }): string | undefined {
-  const rest = quote.slice(high.index + high.matchedText.length);
-  return unitLeading(/%\s*$/u.test(high.matchedText) ? `%${rest}` : rest);
-}
-/** Two units differ: both in the vocabulary and in different families, or (outside it) not `sameUnit`. */
-function unitsDiffer(a: string, b: string): boolean {
-  const fa = unitFamily(a), fb = unitFamily(b);
-  return fa !== undefined && fb !== undefined ? fa !== fb : !sameUnit(a, b);
-}
-
-/**
- * Positive evidence that a range's claimed unit is not its own: the words write a different unit at the range's own high end
- * ("between 4 and 6 lb" read as kg; "6 mm" read as m; "6 kg" read as g), the claimed unit is written only after an unrelated
- * figure equal to that end ("between 4 and 6 mm … a platform 6 metres high"), or the words never write it at all. A range whose
- * words write its unit elsewhere ("between 20 and 40 extra visitors"; "about 5 points, between 4 and 7") is read as before; a
- * currency is the amounts' own symbol (`figuresWritten` reads it with them).
- */
-function rangeUnitNotItsOwn(st: UserStatement): boolean {
-  if (typeof st.low !== 'number' || typeof st.high !== 'number' || st.unit === undefined || st.unit.trim() === '') return false;
-  if (readCurrencyUnitWithQualifiers(st.unit).kind === 'currency') return false;
+function withOwnRangeUnit(st: UserStatement): UserStatement {
+  if (typeof st.low !== 'number' || typeof st.high !== 'number' || st.unit === undefined || st.unit.trim() === ''
+    || readCurrencyUnitWithQualifiers(st.unit).kind === 'currency') return st;
   const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === st.low && r.high.magnitude === st.high);
-  if (joined === undefined) return false;
-  const written = unitAtRange(st.quote, joined.high), claimed = unitFamily(st.unit);
-  if (written !== undefined && claimed !== undefined) return written !== claimed;
-  if (unitWrittenAfter(st.quote, st.high, st.unit, joined.high.index)) return false;
-  // Borrowed: another figure equal to this end carries the unit (as written, or a word of its family).
-  const high = st.high, unit = st.unit;
-  if (findStatedAmounts(st.quote).some((x) => x.index !== joined.high.index && Math.abs(x.magnitude) === Math.abs(high)
-    && (unitWrittenAfter(st.quote, high, unit, x.index) || (claimed !== undefined && unitAtRange(st.quote, x) === claimed)))) return true;
-  return !quoteNamesUnit(st.quote, st.unit);
-}
-
-/** The words name the unit somewhere (whole word, plural-tolerant, or a word of its family): a unit they never write is the AI's alone. */
-function quoteNamesUnit(quote: string, unit: string): boolean {
-  const u = unit.trim().toLowerCase().replace(/\s+/gu, ' ');
-  const whole = new RegExp(`(?<![\\p{L}\\p{N}])${u.replace(/(?:es|s)$/u, '').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/ /gu, '\\s+')}(?:es|s)?(?![\\p{L}\\p{N}])`, 'iu');
-  if (whole.test(quote)) return true;
-  const family = unitFamily(unit);
-  return family !== undefined && [...quote.matchAll(/[\p{L}%]+/gu)].some((w) => unitLeading(quote.slice(w.index)) === family);
+  const written = joined === undefined ? null : statedTailParts(st.quote, joined.high);
+  const claimed = readUnitParts(st.unit);
+  const stated = (v: unknown): boolean => v !== null && !(Array.isArray(v) && v.length === 0);
+  return written !== null && claimed !== null && carrierCompatible(written, claimed)
+    && (['period', 'per', 'base', 'qualifiers'] as const).every((part) => stated(written[part]) === stated(claimed[part])) ? st : { ...st, unit: '' };
 }
 
 /**
@@ -440,10 +370,10 @@ export function linkEffectStatedRange(model: unknown, brief: string, from: strin
   return { low, high, text: `${between}${text}`, end: 'whole', reported: st.quote };
 }
 /**
- * ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R1–R3): the AI's own range reading for THIS link whose figures the words write, but which is
- * NOT in the edge's operative unit: a different unit written at the range ("4 to 6 lb" on a kilogram link), or the AI's unit not
- * written there at all (refused `unit_not_written`: "4 and 6 mm … a platform 6 metres high" read as metres). An Olumi size taken
- * from it is a figure in the wrong unit. Ends as magnitudes; the whole quote. `null`: none; `undefined`: a draft without statements.
+ * ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R1–R5): the user's range for THIS link that is NOT in the edge's operative unit by complete-unit
+ * equality (`sameUnit`): a different unit written at the range ("4 to 6 lb" on a kilogram link; "4 and 6 kg per week" on kg per day),
+ * or none ("4 and 6 mm … a platform 6 metres high" is never metres). An Olumi size taken from it is a figure in the wrong unit. Ends
+ * as magnitudes; the whole quote. `null`: none; `undefined`: a draft without statements.
  */
 export function linkEffectRangeInOtherUnit(model: unknown, brief: string, from: string, to: string, unit: string | undefined)
   : { readonly low: number; readonly high: number; readonly quote: string } | null | undefined {
@@ -452,26 +382,10 @@ export function linkEffectRangeInOtherUnit(model: unknown, brief: string, from: 
   // A link with no unit of its own has no other unit to compare with: nothing is set aside on a guess.
   if (typeof unit !== 'string' || unit.trim() === '') return null;
   const key = subjectKey({ kind: 'link', label: from, to_label: to }, 'effect');
-  const map = sourceMapOf(draftStatements(model), brief);
-  const ends = (low: unknown, high: unknown) => (typeof low === 'number' && typeof high === 'number'
-    ? { low: Math.min(Math.abs(low), Math.abs(high)), high: Math.max(Math.abs(low), Math.abs(high)) } : undefined);
-  // A refused range's unit is the one its words write at its own end, if any.
-  const writtenAt = (quote: string, e: { readonly low: number; readonly high: number }): string | undefined => {
-    const joined = findJoinedRanges(quote).find((r) => r.low.magnitude === e.low && r.high.magnitude === e.high);
-    return joined === undefined ? undefined : unitAtRange(quote, joined.high);
-  };
-  // A verified range's unit agrees with its words (`rangeUnitNotItsOwn`), so the AI's reading of it is the range's unit.
-  for (const st of map.verified.get(key) ?? []) {
-    const e = ends(st.low, st.high);
-    if (st.form === 'range' && st.negated !== true && e !== undefined && typeof st.unit === 'string' && st.unit.trim() !== ''
-      && unitsDiffer(st.unit, unit)) return { ...e, quote: st.quote };
-  }
-  for (const r of map.refused) {
-    const e = r.key === key && r.refusal === 'unit_not_written' && r.given['negated'] !== true ? ends(r.given['low'], r.given['high']) : undefined;
-    if (e === undefined || typeof r.quote !== 'string') continue;
-    // Refused for its claimed unit: an Olumi size from it is set aside unless its own words write this link's unit there.
-    const words = writtenAt(r.quote, e);
-    if (words === undefined || words !== unitFamily(unit)) return { ...e, quote: r.quote };
+  // A verified range carries the unit its own words write (`withOwnRangeUnit`), or none: anything but this link's unit is other.
+  for (const st of sourceMapOf(draftStatements(model), brief).verified.get(key) ?? []) {
+    if (st.form !== 'range' || st.negated === true || typeof st.low !== 'number' || typeof st.high !== 'number' || sameUnit(st.unit, unit)) continue;
+    return { low: Math.min(Math.abs(st.low), Math.abs(st.high)), high: Math.max(Math.abs(st.low), Math.abs(st.high)), quote: st.quote };
   }
   return null;
 }
