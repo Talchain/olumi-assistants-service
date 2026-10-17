@@ -5,15 +5,40 @@ import type { RunQuestionSide, RunQuestionScope } from './run-question.js';
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** Source inspection, not an engine simulation or a claim about a deployment. Time capability is outside this scope. */
+/**
+ * Available before admission or a Run: CEE's versioned reading of pinned SOURCE contracts, never an engine attestation.
+ * The static input validator below covers level calculations; the engine's other request frames still need their own
+ * existing validators/licences. Specialized temporal owners are outside this declaration, not declared unsupported.
+ * A capability does not set may_run, verify evaluated inputs, grant a chance/order, or grant comparative leadership.
+ */
 export const STATIC_LEVEL_CAPABILITY = Object.freeze({
-  scope: 'static' as const,
-  supports_horizon: false,
-  verification: 'source_contract' as const,
-  level: 'baseline_plus_paired_option_change' as const,
-  source: 'Inference-Service-Layer@a5725a158ce9431350eb1e805e9d9ff8db2dea64:_resolve_threshold_in_sample_frame',
-  transport: 'plot-lite-service@58b3e3c4c6e8eb1df33cb66f4df129607962aaa9:resolvedGoalTarget',
+  declaration_version: 1 as const,
+  authority: 'cee_source_contract' as const,
+  engine_attestation: 'unverified' as const,
+  engine_support: Object.freeze({
+    static_level: Object.freeze({ request_frame: 'level' as const, method: 'baseline_plus_paired_option_change' as const }),
+    request_frames: Object.freeze(['level', 'delta', 'change_abs', 'change_rel'] as const),
+    minimum_option_count: 1 as const,
+    temporal_evolution: 'outside_this_declaration' as const,
+    source: 'Inference-Service-Layer@a5725a158ce9431350eb1e805e9d9ff8db2dea64:src/services/robustness_analyzer_v2.py:_resolve_threshold_in_sample_frame',
+    request_source: 'Inference-Service-Layer@a5725a158ce9431350eb1e805e9d9ff8db2dea64:src/models/robustness_v2.py:TargetFrame,RobustnessRequestV2.options',
+  }),
+  transport_admission: Object.freeze({
+    route: '/v2/run' as const,
+    minimum_option_count: 2 as const,
+    single_option_goal_chance: false,
+    source: 'plot-lite-service@58b3e3c4c6e8eb1df33cb66f4df129607962aaa9:src/routes/v2/run.ts:options.minItems',
+  }),
+  potential_claim_support: Object.freeze({
+    goal_chance_requires: Object.freeze(['admission', 'target_testability', 'currentness', 'goal_chance_licence'] as const),
+    goal_chance_and_ordering: 'goalChanceLicenceForAgent' as const,
+    comparative_leadership: 'leaderLicenceFromState' as const,
+    one_surviving_result_licenses_leader: false,
+    static_calculation_answers_date: false,
+  }),
 });
+
+export type CeeSourceContractDeclaration = typeof STATIC_LEVEL_CAPABILITY;
 
 const questionText = (v: unknown): string | undefined => typeof v === 'string' && v.trim() !== '' ? v : undefined;
 const questionNodes = (graph: unknown): Rec[] => isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -82,7 +107,8 @@ export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequ
     || levelKind === false || questionNodes(savedGraph).some(n => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation')
     || (savedGoal?.nonlinear_identity !== undefined && (!isRec(savedGoal.nonlinear_identity) || savedGoal.nonlinear_identity.operation !== 'sum'))
     || questionGoal(savedGraph, goalId)?.quantity_frame === 'change'
-    || asked.frame !== 'level') return { status: 'outside_static_scope', can_show_goal_chance: false, reasons: ['outside_verified_static_level_scope'] };
+    || asked.frame !== STATIC_LEVEL_CAPABILITY.engine_support.static_level.request_frame)
+    return { status: 'outside_static_scope', can_show_goal_chance: false, reasons: ['outside_verified_static_level_scope'] };
   if (calculated === null) return { status: 'unverified', can_show_goal_chance: false, reasons: ['dispatched_inputs_not_recorded'] };
   // Existing missing-target/direction owners keep their precise refusal; no second generic reason is minted.
   if (asked.target === undefined || asked.comparator === undefined) return { status: 'unverified', can_show_goal_chance: false,
@@ -105,7 +131,7 @@ export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequ
   const optionIds = calculated.option_ids ?? [], askedIds = asked.option_ids ?? [];
   if (optionIds.length === 0 || optionIds.some(id => !askedIds.includes(id))) reasons.push('unverified_options');
   const sentThreshold = readDispatchedGoalThreshold(sent, goalId);
-  if (sentThreshold?.frame !== 'level') {
+  if (sentThreshold?.frame !== STATIC_LEVEL_CAPABILITY.engine_support.static_level.request_frame) {
     const referenceOptions = (Array.isArray(sent.options) ? sent.options.filter(isRec) : []).filter(o => o.is_baseline === true);
     if (reasons.length === 0 && referenceOptions.length !== 1) return { status: 'outside_static_scope', can_show_goal_chance: false,
       reasons: ['outside_verified_paired_reference_scope'] };

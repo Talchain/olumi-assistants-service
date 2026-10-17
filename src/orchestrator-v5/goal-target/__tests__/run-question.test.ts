@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { withEvaluatedGoalChanceInputs, deriveRunQuestion, sentGoalThresholdOf } from '../goal-chance-licence.js';
 import { sentDigest } from '../../tools/handlers/run-input-snapshot.js';
+import { STATIC_LEVEL_CAPABILITY } from '../run-question-scope.js';
 
 const saved = () => ({ nodes: [
   { id: 'capacity', kind: 'goal', label: 'Weekly capacity', goal_threshold_raw: 100, goal_threshold: 0.2,
@@ -27,7 +28,11 @@ describe('Run question: evaluated inputs and saved revision, never today’s mod
     expect(q.calculated).toMatchObject({ target: 100, baseline: 80, encoded_target: 0.2, frame: 'level', comparator: '>=' });
     expect(q.scope.can_show_goal_chance).toBe(false);
     expect(withEvaluatedGoalChanceInputs({}, saved(), 'capacity', request()).scope).toMatchObject({
-      status: 'supported_static', note: 'Static model; not a forecast to a date.' });
+      status: 'supported_static', note: 'Static model; not a forecast to a date.',
+      capability: { declaration_version: 1, authority: 'cee_source_contract', engine_attestation: 'unverified',
+        engine_support: { minimum_option_count: 1 },
+        transport_admission: { minimum_option_count: 2, single_option_goal_chance: false },
+        potential_claim_support: { one_surviving_result_licenses_leader: false, static_calculation_answers_date: false } } });
     expect(q.omitted).toContainEqual({ field: 'horizon', reason: 'not_verified', asked: q.asked!.horizon });
   });
 
@@ -72,12 +77,25 @@ describe('Run question: evaluated inputs and saved revision, never today’s mod
     expect(q.evidence.status).toBe('unverified');
     expect(q.evidence.missing).toEqual(expect.arrayContaining(['input_snapshot', 'evaluated_scenario_revision']));
     expect(q.scope.can_show_goal_chance).toBe(false);
+    // The declaration is available before a Run. It cannot supply missing evidence for this historical Run.
+    expect(STATIC_LEVEL_CAPABILITY.declaration_version).toBe(1);
+    expect(q.scope.capability).toBeUndefined();
+  });
+
+  it('a source contract names independent claim owners; engine support grants neither admission nor leadership', () => {
+    expect(STATIC_LEVEL_CAPABILITY.engine_support.request_frames).toEqual(['level', 'delta', 'change_abs', 'change_rel']);
+    expect(STATIC_LEVEL_CAPABILITY.potential_claim_support.goal_chance_requires)
+      .toEqual(['admission', 'target_testability', 'currentness', 'goal_chance_licence']);
+    expect(STATIC_LEVEL_CAPABILITY.potential_claim_support.goal_chance_and_ordering).toBe('goalChanceLicenceForAgent');
+    expect(STATIC_LEVEL_CAPABILITY.potential_claim_support.comparative_leadership).toBe('leaderLicenceFromState');
+    expect(STATIC_LEVEL_CAPABILITY).not.toHaveProperty('may_run');
   });
 
   it('an existing temporal calculation outside this capability is never labelled static or said to have ignored its horizon', () => {
     const historical = saved(); Object.assign(historical.nodes[0]!, { nonlinear_identity: { operation: 'accumulation' } });
     const q = deriveRunQuestion({ runEvidence: evidence(), historicalModel: { revision: 12, graph: historical }, dispatchedRequest: request() });
     expect(withEvaluatedGoalChanceInputs({}, historical, 'capacity', request()).scope.status).toBe('outside_static_scope');
+    expect(STATIC_LEVEL_CAPABILITY.engine_support.temporal_evolution).toBe('outside_this_declaration');
     expect(q.calculated?.scope).toBeUndefined();
     expect(q.omitted).toContainEqual({ field: 'horizon', reason: 'not_verified', asked: q.asked!.horizon });
   });
