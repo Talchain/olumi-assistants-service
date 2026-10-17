@@ -130,7 +130,14 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     // figure's clause (or the quote) by `statementBoundTo`.
     const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
     const source = row.sourceOf?.(subject, graph);
-    if (!whole && !(source !== undefined && source === quote)
+    // ⭐ (opt-in, `bindsByAnsweredQuestion`): the question the quote answers must be Olumi's own, verbatim in its last reply; then
+    // that question naming this subject binds the answer. An answered question the host cannot find there binds nothing.
+    const asked = row.bindsByAnsweredQuestion === true && typeof answering === 'string' && answering.trim() !== '' ? answering.trim() : undefined;
+    if (asked !== undefined && !(typeof ctx.preceding_ask === 'string' && ctx.preceding_ask.includes(asked))) {
+      return { kind: 'refused', refusal: 'not_this_subject', detail: `“${asked}” is not in Olumi’s last reply, so it does not bind “${quote}”. Nothing was prepared. ${KEEP}` };
+    }
+    const byQuestion = asked !== undefined && statementBoundTo(graph, subject, asked) === 'bound';
+    if (!whole && !byQuestion && !(source !== undefined && source === quote)
       && statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering, row.answersFor?.(subject, graph) ?? []) !== 'bound') {
       return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
     }
