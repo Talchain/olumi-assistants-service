@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { log } from '../../../utils/telemetry.js';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
 import { userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
@@ -34,6 +36,72 @@ function fixture(row: typeof cases[number]) {
   return { graph, message, subject, other, request };
 }
 const withoutRef = ({ ref: _ref, ...node }: Rec) => node;
+
+it.each([
+  ['missing quote', 'correction_not_stated', 'correction.quote_present'],
+  ['partial quote', 'correction_not_stated', 'correction.quote_whole_current_turn'],
+  ['empty edits', 'correction_not_stated', 'correction.edits_nonempty'],
+  ['unrelated source', 'unrelated_correction', 'correction.postimage.unrelated_correction.unbound'],
+  ['ordinary subject', 'subject_not_found', 'propose_statement.subject_not_found'],
+])('refusal source diagnostic: %s keeps text private and changes no verdict', async (fault, refusal, check) => {
+  const f = fixture(cases[0]!), secret = 'PRIVATE_SOURCE_AND_READING_CANARY_7d92';
+  const message = fault === 'unrelated source' ? 'Revenue rose last year; the current filing is not complete.' : f.message;
+  const args: Rec = { correction: structuredClone(f.request) };
+  args.correction.quote = message;
+  args.correction.edits[0].reading_words = secret;
+  args.correction[secret] = secret; // Neither an arbitrary key nor its value may become a logged field.
+  if (fault === 'missing quote') delete args.correction.quote;
+  if (fault === 'partial quote') args.correction.quote = message.slice(0, message.indexOf(','));
+  if (fault === 'empty edits') args.correction.edits = [];
+  if (fault === 'ordinary subject') {
+    delete args.correction;
+    args.subject = { kind: 'factor', id: secret, field: 'measure' };
+    args.statements = [{ quote: message, reading_words: secret, [secret]: secret }];
+  }
+  const w = await correctionWorld(f.graph, `${message} ${secret}.`);
+  const spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+  try {
+    const result = await w.offer('propose_statement', args);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal });
+    expect(result).not.toHaveProperty('failed_checks'); // Observations are not a new AI input or permission.
+    const events = spy.mock.calls.map(([event]) => event as Rec).filter(e => e.diagnostic_source === 'statement_preparation');
+    expect(events).toHaveLength(1);
+    const event = events[0]!;
+    expect(event).toMatchObject({ event: 'v5.agent.tool_refusal_diagnostic', tool: 'propose_statement', refusal, failed_checks: [check],
+      variant: fault === 'ordinary subject' ? 'statement' : 'correction', agent_mode: 'full' });
+    const quoted = fault === 'ordinary subject' ? event.statements[0] : event.correction;
+    const quote = fault === 'ordinary subject' ? message : args.correction.quote ?? '';
+    expect(quoted).toMatchObject({ quote_length: quote.length, quote_sha256: createHash('sha256').update(quote).digest('hex'),
+      quote_is_whole_current_statement: !['missing quote', 'partial quote'].includes(fault) });
+    expect(quoted).not.toHaveProperty('quote_found_in_current_turn'); // No second quote-normalisation rule.
+    expect(event.correction.edits.every((e: Rec) => e.subject_id_present)).toBe(true);
+    expect(JSON.stringify(event)).not.toContain(secret);
+    expect(JSON.stringify(event)).not.toContain(message);
+    expect(w.graph()).toEqual(f.graph);
+    expect(w.proposals.size()).toBe(0); expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  } finally { spy.mockRestore(); }
+});
+
+it.each([
+  { words: 'For Energy use, retract the earlier account.', binder: 'another', index: 0 },
+  { words: 'Retract the earlier account.', binder: 'unbound', index: 0 },
+  { words: 'For Dispatch updates, retract the earlier account.', binder: 'unbound', index: 1 },
+])('native diagnostic distinguishes $binder at edit $index', async ({ words, binder, index }) => {
+  const f = fixture(cases[0]!);
+  f.graph.nodes.push({ id: 'energy', kind: 'factor', label: 'Energy use' });
+  const w = await correctionWorld(f.graph, words), spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+  try {
+    const result = await w.offer('propose_statement', { correction: { ...f.request, quote: words,
+      edits: index === 0 ? [f.request.edits[0]] : f.request.edits } });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+    const event = spy.mock.calls.map(([e]) => e as Rec).find(e => e.diagnostic_source === 'statement_preparation')!;
+    expect(event).toMatchObject({ request_id: w.ctx.request_id, binder_result: binder, failed_edit_index: index,
+      failed_checks: [`correction.postimage.unrelated_correction.${binder}`] });
+    expect(JSON.stringify(event)).not.toContain(words);
+    expect(JSON.stringify(event)).not.toContain('Energy use');
+    expect(w.graph()).toEqual(f.graph); expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0);
+  } finally { spy.mockRestore(); }
+});
 
 describe.each(cases)('$name: correct_statement on the existing native operation', row => {
   it('proposal → persisted own card → one real register → full readback → cold native read', async () => {

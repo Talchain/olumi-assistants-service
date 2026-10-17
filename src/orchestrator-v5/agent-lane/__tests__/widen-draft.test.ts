@@ -78,7 +78,7 @@ function candidate({ risks = 2, sameLever = false, nonSq = 3, counterCase = fals
 const fixture = (args: Parameters<typeof candidate>[0] = {}) => {
   const c = candidate(args);
   // Both arms run in the served seam (restored, Paul #94 6166259456); these unit rows set them explicitly.
-  return { candidate: c, admitted: ADMIT(c, {}, BRIEF), admit: unitAdmit(BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true, risksArm: true };
+  return { candidate: c, admitted: ADMIT(c, {}, BRIEF), admit: unitAdmit(BRIEF), brief: BRIEF, constructionInput: BRIEF, deadlineAt: Date.now() + 60_000, optionsArm: true, risksArm: true };
 };
 const churnFixture = () => {
   const input = fixture({ risks: 1 });
@@ -100,7 +100,7 @@ const churnFixture = () => {
       { from: 'Pro monthly price', to: 'Pro monthly churn', direction: 'positive', provenance: 'inferred' },
     ],
   };
-  return { ...input, candidate: c, admitted: ADMIT(c, {}, brief), admit: unitAdmit(brief), brief, optionsArm: false };
+  return { ...input, candidate: c, admitted: ADMIT(c, {}, brief), admit: unitAdmit(brief), brief, constructionInput: brief, optionsArm: false };
 };
 const riskSuggestions = (sameLever = false) => [
   { label: 'Recruitment delay', category: 'timing', hits_id: sameLever ? 'grow_engineering_team' : 'hire_two_developers', through_id: 'developer_hires', through_direction: 'positive', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'filling both developer roles quickly', watch_for: 'offers remain unaccepted' },
@@ -747,7 +747,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
     const original: CandidateModel = { ...c, factors: c.factors.map((f) => f.label === 'Tech lead hires' || f.label === 'Contractor hours' ? { ...f, role: 'controllable' as const } : f) };
     const admitted = ADMIT(original, {}, BRIEF);
     expect(admitted.nodes.find((n) => n.id === 'contractor_hours')!.category).toBe('external');
-    expect(await widening.widenDraft({ candidate: original, admitted, admit: unitAdmit(BRIEF), brief: BRIEF, deadlineAt: Date.now() + 60_000, callStructured: generator([]) })).toBeNull();
+    expect(await widening.widenDraft({ candidate: original, admitted, admit: unitAdmit(BRIEF), brief: BRIEF, constructionInput: BRIEF, deadlineAt: Date.now() + 60_000, callStructured: generator([]) })).toBeNull();
   });
 
   it('aw-convention: never set or overwrite an Olumi-convention factor cap', async () => {
@@ -811,7 +811,7 @@ describe('P05b automatic widening, rows bound to graph identity', () => {
       const c = candidate({ risks: 1, sameLever: true });
       c.options[1]!.label = 'Better hiring pilot';
       const brief = BRIEF.replace('Hire a Tech Lead', 'Better hiring pilot');
-      const input = { candidate: c, admitted: ADMIT(c, {}, brief), admit: unitAdmit(brief), brief, deadlineAt: Date.now() + 60_000 };
+      const input = { candidate: c, admitted: ADMIT(c, {}, brief), admit: unitAdmit(brief), brief, constructionInput: brief, deadlineAt: Date.now() + 60_000 };
       const option = structuredClone(optionsArgs().options[0]!);
       const risk = { ...riskSuggestions(true)[0]! };
       if (field === 'label') option.label = 'Better hiring pilot with developers';
