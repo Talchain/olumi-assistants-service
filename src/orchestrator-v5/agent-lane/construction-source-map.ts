@@ -304,8 +304,11 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
     const high = Math.max(Math.abs(st.low), Math.abs(st.high));
     const end = size === low ? 'low' : size === high ? 'high' : null;
     if (end === null || !(low < high)) continue;
-    // The verifier's own reader of a unit written after a figure (a whole word: "m" is never "mm", BUDDY-A #3356 R2).
-    if (typeof st.unit !== 'string' || !unitWrittenAfter(st.quote, high, st.unit) || typeof unit !== 'string' || !sameUnit(st.unit, unit)) continue;
+    // The verifier's own reader of a unit written after a figure (a whole word: "m" is never "mm", BUDDY-A #3356 R2), at THIS
+    // range's own high end (R3: never another figure equal to it, "… 4 and 6 mm … a platform 6 metres high").
+    const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === low && r.high.magnitude === high);
+    if (joined === undefined || typeof st.unit !== 'string' || !unitWrittenAfter(st.quote, high, st.unit, joined.high.index)
+      || typeof unit !== 'string' || !sameUnit(st.unit, unit)) continue;
     // ⛔ BUDDY-A #3297 B1: the WHOLE verified quote, never a clause cut at punctuation. A shorter "clause" dropped its speaker
     // and condition ("The supplier estimates that, if the pilot succeeds, …" became only the numbers' clause) and was still
     // said "as the brief puts it"; the AIE disposition keeps the full attributed range with its speaker and conditions.
