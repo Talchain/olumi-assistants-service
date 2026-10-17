@@ -2,8 +2,8 @@
 import type { GoalRecord } from './goal-record.js';
 import type { RunEvidence } from '../agent-lane/run-evidence.js';
 import type { RunOmittedRisk } from '../agent-lane/unsized-risk.js';
-import { askedQuestionOf, dispatchedQuestionOf, STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
-export { STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
+import { askedQuestionOf, dispatchedQuestionOf, type CeeSourceContractDeclaration } from './run-question-scope.js';
+export { STATIC_LEVEL_CAPABILITY, type CeeSourceContractDeclaration } from './run-question-scope.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
 import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { calculatedRawTarget, recordedStaticLevelEvidence, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
@@ -37,7 +37,8 @@ export interface RunQuestionScope {
   readonly can_show_goal_chance: boolean;
   readonly reasons: readonly string[];
   readonly note?: typeof STATIC_MODEL_SCOPE_NOTE;
-  readonly capability?: typeof STATIC_LEVEL_CAPABILITY;
+  /** Descriptive CEE source contract only; the selected Run's recorded evidence/licence still decides its scope. */
+  readonly capability?: CeeSourceContractDeclaration;
   readonly dispatched_input_digest?: string;
 }
 

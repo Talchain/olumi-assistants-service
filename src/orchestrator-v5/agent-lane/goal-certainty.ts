@@ -314,7 +314,18 @@ function sayMismatch(
  * a std counts as zero within a relative tolerance far below any real spread (the smallest real one in that census:
  * B1 £59, std 0.0045 on a 0–1 frame).
  */
-const ZERO_SPREAD_RELATIVE = 1e-9;
+/** Paired-reference arithmetic only; never target identity or a probability boundary. Absolute floor below unit scale. */
+export const PAIRED_REFERENCE_PRECISION = 8 * Number.EPSILON;
+/** Existing reported-sample spread policy; a narrow central range does not establish a fixed reference or certainty. */
+export const REPORTED_SPREAD_PRECISION = 1e-9;
+
+/** Caller supplies ONE recorded frame's scale, explicitly choosing its arithmetic policy. No conversion or attestation. */
+export function sameFrameArithmeticAgreement(actual: number, expected: number, scale: number, relativeTolerance: number): boolean {
+  return Number.isFinite(actual) && Number.isFinite(expected) && Number.isFinite(scale)
+    && Number.isFinite(relativeTolerance) && relativeTolerance >= 0
+    && Math.abs(actual - expected) <= relativeTolerance * Math.max(1, Math.abs(scale));
+}
+
 export function zeroSpread(r: Rec): boolean {
   const o = isRec(r.outcome) ? r.outcome : undefined;
   if (o === undefined) return false;
@@ -323,7 +334,7 @@ export function zeroSpread(r: Rec): boolean {
   if (p10 !== undefined && p90 !== undefined && p10 === p90) return true;
   const std = num(o.std);
   const scale = Math.max(Math.abs(num(o.p50) ?? num(o.mean) ?? 0), 1);
-  return std !== undefined && std >= 0 && std <= ZERO_SPREAD_RELATIVE * scale;
+  return std !== undefined && std >= 0 && sameFrameArithmeticAgreement(std, 0, scale, REPORTED_SPREAD_PRECISION);
 }
 
 /**

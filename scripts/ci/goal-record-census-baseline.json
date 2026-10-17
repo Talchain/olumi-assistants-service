@@ -1,5 +1,5 @@
 {
-  "source_sha": "eb6ac29c951d1a41d5d5cb73ab33ed82c211b94d",
+  "source_sha": "407985c0a67463d85efa4d1339d4e180e572f4c8",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -74,7 +74,7 @@
       "src/orchestrator-v5/admission/target-testability.ts": 2,
       "src/orchestrator-v5/agent-lane/actions/state.ts": 2,
       "src/orchestrator-v5/agent-lane/admit-constraint.ts": 2,
-      "src/orchestrator-v5/agent-lane/admit-model.ts": 9,
+      "src/orchestrator-v5/agent-lane/admit-model.ts": 10,
       "src/orchestrator-v5/agent-lane/analysis-admissibility.ts": 1,
       "src/orchestrator-v5/agent-lane/ceiling-stock.ts": 4,
       "src/orchestrator-v5/agent-lane/construction-size-gate.ts": 3,
@@ -833,7 +833,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 30,
     "goalUnitOf": 5,
-    "goal_constraints": 452,
+    "goal_constraints": 453,
     "goal_deadline_as_stated": 12,
     "goal_direction": 104,
     "goal_horizon": 48,
@@ -862,7 +862,7 @@
     "threshold_source": 40,
     "unit_reading": 79
   },
-  "total_references": 2489,
+  "total_references": 2490,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

@@ -51,7 +51,7 @@ import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft
 import { recordedMeasureOf } from '../statement-door/fields/measure.js';
 import { goalTargetBasisIn, humanEffectsTimingOf, laterTimingWords, timingBasisNote } from '../statement-door/fields/goal-timing.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
-import { zeroSpread } from '../agent-lane/goal-certainty.js';
+import { zeroSpread, sameFrameArithmeticAgreement, PAIRED_REFERENCE_PRECISION } from '../agent-lane/goal-certainty.js';
 import { goalTargetRow, statedGoalTargetOf } from './stated-goal-target.js';
 import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
@@ -360,15 +360,17 @@ function pairedLevelFacts(graph: unknown, node: Rec, basis: Pick<GoalTargetBasis
 /**
  * The checked facts decide; the Run's status-quo row only CHECKS them, and never stands in for them (DL re-scope after
  * independent check r2, BLOCKING 3: no "no change" from summary statistics — the equal-decile / zero-spread reading is not
- * used here at all). On the same-draw reference every draw IS the reference, so the row disagrees on ANY sign otherwise:
- * a share strictly between 0 and 1; ANY positive std (equal deciles never excuse it: std 3 with p10 = p90 = 75 is a spread);
- * deciles apart; or any recorded centre or decile not exactly the reference in the Run's frame (D2, exact equality).
+ * used here at all). First check the exact probability side against the held target. Then check std and every recorded
+ * centre against the known reference, within the published arithmetic precision in ONE frame. Neither a narrow central
+ * range nor numerical agreement earns an otherwise unlicensed certainty.
  * A row that records none of these (no outcome, or its spread already withheld) agrees.
  */
-function statusQuoReadingOf(a: {
+export function statusQuoReadingOf(a: {
   readonly paired: boolean; readonly forecast: boolean; readonly row: Rec | undefined; readonly reference: number | 'unknown' | undefined;
   /** The same LEVEL reference in raw units, only when retained on the verified dispatched request. No row-scale inference. */
   readonly rawReference?: number;
+  /** Exact side in the held target's frame: today's raw level or zero change, independently of output residue. */
+  readonly referenceChance?: 0 | 1;
   /** A goal measured AS a change: the chance a ZERO change has against the held target (1 meets it, 0 does not). */
   readonly zeroChange?: 0 | 1;
 }): StatusQuoReading {
@@ -377,6 +379,7 @@ function statusQuoReadingOf(a: {
   if (row === undefined) return 'assumed';
   const p = row.probability_of_goal;
   if (typeof p === 'number' && p !== 0 && p !== 1) return 'moved';
+  if (typeof p === 'number' && a.referenceChance !== undefined && p !== a.referenceChance) return 'moved';
   // ⭐ G (DL ruling 12 Oct: the AIE's D2 exact equality, applied IN THE RUN'S OWN RECORDED FRAME): a goal measured AS a change is
   // scored as the PAIRED change (each option minus carrying on, on the same draw), so carrying on's change is 0 = the
   // reference by construction, and its recorded chance must be exactly what a zero change gives against the held target. The
@@ -388,16 +391,17 @@ function statusQuoReadingOf(a: {
   // DL 17 Oct 10:22/11:23: a paired reference is established by the evaluated model above, not inferred from these
   // statistics. Allow eight machine epsilons on that reference's scale for float arithmetic (the captured 8d9 row has
   // std 5.55e-17 and mean one ulp above 0.4). This is deliberately far smaller than the suggested 1e-9 allowance.
-  // EVERY recorded centre and std must fit ONE known frame. It earns no exact chance and cannot excuse real spread,
+  // EVERY recorded centre and std must fit ONE known frame, and the held target's exact side must be independently known.
+  // Residue cannot establish that side when the units are unknown, earn an exact chance, or excuse real spread,
   // mixed encodings, an unknown frame or the contradictory probability already checked above.
   const centres = ['p10', 'p50', 'p90', 'mean'];
   const agreesInFrame = (reference: unknown): boolean => {
     if (!finite(reference)) return false;
-    const precision = 8 * Number.EPSILON * Math.max(1, Math.abs(reference));
-    return (!finite(o.std) || Math.abs(o.std) <= precision)
-      && centres.every(k => !finite(o[k]) || Math.abs(o[k] - reference) <= precision);
+    return (!finite(o.std) || sameFrameArithmeticAgreement(o.std, 0, reference, PAIRED_REFERENCE_PRECISION))
+      && centres.every(k => !finite(o[k]) || sameFrameArithmeticAgreement(o[k], reference, reference, PAIRED_REFERENCE_PRECISION));
   };
-  const agrees = a.reference !== 'unknown' && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
+  const agrees = a.reference !== 'unknown' && a.referenceChance !== undefined
+    && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
   if (finite(o.std) && o.std > 0 && !agrees) return 'moved';
   if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90 && !agrees) return 'moved';
   // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".
@@ -742,6 +746,12 @@ export function goalChanceLicenceOf(
       // the Run's own frame).
       reference: changeQuantity ? 0 : levelToday,
       ...(changeQuantity || rawLevelReference === undefined ? {} : { rawReference: rawLevelReference }),
+      // N1: residue must not turn a wrong-side exact 0/1 into an assumed reference and leak it through a joint.
+      // The quantity/samples may be levels while the TARGET asks for a change. Compare zero change with that
+      // change target, never today's level with a change amount (75% today is not a +10-point target).
+      ...(!changeQuantity ? { referenceChance: changeFrame !== undefined
+        ? exactComparisonSide(0, held, target.value)
+        : finite(today) && goalState?.unit === target.unit ? exactComparisonSide(today, held, target.value) : undefined } : {}),
       // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
       ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
     });
@@ -1170,7 +1180,13 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
     const cp = sqRecord?.constraint_probabilities;
     const p = isRec(cp) ? cp[row.constraint_id] : Array.isArray(cp)
       ? cp.filter(isRec).find((x) => x.constraint_id === row.constraint_id)?.probability : undefined;
-    return typeof p === 'number' && p !== 0 && p !== 1 ? 'moved' : 'assumed';
+    const held = stored.find(x => x.constraint_id === row.constraint_id);
+    const state = isRec(n.observed_state) ? n.observed_state : undefined;
+    // Raw level and held raw target, with recorded unit/value identity. Never compare an encoded centre with a raw target.
+    const side = finite(state?.raw_value) && finite(held?.value) && typeof state?.unit === 'string'
+      && state.unit === held?.unit && row.unit === held.unit && row.value === held.value
+      ? exactComparisonSide(state.raw_value, row.operator, held.value) : undefined;
+    return typeof p === 'number' && ((p !== 0 && p !== 1) || (side !== undefined && p !== side)) ? 'moved' : 'assumed';
   };
   const targetRows = sent.filter((r) => stored.some((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE));
   // ⛔ RE-SCOPE 2 (R5-3; AIE open 1): the JOINT is every condition the Run sent — each target AND each included limit
@@ -1946,7 +1962,14 @@ export function periodEndConditionalOf(
 
 /** Whether a change of exactly 0 meets the held comparison against the target (`held` is the stated comparator). */
 function zeroChangeMeets(held: string, value: number): boolean {
-  return held === '>=' ? 0 >= value : held === '>' ? 0 > value : held === '<=' ? 0 <= value : held === '<' ? 0 < value : false;
+  return exactComparisonSide(0, held, value) === 1;
+}
+
+/** Exact predicate only. It checks a recorded extreme; it never manufactures a chance or uses arithmetic tolerance. */
+function exactComparisonSide(reference: number, operator: unknown, target: number): 0 | 1 | undefined {
+  const met = operator === '>=' ? reference >= target : operator === '>' ? reference > target
+    : operator === '<=' ? reference <= target : operator === '<' ? reference < target : undefined;
+  return met === undefined ? undefined : met ? 1 : 0;
 }
 
 /** The comparator a chance is stated with: the held one, else — a change carries its direction in its sign — the Run's own sense. */
