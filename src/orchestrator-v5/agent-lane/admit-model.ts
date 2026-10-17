@@ -5056,8 +5056,9 @@ function admitOnce(
     // Served: the drafter sized "would cut leakage by between 3 and 5" at its low end and flagged it `inferred`, so the user's range
     // was saved as Olumi's estimate with no range. An Olumi size that is no end of this link's verified range stays Olumi's, and a
     // denied range (`negated`) earns nothing.
+    // ⛔ BUDDY-A #3356 R1 B1: only in the unit the edge's own natural size is said in ("percentage points" on a percentage level).
     if (source !== undefined && target !== undefined && typeof brief === 'string' && typeof l.effect_amount === 'number'
-      && (linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount) ?? null) !== null) return true;
+      && (linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount, naturalAmountUnitOf(magnitudeNodeFor(target))) ?? null) !== null) return true;
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
     // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
@@ -5163,7 +5164,7 @@ function admitOnce(
         source: source.label,
         sourceUnit: source.unit,
         others: quantityLabels.filter((q) => q !== source.label),
-      }) ?? (typeof brief === 'string' ? linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount as number) ?? null : null)
+      }) ?? (typeof brief === 'string' ? linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount as number, naturalAmountUnitOf(target)) ?? null : null)
       : null;
     // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
     // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside
