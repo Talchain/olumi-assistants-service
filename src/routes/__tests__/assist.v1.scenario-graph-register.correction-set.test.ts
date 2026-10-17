@@ -736,6 +736,19 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(out).toMatchObject({ ok: false, mutated: false });
     expect(w.calls).toHaveLength(0); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
   });
+  it.each([
+    ["Don't create a new model.", 'create a new model.'],
+    ['Olumi suggested: create a new model.', 'create a new model.'],
+    ['Alice said: create a new model.', 'create a new model.'],
+    ['Do not create a new model; retain this one.', 'Create a new model'],
+  ])('a request fragment cannot strip the current negation or speaker: %s', async (message, excerpt) => {
+    const w = await bakeryWorld();
+    const ctx = { ...w.ctx, user_turn_text: message, user_text: message, verified_user_messages: [message] };
+    const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: excerpt }), ctx, w.caps());
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'current_request_required' });
+    expect(w.calls).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+
   it.each(['options', 'goal'])('withholds a replacement that loses saved %s', async lost => {
     const bad = structuredClone(bakery.draft);
     if (lost === 'options') bad.options.pop(); else bad.goal.metric = 'Other governing outcome';
@@ -787,14 +800,20 @@ describe('78ca founder: complete current source through the existing correction 
     const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
     expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
     expect(offered.public_label).toContain(source); expect(offered.public_label).toContain(quote);
-    expect(offered.public_label).toContain('Olumi’s unverified later-ambition reading');
+    expect(offered.public_label).toContain('Your source stays yours');
+    expect(offered.public_label).toContain('later role and its binding remain Olumi’s reading');
+    expect(offered.public_label).not.toContain('Check its source');
     expect(offered.public_label).toContain('Other saved aims and bounds stay on their existing nodes');
     const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
     expect(w.writes).toHaveLength(0);
     const other = (g: Rec) => g.nodes.filter((n: Rec) => n.id !== 'funding_secured');
     expect(other(candidate)).toEqual(other(w.original));
     expect(candidate.goal_constraints.find((r: Rec) => r.node_id === 'larger_fund_capital_secured')).toEqual(w.original.goal_constraints[0]);
-    expect(candidate.nodes.find((n: Rec) => n.id === 'funding_secured').description).toContain('Olumi’s unverified reading');
+    const originalSaid = founder78ca.graph.nodes.find((n: Rec) => n.id === 'funding_secured').user_statements.flatMap((r: Rec) => r.statements);
+    const proposedGoal = candidate.nodes.find((n: Rec) => n.id === 'funding_secured');
+    expect(proposedGoal.description).toContain('Your source stays yours');
+    expect(proposedGoal.description).not.toContain('or verified its source');
+    expect(proposedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining(originalSaid));
     expect(await w.caps().authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
     const cold = restoreCard(held, offered, w.ctx);
     const saved = await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid });
@@ -803,7 +822,11 @@ describe('78ca founder: complete current source through the existing correction 
     expect(w.graph().nodes.find((n: Rec) => n.id === 'funding_secured').goal_threshold_raw).toBe(250000);
     expect(other(w.graph())).toEqual(other(w.original));
     const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
-    expect(read.entities.find((n: Rec) => n.id === 'funding_secured').full_label).toContain('unverified');
+    const savedGoal = w.graph().nodes.find((n: Rec) => n.id === 'funding_secured');
+    expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining(originalSaid));
+    expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: source })]));
+    expect(read.entities.find((n: Rec) => n.id === 'funding_secured').full_label).toContain('Your source stays yours');
+    expect(read.goal.user_statements).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', said: expect.arrayContaining([quote, source]) })]));
     expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });
@@ -820,7 +843,9 @@ describe('78ca founder: complete current source through the existing correction 
       provenance: { authored_by: 'model_proposed', basis: 'Olumi’s unrelated starting figure' },
       validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Use these starting figures' });
     w.proposals.put(pending);
-    const args = { brief: framing, explicit_rebuild_request: excerpt };
+    // The source turn is unchanged. Quote its whole statement; bare verb fragments can omit negation or speaker.
+    const args = { brief: framing, explicit_rebuild_request: message.replace(/'/g, '’').toLocaleLowerCase('en-GB') };
+    expect(message.toLowerCase()).toContain(excerpt.toLowerCase());
     const offered = await dispatchTool('build_model_from_brief', JSON.stringify(args), w.ctx, w.caps());
     expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
     expect(w.proposals.get(pending.proposal_id)).toEqual(pending); expect(w.writes).toHaveLength(0);
