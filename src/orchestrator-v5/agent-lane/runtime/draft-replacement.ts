@@ -374,7 +374,12 @@ export function limitsKeptBy(base: unknown, drafted: unknown, figure = (value: n
     candidate = asSavedNode(candidate, String(same[0]!.node_id), savedNode);
     savedRowFor.set(same[0]!.constraint_id, c);
   }
-  const rows = rowsOf(candidate).map((r) => (savedRowFor.has(r.constraint_id) ? structuredClone(savedRowFor.get(r.constraint_id)!) : r));
+  // Excluded historical subjects keep their saved rows, including absence after a goal reframe.
+  // Reuse this row assembly: a stale draft cannot revive an earlier aim as an active target.
+  const excludedIds = new Set(recs(rec(base)?.nodes).filter(n => n.analysis_participation === 'retained_excluded').map(n => n.id));
+  const rows = [...rowsOf(candidate).filter(r => !excludedIds.has(r.node_id)),
+    ...rowsOf(base).filter(r => excludedIds.has(r.node_id)).map(r => structuredClone(r))]
+    .map((r) => (savedRowFor.has(r.constraint_id) ? structuredClone(savedRowFor.get(r.constraint_id)!) : r));
   const theirs = rows.filter(limitIn(candidate));
   const kept: HeldRow[] = [];
   const dropped: HeldRow[] = [];

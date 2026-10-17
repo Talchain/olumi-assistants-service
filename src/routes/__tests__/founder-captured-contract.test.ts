@@ -333,7 +333,10 @@ it('the prepared captured retention candidate cold-saves through the existing co
   expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(prepared.candidate, w.graph())).toBe(true);
   for (const n of w.original.nodes) expect(w.graph().nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
   const reopened = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
-  expect(reopened.goal.user_statements).toBeDefined();
+  const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
+  expect(reopened.recorded_reasoning.find((n: Rec) => n.id === goal.id).user_statements).toEqual(goal.user_statements);
+  const said = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
+  expect(goal.user_statements).toMatchObject([{ field: 'target', statements: [{ speaker: 'user', quote: said, source: said }] }]);
   expect(await caps.authoriseChange(press, { proposal_id: proposal.proposal_id })).toMatchObject({ ok: true, already_applied: true });
   expect(w.writes).toHaveLength(1);
 });

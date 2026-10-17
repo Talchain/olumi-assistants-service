@@ -162,11 +162,14 @@ describe('M3a: ONE press moves only the two members, and records the user’s wo
     const ctx = projectModelContext({ nodes: after.nodes, edges: after.edges, raw: after, analysis_state: undefined, analysis_ready: false } as never);
     const goal = ctx.goal as Rec;
     expect(goal.id).toBe('productivity');
-    expect(goal.user_statements).toEqual([{ field: 'measure', said: [SAID], speaker: 'user' }]);
+    expect((ctx.recorded_reasoning as Rec[]).find(n => n.id === goal.id)!.user_statements)
+      .toEqual(after.nodes.find((n: Rec) => n.id === goal.id)!.user_statements);
+    expect(goalOf(after).user_statements).toMatchObject([{ field: 'measure',
+      statements: [{ speaker: 'user', quote: SAID, source: TURN }] }]);
     expect(goal.measured_in).toBe(MEASURE);
     const plain = projectModelContext({ nodes: R4.nodes, edges: R4.edges, raw: R4, analysis_state: undefined, analysis_ready: false } as never);
     expect(plain.goal).toMatchObject({ id: 'productivity' });
-    expect(plain.goal).not.toHaveProperty('user_statements');
+    expect(((plain.recorded_reasoning ?? []) as Rec[]).find(n => n.id === (plain.goal as Rec).id)).toBeUndefined();
   });
 });
 

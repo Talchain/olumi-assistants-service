@@ -32,7 +32,12 @@ function corrected(retained: string[], retired: string, old = original) {
 }
 const view = (graph: Rec): Rec => projectModelContext({ nodes: graph.nodes, edges: graph.edges, raw: graph,
   analysis_state: undefined, analysis_ready: false } as never);
-const recordView = (graph: Rec): Rec => view(graph).goal.user_statements[0];
+const materialView = (graph: Rec): Rec => view(graph).recorded_reasoning.find((n: Rec) => n.id === subject.id);
+const recordView = (graph: Rec): Rec => {
+  const material = materialView(graph);
+  const { field, ...current } = material.current_retained.find((r: Rec) => r.field === subject.field);
+  return { field, current_retained: current, source_record: material.user_statements.find((r: Rec) => r.field === field) };
+};
 
 describe('N6: current retained words and complete earlier source remain distinct', () => {
   it.each([
@@ -82,9 +87,10 @@ describe('N6: current retained words and complete earlier source remain distinct
     expect(recordView(w.graph).source_record).toEqual(userStatementFor(w.graph, subject));
   });
 
-  it('a non-correction record keeps its existing reader bytes and measure', () => {
+  it('a non-correction record keeps its complete source and measure in the shared reasoning projection', () => {
     const { before } = corrected(['staff hours'], 'mostly on nights');
-    expect(recordView(before)).toEqual({ field: 'measure', said: [original], speaker: 'user' });
+    expect(materialView(before).user_statements).toEqual(before.nodes[0].user_statements);
+    expect(materialView(before).current_retained).toBeUndefined();
     expect(recordedMeasureOf(before.nodes[0])).toBe('staff hours');
   });
 });

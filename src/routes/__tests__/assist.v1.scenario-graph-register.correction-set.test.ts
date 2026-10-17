@@ -1085,8 +1085,10 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
     expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
     const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
-    expect(read.goal.user_statements.find((r: Rec) => r.field === 'measure')).toEqual({ field: 'measure',
-      current_retained: { spans: [{ text: 'loaves sold', origin: 'held_user_statement' }], complete: true }, source_record: beforeRecord });
+    const material = read.recorded_reasoning.find((n: Rec) => n.id === subject.id);
+    expect(material.current_retained.find((r: Rec) => r.field === 'measure')).toEqual({ field: 'measure',
+      spans: [{ text: 'loaves sold', origin: 'held_user_statement' }], complete: true });
+    expect(material.user_statements.find((r: Rec) => r.field === 'measure')).toEqual(beforeRecord);
     expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });
@@ -1160,9 +1162,10 @@ describe('78ca founder: complete current source through the existing correction 
     const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
     const savedGoal = w.graph().nodes.find((n: Rec) => n.id === 'funding_secured');
     expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining(originalSaid));
-    expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: source })]));
+    expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: source, source })]));
     expect(read.entities.find((n: Rec) => n.id === 'funding_secured').full_label).toContain('Your source stays yours');
-    expect(read.goal.user_statements).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', said: expect.arrayContaining([quote, source]) })]));
+    expect(savedGoal.user_statements.find((r: Rec) => r.field === 'target').statements.map((s: Rec) => s.quote)).toEqual(expect.arrayContaining([quote, source]));
+    expect(read.recorded_reasoning.find((n: Rec) => n.id === savedGoal.id).user_statements).toEqual(savedGoal.user_statements);
     expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });

@@ -9,6 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, firstConstructInput, type ConstructionContext } from '../runtime/build-model.js';
+import { answeredEarlierItem } from '../history-store.js';
+import { userStatementRecord } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const LEVEL = 'We run a 300-member gym and weekday attendance is about 45% at the moment.';
@@ -17,10 +19,14 @@ const BRIEF = `${LEVEL} ${TARGET} Option one is a corporate wellness deal. Optio
 const REJECTION = 'That "Corporate budgets frozen" risk connects to nothing, so it is useless here: take it out and do not add it back.';
 const CHIP = 'Yes, make that change.';
 const CONTEXT: ConstructionContext = {
+  current_model: { recorded_reasoning: [{ id: 'risk', kind: 'risk', label: 'Corporate budgets frozen',
+    user_statements: [userStatementRecord({ kind: 'risk', id: 'risk', field: 'holds_now' }, [{ speaker: 'user', source: REJECTION,
+      quote: REJECTION, reading: 'olumi', form: 'describes', subject: { quantity: 'risk', node_id: 'risk' } }],
+    '2026-08-01T00:00:00Z', { recorded_by: 'correction', disposition: 'retracted', scope: 'whole', retained_count: 0 })] }] },
   retained: { brief: BRIEF, conversation: [
     { speaker: 'user', source: 'typed', text: REJECTION },
     { speaker: 'unknown', source: 'stored, origin not verified', text: CHIP },
-  ] },
+  ], items: [answeredEarlierItem([{ olumi: 'Which attendance does that concern?', reply: 'Weekday attendance only.', reply_source: 'typed' }])] },
   objections: [REJECTION],
 };
 const statement = (quote: string, subject: Rec, field: string, form: string, figures: Rec, unit: string): Rec =>
