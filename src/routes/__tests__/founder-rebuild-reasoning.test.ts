@@ -13,7 +13,12 @@ import { provenanceOf } from '../../cee/provenance/provenance-of.js';
 type Rec = Record<string, any>;
 const capture = JSON.parse(readFileSync(new URL('./fixtures/founder-e625-rebuild-read04.json', import.meta.url), 'utf8')) as Rec;
 const graph = () => structuredClone(capture.graph) as Rec;
-const prepare = (saved: Rec, draft: Rec) => prepareRequestedRebuild(saved, draft, levelFrameOf);
+const prepare = (saved: Rec, draft: Rec, unadopted: string[] = []) => {
+  const result = prepareRequestedRebuild(saved, draft, levelFrameOf, unadopted);
+  const candidate = result.candidate;
+  if (candidate && (!Array.isArray(candidate.nodes) || !Array.isArray(candidate.edges))) throw new Error('Malformed rebuild candidate');
+  return { ...result, candidate: candidate as (Rec & { nodes: Rec[]; edges: Rec[] }) | undefined };
+};
 const omit = (g: Rec, ids: string[]) => {
   g.nodes = g.nodes.filter((n: Rec) => !ids.includes(n.id));
   g.edges = g.edges.filter((e: Rec) => !ids.includes(e.from) && !ids.includes(e.to));
@@ -77,7 +82,7 @@ describe('explicit rebuild retains the complete saved reasoning', () => {
     const r = prepare(saved, draft);
     expect(r.missing).toEqual([]);
     for (const option of saved.nodes.filter((n: Rec) => n.interventions?.[id])) {
-      expect(r.candidate!.nodes.find((n: Rec) => n.id === option.id).interventions[id]).toEqual(option.interventions[id]);
+      expect(r.candidate!.nodes.find((n: Rec) => n.id === option.id)!.interventions[id]).toEqual(option.interventions[id]);
     }
     expect(r.adoption_unknown.some(x => x.includes('Founder time on job specifications'))).toBe(true);
     expect(r.retired).toEqual([]);
@@ -110,7 +115,7 @@ describe('explicit rebuild retains the complete saved reasoning', () => {
     draft.edges = draft.edges.filter((e: Rec) => e.from !== from || e.to !== to);
     const r = prepare(saved, draft); expect(r.missing).toEqual([]);
     expect(r.candidate!.edges.find((e: Rec) => e.from === from && e.to === to)).toEqual(edge);
-    expect(r.candidate!.nodes.find((n: Rec) => n.id === from).user_statements).toEqual(saved.nodes.find((n: Rec) => n.id === from).user_statements);
+    expect(r.candidate!.nodes.find((n: Rec) => n.id === from)!.user_statements).toEqual(saved.nodes.find((n: Rec) => n.id === from).user_statements);
   });
 
   it('the existing refusal reader shows the audience-safe cause once, without raw tool detail', () => {
@@ -127,7 +132,7 @@ describe('explicit rebuild retains the complete saved reasoning', () => {
     option.interventions[id] = { ...option.interventions[id], value: 0, raw_value: 0, source: 'user_specified',
       range: { low: 0, high: 5, meaning: 'likely_range', source: 'user_specified' } };
     const r = prepare(saved, draft); expect(r.missing).toEqual([]);
-    expect(r.candidate!.nodes.find((n: Rec) => n.id === option.id).interventions[id]).toEqual(option.interventions[id]);
+    expect(r.candidate!.nodes.find((n: Rec) => n.id === option.id)!.interventions[id]).toEqual(option.interventions[id]);
   });
 
   it('the user’s figure and an accepted Olumi estimate keep their exact quantities, uncertainty and different authors', () => {
@@ -139,7 +144,8 @@ describe('explicit rebuild retains the complete saved reasoning', () => {
       reviewed_by_user: { intent: 'confirm', at: '2026-10-17T00:00:00.000Z' } };
     for (const id of [human.id, ai.id]) draft.nodes.find((n: Rec) => n.id === id).observed_state = { value: 0.1, raw_value: 10, cap: 100, unit, source: 'user_override' };
     const r = prepare(saved, draft); expect(r.missing).toEqual([]);
-    const keptHuman = r.candidate!.nodes.find((n: Rec) => n.id === human.id), keptAi = r.candidate!.nodes.find((n: Rec) => n.id === ai.id);
+    const keptHuman = r.candidate!.nodes.find((n: Rec) => n.id === human.id)!, keptAi = r.candidate!.nodes.find((n: Rec) => n.id === ai.id)!;
+    expect(keptHuman).toBeDefined(); expect(keptAi).toBeDefined();
     expect(keptHuman.observed_state).toEqual(human.observed_state); expect(keptAi.observed_state).toEqual(ai.observed_state);
     expect(provenanceOf({ value: keptHuman.observed_state }).origin).toBe('human');
     expect(provenanceOf({ value: keptAi.observed_state })).toMatchObject({ origin: 'ai', accepted: true });
@@ -162,7 +168,7 @@ describe('retirement reads a real unpressed adoption carrier', () => {
   it('a matching, unexpired, integrity-checked pending offer permits only its empty unadopted option to be left out', () => {
     const w = setup(), evidence = unpressedRebuildOptions([w.carrier], { ...subject, graph: w.saved });
     expect(evidence.ids).toEqual([w.node.id]);
-    const r = prepareRequestedRebuild(w.saved, w.draft, levelFrameOf, evidence.ids);
+    const r = prepare(w.saved, w.draft, evidence.ids);
     expect(r.missing).toEqual([]); expect(r.retired).toEqual([w.node.label]);
     expect(r.candidate!.nodes.some((n: Rec) => n.id === w.node.id)).toBe(false);
   });
