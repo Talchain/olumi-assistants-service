@@ -178,9 +178,9 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
 /**
  * ⛔ G3 a735 (BUDDY-A #3356 R1–R6; DL-3 fail-safe core, 17:4xZ: ONE unit authority, never convert): an effect range is the user's
  * range in the AI's unit only where that unit EQUALS the complete unit written at the range's own high end, read by the estate's one
- * tail reader (`statedTailParts`), money included: the same kind, currency, period, denominator, base and qualifiers, all present on
- * both sides alike (scale belongs to the number); a count's noun may only hold the user's words around the AI's ("extra visitors"
- * holds "visitors", the real A4 row). So "4 and 6 kg per week" is never kg nor kg per day, "£4 to £6 a week"
+ * tail reader (`statedTailParts`), money included: the same kind, currency, noun, period, denominator, base and qualifiers, all
+ * present on both sides alike (scale belongs to the number). A noun with other words is another population ("non-paying visitors"
+ * are never "paying visitors"; DL-3's exit on BUDDY-A R7). So "4 and 6 kg per week" is never kg nor kg per day, "£4 to £6 a week"
  * never £ a day, "kg per new client" never kg per client, "6 crates" never kg, and a unit written anywhere else in the sentence
  * certifies nothing. Otherwise the range is still recorded, whole, with NO unit: never relabelled, never converted.
  */
@@ -191,8 +191,8 @@ function withOwnRangeUnit(st: UserStatement): UserStatement {
   const claimed = readUnitParts(st.unit);
   const words = (a: readonly string[] | null): string => (a ?? []).join(' ');
   return written !== null && claimed !== null && written.kind === claimed.kind && written.code === claimed.code
-    && written.period === claimed.period && (['per', 'base', 'qualifiers'] as const).every((part) => words(written[part]) === words(claimed[part]))
-    && ` ${words(written.noun)} `.includes(` ${words(claimed.noun)} `) ? st : { ...st, unit: '' };
+    && written.period === claimed.period && (['noun', 'per', 'base', 'qualifiers'] as const).every((part) => words(written[part]) === words(claimed[part]))
+    ? st : { ...st, unit: '' };
 }
 
 /**

@@ -18,13 +18,12 @@ const WRITTEN = ['mm', 'millimetres', 'cm', 'metres', 'km', 'mg', 'g', 'grams', 
   'seconds', 'minutes', 'mins', 'hours', 'days', 'weeks', 'percent', 'per cent', 'percentage points', 'crates'];
 const CLAIMED = [...WRITTEN, 'm', 'l', 's', 'h', 'pp', '%'];
 const PERIODS = ['', ' a day', ' per week'];
-/** The oracle (DL-3 fail-safe core): every part of the complete unit written at the range EQUALS the claim's, present alike; a count's
- * noun may only hold words around the claim's ("extra visitors" holds "visitors"). */
+/** The oracle (DL-3 fail-safe core): every part of the complete unit written at the range EQUALS the claim's, present alike. */
 const agrees = (written: string, claimed: string): boolean => {
   const w = readUnitParts(written), c = readUnitParts(claimed);
   const words = (x: readonly string[] | null): string => (x ?? []).join(' ');
   return w !== null && c !== null && w.kind === c.kind && w.code === c.code && w.period === c.period
-    && (['per', 'base', 'qualifiers'] as const).every((k) => words(w[k]) === words(c[k])) && ` ${words(w.noun)} `.includes(` ${words(c.noun)} `);
+    && (['noun', 'per', 'base', 'qualifiers'] as const).every((k) => words(w[k]) === words(c[k]));
 };
 const KEY = 'link|pre-order system in use|daily food waste||effect';
 const statement = (quote: string, unit: string, low = 4, high = 6): Rec => ({ quote, subject: { kind: 'link', label: 'Pre-order system in use', to_label: 'Daily food waste', factor_label: null },
@@ -87,12 +86,17 @@ describe('SWEEP: a range is recorded in the AI\'s unit only where the complete u
     expect(wrong).toEqual([]);
   });
 
-  it('POSITIVE CONTROLS: a word before the unit ("extra") still writes it; a range with no unit anywhere is kept with none', () => {
+  it('a noun with other words is another population (BUDDY-A R7; DL-3 exit): kept whole, unconverted; the same noun is kept in it', () => {
     const wrong: string[] = [];
     for (const c of ['visitors', 'kg', 'litres', 'hours']) {
-      if (recordedUnit(`Our manager reckons the scheme would bring between 20 and 40 extra ${c} that week.`, c, 20, 40) !== c) wrong.push(`extra ${c}: not in ${c}`);
+      // The tail reader's noun is the whole phrase after the figure (up to three words), so a unit stands alone to equal the claim.
+      if (recordedUnit(`Our manager reckons the scheme would bring between 20 and 40 ${c}.`, c, 20, 40) !== c) wrong.push(`${c}: not in ${c}`);
+      if (recordedUnit(`Our manager reckons the scheme would bring between 20 and 40 ${c} that week.`, c, 20, 40) !== '') wrong.push(`${c} that week: read as ${c}`);
+      if (recordedUnit(`Our manager reckons the scheme would bring between 20 and 40 extra ${c}.`, c, 20, 40) !== '') wrong.push(`extra ${c}: read as ${c}`);
       if (recordedUnit('Our manager reckons the scheme would bring between 20 and 40 more of them each time.', c, 20, 40) !== '') wrong.push(`no unit, claimed ${c}`);
     }
+    if (recordedUnit('Our manager reckons the scheme would bring between 4 and 6 non-paying visitors.', 'paying visitors') !== '') wrong.push('non-paying read as paying');
+    if (recordedUnit('Our manager reckons the scheme would bring between 4 and 6 paying visitors.', 'paying visitors') !== 'paying visitors') wrong.push('paying not kept');
     expect(wrong).toEqual([]);
   });
 });

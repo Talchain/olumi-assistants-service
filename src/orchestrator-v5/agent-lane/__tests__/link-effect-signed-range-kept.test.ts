@@ -247,6 +247,8 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
       { words: 'between 4 and 6 kg per new client', claimed: 'kg per client', goal: 'kg per client' },
       // BUDDY-A R6: money is read by the same tail reader: a weekly saving is never a daily one.
       { words: 'between £4 and £6 a week', claimed: '£ per day', goal: '£ per day' },
+      // BUDDY-A R7: a noun with other words is another population.
+      { words: 'between 4 and 6 non-paying visitors', claimed: 'paying visitors', goal: 'paying visitors' },
     ];
     for (const c of cases) {
       const range = RANGE.replace('between 4 and 6 kg', c.words);
