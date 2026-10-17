@@ -144,7 +144,7 @@ import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js'
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
-import { buildRunInputSnapshot, runIdFor, sentDigest } from './run-input-snapshot.js';
+import { buildRunInputSnapshot, recordRunQuestion, RUN_QUESTION_EVIDENCE_KEY, runIdFor, sentDigest } from './run-input-snapshot.js';
 import type { RunAnalysisProbe } from './run-analysis-probe.js';
 import {
   carryLevelLimitBaselines,
@@ -615,6 +615,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const frozenRevision = typeof evaluatedScenarioRevision === 'number'
       && Number.isSafeInteger(evaluatedScenarioRevision) && evaluatedScenarioRevision >= 0
       ? evaluatedScenarioRevision : undefined;
+    const questionGraphAtRead = structuredClone(snapshot.rawPersistedGraph ?? snapshot.graph);
     const shareChanceBlocked = shareChanceRunBlock(snapshot.rawPersistedGraph ?? snapshot.graph);
     if (shareChanceBlocked !== null) {
       throw new HandlerInvocationFailedError('The deadline chance needs a usable stated range and date', {
@@ -1409,6 +1410,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const runInputSnapshot = inputSnapshot === null || seedReuse.seed === undefined
       ? inputSnapshot
       : { ...inputSnapshot, sent_digest: sentDigest(plotPayload) };
+    const evaluatedQuestion = recordRunQuestion({ runId, revision: frozenRevision, graphHashAtRun,
+      savedGraph: questionGraphAtRead, dispatchedRequest: plotPayload, inputSnapshot: runInputSnapshot });
     log.info(
       { event: 'run_analysis.seed_reuse', request_id: invocation.requestId, scenario_id: args.scenario_id, reason: seedReuse.reason },
       'run_analysis seed decision',
@@ -3210,6 +3213,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           : leaderPermission,
       },
     };
+    // Only this producer owns the descriptive evidence key. The stamped response is a copy; provider bytes stay put.
+    delete factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY];
+    if (evaluatedQuestion !== undefined) factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY] = evaluatedQuestion;
 
     // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
     // Use the response's public-block builder; its projection owns the claim gate, not the cell reader.

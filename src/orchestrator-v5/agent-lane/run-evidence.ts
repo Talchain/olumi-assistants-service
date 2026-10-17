@@ -1,5 +1,6 @@
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { readRunAnalysisOccurrence } from '../types/handler-fact.js';
+import { RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 
 /**
  * ⭐ §9 HOOK FOR LANE B (BLOCKED-LEASE, outbox/LANE-B.md:19; Lane A pass-through, 15 Oct). What the SELECTED successful Run
@@ -11,6 +12,7 @@ import { readRunAnalysisOccurrence } from '../types/handler-fact.js';
 export interface RunEvidence {
   readonly runId?: string;
   readonly inputSnapshot?: unknown;
+  readonly evaluatedQuestion?: unknown;
   readonly occurrence?: { readonly fact_row_id?: string; readonly evaluated_scenario_revision?: number };
 }
 
@@ -18,6 +20,7 @@ export interface RunEvidence {
 export interface RunEvidenceWire {
   readonly run_id?: string;
   readonly input_snapshot?: unknown;
+  readonly evaluated_question?: unknown;
   readonly occurrence?: { readonly fact_row_id?: string; readonly evaluated_scenario_revision?: number };
 }
 
@@ -37,10 +40,12 @@ function occurrenceOf(o: Record<string, unknown> | undefined): RunEvidenceWire['
 export function runEvidenceWireOf(fact: RunAnalysisHandlerFact): RunEvidenceWire | undefined {
   const runId = idOf(fact.result.run_id);
   const snapshot = (fact.result as { input_snapshot?: unknown }).input_snapshot;
+  const question = recordOf(fact.result.enrichment)?.[RUN_QUESTION_EVIDENCE_KEY];
   const occurrence = occurrenceOf(readRunAnalysisOccurrence(fact) as Record<string, unknown> | undefined);
   const wire: RunEvidenceWire = {
     ...(runId === undefined ? {} : { run_id: runId }),
     ...(snapshot === undefined || snapshot === null ? {} : { input_snapshot: snapshot }),
+    ...(question === undefined || question === null ? {} : { evaluated_question: question }),
     ...(occurrence === undefined ? {} : { occurrence }),
   };
   return Object.keys(wire).length === 0 ? undefined : wire;
@@ -55,6 +60,7 @@ export function readRunEvidence(value: unknown): RunEvidence | undefined {
   const evidence: RunEvidence = {
     ...(runId === undefined ? {} : { runId }),
     ...(w.input_snapshot === undefined || w.input_snapshot === null ? {} : { inputSnapshot: w.input_snapshot }),
+    ...(w.evaluated_question === undefined || w.evaluated_question === null ? {} : { evaluatedQuestion: w.evaluated_question }),
     ...(occurrence === undefined ? {} : { occurrence }),
   };
   return Object.keys(evidence).length === 0 ? undefined : evidence;

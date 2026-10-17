@@ -5,6 +5,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { RUN_QUESTION_EVIDENCE_KEY } from '../../tools/handlers/run-input-snapshot.js';
 
 const SERVED_FACT = JSON.parse(readFileSync(new URL('./fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8')) as { fact_type: string; result: Record<string, unknown> };
 const SCENARIO = '9e5c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
@@ -85,6 +86,27 @@ describe('§9: the selected Run’s own evidence reaches runFactsOf as state.run
     const state = runFactsCalls.at(-1)![3] as { runEvidence?: unknown };
     expect(state.runEvidence).toEqual({ runId: 'run-44', inputSnapshot: SNAPSHOT, occurrence: { fact_row_id: 'row-44', evaluated_scenario_revision: 44 } });
     expect(runFactsCalls.at(-1)![1], 'the graph argument is unchanged').toBeDefined();
+  });
+
+  it('the same selected-Run read carries retained question evidence through getCanonicalState to the actual Run facts', async () => {
+    const question = { run_id: 'run-question', evaluated_scenario_revision: 46, graph_hash_at_run: hashOf(GRAPH),
+      sent_digest: SNAPSHOT.sent_digest, asked: null, calculated: null,
+      dispatched_goal_threshold: null, dispatched_goal_baseline: null };
+    const fact = persist({ run_id: 'run-question', input_snapshot: SNAPSHOT,
+      enrichment: { ...(SERVED_FACT.result.enrichment as Record<string, unknown>), [RUN_QUESTION_EVIDENCE_KEY]: question } });
+    bind({ fact, fact_row_id: 'row-question', evaluated_scenario_revision: 46 } as never);
+    const analysis = await read(GRAPH);
+    expect(analysis.analysis_run_evidence).toMatchObject({ evaluated_question: question,
+      occurrence: { fact_row_id: 'row-question', evaluated_scenario_revision: 46 } });
+    const { createAgentCapabilities } = await import('../runtime/agent-capabilities.js');
+    const { ProposalStore } = await import('../proposal.js');
+    const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: GRAPH, graph_hash: hashOf(GRAPH), ...analysis } }), new ProposalStore());
+    const state = await caps.getCanonicalState({ scenario_id: SCENARIO, authenticated_user_id: 'u', request_id: 'question-hook' } as never);
+    expect(state).toMatchObject({ ok: true, run_facts: { question: { run_id: 'run-question', evaluated_scenario_revision: 46,
+      asked: null, calculated: null, omitted: expect.arrayContaining([
+        { field: 'dispatched_goal_threshold', reason: 'not_dispatched' },
+      ]) } } });
+    expect((runFactsCalls.at(-1)![3] as { runEvidence: { evaluatedQuestion: unknown } }).runEvidence.evaluatedQuestion).toEqual(question);
   });
 
   it('CONTRAST a read without the key passes no runEvidence; malformed fields are dropped, not coerced', async () => {

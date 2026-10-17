@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildRunInputSnapshot, runIdFor, sentDigest } from '../run-input-snapshot.js';
+import { buildRunInputSnapshot, recordRunQuestion, readRecordedRunQuestion, runIdFor, sentDigest } from '../run-input-snapshot.js';
 import { factorAuthorshipDigest, linkAuthorshipDigest } from '../run-input-residual.js';
 import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
 
@@ -44,6 +44,45 @@ const input = (over: Partial<Parameters<typeof buildRunInputSnapshot>[0]> = {}) 
   wireGraph: graph,
   plotPayload: payload(),
   ...over,
+});
+
+describe('retained question evidence binds to the same existing dispatch snapshot', () => {
+  const recorded = () => {
+    const source = input();
+    const dispatched = payload({ options: source.submittedOptions });
+    const snapshot = buildRunInputSnapshot({ ...source, plotPayload: dispatched })!;
+    const record = recordRunQuestion({ runId: 'run-N', revision: 12, graphHashAtRun: 'frozen-read',
+      savedGraph: graph, dispatchedRequest: dispatched, inputSnapshot: snapshot })!;
+    expect(record).toBeDefined();
+    return { snapshot, record };
+  };
+  it.each(['run', 'revision', 'digest', 'hash', 'goal', 'target', 'options', 'threshold_presence', 'baseline_presence', 'malformed'] as const)(
+    'a conflicting %s record supplies no historical question', field => {
+      const { snapshot, record } = recorded();
+      const changed = structuredClone(record);
+      if (field === 'run') changed.run_id = 'other-run';
+      if (field === 'revision') changed.evaluated_scenario_revision = 13;
+      if (field === 'digest') changed.sent_digest = 'a'.repeat(64);
+      if (field === 'hash') changed.graph_hash_at_run = 'different-read';
+      if (field === 'goal') changed.calculated!.quantity.node_id = 'different-goal';
+      if (field === 'target') changed.calculated!.target = 999;
+      if (field === 'options') changed.calculated!.option_ids = ['different-option'];
+      if (field === 'threshold_presence') changed.dispatched_goal_threshold = null;
+      if (field === 'baseline_presence') changed.dispatched_goal_baseline = 0.9;
+      if (field === 'malformed') Object.assign(changed.asked!, { horizon: { months: 'six' } });
+      expect(readRecordedRunQuestion(changed, { runId: 'run-N', revision: 12,
+        graphHashAtRun: 'frozen-read', inputSnapshot: snapshot })).toBeUndefined();
+    },
+  );
+  it('missing snapshots do not create a substitute record, and a known record grants no licence', () => {
+    const { snapshot, record } = recorded();
+    expect(readRecordedRunQuestion(record, { runId: 'run-N', inputSnapshot: null })).toBeUndefined();
+    expect(readRecordedRunQuestion(record, { runId: 'run-N', inputSnapshot: snapshot })).toEqual(record);
+    expect(record).not.toHaveProperty('scope');
+    expect(record).not.toHaveProperty('can_show_goal_chance');
+    expect(recordRunQuestion({ runId: 'run-N', revision: 12, graphHashAtRun: 'frozen-read', savedGraph: graph,
+      dispatchedRequest: payload(), inputSnapshot: null })).toBeUndefined();
+  });
 });
 
 describe('buildRunInputSnapshot — what the Run was sent', () => {

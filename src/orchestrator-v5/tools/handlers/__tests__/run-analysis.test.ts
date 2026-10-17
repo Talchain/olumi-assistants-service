@@ -49,6 +49,7 @@ import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/analysis-projection-policy.js';
 import { ANALYSIS_PROJECTION_VERSION } from '../../../context/graph-identity.js';
 import { toSafeTransportEnrichment } from '../../../compose.js';
+import { RUN_QUESTION_EVIDENCE_KEY, sentDigest } from '../run-input-snapshot.js';
 import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
 
 // ---------------------------------------------------------------------------
@@ -207,12 +208,14 @@ describe('run_analysis handler — happy path', () => {
   /**
    * Every new Run records the existing projection stamp in persisted metadata.
    * PLoT fields and transport bytes remain unchanged. Claim safety lives on
-   * constraint_verdict, and no other key may be added to enrichment.
+   * constraint_verdict. The evaluated question is descriptive evidence on this
+   * same Run fact, not a second licence; only these two internal keys are added.
    */
-  it('fact.result.enrichment adds only the existing projection stamp; provider and transport remain VERBATIM', async () => {
+  it('fact.result.enrichment adds only the projection stamp and dispatched-question evidence; provider and transport remain VERBATIM', async () => {
     const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
+    const plotClient = makePlotClient(responseSnapshot);
     const handler = createRunAnalysisHandler({
-      plotClient: makePlotClient(responseSnapshot),
+      plotClient,
       scenarioReader: makeScenarioReader(),
     });
 
@@ -222,12 +225,14 @@ describe('run_analysis handler — happy path', () => {
 
     const enrichment = fact.result.enrichment as Record<string, unknown>;
 
-    // 1. Only the existing internal projection key is added to persisted facts.
+    // 1. Only the two named evidence keys are added; no extra numerical/claim authority.
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY]);
+    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY, RUN_QUESTION_EVIDENCE_KEY]);
     expect(enrichment[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
+    expect(enrichment[RUN_QUESTION_EVIDENCE_KEY]).toMatchObject({ run_id: fact.result.run_id,
+      sent_digest: sentDigest(vi.mocked(plotClient.run).mock.calls[0]![0] as unknown as Record<string, unknown>) });
     // The interim key specifically is GONE — nothing writes it any more.
     expect(CEE_CLAIM_SAFETY_ENRICHMENT_KEY in enrichment).toBe(false);
 
@@ -235,6 +240,7 @@ describe('run_analysis handler — happy path', () => {
     //    field reordering that would change JSON.stringify byte output.
     const providerFields = { ...enrichment };
     delete providerFields[RUN_ANALYSIS_PROJECTION_KEY];
+    delete providerFields[RUN_QUESTION_EVIDENCE_KEY];
     expect(providerFields).toEqual(responseSnapshot);
     expect(JSON.stringify(providerFields)).toBe(JSON.stringify(responseSnapshot));
     expect(responseSnapshot).toEqual(happyFixture);
