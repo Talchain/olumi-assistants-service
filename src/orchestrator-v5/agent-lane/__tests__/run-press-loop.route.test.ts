@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /** R1: real route -> loop -> capability -> Run handler -> G2 licence -> same-turn answer. */
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -9,7 +10,7 @@ import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
-import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+import { RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -52,12 +53,9 @@ const rows: Rec[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
-  append: vi.fn(async (row: Rec) => {
-    const { prepare, ...stored } = row;
-    const checked = prepare ? { ...stored, ...prepare(row, { finalPending: row.pending_actions ?? [], prospectiveGuidance: null }) } : stored;
-    rows.push({ ...checked, assistant_message: checked.assistantMessage, user_message: checked.userMessage });
-    return { id: row.turn_id };
-  }),
+  append: vi.fn(async (row: Rec, options?: SessionAppendOptions) => {
+    row = Object.assign({}, row, options?.prepare?.(row as typeof row & SessionTurnWrite, { finalPending: (row as typeof row & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+ rows.push({ ...row, assistant_message: row.assistantMessage, user_message: row.userMessage }); return { id: row.turn_id }; }),
   readRecent: vi.fn(async () => [...rows].reverse()),
   readMostRecentPendingActions: vi.fn(async () => []),
   loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: brief() })),
@@ -410,7 +408,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(store.append).not.toHaveBeenCalled(); expect(rows).toEqual(savedRows);
   });
 
-  it('a moved Explain resend delivers its recorded words beside non-current explanation controls', async () => {
+  it('a moved Explain replay reports its explanation unavailable beside the current result without Explain', async () => {
     const first = (await press()).json();
     const chip = first.suggested_actions.find((a: Rec) => a.id.startsWith('agent-explain-run:'));
     expect(chip).toBeDefined();
@@ -426,9 +424,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     const replay = await press(request);
     expect(replay.statusCode, replay.body).toBe(200);
     const body = replay.json();
-    expect(body.assistant_text).toBe(live.assistant_text);
-    expect(body.assistant_text).toBe(savedRows.find(row => row.turn_id === request.turn_id)!.assistant_message);
-    // DL-3: resend delivers the historical answer; currentness still governs its controls.
+    expect(body.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(body.assistant_text).not.toBe(live.assistant_text);
+    // Separate Explain replay retains the current result; the old explanation is unavailable.
     expect(body.blocks).toEqual([block]);
     expect(body.narration).toEqual({ status: 'stale', run_key: live.narration.run_key });
     expect(body.suggested_actions.some((a: Rec) => a.id.startsWith('agent-explain-run:'))).toBe(false);

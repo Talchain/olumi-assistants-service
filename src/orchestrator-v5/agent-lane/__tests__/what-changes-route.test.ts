@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * "What would change the result?" through THE REAL ROUTE (SCIENCE ROBUSTNESS, EXPERIMENT; #85 lease 5950283606; route
  * hunk leased by HARNESS 5950400056). Seams: the product's internal graph read (serving R3's served D3 response), the
@@ -52,7 +53,9 @@ const store = {
     return rows.get(k) ?? null;
   }),
   readMostRecentPendingActions: vi.fn(async () => []),
-  append: vi.fn(async (w: Rec) => {
+  append: vi.fn(async (w: Rec, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (rows.has(k) && storeCtl.replayKey === k) return { id: rows.get(k)!.id, replayedPriorTurn: true as const };
     if (!rows.has(k)) rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: [] });

@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { timingGated } from '../../../../tests/helpers/scaling-ratio.js';
 /** Route → real method adapter → real SCI-DEEP dispatch → real Run handler, entirely offline.
  * Only transport boundaries are replaced. Replaying the bank-2 response tests press reachability and licences;
@@ -155,7 +156,9 @@ describe('agent route: real structural challenge press reachability', () => {
     });
     transport.store.readAnalysisInvalidatedAt = vi.fn(async () => null);
     const rows = new Map<string, CommittedTurnRecord>();
-    append = vi.fn(async (write) => {
+    append = vi.fn(async (write, options?: SessionAppendOptions) => {
+    write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
       const id = `row-${rows.size + 1}`;
       rows.set(write.turn_id, { id, request_hash: write.request_hash, assistant_message: write.assistantMessage ?? null,
         user_message: write.userMessage ?? null, llm_calls_used: write.llm_calls_used });

@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⛔ A RUN'S REPLY TAKES ITS REASON FROM THE ENGINE'S TYPED OUTCOME (DL #72 5867687155 + AIQ 5867754251; one seam,
@@ -26,7 +27,7 @@ const SCENARIO = '9ca6b263-a672-4017-a80b-925d4681fb2c';
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async () => null),
-  append: vi.fn(async () => ({ id: 'row-1' })),
+  append: vi.fn(async (write: SessionTurnWrite, options?: SessionAppendOptions) => { write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null })); return ({ id: 'row-1' }); }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
@@ -78,7 +79,12 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
           { id: 'o1', kind: 'option', label: 'Features', interventions: { f: 1 } },
           { id: 'o2', kind: 'option', label: '50/50', interventions: {} },
           { id: 'f', kind: 'factor', label: 'New feature availability' },
-          { id: 'g', kind: 'goal', label: 'MRR' },
+          { id: 'g', kind: 'goal', label: 'MRR', unit: 'GBP/month', user_statements: [{
+            subject_key: 'goal|g|||level', field: 'level', recorded_at: '2026-10-17T20:00:00Z', statements: [{
+              speaker: 'user', quote: 'MRR is £93,000/month.', source: 'MRR is £93,000/month.',
+              subject: { quantity: 'level', node_id: 'g' }, form: 'point', low: 93000, high: 93000, unit: 'GBP/month', reading: 'olumi',
+            }],
+          }] },
         ],
         edges: [{ from: 'd', to: 'o1' }, { from: 'd', to: 'o2' }, { from: 'o1', to: 'f' }, { from: 'o2', to: 'f' }, { from: 'f', to: 'g' }],
       },

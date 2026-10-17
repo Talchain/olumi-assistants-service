@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,7 +64,9 @@ vi.mock('../../session/index.js', () => ({ getSessionStore: () => ({
     return scripted.rows.find(row => row.turn_id === tid) ?? null;
   }),
   readMostRecentPendingActions: vi.fn(async () => scripted.prior),
-  append: vi.fn(async (row: Record<string, unknown>) => {
+  append: vi.fn(async (row: Record<string, unknown>, options?: SessionAppendOptions) => {
+    row = Object.assign({}, row, options?.prepare?.(row as typeof row & SessionTurnWrite, { finalPending: (row as typeof row & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     if (scripted.retireOnAppend && row.turn_id === TID) scripted.prior = [];
     scripted.rows.push({ ...row, assistant_message: scripted.concurrent ? scripted.concurrentText : row.assistantMessage,
       // The concurrent winner did not observe the losing request's fresh issue.

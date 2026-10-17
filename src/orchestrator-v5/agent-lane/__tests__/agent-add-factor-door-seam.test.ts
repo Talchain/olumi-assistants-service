@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * ⭐ PJ-E-FIG — THE AGENT ADDS NEW FACTORS WITH THE FIGURES THE USER STATED, HELD ON THE PRODUCT'S OWN SEAM.
  * Ruling: Delivery Lead #72 5866036457, on Canonical 5866021645 — the TWIN of the add-risk door
@@ -65,7 +66,9 @@ const store = {
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
       tick += 1;

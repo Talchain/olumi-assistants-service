@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import G2_CAPTURED from './fixtures/g2-2b073341-coaching.json';
 import { unsizedLinkSentence, UNSIZED_PATH_LEADER_CAUSE_KEY } from '../unsized-path-cause.js';
 /** Real Agent route with mocked transport: one reply, recorded figures, source, scope and durable replay. */
@@ -61,10 +62,12 @@ const rows = new Map<string, Json>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: Json) => {
+  append: vi.fn(async (w: Json, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
-    const row = { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` };
+    const row = { ...w, created_at: new Date().toISOString(), assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` };
     rows.set(w.turn_id, row);
     return { id: row.id };
   }),
@@ -500,9 +503,9 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     const line = estimateScreenLine();
     const risk = 'Raise to £59: there is a 67% chance a competitor launches first.';
     const earlierMessage = `Keep this risk in our reasoning. ${risk} We can revisit it next quarter.`;
-    const earlier = { id: 'r13-user-risk', turn_id: 'a13d0000-0000-4000-8000-000000000001', request_hash: hashTurn(earlierMessage),
-      user_message: earlierMessage, assistant_message: 'Recorded your risk.', llm_calls_used: 1,
-      created_at: '2026-10-08T10:00:00.000Z' };
+    // A real earlier typed turn, after the typed-origin cutover, supplies its own hash/time evidence.
+    const priorInput = await turn([say('We can test that risk.')], earlierMessage, `r13-input-${mode}`);
+    const earlier = [...rows.values()].find(row => row.assistant_message === priorInput.assistant_text)!;
     const message = 'Review the risk we recorded earlier.';
     const narration = `You said: “${risk}”\n${line.chance}`;
     // A unique session starts with no in-process typedWords. Only actual durable user_message rows own the risk.

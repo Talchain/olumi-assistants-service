@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * ⭐ A SEARCH CONTROL THE AGENT WAS TOLD THE USER SEES, REACHES THE USER (S-B slice 1a; witnessed on staging 7 Oct 2026).
  *
@@ -38,7 +39,7 @@ import { textAtRest } from '../decision-input-ask.js';
 const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d70';
 const OPTIONS = ['Hire a tech lead', 'Hire two developers'] as const;
 /** A query that ranks the options: the gate removes a control that quotes it. */
-const RANKING = 'Why is Hire a tech lead the best option for meeting a launch deadline?';
+const RANKING = 'Why is Hire a tech lead the leading option, most likely to meet the goal in this model, for meeting a launch deadline?';
 /** The same subject as one neutral public question: no option is put ahead. */
 const NEUTRAL = 'How long do new engineering hires take to become productive before a launch deadline?';
 const PROMISE = 'The search would look for that evidence; it runs only if you press the control.';
@@ -51,7 +52,9 @@ const writes: unknown[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: Record<string, unknown>) => {
+  append: vi.fn(async (w: Record<string, unknown>, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     writes.push(w);
     rows.set(String(w.turn_id), { request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, response_emitted: w.response_emitted });
     return { id: `row-${rows.size}` };

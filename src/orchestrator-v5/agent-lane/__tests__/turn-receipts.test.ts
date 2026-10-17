@@ -86,10 +86,9 @@ describe('the agent route actually surfaces them', () => {
   });
 
   it('⛔ the _agent sidecar reports the receipts', () => {
-    // ⚠ THE LAST `_agent: {` is the live response. An earlier one belongs to the
-    // REPLAY path, and slicing from the first match asserted about the wrong
-    // object — which is how this pin first failed against correct code.
-    const at = ROUTE.lastIndexOf('_agent: {');
+    // Select the authoritative live constructor by its session/mode/tool inputs.
+    // The provisional-view object and later durability clone do not own receipts.
+    const at = ROUTE.indexOf('_agent: {\n        session_id: sessionId,\n        mode,\n        tool_calls: result.tool_calls,');
     expect(at, 'no _agent sidecar found — vacuous').toBeGreaterThan(-1);
     const sidecar = ROUTE.slice(at);
     expect(sidecar).toContain('collectTurnReceipts(result.tool_results)');

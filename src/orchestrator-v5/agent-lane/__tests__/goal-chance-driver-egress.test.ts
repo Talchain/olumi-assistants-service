@@ -184,7 +184,7 @@ describe('wiring: both Agent exits apply the edit after the leader egress', () =
     expect(route).toContain("const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
     expect(route).toContain("const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {");
     expect(route).toContain("const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {");
-    expect(route).toContain("return withShapeOnlyIfItDerives(gatedReplay);");
+    expect(route).toContain("return finaliseV5Response(withShapeOnlyIfItDerives(gatedReplay), {");
     expect(route).toContain("analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',");
   });
 });

@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -23,7 +24,9 @@ const rows: Record<string, unknown>[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
-  append: vi.fn(async (row: Record<string, unknown>) => { rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
+  append: vi.fn(async (row: Record<string, unknown>, options?: SessionAppendOptions) => {
+    row = Object.assign({}, row, options?.prepare?.(row as typeof row & SessionTurnWrite, { finalPending: (row as typeof row & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+ rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => [{ id: 'run-row', turn_class: 'decide', created_at: '2026-10-01T12:00:00.000Z' }, ...rows].reverse()),
   readMostRecentPendingActions: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => fact === null ? [] : [...editFacts, fact]),

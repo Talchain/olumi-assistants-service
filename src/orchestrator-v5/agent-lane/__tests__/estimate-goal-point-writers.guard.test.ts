@@ -82,10 +82,24 @@ function scan({ rel, text }: Source): Sink[] {
   const unwrap = (node: ts.Expression): ts.Expression =>
     ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node)
       || ts.isAwaitExpression(node) ? unwrap(node.expression) : node;
+  const bindings = new Map<string, ts.Node[]>();
+  for (const node of nodes) {
+    const names = ts.isVariableDeclaration(node) && node.initializer !== undefined
+      ? ts.isObjectBindingPattern(node.name) ? node.name.elements.map(e => name(e.name)) : [name(node.name)]
+      : ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken ? [name(node.left)] : [];
+    for (const key of names) if (key !== undefined) bindings.set(key, [...(bindings.get(key) ?? []), node]);
+  }
   const declarations = (ident: string, before: ts.Node): ts.Expression | undefined => {
     const containingOwners = new Set<ts.Node>([source]);
     for (let p: ts.Node | undefined = before; p; p = p.parent) if (ts.isFunctionLike(p)) containingOwners.add(p);
-    const candidates = nodes.filter(node => node.end < before.getStart() && containingOwners.has(owner(node))
+    // A zero-argument closure reads the carrier at invocation, after final validation,
+    // rather than at its earlier definition (the live history publisher).
+    const fn = owner(before);
+    const binding = ts.isArrowFunction(fn) && fn.parameters.length === 0 && ts.isVariableDeclaration(fn.parent) ? name(fn.parent.name) : undefined;
+    const invocation = binding === undefined ? undefined : nodes.find(n => ts.isCallExpression(n)
+      && name(n.expression) === binding && n.getStart() > fn.end && owner(n) === owner(fn.parent));
+    if (invocation !== undefined) before = invocation;
+    const candidates = (bindings.get(ident) ?? []).filter(node => node.end < before.getStart() && containingOwners.has(owner(node))
       && ((ts.isVariableDeclaration(node) && node.initializer !== undefined && (name(node.name) === ident
         || ts.isObjectBindingPattern(node.name) && node.name.elements.some(e => name(e.name) === ident)))
         || ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && name(node.left) === ident));
@@ -119,7 +133,16 @@ function scan({ rel, text }: Source): Sink[] {
 
   // A deliberately bounded provenance walk: no arbitrary function is assumed
   // text-preserving. The composer is allowed only through its own text input.
+  const provenance = new Map<string, boolean>();
   const qualified = (input: ts.Expression, before: ts.Node = input, depth = 0): boolean => {
+    const key = `${input.pos}:${input.end}:${before.pos}`;
+    if (!provenance.has(key)) {
+      provenance.set(key, false);
+      provenance.set(key, inspect(input, before, depth));
+    }
+    return provenance.get(key)!;
+  };
+  const inspect = (input: ts.Expression, before: ts.Node = input, depth = 0): boolean => {
     if (depth > 60) return false;
     const expr = unwrap(input);
     const recur = (value: ts.Expression, at: ts.Node = value): boolean => qualified(value, at, depth + 1);
@@ -130,6 +153,11 @@ function scan({ rel, text }: Source): Sink[] {
     }
     if (ts.isPropertyAccessExpression(expr)) return recur(expr.expression);
     if (ts.isConditionalExpression(expr)) return recur(expr.whenTrue) && recur(expr.whenFalse);
+    // The history publisher appends the already displayed card as labelled reference data,
+    // after its gated assistant text; the reference is not a second assistant writer.
+    if (rel === ROUTE && ts.isTemplateExpression(expr) && expr.templateSpans.length === 2
+      && expr.templateSpans[0]!.literal.text === '\n\n[Card displayed beside this reply; reference data]\n'
+      && name(expr.templateSpans[1]!.expression) === 'displayedQuestion') return recur(expr.templateSpans[0]!.expression);
     if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
       const left = unwrap(expr.left);
       // The route's existing string carrier is pinned; new raw fallback prose
@@ -157,7 +185,7 @@ function scan({ rel, text }: Source): Sink[] {
     if (ts.isCallExpression(expr)) {
       const callee = name(expr.expression);
       if (callee === GATE) return true;
-      if (['String', 'withShapeOnlyIfItDerives', 'finaliseV5Response'].includes(callee ?? '')) {
+      if (['String', 'withShapeOnlyIfItDerives', 'finaliseV5Response', 'checkFinalReply', 'repairFinalReply'].includes(callee ?? '')) {
         return expr.arguments[0] !== undefined && recur(expr.arguments[0]);
       }
       if (callee === 'composeReplyShape') {

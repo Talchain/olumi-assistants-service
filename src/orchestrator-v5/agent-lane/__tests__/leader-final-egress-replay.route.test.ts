@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * AI HARNESS PR-L1 — a REPLAY is an exit too. A committed answer row written before the final egress existed (or under
  * a licence that has since changed) is replayed with no model call; its words are re-checked against TODAY's licence on
@@ -11,7 +12,9 @@ const rows = new Map<string, Row>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used: number }) => {
+  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used: number }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
     const row: Row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used };
@@ -34,7 +37,7 @@ const fakeFetch = vi.fn(async () => {
 const SID = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const T1 = '3c8c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d';
 const MESSAGE = 'Which option should I pick?';
-const LEADER_PROSE = 'AI Reporting Sprint currently performs best, leading in 46% of simulations.';
+const LEADER_PROSE = 'AI Reporting Sprint is most likely to meet the goal in this model, leading in 46% of simulations.';
 const GRAPH = { nodes: [
   { id: 'goal', kind: 'goal', label: 'Quarterly revenue' },
   { id: 'ai_reporting_sprint', kind: 'option', label: 'AI Reporting Sprint' },
@@ -77,7 +80,7 @@ describe('a replayed Agent turn passes the final leader egress', () => {
     const body = r.json() as { assistant_text?: string; _agent?: { replayed?: boolean } };
     expect(body._agent?.replayed).toBe(true);
     expect(provider.calls).toBe(0);
-    expect(body.assistant_text).not.toContain('AI Reporting Sprint currently performs best');
+    expect(body.assistant_text).not.toContain('AI Reporting Sprint is most likely to meet the goal in this model');
   });
 
   it('RED (DL 5932495794 item 3): a licence NEWLY withheld after the answer was written edits the replay — the stored words came from a live permitted turn', async () => {
@@ -102,7 +105,7 @@ describe('a replayed Agent turn passes the final leader egress', () => {
     const body = replay.json() as { assistant_text?: string; _agent?: { replayed?: boolean } };
     expect(body._agent?.replayed).toBe(true);
     expect(provider.calls, 'a replay calls no model').toBe(callsAfterLive);
-    expect(body.assistant_text).not.toContain('AI Reporting Sprint currently performs best');
+    expect(body.assistant_text).not.toContain('AI Reporting Sprint is most likely to meet the goal in this model');
   });
 
   it('CONTROL: when today\'s licence permits it, the replay returns the stored words exactly', async () => {

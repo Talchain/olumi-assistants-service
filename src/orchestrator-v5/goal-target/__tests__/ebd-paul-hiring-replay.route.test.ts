@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * ⭐ EBD — PAUL'S HIRING CONVERSATION (staging, 12 Oct 2026, scenario 4184e877), REPLAYED THROUGH THE REAL AGENT ROUTE.
  *
@@ -131,7 +132,9 @@ function world(brief: string = PAUL.brief) {
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
     readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
       .map((fact: Rec) => ({ turn_id: r.id, fact_created_at: r.created_at, fact })) : []),
-    append: async write => {
+    append: async (write, options?: SessionAppendOptions) => {
+    write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
       writes.push(write);
       if (write.graph !== undefined && write.graph !== null) bytes = JSON.stringify(write.graph);
       const id = randomUUID(); rows.unshift({ ...makeSessionTurnRow({ id, scenario_id: sid, turn_id: write.turn_id, request_hash: write.request_hash,

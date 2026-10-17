@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /** Q6 r1: the actual graph-read route carries the selected stored Run's exclusions to both Agent exits. */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -41,7 +42,9 @@ const store = {
   readExistingScenario: vi.fn(async () => ({ userId: null, graph, briefText: null, analysisInvalidatedAt: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
   append: vi.fn(async (write: { turn_id: string; request_hash: string; assistantMessage?: string;
-    userMessage?: string; llm_calls_used: number }) => {
+    userMessage?: string; llm_calls_used: number }, options?: SessionAppendOptions) => {
+    write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const row = { id: `row-${rows.size + 1}`, turn_id: write.turn_id, request_hash: write.request_hash,
       assistant_message: write.assistantMessage ?? null, user_message: write.userMessage ?? null,
       llm_calls_used: write.llm_calls_used };

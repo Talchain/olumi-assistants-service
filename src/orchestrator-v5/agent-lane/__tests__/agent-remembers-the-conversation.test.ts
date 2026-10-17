@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * ⛔ THE CONVERSATION OUTLIVES THE PROCESS — the Agent's memory of it must too.
  *
@@ -23,7 +24,7 @@ const EARLIER = [
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async () => null),
-  append: vi.fn(async () => ({ id: 'row-1' })),
+  append: vi.fn(async (write: SessionTurnWrite, options?: SessionAppendOptions) => { write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null })); return ({ id: 'row-1' }); }),
   readRecent: vi.fn(async () => EARLIER),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -32,7 +33,29 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
+const negativeScenarios = [
+  ['no verified source', '1b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b'],
+  ['the verified £180k statement belongs only to another scenario', '2b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b'],
+] as const;
+const verifiedReceipt = { version: 2, version_id: 'saved-v2', mutation_id: 'mutation-v2', source_turn_id: 'prior-change' };
+vi.mock('../runtime/agent-loop.js', async original => {
+  const actual = await original<typeof import('../runtime/agent-loop.js')>();
+  return { ...actual, runAgentTurn: async (...args: Parameters<typeof actual.runAgentTurn>) => {
+    const result = await actual.runAgentTurn(...args);
+    if (!negativeScenarios.some(([, scenario]) => scenario === args[0].ctx.scenario_id)) return result;
+    // An actual tool-result fixture receipt must survive refusal of the unrelated budget attribution.
+    return { ...result, tool_calls: [{ name: 'authorise_change', ok: true, mutated: false }],
+      tool_results: [{ ok: true, already_applied: true, receipts: [verifiedReceipt] }] };
+  } };
+});
+
 const SCENARIO = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
+const VERIFIED_BUDGET_SCENARIO = '9b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
+const budgetStatement = { id: 'budget', kind: 'factor', label: 'Budget', unit: 'GBP',
+  user_statements: [{ subject_key: 'factor|budget|||level', field: 'level', recorded_at: '2026-10-17T20:00:00Z', statements: [{
+    speaker: 'user', quote: 'Our budget is fixed at £180k.', source: 'Our budget is fixed at £180k.',
+    subject: { quantity: 'level', node_id: 'budget' }, form: 'point', low: 180000, high: 180000, unit: 'GBP', reading: 'olumi',
+  }] }] };
 type Item = { role?: string; content?: unknown; type?: string };
 const textOf = (c: unknown): string => (typeof c === 'string' ? c
   : Array.isArray(c) ? c.map((p) => String((p as { text?: unknown }).text ?? '')).join('') : JSON.stringify(c));
@@ -57,7 +80,11 @@ describe('after a restart, the Agent still knows the conversation the user can s
     process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }], edges: [] }, graph_hash: 'h1' }));
+    app.post('/assist/v1/scenarios/:id/graph', async request => ({ graph: { nodes: [
+      { id: 'g', kind: 'goal', label: 'Velocity' },
+      // DL 2j ruling: the durable-read failure has a verified source in THIS scenario.
+      ...((request.params as { id: string }).id === VERIFIED_BUDGET_SCENARIO ? [budgetStatement] : []),
+    ], edges: [] }, graph_hash: 'h1' }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -105,10 +132,27 @@ describe('after a restart, the Agent still knows the conversation the user can s
     const readsBefore = store.readRecent.mock.calls.length;
     store.readRecent.mockRejectedValue(new Error('db down'));
     sent.length = 0;
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '9b1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Hello' } });
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: VERIFIED_BUDGET_SCENARIO, message: 'Hello' } });
     expect(r.statusCode).toBe(200);
     expect(r.json().assistant_text).toBe('You said the budget is fixed at £180k.');
     expect(store.readRecent.mock.calls.length, 'failed seed is not retried by egress').toBe(readsBefore + 1);
     expect(texts(sent[0])).toEqual(['user: Hello']);
   });
+  it.each(negativeScenarios)('unsupported attribution: %s regenerates once then becomes unavailable', async (_premise, scenario) => {
+    // The positive row has read VERIFIED_BUDGET_SCENARIO; neither scenario may borrow its statement.
+    store.readRecent.mockRejectedValue(new Error('db down'));
+    sent.length = 0;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: scenario, message: 'Hello',
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(sent).toHaveLength(2);
+    const retry = JSON.parse(textOf(sent[1]!.find(item => item.role === 'user')!.content));
+    expect(retry.failures.map((failure: { id: string }) => failure.id)).toEqual(['b']);
+    expect(retry.canonical_snapshot.receipts).toHaveLength(1);
+    expect(response.json().assistant_text).toBe(retry.canonical_snapshot.receipts.join('\n\n'));
+    expect(response.json()._agent.receipts).toEqual([verifiedReceipt]);
+    expect(response.json().suggested_actions).toEqual(expect.any(Array));
+  });
+
 });

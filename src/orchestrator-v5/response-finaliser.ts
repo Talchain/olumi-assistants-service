@@ -466,6 +466,11 @@ export function finaliseV5Response(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): FinalisedV5Response {
+  // The final reply already crossed the presentation producers. Re-stamping must preserve that snapshot.
+  if (ctx.finalReplyAnalysisState !== undefined) {
+    FINALISED_RESPONSES.add(response);
+    return response as FinalisedV5Response;
+  }
   // Defensive ceeTrace scrub: V5 source code on this branch does not write
   // `ceeTrace` (verified by exhaustive grep), but the V5 golden-path replay
   // observed `ceeTrace.reason: "CEE"` on a Step 4 wire response from an
