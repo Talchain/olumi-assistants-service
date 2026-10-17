@@ -4,7 +4,7 @@
  * (Batch 0 change-goal decision rulings 15–22; amendments 1–7; DL amendment 22:15Z). Hand-written figures throughout: the
  * licence never computes a chance, it decides what may be said about the Run's own.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { agentLicenceRecordOf, goalChanceLicenceForAgent, goalChanceLicenceOf, goalChancePointForAgent, goalLevelIsOlumisEstimate, nearestFiveGoalChancesForAgent, sentGoalThresholdOf, UNVERIFIED_SOURCES_NOTE, withGoalChanceLicence, withholdForOlumiGoalLevel } from '../goal-chance-licence.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
@@ -16,6 +16,9 @@ import { goalChanceCellFacesForAgent, goalChanceNotesForAgent } from '../../agen
 import { withEstimateGoalPointsAtEgress } from '../../agent-lane/goal-chance-estimate-egress.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { withholdOptionLimitScores } from '../../../orchestrator/context/constraint-feasibility.js';
+import { recordGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 
 /**
  * AMENDED (AIE #94 6163023819, packet fc17c200; was #94 6160089127's "Carrying on as now: this Run uses …" lines): the status-quo row's
@@ -1097,14 +1100,15 @@ describe('AIE status-quo disposition — AND: the joint and its marginals keep e
     for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
   });
 
-  it('RED: the goal on the same-draw reference but ‘Conversion rate’ not anchored — the assumption names the goal only; the status quo keeps its joint and conversion figures', () => {
+  it('N2: the goal on the same-draw reference but ‘Conversion rate’ not anchored — withhold the dependent joint zero, keep conversion’s 25%', () => {
     const g = pairedPair({});
     const run = withSqRow(marketingRun(), { probability_of_joint_goal: 0, constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0.25 } });
     const l = licenceFor(run, g)!;
-    expect(l.status_quo).toBeUndefined();
+    expect(l.status_quo?.line).toContain('because it treats ‘New customers’ as unchanged from today');
     expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ unchanged through month three; each option is measured against that.');
     expect(JSON.stringify(l.notes)).not.toMatch(/‘Conversion rate’ unchanged/);
-    expect(l.pct_by_option).toHaveProperty('carry_on');
+    expect(l.pct_by_option).not.toHaveProperty('carry_on'); // AIE N2: raw zero is not an independently earned chance.
+    expect((run.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(0);
     const per = Object.fromEntries(l.targets!.per_target.map((t) => [t.constraint_id, t.pct_by_option]));
     expect(per['target:new_customers']).not.toHaveProperty('carry_on');
     expect(per['target:conversion_rate']).toMatchObject({ carry_on: 25 });
@@ -1138,6 +1142,88 @@ const pairedWithLimit = (setDirectly: boolean): Rec => {
 };
 const sqWith = (limitP: number, joint: number): Rec => withSqRow(marketingRun(), { probability_of_joint_goal: joint,
   constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0, 'limit:annual_spend': limitP } });
+
+describe('N2: a paired premise cannot earn an exact joint chance', () => {
+  const example = (primary: 0 | 1, joint: number, assumed = true) => {
+    const g = pairedWithLimit(true), nodes = g.nodes as Rec[], rows = g.goal_constraints as Rec[];
+    const goal = nodes.find(n => n.id === 'new_customers')!;
+    goal.goal_direction = primary === 0 ? '>=' : '<=';
+    (goal.observed_state as Rec).baseline = 0.2;
+    rows.find(r => r.node_id === goal.id)!.operator = goal.goal_direction;
+    if (!assumed) nodes.find(n => n.id === 'hire_manager')!.interventions = {
+      new_customers: { value: 0.3 }, conversion_rate: { value: 0.2 }, annual_spend: { value: 0.45 } };
+    const run = withSqRow(marketingRun(), { probability_of_goal: primary, probability_of_joint_goal: joint,
+      constraint_probabilities: { 'target:new_customers': primary, 'target:conversion_rate': 0, 'limit:annual_spend': 0.4 } });
+    const sentRun = { graph: structuredClone(g), goal_node_id: 'new_customers', goal_threshold: 0.8,
+      goal_direction: primary === 0 ? 'maximise' : 'minimise', goal_threshold_strict: false,
+      options: nodes.filter(n => n.kind === 'option').map(n => ({ option_id: n.id, ...(n.is_baseline === true ? { is_baseline: true } : {}) })) };
+    return { g, run, constraints: { storedConstraints: rows, sentConstraints: wireGoalConstraints(rows), sentRun } };
+  };
+  const rows = ([0, 1] as const).flatMap(primary => [0, 1, 0.4].flatMap(joint => [false, true].flatMap(earned =>
+    [false, true].map(assumed => ({ primary, joint, earned, assumed })))));
+
+  it.each(rows)('primary=$primary, joint=$joint, earned=$earned, paired=$assumed', ({ primary, joint, earned, assumed }) => {
+    const { g, run, constraints } = example(primary, joint, assumed);
+    const callback = vi.fn((id: string, p: 0 | 1) => earned && id === 'carry_on' && p === primary);
+    const l = goalChanceLicenceOf(run, g, 'new_customers', callback, undefined, g, constraints)!;
+    const shown = !assumed || joint === 0.4;
+    expect(l.pct_by_option).toMatchObject({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(Object.hasOwn(l.pct_by_option, 'carry_on')).toBe(shown);
+    if (shown) expect(l.pct_by_option.carry_on).toBe(joint * 100);
+    else expect(l.withheld_option_ids).toContain('carry_on');
+    expect(callback.mock.calls.every(([, p]) => p === primary)).toBe(true); // Never ask about joint p as primary permission.
+    expect((run.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(joint);
+  });
+
+  it.each(['quantity', 'target', 'cap', 'operator', 'unit', 'frame', 'reference', 'baseline', 'encoded level', 'raw level', 'reference unit', 'missing reference', 'window', 'deadline', 'period', 'conditions', 'selected goal', 'selected option'])(
+    'earned primary zero cannot license a different %s', mismatch => {
+      const { g, run, constraints } = example(0, 0);
+      const sent = (constraints.sentRun.graph.nodes as Rec[]).find(n => n.id === 'new_customers')!;
+      if (mismatch === 'quantity') sent.quantity_frame = 'change';
+      if (mismatch === 'target') sent.goal_threshold_raw = 21;
+      if (mismatch === 'cap') sent.goal_threshold_cap = 50;
+      if (mismatch === 'operator') constraints.sentRun.goal_direction = 'minimise';
+      if (mismatch === 'unit') sent.goal_threshold_unit = 'GBP';
+      if (mismatch === 'frame') sent.goal_threshold_frame = 'delta';
+      if (mismatch === 'reference') (sent.goal_target_basis as Rec).reference = 'launch';
+      if (mismatch === 'baseline') (sent.observed_state as Rec).baseline = 0.3;
+      if (mismatch === 'encoded level') (sent.observed_state as Rec).value = 0.3;
+      if (mismatch === 'raw level') (sent.observed_state as Rec).raw_value = 6;
+      if (mismatch === 'reference unit') (sent.observed_state as Rec).unit = 'GBP';
+      if (mismatch === 'missing reference') delete (sent.observed_state as Rec).raw_value;
+      if (mismatch === 'window') (sent.goal_target_basis as Rec).period_months = 4;
+      if (mismatch === 'deadline') sent.goal_horizon_months = 4;
+      if (mismatch === 'period') sent.goal_period = 'month';
+      if (mismatch === 'conditions') (sent.goal_target_basis as Rec).also_required = ['No contractors'];
+      if (mismatch === 'selected goal') constraints.sentRun.goal_node_id = 'conversion_rate';
+      if (mismatch === 'selected option') constraints.sentRun.options = constraints.sentRun.options.filter(o => o.option_id !== 'carry_on');
+      const l = goalChanceLicenceOf(run, g, 'new_customers', () => true, undefined, g, constraints)!;
+      expect(l.pct_by_option).not.toHaveProperty('carry_on');
+      expect(l.withheld_option_ids).toContain('carry_on');
+    });
+
+  it('an outcome-less status quo stays withheld despite the actual upstream earned flag; raw Run and reader protections remain', () => {
+    const { g, run, constraints } = example(0, 0);
+    const before = structuredClone(run);
+    expect((run.option_comparison as Rec[]).at(-1)).not.toHaveProperty('outcome');
+    const certainty = recordGoalCertainty(g, run, computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(g)));
+    expect(certainty).toMatchObject({ recorded: true, decisions: [{ option_id: 'carry_on', probability_of_goal: 0, earned: true }] });
+    const earned = (id: string, p: 0 | 1) => certainty.recorded && certainty.decisions.some(d => d.option_id === id && d.probability_of_goal === p && d.earned);
+    for (const permission of [earned, () => false]) {
+      const enrichment = withGoalChanceLicence(run, g, 'new_customers', permission, undefined, g, constraints);
+      const result = { type: 'analysis_result', enrichment };
+      const l = goalChanceLicenceForAgent(result)!;
+      const record = agentLicenceRecordOf(result)!;
+      const cell = projectCanonicalAnalysisCells(result as never, g).find(r => r.option_id === 'carry_on')!.cell;
+      expect(record.pct_by_option).not.toHaveProperty('carry_on');
+      expect(cell).toMatchObject({ kind: 'withheld' });
+      expect((cell as Rec).face).not.toMatch(/0%|100%/);
+      expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');
+      expect((enrichment.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(0);
+    }
+    expect(run).toEqual(before);
+  });
+});
 
 describe('N1: a fixed target at today’s level keeps its EXACT probability side before joint projection', () => {
   const boundary = (subject: 'primary' | 'secondary', operator: string, contradiction: boolean) => {
@@ -1194,12 +1280,14 @@ describe('N1: a fixed target at today’s level keeps its EXACT probability side
       expect(run).toEqual(original);
     });
 
-  it.each(['primary', 'secondary'] as const)('%s: a consistent fixed target leaves the uncertain limit’s recorded joint intact', subject => {
+  it.each(['primary', 'secondary'] as const)('%s: a consistent fixed target keeps interior 40%, but does not independently earn the raw joint zero', subject => {
     const inclusive = boundary(subject, '>=', false).licence;
     expect(inclusive.pct_by_option.carry_on).toBe(40);
     expect(inclusive.withheld_option_ids ?? []).not.toContain('carry_on');
-    // Strict > at exact equality fails; its recorded joint 0 is consistent, never changed to the limit’s 40%.
-    expect(boundary(subject, '>', false).licence.pct_by_option.carry_on).toBe(0);
+    // AIE N2: consistency with a paired assumption is not independent permission for an exact chance.
+    const strict = boundary(subject, '>', false);
+    expect(strict.licence.pct_by_option).not.toHaveProperty('carry_on');
+    expect((strict.run.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(0);
   });
 
   it.each(['>=', '>', '<=', '<'])('B1 review: unknown exact unit side for %s cannot be supplied by residue', operator => {
@@ -1269,13 +1357,15 @@ describe('N1: a fixed target at today’s level keeps its EXACT probability side
 });
 
 describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the Run sent — targets AND limits', () => {
-  it('RED on e58b8dbd (fixed targets + an uncertain budget limit): the status quo keeps its varying joint; no universal "no change"', () => {
-    const l = licenceFor(sqWith(0.4, 0), pairedWithLimit(true))!;
+  it('N2: fixed targets plus an uncertain budget do not license carrying on’s raw joint zero', () => {
+    const run = sqWith(0.4, 0), l = licenceFor(run, pairedWithLimit(true))!;
     expect(l.targets!.joint.status).toBe('licensed');
-    // Its joint figure is the Run's own (the budget varies on carrying on): quoted, never withheld "by assumption".
-    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48, carry_on: 0 });
-    expect(l.status_quo).toBeUndefined();
-    expect(l.withheld_option_ids ?? []).not.toContain('carry_on');
+    // AIE N2: keep the raw conditional result; an uncertain budget cannot earn the paired premises' joint zero.
+    expect((run.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(0);
+    expect(l.pct_by_option).toEqual({ hire_manager: 35, ai_plus_ads: 48 });
+    expect(l.status_quo?.line).toContain('because it treats ‘New customers’ and ‘Conversion rate’ as unchanged from today');
+    expect(l.status_quo?.line).not.toContain('Annual spend'); // The budget remains uncertain.
+    expect(l.withheld_option_ids).toContain('carry_on');
     // Each target's own marginal still keeps its own same-draw reference (no figure for the status quo there).
     for (const t of l.targets!.per_target) expect(t.pct_by_option).not.toHaveProperty('carry_on');
     expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');

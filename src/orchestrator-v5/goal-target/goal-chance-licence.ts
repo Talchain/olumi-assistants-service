@@ -1204,11 +1204,15 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const movedIds = new Set([...readings].filter(([id, r]) => r === 'moved' && targetIds.has(id)).map(([id]) => id));
   const jointMovedIds = new Set([...readings].filter(([, r]) => r === 'moved').map(([id]) => id));
   const allAssumed = targetRows.length > 0 && jointRows.length > 0 && [...readings.values()].every((r) => r === 'assumed');
+  // N2: an uncertain second condition cannot turn an unlicensed paired premise into an exact joint chance.
+  const jointP = sqRecord?.probability_of_joint_goal;
+  const fromJoint = allAssumed || jointMovedIds.size > 0
+    || ((jointP === 0 || jointP === 1) && [...readings.values()].some(r => r === 'assumed'));
   let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,
     perLimit: c.constraints.perLimit, primaryGoalId: c.goal?.id, primaryRefused: c.primaryRefused,
-    ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint: allAssumed || jointMovedIds.size > 0, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
+    ...(sqId !== undefined ? { statusQuo: { id: sqId, fromJoint, fromTargets: new Set([...assumedIds, ...movedIds]) } } : {}),
     ...(c.basis !== undefined ? { basis: c.basis } : {}),
   });
   if (block === null) return l;
@@ -1272,11 +1276,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   // retained condition sharing a figure with a target the joint names (the same 15% over a distinct period) is not that target.
   const covers = partialGoalWords(targetNames, c.alsoRequired);
   if (covers !== undefined && targetNames.length > 0 && (block.joint.status === 'licensed' || block.per_target.length > 0)) notes.push(covers);
-  // The status quo's own line is said only where EVERY target's reference is the same-draw one (never universal by default);
-  // a status quo whose own share disagrees with that reference is withheld with that reason.
-  // R5-3: "no change" only where EVERY condition of the joint is on the same-draw reference — and then it names every one.
-  const targetLabels = block.conditions.map((x) => `‘${x.label}’`);
-  const statusQuo = sqId !== undefined && allAssumed && targetNames.length > 0 && targetLabels.length > 0
+  // Say which paired premises withhold this joint, including a mixed-reference extreme. Never call an uncertain limit fixed.
+  const targetLabels = block.conditions.filter(x => readings.get(x.constraint_id) === 'assumed').map((x) => `‘${x.label}’`);
+  const statusQuo = sqId !== undefined && fromJoint && jointMovedIds.size === 0 && targetNames.length > 0 && targetLabels.length > 0
     ? { status_quo: { option_id: sqId,
       line: `This Run can’t give a chance for carrying on as now, because it treats ${targetLabels.length === 1 ? targetLabels[0]
         : `${targetLabels.slice(0, -1).join(', ')} and ${targetLabels[targetLabels.length - 1]}`} as unchanged from today. Worth checking: how ${
