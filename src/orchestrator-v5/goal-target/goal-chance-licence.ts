@@ -391,7 +391,8 @@ export function statusQuoReadingOf(a: {
   // DL 17 Oct 10:22/11:23: a paired reference is established by the evaluated model above, not inferred from these
   // statistics. Allow eight machine epsilons on that reference's scale for float arithmetic (the captured 8d9 row has
   // std 5.55e-17 and mean one ulp above 0.4). This is deliberately far smaller than the suggested 1e-9 allowance.
-  // EVERY recorded centre and std must fit ONE known frame. It earns no exact chance and cannot excuse real spread,
+  // EVERY recorded centre and std must fit ONE known frame, and the held target's exact side must be independently known.
+  // Residue cannot establish that side when the units are unknown, earn an exact chance, or excuse real spread,
   // mixed encodings, an unknown frame or the contradictory probability already checked above.
   const centres = ['p10', 'p50', 'p90', 'mean'];
   const agreesInFrame = (reference: unknown): boolean => {
@@ -399,7 +400,8 @@ export function statusQuoReadingOf(a: {
     return (!finite(o.std) || sameFrameArithmeticAgreement(o.std, 0, reference, PAIRED_REFERENCE_PRECISION))
       && centres.every(k => !finite(o[k]) || sameFrameArithmeticAgreement(o[k], reference, reference, PAIRED_REFERENCE_PRECISION));
   };
-  const agrees = a.reference !== 'unknown' && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
+  const agrees = a.reference !== 'unknown' && a.referenceChance !== undefined
+    && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
   if (finite(o.std) && o.std > 0 && !agrees) return 'moved';
   if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90 && !agrees) return 'moved';
   // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".

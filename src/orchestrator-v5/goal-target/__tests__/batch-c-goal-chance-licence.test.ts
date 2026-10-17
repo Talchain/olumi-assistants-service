@@ -1201,6 +1201,21 @@ describe('N1: a fixed target at today’s level keeps its EXACT probability side
     // Strict > at exact equality fails; its recorded joint 0 is consistent, never changed to the limit’s 40%.
     expect(boundary(subject, '>', false).licence.pct_by_option.carry_on).toBe(0);
   });
+
+  it.each(['>=', '>', '<=', '<'])('B1 review: unknown exact unit side for %s cannot be supplied by residue', operator => {
+    const { g, run, threshold, constraints } = boundary('primary', operator, true);
+    const goal = (g.nodes as Rec[]).find(n => n.id === 'new_customers')!;
+    (goal.observed_state as Rec).unit = 'new customers'; // Target unit remains 'customers': no guessed unit equivalence.
+    const l = goalChanceLicenceOf(run, g, 'new_customers', () => false, threshold, g, constraints)!;
+    expect(l.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
+    expect(l.pct_by_option).not.toHaveProperty('carry_on');
+    if (l.targets!.joint.status === 'licensed') expect(l.targets!.joint.pct_by_option).not.toHaveProperty('carry_on');
+    const response = withGoalChanceLicence(run, g, 'new_customers', () => false, threshold, g, constraints);
+    const cell = projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: response } as never, g)
+      .find(row => row.option_id === 'carry_on')!.cell;
+    expect(cell).toMatchObject({ kind: 'withheld', face: 'Chance not shown yet' });
+    expect((cell as Rec).face).not.toMatch(/0%|100%/);
+  });
 });
 
 describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the Run sent — targets AND limits', () => {

@@ -227,8 +227,8 @@ describe('D2 same-frame precision (11 Oct and 8d9ef02e capacity statistics, and 
 
   it('N6: a retained raw reference never supplies the missing evaluated frame', () => {
     const row = { probability_of_goal: 0, outcome: { p10: 80, p50: 80, p90: 80, mean: 80.00000000000001, std: 1.1e-14 } };
-    expect(statusQuoReadingOf({ paired: true, forecast: false, reference: 'unknown', rawReference: 80, row })).toBe('moved');
-    expect(statusQuoReadingOf({ paired: true, forecast: false, reference: 'unknown', rawReference: 80,
+    expect(statusQuoReadingOf({ paired: true, forecast: false, reference: 'unknown', rawReference: 80, referenceChance: 0, row })).toBe('moved');
+    expect(statusQuoReadingOf({ paired: true, forecast: false, reference: 'unknown', rawReference: 80, referenceChance: 0,
       row: { probability_of_goal: 0, outcome: { p10: 80, p50: 80, p90: 80, mean: 80, std: 0 } } })).toBe('unknown');
   });
 
