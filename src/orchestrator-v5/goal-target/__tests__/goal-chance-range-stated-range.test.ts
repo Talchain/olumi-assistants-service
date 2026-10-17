@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { GOAL_CHANCE_RANGE, goalChanceRangeOf, withGoalChanceRange, type GoalChanceRangeInputs } from '../goal-chance-range.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../orchestrator/context/option-result-source.js';
 import { userStatementRecord, withUserStatement, CONSTRUCTION_ATTEST } from '../../statement-door/statements.js';
+import { linkEffectRangeRecord } from '../../statement-door/fields/link-effect-range.js';
 
 type Json = Record<string, any>;
 const A = 'food_waste', B = 'keep', FROM = 'coverage', TO = 'recycling';
@@ -70,5 +71,18 @@ describe('a chance range never rests on Olumi\'s placeholder for a link the user
     const strength = existenceRow({ kind: 'link_strength', p_goal_if_low: 0.1, p_goal_if_high: 0.6, n_low: 5000, n_high: 5000 });
     expect(goalChanceRangeOf(envelope(), graph(), A, inputs([strength]))).not.toBeNull();
     expect(goalChanceRangeOf(envelope(), withStatedRange(graph()), A, inputs([strength]))).toBeNull();
+  });
+  // ⛔ #3329 GREEN CORE (DL-3 03:18Z; BUDDY-A 03:14Z B1): the record the chat press writes (`linkEffectRangeRecord`, no attest),
+  // here for a DENIAL whose negation the AI left out: Olumi's reading, so it neither bars nor credits the range.
+  it('⛔ a chat-pressed range (the press\'s own record, a denial with the negation left out) changes nothing: the range shows as with no statement', () => {
+    const denial = 'Weekly food collection will not lift the rate by between 4 and 7 percentage points.';
+    const subject = { kind: 'link' as const, id: FROM, to_id: TO, field: 'effect' as const };
+    const reading = { subject, statements: [{ speaker: 'user', reading: 'olumi', quote: denial, source: denial,
+      subject: { quantity: `link|${FROM}|${TO}||effect` }, unit: 'percentage points', form: 'range', low: 4, high: 7 }] };
+    const pressed = linkEffectRangeRecord(graph(), subject, reading as never, '2026-10-17T03:00:00.000Z')!;
+    expect(pressed.user_statement.record.attest).toBeUndefined();
+    const g = withUserStatement(graph() as never, pressed.user_statement.record, subject) as Json;
+    expect(goalChanceRangeOf(envelope(), g, A, inputs())).toEqual(goalChanceRangeOf(envelope(), graph(), A, inputs()));
+    expect(rangeRecord(withGoalChanceRange(envelope(), g, inputs()))).toEqual(rangeRecord(withGoalChanceRange(envelope(), graph(), inputs())));
   });
 });
