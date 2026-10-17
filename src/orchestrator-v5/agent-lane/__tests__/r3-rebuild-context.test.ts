@@ -202,7 +202,8 @@ it('construction preserves each answered-pair identity once and distinct typed s
     expect(items).toHaveLength(2);
     expect(items.find((i: Rec) => i.content[0].text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(pairItem);
     const context = JSON.parse(items.find(i => i.content[0].text.startsWith(REASONING_CONTEXT_LABEL))!.content[0].text.split('\n')[1]);
-    expect(context.verified_user_statements).toEqual([]);
+    expect(context.verified_user_statements).toEqual([recent, request, other].map(text => ({ speaker: 'user', source: 'typed', text })));
+    expect(context.current_request_origin).toBe('typed');
     expect(pairsIn(items)).toEqual([
       { olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: 'Which assumptions remain disputed?' },
         response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: recent } },

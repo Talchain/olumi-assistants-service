@@ -4065,7 +4065,7 @@ export function createAgentCapabilities(
     const context = { current_model: projectModelContext(before), objections: objections.map(o => o.statement),
       retained: { brief: before.brief_text,
         items: turnContextItems({ now: new Date(), briefText: before.brief_text, conversation: opts.readTurnHistory?.() ?? [],
-          recentTurns: 0, request: currentRequest }).filter(item =>
+          recentTurns: 0, request: currentRequest, verifiedUserMessages: typed, currentRequestOrigin: 'typed' }).filter(item =>
           isPlainRecord(item) && Array.isArray(item.content) && item.content.some(part =>
             isPlainRecord(part) && typeof part.text === 'string' && (part.text.startsWith(ANSWERED_EARLIER_LABEL) || part.text.startsWith(REASONING_CONTEXT_LABEL)))),
         conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: "Olumi’s proposed replacement framing (context only, not user source or a saved model):\n" + framing }, ...history.messages.filter(m => !typed.includes(m)).map(text => ({ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text })),
