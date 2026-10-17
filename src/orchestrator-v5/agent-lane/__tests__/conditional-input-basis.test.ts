@@ -157,3 +157,20 @@ describe('B3-8: named factor baselines, with bounded coverage', () => {
     }
   });
 });
+
+
+describe('starting-value roles stay separate from supplied option settings and effects', () => {
+  it('does not describe an unverified starting role as missing words in the brief', () => {
+    const unverified = { ...observed('cee_inference'), extractionType: 'inferred', user_material_unverified: true };
+    const text = say(graph(unverified));
+    expect(text).toContain('The starting value for "Subscribers" has not been verified as today');
+    expect(text).not.toContain('Not confirmed from your brief');
+    expect(text).not.toContain('Olumi’s estimates'); // The one provenance owner still calls this origin human / role unverified.
+    expect(text).toContain('Other model assumptions may also affect the result.');
+  });
+  it('a real Olumi estimate still owes its existing disclosure', () => {
+    const text = say(graph(observed('cee_inference')))!;
+    expect(text).toContain('Olumi’s estimates for "Subscribers"');
+    expect(text.split('Olumi’s estimates for "Subscribers"')).toHaveLength(2);
+  });
+});

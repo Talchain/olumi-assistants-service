@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { withoutUnsizedLinkInvitation, unsizedLinkSentence, UNSIZED_PATH_LEADER_CAUSE_KEY } from '../unsized-path-cause.js';
-import { disclosuresFor, withDisclosures, PLACEHOLDER_STRENGTH_DISCLOSURE } from '../disclosure.js';
+import { withoutDisclosure, disclosuresFor, withDisclosures, PLACEHOLDER_STRENGTH_DISCLOSURE } from '../disclosure.js';
 
 describe('Olumi discloses a placeholder, not the Agent', () => {
   it('discloses when a write used a placeholder strength', () => {
@@ -68,5 +68,31 @@ describe('AIE-04: the recorded cause separates qualification from its stock task
     expect(withoutUnsizedLinkInvitation(full, {})).toBe(full);
     const conditional = `Unless you set it, the link remains unsized. ${full}`;
     expect(withoutUnsizedLinkInvitation(conditional, {})).toBe(conditional);
+  });
+});
+
+
+describe('owned disclosure removal retains reasoning and removes only emptied formatting', () => {
+  const note = 'Static model; not a forecast to a date.';
+  it('removes only a label whose owned list was emptied; an independent negative keeps its section', () => {
+    expect(withoutDisclosure(`The implication stays.\n\n**Conditions:**\n- ${note}\n\nA useful move.`, note, { keep: 0 }))
+      .toBe('The implication stays.\nA useful move.');
+    const negative = 'Do not treat this as a forecast.';
+    expect(withoutDisclosure(`Conditions:\n- ${note}\n- ${negative}`, note, { keep: 0 }))
+      .toBe(`Conditions:\n- ${negative}`);
+  });
+  it('removes its empty bullet, leaving independent reasoning and negatives verbatim', () => {
+    const text = `A conditional finding.\n- ${note}\n- Do not treat this as measured evidence.\n- \nA separate thought.`;
+    expect(withoutDisclosure(text, note, { keep: 0 })).toBe('A conditional finding.\n- Do not treat this as measured evidence.\n- \nA separate thought.');
+  });
+  it('only a supplied current option label may leave with its emptied disclosure', () => {
+    const text = `- **Carry on:** ${note}\n- **Other condition:** ${note}`;
+    const result = withoutDisclosure(text, note, { keep: 0, emptyLabels: ['Carry on'] });
+    expect(result).not.toContain('Carry on');
+    expect(result).toContain('Other condition');
+  });
+  it('a quoted user sentence remains intact even when its surrounding format matches', () => {
+    const source = `- **Carry on:** ${note}`;
+    expect(withoutDisclosure(source, note, { keep: 0, emptyLabels: ['Carry on'], protectedTexts: [source] })).toBe(source);
   });
 });
