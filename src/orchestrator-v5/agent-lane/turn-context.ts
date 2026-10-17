@@ -58,19 +58,19 @@ export function runFactsInstructionItem(use: string): unknown {
 export function turnContextItems(args: {
   readonly now: Date; readonly briefText: unknown; readonly conversation: readonly unknown[];
   readonly verifiedUserMessages?: readonly string[]; readonly unknownUserText?: string;
-  readonly canonicalState?: unknown; readonly request?: string; readonly runFactsUse?: string; readonly currentRequestOrigin?: 'typed' | 'product control' | 'unknown';
+  readonly recentTurns?: number; readonly canonicalState?: unknown; readonly request?: string; readonly runFactsUse?: string; readonly currentRequestOrigin?: 'typed' | 'product control' | 'unknown';
 }): unknown[] {
   const items: unknown[] = [{ role: 'developer', content: [{ type: 'input_text', text: todayLine(args.now) }] }];
   const brief = typeof args.briefText === 'string' ? args.briefText.trim() : '';
   if (brief !== '' && !args.conversation.some((item) => textOf(item).includes(brief))) {
     items.push({ role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] });
   }
-  // Chat already forwards its whole window. Explain keeps its existing three-turn window; pairs supply only dropped replies.
+  // Chat forwards its whole window; Explain defaults to three turns. Rebuild uses zero so every reply is paired.
   // The store's re-made items (the older words; the dropped replies beside Olumi's questions) are carried whole, as chat carries them.
   const older = args.conversation.filter(isOlderWordsItem);
   const forwardedConversation = args.request === undefined ? args.conversation
     : [...older,
-      ...trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), 3)]
+      ...(args.recentTurns === 0 ? [] : trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), args.recentTurns ?? 3))]
       .filter(item => ['user', 'assistant'].includes(String(record(item)?.role)));
   const forwarded = new Set(forwardedConversation);
   let preceding: { item: unknown; text: string } | undefined;

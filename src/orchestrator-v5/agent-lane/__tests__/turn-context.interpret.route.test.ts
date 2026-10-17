@@ -53,6 +53,15 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
+const historyBinding = vi.hoisted(() => ({ read: undefined as (() => readonly unknown[]) | undefined }));
+vi.mock('../runtime/agent-capabilities.js', async original => {
+  const actual = await original<typeof import('../runtime/agent-capabilities.js')>();
+  return { ...actual, createAgentCapabilities: (...args: Parameters<typeof actual.createAgentCapabilities>) => {
+    historyBinding.read = args[5]?.readTurnHistory;
+    return actual.createAgentCapabilities(...args);
+  } };
+});
+
 const textOf = (item: Json): string => (Array.isArray(item?.content) ? item.content.map((c: Json) => c?.text ?? '').join('\n') : String(item?.content ?? ''));
 
 describe('S2 turnContext: the coaching call is told today and the user’s brief, verbatim', () => {
@@ -139,6 +148,14 @@ describe('S2 turnContext: the coaching call is told today and the user’s brief
     expect(interpret, 'exactly one interpreting call').toHaveLength(1);
     return interpret[0]!;
   };
+
+  it('R3 route binds a live readTurnHistory reader after the conversation is populated', async () => {
+    const statements = ['The night team disputes the mechanism.', 'The day team still needs evidence.'];
+    await explainRequest(BRIEFS.capacity!, statements);
+    expect(historyBinding.read, 'the real route supplies the rebuild history reader').toBeTypeOf('function');
+    const history = historyBinding.read!() as Json[];
+    for (const text of [...statements, ...priorReplies]) expect(history.map(textOf)).toContain(text);
+  }, 60_000);
 
   it.each(Object.keys(CONTEXT_BRIEFS).flatMap(brief => ['chat', 'Explain'].map(path => ({ brief, path }))))(
     'R2 authority $brief $path: no developer item contains a typed user sentence', async ({ brief, path }) => {
