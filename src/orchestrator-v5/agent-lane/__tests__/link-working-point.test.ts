@@ -70,8 +70,10 @@ describe('Olumi\'s working point from a link\'s brief range', () => {
     expect(linkWorkingPointOf(g(), FROM, TO)).toBeUndefined();
   });
 
-  it('⛔ CONTRAST: the same range on a GRADED source (staff, 0 to 20) gives no "per what", so no working point; the switch does', () => {
-    const graded = withRange(graph({ from: { label: 'Collection staff', observed_state: { value: 4, baseline: 4, raw_value: 4, unit: 'staff', cap: 20 } } }));
+  // The graded source is framed so that, read as if it were a switch, its working point WOULD be valid (0.11 on its frame of 2):
+  // only the switch rule refuses it, never a size or spread bound.
+  it('⛔ CONTRAST: the same range on a GRADED source (staff, frame 2) gives no "per what", so no working point; the switch does', () => {
+    const graded = withRange(graph({ from: { label: 'Collection staff', observed_state: { value: 0.5, baseline: 0.5, raw_value: 1, unit: 'staff', cap: 2 } } }));
     expect(linkWorkingPointOf(graded, FROM, TO)).toBeUndefined();
     expect(linkWorkingPointOf(withRange(graph()), FROM, TO)).toBeDefined();
   });
