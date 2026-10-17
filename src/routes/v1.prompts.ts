@@ -5,17 +5,13 @@
  * that don't require admin authentication.
  *
  * Routes:
- * - POST /v1/prompts/warm - Warm prompt cache from Supabase store
- * - GET  /v1/prompts/status - Get prompt cache status
+ * - POST /assist/v1/prompts/warm - Warm prompt cache from Supabase store
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   warmPromptCacheFromStore,
   getPromptLoaderCacheDiagnostics,
-  getCacheWarmingState,
-  isCacheWarmingHealthy,
-  getSystemPromptMeta,
 } from '../adapters/llm/prompt-loader.js';
 import { isPromptStoreHealthy } from '../prompts/index.js';
 import { shouldUseStagingPrompts } from '../config/index.js';
@@ -28,12 +24,11 @@ const PromptWarmingEvents = {
   WarmRequested: 'prompt.warm.requested',
   WarmCompleted: 'prompt.warm.completed',
   WarmFailed: 'prompt.warm.failed',
-  StatusChecked: 'prompt.status.checked',
 } as const;
 
 export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
   /**
-   * POST /v1/prompts/warm - Warm prompt cache from Supabase store
+   * POST /assist/v1/prompts/warm - Warm prompt cache from Supabase store
    *
    * This endpoint allows the frontend to proactively warm the prompt cache
    * before the user submits their first decision brief. This ensures that:
@@ -147,71 +142,5 @@ export async function publicPromptRoutes(app: FastifyInstance): Promise<void> {
     }
   };
 
-  app.post('/v1/prompts/warm', { config: { scenarioId: 'none' } }, handleWarmPrompts);
-
-  /**
-   * GET /v1/prompts/status - Get prompt cache status
-   *
-   * Returns the current state of the prompt cache without triggering a refresh.
-   * Use this to check if prompts are loaded and from what source.
-   *
-   * Response includes:
-   * - Cache warming state (completed, counts)
-   * - Per-task prompt status (source, version, age)
-   * - Whether staging prompts are enabled
-   */
-  const handlePromptStatus = async (request: FastifyRequest, reply: FastifyReply) => {
-    emit(PromptWarmingEvents.StatusChecked, {
-      client_ip: request.ip,
-    });
-
-    const warmingState = getCacheWarmingState();
-    const cacheStatus = getPromptLoaderCacheDiagnostics();
-    const storeHealthy = isPromptStoreHealthy();
-    const usingStaging = shouldUseStagingPrompts();
-    const cacheHealthy = isCacheWarmingHealthy();
-
-    // Build per-task status with model config info
-    const taskStatus = cacheStatus.entries.map(entry => {
-      const meta = getSystemPromptMeta(entry.taskId);
-      return {
-        task_id: entry.taskId,
-        source: entry.source,
-        prompt_id: entry.promptId,
-        version: entry.version,
-        is_staging: entry.isStaging,
-        age_ms: entry.ageMs,
-        status: entry.status,
-        model_config: meta.modelConfig,
-      };
-    });
-
-    return reply.status(200).send({
-      cache_warming: {
-        completed: warmingState.completed,
-        completed_at: warmingState.completedAt,
-        warmed_from_store: warmingState.warmedFromStore,
-        failed_count: warmingState.failedCount,
-        skipped_count: warmingState.skippedCount,
-        healthy: cacheHealthy,
-      },
-      environment: {
-        using_staging_prompts: usingStaging,
-        store_healthy: storeHealthy,
-      },
-      cache: {
-        size: cacheStatus.cacheSize,
-        tasks: taskStatus,
-      },
-    });
-  };
-
-  app.get('/v1/prompts/status', { config: { scenarioId: 'none' } }, handlePromptStatus);
-
-  // ── Route aliases with /assist prefix ──────────────────────────────────────
-  // The frontend calls /assist/v1/prompts/warm but the canonical routes are
-  // /v1/prompts/warm and /v1/prompts/status. Register the same handlers on both.
-
   app.post('/assist/v1/prompts/warm', { config: { scenarioId: 'none' } }, handleWarmPrompts);
-  app.get('/assist/v1/prompts/status', { config: { scenarioId: 'none' } }, handlePromptStatus);
 }

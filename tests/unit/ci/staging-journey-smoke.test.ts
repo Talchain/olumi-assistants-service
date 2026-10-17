@@ -579,7 +579,7 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
     expect(releaseJobRuns(ci.jobs["live-tests"].if, pr(), hold)).toBe(true);
   });
 
-  it("⛔ perf-gate does not run on pull requests at all, and neither job is var-gated", () => {
+  it("⛔ perf-gate does not run on pull requests at all, and no job is var-gated", () => {
     // THE REPLACEMENT FOR THE HOLD, and a stronger guarantee than the hold ever
     // gave: the hold, even had the variable existed, covered eight NAMED
     // branches. This covers every PR from every lane, for ever, with no list.
@@ -627,11 +627,9 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
   });
 
   it("does not exempt additional performance jobs from the scope checks", () => {
-    // ⚠ THE JOB LIST IS THE LOAD-BEARING HALF. This workflow has TWO jobs and
-    // BOTH target production; reasoning about one is how the other is
-    // forgotten, which is exactly what nearly happened here. If a third
-    // appears, this REDs and someone has to decide whether it spends money.
-    expect(Object.keys(perf.jobs).sort()).toEqual(["perf-gate", "sse-live-resume-gate"]);
+    // Keep the production job inventory exact after retiring the legacy draft probe.
+    // Any additional job must be reviewed for production spend.
+    expect(Object.keys(perf.jobs).sort()).toEqual(["sse-live-resume-gate"]);
     expect(findVarGatedConditions(perf, "perf")).toEqual([]);
   });
 });

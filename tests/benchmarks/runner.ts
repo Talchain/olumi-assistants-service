@@ -370,9 +370,7 @@ export async function runBenchmark(config: BenchmarkConfig): Promise<BenchmarkRe
   if (config.createApp) {
     app = await config.createApp();
   } else {
-    const draftRoute = (await import("../../src/routes/assist.draft-graph.js")).default;
     app = Fastify({ logger: false });
-    await draftRoute(app);
   }
 
   // Run per-brief benchmarks — track dropped briefs explicitly

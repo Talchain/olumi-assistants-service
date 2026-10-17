@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyReply } from "fastify";
 import { DraftGraphOutput, ErrorV1, type DraftGraphInputT } from "../schemas/assist.js";
 import { shouldClarify } from "../utils/confidence.js";
 import { type DocPreview } from "../services/docProcessing.js";
@@ -8,7 +8,6 @@ import { log } from "../utils/telemetry.js";
 import type { GraphT } from "../schemas/graph.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
 import { DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
-import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config } from "../config/index.js";
 
 const EVENT_STREAM = "text/event-stream";
@@ -359,12 +358,6 @@ type Diagnostics = {
   correlation_id: string;
 };
 
-type StructuralMeta = {
-  had_cycles?: boolean;
-  cycle_node_ids?: string[];
-  had_pruned_nodes?: boolean;
-};
-
 function _buildDiagnosticsFromPayload(
   payload: Record<string, any>,
   correlationId: string,
@@ -507,19 +500,6 @@ export function sanitizeDraftGraphInput(
   return { ...base, ...passthrough } as DraftGraphInputT;
 }
 
-type PipelineResult =
-  | {
-      kind: "success";
-      payload: SuccessPayload;
-      hasLegacyProvenance?: boolean;
-      cost_usd: number;
-      provider: string;
-      model: string;
-      llm_meta?: DraftGraphResult["meta"];
-      structural_meta?: StructuralMeta;
-    }
-  | { kind: "error"; statusCode: number; envelope: ErrorEnvelope };
-
 function _buildError(code: "BAD_INPUT" | "RATE_LIMITED" | "INTERNAL", message: string, details?: unknown): ErrorEnvelope {
   return ErrorV1.parse({ schema: "error.v1", code, message, details });
 }
@@ -625,56 +605,4 @@ export async function groundAttachments(
   // Process attachments with grounding module (enforces 5k limit, privacy, safe CSV)
   const result = await processAttachments(attachmentInputs);
   return result;
-}
-
-export interface PipelineOpts {
-  /** Force refresh prompts from Supabase (bypass cache) - ?supa=1 URL param */
-  refreshPrompts?: boolean;
-  /** Force use of hardcoded default prompt (skip store lookup) - ?default=1 URL param */
-  forceDefault?: boolean;
-  /** AbortSignal for client disconnect / budget cancellation */
-  signal?: AbortSignal;
-  /** Request start timestamp for budget tracking */
-  requestStartMs?: number;
-}
-
-
-/**
- * Legacy Pipeline A entry point — ARCHIVED.
- *
- * This function previously contained ~1,650 lines of the original draft-graph
- * pipeline (Pipeline A). It has been replaced by the unified 6-stage pipeline
- * (`runUnifiedPipeline`). The function signature is preserved for
- * type-compatibility with any remaining imports.
- */
-export async function runDraftGraphPipeline(_input: DraftGraphInputT, _rawBody: unknown, _correlationId: string, _pipelineOpts?: PipelineOpts): Promise<PipelineResult> {
-  throw new Error("Pipeline A has been removed. Use the unified pipeline (runUnifiedPipeline) instead.");
-}
-
-/**
- * Legacy route registration — ARCHIVED.
- *
- * These routes (/assist/draft-graph, /assist/draft-graph/stream,
- * /assist/draft-graph/resume) have been superseded by the v1 endpoints
- * (/assist/v1/draft-graph). They are kept as stubs returning 410 Gone
- * to provide a clear migration signal to any remaining consumers.
- */
-export default async function route(app: FastifyInstance) {
-  const goneResponse = {
-    schema: "error.v1",
-    code: "GONE",
-    message: "This endpoint has been removed. Use /assist/v1/draft-graph instead.",
-  };
-
-  app.post("/assist/draft-graph/stream", { config: { scenarioId: 'none' } }, async (_req, reply) => {
-    return reply.code(410).send(goneResponse);
-  });
-
-  app.post("/assist/draft-graph/resume", { config: { scenarioId: 'none' } }, async (_req, reply) => {
-    return reply.code(410).send(goneResponse);
-  });
-
-  app.post("/assist/draft-graph", { config: { scenarioId: 'none' } }, async (_req, reply) => {
-    return reply.code(410).send(goneResponse);
-  });
 }

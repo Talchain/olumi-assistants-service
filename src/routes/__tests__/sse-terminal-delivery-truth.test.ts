@@ -30,7 +30,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
-import { resolveSseEndState } from "../assist.v1.draft-graph-staged.js";
+import { resolveSseEndState } from "../streamed-turn-sse.js";
 import { streamTurnAsStagedSse } from "../streamed-turn-sse.js";
 import { setTestSink, log } from "../../utils/telemetry.js";
 

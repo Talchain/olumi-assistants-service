@@ -185,7 +185,7 @@ describe("POST /orchestrate/v2/turn/stream — the streamed V5 turn", () => {
 
     it("both SSE routes draw their frame classes from ONE constant (no mirror)", async () => {
       const streamRoute = await import("../../src/routes/orchestrate.v2.turn-stream.js");
-      const stagedRoute = await import("../../src/routes/assist.v1.draft-graph-staged.js");
+      const stagedRoute = await import("../../src/routes/streamed-turn-sse.js");
       // Same object identity, not merely equal contents: a copied list could
       // drift; a shared reference cannot.
       expect(streamRoute.STAGED_FRAME_CLASSES).toBe(stagedRoute.STAGED_FRAME_CLASSES);

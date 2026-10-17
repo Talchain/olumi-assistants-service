@@ -47,8 +47,8 @@ import { toOutboundGraph } from "../orchestrator-v5/goal-target/outbound-graph.j
  * that drafts. A turn that edits, answers or runs analysis emits DRAFTING then
  * COMPLETE — correct and honest, not a degraded case.
  *
- * `STAGED_FRAME_CLASSES` and `statusForStage` are IMPORTED from lane 1's staged
- * assist route rather than restated: one vocabulary, one derivation of `status`.
+ * `STAGED_FRAME_CLASSES`, `statusForStage` and `resolveSseEndState` live here:
+ * one vocabulary and one derivation for the streamed turn routes.
  *
  * ── CLIENT RULES ────────────────────────────────────────────────────────────
  *  · Reconcile by node `id`. Identity is stable between GRAPH_READY and
@@ -85,15 +85,97 @@ import type { OutgoingHttpHeaders } from "node:http";
 
 import { runWithStageStream } from "../cee/unified-pipeline/stage-stream-context.js";
 import type { PipelineStageEvent } from "../cee/unified-pipeline/types.js";
-import {
-  resolveSseEndState,
-  STAGED_FRAME_CLASSES,
-  statusForStage,
-  type StagedFrameClass,
-} from "./assist.v1.draft-graph-staged.js";
+
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { SSE_HEARTBEAT_INTERVAL_MS } from "../config/timeouts.js";
 import { config } from "../config/index.js";
+
+/**
+ * The frame classes. Order of DECLARATION is the order of EMISSION. `BRIEF_READ` (C6-2) is written only by the
+ * agent-lane turn stream, between DRAFTING and GRAPH_READY; this route's pipeline never emits it.
+ */
+const STAGED_FRAME_CLASSES = [
+  "DRAFTING",
+  "BRIEF_READ",
+  "PROGRESS",
+  "GRAPH_READY",
+  "COACHING_READY",
+  "COMPLETE",
+] as const;
+
+export type StagedFrameClass = (typeof STAGED_FRAME_CLASSES)[number];
+
+/**
+ * `status` is DERIVED from the stage, never supplied by a caller. This is the
+ * mechanism behind "partial content presents as in-progress, never complete":
+ * there is no code path that can stamp `"complete"` on a pre-terminal frame,
+ * so the doctrine is enforced by construction rather than by review.
+ *
+ * EXPORTED (ROADMAP 2.122, CEE lane 2) so the streamed TURN route derives its
+ * `status` from THIS function rather than re-implementing the rule. Two routes
+ * each carrying their own copy of "which stage counts as complete" is the
+ * hand-maintained mirror of CLAUDE.md trap 12 — and the failure would be
+ * silent, because a mirror that drifts still returns a valid-looking string.
+ * Adding the keyword changes no behaviour on this route.
+ */
+export function statusForStage(stage: StagedFrameClass): "in_progress" | "complete" {
+  return stage === "COMPLETE" ? "complete" : "in_progress";
+}
+
+/**
+ * The `sse_end_state` vocabulary, and the ONE derivation of it (ROADMAP 2.1249).
+ *
+ * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
+ * Both staged routes already track whether the client's socket is still
+ * writable (`socketWritable`, flipped by the frame writer the moment
+ * `reply.raw` is destroyed or a write throws). They already LOGGED it, on the
+ * delivery line, beside `frames_emitted`. And then they derived
+ * `sse_end_state` from the STATUS CODE ALONE — so a turn whose socket died
+ * after 2 of 4 frames, with a fully-built persisted draft the user never
+ * received, was recorded as `sse_end_state: "complete"` at `log.info` with a
+ * 200. Measured on a live incident: success telemetry for a draft nobody got.
+ *
+ * The status code answers "did the SERVER produce a good turn?". It cannot
+ * answer "did the CLIENT receive the terminal frame?" — and `sse_end_state` is
+ * read as the second question, by the SLO
+ * (`sse.completed{sse_end_state:complete} / sse.completed{env:prod}`, see
+ * config/datadog-slos.json) and by every operator scanning for stream health.
+ *
+ * ── WHY `undelivered` RATHER THAN `error` ───────────────────────────────────
+ * The turn is not an error. It ran, it committed, its body is correct — the
+ * DELIVERY failed. Filing it as `error` would blame the pipeline and, worse,
+ * would move the sample out of the SSE-completed metric family entirely, which
+ * is why the emitting sites keep using `SSECompleted`: the sample must stay in
+ * the SLO's DENOMINATOR while failing its numerator. Re-filing an undelivered
+ * turn as an error event would make the delivery SLO go UP as delivery got
+ * worse.
+ *
+ * ── PRECEDENCE ──────────────────────────────────────────────────────────────
+ * Undelivered WINS over the status code, both ways round. A 200 nobody
+ * received is not a success, and a 500 nobody received is not an error the
+ * client ever saw — in both cases the honest fact about the STREAM is that its
+ * terminal frame did not land. The status code stays on the event as its own
+ * field, so nothing is lost.
+ */
+export type SseEndState = "complete" | "error" | "undelivered";
+
+/**
+ * Derive the terminal `sse_end_state` from BOTH facts the route holds.
+ *
+ * `socketWritable` must be read AFTER the terminal COMPLETE frame has been
+ * written: the writer sets it false either by refusing to write (socket already
+ * gone) or by observing `reply.raw.destroyed` immediately after the write, and
+ * a destroyed socket discards anything still queued. Reading it before the
+ * terminal write answers a different, weaker question.
+ */
+export function resolveSseEndState(input: {
+  readonly socketWritable: boolean;
+  readonly statusCode: number;
+}): SseEndState {
+  if (!input.socketWritable) return "undelivered";
+  return input.statusCode >= 400 ? "error" : "complete";
+}
+
 
 /**
  * The buffered turn both streamed routes forward to. Single source of truth.

@@ -89,27 +89,6 @@ describe("v1 SSE Stream Integration", () => {
         expect(hasErrorEvent).toBe(true);
       }
     });
-
-    it("should return 410 for legacy /assist/draft-graph/stream", async () => {
-      const response = await app.inject({
-        method: "POST",
-        url: "/assist/draft-graph/stream",
-        headers: { "content-type": "application/json" },
-        payload: { brief: "Should get 410" },
-      });
-
-      expect(response.statusCode).toBe(410);
-    });
-
-    it("should return 410 for legacy /assist/draft-graph/resume", async () => {
-      const response = await app.inject({
-        method: "POST",
-        url: "/assist/draft-graph/resume",
-        headers: { "x-resume-token": "any-token" },
-      });
-
-      expect(response.statusCode).toBe(410);
-    });
   });
 
   describe("Graceful Degradation (Redis unavailable)", () => {

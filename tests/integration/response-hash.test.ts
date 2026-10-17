@@ -40,23 +40,6 @@ describe.skip("Response Hash Integration - QUARANTINED", () => {
     expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
   });
 
-  it("should add X-Olumi-Response-Hash header to /assist/draft-graph", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/assist/draft-graph",
-      headers: {
-        "X-Olumi-Assist-Key": "test-key-response-hash",
-      },
-      payload: {
-        brief: "Should we expand internationally?",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["x-olumi-response-hash"]).toBeDefined();
-    expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
-  });
-
   it("should produce deterministic hash for identical responses", async () => {
     // Use /healthz which returns deterministic responses
     const response1 = await app.inject({
@@ -94,23 +77,6 @@ describe.skip("Response Hash Integration - QUARANTINED", () => {
     expect(actualHash).toBe(expectedHash);
   });
 
-  it("should include hash in error responses", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/assist/draft-graph",
-      headers: {
-        "X-Olumi-Assist-Key": "test-key-response-hash",
-      },
-      payload: {
-        // Missing required field 'brief'
-      },
-    });
-
-    expect(response.statusCode).toBe(400); // Bad request
-    expect(response.headers["x-olumi-response-hash"]).toBeDefined();
-    expect(response.headers["x-olumi-response-hash"]).toMatch(new RegExp(`^[a-f0-9]{${RESPONSE_HASH_LENGTH}}$`));
-  });
-
   it("should not add hash to non-JSON responses", async () => {
     // Note: This test assumes SSE endpoints don't get hashed
     // SSE responses have Content-Type: text/event-stream
@@ -121,11 +87,6 @@ describe.skip("Response Hash Integration - QUARANTINED", () => {
   it("should add hash to all API endpoints", async () => {
     const endpoints = [
       { method: "GET" as const, url: "/healthz" },
-      {
-        method: "POST" as const,
-        url: "/assist/draft-graph",
-        payload: { brief: "test" },
-      },
       {
         method: "POST" as const,
         url: "/assist/v1/explain-diff",

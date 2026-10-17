@@ -1,7 +1,7 @@
 /**
  * Explain Diff Integration Tests
  *
- * Tests POST /assist/explain-diff with fixtures adapter
+ * Tests POST /assist/v1/explain-diff with fixtures adapter
  * Verifies:
  * - Route responds correctly to valid inputs
  * - Schema validation works
@@ -16,7 +16,7 @@ import explainRoute from "../../src/routes/assist.explain-diff.js";
 // Use fixtures adapter for deterministic tests without API keys
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
-describe("POST /assist/explain-diff", () => {
+describe("POST /assist/v1/explain-diff", () => {
   let app: ReturnType<typeof Fastify>;
 
   beforeAll(async () => {
@@ -27,7 +27,7 @@ describe("POST /assist/explain-diff", () => {
   it("accepts valid patch with added nodes", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/explain-diff",
+      url: "/assist/v1/explain-diff",
       payload: {
         patch: {
           adds: {
@@ -52,7 +52,7 @@ describe("POST /assist/explain-diff", () => {
   it("returns rationales with required fields", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/explain-diff",
+      url: "/assist/v1/explain-diff",
       payload: {
         patch: {
           adds: {
@@ -79,7 +79,7 @@ describe("POST /assist/explain-diff", () => {
   it("sorts rationales deterministically by target", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/explain-diff",
+      url: "/assist/v1/explain-diff",
       payload: {
         patch: {
           adds: {
@@ -106,7 +106,7 @@ describe("POST /assist/explain-diff", () => {
   it("rejects empty patch", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/explain-diff",
+      url: "/assist/v1/explain-diff",
       payload: {
         patch: {
           adds: { nodes: [], edges: [] },
@@ -126,7 +126,7 @@ describe("POST /assist/explain-diff", () => {
   it("rejects missing patch field", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/assist/explain-diff",
+      url: "/assist/v1/explain-diff",
       payload: {},
     });
 
@@ -142,9 +142,9 @@ describe("POST /assist/explain-diff", () => {
    * nonetheless unreachable from any browser. It mounts on the LEGACY
    * `/assist/*` surface; the UI's only CEE seam is the `/bff/cee/*` edge
    * function, which rewrites `/bff/cee/<x>` -> `/assist/v1/<x>` unconditionally.
-   * No value of `<x>` yields `/assist/explain-diff`, so the capability was dark
+   * No value of `<x>` yields `/assist/v1/explain-diff`, so the capability was dark
    * with a complete server half — measured, not inferred: a live probe of
-   * `/bff/assist/explain-diff` on staging returned the SPA catch-all, byte-identical
+   * `/bff/assist/v1/explain-diff` on staging returned the SPA catch-all, byte-identical
    * (3449 bytes) to a deliberately fabricated path, while `/bff/cee/graph-readiness`
    * returned live CEE JSON in the same run.
    *
@@ -191,7 +191,7 @@ describe("POST /assist/explain-diff", () => {
       expect(body.rationales.length).toBeGreaterThan(0);
     });
 
-    it("enforces the same validation as the legacy path (empty patch -> 400)", async () => {
+    it("enforces validation (empty patch -> 400)", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/assist/v1/explain-diff",
@@ -202,24 +202,6 @@ describe("POST /assist/explain-diff", () => {
       const body = JSON.parse(res.body);
       expect(body.code).toBe("BAD_INPUT");
       expect(body.message).toContain("no changes");
-    });
-
-    /**
-     * ONE HANDLER, TWO PATHS — asserted, not assumed.
-     *
-     * Two copies of a handler is the hand-maintained-mirror defect: they drift,
-     * and the drift reads as green on whichever path the suite happens to
-     * exercise. This asserts the two surfaces agree on the SAME input, so a
-     * future edit that forks them REDs here.
-     */
-    it("routes both paths to the same handler (no forked copy)", async () => {
-      const [legacy, v1] = await Promise.all([
-        app.inject({ method: "POST", url: "/assist/explain-diff", payload: VALID_PATCH }),
-        app.inject({ method: "POST", url: "/assist/v1/explain-diff", payload: VALID_PATCH }),
-      ]);
-
-      expect(legacy.statusCode).toBe(v1.statusCode);
-      expect(JSON.parse(v1.body)).toEqual(JSON.parse(legacy.body));
     });
 
     /**
