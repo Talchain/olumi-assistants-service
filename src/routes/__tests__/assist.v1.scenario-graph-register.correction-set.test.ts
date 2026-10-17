@@ -1,7 +1,6 @@
 import { HistoryStore } from '../../orchestrator-v5/agent-lane/history-store.js';
-import { prepareStatementCorrection } from '../../orchestrator-v5/statement-door/fields/correction.js';
 import { userStatementOf } from '../../orchestrator-v5/agent-lane/user-statements.js';
-import { userStatementRecord, withUserStatement } from '../../orchestrator-v5/statement-door/statements.js';
+import { prepareStatementCorrection, userStatementRecord, withUserStatement } from '../../orchestrator-v5/statement-door/statements.js';
 import { subjectKey } from '../../orchestrator-v5/statement-door/subject.js';
 import { typedByUser, userWordsOf } from '../../orchestrator-v5/agent-lane/stated-by-user.js';
 import { log } from '../../utils/telemetry.js';

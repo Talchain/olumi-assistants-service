@@ -73,7 +73,7 @@ function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, r
     `“${String(old.label)}” becomes an earlier outcome, excluded from analysis, with its complete original source, figures and uncertainty retained.`,
     ...retired, `Earlier aim in the saved model: ${description}`,
     'The new aim has no numeric target, baseline, unit, date, distribution or causal relationships. How the options affect this aim remains unknown.',
-    'Options, settings, links, other limits and disagreement are unchanged. No requested change is omitted. Your quote stays yours; the reading remains Olumi’s after approval.',
+    'Options, settings, links, other limits and disagreement are unchanged. This card records only the aim change shown. Other changes need their own supported card. Your quote stays yours; the reading remains Olumi’s after approval.',
   ].join('\n');
   return { candidate: recorded, new_id: newId, words, source_line: verified.statements[0]!.source };
 }

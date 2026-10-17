@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
-import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
+import { userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
-import type { StatementCorrectionRequest } from '../../statement-door/fields/correction.js';
 import { rangeLawAdopted, rangeLawSubject } from '../../intervention-range.js';
 
 const cases = [

@@ -1,5 +1,5 @@
 {
-  "source_sha": "fe12f552d58ca81f66596082fca30a90df2e4fce",
+  "source_sha": "68a4b6b1d8254d2be925dbddd4f3397ec1471d01",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,

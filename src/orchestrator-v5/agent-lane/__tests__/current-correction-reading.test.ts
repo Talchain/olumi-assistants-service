@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { projectModelContext } from '../runtime/agent-capabilities.js';
 import { userStatementOf } from '../user-statements.js';
-import { prepareStatementCorrection } from '../../statement-door/fields/correction.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { subjectKey } from '../../statement-door/subject.js';
-import { userStatementFor, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { prepareStatementCorrection, userStatementFor, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const subject = { kind: 'goal' as const, id: 'coverage', field: 'measure' as const };

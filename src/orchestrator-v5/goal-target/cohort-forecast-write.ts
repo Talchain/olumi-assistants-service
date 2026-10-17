@@ -25,10 +25,9 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
-import { holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
-import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection } from '../statement-door/fields/correction.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
