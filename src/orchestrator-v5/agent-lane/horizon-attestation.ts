@@ -58,9 +58,9 @@ const CALENDAR_POINT = new RegExp(
 const PAST_OR_RANGE_BEFORE = /(?:\b(?:last|past|previous|prior)\s+|\d\s*(?:[-–]|to)\s*)$/i;
 /**
  * ⭐ A RANGE OF TIME IS ONE SPAN, NEVER A COUNT (DL-3 02:54Z; BUDDY-A 02:58Z; Paul's served "in the next 6-12 months"): its whole
- * words are kept and neither end is ever attested, so the existing role rules below say it (`unbound`: "Is … the period by which …
- * should be achieved?"; inside the goal's own target statement, `unresolved` and held as words). Before, both ends were skipped and
- * the brief's words were lost, leaving only the drafter's own pick of one end ("Does … get there within 12 months?").
+ * words are kept and neither end is ever attested. Its role is always asked first (`unbound`: "Is … the period by which … should
+ * be achieved?"), wherever it sits (#3342 R2, below). Before, both ends were skipped and the brief's words were lost, leaving only
+ * the drafter's own pick of one end ("Does … get there within 12 months?").
  */
 const RANGE_DURATION = new RegExp(String.raw`(${LEAD})?(?<![\d.,])(\d+)\s*(?:[-–]|to)\s*(\d+)(?:\s+|\s*-\s*)(month|year)s?\b`, 'gi');
 /** Words just after that make it a past period. */
@@ -184,8 +184,12 @@ export function attestHorizon(
     if (match !== undefined) return { months: claimed, wording: match.wording, status: 'attested' };
   }
   const calendar = [...brief.matchAll(CALENDAR_POINT)].map((m) => ({ wording: m[0].trim(), index: m.index ?? 0 }));
+  // ⛔ #3342 R2 (BUDDY-A B1 03:24Z; AIE 6184383302: containment alone never proves a period's role): a RANGE is never the goal's
+  // deadline by sitting inside its target sentence ("We want £100k MRR; the Pro feature release is planned in the next 6-12
+  // months."). Its whole words always come back `unbound`, so the role is asked first; a single span keeps the existing rule.
+  const range = (d: { readonly months?: number }): boolean => Number.isNaN(d.months);
   const first = [...calendar, ...durations.filter((d) => d.led)].sort((a, b) => a.index - b.index)
-    .find((d) => governed(d.index, d.wording));
+    .find((d) => (range(d) ? ((unbound ??= d.wording), false) : governed(d.index, d.wording)));
   if (first !== undefined) return { months: null, wording: first.wording, status: 'unresolved' };
   return unbound === undefined ? absent : { ...absent, unbound };
 }

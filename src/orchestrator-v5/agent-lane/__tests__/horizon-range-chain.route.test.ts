@@ -1,9 +1,9 @@
 /**
  * ⭐ #3342 R2 (DL-3 03:2xZ condition; BUDDY-A 02:58Z AMEND): the WHOLE chain for a range of time inside the goal's own target
  * sentence, on the REAL build and the REAL /agent/v1/turn route, 0 LLM calls (the drafter and the Agent are scripted):
- *  1. the build holds the brief's words ("within 6 to 12 months"), asks the existing "Which date …" question, picks no end, and
- *     keeps the target reading awaiting its period (#3340: conditions kept, threshold minted, no chance licensed);
- *  2. the user types "12 months" → the Agent's propose_goal_deadline → the existing deadline card;
+ *  1. the build asks the range's role first in the brief's words ("within 6 to 12 months"), picks no end, holds nothing as the
+ *     deadline, and keeps the target reading awaiting its period (#3340: conditions kept, threshold minted, no chance licensed);
+ *  2. the user types "Yes, 12 months" → the Agent's propose_goal_deadline → the existing deadline card;
  *  3. the press saves the deadline once, and the awaiting reading then validates with that period and every condition.
  * CONTRAST (BUDDY-A B1): a window for ANOTHER event ("open a Nordic office in the next 6 to 12 months") never becomes the
  * goal's deadline: its role is asked first, and nothing is held. SYNTHETIC brief.
@@ -157,13 +157,14 @@ describe('a range of time in the goal\'s own target sentence, on the real build 
   const goalNow = (): Json => (graphOf.get(scenario) as Json).nodes.find((n: Json) => n.kind === 'goal');
   const callOf = (body: Json, name: string): Json | undefined => (body._agent?.tool_calls as Json[] | undefined)?.find((c) => c.name === name);
 
-  it('⭐ the whole chain: "Which date …" asked, no end picked → typed "12 months" → the deadline card → the press saves it once → the awaiting reading completes', async () => {
+  it('⭐ the whole chain: its role asked first, no end picked → typed "Yes, 12 months" → the deadline card → the press saves it once → the awaiting reading completes', async () => {
     const { graph, result } = await built(BRIEF_IN, TARGET);
-    // 1. The build: the brief's words held, the existing question asked first, no month count, the reading awaiting its period.
-    expect((result.open_questions as string[])[0]).toBe('Which date does "within 6 to 12 months" mean? It is the deadline your brief sets for "Client base"; '
-      + 'the model keeps your words but no date, so no result answers whether it is met by then.');
+    // 1. The build: the range's role asked first in the brief's words (#3342 R2: containment never proves it), no month count,
+    // nothing held as the deadline, and the target reading awaiting its period.
+    expect((result.open_questions as string[])[0]).toBe('Is "within 6 to 12 months" the period by which "Client base" should be achieved? '
+      + 'Your brief does not say, so the model holds no deadline for it.');
     const goal0 = graph.nodes.find((n: Json) => n.kind === 'goal');
-    expect(goal0.goal_deadline_as_stated).toBe('within 6 to 12 months');
+    expect(Object.hasOwn(goal0, 'goal_deadline_as_stated')).toBe(false);
     expect(goal0.goal_horizon_months).toBeUndefined();
     expect(goal0.goal_target_basis).toMatchObject({ also_required: CONDITIONS });
     expect(goal0.goal_target_basis).not.toHaveProperty('period_months');
@@ -171,9 +172,9 @@ describe('a range of time in the goal\'s own target sentence, on the real build 
     graphOf.set(scenario, structuredClone(graph)); briefOf.set(scenario, BRIEF_IN);
     // 2. The user answers in their own words; the Agent proposes the deadline from them.
     const session = `horizon-${randomUUID()}`;
-    script['12 months.'] = { name: 'propose_goal_deadline', args: { deadline_words: '12 months', deadline_date: '', reference_date: '',
+    script['Yes, 12 months.'] = { name: 'propose_goal_deadline', args: { deadline_words: '12 months', deadline_date: '', reference_date: '',
       rationale: 'The user answered which date their target is for.' } };
-    const offered = await send({ agent_session_id: session, message: '12 months.' });
+    const offered = await send({ agent_session_id: session, message: 'Yes, 12 months.' });
     expect(callOf(offered, 'propose_goal_deadline'), JSON.stringify(offered._agent?.tool_calls)).toMatchObject({ ok: true });
     const chips = (offered.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-approve-proposal:'));
     expect(chips, JSON.stringify(offered.suggested_actions)).toHaveLength(1);
