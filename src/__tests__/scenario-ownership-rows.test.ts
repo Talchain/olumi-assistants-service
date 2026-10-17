@@ -31,8 +31,6 @@ const session = vi.hoisted(() => ({
   append: vi.fn(async (input: { scenario_id: string }) => { state.writes(input); return { id: 'row' }; }),
 }));
 vi.mock('../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => session }));
-vi.mock('../services/session-cache.js', () => ({ retrieveSession: vi.fn(async () => ({ degraded: false, session: null })), appendTurn: vi.fn(async () => undefined) }));
-vi.mock('../adapters/ask/index.js', () => ({ processAskRequest: vi.fn(async () => ({ response: { message: 'Ask served.', actions: [] }, inferredIntent: 'explain', intentConfidence: 1 })) }));
 const cfg = vi.hoisted(() => ({ auth: {} as Record<string, unknown> }));
 vi.mock('../config/index.js', async (load) => {
   const actual = await load<typeof import('../config/index.js')>();
@@ -66,7 +64,7 @@ const routes = [
   ['POST', '/assist/v1/decision-records/:record_id/outcome', 403], ['POST', '/assist/v1/decision-records/list', 404],
   ['POST', '/collab/v1/rounds', 403], ['POST', '/collab/v1/rounds/:round_id/close', 403],
   ['GET', '/collab/v1/rounds/:round_id/preview', 403], ['GET', '/collab/v1/rounds/:round_id/reveal', 403], ['GET', '/collab/v1/rounds/:round_id/disagreement', 403],
-  ['POST', '/assist/v1/ask', 404], ['POST', '/assist/v1/graph-readiness', 404],
+  ['POST', '/assist/v1/graph-readiness', 404],
 ] as const;
 const pathname = (p: string) => p.replace(':scenario_id', SID).replace(':record_id', RID).replace(':round_id', RID);
 const admitted = new Set<string>(routes.map(([, p]) => p));
@@ -82,7 +80,7 @@ async function ownership(app: FastifyInstance) {
   }
 }
 async function mount(app: FastifyInstance) {
-  const files = ['assist.v1.ask', 'assist.v1.graph-readiness', 'assist.v1.scenario-graph', 'assist.v1.scenario-graph-register', 'assist.v1.scenario-versions', 'assist.v1.scenario-copy', 'assist.v1.decision-records', 'collab.v1.rounds', 'orchestrate.v2.turn-stream', 'proxy-v5-turn', 'proxy-v5-turn-stream', 'agent-v1-turn'];
+  const files = ['assist.v1.graph-readiness', 'assist.v1.scenario-graph', 'assist.v1.scenario-graph-register', 'assist.v1.scenario-versions', 'assist.v1.scenario-copy', 'assist.v1.decision-records', 'collab.v1.rounds', 'orchestrate.v2.turn-stream', 'proxy-v5-turn', 'proxy-v5-turn-stream', 'agent-v1-turn'];
   for (const name of files) { const mod = await import(`../routes/${name}.ts`); await (mod.default ?? mod.agentV1TurnRoute ?? mod.proxyV5TurnRoute)(app); }
   const { ceeOrchestratorRouteV2 } = await import('../orchestrator/route-v2.js');
   await ceeOrchestratorRouteV2(app);
@@ -119,7 +117,7 @@ beforeAll(async () => {
 afterAll(async () => { await app?.close(); await jwks?.close(); vi.unstubAllGlobals(); });
 beforeEach(() => { state.owner = A; state.member = false; state.memberThrows = false; state.absent = false; state.oracleThrows = false; state.entityAbsent = false; state.existenceThrows = false; state.admitted = false; state.persisted = false; vi.clearAllMocks(); session.markTurnStopped.mockClear(); state.members.mockClear(); state.writes.mockClear(); });
 
-describe('24 real registrations: ownership admission (terminal hook, business handlers excluded)', () => {
+describe('23 real registrations: ownership admission (terminal hook, business handlers excluded)', () => {
   for (const [method, path, refusal] of routes) {
     it(`${method} ${path} id=${SID} owner=A caller=B valid JWT -> ${refusal}`, async () => {
       const r = await request(path, tokenB, method); expect(r.statusCode).toBe(refusal); expect(r.payload).not.toContain('"admitted":true');
@@ -156,14 +154,10 @@ it.each([
 ] as const)('exact refusal %s', async (p, status, code, message) => {
   const r = await request(p, tokenB); expect(r.statusCode).toBe(status); expect(normalise(r.payload)).toBe(JSON.stringify({ error: code, code, message, request_id: 'row' }));
 });
-it('a body user_id=A and valid JWT B cannot impersonate A on ask', async () => {
-  const r = await request('/assist/v1/ask', tokenB, 'POST', { user_id: A }); expect(r.statusCode).toBe(404);
-});
-
 // Served-change rows use REAL business handlers; no terminal admission hook.
-it.each(['/assist/v1/ask', '/assist/v1/graph-readiness'])('real handler %s: cross-owner refusal and guest unchanged', async p => {
+it.each(['/assist/v1/graph-readiness'])('real handler %s: cross-owner refusal and guest unchanged', async p => {
   const real = Fastify(); await ownership(real);
-  const mod = await import(`../routes/${p.endsWith('ask') ? 'assist.v1.ask' : 'assist.v1.graph-readiness'}.ts`); await mod.default(real);
+  const mod = await import('../routes/assist.v1.graph-readiness.js'); await mod.default(real);
   const graph = { nodes: [], edges: [] };
   const payload = { scenario_id: SID, message: 'What matters?', graph, graph_snapshot: graph, graph_schema_version: '2.2', brief: 'What should our team explore?', market_context: { id: 'market', version: '1', hash: 'h' } };
   const denied = await real.inject({ method: 'POST', url: p, headers: { authorization: `Bearer ${tokenB}` }, payload });
@@ -173,8 +167,8 @@ it.each(['/assist/v1/ask', '/assist/v1/graph-readiness'])('real handler %s: cros
   expect(denied.statusCode).toBe(404);
 });
 
-it.each(['/assist/v1/ask', '/assist/v1/graph-readiness'])('base/head real guest no JWT %s -> 200', async p => {
-  state.owner = null; const real = Fastify(); await ownership(real); const mod = await import(`../routes/${p.endsWith('ask') ? 'assist.v1.ask' : 'assist.v1.graph-readiness'}.ts`); await mod.default(real);
+it.each(['/assist/v1/graph-readiness'])('base/head real guest no JWT %s -> 200', async p => {
+  state.owner = null; const real = Fastify(); await ownership(real); const mod = await import('../routes/assist.v1.graph-readiness.js'); await mod.default(real);
   const graph = { nodes: [], edges: [] }; const payload = { scenario_id: SID, message: 'What matters?', graph, graph_snapshot: graph, graph_schema_version: '2.2', brief: 'What should our team explore?', market_context: { id: 'market', version: '1', hash: 'h' } };
   const guest = await real.inject({ method: 'POST', url: p, payload }); await real.close(); expect(guest.statusCode).toBe(200);
 });
@@ -208,9 +202,9 @@ it('unknown invalid graph import keeps 422 and does not CREATE', async () => {
   const r = await real.inject({ method: 'POST', url: pathname('/assist/v1/scenarios/:scenario_id/graph/register'), headers: { authorization: `Bearer ${tokenA}` }, payload: { graph: { nodes: [], edges: [] } } });
   expect(r.statusCode).toBe(422); expect(state.writes).not.toHaveBeenCalled(); await real.close();
 });
-it('ownership reader outage fails closed on ask, readiness and graph', async () => {
+it('ownership reader outage fails closed on readiness and graph', async () => {
   state.oracleThrows = true;
-  for (const p of ['/assist/v1/ask', '/assist/v1/graph-readiness', '/assist/v1/scenarios/:scenario_id/graph']) {
+  for (const p of ['/assist/v1/graph-readiness', '/assist/v1/scenarios/:scenario_id/graph']) {
     const r = await request(p, tokenA); expect(r.statusCode).toBe(503); expect(state.writes).not.toHaveBeenCalled();
   }
 });
@@ -464,7 +458,6 @@ for (const [method, path] of routes) it(`R5 malformed id: ${method} ${path} cann
     const url = pathname(path).replace(SID, 'not-a-uuid');
     const r = await real.inject({ method, url, headers: { 'x-request-id': 'row', authorization: `Bearer ${tokenB}`, origin: 'https://staging--olumi.netlify.app' }, ...(method === 'POST' ? { payload: { ...spellingPayload(path, 'not-a-uuid'), turn_id: RID, scenario_id: 'not-a-uuid' } } : {}) });
     expect(session.readRecent).not.toHaveBeenCalled(); expect(session.loadGraphAndBriefText).not.toHaveBeenCalled(); expect(session.loadGraph).not.toHaveBeenCalled(); expect(collab.createModelVersion).not.toHaveBeenCalled(); expect(versions.saveVersion).not.toHaveBeenCalled(); expect(state.writes).not.toHaveBeenCalled();
-    const cache = await import('../services/session-cache.js'); expect(cache.retrieveSession).not.toHaveBeenCalled(); expect(cache.appendTurn).not.toHaveBeenCalled();
     if (path.includes(':round_id') || path.includes(':record_id')) expect(r.statusCode).toBe(403); // The malformed shadow body id has no authority over a derived entity.
     else if (path.endsWith('/stream')) { expect(r.statusCode).toBe(200); expect(r.payload).toContain('INGRESS_CONTRACT_VIOLATION'); }
     else expect(r.statusCode).toBe(path === '/collab/v1/rounds' || path.includes('/decision-records') ? 400 : path === '/orchestrate/v2/turn' || path === '/proxy/v5/turn' ? 422 : 404);
@@ -484,15 +477,6 @@ it.each([() => tokenB, () => null])('R5 CREATE race: the RPC returns owner A; an
     const expected = spellingRefusal('a turn', credential === null); expect(r.statusCode).toBe(422); expect(normalise(r.payload)).toBe(JSON.stringify(expected.body)); expect(session.ensureScenarioExists).toHaveBeenCalledWith(SID, credential ? B : null); expect(session.readRecent).not.toHaveBeenCalled(); expect(session.loadGraph).not.toHaveBeenCalled(); expect(state.writes).not.toHaveBeenCalled();
   } finally { await real.close(); }
 });
-it('R5 malformed ask id with otherwise valid payload refuses before the session cache', async () => {
-  const real = await businessApp('assist.v1.ask'); const graph = { nodes: [], edges: [] };
-  try {
-    const r = await real.inject({ method: 'POST', url: '/assist/v1/ask', headers: { 'x-request-id': 'row', authorization: `Bearer ${tokenB}` }, payload: { scenario_id: 'not-a-uuid', message: 'What matters?', graph_snapshot: graph, graph_schema_version: '2.2', brief: 'What should our team explore?', market_context: { id: 'market', version: '1', hash: 'h' } } });
-    expect(r.statusCode).toBe(404); expect(normalise(r.payload)).toBe(JSON.stringify({ schema: 'error.v1', code: 'NOT_FOUND', message: 'No readable graph for that scenario.', request_id: 'row' }));
-    const cache = await import('../services/session-cache.js'); expect(cache.retrieveSession).not.toHaveBeenCalled(); expect(cache.appendTurn).not.toHaveBeenCalled(); expect(state.writes).not.toHaveBeenCalled();
-  } finally { await real.close(); }
-});
-
 
 const malformedSeparators = [
   ['leading hyphen', `-${SID}`],
