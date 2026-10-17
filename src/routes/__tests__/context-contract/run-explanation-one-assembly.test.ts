@@ -253,10 +253,11 @@ describe('Explain scoped assembly safety', () => {
       // S4: two competing finding-first copies removed; record-first ordering owned once by RUN_FACTS_USE.
       // AIE current-finding-first replacement; duplicate rerun-plan instruction retired, factual context retained.
       // AIE current-qualification clarification replaces the earlier B coaching addition in the same RUN_FACTS_USE.
-      // 46692 UTF-8 bytes from the actual mocked sent request: swapping only this passage reproduces14bd262e…,
-      // removing it reproduces the pre-prompt ef9d6733…. All11 pins, including the run-facts literal, require Claude challenge.
-      // The literal and3 request assertions preserve currently applicable disclosure/scope/scientific qualifications; generation remains unverified.
-      .toBe('9393589037c2bbe99943e2b6e4bd74df5dcea94b3f3c8288b79e3d45d98ab098');
+      // S4 current-card ownership + stored dependency instruction: 47919 UTF-8 bytes from actual SENT.
+      // All9 request hashes reverse to HEAD by replacing ONLY RUN_FACTS_USE (including nested JSON carriers).
+      // This instruction hash and the run-facts full literal are the other2 pins; all11 need Claude challenge.
+      // Current qualifications, tool constraints, numbers and negative assertions remain; generated quality is unverified.
+      .toBe('b378fe5c30858899e111155ab5244658970dead74f238c4e207e7c3898b14b83');
   },60000);
 });
 

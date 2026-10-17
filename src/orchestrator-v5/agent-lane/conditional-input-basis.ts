@@ -71,7 +71,7 @@ function factorStartingValueBasis(input: ConditionalInputBasis): string | null {
     const state = rec(node.observed_state) ?? rec(rec(node.data)?.observed_state);
     if (state === undefined || (!finite(state.raw_value) && !finite(state.value))) return UNAVAILABLE;
     // ⭐ ONE PROVENANCE AUTHORITY: Olumi's (accepted or not, repaired included) is said as Olumi's estimate; a human
-    // figure whose role is unverified "Not confirmed from your brief"; an unestablished origin "source unrecorded"; the
+    // figure whose current-level role is unverified is scoped to that starting value; an unestablished origin "source unrecorded"; the
     // person's verified figure and a structural definition are not listed. (`user_confirmed` is the person's confirmed
     // figure — human, ratified — as every other reader says, no longer listed as Olumi's.)
     const p = valueProvenanceOf(state);
@@ -82,7 +82,7 @@ function factorStartingValueBasis(input: ConditionalInputBasis): string | null {
   }
   const lines = [
     ...(estimates.length > 0 ? [`This comparison uses Olumi’s estimates for ${estimates.join(', ')}.`] : []),
-    ...unverified.map((name) => `${name}: Not confirmed from your brief`),
+    ...(unverified.length > 0 ? [`The starting ${unverified.length === 1 ? 'value for' : 'values for'} ${unverified.join(', ')} ${unverified.length === 1 ? 'has' : 'have'} not been verified as today's ${unverified.length === 1 ? 'level' : 'levels'}.`] : []),
     ...unrecorded.map((name) => `${name}: source unrecorded.`),
   ];
   return lines.length === 0 ? null : `${lines.join(' ')} ${COVERAGE}`;

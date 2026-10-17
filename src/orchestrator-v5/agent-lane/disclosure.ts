@@ -87,17 +87,43 @@ export function withDisclosures(assistantText: string, owed: readonly string[],
   return body;
 }
 
+/** Remove only formatting emptied by an owned disclosure; unrelated empty rows and source quotations stay. */
+function withoutOwnedSlice(body: string, at: number, length: number, emptyLabels: readonly string[] = []): string {
+  const lineStart = body.lastIndexOf('\n', at - 1) + 1;
+  const nextBreak = body.indexOf('\n', at + length);
+  const lineEnd = nextBreak < 0 ? body.length : nextBreak;
+  const remainder = body.slice(lineStart, at) + body.slice(at + length, lineEnd);
+  const text = foldQuotes(remainder).replace(/^[ \t]*[-+*•][ \t]*/u, '').replace(/[*_`]/gu, '').trim();
+  const emptyLabel = emptyLabels.some(label => text === `${foldQuotes(label).trim()}:`);
+  if ((text === '' && remainder.trim() !== '') || emptyLabel) {
+    let before = body.slice(0, lineStart);
+    const after = body.slice(lineEnd + (nextBreak < 0 ? 0 : 1));
+    // A label introducing only the removed list is emptied by the same operation. No phrase list or other section changes.
+    const label = before.match(/(?:^|\n\n)([^\n]+)\n$/u);
+    if (label !== null && /:$/u.test(label[1]!.replace(/[*_`]/gu, '').trim()) && (after === '' || after.startsWith('\n'))) {
+      before = before.slice(0, before.length - label[0].length);
+    }
+    return before + after;
+  }
+  // A partial sentence/label is not a paragraph: keep its neighbouring breaks intact.
+  const paragraphOnly = remainder.trim() === '';
+  const beforeBreak = paragraphOnly && body.slice(Math.max(0, at - 2), at) === '\n\n';
+  const afterBreak = paragraphOnly && body.slice(at + length, at + length + 2) === '\n\n';
+  return body.slice(0, beforeBreak ? at - 2 : at) + body.slice(at + length + (!beforeBreak && afterBreak ? 2 : 0));
+}
+
 /** The inverse of {@link withDisclosures} for ONE host-owed line: removed with its paragraph break, only when it stands exactly once. */
 export function withoutDisclosure(assistantText: string, line: string, opts?: {
   /** Explicit ownership: keep one copy in prose, or none when the same Run's card carries it. */
   readonly keep: 0 | 1;
   readonly protectedTexts?: readonly string[];
+  /** Current Run option labels whose emptied option rows may be removed. */
+  readonly emptyLabels?: readonly string[];
 }): string {
   if (line.trim() === '') return assistantText;
   if (opts === undefined) {
     if (assistantText.split(line).length !== 2) return assistantText;
-    const form = [`\n\n${line}`, `${line}\n\n`, line].find(f => assistantText.includes(f))!;
-    return assistantText.replace(form, '');
+    return withoutOwnedSlice(assistantText, assistantText.indexOf(line), line.length);
   }
   const protectedText: string[] = [];
   let body = assistantText;
@@ -115,9 +141,7 @@ export function withoutDisclosure(assistantText: string, line: string, opts?: {
   const positions: number[] = [];
   for (let at = body.indexOf(line); at >= 0; at = body.indexOf(line, at + line.length)) positions.push(at);
   for (const at of positions.slice(opts.keep).reverse()) {
-    const beforeBreak = body.slice(Math.max(0, at - 2), at) === '\n\n';
-    const afterBreak = body.slice(at + line.length, at + line.length + 2) === '\n\n';
-    body = body.slice(0, beforeBreak ? at - 2 : at) + body.slice(at + line.length + (!beforeBreak && afterBreak ? 2 : 0));
+    body = withoutOwnedSlice(body, at, line.length, opts.emptyLabels);
   }
   for (const [i, text] of protectedText.entries()) body = body.split(`\u0000RECORDED_SOURCE_${i}\u0000`).join(text);
   return body;
