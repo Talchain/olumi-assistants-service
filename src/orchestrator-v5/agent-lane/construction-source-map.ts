@@ -239,7 +239,7 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
       : out({ author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed: [...claimed, ...kept] });
   }
   // ⭐ GREEN CORE (DL-3 stop rule; BUDDY-A #3327 R2 + R3 B1): for a risk, NO construction statement verifies the user. A figure the
-  // quote writes proves the number, not that it is THIS risk's chance (the budget's £2 million read as an occurrence), and a
+  // quote writes proves the number, not that it is THIS risk's chance (a budget figure read as an occurrence), and a
   // figure-free reading is Olumi's. The user's whole words stay human material, unverified; their chance is recorded only by the
   // door's own occurrence card, on their press.
   // Known human words (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
