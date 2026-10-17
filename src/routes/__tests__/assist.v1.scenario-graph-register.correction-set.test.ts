@@ -297,6 +297,11 @@ describe('one native governing-outcome correction', () => {
   it.each([true, false])('prepares, cold-restores, presses and reads back the whole goal change (existing outcome %s)', async existing => {
     const w = await make(existing);
     const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    // DL 17 Oct scope contract: an isolated new outcome must not exclude a protected option/lever.
+    if (!existing) {
+      expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' });
+      expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original); return;
+    }
     expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
     expect(offered.public_label).toContain('Olumi reads the target as');
     expect(offered.public_label).toContain('later ambition');
@@ -440,16 +445,13 @@ describe('one native governing-outcome correction', () => {
     expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
   });
 
-  it('preserves the complete existing funding model while adding a new governing outcome', async () => {
+  it('refuses an isolated new governing outcome on the older captured model, retaining every option and link', async () => {
     const recorded = fixture('funding-247ae5b4-before-target.json');
     const w = await world({ graph: recorded.graph, brief: recorded.brief_text, message: source });
     w.ctx.verified_user_messages = [source];
     const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, later_ambition_quote: undefined }), w.ctx, w.caps());
-    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
-    const pid = String(offered.proposal_id);
-    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
-    expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
-    expect(w.graph().edges).toEqual(w.original.edges); expect(w.writes).toHaveLength(1);
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' });
+    expect(w.graph()).toEqual(w.original); expect(w.writes).toHaveLength(0);
   });
 
   it('cannot silently rescale an existing outcome’s old-unit current level during re-goal', async () => {
@@ -567,7 +569,7 @@ describe('one native governing-outcome correction', () => {
     expect(w.writes).toHaveLength(1);
   });
 
-  it('the recorded founder words still offer a goal card when earlier level and removal cannot be included', async () => {
+  it('earlier level/removal requests do not authorise excluding protected branches to an isolated new goal', async () => {
     const recorded = fixture('funding-247ae5b4-before-target.json');
     const noFunding = "I feel like you're going down the wrong route. We have no funding. I cannot carry on as I am now. I need to get funding as soon as possible. I probably need a PoC as soon as I have an interview/meeting with an investor, but I obviously need to get investors to ask to speak to me first.";
     const job = "The job specification is just the work I would be doing if I was focusing on that, so I'm not sure we should be focusing on it. The question I'm trying to answer is how to best divide my time.";
@@ -576,22 +578,8 @@ describe('one native governing-outcome correction', () => {
     w.ctx.verified_user_messages = [noFunding, job, source, update]; w.ctx.user_text = w.ctx.verified_user_messages.join('\n');
     const offered = await dispatchTool('propose_goal_target', JSON.stringify({ ...args, later_ambition_quote: undefined,
       current_level: { value: 0, unit: '£' }, remove_mechanisms: [{ kind: 'factor', label: 'Founder job-spec time', quote: job }] }), w.ctx, w.caps());
-    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
-    const omitted = offered.not_included as Rec[];
-    expect(omitted).toHaveLength(2); expect(omitted.every(p => p.refusal && p.detail)).toBe(true);
-    expect(omitted.find(p => p.part.includes('removal'))).toMatchObject({ refusal: 'not_current_removal' });
-    expect(offered.public_label).toContain('Not included on this card');
-    expect(offered.public_label).toContain('Today’s level');
-    expect(offered.public_label).not.toContain('Say so plainly');
-    expect(offered.public_label).not.toContain('0 £');
-    expect(offered.public_label).not.toContain('not current removal permission');
-    expect(omitted.find(p => p.part.includes('level'))?.detail).toContain('Say so plainly');
-    expect(w.writes).toHaveLength(0);
-    const pid = String(offered.proposal_id);
-    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
-    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').goal_threshold_raw).toBe(250000);
-    expect(w.graph().nodes.some((n: Rec) => n.id === 'founder_job_spec_time')).toBe(w.original.nodes.some((n: Rec) => n.id === 'founder_job_spec_time'));
-    expect(w.writes).toHaveLength(1);
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' });
+    expect(w.graph()).toEqual(w.original); expect(w.writes).toHaveLength(0);
   });
 
   it('keeps the outcome’s full conditional description first through card, save and cold context', async () => {

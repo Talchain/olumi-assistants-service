@@ -1,6 +1,6 @@
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
-import { omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
+import { laterAimOnlyBranch, omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
 import { carriesQuoteConfirmation, plainQuoteWords, verbatimSourceLine } from '../quote-confirmation.js';
@@ -354,7 +354,7 @@ import { buildModelFromBrief, constructionOperationId, findConstructionVersion, 
 import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-target/goal-target-basis.js';
 import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForecastOf, approvedStatementRecordOf, cohortForecastRecordedWords,
   SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
-import { approvedGraphHeld, draftHistory, prepareRequestedRebuild, revisedDraftBrief } from './draft-replacement.js';
+import { approvedGraphHeld, draftHistory, prepareRequestedRebuild, revisedDraftBrief, type RebuildMissingKind } from './draft-replacement.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { preOfferOptionInterventions } from '../../system-events/option-intervention-preoffer.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -3970,7 +3970,13 @@ export function createAgentCapabilities(
     prepareHorizonBasisForWrite(candidate, before.raw, ctx.scenario_id);
     candidate = assignEntityRefs(candidate, before.raw).graph;
     const retained = repointRetainedBase(before.raw, removals, ctx);
-    if (retained === undefined || !repointRetainsSavedWork(retained, candidate, old.id, newId, priorDescription, ctx.scenario_id)) return invalid('incomplete_goal_postimage',
+    if (retained === undefined) return invalid('incomplete_goal_postimage', 'The complete saved work could not be checked. Nothing was prepared.');
+    const scope = laterAimOnlyBranch(candidate, old.id, newId, retained);
+    if (scope.blocked.length) return invalid('incomplete_goal_postimage',
+      'This goal change would leave an option, a quantity an option changes, or a saved limit only connected to the earlier aim. Nothing was prepared; keep those parts in the analysis and resolve how they relate to the new goal.');
+    candidate.nodes = (candidate.nodes as Record<string, unknown>[]).map(n => scope.excluded.includes(String(n.id))
+      ? { ...n, analysis_participation: 'retained_excluded' } : n);
+    if (!repointRetainsSavedWork(retained, candidate, old.id, newId, priorDescription, ctx.scenario_id, scope.excluded)) return invalid('incomplete_goal_postimage',
       'The earlier aim or an option would be lost by this change. Nothing was prepared.');
     const hash = identityHashOf(computeGraphIdentityHash(candidate as never));
     if (hash === '') return invalid('goal_not_prepared', 'The complete proposed model could not be checked. Nothing was prepared.');
@@ -3982,12 +3988,13 @@ export function createAgentCapabilities(
     const public_label = `From your message: “${source}”. Olumi proposes making “${label}” the current goal: ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}.`
       + interpretation + (matched.length === 0 ? ' This adds a new outcome; its label is Olumi’s proposal.' : '')
       + ` “${old.label}”${earlierTarget} stays as ${args.later_ambition_quote !== undefined ? `a later ambition, as Olumi reads “${args.later_ambition_quote}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal. The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below.`
+      + scope.excluded.map(id => ` “${String((candidate.nodes as Record<string, unknown>[]).find(n => n.id === id)!.label)}” leads only to the earlier aim, so its words and links also stay visible as context and are left out of this analysis.`).join('')
       + ` Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.`
       + (!hasIncoming ? ' The new goal has no incoming causal relationships yet. This card does not establish how the options affect it; that remains to be modelled.' : '')
       + (details.length ? `\n${details.join('\n')}` : '')
       + (notIncluded.length ? `\nNot included on this card: ${notIncluded.map(p => omittedGoalChangeWords(p.part, p.refusal)).join('; ')} This card won’t apply those omitted changes; they remain unresolved.` : '');
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
-      operations: [{ op: 'repoint_goal', path: newId, value: { candidate, previous_goal_id: old.id, later_ambition_quote: args.later_ambition_quote, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
+      operations: [{ op: 'repoint_goal', path: newId, value: { candidate, scope_excluded: scope.excluded, previous_goal_id: old.id, later_ambition_quote: args.later_ambition_quote, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
         brief_text: before.brief_text, goal_turn_id: turn, operation_id: constructionOperationId(ctx.scenario_id, `repoint_goal:${before.graph_identity_hash}:${hash}`) } }],
       provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label });
     proposals.put(proposal);
@@ -4004,7 +4011,8 @@ export function createAgentCapabilities(
    * and those bytes (a retry replays; a conflict writes nothing). Confirmed from whole saved state.
    */
   /** The current explicit request uses the real prepare-only constructor and the existing whole-candidate card. */
-  const prepareExplicitRebuild = async (ctx: AgentToolContext, framing: string, request: string): Promise<ToolResult> => {
+  type BuildRefusalDiagnostic = { failed_checks?: string[]; missing_kind?: RebuildMissingKind; missing_count?: number };
+  const prepareExplicitRebuild = async (ctx: AgentToolContext, framing: string, request: string, diagnostic: BuildRefusalDiagnostic): Promise<ToolResult> => {
     const refused = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
     if (readOnly) return refuseReadOnly();
     const currentRequest = ctx.user_turn_text ?? '';
@@ -4017,12 +4025,7 @@ export function createAgentCapabilities(
       !ctx.verified_user_messages?.includes(currentRequest) && 'current_turn_unverified',
     ].filter((check): check is string => typeof check === 'string');
     if (failedRequestChecks.length > 0) {
-      const { log } = await import('../../../utils/telemetry.js');
-      log.info({ event: 'v5.agent.tool_refused', request_id: ctx.request_id, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id,
-        tool: 'build_model_from_brief', refusal: 'current_request_required', failed_checks: failedRequestChecks,
-        argument_length: request.length, argument_sha256: createHash('sha256').update(request).digest('hex'),
-        current_turn_length: currentRequest.length, current_turn_sha256: createHash('sha256').update(currentRequest).digest('hex'),
-        arg_is_whole_turn: matchRequest === matchCurrent }, 'Agent construction tool refused');
+      diagnostic.failed_checks = failedRequestChecks;
       return refused('current_request_required', 'No replacement was prepared. The complete current typed request must be verified; an earlier request or another card’s press cannot authorise a rebuild.');
     }
     // The tool quotes a WHOLE current statement, never a fragment that drops a speaker or negation. Retain the full turn,
@@ -4049,7 +4052,11 @@ export function createAgentCapabilities(
         dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured, undefined, context, undefined, true, opts.onDraftAdmitted)));
     if (built.ok !== true) return built;
     const prepared = prepareRequestedRebuild(before.raw, built.prepared_graph, levelFrameOf);
-    if (!prepared.candidate) return { ...refused('replacement_work_not_held', 'No replacement card was offered because the candidate could not retain: ' + prepared.missing.join('; ') + '. The saved model is unchanged. This is a drafting limit; do not ask the user to repeat retained facts.'), construction_report: built };
+    if (!prepared.candidate) {
+      diagnostic.missing_kind = prepared.missing_kind;
+      diagnostic.missing_count = prepared.missing.length;
+      return { ...refused('replacement_work_not_held', 'No replacement card was offered because the candidate could not retain: ' + prepared.missing.join('; ') + '. The saved model is unchanged. This is a drafting limit; do not ask the user to repeat retained facts.'), construction_report: built };
+    }
     let candidate = prepared.candidate;
     prepareHorizonBasisForWrite(candidate, before.raw, ctx.scenario_id);
     candidate = assignEntityRefs(candidate, before.raw).graph;
@@ -4107,7 +4114,7 @@ export function createAgentCapabilities(
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
-      goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; later_ambition_binding_unverified?: unknown; later_ambition_source_unverified?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown; explicit_rebuild_request?: unknown; rebuild_history?: unknown; retained_aim_description?: unknown };
+      goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; later_ambition_binding_unverified?: unknown; later_ambition_source_unverified?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown; explicit_rebuild_request?: unknown; rebuild_history?: unknown; retained_aim_description?: unknown; scope_excluded?: unknown };
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (!isPreparedSavedCorrection(parent.operations[0]) || ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -4123,7 +4130,7 @@ export function createAgentCapabilities(
     const priorDescription = repoint && typeof v.previous_goal_id === 'string' ? priorAimDescription(before.raw, v.previous_goal_id,
       typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined) : undefined;
     if (repoint && (retained === undefined || priorDescription === undefined || typeof v.previous_goal_id !== 'string'
-      || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription, ctx.scenario_id))) {
+      || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription, ctx.scenario_id, v.scope_excluded))) {
       return notApplied('incomplete_goal_postimage', 'The complete earlier aim or an option would be lost by this card. Nothing was saved.');
     }
     if (repoint && (!isDeepStrictEqual(readGoalRecord(v.candidate, parent.operations[0]!.path), v.expected_goal)
@@ -4876,9 +4883,27 @@ export function createAgentCapabilities(
     };
     const native = await runWithApprovedBindings(approvedBindings, () => runWithApprovedLevelAdoptions(adoptions,
       () => preOfferOptionInterventions(nativeInput, before.raw, { briefText: before.brief_text })));
-    if (!native.offer) return refuse({ ok: false, mutated: false,
-      refusal: native.refusal.kind === 'refused' ? native.refusal.reason : 'nothing_to_set', native_refusal: native.refusal,
-      detail: native.refusal.kind === 'refused' ? `The complete starting figures could not be prepared (${native.refusal.reason}). No card was offered. Use the native item and scope; it may concern more than units.` : native.detail });
+    if (!native.offer) {
+      let scopeDetail = '';
+      if (native.refusal.kind === 'refused' && native.refusal.reason === 'value_scope_mismatch' && native.refusal.valueIndex !== undefined) {
+        const value = input.values?.[native.refusal.valueIndex];
+        const factor = before.nodes.find(n => n.id === value?.factor_id);
+        if (factor !== undefined) {
+          const units = [...new Set([factorUnitOf(before.raw, factor),
+            ...(before.raw.nodes as Record<string, unknown>[]).filter(n => n.kind === 'option').map(n => {
+              const cell = mergeInterventionSourceObjects(n as never)[factor.id];
+              return isPlainRecord(cell) && typeof cell.unit === 'string' ? cell.unit : undefined;
+            })].filter((u): u is string => typeof u === 'string' && u.trim() !== ''))];
+          const frame = levelFrameOf(factor);
+          scopeDetail = ` The refused figure is for “${factor.label}”.` + (units.length === 1
+            ? ` Its saved unit is exactly “${units[0]}”. Give the figure in that unit, not a model coordinate${frame === null ? '' : `; the saved model frame is 0–${frame}`}. Do not relabel the quantity.`
+            : ' Its saved measurement is not uniquely resolved; read its complete factor and option settings rather than guessing a unit.');
+        }
+      }
+      return refuse({ ok: false, mutated: false,
+        refusal: native.refusal.kind === 'refused' ? native.refusal.reason : 'nothing_to_set', native_refusal: native.refusal,
+        detail: (native.refusal.kind === 'refused' ? `The complete starting figures could not be prepared (${native.refusal.reason}). No card was offered. Use the native item and scope; it may concern more than units.` : native.detail) + scopeDetail });
+    }
     const readiness = readinessViewOf(native.prepared.graph);
     const shownLevels = (rows: unknown): unknown => !Array.isArray(rows) ? rows : rows.map(row => {
       const l = input.levels.find(l => before.nodes.find(n => n.id === l.option_id)?.label === row.option
@@ -10243,6 +10268,8 @@ export function createAgentCapabilities(
     },
 
     async buildModelFromBrief(ctx, args): Promise<ToolResult> {
+      const diagnostic: BuildRefusalDiagnostic = {};
+      const result = await (async (): Promise<ToolResult> => {
       if (callStructured === undefined) {
         return { ok: false, mutated: false, refusal: 'construction_unavailable' };
       }
@@ -10253,7 +10280,7 @@ export function createAgentCapabilities(
         const saved = await readGraph(ctx.scenario_id);
         if (saved === null) return { ok: false, mutated: false, refusal: 'not_found' };
         // A replacement request applies only to a saved model. An empty scenario still uses normal first construction.
-        if (saved.nodes.length > 0) return prepareExplicitRebuild(ctx, brief, args.explicit_rebuild_request);
+        if (saved.nodes.length > 0) return prepareExplicitRebuild(ctx, brief, args.explicit_rebuild_request, diagnostic);
       }
 
       /**
@@ -10409,6 +10436,20 @@ export function createAgentCapabilities(
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
         ...(firstRunFacts === undefined ? {} : { run_facts: firstRunFacts }),
       };
+      })();
+      if (result.ok === false && typeof result.refusal === 'string') {
+        const { log } = await import('../../../utils/telemetry.js');
+        const argument = typeof args.explicit_rebuild_request === 'string' ? args.explicit_rebuild_request : typeof args.brief === 'string' ? args.brief : '';
+        const current = ctx.user_turn_text ?? '';
+        log.info({ event: 'v5.agent.tool_refused', request_id: ctx.request_id, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id,
+          tool: 'build_model_from_brief', refusal: result.refusal, failed_checks: diagnostic.failed_checks ?? [result.refusal],
+          argument_length: argument.length, argument_sha256: createHash('sha256').update(argument).digest('hex'),
+          current_turn_length: current.length, current_turn_sha256: createHash('sha256').update(current).digest('hex'),
+          arg_is_whole_turn: plainQuoteWords(argument).toLocaleLowerCase('en-GB') === plainQuoteWords(current).toLocaleLowerCase('en-GB'),
+          ...(diagnostic.missing_kind === undefined ? {} : { missing_kind: diagnostic.missing_kind, missing_count: diagnostic.missing_count }) },
+        'Agent construction tool refused');
+      }
+      return result;
     },
 
     /**

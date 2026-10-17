@@ -9,6 +9,8 @@ import { sayDate } from '../../goal-target/deadline-date.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../limit-operator-words.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
+import { reachableNodeIds } from '../../../orchestrator/graph-structure-validator.js';
+import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -64,8 +66,30 @@ export function repointRetainedBase(before: Rec, removals: unknown, ctx: AgentTo
   return graph;
 }
 
-/** The repoint card must retain the whole old aim and all options, before the one native registration. */
-export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: string, newId: string, expectedDescription: string, scenarioId: string): boolean {
+/** The final card's topology, with original participation: never infer a new causal link or discard a branch. */
+export function laterAimOnlyBranch(candidate: Rec, oldId: string, newId: string, before: Rec): { excluded: string[]; blocked: string[] } {
+  const nodes = (Array.isArray(candidate.nodes) ? candidate.nodes : []).filter(rec);
+  const prior = (Array.isArray(before.nodes) ? before.nodes : []).filter(rec);
+  const edges = (Array.isArray(candidate.edges) ? candidate.edges : []).filter(rec)
+    .filter((e): e is Rec & { from: string; to: string } => typeof e.from === 'string' && typeof e.to === 'string')
+    .map(e => ({ from: e.from, to: e.to, ...(typeof e.edge_type === 'string' ? { edge_type: e.edge_type } : {}) }));
+  const reachesOld = reachableNodeIds(edges, [oldId], true), reachesNew = reachableNodeIds(edges, [newId], true);
+  const options = [...nodes, ...prior, ...(Array.isArray(candidate.options) ? candidate.options : []).filter(rec)]
+    .filter(n => n.kind === 'option' || Object.hasOwn(n, 'interventions'));
+  const protectedIds = new Set(options.flatMap(n => Object.keys(mergeInterventionSourceObjects(n as never))));
+  for (const n of [...nodes, ...prior]) if (n.kind === 'option') protectedIds.add(String(n.id));
+  for (const row of (Array.isArray(candidate.goal_constraints) ? candidate.goal_constraints : []).filter(rec)) protectedIds.add(String(row.node_id));
+  const branch = nodes.filter(n => typeof n.id === 'string' && n.id !== oldId && n.id !== newId
+    && prior.find(p => p.id === n.id)?.analysis_participation !== 'retained_excluded'
+    && reachesOld.has(n.id) && !reachesNew.has(n.id));
+  return {
+    excluded: branch.filter(n => ['factor', 'risk', 'outcome'].includes(String(n.kind)) && !protectedIds.has(String(n.id))).map(n => String(n.id)).sort(),
+    blocked: branch.filter(n => protectedIds.has(String(n.id))).map(n => String(n.id)).sort(),
+  };
+}
+
+/** The repoint card retains all work; only its explicitly listed later-only branch changes participation. */
+export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: string, newId: string, expectedDescription: string, scenarioId: string, scopeExcluded?: unknown): boolean {
   if (!rec(candidate) || !Array.isArray(before.nodes) || !Array.isArray(candidate.nodes)) return false;
   const old = before.nodes.find((n): n is Rec => rec(n) && n.id === oldId && n.kind === 'goal');
   const kept = candidate.nodes.find((n): n is Rec => rec(n) && n.id === oldId);
@@ -85,8 +109,12 @@ export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: 
   // Every untouched node, edge, non-goal constraint and top-level member must survive, not only the option roster.
   const formerlyOutcome = before.nodes.find((n): n is Rec => rec(n) && n.id === newId);
   if (formerlyOutcome !== undefined && goals[0].description !== promotedOutcome(formerlyOutcome).description) return false;
+  const scope = laterAimOnlyBranch(candidate, oldId, newId, before);
+  if (scope.blocked.length || !isDeepStrictEqual(scopeExcluded ?? [], scope.excluded)) return false;
   const otherNodes = (nodes: unknown[]) => nodes.filter(n => rec(n) && n.id !== oldId && n.id !== newId);
-  if (!isDeepStrictEqual(otherNodes(before.nodes), otherNodes(candidate.nodes))) return false;
+  const scopedBefore = otherNodes(before.nodes).map(n => rec(n) && scope.excluded.includes(String(n.id))
+    ? { ...n, analysis_participation: 'retained_excluded' } : n);
+  if (!isDeepStrictEqual(scopedBefore, otherNodes(candidate.nodes))) return false;
   const rest = (graph: Rec) => Object.fromEntries(Object.entries(graph).filter(([k]) =>
     !['nodes', 'goal_constraints', 'goal_node_id', 'ref_high_water'].includes(k)));
   if (!isDeepStrictEqual(rest(before), rest(candidate))) return false;

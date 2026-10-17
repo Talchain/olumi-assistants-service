@@ -539,11 +539,13 @@ function heldUnchanged(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
+export type RebuildMissingKind = 'saved_option' | 'option_setting' | 'recorded_reasoning' | 'goal_target' | 'goal_frame' | 'limit' | 'human_item' | 'goal_contract';
+
 /** Prepare a complete replacement without discarding the saved goal, options or recorded human work. Pure. */
 export function prepareRequestedRebuild(base: unknown, drafted: unknown,
-  levelFrameOf: (node: Rec | undefined) => number | null): { candidate?: Rec; kept: string[]; missing: string[] } {
+  levelFrameOf: (node: Rec | undefined) => number | null): { candidate?: Rec; kept: string[]; missing: string[]; missing_kind?: RebuildMissingKind } {
   const before = rec(base), draft = rec(drafted);
-  const missing = (why: string) => ({ kept: [], missing: [why] });
+  const missing = (why: string, missing_kind: RebuildMissingKind = 'goal_contract') => ({ kept: [], missing: [why], missing_kind });
   if (!before || !draft) return missing('the complete saved model');
   const oldNodes = recs(before.nodes), newNodes = recs(draft.nodes);
   const oldGoal = oldNodes.filter(n => n.kind === 'goal'), newGoal = newNodes.filter(n => n.kind === 'goal');
@@ -557,20 +559,20 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
       horizon: r.horizon === null ? null : { deadline: r.horizon.deadline, months: r.horizon.months }, period: r.period };
   };
   const savedMeaning = meaning(before, String(old.id)), proposedMeaning = meaning(draft, String(next.id));
-  if (savedMeaning === null || proposedMeaning === null || (proposedMeaning.target !== null && !isDeepStrictEqual(savedMeaning.target, proposedMeaning.target))) return missing('the saved goal’s target or measurement; use its existing correction card first');
+  if (savedMeaning === null || proposedMeaning === null || (proposedMeaning.target !== null && !isDeepStrictEqual(savedMeaning.target, proposedMeaning.target))) return missing('the saved goal’s target or measurement; use its existing correction card first', 'goal_target');
   // Construction does not author a saved deadline/approved timing judgement. Restore the WHOLE old goal below,
   // rather than requiring the drafter to recreate a server-owned proof or re-author its human source.
-  if (levelFrameOf(old) !== levelFrameOf(next)) return missing('the saved goal’s numerical frame');
+  if (levelFrameOf(old) !== levelFrameOf(next)) return missing('the saved goal’s numerical frame', 'goal_frame');
   const matches = (n: Rec, nodes: Rec[]) => nodes.filter(x => x.kind === n.kind && canonicalLabel(String(x.label)) === canonicalLabel(String(n.label)));
   for (const option of oldNodes.filter(n => n.kind === 'option')) {
-    if (matches(option, newNodes).length !== 1) return missing(`the saved option “${String(option.label)}”`);
+    if (matches(option, newNodes).length !== 1) return missing(`the saved option “${String(option.label)}”`, 'saved_option');
   }
   const protectedIds = new Set(oldNodes.filter(n => n.kind === 'option').map(n => String(n.id)));
   for (const option of oldNodes.filter(n => n.kind === 'option')) {
     for (const id of Object.keys(rec(option.interventions) ?? rec(rec(option.data)?.interventions) ?? {})) {
       const saved = oldNodes.find(n => n.id === id), found = saved && matches(saved, newNodes);
       if (!saved || !found || found.length !== 1 || levelFrameOf(saved) !== levelFrameOf(found[0])
-        || !isDeepStrictEqual(rec(saved.observed_state)?.unit, rec(found[0]!.observed_state)?.unit)) return missing(`the saved quantity and setting on “${String(option.label)}”`);
+        || !isDeepStrictEqual(rec(saved.observed_state)?.unit, rec(found[0]!.observed_state)?.unit)) return missing(`the saved quantity and setting on “${String(option.label)}”`, 'option_setting');
       protectedIds.add(id);
     }
   }
@@ -579,10 +581,10 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
   for (const n of oldNodes) {
     const found = matches(n, recs(candidate.nodes));
     if (found.length === 1) candidate = asSavedNode(candidate, String(found[0]!.id), n);
-    else if (n.description !== undefined || userStatementsOn(n).length > 0 || n.analysis_participation === 'retained_excluded') return missing(`the recorded reasoning for “${String(n.label)}”`);
+    else if (n.description !== undefined || userStatementsOn(n).length > 0 || n.analysis_participation === 'retained_excluded') return missing(`the recorded reasoning for “${String(n.label)}”`, 'recorded_reasoning');
   }
   const limits = limitsKeptBy(before, candidate);
-  if (limits.conflict) return missing('a saved limit or target');
+  if (limits.conflict) return missing('a saved limit or target', 'limit');
   candidate = limits.replacement;
   candidate.nodes = recs(candidate.nodes).map(n => {
     const saved = oldNodes.find(p => p.id === n.id);
@@ -597,9 +599,9 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
   });
   const items = humanItemsAfterTheDraft(before, true);
   const unknown = items.filter(i => i.origin !== 'human' || i.carry === undefined).map(i => i.words);
-  if (unknown.length) return { kept: [], missing: unknown };
+  if (unknown.length) return { kept: [], missing: unknown, missing_kind: 'human_item' };
   const carried = carryHumanItems(candidate, items, levelFrameOf);
-  if (carried.missing.length) return { kept: [], missing: carried.missing };
+  if (carried.missing.length) return { kept: [], missing: carried.missing, missing_kind: 'human_item' };
   candidate = carried.replacement;
   if (!isDeepStrictEqual(readGoalRecord(before, String(old.id)), readGoalRecord(candidate, String(old.id)))) return missing('the complete saved goal contract');
   return { candidate, kept: [...carried.carried, ...limits.carried.map(r => `the saved bound on ${String(r.node_id)}`)], missing: [] };
