@@ -21,7 +21,10 @@ const BASE_GAP_RESULT = {
   "construction_retried": true,
   "options": 2,
   "withheld": [],
-  "projected_field_count": 18,
+  // ⛔ 18 → 19, INTENDED (CONTRACT-A row 3, #3350): exactly one added loss row, RESOLVE_BELIEF_PRECEDENCE
+  // nodes[hiring_delay].provenance → "unknown". The drafter's `explicit` tag alone no longer makes the risk the user's: its
+  // claimed source is retained as unknown, not stamped from_brief. Every other loss row is identical (diffed against staging 2b073341).
+  "projected_field_count": 19,
   "options_that_change_nothing": [],
   "goal_constraints_carried": 0,
   "open_questions": [

@@ -4408,7 +4408,9 @@ function admitOnce(
         // Olumi's holds-now reading of the user's whole sentence, for its card only: nothing reads it as true until the press.
         ...(holdsNow !== undefined ? { already_true_quote: holdsNow } : {}),
       };
-      return { label: r.label, kind: 'risk' as const, provenance: author.origin === 'ai' ? 'ai_proposed'
+      // An Olumi risk keeps the drafter's own AI class: read out of the brief (`inferred`, builder_inferred) or added beyond it
+      // (`ai_proposed`, model_proposed), the widening the size gate counts. Both display as Olumi's (`ai_inferred`).
+      return { label: r.label, kind: 'risk' as const, provenance: author.origin === 'ai' ? (r.provenance === 'inferred' ? 'inferred' : 'ai_proposed')
         : author.origin === 'human' && author.role !== 'unverified' ? 'explicit' : 'unverified', node };
     }),
     ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance, ...framedByRange(o) })),
