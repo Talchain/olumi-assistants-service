@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
 import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
 import { applyQualitativeReframe } from '../runtime/agent-capabilities.js';
+import { constructionOperationId } from '../runtime/build-model.js';
+import { approvedGraphHeld } from '../runtime/draft-replacement.js';
 
 const cases = [
   { name: 'warehousing', goal: 'Average dispatch delay', value: 6, unit: 'days', comparator: '<=',
@@ -97,7 +99,7 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     const before = { raw: w.graph(), graph_hash: tampered.base_graph_identity_hash, graph_identity_hash: tampered.operations[0].value.base_identity,
       brief_text: tampered.operations[0].value.brief_text };
     const native = await applyQualitativeReframe({ ...w.ctx, typed_approval_of: pid }, tampered as never, before, w.proposals,
-      async () => { throw new Error('A refused candidate must not register'); }, async () => before);
+      async () => { throw new Error('A refused candidate must not register'); }, async () => before, { constructionOperationId, approvedGraphHeld });
     expect(native).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' }); expect(w.writes).toHaveLength(0);
   });
 
