@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analysedOptionIds, conditionalInputBasis } from '../conditional-input-basis.js';
+import { analysedOptionIds, conditionalInputBasis, conditionalInputFactsOf, conditionalInputDisclosuresOf } from '../conditional-input-basis.js';
 
 const observed = (source?: string, review?: string) => ({ value: 0.3, raw_value: 300, ...(source ? { source } : {}), ...(review ? { reviewed_by_user: { intent: review } } : {}) });
 const factor = (id: string, state = observed('cee_inference')) => ({ id, kind: 'factor', label: id === 'subscribers' ? 'Subscribers' : id, observed_state: state });
@@ -7,6 +7,39 @@ const option = (id: string, override = false) => ({ id, kind: 'option', interven
 const admission = (ids: unknown = ['subscribers']) => ({ semantic_signals: { material_parameters_awaiting_user_node_ids: ids } });
 const graph = (state = observed('cee_inference'), options = [option('a'), option('b')]) => ({ nodes: [factor('subscribers', state), ...options], edges: [] });
 const say = (g: unknown = graph(), a: unknown = admission(), ids = ['a', 'b']) => conditionalInputBasis({ graph: g, admission: a, analysedOptionIds: ids });
+
+describe('B3: the qualification owner supplies facts to coaching and keeps the complete fallback', () => {
+  it.each([
+    ['cee_inference', 'ai', 'n/a', 'unknown'],
+    ['user_confirmed', 'ai', 'n/a', 'accepted_olumi_value'],
+    ['brief_extraction', 'human', 'verified', 'unknown'],
+    [undefined, 'unknown', 'n/a', 'unknown'],
+  ])('%s: origin and recorded adoption are independent', (source, origin, role, adoption) => {
+    const facts = conditionalInputFactsOf({ graph: graph(observed(source)), admission: admission(), analysedOptionIds: ['a', 'b'] });
+    expect(facts.factor_starting_values).toMatchObject({ status: 'available', coverage: 'material_factor_starting_values_only',
+      inputs: [{ node_id: 'subscribers', label: 'Subscribers', provenance: { origin, role }, adoption }] });
+    expect(conditionalInputDisclosuresOf(facts).join(' ') || null).toBe(say(graph(observed(source))));
+  });
+
+  it('an unverified starting-level role preserves human origin; stated option counts do not verify that role', () => {
+    const currentLevel = { ...observed('brief_extraction'), user_material_unverified: true };
+    const g = graph(currentLevel);
+    const facts = conditionalInputFactsOf({ graph: g, admission: admission(), analysedOptionIds: ['a', 'b'] });
+    expect(facts.factor_starting_values).toMatchObject({ status: 'available',
+      inputs: [{ provenance: { origin: 'human', role: 'unverified' }, adoption: 'unknown' }] });
+    expect(conditionalInputDisclosuresOf(facts).join(' ')).toContain("not been verified as today's level");
+    expect(conditionalInputDisclosuresOf(facts).join(' ')).not.toContain('Olumi’s estimates');
+  });
+
+  it('missing coverage is unavailable, while a known-empty census is only a bounded empty census', () => {
+    const unavailable = conditionalInputFactsOf({ graph: graph(), admission: {}, analysedOptionIds: ['a', 'b'] });
+    const empty = conditionalInputFactsOf({ graph: graph(), admission: admission([]), analysedOptionIds: ['a', 'b'] });
+    expect(unavailable.factor_starting_values).toMatchObject({ status: 'unavailable' });
+    expect(empty.factor_starting_values).toEqual({ status: 'available', coverage: 'material_factor_starting_values_only', inputs: [] });
+    expect(conditionalInputDisclosuresOf(unavailable).join(' ')).toContain('unavailable');
+    expect(conditionalInputDisclosuresOf(empty)).toEqual([]);
+  });
+});
 
 describe('RT-12: example figures are disclosed from edges only', () => {
   const before = 'This comparison uses Olumi’s estimates for "Subscribers". These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.';
