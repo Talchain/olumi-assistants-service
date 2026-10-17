@@ -198,7 +198,6 @@ import { eligibleInterventionFor, ELIGIBLE_INTERVENTION_INSTRUCTION, selectTurnG
 import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
 import { guidanceOnAnswer, thinDraftShownWire, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { actionFactsOf, type ActionFacts } from '../orchestrator-v5/agent-lane/actions/state.js';
-import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
 import { actionBarOf } from '../orchestrator-v5/agent-lane/actions/rank.js';
 import { actionPressOf, actionReceiptOf, decidePress, declinedReply, type ActionExit, type ActionPress, type ActionTypedReply } from '../orchestrator-v5/agent-lane/actions/handlers.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -2986,42 +2985,10 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
-      // The current envelope crosses the existing protections; recorded prose is historical delivery, not a new claim.
-      const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
-        requestId: String(req.id),
-        exitPath: 'agent_lane_v1_replay',
-        scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
-        licence: leaderLicenceFromState(state.analysisState, state.analysisReady),
-        mayNameLeadingOption: replayClaim?.permitted === true,
-        separationEstablished: replayClaim?.separation === 'separated',
-        ...(typeof replayClaim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: replayClaim.withheld_reason } : {}),
-        graph: state.graph ?? null,
-        analysisReady: state.analysisReady,
-      }).response, {
-        analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
-        ...(turnId !== undefined ? { turnId } : {}),
-      });
-      const optionGatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
-        runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
-        requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
-      });
-      const gatedReplay = withEstimateGoalPointsAtEgress(optionGatedReplay, {
-        analysisResult: state.analysisResult, graph: state.graph ?? null,
-        current: !replayLoopRun && historicalReceiptKey === undefined && (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current',
-        userAuthoredTexts: userTextsForEgress(
-          [...histories.typedWords(sessionId), ...(typedByUser(body) ? [prior.user_message ?? message] : [])], recentRowsForEgress),
-      });
-      // Materialise recorded prose only as the final boundary's opaque delivery input, never as current-model narration.
-      // Accel P24 / SCI-10: the typed rows go on AFTER every replay guard (a structured scrub must never reach them), and only
-      // when each row and figure is in the reply those guards left. withShapeOnlyIfItDerives below never changes
-      // assistant_text and keeps every other key (it can only drop `_answer_shape`), so this is the text that ships.
-      const replayMethod = methodResultForEgress(replayMethodResult, prior.assistant_message ?? String(gatedReplay.assistant_text ?? ''));
-      if (replayMethod !== null) Object.assign(gatedReplay, { _method_result: replayMethod });
-      // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
-      // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
-      const delivery = { ...gatedReplay, assistant_text: prior.assistant_message ?? gatedReplay.assistant_text };
+      // Recorded prose is immutable; the final gate checks only the newly derived display units.
+      const replayMethod = methodResultForEgress(replayMethodResult, prior.assistant_message ?? replayBody.assistant_text);
+      const delivery = { ...replayBody, assistant_text: prior.assistant_message ?? replayBody.assistant_text,
+        ...(replayMethod === null ? {} : { _method_result: replayMethod }) };
       return repairFinalReply(withShapeOnlyIfItDerives(delivery), { model: state.graph, analysisResult: state.analysisResult,
         analysisState: state.analysisState, analysisReady: state.analysisReady,
         sources: replaySources, receipts: [],
@@ -6313,32 +6280,6 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
     if (turnRunReceipts(fa, result.tool_results).some((r) => (r as { ran?: unknown } | null)?.ran === true)) interruptIfArmed(recoveryFault, 'after_run');
     // A recorded delivery is durable too: the same minted id as an offer, so an unnamed turn never drops the record.
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined || runDelivery.kind === 'recorded' ? randomUUID() : undefined);
-    /**
-     * ⭐ S-B: THE ACTION BAR THIS ANSWER CARRIES (`action_bar` v1; github-a2 contract amendments 1–11 + v1.1), on EVERY turn,
-     * from the SAME final readback. B4 needs a pre-append projection of the bounded guidance window and actual pending
-     * carrier: a flattened history plus this row cannot prove which oldest event leaves the window (#2751).
-     * TODO(B4 store hook): retain exact reload parity before the final gate; see the unchanged action-bar route rows.
-     * Never stored: the answer row's SQL envelopes carry no bar.
-     */
-    const actionBar = await (async () => {
-      try {
-        let history: GuidanceState | null = guidanceHistory;
-        if (answerGuidance !== undefined) {
-          history = { ...(guidanceHistory ?? {}), ...answerGuidance.entries };
-        }
-        // The approval carrier the reload reads: the latest PERSISTED pending row, after the persistence floor's held-proposal
-        // reconcile (Codex r1 P1-1 on #2766). This turn's own carrier only when that read is unavailable.
-        let pending: readonly PendingAction[] = durablePending;
-        if (typeof store.readMostRecentPendingActions === 'function') {
-          try { pending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }); } catch { /* keep this turn's carrier */ }
-        }
-        return actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady, analysisResult,
-          optionParticipation, identityEvaluated, guidance: history, pending }));
-      } catch (err) {
-        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: action bar could not be ranked; the turn carries none');
-        return undefined;
-      }
-    })();
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
     // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
@@ -6381,7 +6322,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
        * ⭐ S-B: the action bar (a root key DGAI keeps in `__additive__`, as it does `guidance`), and on an action press its
        * receipt `_action`: which action, on which revision, and whether it ran or answered "can't yet" (contract v1.1 item 5).
        */
-      ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
+
       ...(actionPress !== null && actionFactsAtPress !== undefined ? { _action: actionReceiptOf(actionPress, actionFactsAtPress.revision,
         actionReply === null || actionReply.outcome === 'ran' ? 'ran' : 'cant_yet', actionReply?.reason, actionReply?.science) } : {}),
       /**
@@ -6571,7 +6512,6 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
     for (;;) {
       try {
         let replyChecked = false;
-        if (rowTurnId === undefined) { wireBody = checkFinalReply(wireBody, replyEvidence); replyChecked = true; }
         if (rowTurnId !== undefined) {
           try {
             // Through the SHARED persistence floor, like every turn row: the one
@@ -6579,7 +6519,6 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
             // S-D x S-D.1b: the floor may reconcile more than once (it re-reads when the latest row moved). Every attempt starts
             // from the reply as composed BEFORE the floor, and a proposal that did not fit is set aside only after the append.
             const wireBeforeFloor = wireBody;
-            if (typeof store.readMostRecentPendingActions !== 'function') { wireBody = checkFinalReply(wireBody, replyEvidence); replyChecked = true; }
             let overCapAtAppend: readonly PendingAction[] = [];
             let overCapSaid: readonly string[] = [];
             const appendAnswer = (handlerFacts: readonly HandlerFact[], withGuidance = true) => appendCheckedGraphWrite({
@@ -6593,14 +6532,18 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
               heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
                 offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
                 onReconciled: (write, overCap) => {
-                  reconciledPending = write.pending_actions ?? [];
-                  heldRecords = (write.pending_actions ?? []).flatMap(p => {
-                    const r = proposalRecord(p, readbackGraph); return r && heldRecordAppliesAt(p, r, readbackGraph, graphHash) ? [r] : [];
-                  });
                   overCapAtAppend = overCap;
                   // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
                   // said at the start of this scenario's next reply (`owedHeldLapses`), never appended to this one.
                   overCapSaid = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
+                  return write;
+                } },
+              write: {
+                prepare: (write, { finalPending, prospectiveGuidance }) => {
+                  reconciledPending = finalPending;
+                  heldRecords = finalPending.flatMap(p => {
+                    const r = proposalRecord(p, readbackGraph); return r && heldRecordAppliesAt(p, r, readbackGraph, graphHash) ? [r] : [];
+                  });
                   const actions = (wireBeforeFloor.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
                     const approved = typedApprovalOf({ chip: { id: a.id } }); const declined = declinedProposalOf(a.id);
                     return approved !== undefined ? heldRecords.some(r => r.proposal_id === approved)
@@ -6617,15 +6560,15 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
                   wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
                   const projection = proposalFieldsWire(finalReplyRegenerated
                     ? heldRecords.filter(record => actions.some(action => action.id === record.approve_action.id)) : heldRecords, graphHash, issuedTurnIds,
-                    heldRecordsApplyAt(write.pending_actions ?? [], readbackGraph, graphHash));
+                    heldRecordsApplyAt(finalPending, readbackGraph, graphHash));
                   const preview = finalReplyRegenerated && wireBeforeFloor.proposal_preview === undefined ? undefined
                     : previewBesideItsChip(pendingPreview, approvalChipIdFor, actions);
                   const { _proposal_fields: _oldFields, proposal_preview: _oldPreview, ...withoutWithdrawnCards } = wireBody;
                   wireBody = { ...withoutWithdrawnCards, ...(projection === undefined ? {} : { _proposal_fields: projection }),
                     ...(preview === undefined ? {} : { proposal_preview: preview }),
-                    ...(actionBar === undefined || (finalReplyRegenerated && wireBeforeFloor.action_bar === undefined) ? {} : { action_bar: actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph,
+                    ...((finalReplyRegenerated && wireBeforeFloor.action_bar === undefined) ? {} : { action_bar: actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph,
                       graphHash, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated,
-                      guidance: { ...(guidanceHistory ?? {}), ...(answerGuidance?.entries ?? {}) }, pending: write.pending_actions ?? [] })) }),
+                      guidance: prospectiveGuidance, pending: finalPending })) }),
                   };
                   replyEvidence = { ...replyEvidence, hasCard: heldRecords.length > 0,
                     cardTexts: deliveredCardTexts(heldRecords, wireBody.suggested_actions) };
@@ -6634,13 +6577,12 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
                   runDelivery = runDeliveryFactFor({ sentBody: wireBody,
                     toolResults: turnRunReceipts(fa, result.tool_results), read: finalRead,
                     licence: leaderLicenceFromState(analysisState, analysisReady), analysisReady });
-                  return { ...write, assistantMessage: wireBody.assistant_text,
+                  return { assistantMessage: wireBody.assistant_text,
                     handler_facts: write.handler_facts?.some(fact => fact.fact_type === 'run_delivery')
                       ? runDelivery.kind === 'recorded' ? [runDelivery.fact] : [] : write.handler_facts,
-                    pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
-                    suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message })) };
-                } },
-              write: {
+                    pending_actions: finalPending.map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
+                    suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message })) };
+                },
                 scenario_id: scenarioId,
               // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before
               // the run), or under the id minted above for an unnamed turn that carries an offer.
@@ -6737,7 +6679,15 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         }
 
 
-        if (!replyChecked) wireBody = checkFinalReply(wireBody, replyEvidence);
+        if (!replyChecked) {
+          wireBody = { ...wireBody,
+            ...(finalReplyRegenerated && wireBody.action_bar === undefined ? {} : { action_bar: actionBarOf(actionFactsOf({
+              scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady, analysisResult,
+              optionParticipation, identityEvaluated, guidance: guidanceHistory, pending: reconciledPending,
+            })) }),
+          };
+          wireBody = checkFinalReply(wireBody, replyEvidence);
+        }
         break;
       } catch (failure) {
         if (!(failure instanceof ReplyValidationError)) throw failure;

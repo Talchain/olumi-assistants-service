@@ -52,7 +52,12 @@ const rows: Rec[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
-  append: vi.fn(async (row: Rec) => { rows.push({ ...row, assistant_message: row.assistantMessage, user_message: row.userMessage }); return { id: row.turn_id }; }),
+  append: vi.fn(async (row: Rec) => {
+    const { prepare, ...stored } = row;
+    const checked = prepare ? { ...stored, ...prepare(row, { finalPending: row.pending_actions ?? [], prospectiveGuidance: null }) } : stored;
+    rows.push({ ...checked, assistant_message: checked.assistantMessage, user_message: checked.userMessage });
+    return { id: row.turn_id };
+  }),
   readRecent: vi.fn(async () => [...rows].reverse()),
   readMostRecentPendingActions: vi.fn(async () => []),
   loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: brief() })),

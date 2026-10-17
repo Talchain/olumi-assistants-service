@@ -120,7 +120,7 @@ import {
 } from '../coaching/coaching-state-snapshot.js';
 import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
-import { guidanceHistoryOf, GUIDANCE_HISTORY_LIMIT, parseAnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
+import { guidanceHistoryOf, GUIDANCE_HISTORY_LIMIT, parseAnswerGuidance, type AnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
 import type { GuidanceState } from '../agent-lane/guidance/index.js';
 import { isAgentAnswerRow } from './conversation-as-seen.js';
 
@@ -611,7 +611,7 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   private async appendThroughRpcInner(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
-    if (options !== undefined && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
+    if ((options !== undefined || write.prepare !== undefined) && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
       || write.coaching_state != null || write.turn_class !== 'direct_answer' || write.handler_id !== null
       || !write.response_emitted || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
       throw new StateCommitFailedError('Conditional append requires a final Agent answer without a graph write');
@@ -628,6 +628,12 @@ export class SupabaseSessionStore implements SessionStore {
       || write.turn_class !== 'direct_answer' || write.handler_id !== null || !write.response_emitted
       || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
       throw new StateCommitFailedError('Guidance metadata requires a final Agent answer without a graph write');
+    }
+    if (write.prepare !== undefined) {
+      let prospectiveGuidance: GuidanceState | null = null;
+      try { prospectiveGuidance = await this.readGuidanceWindow(write.scenario_id, write.agent_guidance); }
+      catch { /* Unknown history suppresses history-dependent offers, never invents an empty history. */ }
+      write = { ...write, ...write.prepare(write, { finalPending: write.pending_actions ?? [], prospectiveGuidance }) };
     }
     // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
     // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
@@ -2030,6 +2036,10 @@ export class SupabaseSessionStore implements SessionStore {
    * re-wrapped as `{ id } | null` for the existing caller).
    */
   async readGuidanceHistory(scenarioId: string): Promise<GuidanceState> {
+    return this.readGuidanceWindow(scenarioId);
+  }
+
+  private async readGuidanceWindow(scenarioId: string, prospective?: AnswerGuidance): Promise<GuidanceState> {
     const { data, error } = await this.client.from('v5_conversation_turns')
       .select('scenario_id, request_hash, turn_id, agent_guidance')
       .eq('scenario_id', scenarioId).eq('turn_class', 'direct_answer').is('handler_id', null)
@@ -2042,7 +2052,7 @@ export class SupabaseSessionStore implements SessionStore {
       || typeof row.turn_id !== 'string' || row.turn_id.endsWith(TURN_CLAIM_SUFFIX))) {
       throw new SessionReadError('Guidance history scope invalid');
     }
-    const history = guidanceHistoryOf(data.map(row => row.agent_guidance));
+    const history = guidanceHistoryOf([...(prospective === undefined ? [] : [prospective]), ...data.map(row => row.agent_guidance)]);
     if (history === null) throw new SessionReadError('Guidance history malformed');
     return history;
   }
