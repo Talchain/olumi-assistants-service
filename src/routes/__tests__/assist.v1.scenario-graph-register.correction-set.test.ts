@@ -1,3 +1,6 @@
+import { HistoryStore } from '../../orchestrator-v5/agent-lane/history-store.js';
+import { typedByUser, userWordsOf } from '../../orchestrator-v5/agent-lane/stated-by-user.js';
+import { log } from '../../utils/telemetry.js';
 /** Saved-model corrections: real canonical adapters → own card → one native CAS registration → whole readback. */
 import { applyGoalSteadyEdit } from '../../orchestrator-v5/goal-target/goal-steady-write.js';
 import { horizonSteadyAttested } from '../../orchestrator-v5/goal-target/horizon-basis.js';
@@ -7,7 +10,7 @@ import { validateGraphStructure } from '../../orchestrator/graph-structure-valid
 import { boundNodeDescriptionForContext } from '../../orchestrator/context/graph-compact.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { readFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
@@ -681,7 +684,115 @@ async function bakeryWorld(options: Parameters<typeof world>[1] = {}, change?: (
   return { ...w, offer, calls, provider };
 }
 
+/** The route reads authorship BEFORE recordTyped; coverage is not the current typed turn's provenance. */
+function routeRebuildContext(w: Awaited<ReturnType<typeof bakeryWorld>>, message: string, turn = 17, source = 'composer', earlierRequest?: string) {
+  const histories = new HistoryStore();
+  const coverage: boolean[] = [];
+  let current: Omit<typeof w.ctx, 'user_text_complete'> & { user_text_complete: boolean } = w.ctx;
+  for (let i = 1; i <= turn; i++) {
+    const text = i === turn ? message : i === 1 ? bakery.brief : i === turn - 1 && earlierRequest !== undefined ? earlierRequest : 'Keep the same current goal and all named options.';
+    const body = { kind: 'message', source: i === turn ? source : 'composer', message: text };
+    const typedNow = typedByUser(body) ? text : null;
+    const authorship = histories.authorshipWords(w.ctx.scenario_id);
+    current = { ...w.ctx, user_turn_text: typedNow ?? '', user_text: userWordsOf(authorship.verified, typedNow),
+      verified_user_messages: [...authorship.verified, ...(typedNow === null ? [] : [typedNow])], user_text_complete: authorship.complete };
+    coverage.push(current.user_text_complete);
+    if (typedNow !== null) histories.recordTyped(w.ctx.scenario_id, typedNow, current.user_text_complete);
+    histories.set(w.ctx.scenario_id, [...histories.get(w.ctx.scenario_id), { role: 'user', content: [{ type: 'input_text', text }] }]);
+  }
+  return { ctx: current, coverage };
+}
+
 describe('explicit CURRENT rebuild through the native correction writer', () => {
+  // Seen 13695c88 inputs; the quoted tool arguments below are declared controls, NOT reconstructed historical arguments.
+  it.each([
+    [11, "I feel like we're going around in circles. Can you just update the model to reflect our conversation so I can actually decide what to spend my time on?", 'Can you just update the model to reflect our conversation so I can actually decide what to spend my time on?'],
+    [16, "Okay, let's go with that. Send that brief, create a new model, and produce your estimates for me to review.", "Okay, let's go with that. Send that brief, create a new model, and produce your estimates for me to review."],
+    [17, "I've already agreed with this brief. Generate a new model based on this brief.", 'Generate a new model based on this brief.'],
+  ] as const)('route-shaped coverage at founder T%s still prepares a complete current-source card and cold-saves once', async (turn, message, quote) => {
+    const w = await bakeryWorld();
+    const { ctx, coverage } = routeRebuildContext(w, message, turn);
+    expect(coverage).toEqual(Array(turn).fill(false));
+    expect(ctx.verified_user_messages.at(-1)).toBe(message); expect(ctx.user_turn_text).toBe(message);
+    const offered = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: quote }), ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, value = held.operations[0]!.value as Rec;
+    expect(held.provenance.basis).toBe(message); expect(value.explicit_rebuild_request).toBe(message);
+    expect(value.goal_turn_id).toBe(ctx.turn_id); expect(offered.public_label).toContain(`From your current message: “${message}”`);
+    const cold = restoreCard(held, offered, ctx);
+    expect(await w.caps(cold).authoriseChange({ ...ctx, user_turn_text: 'Yes' }, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(await w.caps(cold).authoriseChange({ ...ctx, typed_approval_of: 'another-card' }, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+    const press = { ...ctx, user_turn_text: '', typed_approval_of: pid };
+    expect(await w.caps(cold).authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(value.candidate, w.graph())).toBe(true);
+    expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
+    expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal')).toEqual(w.original.nodes.find((n: Rec) => n.kind === 'goal'));
+    expect(await w.caps(cold).authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, mutated: false, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+  });
+
+  it.each(['empty_rebuild_signal', 'card_press', 'not_whole_current_statement', 'current_turn_unverified'] as const)(
+    'refusal diagnostics record %s locally without changing the AI-facing result', async check => {
+      const w = await bakeryWorld();
+      const message = check === 'card_press' ? 'Yes, make this change.' : rebuildRequest;
+      const { ctx: typed } = routeRebuildContext(w, message);
+      // The unverified case exercises the capability's defensive contract, not a claim that the typed route omits its turn.
+      const ctx = { ...typed, ...(check === 'card_press' ? { typed_approval_of: 'another-card' } : {}),
+        ...(check === 'current_turn_unverified' ? { verified_user_messages: [] } : {}) };
+      const argument = check === 'empty_rebuild_signal' ? '' : check === 'not_whole_current_statement' ? 'generate a replacement model' : message;
+      const info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+      try {
+        const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: argument }), ctx, w.caps());
+        expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'current_request_required' });
+        expect(Object.keys(out).sort()).toEqual(['detail', 'mutated', 'ok', 'refusal']);
+        const events = info.mock.calls.map(([entry]) => entry as Rec).filter(e => e.event === 'v5.agent.tool_refused');
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({ tool: 'build_model_from_brief', request_id: ctx.request_id, scenario_id: ctx.scenario_id,
+          turn_id: ctx.turn_id, refusal: 'current_request_required', failed_checks: expect.arrayContaining([check]),
+          argument_length: argument.length, argument_sha256: createHash('sha256').update(argument).digest('hex'),
+          current_turn_length: message.length, current_turn_sha256: createHash('sha256').update(message).digest('hex'),
+          arg_is_whole_turn: argument === message });
+        expect(w.calls).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
+      } finally { info.mockRestore(); }
+    });
+
+  it('refusal logs contain no raw argument, current text, brief or credentials, even beyond the preview bound', async () => {
+    const w = await bakeryWorld();
+    const message = 'Private current message: password secret-current-value. '.repeat(20);
+    const argument = 'Private AI argument: Bearer secret-argument-value. '.repeat(20);
+    const { ctx } = routeRebuildContext(w, message);
+    const info = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+    try {
+      const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: argument }), ctx, w.caps());
+      expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'current_request_required' });
+      const events = info.mock.calls.map(([entry]) => entry as Rec).filter(e => e.event === 'v5.agent.tool_refused');
+      expect(events).toHaveLength(1);
+      expect(Object.keys(events[0]).sort()).toEqual(['arg_is_whole_turn', 'argument_length', 'argument_sha256', 'current_turn_length',
+        'current_turn_sha256', 'event', 'failed_checks', 'refusal', 'request_id', 'scenario_id', 'tool', 'turn_id'].sort());
+      expect(events[0]).toMatchObject({ argument_length: argument.length, argument_sha256: createHash('sha256').update(argument).digest('hex'),
+        current_turn_length: message.length, current_turn_sha256: createHash('sha256').update(message).digest('hex') });
+      expect(JSON.stringify(events)).not.toMatch(/secret-current-value|secret-argument-value|Private current|Private AI|Bearer|password/);
+      expect(JSON.stringify(events)).not.toContain(framing); expect(JSON.stringify(events)).not.toContain(bakery.brief);
+      expect(Object.keys(out).sort()).toEqual(['detail', 'mutated', 'ok', 'refusal']);
+      expect(w.calls).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    } finally { info.mockRestore(); }
+  });
+
+  it('incomplete typed-history coverage keeps restored source unknown while the complete ledger permits a card', async () => {
+    const unknown = 'A colleague reported the pilot might be too risky; the speaker has not been verified.';
+    const w = await bakeryWorld({ ledger: { complete: true, user_message_turn_ids: ['first', 'restored'],
+      later_user_messages: [{ turn_id: 'restored', text: unknown }] } });
+    const { ctx } = routeRebuildContext(w, rebuildRequest);
+    expect(ctx.user_text_complete).toBe(false); expect(ctx.verified_user_messages).not.toContain(unknown);
+    const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), ctx, w.caps());
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false });
+    expect(w.calls[0].input).toContain(JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified', text: unknown }));
+    expect(w.calls[0].input).not.toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: unknown }));
+    expect(w.writes).toHaveLength(0);
+  });
+
   it.each([undefined, 'An incidental fragment supplied as a rebuild flag'])('first build follows normal construction on an empty scenario (flag: %s)', async flag => {
     const provider = vi.fn(async () => ({ text: JSON.stringify(bakery.draft), status: 'completed' }));
     const w = await world({ graph: { nodes: [], edges: [] }, brief: bakery.brief, message: bakery.brief }, { provider });
@@ -740,12 +851,13 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(await w.caps(cold).authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, mutated: false, applied: true, already_applied: true });
     expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
   });
-  it.each(['missing', 'partial', 'earlier', 'assistant', 'chip'])("%s request authority cannot prepare or write", async kind => {
+  it.each(['missing', 'earlier', 'assistant', 'chip'])("%s request authority cannot prepare or write", async kind => {
     const w = await bakeryWorld();
-    const ctx = { ...w.ctx, ...(kind === 'partial' ? { user_text_complete: false } : {}),
-      ...(kind === 'earlier' ? { user_turn_text: 'Please explain the current model.' } : {}),
-      ...(kind === 'assistant' ? { verified_user_messages: [] } : {}),
-      ...(kind === 'chip' ? { typed_approval_of: 'another-card' } : {}) };
+    const { ctx: routed } = routeRebuildContext(w, kind === 'earlier' ? 'Please explain the current model.' : rebuildRequest,
+      17, kind === 'assistant' ? 'coaching' : 'composer', kind === 'earlier' ? rebuildRequest : undefined);
+    const ctx = { ...routed, ...(kind === 'chip' ? { typed_approval_of: 'another-card' } : {}) };
+    if (kind === 'earlier') { expect(ctx.verified_user_messages.at(-1)).toBe(ctx.user_turn_text); expect(ctx.verified_user_messages).toContain(rebuildRequest); }
+    if (kind === 'assistant') expect(ctx.user_turn_text).toBe('');
     const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing,
       ...(kind === 'missing' ? {} : { explicit_rebuild_request: rebuildRequest }) }), ctx, w.caps());
     expect(out).toMatchObject({ ok: false, mutated: false });
@@ -774,7 +886,10 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
   });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });
-    expect(await w.offer()).toMatchObject({ ok: false, mutated: false, refusal: 'history_unreadable' });
+    // DL04:00 ACK: the former 'partial' row lives at the actual durable source gate, not a sticky authorship flag.
+    const { ctx } = routeRebuildContext(w, rebuildRequest);
+    expect(await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), ctx, w.caps()))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'history_unreadable' });
     expect(w.calls).toHaveLength(0); expect(w.writes).toHaveLength(0);
   });
   it('a valid card has no authority without its own press; a race writes nothing', async () => {

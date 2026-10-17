@@ -4010,8 +4010,19 @@ export function createAgentCapabilities(
     const currentRequest = ctx.user_turn_text ?? '';
     const matchCurrent = plainQuoteWords(currentRequest).toLocaleLowerCase('en-GB');
     const matchRequest = plainQuoteWords(request).toLocaleLowerCase('en-GB');
-    if (!request.trim() || ctx.user_text_complete !== true || ctx.typed_approval_of !== undefined
-      || !wholeStatementIn(matchCurrent, matchRequest) || !ctx.verified_user_messages?.includes(currentRequest)) {
+    // History authorship coverage is not current-turn authority; the durable ledger below still checks retained work.
+    const failedRequestChecks = [
+      !request.trim() && 'empty_rebuild_signal', ctx.typed_approval_of !== undefined && 'card_press',
+      !wholeStatementIn(matchCurrent, matchRequest) && 'not_whole_current_statement',
+      !ctx.verified_user_messages?.includes(currentRequest) && 'current_turn_unverified',
+    ].filter((check): check is string => typeof check === 'string');
+    if (failedRequestChecks.length > 0) {
+      const { log } = await import('../../../utils/telemetry.js');
+      log.info({ event: 'v5.agent.tool_refused', request_id: ctx.request_id, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id,
+        tool: 'build_model_from_brief', refusal: 'current_request_required', failed_checks: failedRequestChecks,
+        argument_length: request.length, argument_sha256: createHash('sha256').update(request).digest('hex'),
+        current_turn_length: currentRequest.length, current_turn_sha256: createHash('sha256').update(currentRequest).digest('hex'),
+        arg_is_whole_turn: matchRequest === matchCurrent }, 'Agent construction tool refused');
       return refused('current_request_required', 'No replacement was prepared. The complete current typed request must be verified; an earlier request or another card’s press cannot authorise a rebuild.');
     }
     // The tool quotes a WHOLE current statement, never a fragment that drops a speaker or negation. Retain the full turn,
