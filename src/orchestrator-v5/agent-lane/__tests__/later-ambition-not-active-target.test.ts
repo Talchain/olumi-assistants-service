@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { admitCandidateModel, admitOrdinaryCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We need to raise £200,000 from angels in the next six months.';
@@ -48,6 +49,7 @@ function draft(role: 'ambition' | 'target' | null, withStatement = false): Rec {
 const admitted = (model: Rec) => admitCandidateModel(model as CandidateModel, {}, BRIEF, (v, u) => figureTheUserWrote(v, u, BRIEF));
 const outcomeId = (out: { nodes: readonly Rec[] }): string => out.nodes.find((n) => n.label === 'Larger round raised')!.id as string;
 let aiCalls = 0;
+let lastResult: Rec = {};
 async function registered(model: Rec): Promise<Rec> {
   let graph: Rec | undefined;
   aiCalls = 0;
@@ -56,6 +58,7 @@ async function registered(model: Rec): Promise<Rec> {
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   }) as never, (async () => { aiCalls += 1; return { text: JSON.stringify(model), status: 'completed' }; }) as never) as Rec;
   expect(r.ok, JSON.stringify(r).slice(0, 1200)).toBe(true);
+  lastResult = r;
   return graph!;
 }
 
@@ -123,6 +126,19 @@ describe('a later ambition is never an active target (G1 turn 01)', () => {
     const share = aiCalls;
     await registered(onShare('ambition'));
     expect(aiCalls).toBe(share);
+  }, 60_000);
+
+  it('⭐ B1: the reading reaches the saved node (cold GraphV3 read) and the build\'s returned explanation, as Olumi\'s, non-operative', async () => {
+    const reading = `Later ambition, as Olumi reads your words: “${LATER}” (‘Larger round raised’, at least 2 million).`;
+    const cold = GraphV3.parse(JSON.parse(JSON.stringify(await registered(draft('ambition', true)))));
+    const node = cold.nodes.find((n) => n.label === 'Larger round raised');
+    expect(node?.description, JSON.stringify(node)).toContain(reading);
+    expect(node!.description).toContain('does not set a target this model tests');
+    expect((lastResult.not_represented ?? []) as string[]).toEqual(expect.arrayContaining([expect.stringContaining(reading)]));
+    // CONTRAST: a genuine further target is no later ambition, and nothing says it is one.
+    const target = GraphV3.parse(JSON.parse(JSON.stringify(await registered(draft('target', true)))));
+    expect(target.nodes.find((n) => n.label === 'Larger round raised')?.description ?? '').not.toContain('Later ambition');
+    expect(JSON.stringify(lastResult.not_represented ?? [])).not.toContain('Later ambition');
   }, 60_000);
 
   it('through the real build and register: the saved graph carries no active target for the later ambition', async () => {

@@ -3506,7 +3506,12 @@ function keepingLaterAmbitions(candidate: CandidateModel, brief: string | undefi
   const ambitions = Array.isArray(candidate.constraints) ? candidate.constraints.filter((c) => c?.role === 'ambition') : [];
   if (ambitions.length === 0) return admit(candidate);
   const admitted = admit({ ...candidate, constraints: candidate.constraints.filter((c) => c?.role !== 'ambition') });
-  return { ...admitted, loss: [...admitted.loss, ...ambitions.map((a) => laterAmbitionLoss(candidate, brief, a))] };
+  const kept = ambitions.map((a) => laterAmbitionLoss(candidate, brief, a));
+  // ⭐ BUDDY-A #3338 R1 B1: the reading is kept on the node it names, in the existing human-readable carrier (`description`,
+  // read cold as its `full_label`; the same precedent as `priorAimDescription`, goal-repoint.ts), after every match is made.
+  const said = (n: AdmittedNode): string[] => ambitions.flatMap((a, i) => (metricNamesLabel(a.metric, n.label) ? [kept[i]!.reason] : []));
+  const nodes = admitted.nodes.map((n) => (said(n).length === 0 ? n : { ...n, description: [n.description ?? n.label, ...said(n)].join('\n') }));
+  return { ...admitted, nodes, loss: [...admitted.loss, ...kept] };
 }
 
 /** The words of a later ambition, kept: the user's own sentence for its figure (the AI's verified target statement), else none. */
