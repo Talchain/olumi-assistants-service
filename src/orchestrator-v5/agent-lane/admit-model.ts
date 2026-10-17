@@ -3511,18 +3511,21 @@ function keepingLaterAmbitions(candidate: CandidateModel, brief: string | undefi
   // read cold as its `full_label`; the same precedent as `priorAimDescription`, goal-repoint.ts), after every match is made.
   const said = (n: AdmittedNode): string[] => ambitions.flatMap((a, i) => (metricNamesLabel(a.metric, n.label) ? [kept[i]!.reason] : []));
   const nodes = admitted.nodes.map((n) => (said(n).length === 0 ? n : { ...n, description: [n.description ?? n.label, ...said(n)].join('\n') }));
-  return { ...admitted, nodes: outsideTheCurrentRun(nodes, admitted.edges, (n) => said(n).length > 0), loss: [...admitted.loss, ...kept] };
+  return { ...admitted, nodes: outsideTheCurrentRun(nodes, admitted.edges, (n) => said(n).length > 0, admitted.goal_constraints), loss: [...admitted.loss, ...kept] };
 }
 
 /**
  * ⭐ G1 TURN 01 (DL-3 09:52Z; e2e/VERIFY-8d9ef02e-founder-diagnosis.md): the node a later ambition names stayed on the current goal's
  * path, so the Run computed today's aim through it. It stays in the model with its words and links, and leaves the calculation
  * (`retained_excluded`: the Run's participation guard and the placeholder reader drop it and its links, and the Run says so).
- * Never the goal, a decision, an option or a quantity an option sets (the guard refuses that Run), and never where leaving it out
- * would cut another part of the model off from the goal: then it stays in, as before.
+ * Never the goal, a decision, an option or a quantity an option sets (the guard refuses that Run), never where leaving it out
+ * would cut another part of the model off from the goal (then it stays in, as before), and ⛔ never a node an ACTIVE constraint row
+ * names (BUDDY-A #3352 R1 B1): a genuine further target or limit on the same metric is still sent, so its node stays in the Run.
  */
-function outsideTheCurrentRun(nodes: readonly AdmittedNode[], edges: readonly AdmittedEdge[], named: (n: AdmittedNode) => boolean): AdmittedNode[] {
+function outsideTheCurrentRun(nodes: readonly AdmittedNode[], edges: readonly AdmittedEdge[], named: (n: AdmittedNode) => boolean,
+  constraints: readonly AdmittedConstraint[]): AdmittedNode[] {
   const setByOption = new Set(nodes.flatMap((n) => (n.kind === 'option' ? Object.keys(n.interventions ?? {}) : [])));
+  const constrained = new Set(constraints.map((c) => c.node_id));
   const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id);
   /** Every node with a directed path to a goal, with `out` and its links left out. */
   const reaching = (out: ReadonlySet<string>): Set<string> => {
@@ -3536,7 +3539,8 @@ function outsideTheCurrentRun(nodes: readonly AdmittedNode[], edges: readonly Ad
   const before = reaching(new Set());
   const out = new Set<string>();
   for (const n of nodes) {
-    if (!named(n) || n.analysis_participation !== undefined || ['goal', 'decision', 'option'].includes(n.kind) || setByOption.has(n.id)) continue;
+    if (!named(n) || n.analysis_participation !== undefined || ['goal', 'decision', 'option'].includes(n.kind) || setByOption.has(n.id)
+      || constrained.has(n.id)) continue;
     const trying = new Set([...out, n.id]);
     const after = reaching(trying);
     if ([...before].every((id) => trying.has(id) || after.has(id))) out.add(n.id);

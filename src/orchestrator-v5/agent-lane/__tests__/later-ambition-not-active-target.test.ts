@@ -208,6 +208,25 @@ describe('a later ambition stays in the model, outside the current Run', () => {
     expect((tsent?.graph.nodes as Rec[] | undefined)?.some((n) => n.id === tid)).toBe(true);
   }, 60_000);
 
+  it('⛔ BUDDY-A #3352 R1 B1, through the real build and Run request: a metric with an ACTIVE target AND a later-ambition row stays in the calculation, its target sent and its later reading kept', async () => {
+    // The mixed role: the AI types a genuine further target on the later outcome, and a later ambition on the same metric.
+    const mixed = (): Rec => { const d = intoGoal(draft('target', true)); d.constraints = [...d.constraints, later('ambition')]; return d; };
+    const out = admitted(mixed());
+    const n = node(out, 'Larger round raised');
+    expect(n.analysis_participation).toBeUndefined();
+    expect(out.goal_constraints.filter((c) => c.node_id === n.id)).toEqual([expect.objectContaining({ role: 'goal_target', value: 2 })]);
+    expect(n.description).toContain(`Later ambition, as Olumi reads your words: “${LATER}”`);
+    expect(out.loss.filter((l) => l.after === 'retained_later_ambition')).toHaveLength(1);
+    const g = await registered(mixed());
+    const id = (g.nodes as Rec[]).find((x) => x.label === 'Larger round raised')!.id;
+    expect(GraphV3.parse(JSON.parse(JSON.stringify(g))).nodes.find((x) => x.id === id)?.analysis_participation).toBeUndefined();
+    const sent = await requestTheRunSends(g);
+    expect(sent, 'the Run reached the engine boundary').toBeDefined();
+    expect((sent!.graph.nodes as Rec[]).some((x) => x.id === id), 'the target\'s node is sent').toBe(true);
+    expect((sent!.graph.edges as Rec[]).some((e) => e.from === id), 'with its link').toBe(true);
+    expect((sent!.goal_constraints as Rec[]).some((c) => c.node_id === id), 'and its active target row').toBe(true);
+  }, 60_000);
+
   it('⛔ CONTRAST: a later ambition on today\'s goal itself never takes the goal out, even where nothing else reaches it', () => {
     // Framed so ONLY the goal rule refuses: with no link into the goal, leaving it out would cut nothing off.
     const d = draft(null);
