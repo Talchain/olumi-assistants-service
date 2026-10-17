@@ -7,7 +7,7 @@ import { unsizedOlumiRiskLine } from '../unsized-risk.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardHolds, riskOccurrenceGoalSubject, riskOccurrencePostimageIsScoped,
-  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, userHoldsNowBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
+  riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP, derivedWindowHoldsBlock, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
 import { heldCardStillApplies, heldCardSubjectMoved } from '../proposal-object/still-applies.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
@@ -289,7 +289,8 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
   const asks = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(g) as Rec).readiness_issues ?? []) as Rec[])
     .filter((i) => i.code === 'MISSING_FACTOR_LEVEL' && i.factor_id === RISK).map((i) => i.message as string);
 
-  it('RED→GREEN: their words → ONE card quoting them → the press → the risk holds now as THEIRS (occurrence 1, basis user); its gap closes', async () => {
+  // DL-3 RULING 23:12Z (BUDDY-A #3327 AMEND): their words stay theirs; "already true now" and its p = 1 are Olumi's reading, adopted by the press.
+  it('RED→GREEN: their words → ONE card quoting them → the press → the risk holds now as Olumi’s reading they chose (occurrence 1, basis olumi); its gap closes', async () => {
     const w = world();
     // Before (AMENDED, DL 15 Oct 23:19Z): Olumi's unsized risk is left out of the Run, so readiness does not ask, and the host
     // says what the calculation leaves out; the user's own words below still size it through this card.
@@ -297,7 +298,8 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     expect(unsizedOlumiRiskLine(w.graph(), RISK, false)).toContain('‘Code quality deterioration’ is Olumi’s unsized risk suggestion');
     const card = await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow(SAID)) as Rec;
     expect(card).toMatchObject({ ok: true, statement: { subject: 'Code quality deterioration', field: 'holds_now', quotes: [SAID] } });
-    expect(card.public_label).toBe(`From your message: “${SAID}” Olumi proposes this reading: ‘Code quality deterioration’ already being true now. How `
+    expect(card.public_label).toBe(`From your message: “${SAID}” Olumi proposes this reading: ‘Code quality deterioration’ already being true now. `
+      + 'For this conditional reading, Olumi would represent ‘Code quality deterioration’ as true at least once in the next 3 months: occurrence 100%. This is Olumi’s derived assumption, not a numerical probability you stated, and does not establish persistence or effect. How '
       + 'strongly it affects ‘Productivity’ is a separate assumption: its effect on ‘Productivity’ is still Olumi’s placeholder, not yet sized. Record this reading?');
     expect(card.public_label).not.toMatch(/chance|likely|Olumi’s starting assumption/);
     // Card-only: the Agent's reading of a yes never applies it.
@@ -306,9 +308,11 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     // AIE 6181498097: its write adds Olumi's derivation (p = 1 within a window from today), so its button is "Use this reading".
     const res = await w.caps.authoriseChange({ ...ctx('Yes, use this reading.'), typed_approval_of: String(card.proposal_id),
       typed_approval_words: 'Yes, use this reading.' } as never, { proposal_id: String(card.proposal_id) }) as Rec;
-    expect(res).toMatchObject({ ok: true, applied: true, follow_up: 'Recorded from your words: ‘Code quality deterioration’ is already true now. '
-      + 'How strongly it affects the model is still Olumi’s placeholder on its link.' });
-    expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: 3 } });
+    expect(res).toMatchObject({ ok: true, applied: true, follow_up: 'Recorded Olumi’s reading of your words, which you chose to use: ‘Code quality '
+      + 'deterioration’ already holds now, so Olumi uses it as occurrence 100% within your goal’s period, a derived reading, not a probability you '
+      + 'stated. How strongly it affects the model is still Olumi’s placeholder on its link.' });
+    expect(String(res.follow_up)).not.toMatch(/Recorded from your words|is already true now/);
+    expect(riskOf(w.graph()).event_risk).toEqual({ version: 1, occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'olumi' }, horizon: { months: 3 } });
     // AIE 6178729504 / 6180193788: their words are durable beside it (`user_statements[]`), not only on the card and receipt.
     expect(riskOf(w.graph()).user_statements).toEqual([expect.objectContaining({ subject_key: `risk|${RISK}|||holds_now`, field: 'holds_now',
       statements: [expect.objectContaining({ speaker: 'user', quote: SAID, form: 'holds_now' })] })]);
@@ -335,13 +339,17 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
     expect(l.detail).toContain('the goal’s period counts from the launch, and being true now does not show it still holds then');
     expect(JSON.stringify(w.graph())).toBe(before);
     expect(w.commits()).toBe(0);
-    // The writer: a user block needs its verified statement, and a statement never carries Olumi's range.
-    const userBlock = userHoldsNowBlock(3)!;
-    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock })).toEqual({ kind: 'refused', reason: 'invalid_block' });
+    // The writer: a holds-now block (Olumi's derived p = 1) needs its verified statement, and a statement never carries Olumi's range.
+    const userBlock = derivedWindowHoldsBlock(3)!;
+    const asTheirs = { ...userBlock, occurrence: { ...userBlock.occurrence, basis: 'user' as const } };
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: asTheirs })).toEqual({ kind: 'refused', reason: 'invalid_block' });
     const statement = { speaker: 'user', quote: SAID, source: SAID, subject: { quantity: 'risk_holds_now', node_id: RISK }, form: 'holds_now', unit: '', reading: 'olumi' } as never;
     expect(applyRiskOccurrenceEdit(G, { ...approved(), holds_now: statement })).toEqual({ kind: 'refused', reason: 'invalid_block' });
     // A user's statement is written only WITH its durable record (`user_statements[]`, dated by the door's writer).
     expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock, holds_now: statement })).toEqual({ kind: 'refused', reason: 'invalid_block' });
     expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: userBlock, holds_now: statement, recorded_at: '2026-10-15T00:00:00.000Z' })).toMatchObject({ kind: 'mutated' });
+    // DL-3 RULING 23:12Z: never the user's p = 1, even with their statement and record beside it.
+    expect(applyRiskOccurrenceEdit(G, { ...approved(), event_risk: asTheirs, holds_now: statement, recorded_at: '2026-10-15T00:00:00.000Z' }))
+      .toEqual({ kind: 'refused', reason: 'invalid_block' });
   });
 });

@@ -20,6 +20,8 @@ import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardina
 import { STATEMENT_FORMS, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
+import { authorshipOf } from '../../cee/provenance/provenance-of.js';
+import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -185,6 +187,65 @@ export function goalTargetSentences(model: unknown, brief: string, figure: numbe
  * Which subject and role the figure has stays the AI's reading.
  */
 export type FigureSource = 'user' | 'unverified' | 'unclaimed';
+/**
+ * Qualitative introduction uses the SAME verified source map, not the drafter's provenance flag.
+ * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3327 B1 and its 22:59Z AMEND): a reading the host cannot check against the
+ * words is OLUMI'S READING of the user's words, never the user's statement of it:
+ *  · no statement makes a risk the user's at construction: a figure the quote writes proves the number, not its subject or role,
+ *    and a figure-free reading (holds_now, describes, any other form) is Olumi's. Nor does `retained` (words the drafter attached to the
+ *    subject outside its statements, a risk's `already_true_evidence`). A whole sentence of the user's there keeps the subject
+ *    unverified human material, its words kept in `claimed`; never Olumi's estimate;
+ *  · `holdsNowReading` is that reading's whole quote, for the door's card (the card IS the ask; only the press adopts it, as
+ *    Olumi's reading). A sentence another subject's verified statement claims gives none (the one cross-subject check).
+ */
+export function subjectSource(model: unknown, brief: string | undefined, subject: DraftedSubject, retained: readonly string[] = []): {
+  readonly author: ReturnType<typeof authorshipOf>;
+  readonly statements: readonly { readonly field: StatementField; readonly statement: UserStatement }[];
+  readonly claimed: readonly GivenStatement[];
+  readonly holdsNowReading?: string;
+} {
+  const entries = draftStatements(model);
+  const kept: GivenStatement[] = retained.map((quote) => ({ quote }));
+  const usersWords = (q: string): boolean => typeof brief === 'string' && wholeStatementIn(brief, q) && !quoteIsNotTheUsersClaim(brief, q);
+  const listed = Array.isArray(entries) && typeof brief === 'string'
+    && !entries.some((e) => e === null || typeof e !== 'object' || Array.isArray(e) || subjectOf((e as Record<string, unknown>).subject) === undefined);
+  const map = listed ? sourceMapOf(entries, brief as string) : undefined;
+  const ownKeys = new Set(STATEMENT_FIELDS.map(field => subjectKey(subject, field)));
+  // The one cross-subject check, as `figureSource`'s (TL 09:18Z AMENDED 10:49Z): a rival is ONLY another subject's verified statement
+  // on the same sentence that gives it a FIGURE. One sentence describing several subjects (Support says…; Sales believes…) is no rival.
+  const rivalled = (q: string): boolean => map !== undefined && [...map.verified].some(([key, other]) => !ownKeys.has(key)
+    && other.some(o => o.quote === q && (o.low !== undefined || o.high !== undefined)));
+  const statements = map === undefined ? []
+    : STATEMENT_FIELDS.flatMap(field => (map.verified.get(subjectKey(subject, field)) ?? []).map(statement => ({ field, statement })));
+  const reading = [...statements.filter(({ statement: st }) => st.form === 'holds_now' && st.negated !== true).map(({ statement: st }) => st.quote),
+    ...retained.filter(usersWords)].find((q) => !rivalled(q));
+  const out = <T extends object>(r: T) => ({ ...r, ...(reading !== undefined ? { holdsNowReading: reading } : {}) });
+  const unverifiedHuman = (claimed: readonly GivenStatement[]) =>
+    out({ author: authorshipOf({ nodeTag: 'unverified_brief' }), statements, claimed: [...claimed, ...kept] });
+  const keptWords = retained.some(usersWords);
+  const unknown = (claimed: readonly GivenStatement[] = []) => (keptWords ? unverifiedHuman(claimed)
+    : out({ author: authorshipOf({ words: { verified: false, unknown: true } }), statements: [], claimed: [...claimed, ...kept] }));
+  // A list with an entry that names no subject is not a complete source: its claims are unknown, never "nobody claimed it".
+  if (map === undefined) return unknown();
+  const keyOf = (s: DraftedSubject) => subjectKey(s, 'level');
+  const claims = (entries as unknown[]).filter((entry): entry is Record<string, unknown> => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const sub = subjectOf((entry as Record<string, unknown>).subject);
+    return sub !== undefined && keyOf(sub) === keyOf(subject);
+  });
+  const claimed = claims.map(givenOf);
+  if (claims.length === 0) {
+    return keptWords ? unverifiedHuman(claimed)
+      : out({ author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed: [...claimed, ...kept] });
+  }
+  // ⭐ GREEN CORE (DL-3 stop rule; BUDDY-A #3327 R2 + R3 B1): for a risk, NO construction statement verifies the user. A figure the
+  // quote writes proves the number, not that it is THIS risk's chance (a budget figure read as an occurrence), and a
+  // figure-free reading is Olumi's. The user's whole words stay human material, unverified; their chance is recorded only by the
+  // door's own occurrence card, on their press.
+  // Known human words (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
+  return claims.some(c => typeof c.quote === 'string' && usersWords(c.quote)) || keptWords ? unverifiedHuman(claimed) : unknown(claimed);
+}
+
 export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
   if (!Array.isArray(m.statements)) return undefined;
@@ -311,6 +372,13 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     const drafted = subjectOf(r['subject']);
     const field = STATEMENT_FIELDS.find((f) => f === r['field']);
     if (drafted === undefined || field === undefined) continue;
+    if (drafted.kind === 'risk') {
+      // The user's words are recorded on a risk they are human material for. A holds-now reading is Olumi's, carried only by its card
+      // (`already_true_quote`), and a risk's chance only by the door's occurrence card: never a construction record of either.
+      if (field === 'holds_now' || field === 'occurrence') continue;
+      const source = subjectSource({ statements: entries }, brief, drafted);
+      if (source.author.origin !== 'human') continue;
+    }
     const verified = [...sourceMapOf([entry], brief).verified.values()].flat();
     if (verified.length === 0) continue;
     const ref = drafted.kind === 'option' && drafted.factor_label !== undefined

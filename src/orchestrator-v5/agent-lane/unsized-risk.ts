@@ -13,7 +13,7 @@
  *    admission's `proposed_by: 'olumi'` stamp, `nodeIntroductionOf`). A risk the user stated or added, one from the brief's words,
  *    and one of unknown origin keep today's path and still ask (AIE: a missing or unknown stamp never enters this exception);
  *  · nobody has sized: no level by readiness's own rule (`riskHoldsALevel`) and no occurrence block at all;
- *  · is undecided (`analysis_participation` absent: an adopted risk asks; a `retained_excluded` one is already out);
+ *  · is still provisional (no participation choice, or an unsized omission already retained; an adopted `included` risk asks);
  *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it, and a directed path to a goal;
  *  · is not something the Run needs: no option sets or links to it, and no limit names it (those keep asking, as before).
  * Pure; read on the model as saved by readiness, the Run's and what-if's compute projection, and the host's line.
@@ -26,8 +26,10 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** Olumi's suggestion by positive evidence: the drafter's own label, or admission's stamp. Never by a missing stamp. */
-const olumiSuggested = (n: Rec): boolean => authorshipOf({ nodeTag: n.provenance }).origin === 'ai'
-  || nodeIntroductionOf(n).origin === 'olumi_added';
+const olumiSuggested = (n: Rec): boolean => {
+  const author = authorshipOf({ nodeTag: n.provenance });
+  return author.origin === 'ai' || (author.origin === 'unknown' && nodeIntroductionOf(n).origin === 'olumi_added');
+};
 
 export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return new Set();
@@ -35,8 +37,12 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
   const counts = new Map<unknown, number>();
   for (const n of nodes) counts.set(n.id, (counts.get(n.id) ?? 0) + 1);
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
-  // Judged on the graph the Run SENDS: a node kept out (`retained_excluded`) and its links are not sent.
-  const keptOut = new Set(nodes.filter((n) => n.analysis_participation === 'retained_excluded').map((n) => n.id));
+  const candidates = nodes.filter(n => n.kind === 'risk' && olumiSuggested(n)
+    && (n.analysis_participation === undefined || n.analysis_participation === 'retained_excluded')
+    && (n.event_risk === undefined || n.event_risk === null) && !riskHoldsALevel(n, graph));
+  const candidateIds = new Set(candidates.map(n => n.id));
+  // A persisted omission is still checked on its retained causal path, so every reader can disclose it.
+  const keptOut = new Set(nodes.filter(n => n.analysis_participation === 'retained_excluded' && !candidateIds.has(n.id)).map(n => n.id));
   const causal = (id: unknown): boolean => kindOf.has(id) && !keptOut.has(id) && !['option', 'decision', 'constraint'].includes(String(kindOf.get(id)));
   const edges = graph.edges.filter(isRec).filter((e) => e.edge_type !== 'bidirected' && causal(e.from) && causal(e.to));
   // AIE (6177505214): keep the protection for option-set risks. A risk an option sets (an intervention) OR acts on (an option → risk
@@ -61,10 +67,15 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
     }
     return false;
   };
-  return new Set(nodes.filter((n) => n.kind === 'risk' && typeof n.id === 'string' && counts.get(n.id) === 1
-    && olumiSuggested(n) && n.analysis_participation === undefined
-    && (n.event_risk === undefined || n.event_risk === null) && !riskHoldsALevel(n, graph)
+  return new Set(candidates.filter((n) => typeof n.id === 'string' && counts.get(n.id) === 1
     && !needed.has(n.id) && !edges.some((e) => e.to === n.id) && reachesGoal(n.id)).map((n) => n.id as string));
+}
+
+/** Persist only the omissions selected by the existing scientific/participation rule. */
+export function retainUnsizedOlumiRisks<T extends { nodes: readonly unknown[] }>(graph: T): T {
+  const ids = unsizedOlumiRiskIds(graph);
+  return ids.size === 0 ? graph : { ...graph, nodes: graph.nodes.map(n => isRec(n) && ids.has(String(n.id))
+    ? { ...n, analysis_participation: 'retained_excluded' } : n) };
 }
 
 /**

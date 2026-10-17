@@ -108,7 +108,7 @@ function oversized(d: Draft): Draft {
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 /** The first draft's size verdict, as the builder measures it (prepared, then admitted) — for byte pins of the retry prompt. */
-const firstVerdict = (d: Draft) => assessConstructionSize(admitCandidateModel(prepareProvisionalCandidate(d as unknown as CandidateModel).candidate, {}));
+const firstVerdict = (d: Draft, brief?: string) => assessConstructionSize(admitCandidateModel(prepareProvisionalCandidate(d as unknown as CandidateModel).candidate, {}, brief));
 
 /**
  * B1 (5842265540): the COMBINED size+repair retry's repair rule — which options may go, and never "Preserve every option".
@@ -125,7 +125,7 @@ const COMPACTION_REPAIR_RULE = 'Repair only the listed construction issues. Keep
 type Graph = { nodes: Array<Record<string, unknown> & { id: string; kind: string }>; edges: Array<{ from: string; to: string }> };
 type Req = { instructions: string; input: string };
 
-async function construct(first: Draft, retry?: Draft) {
+async function construct(first: Draft, retry?: Draft, brief: string = BRIEF) {
   expect(strict(first), JSON.stringify(strict.errors)).toBe(true);
   if (retry !== undefined) {
     const pinned = new Ajv({ strict: false }).compile(retrySchemaPinningGoal(first.goal as unknown as CandidateModel['goal']));
@@ -143,7 +143,7 @@ async function construct(first: Draft, retry?: Draft) {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const result = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, async (req) => {
+  const result = await buildModelFromBrief(SCENARIO, brief, dispatch, async (req) => {
     reqs.push({ instructions: req.instructions, input: req.input });
     return { text: JSON.stringify(drafts[Math.min(reqs.length - 1, drafts.length - 1)]) };
   }) as Record<string, unknown>;
@@ -538,8 +538,15 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
 
   const riskIds = (g: Graph) => g.nodes.filter((n) => n.kind === 'risk').map((n) => n.id).sort();
   const leftOutLabels = (r: Record<string, unknown>) => ((r.left_out_to_stay_compact ?? []) as { label: string }[]).map((x) => x.label).sort();
-  /** "Delivery slip" stamped `explicit`: a risk the USER stated. */
-  const userRisk = (d: Draft): Draft => ({ ...d, risks: d.risks.map((r) => (r.label === 'Delivery slip' ? { ...r, provenance: 'explicit' } : r)) });
+  /**
+   * "Delivery slip" in the USER'S OWN WORDS: stated in the brief and bound by the drafter. ⛔ BUDDY-A #3327 de1534fd: since the risk
+   * source owner (CONTRACT-A row 3), a drafter's `explicit` tag alone never makes a risk the user's (it was this fixture's stale
+   * precondition); the user's words do, as human material whose reading stays unverified. The control's assertions are unchanged.
+   */
+  const RISK_SAID = 'There is about a 20% chance that delivery slips.';
+  const RISK_BRIEF = `${BRIEF} ${RISK_SAID}`;
+  const userRisk = (d: Draft): Draft => ({ ...d, risks: d.risks.map((r) => (r.label === 'Delivery slip' ? { ...r, provenance: 'explicit' } : r)),
+    statements: [{ subject: { kind: 'risk', label: 'Delivery slip', to_label: null, factor_label: null }, field: 'occurrence', form: 'point', quote: RISK_SAID, value: 20, low: null, high: null, unit: '%', qualifier: null, conditions: null }] }) as Draft;
   /** Every occurrence of one exact label (a JSON string), respelled. */
   const respell = (d: Draft, from: string, to: string): Draft => JSON.parse(JSON.stringify(d).replaceAll(`"${from}"`, `"${to}"`)) as Draft;
   /** The risk's own direction into the goal, reversed ("Delivery slip" RAISES delivery velocity). */
@@ -610,11 +617,11 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
 
   it('CONTROL (keepsEveryUserStatedIdentity — the verifier\'s P1d): a compaction that sheds a USER-stated risk is NOT adopted, on both arms; keeping it IS', async () => {
     for (const first of [userRisk(withRisk(oversized(c22()), [])), userRisk(withRiskMechanismIssue())]) {
-      expect(firstVerdict(first).brief_stated_keys.nodes, 'PRECONDITION: the risk is the user\'s, by identity').toContain('risk:delivery slip');
-      expectRefusedNotAdopted(await construct(first, covered()));
+      expect(firstVerdict(first, RISK_BRIEF).brief_stated_keys.nodes, 'PRECONDITION: the risk is the user\'s, by identity').toContain('risk:delivery slip');
+      expectRefusedNotAdopted(await construct(first, covered(), RISK_BRIEF));
     }
     // Contrast, same first draft: the retry that KEEPS the user's risk (on its path) is adopted, the risk by id.
-    const kept = await construct(userRisk(withRisk(oversized(c22()), [])), userRisk(withRisk(covered(), [])));
+    const kept = await construct(userRisk(withRisk(oversized(c22()), [])), userRisk(withRisk(covered(), [])), RISK_BRIEF);
     expect(kept.result.ok, JSON.stringify(kept.result)).toBe(true);
     expect(riskIds(kept.graph!)).toEqual(['delivery_slip']);
   });

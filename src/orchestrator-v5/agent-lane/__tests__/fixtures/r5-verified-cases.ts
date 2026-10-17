@@ -15,6 +15,7 @@ import { buildCandidateSchema, buildModelFromBrief, carryFindingsAcrossRetry, pr
 import type { InternalDispatch } from '../../runtime/agent-capabilities.js';
 import { beforeDoorTag } from '../licence-test-graphs.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { unsizedOlumiRiskIds } from '../../unsized-risk.js';
 
 export const fixture = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
 const json = (path: string): any => JSON.parse(fixture(path));
@@ -177,6 +178,9 @@ function beforeAiLevelType(a: ReturnType<typeof admitted>, raw: CandidateModel, 
     return { ...n, observed_state };
   }) };
 }
+// The risks the Run already leaves out, now persisted on the saved model (#3350): staging 2b073341's own `unsizedOlumiRiskIds` on
+// staging's admitted graph of each raw returned exactly these, and none for every other raw.
+const RUN_OMITS_BY_RAW: Record<string, readonly string[]> = { '689f4bb9.json': ['launch_delay'] };
 export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
   name: `raw no-evidence ${c.file} ${c.sha256}`,
   run: () => {
@@ -195,6 +199,9 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(sentIntervention(oldCell), true);
     assert.equal(sentIntervention({ ...oldCell, stated_evidence: null }), false);
     const p = prepare(raw, brief); const a = admitted(p.candidate, brief);
+    const omitted = a.nodes.filter(n => n.analysis_participation === 'retained_excluded').map(n => n.id);
+    assert.deepEqual(omitted, RUN_OMITS_BY_RAW[c.file] ?? []);
+    assert.deepEqual([...unsizedOlumiRiskIds({ nodes: a.nodes, edges: a.edges, goal_constraints: a.goal_constraints })], omitted);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
     assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
   },
