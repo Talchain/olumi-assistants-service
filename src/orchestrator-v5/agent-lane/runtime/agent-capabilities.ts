@@ -3932,6 +3932,10 @@ export function createAgentCapabilities(
       notIncluded.push({ part, refusal: typeof offered.refusal === 'string' ? offered.refusal : 'not_prepared',
         detail: typeof offered.detail === 'string' ? offered.detail : fallback });
     };
+    if (laterAmbitionUnverified) omit(`a new later ambition for “${old.label}”`,
+      { ok: false, mutated: false, refusal: 'ambition_not_stated',
+        detail: 'The earlier aim stays as recorded. This card changes only the current goal.' },
+      'This card does not change the earlier aim into a later ambition.');
     const removals: { removed_node_ids: string[]; removed_edges: { from: string; to: string }[] }[] = [];
     if (args.current_level !== undefined) {
       const offered = await prepare.proposeGoalCurrentLevel!(ctx, { goal_label: label, ...args.current_level, user_stated: true });
@@ -4005,7 +4009,7 @@ export function createAgentCapabilities(
     const interpretation = said === null ? ` Olumi reads the target as ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}; this direction is a proposal, not a comparator the user stated.` : '';
     const public_label = `From your message: “${source}”. Olumi proposes making “${label}” the current goal: ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}.`
       + interpretation + (matched.length === 0 ? ' This adds a new outcome; its label is Olumi’s proposal.' : '')
-      + ` “${old.label}”${earlierTarget} stays as ${laterAmbition !== undefined ? `a later ambition, as Olumi reads “${laterAmbition}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal.${laterAmbitionUnverified ? ' An optional later-ambition reading could not be verified against your recorded words, so this card adds no such claim; the earlier aim stays as history.' : ''} The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below.`
+      + ` “${old.label}”${earlierTarget} stays as ${laterAmbition !== undefined ? `a later ambition, as Olumi reads “${laterAmbition}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal. The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below.`
       + scope.excluded.map(id => ` “${String((candidate.nodes as Record<string, unknown>[]).find(n => n.id === id)!.label)}” leads only to the earlier aim, so its words and links also stay visible as context and are left out of this analysis.`).join('')
       + ` Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.`
       + (!hasIncoming ? ' The new goal has no incoming causal relationships yet. This card does not establish how the options affect it; that remains to be modelled.' : '')

@@ -354,6 +354,7 @@ describe('one native governing-outcome correction', () => {
     if (fault === 'unit') input.unit = 'customers';
     if (fault === 'ambition') input.later_ambition_quote = 'This is definitely the later ambition.';
     const result = await dispatchTool('propose_goal_target', JSON.stringify(input), w.ctx, w.caps());
+    if (fault === 'ambition') expect(result.refusal).toBe('ambition_not_stated');
     expect(result).toMatchObject({ ok: false, mutated: false }); expect(result).not.toHaveProperty('proposal_id');
     expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
   });
@@ -1075,7 +1076,12 @@ it.each([undefined, '', 'SYNTHETIC ONLY: 1% in ten years'])('ROW-C DEV P03 decla
   expect(record.statements).toEqual(expect.arrayContaining([expect.objectContaining({source:message,quote:message,speaker:'user',reading:'olumi'})]));
   const old=w.graph().nodes.find((n:Rec)=>n.id==='leaking_caps_reaching_dispatch');
   expect(old.user_statements).toEqual(read.graph.nodes.find((n:Rec)=>n.id===old.id).user_statements);
-  if(later) {expect(JSON.stringify(candidate)).not.toContain(later);expect(out.public_label).toContain('this card adds no such claim');}
+  if(later) {
+    expect(JSON.stringify(candidate)).not.toContain(later);
+    expect(out.not_included).toEqual(expect.arrayContaining([expect.objectContaining({ refusal:'ambition_not_stated' })]));
+    expect(out.public_label).toContain('Not included on this card:');
+    expect(out.note).toContain('name each part left out'); expect(out.note).toContain('Do not say the omitted parts will be saved');
+  }
   expect(await caps.authoriseChange(press,{proposal_id:pid})).toMatchObject({ok:true,already_applied:true});expect(w.writes).toHaveLength(1);
 });
 
@@ -1098,4 +1104,82 @@ it('ROW-C DEV current correction keeps the whole-candidate compare-and-set bound
   const pid=String(offered.proposal_id),cold=restoreCard(w.proposals.get(pid)!,offered,w.ctx);
   const out=await w.caps(cold).authoriseChange({...w.ctx,typed_approval_of:pid},{proposal_id:pid});
   expect(out).toMatchObject({ok:false,mutated:false});expect(w.writes).toHaveLength(0);
+});
+
+// Synthetic controls for CLAUDE-FOUNDER-ROWC-607ad7c9 B1; independent of DEV wording.
+import { readGoalRecord as rgr } from '../../orchestrator-v5/goal-target/goal-record.js';
+const synth = (raw = 5000, unit = 'visitors', dir = '>=') => ({ nodes: [
+  { id: 'site_visits', kind: 'goal', label: 'Website visits', goal_threshold_raw: raw, goal_threshold: 0.8,
+    goal_threshold_cap: raw * 1.25, goal_threshold_unit: unit, goal_threshold_frame: 'level', goal_direction: dir, threshold_source: 'brief_extraction',
+    description: 'Earlier stated aim' },
+  { id: 'focus', kind: 'option', label: 'Run a campaign', interventions: { effort: { value: 0.8 } } },
+  { id: 'effort', kind: 'factor', label: 'Campaign effort', observed_state: { value: 0.8, baseline: 0.8, source: 'brief_extraction' } },
+], edges: [{ from: 'focus', to: 'effort', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+  { from: 'effort', to: 'site_visits', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.5, effect_direction: 'positive' }] });
+const BRIEF = 'We want at least 5000 visitors from the spring campaign.';
+const LATER = 'SYNTHETIC: my later ambition is 9000 visitors.';
+async function synthCall(o: { message: string; value: number; unit: string; constraint_type: string; later?: unknown; graph?: Rec; verified?: string[] }) {
+  const g = o.graph ?? synth();
+  const parsed = GraphV3.safeParse(g); expect(parsed.success, JSON.stringify(parsed)).toBe(true);
+  const w = await world({ graph: g, brief: BRIEF, message: o.message });
+  w.ctx.verified_user_messages = o.verified ?? [BRIEF, o.message];
+  const args: Rec = { value: o.value, unit: o.unit, constraint_type: o.constraint_type, governing_outcome: 'Newsletter sign-ups',
+    goal_change_quote: o.message, rationale: o.message };
+  if (o.later !== undefined) args.later_ambition_quote = o.later;
+  const out = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+  return { w, out };
+}
+const EQUAL = 'I mislabelled the goal. Keep the target of at least 5000 visitors, but for newsletter sign-ups rather than website visits.';
+describe('ROW-C synthetic held-target guard controls', () => {
+  it.each([undefined, LATER])('PROBE S1 equal held target + later %j proceeds; press writes; later absent', async later => {
+    const { w, out } = await synthCall({ message: EQUAL, value: 5000, unit: 'visitors', constraint_type: 'at_least', later });
+    expect(out, String(out.refusal)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(out.proposal_id), held = w.proposals.get(pid)!; const v = held.operations[0]!.value as Rec;
+    expect(v.later_ambition_quote).toBeUndefined();
+    const cold = restoreCard(held, out, w.ctx);
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, turn_id: randomUUID(), user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(v.candidate, w.graph())).toBe(true);
+    const saved = JSON.stringify(w.graph());
+    if (later) { expect(saved).not.toContain(String(later)); expect(String(out.public_label)).not.toContain('9000'); }
+    const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.label).toBe('Newsletter sign-ups');
+    expect(rgr(w.graph(), goal.id)?.target).toMatchObject({ raw: 5000, unit: 'visitors', comparator: '>=' });
+    expect(w.graph().nodes.map((n: Rec) => n.description ?? '').join(' ')).not.toContain('9000');
+  });
+  it.each([
+    ['changed value', 'Keep the target of at least 6000 visitors, but for newsletter sign-ups rather than website visits.', 6000, 'visitors', 'at_least'],
+    ['changed unit', 'Keep the target of at least 5000 sessions, but for newsletter sign-ups rather than website visits.', 5000, 'sessions', 'at_least'],
+    ['changed comparator', 'Keep the target below 5000 visitors, but for newsletter sign-ups rather than website visits.', 5000, 'visitors', 'at_most'],
+    ['AI flips unstated direction', 'Keep the 5000 visitors target, but for newsletter sign-ups rather than website visits.', 5000, 'visitors', 'at_most'],
+  ] as const)('PROBE S2 %s + unverified later => ambition_not_stated, nothing prepared', async (_n, message, value, unit, ct) => {
+    const control = await synthCall({ message, value, unit, constraint_type: ct });
+    expect(control.out, String(control.out.refusal)).toMatchObject({ ok: true }); // positive control: the call is otherwise valid
+    const { w, out } = await synthCall({ message, value, unit, constraint_type: ct, later: LATER });
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'ambition_not_stated' });
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.sent).toHaveLength(0);
+  });
+  it.each(['', '   ', null, 42])('N1 changed target treats empty/non-text optional quote %j as absent', async later => {
+    const message = 'Set the target to at least 6000 visitors for newsletter sign-ups rather than website visits.';
+    const { w, out } = await synthCall({ message, value: 6000, unit: 'visitors', constraint_type: 'at_least', later });
+    expect(out).toMatchObject({ ok: true, mutated: false });
+    const held = w.proposals.get(String(out.proposal_id))!, value = held.operations[0]!.value as Rec;
+    expect(value.later_ambition_quote).toBeUndefined(); expect(out.not_included).toBeUndefined();
+    const goal = value.candidate.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(rgr(value.candidate, goal.id)?.target).toMatchObject({ raw: 6000, unit: 'visitors', comparator: '>=' });
+    expect(w.writes).toHaveLength(0); expect(w.sent).toHaveLength(0);
+  });
+  it('C1 dropped reading and figure are absent from the offered proposal, durable carrier and result', async () => {
+    const { w, out } = await synthCall({ message: EQUAL, value: 5000, unit: 'visitors', constraint_type: 'at_least', later: LATER });
+    expect(out).toMatchObject({ ok: true });
+    const held = w.proposals.get(String(out.proposal_id))!;
+    const chip = approvalChipsFor([{ name: 'propose_change', ...out } as never], () => ({ proposal: held, result: out as never }))[0]!;
+    const carrier = proposalPendingAction(held, chip, { scenario_id: w.ctx.scenario_id, emitted_at_iso: new Date().toISOString() });
+    for (const item of [held, carrier, out]) {
+      const numbers: number[] = [];
+      const text = JSON.stringify(item, (_key, value) => { if (typeof value === 'number') numbers.push(value); return value; });
+      expect(text).not.toContain(LATER); expect(numbers).not.toContain(9000);
+    }
+    expect(out.public_label).not.toContain('9000');
+    expect(restoreCard(held, out, w.ctx).get(held.proposal_id)).toBeDefined();
+  });
 });
