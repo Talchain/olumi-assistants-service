@@ -404,7 +404,7 @@ export function goalTargetStatements(model: unknown, brief: string, figure: numb
   const metric = typeof m.goal?.metric === 'string' ? m.goal.metric : '';
   if (metric.trim() === '' || !Number.isFinite(figure)) return [];
   const states = (n: number | undefined): boolean => typeof n === 'number' && Math.abs(n) === Math.abs(figure);
-  const map = sourceMapOf(m.statements, brief);
+  const map = sourceMapOf(draftStatements(model), brief);
   const key = subjectKey({ kind: 'goal', label: metric }, 'target');
   // TL 09:18Z (2), AMENDED 10:49Z: a rival is ONLY another of the AI's own verified statements on the same sentence that gives
   // that figure to another subject or field ("We have a budget of £40,000." as the budget's level and the goal's target). No
@@ -471,6 +471,16 @@ const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound
  * against its own link's direction, on no drawn link, or across zero is returned as given (and refused, as before).
  * Every other entry is returned as given. Pure.
  */
+/** A cut target's statement in the magnitudes its words write: −20 → 20; "at most −20" (a change) → at least 20 (a cut). */
+function writtenMagnitudesOfCut(r: Record<string, unknown>): Record<string, unknown> | undefined {
+  const neg = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v < 0;
+  if (r['form'] === 'point' && neg(r['value'])) return { ...r, value: -r['value'] };
+  if ((r['form'] === 'upper_bound' || r['form'] === 'lower_bound') && neg(r['value'])) {
+    return { ...r, value: -r['value'], form: r['form'] === 'upper_bound' ? 'lower_bound' : 'upper_bound' };
+  }
+  if (r['form'] === 'range') { const ends = writtenEndsOfNegativeRange(r['low'], r['high']); return ends === undefined ? undefined : { ...r, ...ends }; }
+  return undefined;
+}
 export function draftStatements(model: unknown): unknown {
   const m = model !== null && typeof model === 'object' ? model as Record<string, unknown> : {};
   const raw = m['statements'];
@@ -485,10 +495,20 @@ export function draftStatements(model: unknown): unknown {
     const r = l !== null && typeof l === 'object' ? l as Record<string, unknown> : {};
     return r['direction'] === 'negative' && typeof r['from'] === 'string' && typeof r['to'] === 'string' ? [`${norm(r['from'])}|${norm(r['to'])}`] : [];
   }));
-  if (limits.length === 0 && drawnNegative.size === 0) return raw;
+  // ⛔ T1 HOST P05 (pilot 17 Oct): a CUT stated as a change ("cut median repair time by 20%") is drafted −20 on a decreasing change
+  // goal; the words write 20. The goal's own direction carries the sign (its operator and frame), so its target statements keep the
+  // magnitudes the words write, exactly as a link's range does. A negative on any other goal (a level, or an INCREASING change: the
+  // AI's sign disagreeing with its own operator) is returned as given, and refused as before.
+  const goal = m['goal'] !== null && typeof m['goal'] === 'object' ? m['goal'] as Record<string, unknown> : {};
+  const cutGoal = (goal['frame'] === 'change_abs' || goal['frame'] === 'change_rel') && (goal['operator'] === '<=' || goal['operator'] === '<')
+    && typeof goal['value'] === 'number' && goal['value'] < 0 && typeof goal['metric'] === 'string' ? norm(goal['metric']) : undefined;
+  if (limits.length === 0 && drawnNegative.size === 0 && cutGoal === undefined) return raw;
   return raw.map((entry: unknown) => {
     const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
     const subject = subjectOf(r?.['subject']);
+    if (r !== undefined && cutGoal !== undefined && subject?.kind === 'goal' && norm(subject.label) === cutGoal && r['field'] === 'target') {
+      return writtenMagnitudesOfCut(r) ?? entry;
+    }
     if (r !== undefined && subject?.kind === 'link' && subject.to_label !== undefined && r['field'] === 'effect' && r['form'] === 'range'
       && drawnNegative.has(`${norm(subject.label)}|${norm(subject.to_label)}`)) {
       const ends = writtenEndsOfNegativeRange(r['low'], r['high']);
