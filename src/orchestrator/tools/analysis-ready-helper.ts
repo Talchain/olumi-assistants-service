@@ -1860,7 +1860,7 @@ export function assessCanonicalAnalysisReadiness(
     const analysisReady = semantic
       ? {
           ...semantic,
-          ...(semanticForAdmission ? { status: semanticForAdmission.status, blockers: activeSemanticBlockers } : {}),
+          ...(userExcludedIds.size > 0 && semanticForAdmission ? { status: semanticForAdmission.status, blockers: activeSemanticBlockers } : {}),
           ...(policyIssues.length > 0 ? {
             blockers: activeSemanticBlockers,
             ...(blockingIssues.length === 0 && semantic.options.length >= 2

@@ -131,7 +131,8 @@ describe('the Run sends PLoT the held copy (wire only); the persisted graph keep
     const FX = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')) as { goal_node_id: string; graph: Rec };
     const graph = structuredClone(FX.graph);
     edit(graph.edges.find((x: Rec) => x.from === 'paying_subscribers' && x.to === 'mrr'));
-    const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ id: n.id, option_id: n.id, label: n.label, interventions: { pro_plan_price: 59 } }));
+    // R2: retain the recorded baseline/£59 contrast; the witness is about the graph, not identical option maps.
+  const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ id: n.id, option_id: n.id, label: n.label, interventions: n.interventions ?? {}, is_baseline: n.is_baseline }));
     const snapshot = { graph: structuredClone(graph), options, goal_node_id: FX.goal_node_id, rawPersistedGraph: structuredClone(graph) };
     const runMock = vi.fn(async () => structuredClone(minimal));
     const handler = createRunAnalysisHandler({ plotClient: { run: runMock, validatePatch: vi.fn().mockResolvedValue({}) }, scenarioReader: async () => snapshot } as never);

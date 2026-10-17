@@ -143,8 +143,14 @@ function pairKey(pair: { readonly optionId: string; readonly factorId: string })
   return `${pair.optionId}::${pair.factorId}`;
 }
 
+// R2: these six-step identity checks complete the strict missing-value record.
+// Canonical Run recovery is checked separately below and never waits for optional completion.
+function strictRepairReadiness(graph: unknown) {
+  return assessCanonicalAnalysisReadiness(graph).analysisReady;
+}
+
 function recoveryChip(graph: unknown) {
-  const readiness = buildCanonicalAnalysisReadyFromGraph(graph);
+  const readiness = strictRepairReadiness(graph);
   return buildReadinessRecoveryChip(
     readiness as never,
     (graph as { nodes: { id?: string; kind?: string; label?: string }[] }).nodes,
@@ -288,11 +294,31 @@ describe('canonical repair loop — ACCEPTANCE 1: strict progress and terminatio
   });
 });
 
+it('R2: an admitted comparison never waits for optional strict value completion or another recovery click', () => {
+  let graph: unknown = startGraph();
+  let admittedWithOpenValues = 0;
+  for (let step = 0; step < 6; step += 1) {
+    const readiness = buildCanonicalAnalysisReadyFromGraph(graph)!;
+    const nodes = (graph as { nodes: { id?: string; kind?: string; label?: string }[] }).nodes;
+    if (readiness.may_run === true) {
+      expect(projectReadinessRecovery(readiness, nodes).kind).toBe('run');
+      expect(buildReadinessRecoveryChip(readiness, nodes)).toBeNull();
+      if (unresolvedPairs(graph).length > 0) admittedWithOpenValues += 1;
+    } else {
+      expect(projectReadinessRecovery(readiness, nodes).kind).not.toBe('run');
+    }
+    const pair = deriveAskedEffectPair(readiness)!;
+    graph = applyUserAnswer(graph, pair, USER_VALUE);
+  }
+  expect(admittedWithOpenValues).toBeGreaterThan(0);
+  expect(buildCanonicalAnalysisReadyFromGraph(graph)?.may_run).toBe(true);
+});
+
 describe('canonical repair loop — ACCEPTANCE 2: the affordance carries identity', () => {
   it('at every step the offered chip is the identity chip for that step`s pair, and it routes back to that option', () => {
     let graph: unknown = startGraph();
     for (let step = 0; step < 6; step += 1) {
-      const readiness = buildCanonicalAnalysisReadyFromGraph(graph);
+      const readiness = strictRepairReadiness(graph);
       const pair = deriveAskedEffectPair(readiness);
       expect(pair).not.toBeNull();
       const chip = recoveryChip(graph);
@@ -373,7 +399,7 @@ describe('canonical repair loop — ACCEPTANCE 3: never an already-resolved pair
       // Independent oracle again (see `askedBlocker`): the raw head blocker,
       // not the derivation that minted the chip.
       expect(resolved.matched && resolved.optionId).toBe(
-        askedBlocker(buildCanonicalAnalysisReadyFromGraph(graph)).option_id,
+        askedBlocker(strictRepairReadiness(graph)).option_id,
       );
       const offered = unresolvedPairs(graph);
       for (const factorLabel of resolved.matched ? resolved.factorLabels : []) {

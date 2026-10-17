@@ -872,10 +872,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     });
     const comparisonRefusal = optionSubmission.comparisonRefusal;
     if (comparisonRefusal !== null) {
+      // Strict readiness names existing unsized options before the final-set comparison fallback.
+      const admission = resolveRunAdmission(snapshot.rawPersistedGraph ?? snapshot.graph);
       throw new HandlerInvocationFailedError(comparisonRefusal.message, {
         cause_kind: 'analysis_not_ready', retryable: false,
         details: { handler_id: 'run_analysis', scenario_id: args.scenario_id,
-          reason_code: 'insufficient_analysable_options', next_step: comparisonRefusal.nextStep },
+          reason_code: 'insufficient_analysable_options', next_step: admission.blockedNextStep ?? comparisonRefusal.nextStep },
       });
     }
     // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire

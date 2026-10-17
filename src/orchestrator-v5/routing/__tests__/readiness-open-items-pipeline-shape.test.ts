@@ -279,7 +279,7 @@ describe("readiness open items — the pipeline-shaped payload must not collapse
 
     // Borrow the real blockers, then assert the canonical `ready` verdict over
     // them — the exact shape the contradiction code above names.
-    const readyWithBlockers = { ...blocked, status: "ready" };
+    const readyWithBlockers = { ...blocked, status: "ready", may_run: true }; // R2: advisory blockers beside affirmative admission.
 
     // Precondition pinned in-test: this fixture genuinely COULD over-report.
     expect(readyWithBlockers.status).toBe("ready");

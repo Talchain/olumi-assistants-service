@@ -109,13 +109,13 @@ describe('one comparison admission after user exclusions', () => {
     expect(production.run).toHaveBeenCalledTimes(1);
     expect((production.run.mock.calls[0]![0].options as Array<{ option_id: string }>).map(o => o.option_id)).toEqual(['b', 'c']);
   });
-  it('R2: strict ready cannot offer Run or lift the leader rail when admission refuses identical survivors', () => {
+  it('R2: strict ready cannot offer Run when admission refuses identical survivors; the leader licence stays separate', () => {
     const graph = synthetic('Capacity', 1);
     for (const id of ['b', 'c']) Object.assign(graph.nodes.find(n => n.id === id)!, { interventions: { factor: 0.4 } });
     const ready = buildCanonicalAnalysisReadyFromGraph(graph)!;
     expect(ready.may_run).toBe(false);
     expect(projectReadinessRecovery(ready).kind).not.toBe('run');
-    expect(analysisReadyPermitsLeaderNaming(ready)).toBe(false);
+    expect(analysisReadyPermitsLeaderNaming(ready)).toBe(true); // DL: admission stands down; the result licence/currentness still owns a leader.
   });
   it('R2: a waived strict gap can offer an admitted comparison without promising a goal chance', () => {
     const graph = synthetic('Capacity', 0);
@@ -131,7 +131,7 @@ describe('one comparison admission after user exclusions', () => {
     const recovery = projectReadinessRecovery(ready);
     expect(recovery.kind).toBe('review_model');
     expect(recovery.nextStep).toBe('We can keep exploring the model and its assumptions. If you want a comparison, name the different options you are weighing.');
-    expect(analysisReadyPermitsLeaderNaming(ready)).toBe(false);
+    expect(analysisReadyPermitsLeaderNaming(ready)).toBe(true); // DL: admission stands down; the result licence/currentness still owns a leader.
   });
   it('R2: distinctness is measured on the final wire values, not raw carrier spelling', () => {
     const graph = synthetic('Capacity', 0);
@@ -185,6 +185,45 @@ describe('one comparison admission after user exclusions', () => {
     const production = invoke(graph, true);
     await expect(production.result()).rejects.toBeInstanceOf(HandlerInvocationFailedError);
     expect(production.run).not.toHaveBeenCalled();
+  });
+  it.each(['Delivery capacity', 'Service throughput'])('%s: unsized existing options keep the strict reason in admission, loader and direct handler', async topic => {
+    const graph = synthetic(topic, 0);
+    for (const id of ['b', 'c']) Object.assign(graph.nodes.find(n => n.id === id)!, { interventions: {} });
+    const admission = resolveRunAdmission(graph);
+    expect(admission.strict.nextStep).toBe('Review all 2 readiness issues together before analysis.');
+    expect(admission.blockedNextStep).toBe(admission.strict.nextStep);
+    for (const realLoader of [false, true]) {
+      const production = invoke(graph, realLoader);
+      const failure = await production.result().catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(HandlerInvocationFailedError);
+      if (!(failure instanceof HandlerInvocationFailedError)) throw failure;
+      expect(failure.details.next_step).toBe(admission.strict.nextStep);
+      expect(production.run).not.toHaveBeenCalled();
+    }
+  });
+  it('served 7f5659fd: three existing options keep their two value issues; the direct all-unconfigured guard stays specific', async () => {
+    const capture = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/paul-legacy-7f5659fd-unsized-options-graph-20261014.json', import.meta.url), 'utf8'));
+    const graph = JSON.parse(capture.graph_text);
+    expect(graph.nodes.filter((n: { kind?: unknown }) => n.kind === 'option')).toHaveLength(3);
+    const admission = resolveRunAdmission(graph);
+    expect(admission.strict.nextStep).toBe('Review all 2 readiness issues together before analysis.');
+    expect(admission.blockedNextStep).toBe(admission.strict.nextStep);
+    const production = invoke(graph, true);
+    const failure = await production.result().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HandlerInvocationFailedError);
+    if (!(failure instanceof HandlerInvocationFailedError)) throw failure;
+    expect(failure.details.next_step).toBe(admission.strict.nextStep);
+    expect(production.run).not.toHaveBeenCalled();
+    // Bypassing the loader on this captured graph reaches the older, dedicated
+    // all-unconfigured guard before the comparison gate exercised by both topics above.
+    const direct = invoke(graph);
+    const directFailure = await direct.result().catch((error: unknown) => error);
+    expect(directFailure).toBeInstanceOf(HandlerInvocationFailedError);
+    if (!(directFailure instanceof HandlerInvocationFailedError)) throw directFailure;
+    expect(directFailure.cause_kind).toBe('options_not_configured');
+    expect(directFailure.details.first_option_label).toBe('Carry on as now');
+    expect(directFailure.details.option_count).toBe(3);
+    expect(direct.run).not.toHaveBeenCalled();
   });
   it('captured revision 5: the excluded baseline cannot count toward READY_TO_COMPARE', async () => {
     await refusalAgrees(structuredClone(captured));

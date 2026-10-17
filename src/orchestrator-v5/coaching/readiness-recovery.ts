@@ -416,6 +416,11 @@ export function projectReadinessRecovery(
     );
   }
 
+  if (status === 'ready') {
+    return project('review_model', null, null,
+      'We can keep exploring the model and its assumptions. A comparison is not confirmed as ready yet.');
+  }
+
   const nonReadyOptions = analysisReady?.options
     ?.map(asOption)
     .filter((option): option is ReadinessOptionLite => option !== null && option.status !== 'ready')
@@ -573,7 +578,8 @@ export function buildReadinessNextStep(
 /**
  * Build the sole conversational recovery chip for a non-ready state. Run is
  * deliberately returned as `null`; executable Run chips stay at their
- * registry-aware call sites and must check exact `status === 'ready'`.
+ * registry-aware call sites and require affirmative `may_run`. This recovery cue
+ * does not delay the host's automatic continuation after an eligible commit or Undo.
  *
  * ⭐⭐ THE `provide_value` BRANCH IS THE REPAIR LOOP'S AFFORDANCE, AND IT IS
  * MINTED FROM IDENTITY, NOT FROM A LABEL.

@@ -319,37 +319,46 @@ describe('the conjunct reads the RANK, and fails open on anything it cannot read
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// R2: explicit refused admission binds current leader prose. Historical explanation
-// remains current-only; the separate result licence still supplies entitlement.
-// Admitted comparisons and missing legacy fields keep their existing controls.
+// ⭐⭐ `structurally_analysable: false` FAILS OPEN — the narrowing, and the
+// discriminating pair that proves it binds to the FIELD and not to a string.
+//
+// MEASURED, NOT ASSUMED. The first cut of this change conjoined the mode alone
+// and turned three of the estate's own PERMIT-WINS controls red, plus the real
+// post-analysis advice-gate answer. Instrumenting the reader showed the mode on
+// those turns is `'none'` — "the model has blockers, nothing may RUN" — which
+// says nothing about a result that already completed. Readiness is recomputed
+// per turn, so an explain turn whose graph has drifted reads `'none'` while its
+// prose is legitimate. Suppressing there is the WORSE defect.
 // ═══════════════════════════════════════════════════════════════════════════
-describe('R2: a refused current comparison binds the leader rail', () => {
-  it('suppresses a current leader when admission refuses the comparison', () => {
+describe('a REFUSED RUN is not a capped CLAIM — the narrowing', () => {
+  it('fails OPEN when the run is refused (none + structurally_analysable:false)', () => {
     const input = envelope(ANSWER);
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...WIRE_OPTS,
       mayNameLeadingOption: true,
       analysisReady: analysisReady('none', false),
     });
-    expect(changed).toBe(true);
-    expect(response.assistant_text).toBe(`${RECEIPT} ${WIRE_WITHHELD_LEADER_REPLACEMENT}`);
+    expect(changed).toBe(false);
+    expect(response).toBe(input);
   });
 
-  it('refused admission still binds when the mode field contradicts it', () => {
+  it('fails OPEN on a refused run even if the mode field says otherwise', () => {
     // A contradictory payload: the run is refused, yet the mode names a cap.
-    // The explicit structural refusal governs, even beside a contradictory mode.
+    // The structural half governs, so this stands down.
     const input = envelope(ANSWER);
     const { changed } = enforceLeadingOptionClaimsAtWire(input, {
       ...WIRE_OPTS,
       mayNameLeadingOption: true,
       analysisReady: analysisReady('quantified_provisional', false),
     });
-    expect(changed).toBe(true);
+    expect(changed).toBe(false);
   });
 
   /**
-   * An admitted comparison still respects the mode cap independently of the
-   * refused-admission rows. Admission alone never grants a leader licence.
+   * ⭐ THE DISCRIMINATING TWIN. The pair above could be satisfied by a predicate
+   * that merely string-matched `'none'`. This arm holds the mode at `'none'` and
+   * flips ONLY `structurally_analysable` — so it must SUPPRESS, proving the gate
+   * reads the field and not the string. Neither arm alone shows the binding.
    */
   it('TWIN — the SAME mode SUPPRESSES when the model IS analysable', () => {
     const { changed } = enforceLeadingOptionClaimsAtWire(envelope(ANSWER), {
@@ -372,7 +381,7 @@ describe('R2: a refused current comparison binds the leader rail', () => {
     expect(response.assistant_text).not.toContain('performs best');
   });
 
-  it('the alarm reports a leader asserted over a refused current comparison', () => {
+  it('the alarm mirrors the narrowing — silent on a refused run', () => {
     const res = envelope(ANSWER);
     expect(
       guardLeadingOptionClaimsAtEgress(res, {
@@ -381,9 +390,7 @@ describe('R2: a refused current comparison binds the leader rail', () => {
         analysisReady: analysisReady('none', false),
       }),
     ).toBe(res);
-    expect(events.map(event => event.name)).toEqual(['v5.egress.leading_option_claim_withheld_violated']);
-    expect(events[0]!.data.dropped).toBe(false);
-    expect(events[0]!.data.hit_count).toBeGreaterThan(0);
+    expect(events).toEqual([]);
   });
 });
 

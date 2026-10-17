@@ -635,9 +635,9 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
     ...admission,
     submission,
     willProceed,
-    blockedNextStep: eventRefusal ?? submission?.participationNextStep ?? submission?.scaleNextStep ?? (submissionBlocked && submissionRefusal ? submissionRefusal.nextStep : undefined) ?? (willProceed
+    blockedNextStep: eventRefusal ?? submission?.participationNextStep ?? submission?.scaleNextStep ?? (willProceed
       ? null
-      : admission.strict.nextStep ?? NO_COMPARISON_NEXT_STEP),
+      : admission.strict.nextStep ?? (submissionBlocked && submissionRefusal ? submissionRefusal.nextStep : NO_COMPARISON_NEXT_STEP)),
   };
 }
 

@@ -44,6 +44,8 @@ function makeScenarioSnapshot(): RunAnalysisScenarioSnapshot {
     graph,
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_x: 1 } },
+      // R2: an admissible comparator lets these timing/error witnesses reach the client.
+      { id: 'opt_b', option_id: 'opt_b', label: 'B', interventions: { fac_x: 0 } },
     ],
     goal_node_id: 'g',
     rawPersistedGraph: graph,

@@ -182,6 +182,8 @@ describe('A3.1 Task 5 — risk-node constraint reaches PLoT payload via run-anal
             label: 'Launch now',
             interventions: { 'f-churn': 1 },
           },
+          // R2: a distinct comparator keeps the risk-constraint forwarding assertion reachable.
+          { id: 'o-defer', option_id: 'o-defer', label: 'Defer launch', interventions: { 'f-churn': 0 } },
         ],
         goal_node_id: 'g-revenue',
         goal_constraints: riskGraph.goal_constraints,

@@ -113,6 +113,9 @@ describe('readiness recovery authority', () => {
     expect(buildReadinessRecoveryChip(readiness, NODES)).toBeNull();
     expect(projectReadinessRecovery({ status: 'ready', may_run: false }, NODES).kind).not.toBe('run');
     expect(projectReadinessRecovery({ status: 'ready' }, NODES).kind).not.toBe('run');
+    expect(projectReadinessRecovery({ status: 'ready' }, NODES).nextStep).toBe(
+      'We can keep exploring the model and its assumptions. A comparison is not confirmed as ready yet.',
+    );
   });
 
   it('keeps blocked authoritative over an incidental value blocker', () => {

@@ -93,6 +93,7 @@ const READY_OPEN: AnalysisReadyPayload = {
 const READY_NONE: AnalysisReadyPayload = {
   goal_node_id: 'goal_1',
   status: 'ready',
+  may_run: true, // R2: the no-open-items control carries affirmative admission.
   goal_threshold: 0.7,
   options: [
     { option_id: 'opt_a', label: 'Hire two senior engineers locally', status: 'ready', interventions: {} },
