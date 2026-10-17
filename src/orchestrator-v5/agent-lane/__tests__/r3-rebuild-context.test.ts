@@ -212,3 +212,39 @@ it('construction preserves each answered-pair identity once and distinct typed s
     ]);
   }
 });
+
+describe('R3 rebuild admission preserves statement authorship', () => {
+  const olumiReply = 'Evening staffing is at 75% today. Shall we use that figure?';
+  const quote = 'Evening staffing is at 75% today';
+  const draftQuoting = (row: typeof cases[number]): Rec => {
+    const d = structuredDraft(row);
+    d.factors.push({ label: 'Evening staffing', role: 'external', baseline_known: true, baseline_value: 75, unit: '%', provenance: 'explicit', plausible_max: 100 });
+    d.links.push({ ...d.links[0], from: 'Evening staffing' });
+    d.statements = [{ quote, subject: { kind: 'factor', label: 'Evening staffing', to_label: null, factor_label: null }, field: 'level', form: 'point',
+      value: 75, low: null, high: null, unit: '%', qualifier: null, conditions: null }];
+    return d;
+  };
+  const runRebuild = async (typedExtra: string | null) => {
+    const row = cases[0]!, calls: Rec[] = [];
+    const w = await savedWorld(row, { readTurnHistory: () => [{ role: 'assistant', content: olumiReply }, { role: 'user', content: 'Noted.' }],
+      provider: async req => { calls.push(structuredClone(req)); return { text: JSON.stringify(draftQuoting(row)), status: 'completed' }; } });
+    const ctx = { ...w.ctx, verified_user_messages: typedExtra === null ? [request] : [typedExtra, request] };
+    const offered = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), ctx, w.caps()) as Rec;
+    const held = offered.proposal_id === undefined ? undefined : w.proposals.get(String(offered.proposal_id));
+    const candidate = held === undefined ? offered.construction_report?.prepared_graph : (held.operations[0]!.value as Rec).candidate;
+    return { calls, offered, candidate: candidate as Rec | undefined };
+  };
+  const userQuotesOf = (g: Rec | undefined): string[] => ((g?.nodes ?? []) as Rec[]).flatMap(n => ((n.user_statements ?? []) as Rec[])
+    .flatMap(r => (r.statements as Rec[]).filter(s => s.speaker === 'user').map(s => String(s.quote))));
+  it('the drafter quoting Olumi\'s forwarded reply never records it as the user\'s statement', async () => {
+    const { calls, offered, candidate } = await runRebuild(null);
+    expect(String(calls[0]!.input), 'control: Olumi\'s reply reached construction').toContain(olumiReply);
+    expect(candidate, JSON.stringify(offered).slice(0, 800)).toBeDefined();
+    expect(userQuotesOf(candidate).filter(q => q.includes('75%'))).toEqual([]);
+  });
+  it('the same words TYPED by the user are recorded as the user\'s', async () => {
+    const { offered, candidate } = await runRebuild('Evening staffing is at 75% today.');
+    expect(candidate, JSON.stringify(offered).slice(0, 800)).toBeDefined();
+    expect(userQuotesOf(candidate).filter(q => q.includes('75%'))).toEqual([quote]);
+  });
+});
