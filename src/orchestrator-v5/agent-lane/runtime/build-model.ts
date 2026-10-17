@@ -1215,7 +1215,8 @@ export function firstConstructInput(brief: string, context?: ConstructionContext
   // and source (`retained`); `brief` (what every quote and figure check reads) is the brief and the user's TYPED messages only.
   const retained = context?.retained;
   const words = retained === undefined ? brief
-    : `${retained.brief.trim()}\n\n${REVISION_LEAD}\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(retained.conversation)}`;
+    : `${retained.brief.trim()}\n\n${REVISION_LEAD}\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(retained.conversation)}`
+      + (retained.items === undefined ? '' : `\n\n${JSON.stringify(retained.items)}`);
   const input = notes.length === 0 ? words : `${words}\n\nConstruction notes: ${JSON.stringify(notes)}`;
   if (context === undefined) return input;
   return input + (context.current_model === undefined ? '' : `\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`)
@@ -1237,7 +1238,9 @@ export interface ConstructionContext {
    * with its recorded speaker and source. `user`/`typed` only by the route's request-level origin (`requestWasTyped`, bound as
    * `verified_user_messages`); everything else stored (a chip's or button's text is stored the same way) is `unknown`.
    */
-  readonly retained?: { readonly brief: string; readonly conversation: readonly RetainedMessage[] };
+  readonly retained?: { readonly brief: string; readonly conversation: readonly RetainedMessage[];
+    /** Shared turnContextItems projection, including labelled answered pairs and recent Olumi replies. Context only. */
+    readonly items?: readonly unknown[] };
   /** The objections the user recorded (S8 `statement`, verbatim): context the revision must not contradict. */
   readonly objections?: readonly string[];
 }
