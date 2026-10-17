@@ -126,7 +126,9 @@ describe('a stated effect range stays the user\'s, on its link (G3 a735)', () =>
     expect(edgeFrom(out, PRE).provenance.natural_effect?.stated_range).toBeUndefined();
     // The other link keeps the ranged-but-unsized contract (ITEM 3): Olumi's placeholder, said once against the user's range.
     expect(edgeFrom(out, DEL).provenance.magnitude).toBe('olumi_placeholder');
-    expect(out.loss.some((l) => l.after === 'stated_range_unsized' || JSON.stringify(l).includes(OTHER))).toBe(true);
+    const said = out.loss.filter((l) => l.field_path.endsWith('.stated_range_unsized'));
+    expect(said, JSON.stringify(out.loss.map((l) => l.field_path))).toEqual([expect.objectContaining({ before: { low: 4, high: 6, text: expect.any(String) } })]);
+    expect(said[0]!.reason).toContain(`"${DEL}" → "${WASTE}" is: "${OTHER}"`);
   });
 
   it('CONTRAST: an Olumi size that is no END of the user\'s range stays Olumi\'s estimate, with its basis', () => {
