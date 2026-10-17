@@ -252,9 +252,40 @@ const ENDS = /[.!?;]['"]*$/;
 export function wholeStatementIn(message: string, quote: unknown): boolean {
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
   const text = plainQuote(message);
+  const regions = quotationRegions(text);
   return said !== '' && quoteSpansIn(text, said).some((at) =>
-    /(?:^|[.!?;\n]['"]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length))));
+    /(?:^|[.!?;\n]['"]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
+    // ⛔ #3363 B1 (BUDDY-A): a statement never starts or ends inside someone's quoted words: their sentences are not whole
+    // without the speaker and the rest of what they said ("This is only true if the pilot works.").
+    && !insideQuotation(regions, at) && !insideQuotation(regions, at + said.length));
 }
+
+/**
+ * The quotations a text holds, as [opening mark, closing mark] index pairs. A mark opens one after the start, a space or the
+ * attribution's punctuation ("Priya:'…"), never inside a word (an apostrophe: "don't", "Priya's"). It closes at the LAST mark
+ * that follows punctuation before the next opening ("…the users' plan works. More referrals help.'"), else at the first
+ * closing mark ("the 'fast track' option"); with none, it runs to the end.
+ */
+function quotationRegions(text: string): readonly (readonly [number, number])[] {
+  const regions: [number, number][] = [];
+  for (const mark of ['"', "'"]) {
+    const opens = (i: number): boolean => text[i] === mark && (i === 0 || /[\s([:;,\u2014\u2013-]/u.test(text[i - 1]!)) && /\S/u.test(text[i + 1] ?? '');
+    const closes = (i: number): boolean => text[i] === mark && i > 0 && /\S/u.test(text[i - 1]!) && /^(?:$|[\s.,;:!?)\]])/u.test(text.slice(i + 1, i + 2));
+    for (let i = 0; i < text.length; i += 1) {
+      if (!opens(i)) continue;
+      let next = text.length;
+      for (let j = i + 1; j < text.length; j += 1) if (opens(j)) { next = j; break; }
+      const candidates = [...Array(next - i - 1).keys()].map((k) => i + 1 + k).filter(closes);
+      const close = [...candidates].reverse().find((j) => /[.!?,;]/u.test(text[j - 1]!)) ?? candidates[0] ?? text.length;
+      regions.push([i, close]);
+      i = close;
+    }
+  }
+  return regions;
+}
+/** `at` lies inside a quotation (after its opening mark, up to and including its closing one). */
+const insideQuotation = (regions: readonly (readonly [number, number])[], at: number): boolean =>
+  regions.some(([open, close]) => open < at && at <= close);
 
 /** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */
 export function namesBothEnds(text: string, nodes: readonly Entity[], from: string, to: string): boolean {

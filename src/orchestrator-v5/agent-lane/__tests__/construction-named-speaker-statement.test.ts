@@ -41,14 +41,14 @@ function draft(quote: string): Rec {
     ],
   };
 }
-async function saved(model: Rec): Promise<Rec> {
+async function saved(model: Rec, brief = BRIEF): Promise<Rec> {
   let body: Rec | undefined;
   const call = (async () => ({ text: JSON.stringify(model) })) as unknown as CallStructuredModel;
   const d: InternalDispatch = async (path, b) => {
     if (path.endsWith('/graph/register')) { body = structuredClone((b as { graph: Rec }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('5e5e5e5e-0000-4e5e-8e5e-5e5e5e5e5e5e', BRIEF, d, call) as Rec;
+  const out = await buildModelFromBrief('5e5e5e5e-0000-4e5e-8e5e-5e5e5e5e5e5e', brief, d, call) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 800)).toBe(true);
   return body!;
 }
@@ -62,6 +62,15 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
   it('⭐ RED → GREEN, real build → register: "Name, role: \'…\'" closed after its full stop is recorded verbatim, speaker included', async () => {
     const record = relationRecord(await saved(draft(SPEECH)));
     expect(record?.statements, 'the named speech is recorded').toEqual([expect.objectContaining({ speaker: 'user', quote: SPEECH, form: 'describes' })]);
+  });
+
+  it('⛔ #3363 B1 (BUDDY-A), real path: a two-sentence speech with an earlier qualification is kept whole; its last sentence alone records nothing', async () => {
+    const qualified = "Priya, sales lead: 'This is only true if the pilot works. More referrals mean more contracts signed, because the client already trusts us.'";
+    const tail = "More referrals mean more contracts signed, because the client already trusts us.'";
+    const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
+    const whole = relationRecord(await saved(draft(qualified), brief));
+    expect(whole?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
+    expect(relationRecord(await saved(draft(tail), brief)), 'the tail loses Priya and her condition').toBeUndefined();
   });
 
   it('CONTRAST: the same words without their speaker are not the brief\'s whole statement, so nothing is recorded for them', async () => {
