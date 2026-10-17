@@ -63,8 +63,10 @@ export const FACTOR_DEFINITION_ROW: RoleRow = {
     const s = statements[0];
     const label = labelOf(subject, graph, subject.id);
     return [
+      // ⛔ BUDDY-A #3348 R1 B1: words taken from Olumi's question are Olumi's proposed reading, never the user's confirmation of it
+      // ("No, only the agency fees" also answers that question). The whole answer and the whole question are both on the card.
       ...(s?.answering !== undefined ? [`You said this in answer to Olumi’s question: “${s.answering}”${fromQuestion(s, words) ? ' The words '
-        + 'for what it covers are that question’s, as your answer confirms them.' : ''}`] : []),
+        + 'for what it covers come from that question: they are Olumi’s proposed reading of your answer.' : ''}`] : []),
       `It is kept with ‘${label}’ as your words and Olumi’s reading of them. It changes no figure: the model and its analysis use `
         + `‘${label}’ exactly as before.`,
     ];

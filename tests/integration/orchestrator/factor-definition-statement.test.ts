@@ -164,7 +164,8 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
     const typed = 'Yes, it covers both.';
     const { card, out } = await pressed(typed, { quote: typed, answering: ASK, reading_words: 'the agency fees as well as the media spend' }, preceding);
     expect(card.public_label).toContain('Olumi proposes this reading: what ‘Marketing budget’ covers: the agency fees as well as the media spend.');
-    expect(card.public_label).toContain(`You said this in answer to Olumi’s question: “${ASK}” The words for what it covers are that question’s, as your answer confirms them.`);
+    expect(card.public_label).toContain(`You said this in answer to Olumi’s question: “${ASK}” The words for what it covers come from that question: they are `
+      + 'Olumi’s proposed reading of your answer.');
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size, 'ONE commit').toBe(1);
     const cold = GraphV3.parse(JSON.parse(JSON.stringify(persisted)));
@@ -194,6 +195,20 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
     expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal });
     expect(String(p.detail)).toContain(detail);
     expect(persisted).toEqual(before);
+    expect(rows.size).toBe(0);
+  });
+
+  // ⛔ BUDDY-A #3348 R1 B1: a "No" also answers Olumi's question. The card shows the whole answer and the whole question, and says the
+  // question's words are Olumi's reading; it never calls the answer a confirmation. The host reads no yes or no: nothing is refused.
+  it('⛔ a negative answer: the card keeps the whole answer and question and never says the answer confirms the question', async () => {
+    const preceding = `The figures look consistent so far. ${ASK}`;
+    const typed = 'No, only the agency fees; the media spend is separate.';
+    const p = await propose(typed, { quote: typed, answering: ASK, reading_words: 'the agency fees as well as the media spend' }, preceding) as Json;
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(String(p.public_label)).toContain(`From your message: “${typed}”`);
+    expect(String(p.public_label)).toContain(`You said this in answer to Olumi’s question: “${ASK}” The words for what it covers come from that question: they are `
+      + 'Olumi’s proposed reading of your answer.');
+    expect(String(p.public_label)).not.toMatch(/confirm/i);
     expect(rows.size).toBe(0);
   });
 
