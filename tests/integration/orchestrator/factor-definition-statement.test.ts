@@ -12,7 +12,8 @@ import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { assignEntityRefs } from '../../../src/orchestrator-v5/graph/entity-refs.js';
-import { userStatementFor } from '../../../src/orchestrator-v5/statement-door/statements.js';
+import { userStatementFor, userStatementRecord } from '../../../src/orchestrator-v5/statement-door/statements.js';
+import { applyStatementRecordEdit } from '../../../src/orchestrator-v5/goal-target/cohort-forecast-write.js';
 
 const SCENARIO_ID = 'f4f4f4f4-0000-4000-8000-000000000501';
 const BUDGET = 'budget';
@@ -216,5 +217,24 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
     expect(p, JSON.stringify(p)).toMatchObject({ ok: false });
     expect(String(p.detail)).not.toContain('Olumi’s last reply');
     expect(rows.size).toBe(0);
+  });
+});
+
+// ⛔ BUDDY-A 05:30Z: narrowing the writer's range-law branch to an option's level must keep THAT adoption's receipt and its re-Run.
+describe('the one writer still says the range-law adoption as before', () => {
+  it('an option\'s level range with its equal-tail law: "Recorded your range … the Olumi approximation you adopted", re-Run owed', () => {
+    const graph = storedGraph() as Json;
+    const subject = { kind: 'factor' as const, id: BUDGET, option_id: 'paid', field: 'level' as const };
+    const quote = 'The paid campaign would spend between £300,000 and £450,000.';
+    const record = userStatementRecord(subject, [{ speaker: 'user', quote, source: quote, form: 'range', low: 300000, high: 450000, unit: '£',
+      reading: 'olumi', subject: { quantity: 'level', node_id: BUDGET, option_id: 'paid' } } as never], '2026-10-17T00:00:00.000Z',
+    { range_law: 'equal_tail', low: 300000, high: 450000 } as never);
+    const out = applyStatementRecordEdit(graph, { node_id: BUDGET, expected_node: structuredClone((graph.nodes as Json[]).find((n) => n.id === BUDGET)),
+      user_statement: { subject, record } } as never);
+    expect(out.kind, JSON.stringify(out)).toBe('mutated');
+    if (out.kind !== 'mutated') return;
+    expect(out.confirmation).toBe('Recorded your range for ‘Marketing budget’ as stated, with the Olumi approximation you adopted.');
+    expect((out.handlerFacts[0] as Json).result).toMatchObject({ rerun_recommended: true,
+      safe_summary: 'Recorded your range as stated, with the Olumi approximation you adopted' });
   });
 });
