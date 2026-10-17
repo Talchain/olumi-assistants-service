@@ -66,8 +66,8 @@ const ends = (g: Rec): { from: string; to: string } => ({ from: g.nodes.find((n:
 describe('A3: a per-one range is recorded on its link, never sized at an end', () => {
   it('the first construct\'s note asks the per-one rule with the range recorded and no size; no "LOW end" anywhere', () => {
     const input = firstConstructInput(BRIEF);
-    expect(input).toContain(sent('record "£40k and £60k" in `statements` as that link’s range, both ends as written.'));
-    expect(input).toContain(sent('leave the size null'));
+    expect(input).toContain(sent('retain "£40k and £60k" as the complete stated effect range in statements on that directed link'));
+    expect(input).toContain(sent('Leave the point size null unless a separately supported point size is supplied.'));
     expect(input).not.toMatch(/LOW end/u);
   });
 
@@ -88,7 +88,7 @@ describe('A3: a per-one range is recorded on its link, never sized at an end', (
     const { inputs } = await build([draft('none'), draft('recorded')]);
     expect(inputs).toHaveLength(2);
     expect(inputs[1]).toContain(sent('The brief writes "£40k and £60k" and no link in the model carries it.'));
-    expect(inputs[1]).toContain(sent('leave the size null, and record "£40k and £60k" in `statements` as that link’s range'));
+    expect(inputs[1]).toContain(sent('retain "£40k and £60k" as the complete stated effect range in statements on that directed link'));
     expect(inputs[1]).not.toMatch(/LOW end/u);
   });
 

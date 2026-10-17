@@ -108,7 +108,7 @@ describe('A4: "deals between £1-2 million" is £1,000,000 per deal, the low end
     expect(instructions.length).toBeGreaterThanOrEqual(1);
     expect(instructions[0]).toContain('A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING');
     // ⭐ A3 (spec v2.1 A1/A3, AIE): the LOW-end rule is retired; the range stays on its link, both ends as written.
-    expect(instructions[0]).toContain('When the brief gives a RANGE for that size, leave the link\u2019s size null and record the range in `statements` on that link, both ends as written: a range is not one size, so never use an end or a middle as the size.');
+    expect(instructions[0]).toContain('When the brief gives a RANGE for that size, retain its complete signed endpoints, unit, reference, period, conditions and source in statements on that directed link. Do not choose an endpoint or calculate a midpoint to fill a missing point size;');
     expect(instructions[0]).not.toMatch(/LOW end/u);
   });
 
