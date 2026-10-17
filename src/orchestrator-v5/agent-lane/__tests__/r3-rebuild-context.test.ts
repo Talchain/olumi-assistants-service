@@ -75,6 +75,24 @@ const pairsIn = (items: Rec[]): Rec[] => items.flatMap(i => i.content.flatMap((p
   [ANSWERED_EARLIER_LABEL, REASONING_CONTEXT_LABEL].some(label => p.text.startsWith(label))
     ? JSON.parse(p.text.slice(p.text.indexOf('\n') + 1)).answered_pairs : []));
 
+it('W43/W44: the actual canonical getter and rebuild input carry one complete ranged conditional goal record', async () => {
+  const f = fixture(cases[0]!), subject = { kind: 'goal' as const, id: 'old_goal', field: 'target' as const };
+  const quote = 'Average dispatch delay is not between 2 and 5 days during the trial, provided the evening crew is available.';
+  const record = userStatementRecord(subject, [{ source: quote, quote, speaker: 'user', reading: 'olumi', form: 'range', low: 2, high: 5,
+    unit: 'days', conditions: 'provided the evening crew is available', period: 'during the trial', reference: 'dispatch to arrival',
+    negated: true, subject: { quantity: 'dispatch_delay', node_id: subject.id } }], at, { recorded_by: 'construction' });
+  f.graph.nodes[0].user_statements = [record];
+  const cold = JSON.parse(JSON.stringify(f.graph)), before = structuredClone(cold);
+  const w = await correctionWorld(cold, 'Read the saved model.', { brief: f.brief });
+  const state = await w.caps().getCanonicalState(w.ctx) as Rec;
+  const input = firstConstructInput(f.brief, { current_model: project(cold) });
+  for (const view of [state, jsonAfter(input, CURRENT_MODEL_CONTEXT_LEAD)]) {
+    expect(view.recorded_reasoning.find((n: Rec) => n.id === subject.id).user_statements).toEqual([record]);
+    expect(view.goal).not.toHaveProperty('user_statements'); // No second flattened alias can discard or relabel source.
+  }
+  expect(w.graph()).toEqual(before); expect(w.writes).toHaveLength(0);
+});
+
 
 describe.each(cases)('R3 $name class', row => {
   it.each(['recent', 'trimmed'] as const)('real rebuild preserves the %s pair and its recorded origin', async placement => {

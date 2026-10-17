@@ -363,29 +363,36 @@ export function statementCorrectionWords(c: StatementCorrection): string {
 }
 
 export function prepareStatementCorrection(graph: unknown, request: StatementCorrectionRequest,
-  texts: { now?: string; conversation?: string }, at: string): CorrectionResult {
-  if (!isRec(graph) || !Array.isArray(graph.nodes) || typeof request?.quote !== 'string'
-    || !wholeStatementIn(texts.now ?? '', request.quote) || !Array.isArray(request.edits) || request.edits.length === 0) return { refused: 'correction_not_stated' };
+  texts: { now?: string; conversation?: string }, at: string, diagnostic?: { failed_check?: string }): CorrectionResult {
+  const refused = (reason: string, check: string): CorrectionResult => {
+    if (diagnostic !== undefined) diagnostic.failed_check = check;
+    return { refused: reason };
+  };
+  // The existing preconditions, in the same order; the observation never grants permission or enters the record.
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return refused('correction_not_stated', 'correction.graph_shape');
+  if (typeof request?.quote !== 'string') return refused('correction_not_stated', 'correction.quote_present');
+  if (!wholeStatementIn(texts.now ?? '', request.quote)) return refused('correction_not_stated', 'correction.quote_whole_current_turn');
+  if (!Array.isArray(request.edits) || request.edits.length === 0) return refused('correction_not_stated', 'correction.edits_nonempty');
   const edits: ApprovedCorrectionEdit[] = [];
   let source: UserStatement | undefined;
   const requested: readonly CorrectionEditRequest[] = request.edits;
   for (const e of requested) {
-    if (!isRec(e) || !isRec(e.subject)) return { refused: 'invalid_statement' };
+    if (!isRec(e) || !isRec(e.subject)) return refused('invalid_statement', 'correction.edit_subject_shape');
     const node = nodeOf(graph, e.subject?.id);
-    if (node === undefined) return { refused: 'node_not_found' };
+    if (node === undefined) return refused('node_not_found', 'correction.edit_subject_exists');
     const verified = verifyStatements([{ quote: request.quote, form: 'describes' }], texts,
       { subject: { quantity: subjectKey(e.subject), node_id: e.subject.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
-    if (verified.kind === 'refused') return { refused: verified.refusal };
+    if (verified.kind === 'refused') return refused(verified.refusal, `correction.source.${verified.refusal}`);
     source = verified.statements[0]!;
-    if (!Array.isArray(e.retained)) return { refused: 'retained_list_required' };
+    if (!Array.isArray(e.retained)) return refused('retained_list_required', 'correction.retained_list');
     const expected = e.expected_record === undefined ? userStatementFor(graph, e.subject) ?? null : e.expected_record;
-    if (protectedAttestation(expected)) return { refused: 'correction_attestation_protected' };
+    if (protectedAttestation(expected)) return refused('correction_attestation_protected', 'correction.protected_attestation');
     edits.push({ ...e, expected_record: expected, expected_node: structuredClone(node),
       record: userStatementRecord(e.subject, replacementStatements(source, { ...e, expected_record: expected }), at,
         correctionAttest({ ...e, expected_record: expected })) });
   }
   const correction: StatementCorrection = { source: source!, edits };
   const written = applyStatementCorrection(graph, correction);
-  if (written.refused || written.candidate === undefined) return { refused: written.refused ?? 'invalid_statement' };
+  if (written.refused || written.candidate === undefined) return refused(written.refused ?? 'invalid_statement', `correction.postimage.${written.refused ?? 'invalid_statement'}`);
   return { correction, candidate: written.candidate, words: statementCorrectionWords(correction) };
 }
