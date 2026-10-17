@@ -667,12 +667,16 @@ export async function readScenarioAnalysis(
       ),
       graphHash,
     ) as AnalysisReadyPayload;
+    // R4's optional historicalResult carrier is consumed after #3361; current claims remain gated here.
+    const canonicalViewInput = {
+      revision: params.revision, graph: params.graph,
+      runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
+      derivation, analysisState, analysisReady, currentResult: boundResult,
+      historicalResult: derivation.freshness === 'unknown' && historical?.fact.fact_type === 'run_analysis'
+        ? buildAnalysisResultBlock(historical.fact as RunAnalysisHandlerFact) : null,
+    };
     return {
-      canonical_analysis_view: projectCanonicalAnalysisView({
-        revision: params.revision, graph: params.graph,
-        runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
-        derivation, analysisState, analysisReady, currentResult: boundResult,
-      }),
+      canonical_analysis_view: projectCanonicalAnalysisView(canonicalViewInput),
       ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })

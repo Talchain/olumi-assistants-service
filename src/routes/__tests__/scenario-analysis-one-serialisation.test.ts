@@ -31,6 +31,15 @@ vi.mock('../../utils/telemetry.js', () => ({
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
+const canonicalViewInputs = vi.hoisted(() => [] as Rec[]);
+vi.mock('../canonical-analysis-view.js', async original => {
+  const actual = await original<typeof import('../canonical-analysis-view.js')>();
+  return { ...actual, projectCanonicalAnalysisView: (input: Parameters<typeof actual.projectCanonicalAnalysisView>[0]) => {
+    canonicalViewInputs.push(input);
+    return actual.projectCanonicalAnalysisView(input);
+  } };
+});
+
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
 import { readBackState } from '../agent-v1-turn.js';
 import { buildAnalysisResultBlock } from '../../orchestrator-v5/compose.js';
@@ -214,6 +223,33 @@ describe('canonical saved-summary producer consumes the existing leader licence'
     expect(read.current_read.result).toBeNull();
     expect(read.analysis_state?.leader_claim.permitted).toBe(false);
     expect(fact.result.summary).toBe('Option B was supported by 65% of runs of this model.');
+  });
+});
+
+describe('R4 selected historical result carrier', () => {
+  it.each(['Revenue', 'Delivery capacity'].flatMap(label => ['run', 'current', 'both'].map(missing => ({ label, missing }))))(
+    '$label / missing $missing hash: selected historical block only; current claims stay closed', async ({ label, missing }) => {
+    const fact = runFact({ separated: true });
+    if (missing !== 'current') delete fact.result.graph_hash_at_run;
+    fact.result.summary = `${label} recorded on the earlier Run.`;
+    const before = structuredClone(fact);
+    await reload(fact, 'r4-unknown');
+    const read = await readScenarioAnalysis({ scenarioId: SCENARIO, requestId: 'r4-other-label',
+      graph: { ...GRAPH, nodes: GRAPH.nodes.map(n => n.id === 'goal' ? { ...n, label: 'Unrelated current £2m' }
+        : n.id === 'factor' && missing !== 'run' ? { ...n, label: undefined } : n) } as GraphStateIngress });
+    const carrier = canonicalViewInputs.at(-1)!;
+    expect(carrier.derivation.freshness).toBe('unknown');
+    expect(carrier.currentResult).toBeNull();
+    expect(carrier.historicalResult).toEqual(buildAnalysisResultBlock(fact));
+    expect(carrier.historicalResult.summary).toBe(`${label} recorded on the earlier Run.`);
+    expect(read.analysis_result).toBeNull();
+    expect(read.current_read.result).toBeNull();
+    expect(read.current_read.figures).toEqual([]);
+    expect(read.canonical_analysis_view.options).toEqual([]);
+    expect(fact).toEqual(before);
+    // The carrier must not be added to a known-current read.
+    await reload(runFact({ separated: true }), 'r4-current');
+    expect(canonicalViewInputs.at(-1)!.historicalResult).toBeNull();
   });
 });
 

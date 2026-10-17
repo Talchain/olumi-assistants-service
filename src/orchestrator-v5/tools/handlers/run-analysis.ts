@@ -1,4 +1,6 @@
 import { runChanceHeadline } from '../../coaching/run-chance-headline.js';
+import { boundRunLeaderClaim } from '../../model-management/version-result-binding.js';
+import { canonicalAnalysisReadyFrom } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { unresolvedRetainedLimits, withholdRetainedLimitFrames, retainedLimitWithheldLine, RETAINED_LIMIT_WITHHOLD_CODE } from '../../../graph/retained-limit.js';
 import { launchWindowGapWords, launchWindowOf } from '../../goal-target/goal-target-basis.js';
 import { toOutboundGraph } from "../../goal-target/outbound-graph.js";
@@ -2536,9 +2538,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⛔ L4 (DL condition 2): a compared capacity-ratio option's run-by-run comparison is distorted (its link is drawn beside
     // the team part), so no leader or win share is said; the licence's note says why (`CAPACITY_RATIO_COMPARISON_NOTE`).
     const ratioOptionCompared = capacityRatioOptionIds(snapshot.rawPersistedGraph ?? snapshot.graph).some(id => analysedOptionIds.has(id));
-    const headlineParts = buildAnalysisResultHeadlineParts(headlineInput);
-    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared
-      ? null : headlineParts.text;
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
     // this headline has withdrawn it, nor assert attainment while the frame is
@@ -2751,6 +2750,113 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis, snapshot.goal_node_id);
 
+    const leaderPermission = applyNonlinearIdentityToLeaderPermission(
+      applyIntakeToLeaderPermission(
+        projectClaimSafety(constraintVerdict),
+        intakeReconciliation,
+      ),
+      nonlinearIdentityWithhold,
+    );
+    // Record the caller's internal cause before the single owned projection/validation boundary.
+    if (withheldBecauseUnsizedPath !== undefined) {
+      response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
+    }
+    // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
+    // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same
+    // bound Run (`persistedFactorReviewFor`). A Run fact stored before this change keeps its enrichment and is still read.
+    const factCandidate: RunAnalysisHandlerFact = {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: args.scenario_id,
+        leading_option_id: leadingOptionId,
+        // Omit `win_probabilities` entirely when empty to match the optional
+        // schema shape (zod strict rejects explicit undefined on optional
+        // fields in some builds — safer to conditionally include).
+        ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
+        summary: template,
+        // Every new Run records the existing projection version in persisted
+        // enrichment. Transport strips this internal key; the provider response
+        // is unchanged. Freshness still uses the one analysis-affecting hash.
+        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
+        // included to keep parity with the existing optional-field idiom —
+        // if the graph was empty (hash null), we omit graph_hash_at_run
+        // rather than emitting an empty string.
+        ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
+        ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
+        // ⭐ 52f8cd (DL 5924731600): the Olumi options this Run left out of the ordinary comparison, and why — stored with
+        // the facts so the read and the turn carry the SAME record (`option-participation.ts`). ALWAYS written on a
+        // completed Run, `[]` included (schemas 0.65; CODEX 5924967500): absent strictly means an older Run, not recorded.
+        option_participation: [
+          ...userStatus.excluded.map((e) => ({ option_id: e.option_id, state: PARTICIPATION_STATE_FOR[e.status] })),
+          ...olumiFilter.participation,
+        ],
+        computed_at: runComputedAt,
+        // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
+        run_id: runId,
+        ...(runInputSnapshot !== null ? { input_snapshot: runInputSnapshot } : {}),
+        // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
+        // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
+        // read back on every path that rebuilds from them, rather than
+        // re-derived at each call site (which is how two surfaces end up
+        // contradicting each other inside one HTTP response — CLAUDE.md trap
+        // #12).
+        //
+        // FIRST-CLASS since @talchain/schemas 0.25.0. It rode
+        // `enrichment.__cee_claim_safety` from #710 until this release, because
+        // `RunAnalysisResultSchema` is `.strict()` and the field could not be
+        // added without a package release (blocked behind V5-CI-01). This is
+        // that release, and the contract's `ConstraintVerdictSchema` mirrors
+        // `PersistedClaimSafety` verbatim — enforced at compile time by the
+        // drift bolt in constraint-feasibility.ts.
+        //
+        // Written HERE, inside the validated fact, not bolted on afterwards:
+        // the field is CEE-OWNED and sits alongside the other CEE-owned fields
+        // (`graph_hash_at_run`, `computed_at`), so the handler-ownership
+        // invariant that `enrichment` is byte-for-byte PLoT
+        // (`scripts/validate-handler-ownership.sh` §6) is satisfied by
+        // construction instead of by a second parse.
+        //
+        // Live-proven harm this closes (G-CEE-1 walk, staging 1c078f0): the
+        // confirmation said "no option can be put forward yet" while
+        // `blocks[1].body` in the SAME response said "The MacBook Pro leads by
+        // a margin of about 52 percentage points".
+        // ROADMAP 2.579 — the intake answer folds into the SAME persisted
+        // permission, so the withhold reaches every egress surface that already
+        // reads it (compose, the leading-option egress guard, the coaching
+        // surfaces, the analysis_result block) instead of only the headline.
+        // Gating the headline alone would ship a contradiction inside one HTTP
+        // response, which is the defect class ROADMAP 1.218 exists to close.
+        // A conjunction: the intake axis can only ever REMOVE the permission,
+        // and it leaves `constraint_verdict_state` untouched because it has
+        // nothing true to say about the constraint evidence — see
+        // `applyIntakeToLeaderPermission` for the full statement of that
+        // residual.
+        // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
+        // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
+        // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
+        constraint_verdict: keptOlumiProvisional || ratioOptionCompared
+          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
+          ? { ...leaderPermission, may_name_leading_option: false }
+          : leaderPermission,
+      },
+    };
+    // Only this producer owns the descriptive evidence key. The stamped response is a copy; provider bytes stay put.
+    delete factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY];
+    if (evaluatedQuestion !== undefined) factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY] = evaluatedQuestion;
+
+    // The same immutable graph feeds the bound licence and the completed Run's horizon cells.
+    const graph = snapshot.rawPersistedGraph ?? snapshot.graph;
+    // Compose against this Run's own recorded inputs and existing admission, exactly as the saved reader does.
+    const headlineAuthority = runAdmission === null ? { licence: 'withheld' as const, readiness: undefined } : boundRunLeaderClaim({ fact: factCandidate,
+      identity: { scenario_id: args.scenario_id, graph_hash_at_run: graphHashAtRun ?? '', computed_at: runComputedAt, run_id: runId } },
+      { graph, scenario_id: args.scenario_id },
+      { readiness: canonicalAnalysisReadyFrom(runAdmission, graph) });
+    const headlineParts = buildAnalysisResultHeadlineParts(headlineInput, headlineAuthority.licence);
+    const headline = headlineParts.text;
+
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,
       resultRecords,
@@ -2874,7 +2980,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
       return summary;
     })();
-    const summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
+    factCandidate.result.summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -2895,17 +3001,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       });
     }
 
-    const leaderPermission = applyNonlinearIdentityToLeaderPermission(
-      applyIntakeToLeaderPermission(
-        projectClaimSafety(constraintVerdict),
-        intakeReconciliation,
-      ),
-      nonlinearIdentityWithhold,
-    );
-    // Record the caller's internal cause before the single owned projection/validation boundary.
-    if (withheldBecauseUnsizedPath !== undefined) {
-      response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
-    }
     // GOAL-REACH 3b (Science §(g) carve-out): a goal-chance refusal with no user action is an Olumi defect, logged by its
     // closed reason (no labels, no figures) so it can be counted and fixed; it is never offered a control.
     const thresholdReason = thresholdReasonOf(response);
@@ -2923,102 +3018,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'PLoT refused the goal chance for an Olumi-side reason (Science §(g) defect row)',
       );
     }
-    // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
-    // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same
-    // bound Run (`persistedFactorReviewFor`). A Run fact stored before this change keeps its enrichment and is still read.
-    const factCandidate: RunAnalysisHandlerFact = {
-      fact_type: 'run_analysis',
-      fact_version: 1,
-      noop: false,
-      result: {
-        scenario_id: args.scenario_id,
-        leading_option_id: leadingOptionId,
-        // Omit `win_probabilities` entirely when empty to match the optional
-        // schema shape (zod strict rejects explicit undefined on optional
-        // fields in some builds — safer to conditionally include).
-        ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
-        summary,
-        // Every new Run records the existing projection version in persisted
-        // enrichment. Transport strips this internal key; the provider response
-        // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
-        // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
-        // included to keep parity with the existing optional-field idiom —
-        // if the graph was empty (hash null), we omit graph_hash_at_run
-        // rather than emitting an empty string.
-        ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
-        ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
-        // ⭐ 52f8cd (DL 5924731600): the Olumi options this Run left out of the ordinary comparison, and why — stored with
-        // the facts so the read and the turn carry the SAME record (`option-participation.ts`). ALWAYS written on a
-        // completed Run, `[]` included (schemas 0.65; CODEX 5924967500): absent strictly means an older Run, not recorded.
-        option_participation: [
-          ...userStatus.excluded.map((e) => ({ option_id: e.option_id, state: PARTICIPATION_STATE_FOR[e.status] })),
-          ...olumiFilter.participation,
-        ],
-        computed_at: runComputedAt,
-        // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
-        run_id: runId,
-        ...(runInputSnapshot !== null ? { input_snapshot: runInputSnapshot } : {}),
-        // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
-        // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
-        // read back on every path that rebuilds from them, rather than
-        // re-derived at each call site (which is how two surfaces end up
-        // contradicting each other inside one HTTP response — CLAUDE.md trap
-        // #12).
-        //
-        // FIRST-CLASS since @talchain/schemas 0.25.0. It rode
-        // `enrichment.__cee_claim_safety` from #710 until this release, because
-        // `RunAnalysisResultSchema` is `.strict()` and the field could not be
-        // added without a package release (blocked behind V5-CI-01). This is
-        // that release, and the contract's `ConstraintVerdictSchema` mirrors
-        // `PersistedClaimSafety` verbatim — enforced at compile time by the
-        // drift bolt in constraint-feasibility.ts.
-        //
-        // Written HERE, inside the validated fact, not bolted on afterwards:
-        // the field is CEE-OWNED and sits alongside the other CEE-owned fields
-        // (`graph_hash_at_run`, `computed_at`), so the handler-ownership
-        // invariant that `enrichment` is byte-for-byte PLoT
-        // (`scripts/validate-handler-ownership.sh` §6) is satisfied by
-        // construction instead of by a second parse.
-        //
-        // Live-proven harm this closes (G-CEE-1 walk, staging 1c078f0): the
-        // confirmation said "no option can be put forward yet" while
-        // `blocks[1].body` in the SAME response said "The MacBook Pro leads by
-        // a margin of about 52 percentage points".
-        // ROADMAP 2.579 — the intake answer folds into the SAME persisted
-        // permission, so the withhold reaches every egress surface that already
-        // reads it (compose, the leading-option egress guard, the coaching
-        // surfaces, the analysis_result block) instead of only the headline.
-        // Gating the headline alone would ship a contradiction inside one HTTP
-        // response, which is the defect class ROADMAP 1.218 exists to close.
-        // A conjunction: the intake axis can only ever REMOVE the permission,
-        // and it leaves `constraint_verdict_state` untouched because it has
-        // nothing true to say about the constraint evidence — see
-        // `applyIntakeToLeaderPermission` for the full statement of that
-        // residual.
-        // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
-        // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
-        // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
-        constraint_verdict: keptOlumiProvisional || ratioOptionCompared
-          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
-          ? { ...leaderPermission, may_name_leading_option: false }
-          : leaderPermission,
-      },
-    };
-    // Only this producer owns the descriptive evidence key. The stamped response is a copy; provider bytes stay put.
-    delete factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY];
-    if (evaluatedQuestion !== undefined) factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY] = evaluatedQuestion;
-
     // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
     // Use the response's public-block builder; its projection owns the claim gate, not the cell reader.
     // This is the Run just produced here: no historical binding or freshness selection is needed.
-    const horizonGraph = snapshot.rawPersistedGraph ?? snapshot.graph;
-    const horizonResult = buildAnalysisResultBlock(factCandidate);
-    const chanceCells = projectCanonicalAnalysisCells(horizonResult, horizonGraph, factCandidate.result.goal_certainty)
+    const horizonResult = buildAnalysisResultBlock(factCandidate, headlineAuthority.readiness, headlineAuthority.licence);
+    // Reuse the saved-summary projection: neutral prose and licensed chance lines retain their exact bytes.
+    const summary = horizonResult.summary;
+    factCandidate.result.summary = summary;
+    const chanceCells = projectCanonicalAnalysisCells(horizonResult, graph, factCandidate.result.goal_certainty)
       .map(option => option.cell);
     factCandidate.result.enrichment = withShortHorizonBesideChance(
-      withUntestedHorizonWarning(factCandidate.result.enrichment, horizonGraph, chanceCells, accumulationDrift.warnings.length > 0),
-      horizonGraph, chanceCells, accumulationDrift.warnings.length > 0, submittedOptionsForMethod(factCandidate.result));
+      withUntestedHorizonWarning(factCandidate.result.enrichment, graph, chanceCells, accumulationDrift.warnings.length > 0),
+      graph, chanceCells, accumulationDrift.warnings.length > 0, submittedOptionsForMethod(factCandidate.result));
 
     // --- 7. Zod-validate the fact ----------------------------------------
     //
