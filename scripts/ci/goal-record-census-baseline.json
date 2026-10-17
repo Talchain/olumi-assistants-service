@@ -1,5 +1,5 @@
 {
-  "source_sha": "407985c0a67463d85efa4d1339d4e180e572f4c8",
+  "source_sha": "18d1f31fd0ce09dd62ceb2b1b198d5b121daf072",
   "references": {
     "extractPersistedGoalTarget": {
       "src/orchestrator-v5/compose/goal-target-receipt-guard.ts": 5,
@@ -91,7 +91,7 @@
       "src/orchestrator-v5/agent-lane/refit-frames.ts": 3,
       "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": 38,
       "src/orchestrator-v5/agent-lane/runtime/build-model.ts": 16,
-      "src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts": 2,
+      "src/orchestrator-v5/agent-lane/runtime/draft-replacement.ts": 4,
       "src/orchestrator-v5/agent-lane/runtime/goal-repoint.ts": 9,
       "src/orchestrator-v5/agent-lane/runtime/widen-draft.ts": 15,
       "src/orchestrator-v5/agent-lane/science/method-science-context.ts": 3,
@@ -833,7 +833,7 @@
     "goalDeadlineOf": 1,
     "goalKindOf": 30,
     "goalUnitOf": 5,
-    "goal_constraints": 453,
+    "goal_constraints": 455,
     "goal_deadline_as_stated": 12,
     "goal_direction": 104,
     "goal_horizon": 48,
@@ -862,7 +862,7 @@
     "threshold_source": 40,
     "unit_reading": 79
   },
-  "total_references": 2490,
+  "total_references": 2492,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

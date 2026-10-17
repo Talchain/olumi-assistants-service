@@ -47,7 +47,7 @@ const OWN_TARGET = 'chance of ‘productivity’ being at least 10% higher than 
 // Plain words (Paul's principle review, 14 Oct): the generic line's new wording, same meaning.
 const DOING_NOTHING = 'This Run can’t give a chance for carrying on as now, because it treats ‘productivity’ as unchanged from today.';
 const SQ_ASSUMED = 'This assumes carrying on as now leaves ‘productivity’ unchanged through month three; each option is measured against that.';
-const SQ_MOVED = 'Not shown: this run’s result for carrying on as now doesn’t match ‘productivity’ as it stands today in the model, so it needs checking first.';
+const SQ_MOVED = 'Chance not shown: Olumi cannot verify this Run’s result for carrying on as now against the reference for ‘productivity’.';
 const CONDITIONS = 'This chance covers ‘productivity’ only. It does not include: ‘Hiring spend’ at most £200,000; maintaining code quality; the urgent launch date.';
 const FACE = {
   hire_a_tech_lead: `‘Hire a Tech lead’: about 24% ${OWN_TARGET}, in this model, using Olumi's estimates for 4 starting values, 2 option settings and 7 relationships (see Check estimates).`,

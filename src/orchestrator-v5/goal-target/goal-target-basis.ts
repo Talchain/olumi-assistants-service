@@ -390,7 +390,7 @@ export function statusQuoRowWords(label: string, level?: StatusQuoLevel): string
 export function statusQuoMovedWords(labels: readonly string[]): string {
   const named = labels.map((l) => `‘${l}’`);
   const list = named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
-  return `Not shown: this run’s result for carrying on as now doesn’t match ${list} as it stands today in the model, so it needs checking first.`;
+  return `Chance not shown: Olumi cannot verify this Run’s result for carrying on as now against the reference for ${list}.`;
 }
 
 /** AIE status-quo disposition (12 Oct): a forecast whose status quo varies is carrying on's own projection, with its uncertainty. */
