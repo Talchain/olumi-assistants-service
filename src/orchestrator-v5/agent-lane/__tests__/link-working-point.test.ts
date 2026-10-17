@@ -65,6 +65,9 @@ describe('Olumi\'s working point from a link\'s brief range', () => {
     ['ends not ascending', () => withRange(graph(), [statement({ low: 7, high: 4 })])],
     ['a spread over the link writer\'s bound (0 to 90 points)', () => withRange(graph(), [statement({ low: 0, high: 90 })])],
     ['a link already sized by the user', () => withRange(graph({ edge: { provenance: { source: 'user_specified' }, defaulted: undefined } }))],
+    // Only a link nobody sized: Olumi's own earlier estimate is never replaced by this card (the press COULD size it, so only the
+    // placeholder rule refuses it).
+    ['a link Olumi already estimated (not a placeholder)', () => withRange(graph({ edge: { provenance: { source: 'brief_extraction', magnitude: 'olumi_estimate' }, defaulted: undefined } }))],
     ['no range at all', () => graph()],
   ])('⛔ no working point: %s', (_why, g) => {
     expect(linkWorkingPointOf(g(), FROM, TO)).toBeUndefined();
