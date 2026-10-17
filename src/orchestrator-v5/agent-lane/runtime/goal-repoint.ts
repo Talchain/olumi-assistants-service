@@ -17,7 +17,7 @@ const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Ar
  * No new carrier or numerical authority: the existing entity reader exposes description as full_label on cold read.
  * Structured target-row controls are explicitly left out; no silent claim that historical rows are still operative.
  */
-export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuote?: string): string | undefined {
+export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuote?: string, historyKind: 'goal' | 'target' = 'goal'): string | undefined {
   const old = Array.isArray(before.nodes) ? before.nodes.find((n): n is Rec => rec(n) && n.id === oldId && n.kind === 'goal') : undefined;
   const held = readGoalRecord(before, oldId);
   if (!old || !held) return undefined;
@@ -25,23 +25,23 @@ export function priorAimDescription(before: Rec, oldId: string, laterAmbitionQuo
   const figure = (value: number, unit: unknown) => sayFigureWithoutRounding(value, typeof unit === 'string' ? unit : '');
   const earlierFigure = held.target?.raw === undefined ? '' : sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
     ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`;
-  const lines = [typeof old.description === 'string' ? old.description : '',
-    `Earlier aim (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}.`,
-    `This was the governing aim before the earlier revision: “${held.label}”.`,
+  const lines = [`Earlier ${historyKind === 'target' ? 'target' : 'aim'} (history${laterAmbitionQuote === undefined ? '' : ', later ambition'}): ${earlierFigure || held.label}.`,
+    typeof old.description === 'string' ? old.description : '',
+    ...(historyKind === 'target' ? [] : [`This was the governing aim before the earlier revision: “${held.label}”.`]),
     ...(laterAmbitionQuote === undefined ? [] : [`Later ambition, as Olumi reads your words: “${laterAmbitionQuote}”. Your source stays yours; the later role is a modelling interpretation.`]),
     ...(held.target?.raw === undefined ? [] : [`Earlier model target: ${sayGoalChange(held.target.frame, held.target.raw, held.target.unit, figure, held.target.comparator)
       ?? `${held.target.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[held.target.comparator]} ${figure(held.target.raw, held.target.unit)}`}.`]),
-    ...(held.horizon === null ? [] : [`Earlier timing: ${[held.horizon.as_stated, held.horizon.deadline === undefined ? undefined : sayDate(held.horizon.deadline),
+    ...(historyKind === 'target' || held.horizon === null ? [] : [`Earlier timing: ${[held.horizon.as_stated, held.horizon.deadline === undefined ? undefined : sayDate(held.horizon.deadline),
       held.horizon.months === undefined ? undefined : `${held.horizon.months} months`].filter(Boolean).join('; ')}. This does not set the current goal’s deadline.`]),
-    ...(held.period === undefined || held.period === 'none' ? [] : [`Earlier figures were per ${held.period}; this does not set the current goal’s period.`]),
-    ...(held.horizon_basis === undefined ? [] : [`Earlier timing basis, recorded but not verified: ${held.horizon_basis.basis}. Earlier source: ${held.horizon_basis.source}; bound period: ${held.horizon_basis.bound_months} months. This earlier judgement does not validate the current goal.`]),
-    ...rows.map(row => `Earlier saved bound: ${sayGoalChange(row.value_frame, Number(row.value), typeof row.unit === 'string' ? row.unit : undefined, figure, statedOperatorOf(row))
+    ...(historyKind === 'target' || held.period === undefined || held.period === 'none' ? [] : [`Earlier figures were per ${held.period}; this does not set the current goal’s period.`]),
+    ...(historyKind === 'target' || held.horizon_basis === undefined ? [] : [`Earlier timing basis, recorded but not verified: ${held.horizon_basis.basis}. Earlier source: ${held.horizon_basis.source}; bound period: ${held.horizon_basis.bound_months} months. This earlier judgement does not validate the current goal.`]),
+    ...rows.filter(row => historyKind === 'goal' || row.deadline_metadata == null).map(row => `Earlier saved bound: ${sayGoalChange(row.value_frame, Number(row.value), typeof row.unit === 'string' ? row.unit : undefined, figure, statedOperatorOf(row))
       ?? `${statedOperatorOf(row) === undefined ? String(row.operator) : LIMIT_OPERATOR_WORDS[statedOperatorOf(row)!]} ${figure(Number(row.value), row.unit)}`}.`
       + (typeof row.source_quote === 'string' ? ` Earlier saved source quote: “${row.source_quote}”.` : '')
       + (typeof row.provenance === 'string' ? ` Origin recorded by the earlier model: ${row.provenance}.` : '')
       + (typeof row.confidence === 'number' ? ` Earlier extraction confidence: ${row.confidence}; this is not a forecast chance.` : '')
       + (rec(row.retained_unresolved_limit) && typeof row.retained_unresolved_limit.question === 'string' ? ` Unresolved: ${row.retained_unresolved_limit.question}` : '')),
-    'The earlier structured target rows and their remaining metadata are not kept as current target controls. Their figures, quoted words and recorded extraction confidence are retained here as text for context; they do not constrain the current goal.'];
+    'The earlier target and its quoted source remain here as history; they do not constrain the current goal.'];
   return lines.filter(Boolean).join('\n');
 }
 
@@ -121,9 +121,9 @@ export function omittedGoalChangeWords(part: string, refusal: string): string {
     unit_mismatch: 'its measurement needs checking',
     unit_unstated: 'its measurement needs checking',
     unit_unrecognised: 'its measurement needs checking',
-    not_current_removal: "its quoted words couldn't be verified as your own current statement",
+    not_current_removal: 'the quoted source is from an earlier message; ask here to include it',
     not_asked: "the quoted words don't identify this change clearly enough",
     subject_not_found: "Olumi couldn't identify the relevant part in this model",
   };
-  return `${part.charAt(0).toUpperCase()}${part.slice(1)} isn't included: ${reasons[refusal] ?? "Olumi couldn't safely include this change"}. This card won't apply that change.`;
+  return `${part.charAt(0).toUpperCase()}${part.slice(1)} isn't included: ${reasons[refusal] ?? "Olumi couldn't safely include this change"}.`;
 }

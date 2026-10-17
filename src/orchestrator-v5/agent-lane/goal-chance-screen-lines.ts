@@ -7,7 +7,7 @@ import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.
 import { sayDate } from '../goal-target/deadline-date.js';
 import { shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE, STATIC_MODEL_SCOPE_NOTE } from '../goal-target/goal-chance-licence.js';
 import { foldQuotes } from './quote-normalisation.js';
-import { narratorCountGuard } from './olumi-estimates-feeding-result.js';
+import { narratorCountGuard, type EstimateCountRecord } from './olumi-estimates-feeding-result.js';
 import { goalChanceEstimateCounts, goalChanceEstimateLinkCount, olumiEstimateWords, type GoalChanceEstimateCounts } from './goal-chance-estimate-attribution.js';
 import { sayDisplayedPct } from '../goal-target/goal-targets-joint.js';
 
@@ -213,12 +213,12 @@ export function goalChanceCellFacesForAgent(result: unknown, graph: unknown, cur
 }
 
 /** Check narrator counts without appending any screen sentence. */
-export function checkScreenLineClaims(text: string, lines: readonly GoalChanceScreenLine[], sourceTexts: readonly string[] = [], speaker?: 'olumi'): string {
-  // Narration never supplies k, even when it guessed correctly. Complete producer-bound sentences are already authorised;
-  // keep their exact bytes while applying RC4's existing guard to all other narrator text before deterministic assembly.
+export function checkScreenLineClaims(text: string, lines: readonly GoalChanceScreenLine[], sourceTexts: readonly string[] = [], speaker?: 'olumi', counts: EstimateCountRecord | null = null): string {
+  // Complete producer sentences and exact human sources retain their bytes. Other count claims cross the one
+  // record comparison; a pronoun, missing record or unrecognised construction establishes no contradiction.
   const authorised: string[] = [];
   let body = text;
-  if (speaker === 'olumi' || lines.some(l => l.olumi_estimate_link_count !== undefined)) {
+  if (counts !== null) {
     const recordSentences = lines.flatMap(l => [l.olumi_estimate_link_count === undefined ? l.chance : estimatePointSentence(l), l.depends]);
     for (const sentence of [...recordSentences, ...sourceTexts].filter(s => s !== '')) {
       const folded = foldQuotes(body), needle = foldQuotes(sentence);
@@ -230,7 +230,7 @@ export function checkScreenLineClaims(text: string, lines: readonly GoalChanceSc
         body = body.slice(0, at) + key + body.slice(at + sentence.length);
       }
     }
-    body = narratorCountGuard(body, null, speaker).text;
+    body = narratorCountGuard(body, counts, speaker).text;
     for (const [i, chance] of authorised.entries()) body = body.split(`\u0000GP_ESTIMATE_POINT_${i}\u0000.`).join(chance);
   }
   return body;

@@ -1,0 +1,182 @@
+{
+  "brief": "Our bakery sells about 400 loaves a week at the moment. We need to sell at least 520 loaves a week by the end of June. Option one is a second delivery van. Our manager reckons a second delivery van would add 90 loaves a week. Option two is a loyalty card for regulars.",
+  "draft": {
+    "goal": {
+      "kind": null,
+      "deliverable": null,
+      "metric": "weekly loaves sold",
+      "operator": ">=",
+      "target_stated": true,
+      "value": 520,
+      "unit": "loaves per week",
+      "horizon_months": null,
+      "provenance": "explicit",
+      "frame": "level",
+      "baseline_known": true,
+      "baseline_value": 400,
+      "baseline_provenance": "explicit",
+      "scope": null,
+      "quantity_frame": "level",
+      "basis": {
+        "reference": "today",
+        "denominator": null,
+        "period_months": null,
+        "period_kind": "at_end",
+        "effect_unit": "loaves per week",
+        "effects_at_period_end": false,
+        "also_required": null,
+        "open_question": null
+      },
+      "source_quote": "We need to sell at least 520 loaves a week by the end of June.",
+      "deadline_words": null
+    },
+    "constraints": [],
+    "options": [
+      {
+        "label": "Keep current setup",
+        "provenance": "ai_proposed",
+        "changes": [],
+        "interventions": [],
+        "added_capacity": null,
+        "is_status_quo": true
+      },
+      {
+        "label": "Second delivery van",
+        "provenance": "explicit",
+        "changes": [],
+        "added_capacity": null,
+        "is_status_quo": null,
+        "interventions": [
+          {
+            "factor_label": "Second van in service",
+            "value": 1,
+            "value_kind": "absolute",
+            "unit": "0/1",
+            "provenance": "inferred"
+          }
+        ]
+      },
+      {
+        "label": "Loyalty card",
+        "provenance": "explicit",
+        "changes": [],
+        "added_capacity": null,
+        "is_status_quo": null,
+        "interventions": [
+          {
+            "factor_label": "Loyalty card running",
+            "value": 1,
+            "value_kind": "absolute",
+            "unit": "0/1",
+            "provenance": "inferred"
+          }
+        ]
+      }
+    ],
+    "factors": [
+      {
+        "label": "Second van in service",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": 0,
+        "unit": "0/1",
+        "provenance": "inferred",
+        "plausible_max": 1
+      },
+      {
+        "label": "Loyalty card running",
+        "role": "controllable",
+        "baseline_known": false,
+        "baseline_value": 0,
+        "unit": "0/1",
+        "provenance": "inferred",
+        "plausible_max": 1
+      }
+    ],
+    "risks": [],
+    "outcomes": [],
+    "identities": [],
+    "unknowns": [],
+    "unknown_concerns": [],
+    "decision_question": null,
+    "links": [
+      {
+        "from": "Second van in service",
+        "to": "weekly loaves sold",
+        "direction": "positive",
+        "provenance": "explicit",
+        "effect_amount": 90,
+        "effect_per_source_change": null,
+        "effect_provenance": "explicit",
+        "definitional": null,
+        "basis": null,
+        "source_quote": "Our manager reckons a second delivery van would add 90 loaves a week."
+      },
+      {
+        "from": "Loyalty card running",
+        "to": "weekly loaves sold",
+        "direction": "positive",
+        "provenance": "ai_proposed",
+        "effect_amount": null,
+        "effect_per_source_change": null,
+        "effect_provenance": null,
+        "definitional": null,
+        "basis": null,
+        "source_quote": null
+      }
+    ],
+    "statements": [
+      {
+        "quote": "Our bakery sells about 400 loaves a week at the moment.",
+        "subject": {
+          "to_label": null,
+          "factor_label": null,
+          "kind": "goal",
+          "label": "weekly loaves sold"
+        },
+        "field": "level",
+        "form": "point",
+        "value": 400,
+        "low": null,
+        "high": null,
+        "unit": "loaves per week",
+        "qualifier": null,
+        "conditions": null
+      },
+      {
+        "quote": "We need to sell at least 520 loaves a week by the end of June.",
+        "subject": {
+          "to_label": null,
+          "factor_label": null,
+          "kind": "goal",
+          "label": "weekly loaves sold"
+        },
+        "field": "target",
+        "form": "lower_bound",
+        "value": 520,
+        "low": null,
+        "high": null,
+        "unit": "loaves per week",
+        "qualifier": null,
+        "conditions": null
+      },
+      {
+        "quote": "Our manager reckons a second delivery van would add 90 loaves a week.",
+        "subject": {
+          "to_label": "weekly loaves sold",
+          "factor_label": null,
+          "kind": "link",
+          "label": "Second van in service"
+        },
+        "field": "effect",
+        "form": "point",
+        "value": 90,
+        "low": null,
+        "high": null,
+        "unit": "loaves per week",
+        "qualifier": null,
+        "conditions": null
+      }
+    ]
+  }
+}

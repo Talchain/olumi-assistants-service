@@ -3,6 +3,8 @@ import { goalChanceScreenLinesForAgent, type GoalChanceScreenLine } from '../goa
 import { heldDeclineSentence, heldLapseSentence, editsRefusedSentence } from '../proposal-object/reply.js';
 import { rerunExplanationPlan } from '../rerun-explanation.js';
 import { withEstimateGoalPointsAtEgress } from '../goal-chance-estimate-egress.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { goalChanceEstimateCensus } from '../goal-chance-estimate-attribution.js';
 
 const line: GoalChanceScreenLine = {
   option_id: 'raise', label: 'Raise to £59', figure: 'about 67%', depends: '',
@@ -27,7 +29,7 @@ describe('r16 option and goal bound estimate points', () => {
 
   it('a Run using no Olumi estimates cannot acquire a fabricated Olumi count', () => {
     const { olumi_estimate_link_count: _count, ...humanLicence } = licence;
-    const humanResult = { enrichment: { inference_warnings: [humanLicence] } };
+    const humanResult = { computed_against_hash: computeAnalysisAffectingGraphHash(graph), enrichment: { inference_warnings: [humanLicence] } };
     const out = withEstimateGoalPointsAtEgress({ assistant_text: "Olumi's estimates: 99, see Check estimates." }, {
       analysisResult: humanResult, graph, current: true, narrator: 'olumi',
     }).assistant_text;
@@ -74,6 +76,69 @@ describe('r16 option and goal bound estimate points', () => {
   it('does not reinterpret first-person instructions without a known AI narrator', () => {
     const text = 'I need 2 values for this worksheet.';
     expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, { analysisResult: result, graph, current: true }).assistant_text).toBe(text);
+  });
+
+  it.each([
+    'Shall I save the £50,000 assumption for Hire PA?',
+    'I have set the £45,000 figure for Hire PA as a starting value.',
+    'I need 2 values for this worksheet.',
+    'Can I check your two assumptions?',
+  ])('an AI pronoun is not an attribution-count claim: %s', statement => {
+    expect(clean(`${line.chance} ${statement}`)).toBe(`${line.chance} ${statement}`);
+  });
+
+  it('the recorded producer census survives re-gating; a different count cannot borrow it', () => {
+    const census = "Olumi's estimates: 1, see Check estimates.";
+    expect(clean(`${line.chance} ${census}`)).toBe(`${line.chance} ${census}`);
+    expect(clean(`${line.chance} ${census.replace(': 1,', ': 99,')}`)).toBe(line.chance);
+  });
+
+  it('unrecorded counts establish no contradiction, even for an AI-authored sentence', () => {
+    const { olumi_estimate_link_count: _count, ...unrecorded } = licence;
+    const unknownResult = { enrichment: { inference_warnings: [unrecorded] } };
+    const text = "Olumi's estimates: 99, see Check estimates. I supplied 4 values.";
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      analysisResult: unknownResult, graph, current: true, narrator: 'olumi',
+    }).assistant_text).toBe(text);
+  });
+
+  it('a partial display census cannot supply the missing full-Run total or value count', () => {
+    const partial = { ...licence, option_ids: ['raise', 'withheld'], withheld_option_ids: ['withheld'] };
+    const partialResult = { enrichment: { inference_warnings: [partial] } };
+    const context = { analysisResult: partialResult, graph, current: true, narrator: 'olumi' as const };
+    const unknownTotal = "Olumi's estimates: 3, see Check estimates. I supplied 3 values.";
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: unknownTotal }, context).assistant_text).toBe(unknownTotal);
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: 'I supplied 99 links.' }, context).assistant_text).toBe('');
+  });
+
+  it('the recorded census, not a different graph’s three Olumi links, owns the count', () => {
+    const otherGraph = { ...graph, nodes: [...graph.nodes,
+      ...['a', 'b', 'c'].map(id => ({ id, kind: 'factor', label: id }))],
+      edges: ['a', 'b', 'c'].map(id => ({ from: id, to: 'mrr', strength: { mean: 0.5, std: 0.01 }, provenance: { magnitude: 'olumi_estimate' } })) };
+    expect(goalChanceEstimateCensus(otherGraph, ['raise'], 'mrr').estimates?.links).toHaveLength(3);
+    const recordedResult = { ...result, computed_against_hash: 'a'.repeat(16) };
+    const text = "Olumi's estimates: 1, see Check estimates.";
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text }, {
+      analysisResult: recordedResult, graph: otherGraph, current: true, narrator: 'olumi',
+    }).assistant_text).toBe(text);
+    expect(withEstimateGoalPointsAtEgress({ assistant_text: text.replace(': 1,', ': 3,') }, {
+      analysisResult: recordedResult, graph: otherGraph, current: true, narrator: 'olumi',
+    }).assistant_text).not.toContain('estimates: 3');
+  });
+
+  it.each([
+    "Olumi's £50,000 assumption for Hire PA is a starting value.",
+    'Olumi supplied 1 of the links behind this.',
+    'Olumi used 3 figures you gave.',
+    'Olumi assumed 3 hours per week for onboarding.',
+    'Olumi estimated a 2.5% churn rate.',
+    'Olumi set 12 months as the horizon.',
+    'Paul said I supplied 99 links.',
+    '“I supplied 99 links.”',
+    'I did not supply 4 values.',
+    'I have not supplied 4 values.',
+  ])('matching, non-claim, quantity, quoted and negated wording is not erased: %s', text => {
+    expect(clean(text)).toBe(text);
   });
 
   it.each(['I supplied 4 of the values behind this.', 'I supplied nine underlying values.', 'I supplied 99 links.'])(
