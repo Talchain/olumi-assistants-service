@@ -202,25 +202,47 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(w.writes).toHaveLength(1); expect(second.writes).toHaveLength(1);
   });
 
-  it.each([200, 201])('N5: retained span of %i characters respects the existing carrier limit', async length => {
-    const f = fixture(row), span = 'a'.repeat(length), source = `${row.factor} reports ${span} and ${row.withdrawn}.`;
-    const record = f.graph.nodes[1].user_statements[0];
-    record.statements[0].source = source; record.statements[0].quote = source;
+  it.each([200, 201, 451])('N5 × B3: all %i retained characters survive card, apply, cold read and second correction', async length => {
+    const f = fixture(row), span = `${row.factor} reports ${row.retained}; the morning team is checking the shared register while the evening team disputes the cause and wants the original evidence preserved before making any further judgement. `.repeat(3).slice(0, length);
+    const source = `${span} and ${row.withdrawn}.`, earlier = f.graph.nodes[1].user_statements[0].statements[0];
+    earlier.source = source; earlier.quote = source;
     const message = `For ${row.factor}, retract “${row.withdrawn}”; keep the earlier report.`;
     const w = await correctionWorld(f.graph, message), card = await w.offer('propose_statement', { correction: { quote: message,
       edits: [{ subject: f.subject, retirement: { quote: row.withdrawn, scope: 'part', disposition: 'retracted' }, retained: [span], reading_words: 'earlier report only' }] } });
-    if (length === 200) {
-      expect(card.ok, JSON.stringify(card)).toBe(true); expect((await w.press(String(card.proposal_id))).ok).toBe(true);
-      expect(userStatementFor(w.graph(), f.subject)!.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'part',
-        retained_count: 1, retained_0: span, retained_0_origin: 'held_user_statement' });
-    } else {
-      expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'retained_source_not_stated' });
-      expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
-      const whole = await w.offer('propose_statement', { correction: { quote: message,
-        edits: [{ subject: f.subject, retirement: { quote: source, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'earlier report withdrawn' }] } });
-      expect(whole.ok, JSON.stringify(whole)).toBe(true); expect((await w.press(String(whole.proposal_id))).ok).toBe(true);
-      expect(userStatementFor(w.graph(), f.subject)!.statements).toEqual([expect.objectContaining({ quote: message })]);
-    }
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    expect(String(card.public_label).split('\n').find(line => line.startsWith('Keep explicitly:'))).toBe(`Keep explicitly: “${span}”.`);
+    const pid = String(card.proposal_id), proposal = w.proposals.get(pid)!, restored = w.restoreCard(proposal, card);
+    expect(restored.get(pid)).toEqual(proposal); expect(w.writes).toHaveLength(0);
+    const edit = approvedStatementRecordOf(restored.get(pid)!.operations[0]!)!.correction!.edits[0]!;
+    expect(edit.retained).toEqual([span]); expect(edit.retirement.scope).toBe('part');
+    expect(edit.record.statements[1]).toEqual(earlier);
+    const attest = edit.record.attest!, parts = attest.retained_0_parts;
+    const kept = parts === undefined ? attest.retained_0
+      : Array.from({ length: Number(parts) }, (_, index) => attest[`retained_0_part_${index}`]).join('');
+    expect(kept).toBe(span);
+    expect(attest.retained_count).toBe(1); expect(attest.retained_0_origin).toBe('held_user_statement');
+    expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+    const saved = userStatementFor(w.graph(), f.subject)!;
+    expect(saved).toEqual(edit.record);
+    expect(userStatementFor(w.writes[0]!.graph, f.subject)).toEqual(saved);
+    const cold = await w.cold(); expect(cold.status).toBe(200);
+    expect(userStatementFor(cold.body.graph, f.subject)).toEqual(saved);
+    // The other subject still holds its own report; this correction cannot borrow or rewrite it.
+    expect(userStatementFor(cold.body.graph, f.other)).toEqual(userStatementFor(f.graph, f.other));
+    const secondMessage = `For ${row.factor}, mark “${row.withdrawn}” historical instead; keep the earlier report.`;
+    const second = await correctionWorld(cold.body.graph, secondMessage), next = await second.offer('propose_statement', { correction: {
+      quote: secondMessage, edits: [{ subject: f.subject, retirement: { quote: row.withdrawn, scope: 'part', disposition: 'historical' },
+        retained: [span], reading_words: 'earlier report only; disputed claim historical' }] } });
+    expect(next, JSON.stringify(next)).toMatchObject({ ok: true, mutated: false });
+    expect(await second.press(String(next.proposal_id))).toMatchObject({ ok: true, applied: true });
+    const resaved = userStatementFor(second.graph(), f.subject)!;
+    expect(resaved.attest).toEqual({ ...attest, disposition: 'historical' });
+    expect(resaved.statements[0]).toMatchObject({ source: secondMessage, quote: secondMessage, speaker: 'user', reading: 'olumi' });
+    expect(resaved.statements[1]).toEqual(earlier);
+    const reopened = await second.cold(); expect(reopened.status).toBe(200);
+    expect(userStatementFor(reopened.body.graph, f.subject)).toEqual(resaved);
+    expect(userStatementFor(reopened.body.graph, f.other)).toEqual(userStatementFor(f.graph, f.other));
+    expect(w.writes).toHaveLength(1); expect(second.writes).toHaveLength(1);
   });
 
   it('Lane A B1: an adopted option range refuses before a card and keeps its own adoption', async () => {

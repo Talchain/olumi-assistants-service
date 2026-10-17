@@ -47,7 +47,12 @@ function correctionAttest(e: CorrectionEditRequest): StatementAttest {
   e.retained.forEach((span, index) => {
     if (typeof span !== 'string') return;
     const key = `retained_${index}`;
-    metadata[key] = span;
+    // Existing attestation strings have a 200-character limit; preserve longer spans losslessly in ordered pieces.
+    if (span.length <= 200) metadata[key] = span;
+    else {
+      metadata[`${key}_parts`] = Math.ceil(span.length / 200);
+      for (let start = 0; start < span.length; start += 200) metadata[`${key}_part_${start / 200}`] = span.slice(start, start + 200);
+    }
     metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
   });
   return metadata;
@@ -189,7 +194,6 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     if (verified.kind === 'refused') return { refused: verified.refusal };
     source = verified.statements[0]!;
     if (!Array.isArray(e.retained)) return { refused: 'retained_list_required' };
-    if (e.retained.some(span => typeof span === 'string' && span.length > 200)) return { refused: 'retained_source_not_stated' };
     const expected = e.expected_record === undefined ? userStatementFor(graph, e.subject) ?? null : e.expected_record;
     if (protectedAttestation(expected)) return { refused: 'correction_attestation_protected' };
     edits.push({ ...e, expected_record: expected, expected_node: structuredClone(node),
