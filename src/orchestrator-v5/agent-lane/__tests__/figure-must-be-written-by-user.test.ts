@@ -198,10 +198,15 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
   it('RED: "churn is lower than that" → the Agent\'s 4% is a revision recorded as Olumi\'s, and said', async () => {
     const { caps, store } = setup();
     const r = await caps.proposeAssumptions(ctxSaying('I think churn is lower than that.'), revise as never) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[] };
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(opAuthor(store, r.proposal_id)).toBe('model_proposed');
-    expect(store.get(String(r.proposal_id))?.provenance.authored_by).toBe('model_proposed');
-    expect(r.not_the_users_figure).toEqual([{ factor: 'Monthly churn', value: 4 }]);
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'figure_not_in_users_words' });
+    expect(store.outstanding(ctxSaying('').scenario_id, null)).toHaveLength(0);
+    // The explicit Olumi estimate remains proposable; refusing a false human claim never invents its authorship.
+    const estimate = await caps.proposeAssumptions(ctxSaying('I think churn is lower than that.'),
+      { assumptions: revise.assumptions.map(a => ({ ...a, user_stated: false })) });
+    expect(estimate.ok, JSON.stringify(estimate)).toBe(true);
+    expect(opAuthor(store, estimate.proposal_id)).toBe('model_proposed');
+    expect(store.get(String(estimate.proposal_id))?.provenance.authored_by).toBe('model_proposed');
+    expect(estimate.public_label).not.toContain('figure you gave');
   });
 
   it('RED (B2): "Yes, but it\'s closer to 4% now, that\'s from finance." → the user\'s revision', async () => {
@@ -216,7 +221,9 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
     const r = await caps.proposeAssumptions(ctxSaying('I think churn is more like 4%.'), revise as never) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown };
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(opAuthor(store, r.proposal_id)).toBe('user_stated');
-    expect(store.get(String(r.proposal_id))?.provenance.authored_by).toBe('user_stated');
+    expect(store.get(String(r.proposal_id))?.provenance.authored_by).toBe('model_proposed');
+    expect(store.get(String(r.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'user_stated', user_material_unverified: true,
+      confirmation: { source: 'I think churn is more like 4%.' } });
     expect(r).not.toHaveProperty('not_the_users_figure');
   });
 });

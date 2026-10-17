@@ -128,18 +128,23 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     const p = await a.caps.proposeAssumptions(a.ctx, SALARIES as never);
     expect(p.ok, JSON.stringify(p)).toBe(true);
     expect(p.not_the_users_figure, JSON.stringify(p.not_the_users_figure)).toBeUndefined();
-    const out = await a.caps.authoriseChange(a.ctx, { proposal_id: String(p.proposal_id) });
+    expect(p.public_label).toContain(a.ctx.user_text);
+    expect(p.public_label).toContain('field binding unverified');
+    expect(await a.caps.authoriseChange(a.ctx, { proposal_id: String(p.proposal_id) })).toMatchObject({ ok: false, refusal: 'approval_required' });
+    expect(rows.size).toBe(0);
+    const out = await a.caps.authoriseChange({ ...a.ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size, 'two values, ONE commit').toBe(1);
     for (const id of ['senior_engineer_annual_salary', 'junior_engineer_annual_salary']) {
       expect(os(id).source, `${id} ${JSON.stringify(os(id))}`).toBe('user_override');
+      expect(os(id).user_material_unverified).toBe(true);
     }
     expect(os('senior_engineer_annual_salary').raw_value ?? os('senior_engineer_annual_salary').value).toBe(120000);
     // A later, unrelated commit (Olumi's figure on another factor), then a fresh read: the user's source survives.
     const b = agent('What would you assume for annual salary spend?');
     const q = await b.caps.proposeAssumptions(b.ctx, { assumptions: [{ user_stated: false, factor_label: 'Annual salary spend', value: 250000, unit: 'GBP/year', basis: 'two seniors', revise: true }] } as never);
     expect(q.ok, JSON.stringify(q)).toBe(true);
-    const out2 = await b.caps.authoriseChange(b.ctx, { proposal_id: String(q.proposal_id) });
+    const out2 = await b.caps.authoriseChange({ ...b.ctx, typed_approval_of: String(q.proposal_id) }, { proposal_id: String(q.proposal_id) });
     expect(out2.ok, JSON.stringify(out2)).toBe(true);
     expect(rows.size).toBe(2);
     for (const id of ['senior_engineer_annual_salary', 'junior_engineer_annual_salary']) expect(os(id).source).toBe('user_override');
