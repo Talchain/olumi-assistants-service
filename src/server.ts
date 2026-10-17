@@ -18,13 +18,6 @@ import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import shareRoute from "./routes/assist.share.js";
 import ceeDraftRouteV1 from "./routes/assist.v1.draft-graph.js";
 import ceeDraftStagedRouteV1 from "./routes/assist.v1.draft-graph-staged.js";
-import ceeOptionsRouteV1 from "./routes/assist.v1.options.js";
-import ceeBiasCheckRouteV1 from "./routes/assist.v1.bias-check.js";
-import ceeExplainGraphRouteV1 from "./routes/assist.v1.explain-graph.js";
-import ceeEvidenceHelperRouteV1 from "./routes/assist.v1.evidence-helper.js";
-import ceeSensitivityCoachRouteV1 from "./routes/assist.v1.sensitivity-coach.js";
-import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js";
-import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
 import ceeScenarioGraphRouteV1 from "./routes/assist.v1.scenario-graph.js";
 import ceeScenarioGraphRegisterRouteV1 from "./routes/assist.v1.scenario-graph-register.js";
 import ceeScenarioVersionsRouteV1 from "./routes/assist.v1.scenario-versions.js";
@@ -751,33 +744,6 @@ function buildCeeConfig() {
       feature_version: env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0",
       rate_limit_rpm: resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM"),
     },
-    options: {
-      feature_version: env.CEE_OPTIONS_FEATURE_VERSION || "options-1.0.0",
-      rate_limit_rpm: resolveCeeRateLimit("CEE_OPTIONS_RATE_LIMIT_RPM"),
-    },
-    bias_check: {
-      feature_version: env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0",
-      rate_limit_rpm: resolveCeeRateLimit("CEE_BIAS_CHECK_RATE_LIMIT_RPM"),
-    },
-    evidence_helper: {
-      feature_version:
-        env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0",
-      rate_limit_rpm: resolveCeeRateLimit("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM"),
-    },
-    sensitivity_coach: {
-      feature_version:
-        env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0",
-      rate_limit_rpm: resolveCeeRateLimit("CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM"),
-    },
-    team_perspectives: {
-      feature_version:
-        env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0",
-      rate_limit_rpm: resolveCeeRateLimit("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM"),
-    },
-    explain_graph: {
-      feature_version: env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0",
-      rate_limit_rpm: resolveCeeRateLimit("CEE_EXPLAIN_RATE_LIMIT_RPM"),
-    },
   };
 }
 
@@ -1292,13 +1258,6 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // and unflagged (no dark launches): the buffered and 2-frame routes above are
   // unchanged, and the UI opts in by calling this one.
   await ceeDraftStagedRouteV1(app);
-  await ceeOptionsRouteV1(app);
-  await ceeBiasCheckRouteV1(app);
-  await ceeExplainGraphRouteV1(app);
-  await ceeEvidenceHelperRouteV1(app);
-  await ceeSensitivityCoachRouteV1(app);
-  await ceeTeamPerspectivesRouteV1(app);
-  await ceeGraphReadinessRouteV1(app);
   await ceeScenarioGraphRouteV1(app);
   await ceeScenarioGraphRegisterRouteV1(app);
   // Model Management v1 wiring slice — versions list/save/restore. Registered

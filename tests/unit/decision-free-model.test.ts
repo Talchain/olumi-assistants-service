@@ -31,7 +31,6 @@ import { validateGraphStructure } from '../../src/orchestrator/graph-structure-v
 import type { GraphT, NodeT } from '../../src/schemas/graph.js';
 import { detectBiases } from '../../src/cee/bias/index.js';
 import { computeQuality } from '../../src/cee/quality/index.js';
-import { generateOptions } from '../../src/cee/options/index.js';
 import { resolveRunAdmission } from '../../src/orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../src/orchestrator-v5/routing/validation-registry.js';
 
@@ -396,18 +395,6 @@ describe('decision-free model — the honesty layer', () => {
     const f = selectionFinding(decisionWithOneOption);
     expect(f).toBeDefined();
     expect(f?.severity).toBe('medium');
-  });
-
-  it('OPTIONS: no "add options" / "explore paths" nudge for a deliberate map', () => {
-    const ids = generateOptions(decisionFreeV1 as never).map((o) => o.id);
-    expect(ids).not.toContain('expand_scope_add_options');
-    expect(ids).not.toContain('change_channel_explore_paths');
-  });
-
-  it('OPTIONS TWIN: a decision with no options still gets both nudges', () => {
-    const ids = generateOptions(decisionWithNoOptions as never).map((o) => o.id);
-    expect(ids).toContain('expand_scope_add_options');
-    expect(ids).toContain('change_channel_explore_paths');
   });
 
   /**

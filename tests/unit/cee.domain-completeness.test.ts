@@ -227,32 +227,3 @@ describe("checkDomainCompleteness", () => {
     });
   });
 });
-
-describe("integration with assessGraphReadiness", () => {
-  it("includes domain completeness in assessment", async () => {
-    // Import dynamically to ensure fresh module
-    const { assessGraphReadiness } = await import("../../src/cee/graph-readiness/index.js");
-
-    const graph = createTestGraph([
-      { id: "d1", kind: "decision", label: "Launch decision" },
-      { id: "o1", kind: "option", label: "Launch in Q1" },
-      { id: "o2", kind: "option", label: "Launch in Q2" },
-      { id: "out1", kind: "outcome", label: "Market share gain" },
-      { id: "g1", kind: "goal", label: "Increase revenue" },
-    ]);
-
-    // Add edges to satisfy minimum requirements
-    (graph as any).edges = [
-      { from: "d1", to: "o1", belief: 0.7, weight: 1.0 },
-      { from: "d1", to: "o2", belief: 0.7, weight: 1.0 },
-      { from: "o1", to: "out1", belief: 0.6, weight: 1.0 },
-      { from: "out1", to: "g1", belief: 0.7, weight: 1.0 },
-    ];
-
-    const result = assessGraphReadiness(graph, { brief: "product launch strategy" });
-
-    expect(result.domain_completeness).toBeDefined();
-    expect(result.domain_completeness?.detected_domain).toBe("product_launch");
-    expect(result.domain_completeness?.missing_factors.length).toBeGreaterThan(0);
-  });
-});

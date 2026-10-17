@@ -53,7 +53,7 @@ export function installScenarioDeclarationGuard(app: FastifyInstance): void {
       !declaration || (typeof ('derive' in declaration ? declaration.derive : undefined) !== 'function' &&
         (!('from' in declaration) || !['body', 'params'].includes(declaration.from) || !declaration.key))
     ))) throw new Error(`Missing or invalid config.scenarioId: ${route.method} ${route.url}`);
-    if (declaration !== 'none' && declaration.allowMissing && route.url !== '/assist/v1/graph-readiness') {
+    if (declaration !== 'none' && declaration.allowMissing) {
       throw new Error(`allowMissing is restricted to graph readiness: ${route.method} ${route.url}`);
     }
     if (declaration !== 'none' && declaration.viewerMemberRead &&
@@ -214,7 +214,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
               ownershipRefusalEvent(req, 'invalid_scenario_id', '');
               return envelope(reply, req, 400, 'invalid_scenario_id', 'scenario_id is required.');
             }
-            if (path === '/agent/v1/turn' || path === '/assist/v1/graph-readiness') return refuse(req, reply, '', 'scenario_not_found');
+            if (path === '/agent/v1/turn') return refuse(req, reply, '', 'scenario_not_found');
           }
           return;
         }

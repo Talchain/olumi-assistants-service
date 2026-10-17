@@ -45,7 +45,7 @@ describe("rate bucket tiers — derived, ordered", () => {
 describe("resolveCeeRateLimit — derive, don't mirror", () => {
   it("derives a registered env var's default from its tier, NOT the flat 5", () => {
     expect(resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM")).toBe(tierRpm("draft"));
-    expect(resolveCeeRateLimit("CEE_GRAPH_READINESS_RATE_LIMIT_RPM")).toBe(tierRpm("read"));
+    expect(resolveCeeRateLimit("CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM")).toBe(tierRpm("read"));
     expect(resolveCeeRateLimit("CEE_REVIEW_RATE_LIMIT_RPM")).toBe(tierRpm("coach"));
   });
 
@@ -53,7 +53,7 @@ describe("resolveCeeRateLimit — derive, don't mirror", () => {
     // Pre-fix, every unset route silently ran at 5 because the `?? N` fallbacks
     // in route files were dead code. Now each resolves to its tier.
     expect(resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM")).not.toBe(5);
-    expect(resolveCeeRateLimit("CEE_GRAPH_READINESS_RATE_LIMIT_RPM")).not.toBe(5);
+    expect(resolveCeeRateLimit("CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM")).not.toBe(5);
   });
 
   it("an explicit per-route env override still wins (back-compat)", () => {
@@ -67,10 +67,10 @@ describe("resolveCeeRateLimit — derive, don't mirror", () => {
     );
   });
 
-  it("registry maps the two LLM routes to draft and graph-readiness to read", () => {
+  it("registry maps the two LLM routes to draft and scenario graph to read", () => {
     expect(RATE_BUCKET_REGISTRY.CEE_DRAFT_RATE_LIMIT_RPM).toBe("draft");
     expect(RATE_BUCKET_REGISTRY.CEE_STREAM_RATE_LIMIT_RPM).toBe("draft");
-    expect(RATE_BUCKET_REGISTRY.CEE_GRAPH_READINESS_RATE_LIMIT_RPM).toBe("read");
+    expect(RATE_BUCKET_REGISTRY.CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM).toBe("read");
     expect(RATE_BUCKET_REGISTRY.CEE_TURN_RATE_LIMIT_RPM).toBe("coach");
   });
 });

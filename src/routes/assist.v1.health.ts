@@ -18,33 +18,6 @@ export default async function route(app: FastifyInstance) {
         feature_version: env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0",
         rate_limit_rpm: resolveCeeRateLimit("CEE_DRAFT_RATE_LIMIT_RPM"),
       },
-      options: {
-        feature_version: env.CEE_OPTIONS_FEATURE_VERSION || "options-1.0.0",
-        rate_limit_rpm: resolveCeeRateLimit("CEE_OPTIONS_RATE_LIMIT_RPM"),
-      },
-      bias_check: {
-        feature_version: env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0",
-        rate_limit_rpm: resolveCeeRateLimit("CEE_BIAS_CHECK_RATE_LIMIT_RPM"),
-      },
-      evidence_helper: {
-        feature_version:
-          env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0",
-        rate_limit_rpm: resolveCeeRateLimit("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM"),
-      },
-      sensitivity_coach: {
-        feature_version:
-          env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0",
-        rate_limit_rpm: resolveCeeRateLimit("CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM"),
-      },
-      team_perspectives: {
-        feature_version:
-          env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0",
-        rate_limit_rpm: resolveCeeRateLimit("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM"),
-      },
-      explain_graph: {
-        feature_version: env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0",
-        rate_limit_rpm: resolveCeeRateLimit("CEE_EXPLAIN_RATE_LIMIT_RPM"),
-      },
     } as const;
 
     const recentErrors = getRecentCeeErrors(50);

@@ -31,17 +31,5 @@ describe("CEE OpenAPI doc-shape spec drift gate", () => {
 
     // Draft My Model
     expect(spec).toContain("/assist/v1/draft-graph:");
-    // Explain My Model
-    expect(spec).toContain("/assist/v1/explain-graph:");
-    // Evidence Helper
-    expect(spec).toContain("/assist/v1/evidence-helper:");
-    // Bias Check
-    expect(spec).toContain("/assist/v1/bias-check:");
-    // Options Helper
-    expect(spec).toContain("/assist/v1/options:");
-    // Sensitivity Coach
-    expect(spec).toContain("/assist/v1/sensitivity-coach:");
-    // Team Perspectives
-    expect(spec).toContain("/assist/v1/team-perspectives:");
   });
 });
