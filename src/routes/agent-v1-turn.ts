@@ -6554,8 +6554,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
                   overCapSaid = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
                   return write;
                 } },
-              write: {
-                prepare: (write, { finalPending, prospectiveGuidance }) => {
+              prepare: (write, { finalPending, prospectiveGuidance }) => {
                   reconciledPending = finalPending;
                   heldRecords = finalPending.flatMap(p => {
                     const r = proposalRecord(p, readbackGraph); return r && heldRecordAppliesAt(p, r, readbackGraph, graphHash) ? [r] : [];
@@ -6599,6 +6598,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
                     pending_actions: finalPending.map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
                     suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message })) };
                 },
+              write: {
                 scenario_id: scenarioId,
               // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before
               // the run), or under the id minted above for an unnamed turn that carries an offer.

@@ -59,7 +59,15 @@ export interface PendingActionReadOptions {
   readonly onLatestRowId?: (id: string | null) => void;
 }
 
-export interface ConditionalAppendOptions {
+export interface SessionAppendOptions {
+  /** Reply-only preparation, run by append after its final carriers are known, again on every CAS attempt. */
+  readonly prepare?: (write: SessionTurnWrite, context: {
+    readonly finalPending: readonly PendingAction[];
+    readonly prospectiveGuidance: GuidanceState | null;
+  }) => Pick<SessionTurnWrite, 'assistantMessage' | 'handler_facts' | 'pending_actions' | 'suggested_actions'>;
+}
+
+export interface ConditionalAppendOptions extends SessionAppendOptions {
   /** Only final, non-graph Agent answers. null asserts that no prior row exists. */
   readonly expectedLatestRowId: string | null;
 }
@@ -172,11 +180,6 @@ export interface ScenarioRunAnalysisFactReadOptions {
 }
 
 export interface SessionTurnWrite {
-  /** Reply-only preparation, run by append after its final carriers are known, again on every CAS attempt. */
-  readonly prepare?: (write: SessionTurnWrite, context: {
-    readonly finalPending: readonly PendingAction[];
-    readonly prospectiveGuidance: GuidanceState | null;
-  }) => Pick<SessionTurnWrite, 'assistantMessage' | 'handler_facts' | 'pending_actions' | 'suggested_actions'>;
   readonly scenario_id: string;
   readonly turn_id: string;
   readonly turn_class: ConversationTurnClass;
@@ -373,7 +376,7 @@ export interface AnswerOffersRead {
 }
 
 export interface SessionStore {
-  append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
+  append(write: SessionTurnWrite, options?: SessionAppendOptions): Promise<SessionAppendOutcome>;
   /**
    * S-D.1b: the Agent answer row, appended ONLY if the latest row is still `options.expectedLatestRowId`. A SEPARATE,
    * optional capability (never an overload of `append`), so no other store, test double or caller changes; a store

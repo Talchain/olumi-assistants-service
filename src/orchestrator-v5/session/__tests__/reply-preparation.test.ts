@@ -53,7 +53,7 @@ describe('reply preparation inside the existing append attempt', () => {
       for (const policy of ['RC-COACH-EDITS', 'RC-WIDEN']) for (const recordsEvent of [false, true]) {
         const s = setup(count);
         let checked = '';
-        await s.store.append({ ...answer(), ...(recordsEvent ? { agent_guidance: event(policy) } : {}),
+        await s.store.append({ ...answer(), ...(recordsEvent ? { agent_guidance: event(policy) } : {}) }, {
           prepare: (write, { finalPending, prospectiveGuidance }) => {
             expect(finalPending).toEqual([]);
             const oldestSurvives = count < GUIDANCE_HISTORY_LIMIT || (!recordsEvent && count === GUIDANCE_HISTORY_LIMIT);
@@ -69,13 +69,13 @@ describe('reply preparation inside the existing append attempt', () => {
   it('CAS contention re-prepares from the new pending carrier and guidance; only those validated bytes commit', async () => {
     const s = setup(1); s.contend();
     const seen: string[] = [];
-    const write: SessionTurnWrite = { ...answer(), pending_actions: [hold], agent_guidance: event('RC-COACH-EDITS'),
+    const write: SessionTurnWrite = { ...answer(), pending_actions: [hold], agent_guidance: event('RC-COACH-EDITS') };
+    await appendCheckedGraphWrite({ store: s.store, write, writesGraph: false,
       prepare: (candidate, { finalPending, prospectiveGuidance }) => {
         const text = JSON.stringify({ holds: finalPending.map(p => p.chip_id), widen: prospectiveGuidance?.['RC-WIDEN'] !== undefined });
         seen.push(text);
         return { assistantMessage: text, handler_facts: candidate.handler_facts };
-      } };
-    await appendCheckedGraphWrite({ store: s.store, write, writesGraph: false,
+      },
       heldProposals: { isHeld: p => p.chip_id === 'hold', seenByThisRequest: new Set(['hold']) } });
     expect(seen).toEqual(['{"holds":["hold"],"widen":true}', '{"holds":[],"widen":false}']);
     expect(s.rpc).toHaveBeenCalledTimes(2);
@@ -86,7 +86,7 @@ describe('reply preparation inside the existing append attempt', () => {
 
   it('another scenario’s guidance cannot supply this answer’s policy history', async () => {
     const s = setup(1); s.misScope();
-    await s.store.append({ ...answer(), agent_guidance: event('RC-COACH-EDITS'),
+    await s.store.append({ ...answer(), agent_guidance: event('RC-COACH-EDITS') }, {
       prepare: (write, { prospectiveGuidance }) => {
         expect(prospectiveGuidance).toBeNull();
         return { assistantMessage: 'History unknown.', handler_facts: write.handler_facts };
@@ -97,10 +97,10 @@ describe('reply preparation inside the existing append attempt', () => {
   it('a failed final check writes nothing; a non-answer cannot acquire the preparation path', async () => {
     const s = setup();
     const prepare = vi.fn(() => { throw new Error('invalid reply'); });
-    await expect(s.store.append({ ...answer(), prepare })).rejects.toThrow('invalid reply');
+    await expect(s.store.append(answer(), { prepare })).rejects.toThrow('invalid reply');
     expect(s.rpc).not.toHaveBeenCalled();
     prepare.mockClear();
-    await expect(s.store.append({ ...answer(), graph: { nodes: [], edges: [] }, prepare })).rejects.toThrow('Conditional append requires');
+    await expect(s.store.append({ ...answer(), graph: { nodes: [], edges: [] } }, { prepare })).rejects.toThrow('Conditional append requires');
     expect(prepare).not.toHaveBeenCalled();
     expect(s.rpc).not.toHaveBeenCalled();
   });

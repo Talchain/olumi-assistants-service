@@ -21,12 +21,11 @@ const store = {
     if (pendingUnavailable && options?.onLatestRowId) throw new Error('pending unavailable');
     return [];
   },
-  append: vi.fn(async (write: Rec) => {
-    if (appendUnavailable && write.prepare) throw new Error('answer append unavailable');
+  append: vi.fn(async (write: Rec, options?: Rec) => {
+    if (appendUnavailable && options?.prepare) throw new Error('answer append unavailable');
     const previous = rows.get(write.turn_id);
     if (previous) return { id: previous.id, replayedPriorTurn: true };
-    const { prepare, ...stored } = write;
-    write = prepare ? { ...stored, ...prepare(write, { finalPending: write.pending_actions ?? [], prospectiveGuidance: null }) } : stored;
+    if (options?.prepare) write = { ...write, ...options.prepare(write, { finalPending: write.pending_actions ?? [], prospectiveGuidance: null }) };
     rows.set(write.turn_id, { ...write, id: `row-${rows.size}`, assistant_message: write.assistantMessage,
       user_message: write.userMessage, run_narration: write.run_narration });
     return { id: `row-${rows.size}` };
