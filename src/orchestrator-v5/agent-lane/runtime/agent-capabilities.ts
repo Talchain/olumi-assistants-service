@@ -3,7 +3,7 @@ import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-pro
 import { omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
 import type { RecoveredRun } from '../run-operation.js';
 import { goalLevelReadingWords } from '../../goal-target/goal-level-reading.js';
-import { carriesQuoteConfirmation, verbatimSourceLine } from '../quote-confirmation.js';
+import { carriesQuoteConfirmation, plainQuoteWords, verbatimSourceLine } from '../quote-confirmation.js';
 import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
@@ -3997,10 +3997,16 @@ export function createAgentCapabilities(
   const prepareExplicitRebuild = async (ctx: AgentToolContext, framing: string, request: string): Promise<ToolResult> => {
     const refused = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
     if (readOnly) return refuseReadOnly();
+    const currentRequest = ctx.user_turn_text ?? '';
+    const matchCurrent = plainQuoteWords(currentRequest).toLocaleLowerCase('en-GB');
+    const matchRequest = plainQuoteWords(request).toLocaleLowerCase('en-GB');
     if (!request.trim() || ctx.user_text_complete !== true || ctx.typed_approval_of !== undefined
-      || request !== ctx.user_turn_text || !ctx.verified_user_messages?.includes(request)) {
+      || !wholeStatementIn(matchCurrent, matchRequest) || !ctx.verified_user_messages?.includes(currentRequest)) {
       return refused('current_request_required', 'No replacement was prepared. The complete current typed request must be verified; an earlier request or another card’s press cannot authorise a rebuild.');
     }
+    // The tool quotes a WHOLE current statement, never a fragment that drops a speaker or negation. Retain the full turn,
+    // including its conditions and disagreement; a pending unrelated card grants no rebuild permission.
+    request = currentRequest;
     const before = await readGraph(ctx.scenario_id);
     if (before === null) return refused('not_found', 'The saved model could not be read. Nothing was changed.');
     if (before.nodes.length === 0) return refused('saved_model_required', 'Use initial construction for an empty model.');
@@ -4049,7 +4055,7 @@ export function createAgentCapabilities(
     const omitted = [...savedParts].filter(([k]) => !proposedParts.has(k)).map(([, label]) => `“${label}”`);
     const reportWords = ['not_represented', 'open_questions', 'disclosures'].flatMap(k => Array.isArray(report[k]) ? (report[k] as unknown[]).filter((v): v is string => typeof v === 'string') : []);
 
-    const public_label = 'Replace the saved model with this complete proposed model. The current goal, all saved options and recorded human work are retained. Other structure and Olumi assumptions may change. Previous analyses keep their original model; this replacement needs a new analysis.\n'
+    const public_label = `From your current message: “${request}”.\n` + 'Replace the saved model with this complete proposed model. The current goal, all saved options and recorded human work are retained. Other structure and Olumi assumptions may change. Previous analyses keep their original model; this replacement needs a new analysis.\n'
       + goalWords + '\n' + (candidate.nodes as Record<string, unknown>[]).map(n => `${String(n.kind)}: ${partWords(n)}`).join('\n')
       + '\nRelationships: ' + (candidate.edges as Record<string, unknown>[]).map(e => `“${names.get(e.from)}” → “${names.get(e.to)}”`).join('; ')
       + (added.length ? '\nParts not in your current model that this would add: ' + added.join('; ') : '')
@@ -4068,12 +4074,19 @@ export function createAgentCapabilities(
       note: 'Show the COMPLETE proposed_model and construction report, including every figure, source, setting, omission and changed assumption, with the approval card. This is a proposal, not a saved model. Only its own press can save the entire candidate.' };
   };
 
+  const retainedTargetAim = (graph: Record<string, unknown>, goalId: string, quote: string | undefined, bindingUnverified: boolean, sourceUnverified: boolean): string | undefined => {
+    const history = priorAimDescription(graph, goalId, sourceUnverified ? undefined : quote, 'target');
+    return history === undefined || !bindingUnverified ? history : history + (sourceUnverified
+      ? `\nLater ambition, as Olumi’s unverified reading: “${quote}”. This card has not bound that reading to the saved target or verified its source. It creates no additional target; other saved aims and their bounds remain on their existing nodes.`
+      : `\nYour words remain yours: “${quote}”. Your source stays yours; the later role and its binding remain Olumi’s reading, not verified by this card or its approval. Other saved aims and bounds stay on their existing nodes.`);
+  };
+
   const applySavedCorrection = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
-      goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown; explicit_rebuild_request?: unknown; rebuild_history?: unknown; retained_aim_description?: unknown };
+      goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; later_ambition_binding_unverified?: unknown; later_ambition_source_unverified?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown; explicit_rebuild_request?: unknown; rebuild_history?: unknown; retained_aim_description?: unknown };
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (!isPreparedSavedCorrection(parent.operations[0]) || ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
       || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
@@ -4118,7 +4131,7 @@ export function createAgentCapabilities(
       }
     }
     if (v.retained_aim_description !== undefined) {
-      const expected = priorAimDescription(before.raw, parent.operations[0]!.path, typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined, 'target');
+      const expected = retainedTargetAim(before.raw, parent.operations[0]!.path, typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined, v.later_ambition_binding_unverified === true, v.later_ambition_source_unverified === true);
       const node = isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) ? v.candidate.nodes.find(n => isPlainRecord(n) && n.id === parent.operations[0]!.path) : undefined;
       if (expected === undefined || v.retained_aim_description !== expected || !isPlainRecord(node) || node.description !== expected) return notApplied('incomplete_goal_postimage', 'This card would lose the earlier aim or its complete source. Nothing was saved.');
     }
@@ -6329,15 +6342,21 @@ export function createAgentCapabilities(
       // A restatement corrects THIS saved goal, never redrafts the options. Source verification proves the human
       // figure, not its role: the uncertain goal/measurement binding is disclosed and stays inferred after approval.
       let retainedAim: string | undefined;
+      let laterAmbitionUnverified = false;
+      let laterAmbitionSource: string | undefined;
+      let laterAmbitionSourceUnverified = false;
       if (args.later_ambition_quote !== undefined) {
         const quote = args.later_ambition_quote;
         const held = readGoalRecord(g.raw, goal.id)?.target;
         const messages = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
-        if (ctx.user_text_complete === false || !quote.trim() || !messages.some(m => wholeStatementIn(m, quote))
+        laterAmbitionSource = messages.find(m => wholeStatementIn(m, quote));
+        laterAmbitionSourceUnverified = laterAmbitionSource === undefined;
+        laterAmbitionUnverified = ctx.user_text_complete === false || laterAmbitionSourceUnverified
           || typeof held?.raw !== 'number' || !figureTheUserWrote(held.raw, held.unit ?? '', quote)
-          || quoteIsNotTheUsersClaim(quote, quote)) return { ok: false, mutated: false, refusal: 'ambition_not_verified',
-            detail: 'The later ambition could not be bound to the saved target and its complete source. Nothing was prepared; retain the original statement.' };
-        retainedAim = priorAimDescription(g.raw, goal.id, quote, 'target');
+          || quoteIsNotTheUsersClaim(quote, quote);
+        // An uncertain later-role reading does not veto the valid current target. Keep it visibly Olumi's,
+        // with the complete saved aims untouched; approval cannot establish the quote's source or binding.
+        retainedAim = retainedTargetAim(g.raw, goal.id, quote, laterAmbitionUnverified, laterAmbitionSourceUnverified);
         if (retainedAim === undefined) return { ok: false, mutated: false, refusal: 'ambition_not_retained' };
       }
       if (restatedQuantity || retainedAim !== undefined) {
@@ -6352,6 +6371,7 @@ export function createAgentCapabilities(
           ...(derived !== null ? ['derived_target'] : []),
           ...(ctx.user_text_complete === false ? ['context_incomplete'] : []),
           ...(quoteIsNotTheUsersClaim(source, source) ? ['not_own_claim'] : []),
+          ...(laterAmbitionUnverified ? ['later_ambition_binding_unverified'] : []),
         ];
         // user_text is the route's verified human words; incomplete coverage or uncertain field binding never reauthors them.
         const event = { kind: 'goal_target_edit' as const, goal_node_id: goal.id, constraint_type: inclusiveType,
@@ -6370,8 +6390,18 @@ export function createAgentCapabilities(
           ok: false, mutated: false, refusal: 'target_would_change_other_work',
           detail: 'The target adapter would also change the goal’s retained reasoning. No card was offered and nothing changed.' };
         const subject = { kind: 'goal' as const, id: goal.id, field: 'target' as const };
-        const record = userStatementRecord(subject, [{ speaker: 'user', quote: source, source,
-          form: 'describes', subject: { quantity: measures || goal.label, node_id: goal.id }, unit, reading: 'olumi' }], new Date().toISOString());
+        // A new target reading changes its binding, not who wrote the earlier reasoning. Keep the exact
+        // existing source statements in the SAME carrier; only the displayed numeric target is replaced.
+        const retainedStatements = userStatementsOn(goal).filter(r => r.field === 'target').flatMap(r => r.statements);
+        if (laterAmbitionSource !== undefined && typeof args.later_ambition_quote === 'string'
+          && !retainedStatements.some(s => s.quote === args.later_ambition_quote)) {
+          retainedStatements.push({ speaker: 'user', quote: args.later_ambition_quote,
+            source: verbatimSourceLine({ now: laterAmbitionSource }, args.later_ambition_quote) ?? laterAmbitionSource,
+            form: 'describes', subject: { quantity: goal.label, node_id: goal.id }, reading: 'olumi' });
+        }
+        const currentStatement = { speaker: 'user' as const, quote: source, source,
+          form: 'describes' as const, subject: { quantity: measures || goal.label, node_id: goal.id }, unit, reading: 'olumi' as const };
+        const record = userStatementRecord(subject, [...retainedStatements.filter(s => !isDeepStrictEqual(s, currentStatement)), currentStatement], new Date().toISOString());
         const candidate = withUserStatement(result.mutatedGraph as Record<string, unknown> & { nodes: unknown[] }, record, subject);
         if (candidate === undefined) return { ok: false, mutated: false, refusal: 'target_not_prepared' };
         const targetNode = (candidate.nodes as Array<Record<string, unknown>>).find(n => n.id === goal.id)!;
@@ -6387,7 +6417,11 @@ export function createAgentCapabilities(
           detail: 'The target adapter would also change other saved work. No card was offered and nothing changed; retain the complete saved model.' };
         if (retainedAim !== undefined) targetNode.description = retainedAim;
         targetNode.threshold_source = 'cee_inference';
-        targetRow.provenance = 'inferred'; targetRow.source_quote = source;
+        targetRow.provenance = 'inferred';
+        // The complete source already lives in user_statements. Do not put an overlong source into the
+        // constraint's bounded legacy quote field: that makes the next native target read reject saved bytes.
+        if (source.length <= 200) targetRow.source_quote = source;
+        else delete targetRow.source_quote;
         const candidateHash = identityHashOf(computeGraphIdentityHash(candidate as never));
         if (candidateHash === '') return { ok: false, mutated: false, refusal: 'target_not_prepared' };
         const operation_id = constructionOperationId(ctx.scenario_id, `saved_goal_target:${g.graph_identity_hash}:${candidateHash}`);
@@ -6395,13 +6429,19 @@ export function createAgentCapabilities(
           ? ` This changes the goal’s measurement from ${goalUnit} to ${unit}.` : '';
         const heldTarget = readGoalRecord(g.raw, goal.id)?.target;
         const replaces = typeof heldTarget?.raw !== 'number' ? '' : ` This replaces the saved target ${heldTarget.comparator === undefined ? '' : LIMIT_OPERATOR_WORDS[heldTarget.comparator]} ${targetFigure(heldTarget.raw, heldTarget.unit ?? '')}.`;
-        const ambitionKept = retainedAim === undefined ? '' : ` The earlier target remains as history and later ambition, with its original source and conditions: “${args.later_ambition_quote}”. It does not constrain the current target.`;
+        const ambitionKept = retainedAim === undefined ? '' : laterAmbitionUnverified
+          ? laterAmbitionSourceUnverified
+            ? ` Olumi’s unverified later-ambition reading: “${args.later_ambition_quote}”. This card could not bind that reading to this goal’s earlier target. Check its source and role; approval does not verify them. Other saved aims and bounds stay on their existing nodes; this card does not resolve their role.`
+            : ` From your words: “${args.later_ambition_quote}”. Your source stays yours; the later role and its binding remain Olumi’s reading, not verified by this card or its approval. Other saved aims and bounds stay on their existing nodes.`
+          : ` The earlier target remains as history and later ambition, with its original source and conditions: “${args.later_ambition_quote}”. It does not constrain the current target.`;
         const levelLeftOut = args.current_level === undefined ? '' : ' This card changes only the target; it does not record today’s level.';
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
           base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_goal_target', path: goal.id, value: {
             constraint_type: type, raw_value: value, unit, candidate, base_identity: g.graph_identity_hash,
             brief_text: g.brief_text, goal_turn_id: turn, operation_id, confirmation: { source, quote: source },
-            ...(retainedAim === undefined ? {} : { retained_aim_description: retainedAim, later_ambition_quote: args.later_ambition_quote }) } }],
+            ...(retainedAim === undefined ? {} : { retained_aim_description: retainedAim, later_ambition_quote: args.later_ambition_quote,
+              ...(laterAmbitionUnverified ? { later_ambition_binding_unverified: true } : {}),
+              ...(laterAmbitionSourceUnverified ? { later_ambition_source_unverified: true } : {}) }) } }],
           provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] },
           public_label: `From your message: “${source}”. Olumi read ${DIRECTION_WORDS[type]} ${figure} as the target for “${goal.label}”.`
             + (derived === null ? '' : ` Olumi derived this figure as ${derived.multiplier} × ${targetFigure(derived.base, unit)}; the original figure stays in the quote.`)
