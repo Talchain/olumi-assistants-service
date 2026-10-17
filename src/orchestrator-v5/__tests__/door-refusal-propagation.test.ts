@@ -6,7 +6,6 @@ import type { SessionStore } from '../session/store.js';
 import { createMockSessionStore } from '../../../tests/utils/mock-session-store.js';
 import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
 import { ceeOrchestratorRouteV2 } from '../../orchestrator/route-v2.js';
-import streamRoute from '../../routes/orchestrate.v2.turn-stream.js';
 
 const state = vi.hoisted(() => ({ store: undefined as SessionStore | undefined }));
 vi.mock('../session/index.js', async load => ({
@@ -84,7 +83,7 @@ const BYTES = {
 };
 const CODE_ONLY = '{"error":"model_write_ownership_refused"}';
 function payload(family: string) {
-  if (family === 'system_event' || family === 'sse') return { kind: 'system_event', scenario_id: SID, turn_id: TID,
+  if (family === 'system_event') return { kind: 'system_event', scenario_id: SID, turn_id: TID,
     stage: 'analyse', event: { kind: 'factor_value_edit', target_id: 'factor', value: 0.65 } };
   if (family === 'agent') return { scenario_id: SID, turn_id: TID, message: 'Consider the strategic framing.' };
   if (family === 'adoption') return { scenario_id: SID, message: 'Yes, include that suggestion.',
@@ -130,7 +129,7 @@ async function harness(family: string, afterCommit = false, hanging = false, opt
       request_hash: 'first', response_emitted: false, llm_calls_used: 0, duration_ms: 0, handler_facts: [],
     } });
   });
-  await ceeOrchestratorRouteV2(app); await streamRoute(app); await agentV1TurnRoute(app); await graphRoute(app);
+  await ceeOrchestratorRouteV2(app); await agentV1TurnRoute(app); await graphRoute(app);
   options.configure?.(app);
   await app.ready();
   return { app, append, appendIfLatest, getScenarioOwner, fence, markGraphWriteFailed, release: () => release?.(OWNER) };
@@ -145,10 +144,9 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); state.store = undefined; });
 function inject(h: Awaited<ReturnType<typeof harness>>, family: string) {
-  return h.app.inject({ method: 'POST', url: family === 'sse' ? '/orchestrate/v2/turn/stream'
-    : family === 'agent' || family === 'adoption' ? '/agent/v1/turn' : '/orchestrate/v2/turn', headers: { 'x-request-id': 'prop-request' }, payload: payload(family) });
+  return h.app.inject({ method: 'POST', url: family === 'agent' || family === 'adoption' ? '/agent/v1/turn' : '/orchestrate/v2/turn', headers: { 'x-request-id': 'prop-request' }, payload: payload(family) });
 }
-it.each(['system_event', 'chip', 'adoption', 'agent', 'sse'])('refusal propagation: %s', async family => {
+it.each(['system_event', 'chip', 'adoption', 'agent'])('refusal propagation: %s', async family => {
   const warn = vi.spyOn(log, 'warn');
   const adoptionDoor = vi.spyOn(adoption, 'commitOlumiOptionAdoptionInProcess');
   const h = await harness(family);
@@ -160,14 +158,8 @@ it.each(['system_event', 'chip', 'adoption', 'agent', 'sse'])('refusal propagati
       expect(adoptionDoor).toHaveBeenCalledOnce();
       await expect(adoptionDoor.mock.results[0]!.value).resolves.toEqual({ status: 'unconfirmed' });
     }
-    let bytes = r.payload;
-    if (family === 'sse') {
-      expect(r.statusCode).toBe(200);
-      const frames = r.payload.split('\n\n').filter(f => f.startsWith('event: stage\n')).map(f => JSON.parse(f.split('\ndata: ')[1]!));
-      const terminal = frames.filter(f => f.stage === 'COMPLETE');
-      expect(terminal).toHaveLength(1); expect(terminal[0].status_code).toBe(403);
-      bytes = JSON.stringify(terminal[0].payload);
-    } else expect(r.statusCode, r.payload).toBe(403);
+    const bytes = r.payload;
+    expect(r.statusCode, r.payload).toBe(403);
     // Adoption publishes session history before its final refusal; it cannot claim no save.
     expect(bytes).toBe(family === 'adoption' ? CODE_ONLY : BYTES.not_owner);
     expect(warn).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'model_write.ownership_refused_after_commit' }), expect.any(String));

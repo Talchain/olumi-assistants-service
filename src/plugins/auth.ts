@@ -159,19 +159,6 @@ async function authPluginImpl(fastify: FastifyInstance) {
       return;
     }
 
-    // V04: Skip auth for legacy SSE deprecation path (426 Upgrade Required)
-    // Allow unauthenticated requests to /assist/draft-graph with Accept: text/event-stream
-    // when ENABLE_LEGACY_SSE is disabled, so the route can return 426 upgrade guidance
-    const isLegacySSEPath =
-      request.url === "/assist/draft-graph" &&
-      (request.headers.accept?.includes("text/event-stream") ?? false) &&
-      !config.features.enableLegacySSE;
-
-    if (isLegacySSEPath) {
-      log.info({ path: request.url, legacy_sse_disabled: true }, "Skipping auth for legacy SSE deprecation path");
-      return; // Let route return 426
-    }
-
     // Get valid keys from config
     const validKeys = getValidApiKeys();
 

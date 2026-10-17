@@ -15,7 +15,6 @@ import type { FastifyInstance } from "fastify";
 import { getRedis, resetRedis } from "../../src/platform/redis.js";
 import { TelemetrySink, expectTelemetry } from "../utils/telemetry-sink.js";
 import { TelemetryEvents } from "../../src/utils/telemetry.js";
-import { SSE_DEGRADED_KIND_REDIS_UNAVAILABLE } from "../../src/utils/degraded-mode.js";
 import { expectNoBannedSubstrings } from "../utils/telemetry-banned-substrings.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 
@@ -140,7 +139,7 @@ describe.skip("Chaos: Redis Blips and Unavailability", () => {
         const degradedEvents = telemetrySink.getEventsByName(TelemetryEvents.SseDegradedMode);
         expect(degradedEvents.length).toBeGreaterThan(0);
         const hasRedisKind = degradedEvents.some(
-          (e) => e.data.kind === SSE_DEGRADED_KIND_REDIS_UNAVAILABLE && e.data.endpoint === "/assist/draft-graph/stream"
+          (e) => e.data.kind === "redis_unavailable" && e.data.endpoint === "/assist/draft-graph/stream"
         );
         expect(hasRedisKind).toBe(true);
       }

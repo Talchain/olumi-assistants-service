@@ -452,18 +452,4 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
     expect(JSON.parse(res.body)).toHaveProperty("nodes");
   });
 
-  it("leaves the pre-existing 2-frame stream route emitting exactly DRAFTING then COMPLETE", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/assist/v1/draft-graph/stream",
-      payload: PAYLOAD,
-      headers: { accept: "text/event-stream" },
-    });
-    expect(res.statusCode).toBe(200);
-
-    const stages = parseStageFrames(res.body).map((f) => f.stage);
-    // The staged seam must not have leaked into this route: it does not pass
-    // `onStage`, so it stays exactly as many frames as it had before.
-    expect(stages).toEqual(["DRAFTING", "COMPLETE"]);
-  });
 });
