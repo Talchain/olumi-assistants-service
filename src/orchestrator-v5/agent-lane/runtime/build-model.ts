@@ -270,8 +270,10 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // from the MODEL'S ORIGIN) gets no new writers.
       frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
       // ⭐ RECOVERY BATCH C (ruling 15) — PROMPT HUNK, science sign-off required. Optional in the contract.
-      role: { type: 'string', enum: ['limit', 'target'], description:
-        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit".' },
+      // ⭐ G1 turn 01 (TL 00:18Z; PL 00:16Z): an eventual aim had no role but target or limit. AIE wording is advice (DL-3 00:2xZ).
+      role: { type: 'string', enum: ['limit', 'target', 'ambition'], description:
+        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit"; '
+        + '"ambition" for a later or eventual aim the user names beside the current one: it is kept with their words and is never a target this model tests.' },
     }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
@@ -1366,7 +1368,8 @@ export function findCoverageGaps(
   // The quantity of a limit that needs today's level (`limitNeedsTodaysLevel`: a level, or a change RELATIVE to today; an
   // absolute change is read against the status quo and needs none), named as admission names a limit's node
   // (`metricNamesLabel`), so "Monthly Churn" is the factor "Monthly churn" (verifier LOW).
-  const limited = (model.constraints ?? []).filter((c) => limitNeedsTodaysLevel(c.frame)).map((c) => c.metric);
+  // A later ambition (`role: 'ambition'`) is no limit and asks for no level (G1 turn 01): admission keeps it out of every constraint.
+  const limited = (model.constraints ?? []).filter((c) => c.role !== 'ambition' && limitNeedsTodaysLevel(c.frame)).map((c) => c.metric);
   for (const f of model.factors) {
     if (limited.some((m) => metricNamesLabel(m, f.label)) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) {
       baseline_gaps.push({ factor: f.label, because: 'limit' });
@@ -1378,7 +1381,7 @@ export function findCoverageGaps(
   // (goal, options, factors, risks, then outcomes), so an outcome sharing its identity with any of those registers as
   // that entity — a factor is judged by the rules above, once (verifier FIX_FIRST (3) on f773a217: factor AND outcome
   // drew two gaps and two retry lines).
-  const rekinded = (model.constraints ?? []).filter((c) => !isChangeFrame(c.frame) && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
+  const rekinded = (model.constraints ?? []).filter((c) => c.role !== 'ambition' && !isChangeFrame(c.frame) && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
   const registeredFirst = new Set([
     ...(typeof model.goal?.metric === 'string' ? [model.goal.metric] : []),
     ...model.options.map((o) => o.label), ...model.factors.map((f) => f.label), ...(model.risks ?? []).map((r) => r.label),
@@ -2949,7 +2952,8 @@ export async function buildModelFromBrief(
         // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
         // `stated_range_unsized`: a link whose effect the user stated as a range, which nobody sized: Olumi's provisional size
         // said against the user's recorded source (AIE 16 Oct), once, never asked again.
-        .filter((l) => /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `retained_later_ambition`: a later aim the user named, kept as Olumi's reading and never a target this model tests (G1).
+        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

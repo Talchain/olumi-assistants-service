@@ -20,7 +20,8 @@ describe('the Batch C drafter contract', () => {
     expect(Object.keys(goalOf(s).properties)).toEqual(expect.arrayContaining(['quantity_frame', 'basis']));
     expect(goalOf(s).required).not.toContain('basis');
     expect(goalOf(s).required).not.toContain('quantity_frame');
-    expect(constraintItemOf(s).properties.role.enum).toEqual(['limit', 'target']);
+    // G1 turn 01 (TL 00:18Z): a later aim is the AI's 'ambition', never a target or limit.
+    expect(constraintItemOf(s).properties.role.enum).toEqual(['limit', 'target', 'ambition']);
     expect(constraintItemOf(s).required).not.toContain('role');
   });
 

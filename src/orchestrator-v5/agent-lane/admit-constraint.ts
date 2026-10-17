@@ -75,8 +75,10 @@ export interface CandidateConstraint {
   /**
    * Recovery Batch C (ruling 15): `target` = one of the goal's success targets the user named beside the goal's own
    * ("conversion over 15% AND 20 new customers"); `limit` (or absent, every older candidate) = a limit, exactly as before.
+   * ⭐ G1 (TL 00:18Z / PL 00:16Z, VERIFY-78ca2232-founder turn 01): `ambition` = a later or eventual aim the user names beside
+   * the current one ("eventually, a larger fund of at least" a stated figure): the AI's reading, kept as words, never a constraint.
    */
-  readonly role?: 'limit' | 'target' | null;
+  readonly role?: 'limit' | 'target' | 'ambition' | null;
 }
 
 export interface AdmittedConstraint {
