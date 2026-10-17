@@ -144,6 +144,7 @@ describe('ContextPack readiness — the blocker identity reaches the pack', () =
   it('exact status "ready" projects no open items', () => {
     const ready = {
       status: 'ready',
+      may_run: true, // R2: this projection consumes an already-admitted payload.
       options: [],
       readiness_issues: [],
     } as unknown as Parameters<typeof projectContextPackReadiness>[0];

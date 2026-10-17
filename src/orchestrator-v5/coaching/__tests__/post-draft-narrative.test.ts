@@ -410,7 +410,7 @@ describe('provisional-decision framing (open brief)', () => {
     );
     // Contrast control: the run branch DOES differ, so the equality above is a
     // real scoping result and not a selector that never fires.
-    const ready = { status: 'ready' as const };
+    const ready = { status: 'ready' as const, may_run: true }; // R2: admitted Run nudge, independent of strict status.
     expect(buildReadinessNextStep(ready, [], { provisionalDecision: true })).not.toBe(
       buildReadinessNextStep(ready, [], { provisionalDecision: false }),
     );

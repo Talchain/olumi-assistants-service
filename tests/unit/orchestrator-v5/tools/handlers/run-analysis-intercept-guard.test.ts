@@ -241,7 +241,11 @@ function makeDupSnapshot(): RunAnalysisScenarioSnapshot {
   };
   return {
     graph: JSON.parse(JSON.stringify(legacyGraph)),
-    options: [{ id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_root_dup: 1 } }],
+    options: [
+      { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_root_dup: 1 } },
+      // R2: compare with this factor's existing 0.5 baseline, preserving the intercept specimen.
+      { id: 'opt_b', option_id: 'opt_b', label: 'Baseline', interventions: { fac_root_dup: 0.5 } },
+    ],
     goal_node_id: 'goal_1',
     // raw persisted mirror — the freshness-hash source; must stay untouched
     rawPersistedGraph: JSON.parse(JSON.stringify(legacyGraph)),
@@ -308,7 +312,11 @@ describe('run_analysis handler wiring (Track S 0.13c-1)', () => {
     };
     const snapshot = {
       graph: JSON.parse(JSON.stringify(cleanGraph)),
-      options: [{ id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_clean: 1 } }],
+      options: [
+      { id: 'opt_a', option_id: 'opt_a', label: 'A', interventions: { fac_clean: 1 } },
+      // R2: compare with this factor's existing 0.5 baseline, preserving the intercept specimen.
+      { id: 'opt_b', option_id: 'opt_b', label: 'Baseline', interventions: { fac_clean: 0.5 } },
+    ],
       goal_node_id: 'goal_1',
       rawPersistedGraph: JSON.parse(JSON.stringify(cleanGraph)),
     } as RunAnalysisScenarioSnapshot;

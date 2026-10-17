@@ -45,7 +45,8 @@ function carriers(o: unknown, path = ''): string[] {
   return o === CODE ? [path] : [];
 }
 async function run(graph: Rec): Promise<unknown> {
-  const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ id: n.id, option_id: n.id, label: n.label, interventions: { pro_plan_price: 59 } }));
+  // R2: retain the recorded baseline/£59 contrast; the witness is about the graph, not identical option maps.
+  const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ id: n.id, option_id: n.id, label: n.label, interventions: n.interventions ?? {}, is_baseline: n.is_baseline }));
   const snapshot = { graph, options, goal_node_id: FX.goal_node_id, rawPersistedGraph: JSON.parse(JSON.stringify(graph)) } as RunAnalysisScenarioSnapshot;
   const runMock = vi.fn(async () => plotResponse());
   const plotClient = { run: runMock, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;

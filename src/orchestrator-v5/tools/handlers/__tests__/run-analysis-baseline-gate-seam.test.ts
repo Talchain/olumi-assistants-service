@@ -123,6 +123,8 @@ function makeOutNoneSnapshot(rawBaseline: Record<string, unknown>): RunAnalysisS
     goal_node_id: 'g',
     options: [
       { id: 'opt_a', option_id: 'opt_a', label: 'Committed', interventions: { f_ok: { value: 0.5 } } },
+      // R2: the known 0.35 baseline is a distinct comparator, not a change to the baseline under test.
+      { id: 'opt_b', option_id: 'opt_b', label: 'Baseline', interventions: { f_ok: { value: 0.35 } } },
     ],
   };
 }

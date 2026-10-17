@@ -47,6 +47,7 @@ const FIXTURE_ANALYSIS: AdviceGateAnalysis = {
 const READY_PAYLOAD_READY: AnalysisReadyPayload = {
   goal_node_id: 'goal_1',
   status: 'ready',
+  may_run: true, // R2: retain the admitted comparison positive.
   goal_threshold: 0.7,
   options: [
     { option_id: 'opt_a', label: 'Hire two senior engineers locally', status: 'ready', interventions: { 'fac_delivery_risk': 0.3 } },

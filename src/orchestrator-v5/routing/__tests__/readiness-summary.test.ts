@@ -44,9 +44,10 @@ describe('summariseReadiness — canonical status/blocker projection', () => {
     expect(summary.prose).not.toContain('threshold');
   });
 
-  it('exact ready stays ready when goal_threshold is absent', () => {
+  it('an admitted comparison stays ready when goal_threshold is absent', () => {
     const readiness = {
       status: 'ready',
+      may_run: true, // R2: this positive control has an affirmative admission, independent of target-testability.
       goal_node_id: 'goal_growth',
       options: READY_OPTIONS,
     } as ReadinessPayload;

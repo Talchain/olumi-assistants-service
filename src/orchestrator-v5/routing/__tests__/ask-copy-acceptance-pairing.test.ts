@@ -554,7 +554,7 @@ describe('the on-screen ask carries the hint', () => {
     expect(blocked.kind).toBe('resolve_model_issue');
     expect(blocked.nextStep).not.toContain(MISSING_VALUE_ASK_FORMAT_HINT);
 
-    const ready = projectReadinessRecovery({ status: 'ready', blockers: [] } as never, [] as never);
+    const ready = projectReadinessRecovery({ status: 'ready', may_run: true, blockers: [] } as never, [] as never);
     expect(ready.kind).toBe('run');
     expect(ready.nextStep).not.toContain(MISSING_VALUE_ASK_FORMAT_HINT);
   });

@@ -1316,6 +1316,11 @@ export function analysisAdmissionFrom(
       code: admission.strict.safeToAnalyse ? 'NOTHING_TO_COMPARE' : 'MODEL_HAS_BLOCKERS',
       message: admission.blockedNextStep ?? MODE_REASON.none.message,
     });
+  } else if (admission.submission && (admission.submission.userStatus.excluded.length > 0
+    || admission.submission.olumiFilter.participation.some(o => o.state === 'excluded_olumi_proposed'))
+    && admission.plan.excluded_option_ids.length === 0) {
+    reasons.push({ field: 'structurally_analysable', code: 'RUN_WILL_EXCLUDE_OPTIONS',
+      message: 'Analysis can compare the included options. Options kept out of this comparison remain in your model.' });
   } else if (admission.plan.excluded_option_ids.length > 0) {
     // Counts what the run LEAVES OUT, never what it waives: a held status quo is waived AND compared
     // (`ScaffoldPlan.excluded_option_ids`).

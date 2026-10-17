@@ -362,6 +362,8 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
         graph: scaleCoherentFixture() as unknown as never,
         options: [
           { id: 'o-launch', option_id: 'o-launch', label: 'Launch now', interventions: { 'f-churn': 1 } },
+          // R2: a distinct setting preserves this constraint-forwarding witness at the client seam.
+          { id: 'o-defer', option_id: 'o-defer', label: 'Defer launch', interventions: { 'f-churn': 0 } },
         ],
         goal_node_id: 'g-revenue',
         goal_constraints: goalConstraints,

@@ -1,7 +1,7 @@
 /**
  * One deterministic projection from typed analysis readiness to user recovery.
  *
- * `analysis_ready.status` owns the recovery class. A blocker may only refine
+ * `analysis_ready.may_run` alone owns the Run offer; strict status guides non-Run recovery. A blocker may only refine
  * the explicit `needs_user_input` class; it can never turn `blocked`, mapping,
  * or encoding into a value request. This matters for the canonical producer's
  * unreachable-controllable-factor case: it deliberately emits a factor-only
@@ -69,6 +69,8 @@ export const RUN_NEXT_STEP_PROVISIONAL =
   'Next, run the analysis to see how the options on the canvas hold up and what could shift the outcome.';
 
 export interface ReadinessRecoveryInput {
+  readonly may_run?: unknown;
+  readonly analysis_admission?: { readonly structurally_analysable?: unknown; readonly reasons?: ReadonlyArray<{ readonly field?: unknown; readonly message?: unknown; readonly code?: unknown }> };
   readonly status?: unknown;
   readonly blockers?: ReadonlyArray<unknown> | undefined;
   readonly options?: ReadonlyArray<unknown> | undefined;
@@ -363,7 +365,7 @@ function describeRemainingEffectValues(
 
 /**
  * Project a typed readiness payload into its sole deterministic recovery.
- * Exact `ready` is the only branch that returns Run copy.
+ * Only an affirmative admission (`may_run`) returns Run copy.
  */
 export function projectReadinessRecovery(
   analysisReady: ReadinessRecoveryInput | null | undefined,
@@ -385,8 +387,24 @@ export function projectReadinessRecovery(
     nextStep,
   });
 
-  if (status === 'ready') {
+  if (analysisReady?.may_run === true) {
     return project('run', null, null, RUN_NEXT_STEP);
+  }
+
+  if (analysisReady?.may_run === false) {
+    const reason = analysisReady.analysis_admission?.reasons?.find(r => r.field === 'structurally_analysable');
+    const currentLevelAsked = analysisReady.readiness_issues?.some(issue => issue !== null && typeof issue === 'object'
+      && 'code' in issue && issue.code === 'MISSING_FACTOR_LEVEL') === true;
+    if (Array.isArray(analysisReady.options) && analysisReady.options.length === 0 && !currentLevelAsked) {
+      return project('review_model', null, null,
+        'We can keep exploring the model and its assumptions. If you want a comparison, name the different options you are weighing.');
+    }
+    const comparisonRefused = status === 'ready' || reason?.code === 'NOTHING_TO_COMPARE'
+      || analysisReady.readiness_issues?.some(issue => issue !== null && typeof issue === 'object'
+        && 'code' in issue && issue.code === 'FEWER_THAN_TWO_OPTIONS') === true;
+    if (comparisonRefused && typeof reason?.message === 'string' && reason.message.trim() !== '') {
+      return project('resolve_model_issue', null, null, reason.message);
+    }
   }
 
   if (status === 'blocked') {
@@ -396,6 +414,11 @@ export function projectReadinessRecovery(
       null,
       'Next, resolve the model issue shown before comparing the options.',
     );
+  }
+
+  if (status === 'ready') {
+    return project('review_model', null, null,
+      'We can keep exploring the model and its assumptions. A comparison is not confirmed as ready yet.');
   }
 
   const nonReadyOptions = analysisReady?.options
@@ -555,7 +578,8 @@ export function buildReadinessNextStep(
 /**
  * Build the sole conversational recovery chip for a non-ready state. Run is
  * deliberately returned as `null`; executable Run chips stay at their
- * registry-aware call sites and must check exact `status === 'ready'`.
+ * registry-aware call sites and require affirmative `may_run`. This recovery cue
+ * does not delay the host's automatic continuation after an eligible commit or Undo.
  *
  * ⭐⭐ THE `provide_value` BRANCH IS THE REPAIR LOOP'S AFFORDANCE, AND IT IS
  * MINTED FROM IDENTITY, NOT FROM A LABEL.
