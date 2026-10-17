@@ -7335,6 +7335,10 @@ export function createAgentCapabilities(
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
         if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && origin !== 'human') {
+          return { ok: false, mutated: false, refusal: 'figure_not_in_users_words',
+            detail: 'That is not the percentage the user wrote in this unit. Use the number in their percentage unit, not the 0–1 model coordinate. Nothing was proposed.' };
+        }
         // Keep the base's strict field check on this typed turn; it never decides the figure's source.
         const source = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
           .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? '';
@@ -7598,6 +7602,8 @@ export function createAgentCapabilities(
         if (parsed.kind === 'invalid') return { ok: false, mutated: false, refusal: parsed.reason, detail: 'Nothing was proposed: repeated option gap declarations must agree.' };
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
+      // A false human-percentage attribution refuses the whole offered starting point, including any level half.
+      if (a?.ok === false && a.refusal === 'figure_not_in_users_words') return a;
       // What THIS starting point would make each factor's starting value — read off the stored
       // value half, never the Agent's arguments — so a held level that only restates it is caught.
       const valueHalf = a !== null && a.ok === true && typeof a.proposal_id === 'string' ? proposals.get(a.proposal_id) : undefined;

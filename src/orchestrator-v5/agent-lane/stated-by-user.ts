@@ -17,9 +17,8 @@
  * price level). A bare number ("59", "7 engineers") grounds any kind; "£49" grounds only a money figure (never a
  * churn level); "4%" only a percentage. A unit nobody can classify accepts any written kind.
  *
- * A written percentage also grounds its fraction ("40%" → 0.4, a share kept as 0–1), unlike the brief-extraction
- * claim `stated-amounts.ts` refuses it for: here the Agent is told to pass the factor's own units, and a share factor's
- * own units are 0–1.
+ * A written percentage grounds its fraction only in a share/model unit ("40%" → 0.4). In an explicit
+ * percentage unit it must retain the raw percentage: "40%" is 40, never 0.4. The unit is part of the figure.
  *
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
  * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
@@ -198,8 +197,9 @@ function amountIs(
     const sameCurrency = unitCode === undefined || a.currencyCode === undefined || a.currencyCode === unitCode;
     return (family === null || family === 'currency') && sameCurrency && same(a.magnitude, written);
   }
-  // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
-  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  // A raw percentage and a 0–1 share are different coordinates. Never attest 0.8% from the user's 80%.
+  if (a.kind === 'percent') return family === 'percent' ? same(a.magnitude, value)
+    : family === null && (same(a.magnitude, value) || same(a.magnitude / 100, value));
   // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
   if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
   if (scale !== 1 && !writtenWithALetter(a)) return false;
