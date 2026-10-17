@@ -549,9 +549,13 @@ export async function readScenarioAnalysis(
             : null,
       }) ?? null;
 
-    const builtResult = analysisResult !== null && analysisState !== null
-      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState, derivation.reason)[0] ?? null
-      : analysisResult;
+    // Build the saved summary under this read's actual licence, before any egress projection.
+    const savedResult = fact !== null
+      ? buildAnalysisResultBlock(fact, analysisReady, leaderLicenceFromState(analysisState, analysisReady))
+      : null;
+    const builtResult = savedResult !== null && analysisState !== null
+      ? projectAnalysisBlocksForRunBinding([savedResult], analysisState, derivation.reason)[0] ?? null
+      : savedResult;
     // SC-24: the displayed Run's comparison with the Run before it — the same producer and permission the turn used.
     // Only for a DELIVERED fact that is the pair's newer end, with no newer Run withholding its claim; `current_read`
     // then adds its own currentness gate (row 1). It never rides top-level on the read.
