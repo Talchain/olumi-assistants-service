@@ -1085,8 +1085,10 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
     expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
     const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
-    expect(read.goal.user_statements.find((r: Rec) => r.field === 'measure')).toEqual({ field: 'measure',
-      current_retained: { spans: [{ text: 'loaves sold', origin: 'held_user_statement' }], complete: true }, source_record: beforeRecord });
+    const material = read.recorded_reasoning.find((n: Rec) => n.id === subject.id);
+    expect(material.current_retained.find((r: Rec) => r.field === 'measure')).toEqual({ field: 'measure',
+      spans: [{ text: 'loaves sold', origin: 'held_user_statement' }], complete: true });
+    expect(material.user_statements.find((r: Rec) => r.field === 'measure')).toEqual(beforeRecord);
     expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });

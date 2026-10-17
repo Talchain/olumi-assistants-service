@@ -111,7 +111,7 @@ describe.each(cases)('R3 $name class', row => {
     draft.nodes.find((n: Rec) => n.id === 'dissent').user_statements = saved.nodes.find((n: Rec) => n.id === 'report').user_statements;
     const result = prepareRequestedRebuild(saved, draft, levelFrameOf);
     expect(result.missing).toEqual([]);
-    for (const id of ['report', 'risk', 'answer', 'dissent']) expect(result.candidate!.nodes.find((n: Rec) => n.id === id)).toEqual(saved.nodes.find((n: Rec) => n.id === id));
+    for (const id of ['report', 'risk', 'answer', 'dissent']) expect((result.candidate as Rec).nodes.find((n: Rec) => n.id === id)).toEqual(saved.nodes.find((n: Rec) => n.id === id));
     const state = await w.caps().getCanonicalState(w.ctx) as Rec;
     const explained = await w.caps().getCanonicalState(w.ctx, { section: 'run_explanation' }) as Rec;
     expect(state.recorded_reasoning).toEqual(context.recorded_reasoning);
@@ -134,7 +134,7 @@ describe.each(cases)('R3 $name class', row => {
     const result = prepareRequestedRebuild(saved, draft, levelFrameOf);
     expect(result.missing).toEqual([]);
     expect(result.candidate!.goal_constraints).toEqual(saved.goal_constraints);
-    for (const n of saved.nodes.filter((n: Rec) => n.kind === 'goal' || n.id === 'old_goal')) expect(result.candidate!.nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
+    for (const n of saved.nodes.filter((n: Rec) => n.kind === 'goal' || n.id === 'old_goal')) expect((result.candidate as Rec).nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
   });
 });
 
@@ -195,14 +195,15 @@ it('construction preserves each answered-pair identity once and distinct typed s
     const w = await savedWorld(row, { readTurnHistory: () => [pairItem,
       { role: 'assistant', content: 'Which assumptions remain disputed?' }, { role: 'user', content: recent }],
       provider: async req => { calls.push(structuredClone(req)); return { text: JSON.stringify(structuredDraft(row)), status: 'completed' }; } });
-    w.ctx.verified_user_messages = [recent, request, other];
-    await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), w.ctx, w.caps());
+    const ctx = { ...w.ctx, verified_user_messages: [recent, request, other] };
+    await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), ctx, w.caps());
     const { conversation, items } = constructionCarriers(calls[0]!.input);
     expect(conversation.slice(1)).toEqual([recent, request, other].map(text => ({ speaker: 'user', source: 'typed', text })));
     expect(items).toHaveLength(2);
     expect(items.find((i: Rec) => i.content[0].text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(pairItem);
     const context = JSON.parse(items.find(i => i.content[0].text.startsWith(REASONING_CONTEXT_LABEL))!.content[0].text.split('\n')[1]);
-    expect(context.verified_user_statements).toEqual([]);
+    expect(context.verified_user_statements).toEqual([recent, request, other].map(text => ({ speaker: 'user', source: 'typed', text })));
+    expect(context.current_request_origin).toBe('typed');
     expect(pairsIn(items)).toEqual([
       { olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: 'Which assumptions remain disputed?' },
         response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: recent } },
