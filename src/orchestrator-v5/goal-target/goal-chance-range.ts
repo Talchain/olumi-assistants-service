@@ -15,7 +15,7 @@ import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import { licenceUnsizedLink, type PlaceholderGoalPath } from '../agent-lane/goal-certainty.js';
 import { byIslRank, groupPct, linkEnds, runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
-import { userStatementFor } from '../statement-door/statements.js';
+import { linkHoldsStatedRange } from '../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -111,7 +111,9 @@ export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: s
     // PLACEHOLDER size ("if present" / "if high"). Where the USER stated a range for that link (construction's statement
     // record on it), their source does not justify that size, so no range resting on it is shown: the figures stay
     // withheld with their reason, and the placeholder is disclosed against the user's range (`stated_range_unsized`).
-    if (userStatedRangeOn(graph, ends.from, ends.to)) return null; }
+    // ⛔ #3329 GREEN CORE (DL-3 03:18Z; BUDDY-A 03:14Z): the ONE construction-only reader; a chat-pressed range (Olumi's reading,
+    // an AI-omitted negation indistinguishable) neither bars nor credits a range here.
+    if (linkHoldsStatedRange(graph, ends.from, ends.to)) return null; }
   const existence = row.kind === 'link_existence';
   const a = row[existence ? 'p_goal_if_absent' : 'p_goal_if_low'];
   const b = row[existence ? 'p_goal_if_present' : 'p_goal_if_high'];
@@ -125,12 +127,6 @@ export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: s
   return { low_pct: low.pct_if_side, high_pct: high.pct_if_side,
     low_rounding: low.pct_if_side_rounding, high_rounding: high.pct_if_side_rounding,
     kind: existence ? 'link_existence' : 'link_strength', ...linkEnds(row)!, among: row === top ? 'all' : 'unsized_links' };
-}
-
-/** Whether the link's FROM node holds the user's statement of a range for this link's effect (`userStatementFor`, by identity). */
-function userStatedRangeOn(graph: unknown, from: string, to: string): boolean {
-  const record = userStatementFor(graph, { kind: 'link', id: from, to_id: to, field: 'effect' });
-  return record?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
 }
 
 /** Append ONE info record when at least one option qualifies. No figure or withhold is changed. */

@@ -266,6 +266,11 @@ function recordable(subject: DoorSubject, record: UserStatementRecord): boolean 
     return record.statements.length === 1 && record.statements[0]!.form === 'range' && record.attest?.range_law === 'equal_tail'
       && typeof record.attest.low === 'number' && typeof record.attest.high === 'number';
   }
+  // G3 (TL 21:18Z): a link's effect the user stated as a range in chat (`LINK_EFFECT_RANGE_ROW`): their range, kept as words and
+  // ends only. It sizes nothing, so it carries no attest (no law, no adoption) and is never read as a size.
+  if (subject.kind === 'link' && subject.field === 'effect' && subject.to_id !== undefined && subject.option_id === undefined) {
+    return record.statements.length === 1 && record.statements[0]!.form === 'range' && record.attest === undefined;
+  }
   return false;
 }
 
@@ -275,29 +280,37 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   const record = userStatementRecordOf(said.record);
   if (said.subject.id !== approved.node_id || said.record.subject_key !== subjectKey(said.subject) || record === undefined
     || !recordable(said.subject, record)) return { kind: 'refused', reason: 'invalid_statement' };
-  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.node_id && n.kind === said.subject.kind);
-  if (matches.length !== 1) return { kind: 'refused', reason: 'node_not_found' };
+  // A link's record lives on its `from` node (`withUserStatement`), and only while the link itself is in the graph.
+  const link = said.subject.kind === 'link';
+  const linkHeld = !link || persistedGraph.edges.filter((e) => isRec(e) && e.from === said.subject.id && e.to === said.subject.to_id).length === 1;
+  const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.node_id && (link || n.kind === said.subject.kind));
+  if (matches.length !== 1 || !linkHeld) return { kind: 'refused', reason: 'node_not_found' };
   // A retry after this press landed finds exactly these words held: the verified no-op.
   if (holdsUserStatement(persistedGraph, said.record, said.subject)) return { kind: 'unchanged' };
   if (!isDeepStrictEqual(matches[0], approved.expected_node)) return { kind: 'refused', reason: 'node_changed' };
   const graph = withUserStatement(structuredClone(persistedGraph) as Rec & { nodes: unknown[] }, said.record, said.subject);
   if (graph === undefined) return { kind: 'refused', reason: 'node_not_found' };
-  const label = String(matches[0]!.label ?? approved.node_id).trim();
+  const labelOf = (id: unknown): string => String((persistedGraph.nodes as unknown[]).find((n): n is Rec => isRec(n) && n.id === id)?.label ?? id).trim();
+  const label = link ? `${labelOf(said.subject.id)} → ${labelOf(said.subject.to_id)}` : String(matches[0]!.label ?? approved.node_id).trim();
   const lead = said.subject.field === 'lead';
   const rangeLaw = said.subject.kind === 'factor';
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph', fact_version: 1, noop: false,
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
-      affected_entities: [{ kind: said.subject.kind, label: label.slice(0, 120) }],
+      affected_entities: [{ kind: link ? 'edge' : said.subject.kind, label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
       safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place'
-        : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted' : 'Recorded from your words that both targets count the same people',
+        : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted'
+          : link ? 'Recorded Olumi’s reading of your words for this link; it does not size the link'
+            : 'Recorded from your words that both targets count the same people',
+      // A link's range sizes nothing, so nothing the analysis reads has changed: no re-Run is owed for it.
       impact: 'low', rerun_recommended: lead || rangeLaw },
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.`
-      : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.` : sameCohortRecordedWords(graph) };
+      : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.`
+        : link ? `Recorded Olumi’s reading of your words for ‘${label}’. It does not size the link.` : sameCohortRecordedWords(graph) };
 }
 
 /** The labels of the goal's two cohort targets, the rate (a percentage of the people reached) and the count, or `undefined`. */

@@ -40,7 +40,7 @@ import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.j
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
 import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
-import { userStatementFor } from '../statement-door/statements.js';
+import { linkHoldsStatedRange } from '../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
 
@@ -530,10 +530,9 @@ export type PlaceholderFirstAsk =
 /** The AIE's words (16 Oct, 6219775036) after a link whose effect the user stated as a range: no question, the next step. */
 export const STATED_RANGE_NEXT_STEP = 'We can also continue comparing the mechanisms and conditions qualitatively.';
 
-/** A link whose effect the USER stated as a range: construction's record on it (`userStatementFor`), never a word reader. */
+/** A link whose effect the USER stated as a range: its record (construction's, or a chat press), never a word reader (`linkHoldsStatedRange`). */
 export function userStatedRangeOn(graph: unknown, l: { readonly from: string; readonly to: string }): boolean {
-  return userStatementFor(graph, { kind: 'link', id: l.from, to_id: l.to, field: 'effect' })
-    ?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
+  return linkHoldsStatedRange(graph, l.from, l.to);
 }
 
 /**
