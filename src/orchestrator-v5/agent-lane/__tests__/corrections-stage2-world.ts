@@ -63,7 +63,8 @@ export async function correctionWorld(original: Rec, message: string) {
     offer: (tool: string, args: unknown) => dispatchTool(tool, JSON.stringify(args), ctx, caps()),
     press: (pid: string, store = proposals, own = true) => caps(store).authoriseChange({ ...ctx, turn_id: randomUUID(), user_turn_text: '',
       ...(own ? { typed_approval_of: pid } : {}) }, { proposal_id: pid }),
-    chips: (tool: string, result: ToolResult) => approvalChipsFor([{ name: tool, ok: true, mutated: false, proposal_id: result.proposal_id }],
+    chips: (tool: string, result: ToolResult) => approvalChipsFor([{ name: tool, ok: true, mutated: false,
+      proposal_id: typeof result.proposal_id === 'string' ? result.proposal_id : undefined }],
       pid => ({ proposal: proposals.get(pid)!, result, args: {} })),
     restoreCard: (proposal: StructuredProposal, result: ToolResult, tool = 'propose_statement') => {
       const chip = approvalChipsFor([{ name: tool, ok: true, mutated: false, proposal_id: proposal.proposal_id }],

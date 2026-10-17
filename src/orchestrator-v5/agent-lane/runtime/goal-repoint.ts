@@ -56,11 +56,12 @@ function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, r
   const oldRows = rows.filter(r => r.node_id === old.id);
   const description = priorDescription;
   const newId = `aim_${createHash('sha256').update(JSON.stringify([ctx.scenario_id, before.graph_identity_hash, request])).digest('hex').slice(0, 24)}`;
-  if (nodes.some(n => n.id === newId || String(n.label).trim() === request.label.trim())) return { refused: 'goal_not_resolved' };
+  const label = request.label.trim();
+  if (nodes.some(n => n.id === newId || String(n.label).trim() === label)) return { refused: 'goal_not_resolved' };
   const earlier = { ...structuredClone(old), kind: 'outcome', description, analysis_participation: 'retained_excluded' };
   const candidate = structuredClone(before.raw);
   candidate.nodes = nodes.map(n => n.id === old.id ? earlier : structuredClone(n));
-  (candidate.nodes as Rec[]).push({ id: newId, kind: 'goal', label: request.label.trim(), provenance: 'ai_inferred' });
+  (candidate.nodes as Rec[]).push({ id: newId, kind: 'goal', label, provenance: 'ai_inferred' });
   if (Object.hasOwn(candidate, 'goal_node_id')) candidate.goal_node_id = newId;
   if (Object.hasOwn(candidate, 'goal_constraints')) candidate.goal_constraints = rows.filter(r => r.node_id !== old.id);
   // The existing server-owned timing preparation demotes proof on the earlier outcome; it never creates a new date.
