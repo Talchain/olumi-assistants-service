@@ -25,7 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
-import { holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
@@ -248,6 +248,8 @@ export interface ApprovedStatementRecord {
   /** The node exactly as stored when the card was made: the stale gate. */
   readonly expected_node: Readonly<Rec>;
   readonly user_statement: { readonly subject: DoorSubject; readonly record: UserStatementRecord };
+  /** The same native operation can replace a bound source record and its explicitly listed legacy reading. */
+  readonly correction?: StatementCorrection;
 }
 
 export type StatementRecordEditResult =
@@ -281,6 +283,27 @@ function recordable(subject: DoorSubject, record: UserStatementRecord): boolean 
 
 export function applyStatementRecordEdit(persistedGraph: unknown, approved: ApprovedStatementRecord): StatementRecordEditResult {
   if (!isRec(persistedGraph) || !Array.isArray(persistedGraph.nodes) || !Array.isArray(persistedGraph.edges)) return { kind: 'refused', reason: 'invalid_graph' };
+  if (approved.correction !== undefined) {
+    const correction = statementCorrectionOf(approved.correction);
+    const first = correction?.edits[0];
+    if (first === undefined || approved.node_id !== first.subject.id
+      || !isDeepStrictEqual(approved.expected_node, first.expected_node)
+      || !isDeepStrictEqual(approved.user_statement, { subject: first.subject, record: first.record })) return { kind: 'refused', reason: 'invalid_statement' };
+    const written = applyStatementCorrection(persistedGraph, correction);
+    if (written.refused !== undefined || written.candidate === undefined) return { kind: 'refused',
+      reason: written.refused === 'node_changed' ? 'node_changed' : 'invalid_statement' };
+    if (written.unchanged) return { kind: 'unchanged' };
+    const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false,
+      result: { edit_kind: 'parameter_update', status: 'applied', operations_count: correction!.edits.length,
+        affected_entities: correction!.edits.map(e => ({ kind: e.subject.kind === 'link' ? 'edge' : e.subject.kind,
+          label: String(e.expected_node.label).slice(0, 120) })),
+        graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
+        graph_hash_after: computeAnalysisAffectingGraphHash(written.candidate as never) || null,
+        safe_summary: 'Recorded your source correction and explicitly retained material',
+        impact: 'low', rerun_recommended: false } });
+    return { kind: 'mutated', mutatedGraph: written.candidate, handlerFacts: [fact as HandlerFact],
+      confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.' };
+  }
   const said = approved.user_statement;
   const record = userStatementRecordOf(said.record);
   if (said.subject.id !== approved.node_id || said.record.subject_key !== subjectKey(said.subject) || record === undefined
@@ -391,7 +414,9 @@ export function approvedStatementRecordOf(op: { readonly path: string; readonly 
   const v = isRec(op.value) ? op.value : {};
   const said = userStatementCarriedBy(v);
   if (!isRec(v.expected_node) || said === undefined || said === null) return undefined;
-  return { node_id: op.path, expected_node: v.expected_node, user_statement: said };
+  const correction = v.correction === undefined ? undefined : statementCorrectionOf(v.correction);
+  if (v.correction !== undefined && correction === undefined) return undefined;
+  return { node_id: op.path, expected_node: v.expected_node, user_statement: said, ...(correction === undefined ? {} : { correction }) };
 }
 
 /** A held goal relation card still applies to `graph` exactly when its own writer would not refuse it there. */

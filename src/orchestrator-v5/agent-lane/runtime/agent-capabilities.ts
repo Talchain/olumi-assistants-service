@@ -1,3 +1,5 @@
+import { applyCorrectedStatement, proposeStatementCorrection, applyQualitativeReframe, proposeQualitativeReframe } from './correction-workflows.js';
+export { applyQualitativeReframe } from './correction-workflows.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 import { laterAimOnlyBranch, omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
@@ -16,7 +18,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { currentStatementRetention, userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
@@ -1677,7 +1679,11 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
         const node = (Array.isArray(g.raw.nodes) ? g.raw.nodes as unknown[] : []).find((x) => isPlainRecord(x) && x.id === n.id);
         const said = userStatementsOn(node);
         const measure = recordedMeasureOf(node);
-        return said.length === 0 ? {} : { user_statements: said.map((r) => ({ field: r.field, said: r.statements.map((x) => x.quote), speaker: 'user' })),
+        return said.length === 0 ? {} : { user_statements: said.map(r => {
+          const current = currentStatementRetention(r);
+          return current === undefined ? { field: r.field, said: r.statements.map(x => x.quote), speaker: 'user' }
+            : { field: r.field, current_retained: current, source_record: r };
+        }),
           ...(measure === undefined ? {} : { measured_in: measure }) };
       })(),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
@@ -2610,6 +2616,7 @@ export function createAgentCapabilities(
   deadlineCardFromDraft(ctx: AgentToolContext, input: Omit<DeadlineIssueInput, 'graph' | 'storedBrief' | 'reference' | 'priorOffer'> & { start: DeadlineTurnStart | undefined }): Promise<{ words: string; issue: NonNullable<AgentCapabilities['proposeGoalDeadline']> } | undefined>;
 } {
   const readOnly = mode === 'preview';
+  const workflowDependencies = { constructionOperationId, approvedGraphHeld };
   const refuseReadOnly = (): ToolResult => ({
     ok: false, mutated: false, refusal: 'read_only_preview',
     detail: 'This preview cannot change the model. Nothing has been altered.',
@@ -3847,7 +3854,7 @@ export function createAgentCapabilities(
 
   /** Reuse the target, level, deadline and removal adapters to prepare ONE complete saved-model card. */
   const proposeGoalRepoint = async (ctx: AgentToolContext,
-    args: Parameters<NonNullable<AgentCapabilities['proposeGoalTarget']>>[1], before: GraphRead,
+    args: Parameters<NonNullable<AgentCapabilities['proposeGoalTarget']>>[1] & { value: number; unit: string }, before: GraphRead,
     direction: TargetDirection, inclusive: 'at_least' | 'at_most'): Promise<ToolResult> => {
     const invalid = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
     const verified = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
@@ -4091,7 +4098,15 @@ export function createAgentCapabilities(
       return typeof raw === 'number' ? `; current figure: ${sayFigureExactly(raw, String(os?.unit ?? '')) ?? raw} (${source})` : '';
     };
     const partWords = (n: Record<string, unknown>) => `“${String(n.label)}”` + (typeof n.description === 'string' ? ` — ${n.description}` : '') + figureWords(n)
-      + userStatementsOn(n).flatMap(r => r.statements.map(s => `; ${r.field}, ${s.speaker === 'user' ? 'recorded user words' : 'source not verified'}: “${s.source}” (quoted: “${s.quote}”; reading: ${s.reading})`)).join('');
+      + userStatementsOn(n).map(r => {
+        const words = r.statements.map(s => `; ${r.field}, ${s.speaker === 'user' ? 'recorded user words' : 'source not verified'}: “${s.source}” (quoted: “${s.quote}”; reading: ${s.reading})`).join('');
+        const current = currentStatementRetention(r);
+        if (current === undefined) return words;
+        const retained = !current.complete ? 'The saved source does not confirm which earlier parts still apply.'
+          : current.spans.length === 0 ? 'No earlier parts remain current.'
+            : current.spans.map(s => `“${s.text}” (${s.origin === 'held_user_statement' ? 'recorded user source' : 'earlier speaker and source not verified'})`).join('; ');
+        return `; ${r.field}, current retained account: ${retained}; Complete source record (correction request and earlier history; only the retained parts above remain current): ${words}`;
+      }).join('');
     const scales = buildFactorScaleMap(candidate.nodes as GraphRead['nodes']);
     const settingWords = (n: Record<string, unknown>): string[] => Object.entries(mergeInterventionSourceObjects(n as never)).map(([id, cell]) => {
       const factor = (candidate.nodes as Record<string, unknown>[]).find(x => x.id === id);
@@ -4109,7 +4124,6 @@ export function createAgentCapabilities(
     const parts = (nodes: readonly Record<string, unknown>[]) => new Map(nodes.map(n => [`${String(n.kind)}:${norm(String(n.label))}`, String(n.label)]));
     const savedParts = parts(before.nodes), proposedParts = parts(candidate.nodes as Record<string, unknown>[]);
     const added = [...proposedParts].filter(([k]) => !savedParts.has(k)).map(([, label]) => `“${label}”`);
-    const omitted = [...savedParts].filter(([k]) => !proposedParts.has(k)).map(([, label]) => `“${label}”`);
     const savedNames = new Map(before.nodes.map(n => [n.id, n.label]));
     const removedRelationships = before.edges.filter(e => !(candidate.edges as Record<string, unknown>[]).some(x => x.from === e.from && x.to === e.to))
       .map(e => `“${savedNames.get(e.from) ?? e.from}” → “${savedNames.get(e.to) ?? e.to}”`);
@@ -4120,7 +4134,6 @@ export function createAgentCapabilities(
       + '\nRelationships: ' + (candidate.edges as Record<string, unknown>[]).map(e => `“${names.get(e.from)}” → “${names.get(e.to)}”`).join('; ')
       + (keptSettings.length ? '\nSaved option settings kept: ' + keptSettings.join('; ') : '')
       + (added.length ? '\nParts not in your current model that this would add: ' + added.join('; ') : '')
-      + (omitted.length && prepared.retired.length === 0 ? '\nParts this would remove: ' + omitted.join('; ') : '')
       + (prepared.retired.length ? '\nEarlier Olumi suggestions left out of this replacement: ' + prepared.retired.join('; ') + '.' : '')
       + (removedRelationships.length ? '\nSaved relationships left out of this replacement: ' + removedRelationships.join('; ') + '.' : '')
       + (prepared.adoption_unknown.length ? '\nKept: Olumi’s earlier suggestions; Olumi cannot tell whether you adopted them: '
@@ -4150,6 +4163,7 @@ export function createAgentCapabilities(
   const applySavedCorrection = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
+    if (isPlainRecord(parent.operations[0]?.value) && (parent.operations[0]!.value as Record<string, unknown>).qualitative_reframe !== undefined) return applyQualitativeReframe(ctx, parent, before, proposals, dispatch, () => readGraph(ctx.scenario_id), workflowDependencies);
     const pid = parent.proposal_id;
     const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
       goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; later_ambition_binding_unverified?: unknown; later_ambition_source_unverified?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown; explicit_rebuild_request?: unknown; rebuild_history?: unknown; retained_aim_description?: unknown; scope_excluded?: unknown };
@@ -4528,6 +4542,7 @@ export function createAgentCapabilities(
     const op = parent.operations[0]!;
     const pid = parent.proposal_id;
     const approved = approvedStatementRecordOf(op);
+    if (approved?.correction !== undefined) return applyCorrectedStatement(ctx, parent, before, proposals, dispatch, () => readGraph(ctx.scenario_id), workflowDependencies);
     if (approved === undefined || opts.commitOptionLevels === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'not_applied' };
     }
@@ -6390,6 +6405,11 @@ export function createAgentCapabilities(
 
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      if (args?.reframe !== undefined) {
+        if (Object.keys(args).some(k => !['reframe', 'rationale'].includes(k))) return { ok: false, mutated: false, refusal: 'mixed_goal_changes' };
+        const saved = await readGraph(ctx.scenario_id);
+        return saved === null ? { ok: false, mutated: false, refusal: 'not_found' } : proposeQualitativeReframe(ctx, saved, args.reframe as never, proposals, workflowDependencies);
+      }
       const typed = args?.constraint_type;
       const value = args?.value;
       const unit = typeof args?.unit === 'string' ? args.unit.trim() : '';
@@ -6460,7 +6480,7 @@ export function createAgentCapabilities(
       }
       const goal = goals[0]!;
       if (typeof args.governing_outcome === 'string' && args.governing_outcome.trim() !== '') {
-        return proposeGoalRepoint(ctx, args, g, type, inclusiveType);
+        return proposeGoalRepoint(ctx, { ...args, value, unit }, g, type, inclusiveType);
       }
       /**
        * ⭐ B RESTATED GOAL (DL ruling (B); PL 6116779075; AIE 0244): a target for a quantity the draft does not contain
@@ -6728,8 +6748,13 @@ export function createAgentCapabilities(
      * (`readStatement`), and the row's writer prepares its carrier's write. ONE card in the door's template; nothing is written.
      */
     async proposeStatement(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
+      if (args?.correction !== undefined) {
+        if (Object.keys(args).some(k => k !== 'correction')) return { ok: false, mutated: false, refusal: 'mixed_statement_changes' };
+        return proposeStatementCorrection(ctx, g.raw, g.graph_hash, args.correction as never, proposals);
+      }
       // Whose words they are is the verifier's ONE check (a whole statement of this turn's or a verified earlier message).
       const resolved = resolveSubject(g.raw, isPlainRecord(args?.subject) ? args.subject : {});
       if (resolved.kind === 'unresolved') {
@@ -7289,16 +7314,23 @@ export function createAgentCapabilities(
             return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'level_not_stated',
               detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
           }
-          if (typeof held !== 'number' || v.statements.length !== 1 || v.statements[0]!.low !== held) {
+          // A revision verifies its replacement; confirmation verifies the held figure.
+          const expected = a?.revise === true ? a.value : held;
+          if (typeof held !== 'number' || v.statements.length !== 1 || v.statements[0]!.low !== expected) {
             return { ok: false, mutated: false, refusal: 'not_the_held_figure',
-              detail: `‘${node.label}’ holds ${typeof held === 'number' ? sayFigureRead(held, heldUnit) : 'no figure'}; this confirms only that figure, from the `
+              detail: a?.revise === true ? 'The verified statement does not state the proposed replacement figure. Nothing was prepared.'
+                : `‘${node.label}’ holds ${typeof held === 'number' ? sayFigureRead(held, heldUnit) : 'no figure'}; this confirms only that figure, from the `
                 + 'user\'s own statement of it. Nothing was prepared. To change the figure, propose the new one they gave.' };
           }
-          if (seen.has(node.id)) continue;
-          seen.add(node.id);
-          adopted.push({ id: node.id, label: node.label, value: held, unit: heldUnit, basis: '', userWrote: true,
-            confirmed: { source: v.statements[0]!.source, quote: v.statements[0]!.quote } });
-          continue;
+          if (a?.revise !== true) {
+            if (seen.has(node.id)) continue;
+            seen.add(node.id);
+            adopted.push({ id: node.id, label: node.label, value: held, unit: heldUnit, basis: '', userWrote: true,
+              confirmed: { source: v.statements[0]!.source, quote: v.statements[0]!.quote } });
+            continue;
+          }
+          // The existing revision path keeps source, field-binding disclosure and approval.
+
         }
         if (a?.keep === true) {
           const os = (node.observed_state ?? undefined) as Record<string, unknown> | undefined;
@@ -8941,6 +8973,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === SET_RISK_OCCURRENCE_OP) return applyRiskOccurrence(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === RECORD_STATEMENT_OP) return applyStatement(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === SET_COHORT_FORECAST_OP) return applyCohortForecast(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === SET_STATEMENT_RECORD_OP) return applyStatementRecord(ctx, decision.proposal, before);
       if (ops.length === 1 && (ops[0]!.op === 'apply_saved_correction' || ops[0]!.op === 'repoint_goal')) return applySavedCorrection(ctx, decision.proposal, before);
       if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
