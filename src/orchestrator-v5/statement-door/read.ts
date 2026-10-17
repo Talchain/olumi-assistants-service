@@ -16,8 +16,6 @@ import type { DoorSubject } from './subject.js';
 import { statementBoundTo, type DoorContext } from './statements.js';
 export { statementBoundTo, type DoorContext } from './statements.js';
 
-type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * One statement as the Agent gives it: the user's exact words, the ask of Olumi's they answer (its exact words), if any, and for a
