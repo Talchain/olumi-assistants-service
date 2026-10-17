@@ -63,7 +63,7 @@ import { niceFrameAtLeast } from './refit-frames.js';
 import { markPlaceholder } from '../../cee/magnitude/link-sizing.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { briefWritesFigure, conventionClassOf, conventionFrameFor, conventionFrameWords, estimatedSpreadUpper, isFlowUnit, olumiSignedSize, rescueConventionFrames, hasBasis } from './convention-frame.js';
-import { sayFigure } from './say-figure.js';
+import { sayFigure, sayFigureWithoutRounding } from './say-figure.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectKey, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -4113,6 +4113,19 @@ function admitOnce(
       || briefWritesFactorFigure(f, brief);
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
+  /**
+   * ⭐ AIE W27 (17 Oct 22:03Z): a figure from the user's material with no unit, and no definition of what it measures (a verified
+   * `measure` statement on its factor), has no established scale. The figure is kept exactly as written, unresolved: no frame from
+   * any source (no cap, no `scale_frame`, nothing normalised) and never Olumi's stamp: unverified user material (no binder verifies
+   * a unitless level). The Run's scale gate holds it under its own rule (`baseline_scale_unresolved`), and the one missing meaning
+   * is asked (`.magnitude_question`, below). A figure within ±1 is read without a scale and is left as before.
+   */
+  const definitions = typeof brief === 'string' ? sourceMapOf((model as { statements?: unknown }).statements, brief).verified : undefined;
+  const unscaled = new Set(model.factors.filter((f) => typeof f.baseline_value === 'number' && Math.abs(f.baseline_value) > 1
+    && (f.unit ?? '').trim() === '' && (f.baseline_known || verifiedLevels.has(f) || quotesBrief(f))
+    && (verifiedLevels.has(f) || f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))
+    && definitions?.has(subjectKey({ kind: 'factor', label: f.label }, 'measure')) !== true).map((f) => f.label));
+  for (const label of unscaled) capByLabel.delete(label);
   /** `display`, when set, is what the node shows; `label` stays the key its id slugs from and links resolve by. */
   const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
@@ -4375,7 +4388,9 @@ function admitOnce(
         // A factor the drafter tagged an estimate BUT quoted the brief for is a user CLAIM the receipt gate could not verify
         // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
         ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
-          ? { observed_state: withStatedLevelRange(framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
+          ? { observed_state: withStatedLevelRange(unscaled.has(f.label)
+            ? { value: f.baseline_value, user_material_unverified: true as const }
+            : framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
             !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
@@ -4418,7 +4433,7 @@ function admitOnce(
         // never disagree. It is derived from the SAME cap the framer was given, so
         // nothing new is invented here.
         ...((): Record<string, number> => {
-          const c = capFor(f.label) ?? f.plausible_max;
+          const c = unscaled.has(f.label) ? undefined : capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
           if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
             const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
@@ -4678,7 +4693,12 @@ function admitOnce(
     const id = ids.get(f.label);
     if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
   }
-  for (const d of defaultedFrames) {
+  for (const f of model.factors.filter((x) => unscaled.has(x.label))) {
+    loss.push({ field_path: `nodes[${ids.get(f.label) ?? f.label}].observed_state.magnitude_question`, before: { value: f.baseline_value, unit: null },
+      after: null, severity: 'warn', reason: `"${f.label}" is recorded as ${sayFigureWithoutRounding(f.baseline_value as number, '')}. `
+        + 'What does this figure measure, and what scale, if any, does it use?' } as RepairEntry);
+  }
+  for (const d of defaultedFrames.filter((x) => !unscaled.has(x.label))) {
     // "Your own figures" only when a figure the user stated fed the frame; when
     // every figure is Olumi's, saying so is the honest record.
     const whose = userStatedFigureLabels.has(d.label)
@@ -4719,7 +4739,7 @@ function admitOnce(
     } as RepairEntry);
   }
 
-  for (const w of widenedFrames) {
+  for (const w of widenedFrames.filter((x) => !unscaled.has(x.label))) {
     loss.push({
       field_path: `nodes[${ids.get(w.label) ?? w.label}].observed_state.frame_widened`,
       before: w.stated,
