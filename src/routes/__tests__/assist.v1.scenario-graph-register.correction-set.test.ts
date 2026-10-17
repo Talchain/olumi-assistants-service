@@ -993,6 +993,41 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
     expect(w.writes).toHaveLength(1);
   });
+  it.each(['factor', 'outcome', 'risk'].flatMap(savedKind =>
+    ['factor', 'outcome', 'risk'].map(proposedKind => ({ savedKind, proposedKind }))))(
+    'B2 quantity family: $savedKind → $proposedKind relabel beside the same saved neighbour refuses without a write', async ({ savedKind, proposedKind }) => {
+      const draftWith = (kind: string, label: string): Rec => {
+        const draft = structuredClone(bakery.draft) as Rec;
+        const quantity = { label, provenance: 'ai_proposed', unit: null, plausible_max: 100 };
+        if (kind === 'factor') draft.factors.push({ ...quantity, role: 'observable', baseline_known: false, baseline_value: null });
+        else if (kind === 'outcome') draft.outcomes.push(quantity);
+        else draft.risks.push({ ...quantity, already_true_evidence: null });
+        draft.links = draft.links.filter((l: Rec) => l.from !== 'Loyalty card running');
+        const link = { direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null,
+          effect_provenance: null, definitional: null, basis: null, source_quote: null };
+        draft.links.push({ ...link, from: 'Loyalty card running', to: label },
+          { ...link, from: label, to: 'weekly loaves sold' });
+        return draft;
+      };
+      const seed = await runPreparingDraftReplacement('b2-family-seed', () => buildModelFromBrief('b2-family-seed', bakery.brief,
+        async () => { throw new Error('Preparation must not dispatch'); },
+        (async () => ({ text: JSON.stringify(draftWith(savedKind, 'Shop footfall')), status: 'completed' })) as never));
+      expect(seed.ok, JSON.stringify(seed)).toBe(true);
+      const proposed = draftWith(proposedKind, 'Customer footfall');
+      const w = await world({ graph: seed.prepared_graph as Rec, brief: bakery.brief, message: rebuildRequest },
+        { provider: async () => ({ text: JSON.stringify(proposed), status: 'completed' }) });
+      const saved = w.original.nodes.find((n: Rec) => n.label === 'Shop footfall');
+      expect(saved).toMatchObject({ kind: savedKind });
+      expect(w.original.edges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ from: 'loyalty_card_running', to: saved.id }),
+        expect.objectContaining({ from: saved.id, to: 'weekly_loaves_sold' }),
+      ]));
+      const offered = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), w.ctx, w.caps());
+      expect(offered, JSON.stringify(offered)).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' });
+      expect(offered.follow_up).toContain('Shop footfall'); expect(offered.follow_up).toContain('Customer footfall');
+      expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
+      expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });
     // DL04:00 ACK: the former 'partial' row lives at the actual durable source gate, not a sticky authorship flag.
