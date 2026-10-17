@@ -427,7 +427,9 @@ describe('the tool is declared, dispatched, withheld in preview, and named in th
   it('RED: propose_goal_target is a declared mutation tool with {constraint_type, value, unit, rationale}', () => {
     const t = AGENT_TOOLS.find((x) => x.name === 'propose_goal_target');
     expect(t, 'declared').toBeDefined();
-    expect((t!.parameters as { required?: unknown }).required).toEqual(['constraint_type', 'value', 'unit', 'rationale']);
+    const modes = (t!.parameters as { anyOf: { required: string[] }[] }).anyOf;
+    expect(modes[1]!.required).toEqual(['constraint_type', 'value', 'unit', 'rationale']);
+    expect(modes[0]!.required).toEqual(['reframe']);
     expect(((t!.parameters as { properties: Record<string, { enum?: unknown }> }).properties.constraint_type!.enum)).toEqual(['at_least', 'at_most']);
     expect(MUTATION_TOOLS).toContain('propose_goal_target');
     expect(toolsFor('preview').map((x) => x.name)).not.toContain('propose_goal_target');

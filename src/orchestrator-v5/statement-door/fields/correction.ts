@@ -2,9 +2,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { userStatementOf, verifyStatements, type UserStatement } from '../../agent-lane/user-statements.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
-import { statementBoundTo } from '../read.js';
 import { subjectKey, resolveSubject, type DoorSubject } from '../subject.js';
-import { userStatementFor, userStatementRecord, userStatementRecordOf, withUserStatement, type UserStatementRecord, type StatementAttest } from '../statements.js';
+import { statementBoundTo, userStatementFor, userStatementRecord, userStatementRecordOf, withUserStatement, type UserStatementRecord, type StatementAttest } from '../statements.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);

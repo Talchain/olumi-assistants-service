@@ -8,10 +8,8 @@ import { createProposal, type ProposalStore } from '../agent-lane/proposal.js';
 import type { AgentToolContext, ToolResult } from '../agent-lane/runtime/agent-tools.js';
 import { prepareStatementCorrection, statementCorrectionWords, type StatementCorrectionRequest } from './fields/correction.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../goal-target/cohort-forecast-write.js';
-import { approvedGraphHeld } from '../agent-lane/runtime/draft-replacement.js';
 import { computeGraphIdentityHash } from '../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { constructionOperationId } from '../agent-lane/runtime/build-model.js';
 import type { StructuredProposal } from '../agent-lane/proposal.js';
 import type { ReframeRead } from '../agent-lane/runtime/goal-repoint.js';
 
@@ -46,6 +44,9 @@ export async function applyCorrectedStatement(ctx: AgentToolContext, parent: Str
   const written = applyStatementRecordEdit(before.raw, approved);
   if (written.kind === 'refused') return no(written.reason === 'node_changed' ? 'superseded' : written.reason);
   if (written.kind === 'unchanged') return no('own_write_unverified');
+  const [{ constructionOperationId }, { approvedGraphHeld }] = await Promise.all([
+    import('../agent-lane/runtime/build-model.js'), import('../agent-lane/runtime/draft-replacement.js'),
+  ]);
   const operationId = constructionOperationId(ctx.scenario_id, `correct_statement:${parent.proposal_id}`);
   const registered = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, { graph: written.mutatedGraph,
     expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: operationId });

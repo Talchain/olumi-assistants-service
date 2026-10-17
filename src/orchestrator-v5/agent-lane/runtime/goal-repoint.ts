@@ -16,11 +16,8 @@ import { createProposal, type ProposalStore, type StructuredProposal } from '../
 import type { ToolResult } from './agent-tools.js';
 import { verifyStatements } from '../user-statements.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
-import { statementBoundTo } from '../../statement-door/read.js';
-import { userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { statementBoundTo, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
-import { approvedGraphHeld } from './draft-replacement.js';
-import { constructionOperationId } from './build-model.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -82,10 +79,11 @@ function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, r
 }
 
 /** Mint the existing repoint_goal operation, with the complete reviewed candidate frozen in its content identity. */
-export function proposeQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: QualitativeReframeRequest,
-  proposals: ProposalStore): ToolResult {
+export async function proposeQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: QualitativeReframeRequest,
+  proposals: ProposalStore): Promise<ToolResult> {
   const at = new Date().toISOString(), prepared = prepareQualitativeReframe(ctx, before, request, at);
   if ('refused' in prepared) return { ok: false, mutated: false, refusal: prepared.refused };
+  const { constructionOperationId } = await import('./build-model.js');
   const operationId = constructionOperationId(ctx.scenario_id, `qualitative_reframe:${before.graph_identity_hash}:${identityOf(prepared.candidate)}`);
   const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
     operations: [{ op: 'repoint_goal', path: prepared.new_id, value: { qualitative_reframe: { request, at, source_line: prepared.source_line }, candidate: prepared.candidate,
@@ -117,6 +115,7 @@ export async function applyQualitativeReframe(ctx: AgentToolContext, parent: Str
   if (registered.status >= 400 && registered.status < 500) return no(registered.status === 409 ? 'superseded' : 'not_applied');
   const after = await read();
   const acknowledged = rec(registered.json.graph_identity_hash) ? registered.json.graph_identity_hash.value : registered.json.graph_identity_hash;
+  const { approvedGraphHeld } = await import('./draft-replacement.js');
   if (after === null || typeof acknowledged !== 'string' || acknowledged !== after.graph_identity_hash
     || identityOf(after.raw) !== acknowledged || !approvedGraphHeld(v.candidate, after.raw)) return {
       ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed' };

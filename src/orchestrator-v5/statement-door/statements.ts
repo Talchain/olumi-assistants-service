@@ -7,12 +7,54 @@
  * key. Pure.
  */
 import { isDeepStrictEqual } from 'node:util';
+import { namesBothEnds } from '../goal-target/input-claim-context.js';
+import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
+import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
-import { isStatementField, subjectKey, type DoorSubject, type StatementField } from './subject.js';
+import { isStatementField, subjectKey, subjectNodeKey, type DoorSubject, type StatementField } from './subject.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** What binds a statement to a subject beside its words. */
+export interface DoorContext {
+  readonly selection?: { readonly element_ids: readonly string[]; readonly unresolved: string };
+  /** Olumi's previous reply, bound by the route from the session's own items. */
+  readonly preceding_ask?: string;
+  /** The readiness asks Olumi said in recent turns, each with its subject and turn (`ask.ts`). */
+  readonly asks?: readonly StatementAsk[];
+}
+
+/** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
+export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
+  alsoAnswers: readonly DoorSubject[] = []): 'bound' | 'another' | 'unbound' {
+  // The subjects an ask of which this statement may answer: its own, and the row's `answersFor` (one key each).
+  // The NODES this statement may answer for: its own, and the rows' `answersFor` (a cohort option's "the same people" answers the goal's ask).
+  const answers = new Set([subject, ...alsoAnswers].map(subjectNodeKey));
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  if (subject.kind === 'link') {
+    const entities = nodes.flatMap((n) => (typeof n.id === 'string' && typeof n.label === 'string' ? [{ id: n.id, label: n.label }] : []));
+    if (subject.to_id !== undefined && namesBothEnds(quote, entities, subject.id, subject.to_id)) return 'bound';
+  } else {
+    const same = nodes.filter((n) => n.kind === subject.kind && typeof n.id === 'string' && typeof n.label === 'string');
+    const named = same.filter((n) => isFactorNamedByUser(String(n.label), quote));
+    if (named.length === 1) return named[0]!.id === subject.id ? 'bound' : 'another';
+    if (named.length > 1) return 'unbound';
+  }
+  const s = ctx.selection;
+  if (s !== undefined && s.unresolved === 'none' && s.element_ids.length === 1) {
+    if (s.element_ids[0] === subject.id) return 'bound';
+    if (nodes.some((n) => n.id === s.element_ids[0] && n.kind === subject.kind)) return 'another';
+  }
+  const answered = answeredAsk(answering, ctx.asks ?? []);
+  // The ask names the NODE; the field is the row's reading of the words (one readiness line asks "true now?" and "how likely?").
+  if (answered !== undefined) return answers.has(subjectNodeKey(answered.subject)) ? 'bound' : 'another';
+  if (typeof answering === 'string' && answering.trim() !== '') return 'unbound';
+  const asked = [...new Set(askedSubjects(ctx.preceding_ask, ctx.asks ?? []).map(subjectNodeKey))];
+  if (asked.length === 1) return answers.has(asked[0]!) ? 'bound' : 'another';
+  return 'unbound';
+}
 
 /** The node key. */
 export const USER_STATEMENTS_KEY = 'user_statements' as const;
