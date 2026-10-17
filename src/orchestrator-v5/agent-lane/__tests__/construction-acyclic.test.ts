@@ -299,8 +299,9 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     const lines = saidAbout(out, 'AI feature availability', 'AI release delay');
     expect(lines, JSON.stringify(out.not_represented)).toHaveLength(1);
     expect(lines[0]).toContain('the link from "AI feature availability" to "AI release delay" was left out');
-    // …and it is not miscounted as a link whose direction nobody stated.
-    expect((out.not_represented as string[]).some((s) => s.includes('nobody has stated which way they run'))).toBe(false);
+    // …and it is not miscounted as a link whose direction nobody stated (that line's words since T1 HOST P11; its positive is
+    // `construction-direction-unknown-named.test.ts`).
+    expect((out.not_represented as string[]).some((s) => s.startsWith('Left out until someone says which way they run:'))).toBe(false);
   });
 
   it('RED (OUTCOME): with an explicitly held AI risk premise, may_run and PLoT compares the two user options', async () => {
