@@ -207,21 +207,11 @@ export function alreadyTrueQuoteOf(node: unknown): string | undefined {
 }
 
 /**
- * The user's "holds now" as a validated block (`ApprovedRiskOccurrence.holds_now`): it is true at the start of a window that
- * counts from TODAY, so it happens at least once within it. That is all it says: not that it persists through the window, nor its
- * intensity or effect (AIE 6178729504). A window counted from a launch is never licensed by it (`riskOccurrenceWindowFromToday`).
- */
-export function userHoldsNowBlock(windowMonths: number): EventRiskV1T | undefined {
-  const parsed = EventRiskV1.safeParse({ version: 1,
-    occurrence: { p_low: 1, p_high: 1, meaning: 'at_least_once_within_horizon', basis: 'user' }, horizon: { months: windowMonths } });
-  return parsed.success ? parsed.data : undefined;
-}
-const isHoldsNowBlock = (block: EventRiskV1T): boolean =>
-  block.occurrence.basis === 'user' && block.occurrence.p_low === 1 && block.occurrence.p_high === 1 && block.mitigations === undefined;
-/**
  * ⭐ The user's forecast that a condition holds at some point during a launch period (`holds_in_window`), as a block: occurrence 1
  * there is OLUMI'S derived reading of that qualitative forecast, never a probability they stated (AIE 6183711560), so its basis is
  * `olumi` and it is bound to that window. Their words stay theirs, in the statement record beside it.
+ * ⭐ DL-3 RULING 23:12Z: "already true now" over a window from today is the SAME derived reading (true now ⇒ at least once
+ * within it; not persistence, intensity or effect, AIE 6178729504), so it writes this block too; no user-basis p = 1 is written.
  */
 export function derivedWindowHoldsBlock(windowMonths: number): EventRiskV1T | undefined {
   const parsed = EventRiskV1.safeParse({ version: 1,
@@ -291,8 +281,9 @@ export const riskWindowHoldsAskWords = (label: string, windowMonths: number): st
 export const riskOccurrenceCardWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_CARD_TEMPLATE, label, block);
 export const riskOccurrenceRecordedWords = (label: string, block: EventRiskV1T): string => fill(RISK_OCCURRENCE_RECORDED_TEMPLATE, label, block);
 /** S2 "holds now": the receipt (the card is the ONE statement door's, `statement-door/card.ts`). */
-export const riskHoldsNowRecordedWords = (label: string): string => `Recorded from your words: ‘${label.trim()}’ is already true now. `
-  + 'How strongly it affects the model is still Olumi’s placeholder on its link.';
+export const riskHoldsNowRecordedWords = (label: string): string => `Recorded Olumi’s reading of your words, which you chose to use: `
+  + `‘${label.trim()}’ already holds now, so Olumi uses it as occurrence 100% within your goal’s period, a derived reading, not a `
+  + 'probability you stated. How strongly it affects the model is still Olumi’s placeholder on its link.';
 /**
  * AIE 6179240850, exact: S2, the user's own occurrence estimate. Their complete statement is quoted; Olumi's reading of it (the
  * chance as they stated it, with "about"; the event; THEIR window) is offered, and the effect stays a separate assumption.
@@ -339,13 +330,12 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   const block = EventRiskV1.safeParse(approved.event_risk);
   // Olumi's range, the user's "holds now", or the user's own stated chance, each with its verified statement: no other block
   // is ever written here, and one card never carries two statements.
-  // "Holds now" over a window from today is the user's block; their forecast that it holds during a launch period
-  // (`holds_in_window`) gets Olumi's derived block (AIE 6183711560). Both say "at least once within the window", each with its statement.
+  // "Holds now" over a window from today and a forecast that it holds during a launch period (`holds_in_window`) both get Olumi's
+  // derived block (AIE 6183711560; DL-3 RULING 23:12Z): "at least once within the window", each with the user's statement beside it.
   const holdsNow = approved.holds_now !== undefined && (approved.holds_now.form === 'holds_now' || approved.holds_now.form === 'holds_in_window');
-  const derived = approved.holds_now?.form === 'holds_in_window';
   const stated = approved.stated_occurrence;
   if (!block.success || (holdsNow && stated !== undefined)
-    || (holdsNow ? !(derived ? isDerivedWindowHoldsBlock(block.data) : isHoldsNowBlock(block.data))
+    || (holdsNow ? !isDerivedWindowHoldsBlock(block.data)
       : stated !== undefined ? !isStatedBlock(block.data, stated, approved.risk_id) : block.data.occurrence.basis !== 'olumi')
     || !isDeepStrictEqual(block.data, approved.event_risk)) {
     return { kind: 'refused', reason: 'invalid_block' };
@@ -383,7 +373,7 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
       affected_entities: [{ kind: 'risk', label: label.slice(0, 120) }],
       graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
-      safe_summary: holdsNow ? 'Recorded from your words that a risk is already true now'
+      safe_summary: holdsNow ? 'Recorded Olumi’s reading of your words that a risk already holds now'
         : stated !== undefined ? 'Recorded from your words how likely a risk is to happen' : 'Recorded Olumi’s starting assumption for a risk',
       impact: 'low',
       rerun_recommended: true,

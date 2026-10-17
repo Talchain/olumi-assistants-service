@@ -257,7 +257,14 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     // option, and only it, now carries `proposed_by: 'olumi'`. The served graph predates the mark; the rest is byte for byte.
     const marked = (registered.nodes as { id: string; proposed_by?: unknown }[]).filter((n) => n.proposed_by !== undefined).map((n) => [n.id, n.proposed_by]);
     expect(marked).toEqual([['phased_54_price', 'olumi']]);
-    const body = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => n) } as typeof registered;
+    // TL 21:16Z (2), the risk-source owner: construction now PERSISTS the unsized Olumi risk root's omission
+    // (`retainUnsizedOlumiRisks`), on that root alone. The served graph predates it.
+    const omitted = (registered.nodes as { id: string; analysis_participation?: unknown }[]).filter((n) => n.analysis_participation !== undefined).map((n) => [n.id, n.analysis_participation]);
+    expect(omitted).toEqual([[DELAY, 'retained_excluded']]);
+    const body = { ...registered, nodes: (registered.nodes as Record<string, unknown>[]).map(({ proposed_by: _mark, ...n }) => {
+      if (n.id !== DELAY) return n;
+      const { analysis_participation: _omitted, ...rest } = n; return rest;
+    }) } as typeof registered;
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(asServedNow).map(canon));
     const withheld = new Set(loopWithheld(out));
@@ -326,7 +333,8 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     for (const provenance of ['from_brief', 'unverified_brief', undefined]) {
       const tagged = { ...graph, nodes: graph.nodes.map((n) => {
         if (n.id !== DELAY) return n;
-        const { provenance: _drop, ...rest } = n as typeof n & { provenance?: unknown };
+        // A root that is the user's (or of no known source) was never persisted as an Olumi omission: drop that mark with the tag.
+        const { provenance: _drop, analysis_participation: _omission, ...rest } = n as typeof n & { provenance?: unknown; analysis_participation?: unknown };
         return (provenance === undefined ? rest : { ...rest, provenance }) as typeof n;
       }) };
       expect(blockers(tagged), String(provenance)).toEqual(['MISSING_FACTOR_LEVEL']);
