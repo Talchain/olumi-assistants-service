@@ -244,12 +244,16 @@ const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'"
  * of `message`, verbatim in one spelling (`plainQuote`). It starts at the message's start or after . ! ? ; or a line, and
  * ends at the message's end or before one. A colon does not end a statement ("Alice says: …" keeps its speaker), so a
  * substring that drops "Alice says …", "Olumi suggested …" or "I disagree" is not whole.
+ * ⛔ T1 HOST P07 (pilot 17 Oct): a full stop may be followed by the quotation mark that closes a person's words
+ * ("Sam, site lead: 'Crews start early.'"), at either end of a statement. Without it, every quoted speech was refused as
+ * "not a whole statement" and its attribution was lost.
  */
+const ENDS = /[.!?;]['"]*$/;
 export function wholeStatementIn(message: string, quote: unknown): boolean {
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
   const text = plainQuote(message);
   return said !== '' && quoteSpansIn(text, said).some((at) =>
-    /(?:^|[.!?;\n])\s*$/.test(text.slice(0, at)) && (/[.!?;]$/.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length))));
+    /(?:^|[.!?;\n]['"]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length))));
 }
 
 /** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */

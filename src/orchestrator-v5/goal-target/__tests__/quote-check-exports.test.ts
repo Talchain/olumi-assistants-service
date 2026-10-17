@@ -24,6 +24,20 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
   it('one spelling: typographic quotes and runs of space match their plain form', () => {
     expect(wholeStatementIn('Price’s effect on MRR is  weak.', "Price's effect on MRR is weak.")).toBe(true);
   });
+  it('⭐ T1 HOST P07: a person’s quoted words, closed after the full stop, are whole with their speaker; a sentence after them is too', () => {
+    const message = "We fit kitchens. Sam, site lead: 'Crews start early only if parts arrive the day before.' He assumes the van is free.";
+    expect(wholeStatementIn(message, "Sam, site lead: 'Crews start early only if parts arrive the day before.'")).toBe(true);
+    expect(wholeStatementIn(message.replace(/'/g, '’').replace("lead: ’", 'lead: ‘'), "Sam, site lead: 'Crews start early only if parts arrive the day before.'")).toBe(true);
+    expect(wholeStatementIn(message, 'He assumes the van is free.')).toBe(true);
+    const two = "Sam, site lead: 'Crews start early only if parts arrive the day before. A late van wastes the morning.' He agrees.";
+    expect(wholeStatementIn(two, "Sam, site lead: 'Crews start early only if parts arrive the day before. A late van wastes the morning.'")).toBe(true);
+  });
+  it('CONTRAST: the quoted words without their speaker, or a quoted fragment mid-sentence, are still not whole', () => {
+    const message = "We fit kitchens. Sam, site lead: 'Crews start early only if parts arrive the day before.' He assumes the van is free.";
+    expect(wholeStatementIn(message, 'Crews start early only if parts arrive the day before.')).toBe(false);
+    expect(wholeStatementIn(message, "'Crews start early only if parts arrive the day before.'")).toBe(false);
+    expect(wholeStatementIn("Sam said 'parts first' and left.", "Sam said 'parts first'")).toBe(false);
+  });
   it('words the message never holds, and a non-string quote, are not whole', () => {
     expect(wholeStatementIn('Please size the links.', 'Price has a weak effect on MRR.')).toBe(false);
     expect(wholeStatementIn('Price has a weak effect on MRR.', undefined)).toBe(false);
