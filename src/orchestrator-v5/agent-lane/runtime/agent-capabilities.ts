@@ -1629,9 +1629,13 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   const preconditions = preconditionRiskIds(g.nodes, g.edges, limitNodeIdsOf(g.raw));
   const leftOut = g.nodes.filter((n) => preconditions.has(n.id)).flatMap((risk) => {
     const stamp = readReliesOnRisk(risk.relies_on);
-    if (stamp === undefined) return [];
-    return [{ id: risk.id, label: risk.label, relies_on: stamp,
-      reason: reliesOnRiskLine(risk.label, labelOf.get(stamp.option_id)!),
+    // The shared predicate above already validated the server's draft-widening attachment and its identities.
+    const widening = isPlainRecord(risk.draft_widening) ? risk.draft_widening : undefined;
+    const hit = isPlainRecord(widening?.hits) ? widening.hits : undefined;
+    const option = g.nodes.find(n => n.kind === 'option' && n.id === (stamp?.option_id ?? hit?.id));
+    if (option === undefined) return [];
+    return [{ id: risk.id, label: risk.label, relies_on: stamp ?? { option_id: option.id },
+      reason: reliesOnRiskLine(risk.label, option.label),
       use: "Kept for discussion. Never a driver, sensitivity or worth-checking row, and never cite it as a reason for a goal chance: the Run leaves it out." }];
   });
   const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
