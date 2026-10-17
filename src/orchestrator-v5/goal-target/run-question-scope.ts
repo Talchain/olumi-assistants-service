@@ -1,6 +1,6 @@
 /** Numerical input validation for the licence owner, with descriptive readers for the Run question. */
 import { readGoalRecord } from './goal-record.js';
-import { readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
+import { calculatedRawTarget, readDispatchedGoalThreshold, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 import type { RunQuestionSide, RunQuestionScope } from './run-question.js';
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -40,18 +40,19 @@ export function askedQuestionOf(graph: unknown, goalId: string): RunQuestionSide
   };
 }
 
-export function dispatchedQuestionOf(request: unknown): RunQuestionSide | null {
+function dispatchedInputsOf(request: unknown): RunQuestionSide | null {
   if (!isRec(request) || typeof request.goal_node_id !== 'string') return null;
   const goal = questionGoal(request.graph, request.goal_node_id);
   if (goal === undefined) return null;
   const os = isRec(goal.observed_state) ? goal.observed_state : undefined;
   const operator = request.goal_direction === 'minimise' ? (request.goal_threshold_strict === true ? '<' : '<=')
     : (request.goal_threshold_strict === true ? '>' : '>=');
+  const encodedTarget = questionNumber(request.goal_threshold) ?? questionNumber(goal.goal_threshold);
   return {
     quantity: { node_id: request.goal_node_id, ...(questionText(goal.label) === undefined ? {} : { label: String(goal.label) }) },
     target: questionNumber(goal.goal_threshold_raw), unit: questionText(goal.goal_threshold_unit),
     frame: questionText(goal.goal_threshold_frame), comparator: operator,
-    encoded_target: questionNumber(request.goal_threshold) ?? questionNumber(goal.goal_threshold),
+    encoded_target: encodedTarget,
     baseline: questionNumber(os?.raw_value), encoded_baseline: questionNumber(os?.baseline),
     option_ids: (Array.isArray(request.options) ? request.options.filter(isRec) : []).flatMap(o => {
       const id = questionText(o.option_id) ?? questionText(o.id); return id === undefined ? [] : [id];
@@ -59,9 +60,18 @@ export function dispatchedQuestionOf(request: unknown): RunQuestionSide | null {
   };
 }
 
+/** Describe a performed target only when the final request's own threshold and quantity basis agree. */
+export function dispatchedQuestionOf(request: unknown): RunQuestionSide | null {
+  const inputs = dispatchedInputsOf(request);
+  if (inputs === null || !isRec(request)) return null;
+  const cap = readGoalRecord(request.graph, inputs.quantity.node_id)?.target?.cap;
+  return { ...inputs, target: cap === undefined ? undefined : calculatedRawTarget(inputs.target,
+    readDispatchedGoalThreshold(request, inputs.quantity.node_id)?.value, { cap }) };
+}
+
 /** Shared scope check over a frozen saved model and the FINAL dispatched request. Never reads output statistics. */
 export function assessEvaluatedQuestionScope(savedGraph: unknown, dispatchedRequest: unknown, goalId: string, levelKind?: boolean): RunQuestionScope {
-  const asked = askedQuestionOf(savedGraph, goalId), calculated = dispatchedQuestionOf(dispatchedRequest);
+  const asked = askedQuestionOf(savedGraph, goalId), calculated = dispatchedInputsOf(dispatchedRequest);
   if (asked === null) return { status: 'unverified', can_show_goal_chance: false, reasons: ['saved_question_not_recorded'] };
   const savedGoal = questionGoal(savedGraph, goalId);
   const basis = isRec(savedGoal?.goal_target_basis) ? savedGoal.goal_target_basis : undefined;

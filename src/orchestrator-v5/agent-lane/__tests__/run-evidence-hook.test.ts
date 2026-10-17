@@ -109,6 +109,68 @@ describe('§9: the selected Run’s own evidence reaches runFactsOf as state.run
     expect((runFactsCalls.at(-1)![3] as { runEvidence: { evaluatedQuestion: unknown } }).runEvidence.evaluatedQuestion).toEqual(question);
   });
 
+  it.each([100, 150])('actual Run → live/cold graph read → Agent: raw target %i is calculated only on its evidenced basis', async rawTarget => {
+    const { default: capacity } = await import('../../goal-target/__tests__/fixtures/capacity-247ae5b4-run.json');
+    const { default: minimal } = await import('../../../../tests/fixtures/plot/v2-run-golden-minimal.json');
+    const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
+    const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
+    const graph = structuredClone(capacity.graph);
+    graph.nodes.find(n => n.id === 'weekly_support_capacity')!.goal_threshold_raw = rawTarget;
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'basis-run', {
+      loadGraphAndBriefText: vi.fn(async () => ({ graph, briefText: capacity.brief, revision: 47 })),
+      readMostRecentPendingActions: vi.fn(async () => []),
+    } as never);
+    const transport = vi.fn(async () => ({ ...structuredClone(minimal),
+      option_comparison: structuredClone(capacity.result.enrichment.option_comparison) }));
+    const outcome = await createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: transport, validatePatch: vi.fn() } as never })({
+      payload: { scenario_id: SCENARIO, turn_id: 'basis-run' }, context: {}, requestId: 'basis-run',
+      signal: new AbortController().signal, orientationText: '',
+    } as never);
+    expect(transport).toHaveBeenCalledTimes(1);
+    const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+    if (fact?.fact_type !== 'run_analysis' || fact.noop) throw new Error('Expected actual produced Run');
+    expect(fact.result.input_snapshot?.goal?.target_raw).toBe(rawTarget);
+    const produced = fact.result.enrichment![RUN_QUESTION_EVIDENCE_KEY] as { asked: { target: number }; calculated: { target?: number; encoded_target: number } };
+    expect(produced.asked.target).toBe(rawTarget);
+    expect(produced.calculated.encoded_target).toBe(0.2);
+    expect(produced.calculated.target).toBe(rawTarget === 100 ? 100 : undefined);
+    const cold = JSON.parse(JSON.stringify(fact)) as typeof fact;
+    const variants = [fact, cold];
+    if (rawTarget === 150) {
+      const old = structuredClone(cold);
+      (old.result.enrichment![RUN_QUESTION_EVIDENCE_KEY] as { calculated: { target?: number } }).calculated.target = 150;
+      variants.push(old); // The pre-fix retained record must not keep describing the wrong performed target.
+    }
+    const { createAgentCapabilities } = await import('../runtime/agent-capabilities.js');
+    const { ProposalStore } = await import('../proposal.js');
+    for (const variant of variants) {
+      const before = JSON.stringify(variant);
+      runFact = variant;
+      bind({ fact: variant, fact_row_id: 'basis-fact', evaluated_scenario_revision: 47 } as never);
+      const analysis = await read(graph);
+      const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph, graph_hash: hashOf(graph), ...analysis } }), new ProposalStore());
+      const state = await caps.getCanonicalState({ scenario_id: SCENARIO, authenticated_user_id: 'u', request_id: 'basis-read' } as never);
+      const question = { run_id: fact.result.run_id, evaluated_scenario_revision: 47,
+        asked: { target: rawTarget }, calculated: { encoded_target: 0.2 } };
+      expect(analysis.canonical_analysis_view).toMatchObject({ question });
+      expect(state).toMatchObject({ ok: true, run_facts: { question } });
+      if (rawTarget === 100) {
+        expect(analysis.canonical_analysis_view).toHaveProperty('question.calculated.target', 100);
+        expect(state).toHaveProperty('run_facts.question.calculated.target', 100);
+        expect(state).toHaveProperty('run_facts.question.scope.can_show_goal_chance', true);
+      } else {
+        expect(analysis.analysis_result).not.toBeNull(); // Computation remains available while the chance is withheld.
+        expect(analysis.canonical_analysis_view).not.toHaveProperty('question.calculated.target', 150);
+        expect(analysis.canonical_analysis_view).not.toHaveProperty('question.calculated.target', 100);
+        expect(state).not.toHaveProperty('run_facts.question.calculated.target');
+        expect(state).not.toHaveProperty('run_facts.chances.goal_chance_display');
+        expect(state).toHaveProperty('run_facts.question.scope.can_show_goal_chance', false);
+      }
+      expect(JSON.stringify(variant)).toBe(before); // A projection never rewrites Run history.
+    }
+  });
+
   it('CONTRAST a read without the key passes no runEvidence; malformed fields are dropped, not coerced', async () => {
     const { createAgentCapabilities } = await import('../runtime/agent-capabilities.js');
     const { ProposalStore } = await import('../proposal.js');

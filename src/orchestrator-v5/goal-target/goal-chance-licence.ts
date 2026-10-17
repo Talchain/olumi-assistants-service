@@ -1,3 +1,4 @@
+import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
 import { goalHorizonVerdict, withholdGoalFiguresForUntestedHorizon, withholdOptionsNotInPlaceAtPeriodEnd, withChanceReadbackWithheld } from './goal-horizon-verdict.js';
 import { readDispatchedGoalThreshold, recordedStaticScopeDeclared, recordedStaticLevelEvidence, hasRecordedLevelCalculation, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 import { readRunOmissionScope, type RunOmissionScope, type RunQuestionScope, type SelectedRunEvidence } from './run-question.js';
@@ -575,8 +576,16 @@ export function goalChanceScopeOf(result: unknown, evidence?: SelectedRunEvidenc
   };
   const source = evidence?.inputSnapshot === undefined ? block : { ...block, input_snapshot: evidence.inputSnapshot };
   const recorded = recordedStaticLevelEvidence(source);
-  if (goalChanceLicenceForAgent(source) === undefined || (hasRecordedLevelCalculation(source) && recorded === undefined)) {
-    return { status: 'unverified', can_show_goal_chance: false, reasons: ['evaluated_question_not_fully_recorded'] };
+  const licence = goalChanceLicenceForAgent(source);
+  if (licence === undefined || (hasRecordedLevelCalculation(source) && recorded === undefined)) {
+    const retained = readRecordedRunQuestion(evidence?.evaluatedQuestion ?? (isRec(source.enrichment)
+      ? source.enrichment[RUN_QUESTION_EVIDENCE_KEY] : undefined), {
+      runId, revision: evidence?.occurrence?.evaluated_scenario_revision,
+      graphHashAtRun: source.graph_hash_at_run, inputSnapshot: source.input_snapshot,
+    });
+    return { status: 'unverified', can_show_goal_chance: false,
+      reasons: [retained !== undefined && licence === undefined
+        ? 'goal_chance_not_licensed' : 'evaluated_question_not_fully_recorded'] };
   }
   const snapshot = isRec(source.input_snapshot) ? source.input_snapshot : undefined;
   const digest = typeof snapshot?.sent_digest === 'string' ? { dispatched_input_digest: snapshot.sent_digest } : {};

@@ -6,6 +6,17 @@ const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object'
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const close = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-10 * Math.max(1, Math.abs(a), Math.abs(b));
 
+/** A descriptive raw target needs an independent retained conversion basis. Never solve backwards for a new target. */
+export function calculatedRawTarget(raw: unknown, encoded: unknown, basis: {
+  readonly cap?: unknown; readonly rawBaseline?: unknown; readonly encodedBaseline?: unknown;
+}): number | undefined {
+  if (!finite(raw) || !finite(encoded)) return undefined;
+  const scale = basis.cap !== undefined ? finite(basis.cap) && basis.cap > 0 ? 1 / basis.cap : undefined
+    : finite(basis.rawBaseline) && basis.rawBaseline !== 0 && finite(basis.encodedBaseline)
+      ? basis.encodedBaseline / basis.rawBaseline : undefined;
+  return scale !== undefined && scale > 0 && close(encoded, raw * scale) ? raw : undefined;
+}
+
 /** Older licences recorded static scope as A7's typed flag, before the current note existed. */
 export function recordedStaticScopeDeclared(licence: unknown): boolean {
   const r = rec(licence);

@@ -6,7 +6,7 @@ import { askedQuestionOf, dispatchedQuestionOf, STATIC_LEVEL_CAPABILITY } from '
 export { STATIC_LEVEL_CAPABILITY } from './run-question-scope.js';
 import { sentDigest } from '../tools/handlers/run-input-digest.js';
 import { readRecordedRunQuestion, RUN_QUESTION_EVIDENCE_KEY } from '../tools/handlers/run-input-snapshot.js';
-import { recordedStaticLevelEvidence, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
+import { calculatedRawTarget, recordedStaticLevelEvidence, STATIC_MODEL_SCOPE_NOTE } from './static-run-evidence.js';
 
 import { goalChanceScopeOf } from './goal-chance-licence.js';
 
@@ -132,6 +132,21 @@ export function deriveRunQuestion(input: {
     target: questionNumber(goal.target_raw), unit: questionText(goal.unit), frame: questionText(goal.frame), comparator: questionText(goal.operator),
     option_ids: (Array.isArray(snapshot?.options) ? snapshot.options.filter(isRec) : []).flatMap(o => typeof o.option_id === 'string' ? [o.option_id] : []),
   });
+  // A retained raw wire value is not itself proof of the performed target. Old records may predate this check;
+  // leave their bytes intact and use only their own encoded threshold/baseline or the existing attested basis.
+  const target = evaluatedInputs === null ? undefined : exact !== null
+    && (retained === undefined || exact.target === evaluatedInputs.target && exact.encoded_target === evaluatedInputs.encoded_target) ? exact.target
+    : recorded !== undefined && evaluatedInputs.target === recorded.target && evaluatedInputs.encoded_target === recorded.encoded_target
+      ? recorded.target : calculatedRawTarget(evaluatedInputs.target, evaluatedInputs.encoded_target, {
+        rawBaseline: evaluatedInputs.baseline, encodedBaseline: evaluatedInputs.encoded_baseline,
+      });
+  let describedInputs = evaluatedInputs;
+  if (evaluatedInputs !== null) {
+    const { target: _rawTarget, ...otherInputs } = evaluatedInputs;
+    describedInputs = { ...otherInputs, ...(target === undefined ? {} : { target }) };
+  }
+  if (evaluatedInputs !== null && target === undefined && evaluatedInputs.encoded_target !== undefined
+    && questionNumber(goal?.target_raw) !== undefined) missing.push('calculated_target_conversion');
   // Retained evaluated inputs attest the calculation; they cannot recover an original horizon/reference never retained.
   if (saved === undefined && retained === undefined) missing.push('asked_horizon_and_reference_at_evaluated_revision', 'asked_options_at_evaluated_revision');
   const notDispatched = retained === undefined ? [] : [
@@ -147,13 +162,14 @@ export function deriveRunQuestion(input: {
   missing.push(...notBound);
   if (exact === null && recorded !== undefined && !recorded.static_scope_declared) missing.push('calculation_scope_at_evaluated_revision');
   const scope = goalChanceScopeOf(input.storedResult, evidence);
-  const calculated = evaluatedInputs === null || scope.status !== 'supported_static' ? evaluatedInputs
-    : { ...evaluatedInputs, scope: 'static' as const };
+  const calculated = describedInputs === null || scope.status !== 'supported_static' ? describedInputs
+    : { ...describedInputs, scope: 'static' as const };
   const omitted = [
     ...(!identityMismatch && runId !== null ? readRunOmissionScope(input.storedResult)?.risks ?? [] : [])
       .map(risk => ({ field: 'risk', ...risk, scope: 'modelled_effects_only' as const })),
     ...(asked?.horizon === undefined ? [] : [{ field: 'horizon', reason: scope.status === 'supported_static' ? 'not_calculated' : 'not_verified', asked: asked.horizon }]),
-    ...missing.map(field => ({ field, reason: notDispatched.includes(field) ? 'not_dispatched'
+    ...missing.map(field => ({ field, reason: field === 'calculated_target_conversion' ? 'unverified'
+      : notDispatched.includes(field) ? 'not_dispatched'
       : notBound.includes(field) ? 'not_bound_in_saved_model' : 'not_recorded' })),
   ];
   return { run_id: runId, fact_row_id: questionText(evidence?.occurrence?.fact_row_id) ?? null,
