@@ -2641,8 +2641,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
       const replayGuidedText = guidedSizingReplyText(replayScopedDraftForRun).guided;
       /**
        * RESULT-FIRST REPLAY: canonical readback still owns current result blocks, narration status and enabled controls.
-       * Recorded bytes replay only while the existing state-bound presenter permits their basis.
-       * Its staleness/withholding reply takes precedence when that basis moved or cannot be verified.
+       * Recorded validated words carry no new currentness authority; each surface still owns its stale presentation.
        */
       const replayChip = runExplanationChip(scenarioId, state);
       // What this exact answer was sent with: this process's memory of its controls, else the narration stored WITH its row.
@@ -2671,6 +2670,8 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
       // id (an action_type) is not the review, so a retry of it never recomposes one.
       const decisionReviewReplay = approvedProposal === undefined && (chipOperationOf(body) === DECISION_REVIEW_CHIP_OPERATION
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, DECISION_REVIEW_CHIP_OPERATION)));
+      const structuralReplay = approvedProposal === undefined && (pressedChipIsStructural
+        || (chiplessRetry && prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)));
       if (decisionReviewReplay) {
         // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
         // unavailable reply). The SAME owner as the live turn, never a model call.
@@ -2702,8 +2703,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
           });
         }
         boundControl.push(TALK_IT_THROUGH_CHIP);
-      } else if (approvedProposal === undefined && (pressedChipIsStructural
-        || (chiplessRetry && prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)))) {
+      } else if (structuralReplay) {
         /** The durable tag recognises the method after a restart; only a remembered typed turn can carry conclusions. */
         const remembered = turnId !== undefined ? presentedStructuralChallenges.get(`${scenarioId}:${turnId}`) : undefined;
         const receipt = remembered === undefined ? undefined : await readStructuralChallengeReceipt({
@@ -2986,8 +2986,8 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
-      // Preserve validated bytes only when the basis-aware presenter still permits them.
-      const recordedText = replayText === prior.assistant_message ? prior.assistant_message : undefined;
+      // Structural challenge's typed refusal takes precedence; other surfaces retain recorded words and their own controls.
+      const recordedText = !structuralReplay || replayText === prior.assistant_message ? prior.assistant_message ?? undefined : undefined;
       const replayMethod = methodResultForEgress(replayMethodResult, recordedText ?? replayBody.assistant_text);
       const delivery = { ...replayBody, assistant_text: recordedText ?? replayBody.assistant_text,
         ...(replayMethod === null ? {} : { _method_result: replayMethod }) };
