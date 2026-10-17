@@ -4,16 +4,19 @@
  * single-quote-marked term or speech were saved nowhere. DL-3 16:14Z (#3363): single marks → speaker UNKNOWN, WORDS KEPT. Words the
  * brief writes verbatim, refused ONLY as not a whole statement, are now kept on their subject with speaker unknown: never the user's,
  * never operative (no figure, unit or sign). SYNTHETIC brief (never a pilot brief). Real path: `buildModelFromBrief` (scripted
- * drafter) → `/graph/register` → the saved record; the correction and measure readers on that record.
+ * drafter) → `/graph/register` → the saved record → its readers. #3376 ruling 3: every reader sees the user's statements only (what it
+ * saw before), so the kept words flip no base behaviour; only `recordsWithUnknownSpeakerOn` returns them.
  */
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { withConstructionStatements } from '../construction-source-map.js';
+import { linkWorkingPointOf } from '../link-working-point.js';
 import { userStatementOf } from '../user-statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { subjectKey } from '../../statement-door/subject.js';
-import { currentStatementRetention, prepareStatementCorrection, userStatementFor, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { currentStatementRetention, prepareStatementCorrection, recordsWithUnknownSpeakerOn, userStatementFor, userStatementRecord, userStatementsOn,
+  withUserStatement } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We need to complete at least 900 repairs this year.';
@@ -84,6 +87,10 @@ describe('words the quote check cannot bound as whole are kept with speaker unkn
     expect(speechRecord(g)?.statements, 'the named speech, kept whole with its name').toEqual(
       unknownWords(SPEECH(SINGLE), SPEECH(SINGLE), 'link|parts delivery speed|repairs completed||relation'));
     expect(levelRecord(g)?.attest).toEqual({ recorded_by: 'construction' });
+    // Never the user's: every reader's record holds none of them; only the named accessor returns them.
+    expect(userStatementsOn(nodeOf(g, SCORE)), 'level: readers see none').toEqual([]);
+    expect(userStatementsOn(nodeOf(g, PARTS)), 'speech: readers see none').toEqual([]);
+    expect(recordsWithUnknownSpeakerOn(nodeOf(g, SCORE))).toEqual([levelRecord(g)]);
     // Same build, same line set: the goal's whole sentence is still the user's.
     expect(recordOf(g, GOAL, `goal|${nodeOf(g, GOAL).id}|||target`)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: AIM, low: 900 })]);
   });
@@ -115,33 +122,83 @@ describe('words the quote check cannot bound as whole are kept with speaker unkn
   });
 });
 
-describe('the record\'s readers never credit speaker-unknown words to the user', () => {
+describe('#3376 ruling 3: every reader sees exactly what it saw before, the user\'s statements only', () => {
   const subject = { kind: 'goal' as const, id: 'coverage', field: 'measure' as const };
   const old = 'Coverage is measured in staff hours, mostly on nights.';
-  const graphWith = (speaker: 'user' | 'unknown') => {
+  const graphWith = (speaker: 'user' | 'unknown' | null) => {
     const g: Rec & { nodes: unknown[] } = { nodes: [{ id: 'coverage', kind: 'goal', label: 'Coverage',
       goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_rel', goal_target_basis: { quantity_frame: 'level', target_frame: 'change_rel', target_raw: 10, reference: 'today',
         denominator: "today's staff hours", period_months: 3, period_kind: 'at_end', effect_unit: '% of staff hours',
         effects_at_period_end: true, source: 'olumi_reading' } }], edges: [] };
+    if (speaker === null) return g;
     const held = userStatementOf({ speaker, quote: old, source: old, form: 'describes', reading: 'olumi', subject: { quantity: subjectKey(subject), node_id: 'coverage' } })!;
     return withUserStatement(g, userStatementRecord(subject, [held], '2026-10-17T12:00:00Z', { recorded_by: 'construction' }), subject)!;
   };
   const correct = (g: Rec) => {
     const quote = 'For Coverage, withdraw “mostly on nights”; keep “staff hours”.';
-    const r = prepareStatementCorrection(g, { quote, edits: [{ subject, retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' },
+    return prepareStatementCorrection(g, { quote, edits: [{ subject, retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' },
       retained: ['staff hours'], reading_words: 'The listed parts remain; the specified earlier account is withdrawn.' }] }, { now: quote }, '2026-10-17T13:00:00Z');
-    if (!('correction' in r)) throw new Error(JSON.stringify(r));
-    return r;
   };
 
-  it.each([['user', 'staff hours', 'held_user_statement'], ['unknown', undefined, 'unknown']] as const)(
-    'speaker %s: the measure reader and a correction retaining its words say whose they are', (speaker, measure, origin) => {
-      const g = graphWith(speaker);
-      expect(recordedMeasureOf(g.nodes[0])).toBe(measure);
-      const r = correct(g);
-      expect(currentStatementRetention(userStatementFor(r.candidate, subject)!)?.spans).toEqual([{ text: 'staff hours', origin }]);
-      expect(r.words.includes('For the earlier words “staff hours”, the original speaker and source are unknown.')).toBe(speaker === 'unknown');
-      // The kept words stay speaker-unknown in the corrected record, never relabelled as the user's.
-      expect(userStatementFor(r.candidate, subject)!.statements[1]).toEqual(expect.objectContaining({ speaker, quote: old }));
-    });
+  it('CONTRAST, speaker user: the measure reader credits the words and a correction retains them as the user\'s source', () => {
+    const g = graphWith('user');
+    expect(recordedMeasureOf(g.nodes[0])).toBe('staff hours');
+    const r = correct(g);
+    if (!('correction' in r)) throw new Error(JSON.stringify(r));
+    expect(currentStatementRetention(userStatementFor(r.candidate, subject)!)?.spans).toEqual([{ text: 'staff hours', origin: 'held_user_statement' }]);
+  });
+
+  it('⛔ speaker unknown: every reader answers exactly as with no record at all; only the named accessor holds the words', () => {
+    const g = graphWith('unknown'), base = graphWith(null);
+    expect(userStatementFor(g, subject)).toBeUndefined();
+    expect(userStatementsOn(g.nodes[0])).toEqual([]);
+    expect(recordedMeasureOf(g.nodes[0])).toBe(recordedMeasureOf(base.nodes[0]));
+    expect(correct(g), 'a correction cannot take them as a held source').toEqual(correct(base));
+    expect(recordsWithUnknownSpeakerOn(g.nodes[0])).toEqual([expect.objectContaining({ subject_key: subjectKey(subject),
+      statements: [expect.objectContaining({ speaker: 'unknown', quote: old })] })]);
+  });
+});
+
+describe('#3376 ruling 3, zero base flips: a link\'s working point is the same with or without kept words beside its range', () => {
+  const AIM2 = 'We want the household recycling rate to reach at least 50% this year.';
+  const NOW = 'The recycling rate is 42% today.';
+  const RANGE = 'Our recycling lead thinks switching to weekly food collection could lift the rate by between 4 and 7 percentage points.';
+  const KEPT = 'It mostly depends on households sorting their food waste.';
+  const TEXT = [AIM2, NOW, RANGE, `The council calls it the 'green bin' plan. ${KEPT}`, 'We could start weekly food collection or keep fortnightly collection.'].join('\n');
+  const RATE = 'Household recycling rate', SWITCH = 'Weekly food collection running';
+  const on = { kind: 'link', label: SWITCH, to_label: RATE, factor_label: null };
+  const model = (kept: boolean): Rec => ({
+    goal: { kind: null, deliverable: null, metric: RATE, operator: '>=', target_stated: true, value: 50, unit: '%', horizon_months: 12,
+      provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 42, baseline_provenance: 'explicit', scope: null,
+      quantity_frame: 'level', source_quote: AIM2, deadline_words: null },
+    constraints: [],
+    options: [
+      { label: 'Keep fortnightly collection', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: true,
+        interventions: [{ factor_label: SWITCH, value: 0, value_kind: 'absolute', unit: '0/1', provenance: 'explicit' }] },
+      { label: 'Start weekly food collection', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+        interventions: [{ factor_label: SWITCH, value: 1, value_kind: 'absolute', unit: '0/1', provenance: 'explicit' }] },
+    ],
+    factors: [{ label: SWITCH, role: 'controllable', baseline_known: true, baseline_value: 0, unit: '0/1', provenance: 'explicit', plausible_max: 1 }],
+    risks: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null, outcomes: [],
+    links: [{ from: SWITCH, to: RATE, direction: 'positive', provenance: 'explicit', effect_amount: null, effect_per_source_change: null,
+      effect_provenance: null, definitional: null, basis: null, source_quote: null }],
+    statements: [
+      { quote: AIM2, subject: { kind: 'goal', label: RATE, to_label: null, factor_label: null }, field: 'target', form: 'lower_bound', value: 50, low: null, high: null, unit: '%', qualifier: null, conditions: null },
+      { quote: NOW, subject: { kind: 'goal', label: RATE, to_label: null, factor_label: null }, field: 'level', form: 'point', value: 42, low: null, high: null, unit: '%', qualifier: null, conditions: null },
+      { quote: RANGE, subject: on, field: 'effect', form: 'range', value: null, low: 4, high: 7, unit: 'percentage points', qualifier: null, conditions: null },
+      ...(kept ? [{ quote: KEPT, subject: on, field: 'effect', form: 'describes', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }] : []),
+    ],
+  });
+  const ends = (g: Rec) => [nodeOf(g, SWITCH).id, nodeOf(g, RATE).id] as const;
+
+  it('⛔ real build → register → reader: a verified range plus kept words on one link gives the point the range alone gives', async () => {
+    const base = await saved(model(false), TEXT), withWords = await saved(model(true), TEXT);
+    // Not vacuous: the saved record holds the user's range AND the kept words; the base record holds the range alone.
+    const raw = (g: Rec) => nodeOf(g, SWITCH).user_statements.find((r: Rec) => r.field === 'effect').statements.map((st: Rec) => [st.speaker, st.form]);
+    expect(raw(base)).toEqual([['user', 'range']]);
+    expect(raw(withWords)).toEqual([['user', 'range'], ['unknown', 'describes']]);
+    const point = linkWorkingPointOf(base, ...ends(base));
+    expect(point, 'the base offers a working point').toMatchObject({ low: 4, high: 7, unit: 'percentage points', quote: RANGE });
+    expect(linkWorkingPointOf(withWords, ...ends(withWords))).toEqual(point);
+  });
 });

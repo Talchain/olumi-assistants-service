@@ -176,6 +176,6 @@ export function recordedMeasureOf(goal: unknown): string | undefined {
   const record = userStatementOnNode(goal, key);
   const current = record === undefined ? undefined : currentStatementRetention(record);
   return record !== undefined && record.field === 'measure' && (current === undefined
-    ? record.statements.some(s => s.speaker === 'user' && wordsTheUserWrote(m[1], s.quote))
+    ? record.statements.some(s => wordsTheUserWrote(m[1], s.quote))
     : current.complete && current.spans.some(s => s.origin === 'held_user_statement' && wordsTheUserWrote(m[1], s.text))) ? m[1] : undefined;
 }

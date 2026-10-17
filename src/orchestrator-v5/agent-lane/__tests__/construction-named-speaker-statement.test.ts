@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { userStatementsOn } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We need to bring in at least £600k of new contract value this year.';
@@ -58,9 +59,18 @@ const relationRecord = (graph: Rec): Rec | undefined => {
   const to = graph.nodes.find((n: Rec) => n.label === COUNT);
   return from?.user_statements?.find((r: Rec) => r.subject_key === `link|${from.id}|${to.id}||relation`);
 };
-/** ⛔ DL-3 16:14Z (first loss P07/P09): words the check cannot bound as whole are KEPT, speaker unknown, figure-free: never the user's. */
-const speakerUnknown = (quote: string, brief: string): Rec[] => [{ speaker: 'unknown', quote, source: brief, form: 'describes', reading: 'olumi',
-  subject: { quantity: `link|${REFERRALS.toLowerCase()}|${COUNT.toLowerCase()}||relation` } }];
+/**
+ * ⛔ DL-3 16:14Z (first loss P07/P09; #3376 rulings 2–3): words the check cannot bound as whole are KEPT, by identity: speaker unknown,
+ * the exact words, the brief's line, `describes`, and no figure, unit or sign. They are never the user's: every reader's record
+ * (`userStatementsOn`) holds none for this subject.
+ */
+async function expectKeptNeverTheUsers(graph: Promise<Rec>, quote: string, brief: string, why = quote): Promise<void> {
+  const g = await graph;
+  expect(relationRecord(g)?.statements, why).toEqual([{ speaker: 'unknown', quote, source: brief, form: 'describes', reading: 'olumi',
+    subject: { quantity: `link|${REFERRALS.toLowerCase()}|${COUNT.toLowerCase()}||relation` } }]);
+  const from = g.nodes.find((n: Rec) => n.label === REFERRALS);
+  expect(userStatementsOn(from).filter((r) => r.subject_key === relationRecord(g)!.subject_key), `${why}: never the user's`).toEqual([]);
+}
 
 describe('a person the brief quotes by name keeps their words, whole, on the link they are about', () => {
   it('⭐ RED → GREEN, real build → register: "Name, role: “…”" closed after its full stop is recorded verbatim, speaker included', async () => {
@@ -74,7 +84,7 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
     const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
     const whole = relationRecord(await saved(draft(qualified), brief));
     expect(whole?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
-    expect(relationRecord(await saved(draft(tail), brief))?.statements, 'the tail loses Priya and her condition').toEqual(speakerUnknown(tail, brief));
+    await expectKeptNeverTheUsers(saved(draft(tail), brief), tail, brief, 'the tail loses Priya and her condition');
   });
 
   it('⛔ #3363 B1 R2 A (BUDDY-A), real path: a plural possessive inside the speech and its full stop OUTSIDE the closing mark never free its last sentence', async () => {
@@ -82,14 +92,14 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
     const tail = 'More referrals mean more contracts signed, because the client already trusts us”.';
     const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
     expect(relationRecord(await saved(draft(qualified), brief))?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
-    expect(relationRecord(await saved(draft(tail), brief))?.statements, 'the tail loses Priya and her condition').toEqual(speakerUnknown(tail, brief));
+    await expectKeptNeverTheUsers(saved(draft(tail), brief), tail, brief, 'the tail loses Priya and her condition');
   });
 
   it('⛔ DL-3 16:14Z, real path: the same speech in SINGLE marks cannot be bounded: neither all of it nor its tail is recorded as anyone\'s, and no speaker is asserted (words kept)', async () => {
     const qualified = "Priya, sales lead: 'This is only true if the users' pilot works. More referrals mean more contracts signed, because the client already trusts us'.";
     const tail = "More referrals mean more contracts signed, because the client already trusts us'.";
     const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
-    for (const quote of [qualified, tail]) expect(relationRecord(await saved(draft(quote), brief))?.statements, quote).toEqual(speakerUnknown(quote, brief));
+    for (const quote of [qualified, tail]) await expectKeptNeverTheUsers(saved(draft(quote), brief), quote, brief);
     for (const quote of ['More referrals mean more contracts signed, because the client already trusts us.']) {
       expect(relationRecord(await saved(draft(quote), brief)), quote).toBeUndefined();
     }
@@ -98,7 +108,7 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
   it('⛔ #3363 B1 R3 A (BUDDY-A), real path: single-marked speech with NO colon ("Priya said \'…\'") never frees its last sentence as the user\'s', async () => {
     const said = 'More referrals mean more contracts signed, because the client already trusts us.';
     const brief = `${AIM} Priya said 'This is only true if the users' pilot works. ${said}' We could hire a second salesperson or start a referral scheme.`;
-    expect(relationRecord(await saved(draft(said), brief))?.statements, 'the tail loses Priya and her condition').toEqual(speakerUnknown(said, brief));
+    await expectKeptNeverTheUsers(saved(draft(said), brief), said, brief, 'the tail loses Priya and her condition');
   });
 
   it('⛔ #3363 B1 R3 B (BUDDY-A), real path: a lone inch mark opens no speech; the complete sentence after it is recorded', async () => {
@@ -115,6 +125,6 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
 
   it('CONTRAST: the same words without their speaker are not the brief\'s whole statement, so they are never recorded as the user\'s', async () => {
     const inner = 'More referrals mean more contracts signed, because the client already trusts us.';
-    expect(relationRecord(await saved(draft(inner)))?.statements).toEqual(speakerUnknown(inner, BRIEF));
+    await expectKeptNeverTheUsers(saved(draft(inner)), inner, BRIEF);
   });
 });

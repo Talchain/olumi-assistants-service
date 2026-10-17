@@ -108,15 +108,24 @@ const attestOf = (v: unknown): StatementAttest | undefined | null => {
     ? v as StatementAttest : null;
 };
 
-/** A well-formed record, or `undefined`: a malformed one is never read as the user's. */
-export function userStatementRecordOf(v: unknown): UserStatementRecord | undefined {
+/** A stored record whole, or `undefined` if any part is malformed; `unknownSpeaker` keeps the brief's speaker-unknown words too. */
+function recordOf(v: unknown, unknownSpeaker: boolean): UserStatementRecord | undefined {
   if (!isRec(v) || !text(v.subject_key, 400) || !isStatementField(v.field) || !text(v.recorded_at, 40) || !Array.isArray(v.statements)
     || v.statements.length === 0) return undefined;
-  const statements = v.statements.map(userStatementOf);
+  const parsed = v.statements.map(userStatementOf);
   const attest = attestOf(v.attest);
-  if (statements.some((s) => s === undefined) || attest === null) return undefined;
-  return { subject_key: v.subject_key, field: v.field, statements: statements as UserStatement[], recorded_at: v.recorded_at,
+  if (parsed.some((s) => s === undefined) || attest === null) return undefined;
+  const statements = (parsed as UserStatement[]).filter((s) => unknownSpeaker || s.speaker === 'user');
+  return statements.length === 0 ? undefined : { subject_key: v.subject_key, field: v.field, statements, recorded_at: v.recorded_at,
     ...(attest !== undefined ? { attest } : {}) };
+}
+
+/**
+ * A well-formed record, or `undefined`: a malformed one is never read as the user's. ⛔ DL-3 #3376 ruling 3: the user's statements
+ * ONLY, exactly what every reader saw before construction kept speaker-unknown words; a record holding only those is none here.
+ */
+export function userStatementRecordOf(v: unknown): UserStatementRecord | undefined {
+  return recordOf(v, false);
 }
 
 /**
@@ -134,10 +143,19 @@ const nodeIdOf = (subject: DoorSubject): string => subject.id;
 const nodeOf = (graph: unknown, id: string): Rec | undefined =>
   (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === id) : undefined);
 
-/** Every well-formed record on a node, in stored order: what the AI's working input and a reopen show beside it. */
+const heldOn = (node: unknown): unknown[] => (isRec(node) && Array.isArray(node[USER_STATEMENTS_KEY]) ? node[USER_STATEMENTS_KEY] as unknown[] : []);
+
+/** Every well-formed record on a node, in stored order, as `userStatementRecordOf` reads each: the user's statements only. */
 export function userStatementsOn(node: unknown): UserStatementRecord[] {
-  const held = isRec(node) && Array.isArray(node[USER_STATEMENTS_KEY]) ? node[USER_STATEMENTS_KEY] as unknown[] : [];
-  return held.map(userStatementRecordOf).filter((r): r is UserStatementRecord => r !== undefined);
+  return heldOn(node).map(userStatementRecordOf).filter((r): r is UserStatementRecord => r !== undefined);
+}
+
+/**
+ * ⛔ The ONE read of the brief's speaker-unknown words (`UserStatement.speaker`), beside the user's own, for the code that shows
+ * them: the AI's context and the not-represented list. Never the user's; every other reader takes `userStatementsOn`.
+ */
+export function recordsWithUnknownSpeakerOn(node: unknown): UserStatementRecord[] {
+  return heldOn(node).map((r) => recordOf(r, true)).filter((r): r is UserStatementRecord => r !== undefined);
 }
 
 /** The subject's record on its node, or `undefined`. */
@@ -235,7 +253,7 @@ function correctionAttest(e: CorrectionEditRequest): StatementAttest {
       metadata[`${key}_parts`] = Math.ceil(span.length / 200);
       for (let start = 0; start < span.length; start += 200) metadata[`${key}_part_${start / 200}`] = span.slice(start, start + 200);
     }
-    metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.speaker === 'user' && s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
+    metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
   });
   return metadata;
 }
@@ -365,7 +383,7 @@ export function statementCorrectionWords(c: StatementCorrection): string {
       e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
         : `Keep “${e.retirement.quote}” only as earlier context.`,
       `Keep explicitly: ${e.retained.length ? e.retained.map(q => `“${q}”`).join('; ') : 'nothing from the retired record'}.`,
-      ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.speaker === 'user' && s.quote.includes(span)))
+      ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
         .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
       `Earlier source and reading:\n${recordWords(e.expected_record)}`, `Replacement source and reading:\n${recordWords(e.record)}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),
