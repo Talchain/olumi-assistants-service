@@ -98,10 +98,18 @@ describe('a later ambition is never an active target (G1 turn 01)', () => {
     expect(admitted(draft('ambition', true)).loss.filter((l) => l.after === 'retained_later_ambition')).toHaveLength(1);
   });
 
-  it('through the real build: a later ambition asks the AI for no "today\'s level" as if it were a limit (same calls as no later aim)', async () => {
-    await registered(draft(null, true));
+  it('through the real build: a later ambition on a factor with no level asks the AI for none "for a limit" (same calls as no later aim)', async () => {
+    // The gap reader (`findCoverageGaps`) asks for today's level of a LIMIT's factor; a later ambition is no limit.
+    const onFactor = (role: 'ambition' | null): Rec => {
+      const d = draft(null);
+      d.factors.push({ label: 'Repeat investors', role: 'external', baseline_known: false, baseline_value: null, unit: 'investors', provenance: 'inferred', plausible_max: null });
+      d.links.push({ ...d.links[0], from: 'Repeat investors' });
+      if (role !== null) d.constraints = [{ metric: 'Repeat investors', operator: '>=', value: 10, unit: 'investors', provenance: 'explicit', frame: 'level', role }];
+      return d;
+    };
+    await registered(onFactor(null));
     const without = aiCalls;
-    await registered(draft('ambition', true));
+    await registered(onFactor('ambition'));
     expect(aiCalls).toBe(without);
   }, 60_000);
 
