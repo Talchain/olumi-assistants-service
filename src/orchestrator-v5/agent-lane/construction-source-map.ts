@@ -17,7 +17,7 @@
  */
 import { findJoinedRanges, findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import { STATEMENT_FORMS, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
+import { STATEMENT_FORMS, unitWrittenAfter, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
@@ -304,21 +304,14 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
     const high = Math.max(Math.abs(st.low), Math.abs(st.high));
     const end = size === low ? 'low' : size === high ? 'high' : null;
     if (end === null || !(low < high)) continue;
-    const written = unitWrittenAfterRange(st, low, high);
-    if (written === undefined || typeof unit !== 'string' || !sameUnit(written, unit)) continue;
+    // The verifier's own reader of a unit written after a figure (a whole word: "m" is never "mm", BUDDY-A #3356 R2).
+    if (typeof st.unit !== 'string' || !unitWrittenAfter(st.quote, high, st.unit) || typeof unit !== 'string' || !sameUnit(st.unit, unit)) continue;
     // ⛔ BUDDY-A #3297 B1: the WHOLE verified quote, never a clause cut at punctuation. A shorter "clause" dropped its speaker
     // and condition ("The supplier estimates that, if the pilot succeeds, …" became only the numbers' clause) and was still
     // said "as the brief puts it"; the AIE disposition keeps the full attributed range with its speaker and conditions.
     return { low, high, text: rangeTextAsWritten(st, low, high), end, reported: st.quote };
   }
   return null;
-}
-
-/** The statement's own unit, when the sentence writes it straight after the range ("3 and 5 Ml/d"); else none. */
-function unitWrittenAfterRange(st: UserStatement, low: number, high: number): string | undefined {
-  const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === low && r.high.magnitude === high);
-  const after = joined === undefined ? '' : st.quote.slice(joined.high.index + joined.high.matchedText.length);
-  return st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`) ? st.unit : undefined;
 }
 
 /** The words the sentence writes for the range, with the unit it writes straight after them ("1.5 to 2.5 percentage points"). */
