@@ -355,6 +355,7 @@ import { goalTargetBasisOf, launchWindowOf, periodWords } from '../../goal-targe
 import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForecastOf, approvedStatementRecordOf, cohortForecastRecordedWords,
   SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import { approvedGraphHeld, draftHistory, prepareRequestedRebuild, revisedDraftBrief, type RebuildMissingKind } from './draft-replacement.js';
+import { unpressedRebuildOptions } from './rebuild-retirement-evidence.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
 import { preOfferOptionInterventions } from '../../system-events/option-intervention-preoffer.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -4060,11 +4061,19 @@ export function createAgentCapabilities(
       constructionOperationId(ctx.scenario_id, source), callStructured!, drafter => buildModelFromBrief(ctx.scenario_id, source,
         dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured, undefined, context, undefined, true, opts.onDraftAdmitted)));
     if (built.ok !== true) return built;
-    const prepared = prepareRequestedRebuild(before.raw, built.prepared_graph, levelFrameOf);
+    const pending = await opts.readPendingActions?.(ctx.scenario_id).catch(() => []) ?? [];
+    const retirement = unpressedRebuildOptions(pending, { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id ?? null,
+      graph_hash: before.graph_hash, graph: before.raw });
+    const prepared = prepareRequestedRebuild(before.raw, built.prepared_graph, levelFrameOf, retirement.ids);
     if (!prepared.candidate) {
       diagnostic.missing_kind = prepared.missing_kind;
       diagnostic.missing_count = prepared.missing.length;
-      return { ...refused('replacement_work_not_held', 'No replacement card was offered because the candidate could not retain: ' + prepared.missing.join('; ') + '. The saved model is unchanged. This is a drafting limit; do not ask the user to repeat retained facts.'), construction_report: built };
+      return { ...refused('replacement_work_not_held', 'No replacement card was offered because the candidate could not retain: ' + prepared.missing.join('; ') + '. The saved model is unchanged. This is a drafting limit; do not ask the user to repeat retained facts.'),
+        follow_up: 'Your saved model is unchanged. Olumi could not verify that this replacement keeps ' + prepared.missing.join('; ') + '. '
+          + (prepared.missing_kind === 'option_setting'
+            ? 'Keep that setting unchanged, or review its existing card before changing it in a replacement.'
+            : 'Olumi needs a replacement that keeps this saved work. You do not need to repeat what is already recorded.'),
+        construction_report: built };
     }
     let candidate = prepared.candidate;
     prepareHorizonBasisForWrite(candidate, before.raw, ctx.scenario_id);
@@ -4083,6 +4092,17 @@ export function createAgentCapabilities(
     };
     const partWords = (n: Record<string, unknown>) => `“${String(n.label)}”` + (typeof n.description === 'string' ? ` — ${n.description}` : '') + figureWords(n)
       + userStatementsOn(n).flatMap(r => r.statements.map(s => `; ${r.field}, ${s.speaker === 'user' ? 'recorded user words' : 'source not verified'}: “${s.source}” (quoted: “${s.quote}”; reading: ${s.reading})`)).join('');
+    const scales = buildFactorScaleMap(candidate.nodes as GraphRead['nodes']);
+    const settingWords = (n: Record<string, unknown>): string[] => Object.entries(mergeInterventionSourceObjects(n as never)).map(([id, cell]) => {
+      const factor = (candidate.nodes as Record<string, unknown>[]).find(x => x.id === id);
+      const natural = resolveRawInterventionValue(cell, scales.get(id));
+      const unit = isPlainRecord(cell) && typeof cell.unit === 'string' ? cell.unit : factorUnitOf(candidate, factor) ?? '';
+      const figure = natural.value === null || natural.codeNotMagnitude ? 'the same recorded setting' : sayFigureWithoutRounding(natural.value, unit);
+      const source = provenanceOf({ setting: cell, target: factor }).origin;
+      return `“${names.get(n.id)}” on “${names.get(id) ?? id}”: ${figure} (${source === 'ai' ? 'Olumi’s estimate' : source === 'human' ? 'recorded human source' : 'source not verified'})`;
+    });
+    const keptSettings = (candidate.nodes as Record<string, unknown>[])
+      .filter(n => before.nodes.some(saved => saved.id === n.id && saved.kind === 'option')).flatMap(settingWords);
     const goal = (candidate.nodes as Record<string, unknown>[]).find(n => n.kind === 'goal');
     const goalRecord = goal && readGoalRecord(candidate, String(goal.id));
     const goalWords = typeof goalRecord?.target?.raw === 'number' ? `\nCurrent target retained: ${goalRecord.target.comparator === undefined ? 'direction not recorded:' : LIMIT_OPERATOR_WORDS[goalRecord.target.comparator]} ${sayFigureExactly(goalRecord.target.raw, goalRecord.target.unit ?? '')}.` : '';
@@ -4090,21 +4110,30 @@ export function createAgentCapabilities(
     const savedParts = parts(before.nodes), proposedParts = parts(candidate.nodes as Record<string, unknown>[]);
     const added = [...proposedParts].filter(([k]) => !savedParts.has(k)).map(([, label]) => `“${label}”`);
     const omitted = [...savedParts].filter(([k]) => !proposedParts.has(k)).map(([, label]) => `“${label}”`);
+    const savedNames = new Map(before.nodes.map(n => [n.id, n.label]));
+    const removedRelationships = before.edges.filter(e => !(candidate.edges as Record<string, unknown>[]).some(x => x.from === e.from && x.to === e.to))
+      .map(e => `“${savedNames.get(e.from) ?? e.from}” → “${savedNames.get(e.to) ?? e.to}”`);
     const reportWords = ['not_represented', 'open_questions', 'disclosures'].flatMap(k => Array.isArray(report[k]) ? (report[k] as unknown[]).filter((v): v is string => typeof v === 'string') : []);
 
-    const public_label = `From your current message: “${request}”.\n` + 'Replace the saved model with this complete proposed model. The current goal, all saved options and recorded human work are retained. Other structure and Olumi assumptions may change. Previous analyses keep their original model; this replacement needs a new analysis.\n'
+    const public_label = `From your current message: “${request}”.\n` + 'Replace the saved model with this complete proposed model. The current goal and recorded work are retained. Any earlier unadopted Olumi suggestion left out is listed below; suggestions whose adoption is unclear are kept. Other structure and Olumi assumptions may change. Previous analyses keep their original model; this replacement needs a new analysis.\n'
       + goalWords + '\n' + (candidate.nodes as Record<string, unknown>[]).map(n => `${String(n.kind)}: ${partWords(n)}`).join('\n')
       + '\nRelationships: ' + (candidate.edges as Record<string, unknown>[]).map(e => `“${names.get(e.from)}” → “${names.get(e.to)}”`).join('; ')
+      + (keptSettings.length ? '\nSaved option settings kept: ' + keptSettings.join('; ') : '')
       + (added.length ? '\nParts not in your current model that this would add: ' + added.join('; ') : '')
-      + (omitted.length ? '\nParts this would remove: ' + omitted.join('; ') : '')
+      + (omitted.length && prepared.retired.length === 0 ? '\nParts this would remove: ' + omitted.join('; ') : '')
+      + (prepared.retired.length ? '\nEarlier Olumi suggestions left out of this replacement: ' + prepared.retired.join('; ') + '.' : '')
+      + (removedRelationships.length ? '\nSaved relationships left out of this replacement: ' + removedRelationships.join('; ') + '.' : '')
+      + (prepared.adoption_unknown.length ? '\nKept: Olumi’s earlier suggestions; Olumi cannot tell whether you adopted them: '
+        + prepared.adoption_unknown.join('; ') + '. Their original source and settings stay unchanged.' : '')
       + (prepared.kept.length ? '\nRetained work: ' + prepared.kept.join('; ') : '')
-      + (reportWords.length ? '\nConstruction report: ' + reportWords.join(' ') : '')
+      + (reportWords.length ? '\nConstruction report (before saved work was restored): ' + reportWords.join(' ') : '')
       + (history.warnings.length ? '\nHistory: ' + history.warnings.join(' ') : '')
       + '\nCheck the complete replacement, figures, sources, changed assumptions and construction report shown with this card before approving. Nothing changes until this card is pressed.';
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
       operations: [{ op: 'apply_saved_correction', path: ctx.scenario_id, value: { candidate, base_identity: before.graph_identity_hash,
         brief_text: before.brief_text, goal_turn_id: turn, operation_id: constructionOperationId(ctx.scenario_id, `explicit_rebuild:${before.graph_identity_hash}:${hash}`),
-        explicit_rebuild_request: request, rebuild_history: { bound: history.bound, context: history.context, objections }, construction_report: report } }],
+        explicit_rebuild_request: request, rebuild_history: { bound: history.bound, context: history.context, objections,
+          unpressed_adoptions: retirement.records }, construction_report: report } }],
       provenance: { authored_by: 'model_proposed', basis: request }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label });
     proposals.put(proposal);
     return { ...report, ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label, proposed_model: candidate, retained_work: prepared.kept, history_warnings: history.warnings,
@@ -4173,7 +4202,10 @@ export function createAgentCapabilities(
       if (expected === undefined || v.retained_aim_description !== expected || !isPlainRecord(node) || node.description !== expected) return notApplied('incomplete_goal_postimage', 'This card would lose the earlier aim or its complete source. Nothing was saved.');
     }
     if (v.explicit_rebuild_request !== undefined) {
-      const kept = prepareRequestedRebuild(before.raw, v.candidate, levelFrameOf);
+      const bound = isPlainRecord(v.rebuild_history) && Array.isArray(v.rebuild_history.unpressed_adoptions) ? v.rebuild_history.unpressed_adoptions : [];
+      const retirement = unpressedRebuildOptions(bound, { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id ?? null,
+        graph_hash: before.graph_hash, graph: before.raw });
+      const kept = prepareRequestedRebuild(before.raw, v.candidate, levelFrameOf, retirement.ids);
       if (!kept.candidate || !approvedGraphHeld(kept.candidate, v.candidate)) return notApplied('incomplete_replacement', 'This replacement would lose recorded work or a saved option. Nothing was saved.');
       if (!isPlainRecord(v.rebuild_history) || !Array.isArray(v.rebuild_history.bound) || !opts.readCommittedTurnLedger || !opts.readStatedObjections) return notApplied('history_unreadable', 'The retained conversation cannot be checked. Nothing was saved.');
       const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id).catch(() => null);

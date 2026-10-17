@@ -484,6 +484,9 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       const detail = eventByDateRefusalDetail(r.detail);
       if (detail !== null) return detail;
     }
+    if (r.ok === false && r.refusal === 'replacement_work_not_held' && typeof r.follow_up === 'string') {
+      return withoutAgentDirections(r.follow_up).text;
+    }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;
     return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? GENERIC_NOT_BUILT}.`;
