@@ -1,6 +1,6 @@
 /** Captured e625 graph; declared arguments, actual register/compound ports, no live provider or engine. */
 import { readFileSync } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../tests/utils/mock-session-store.js';
@@ -8,24 +8,17 @@ import { withScenarioRevision } from '../../../tests/utils/revision-store-double
 import { injectAsCeeWriter } from '../../../tests/utils/inject-as-cee-writer.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../orchestrator-v5/context/graph-identity.js';
-import { createAgentCapabilities, levelFrameOf, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { createAgentCapabilities, type InternalDispatch } from '../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { ProposalStore, createProposal, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
+import { ProposalStore, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { approvalChipsFor } from '../../orchestrator-v5/agent-lane/approval-chips.js';
 import { proposalPendingAction, rehydrateProposals } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 import { parsePendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import { commitOptionLevelsInProcess } from '../../orchestrator-v5/system-events/dispatch.js';
-import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { GraphV3 } from '../../schemas/cee-v3.js';
-import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
-import { approvedGraphHeld, prepareRequestedRebuild } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement.js';
-import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
-import { runPreparingDraftReplacement } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement-context.js';
-import { runAgentTurn, type CallModel } from '../../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import { log } from '../../utils/telemetry.js';
-import { figureTheUserWrote } from '../../orchestrator-v5/agent-lane/stated-by-user.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../orchestrator-v5/build-turn-context.js';
 import { createRunAnalysisHandler } from '../../orchestrator-v5/tools/handlers/run-analysis.js';
+import { figureTheUserWrote } from '../../orchestrator-v5/agent-lane/stated-by-user.js';
+import { sourceMapOf, subjectKey } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
 vi.mock('../../config/index.js', async original => {
  const actual = await original<typeof import('../../config/index.js')>();
  return { ...actual, config: { ...actual.config, auth: { ...actual.config.auth, requireUserJwt: false, hmacSecret: 'native-founder-captured-contract-test-only-key' } } };
@@ -90,16 +83,11 @@ async function world(row: { readonly graph: Rec; readonly brief: string; readonl
 
 const captured = JSON.parse(readFileSync(new URL('./fixtures/founder-e625-before-goal-change.json', import.meta.url), 'utf8')) as Rec;
 const source = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
-const goalArgs = { constraint_type: 'at_least', value: 250000, unit: '£', rationale: source, governing_outcome: 'Angel funding secured', goal_change_quote: source, later_ambition_quote: captured.brief_text };
 async function goalWorld(change?: (graph: Rec) => void, message = source) {
   const graph = structuredClone(captured.graph); change?.(graph);
   const w = await world({ graph, brief: captured.brief_text, message });
   w.ctx.verified_user_messages = [captured.brief_text, source, message]; return w;
 }
-const offer = (w: Awaited<ReturnType<typeof goalWorld>>, extra: Rec = {}) => dispatchTool('propose_goal_target', JSON.stringify({ ...goalArgs, ...extra }), w.ctx, w.caps());
-const noPath = (g: Rec) => validateGraphStructure(GraphV3.parse(g), { leaveOutInertRisks: true }).violations.filter(v => v.code === 'NO_PATH_TO_GOAL');
-const valueOf = (w: Awaited<ReturnType<typeof world>>, r: Rec) => w.proposals.get(String(r.proposal_id))!.operations[0]!.value as Rec;
-const events = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map(([x]) => x as Rec).filter(x => x.event === 'v5.agent.tool_refused');
 
 describe('D1: human percentages retain their raw unit before any card or native save', () => {
   const q80 = "I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly.";
@@ -149,4 +137,45 @@ it('a complete current factor name keeps the genuine bound human figure positive
   const pid = String(r.proposal_id); expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
   const os = w.graph().nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').observed_state;
   expect(os).toMatchObject({ raw_value: 80, value: 0.8, source: 'user_override' }); expect(os.user_material_unverified).not.toBe(true); expect(w.writes).toHaveLength(1);
+});
+
+describe('D3: a numeric quote cannot ground a figure-free describes estimate', () => {
+  it('the captured qualitative goal measure keeps its whole numeric source and qualifications without becoming a level estimate', () => {
+    const held = captured.graph.nodes.find((n: Rec) => n.id === 'funding_secured').user_statements[0].statements[0];
+    const subject = { kind: 'goal' as const, label: 'Funding secured' };
+    const map = sourceMapOf([{ ...held, subject, field: 'measure' }], captured.brief_text);
+    expect(map.refused).toEqual([]);
+    expect(map.verified.get(subjectKey(subject, 'measure'))).toEqual([expect.objectContaining({ quote: held.quote,
+      source: held.source, form: 'describes', qualifier: 'urgently', conditions: held.conditions, reading: 'olumi' })]);
+  });
+  it.each([{ quote: '20% of my time is going into them.', ok: false },
+    { quote: "I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process.", ok: true }])('qualitative zero from “$quote” is offered=$ok', async ({ quote, ok }) => {
+    const w = await goalWorld(undefined, quote);
+    const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: 'Founder time on job specifications', value: 0, unit: '% of founder working time', user_stated: false, basis: 'Olumi reads the quoted description as no time spent now; provisional, not a measurement.', statements: [{ quote, form: 'describes' }] }], option_levels: [] }), w.ctx, w.caps());
+    if (!ok) { expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'description_not_stated' }); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original); return; }
+    expect(r.ok, JSON.stringify(r)).toBe(true); expect(r.public_label).toContain(quote); expect(r.public_label).toContain('Olumi’s figure from them is its own estimate, not yours');
+    expect(r.public_label).not.toContain('figure you gave'); const pid = String(r.proposal_id);
+    expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.find((n: Rec) => n.id === 'founder_time_on_job_specifications').observed_state).toMatchObject({ raw_value: 0, value: 0, source: 'user_assumption' }); expect(w.writes).toHaveLength(1);
+  });
+});
+
+it('the real Run reader and final payload keep human 80% at model 0.8, never 0.8%', async () => {
+  const quote = 'I have been spending probably 80% of my time on it.';
+  const w = await goalWorld(undefined, 'Record those current levels.'); w.ctx.user_text = quote; w.ctx.verified_user_messages.push(quote);
+  const assumptions = w.graph().nodes.filter((n: Rec) => n.kind === 'factor').map((n: Rec) => ({ factor_label: n.label,
+    value: n.id === 'founder_time_on_poc_testing_and_improvement' ? 80 : 10, unit: '% of founder working time',
+    user_stated: n.id === 'founder_time_on_poc_testing_and_improvement', basis: 'Controlled native reader test, other levels are Olumi assumptions.' }));
+  const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions, option_levels: [] }), w.ctx, w.caps()), pid = String(r.proposal_id);
+  expect(r.ok, JSON.stringify(r)).toBe(true);
+  expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+  const store = { readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: structuredClone(w.graph()), briefText: captured.brief_text }), loadGraph: async () => structuredClone(w.graph()) };
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(w.ctx.scenario_id, 'native-D1-read', store as never);
+  expect((snapshot.graph as Rec).nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').observed_state).toMatchObject({ value: 0.8, raw_value: 80, unit: '% of founder working time' });
+  let payload: Rec | undefined;
+  const engine = vi.fn(async () => { throw new Error('No engine call'); });
+  await createRunAnalysisHandler({ plotClient: { run: engine } as never, scenarioReader: async () => snapshot,
+    probe: async sent => { payload = sent.plotPayload; } })({ payload: { kind: 'message', scenario_id: w.ctx.scenario_id, turn_id: randomUUID(), source: 'chip_click', chip: { id: 'agent-run-analysis', action_type: 'run_analysis', parameters: { effects_timing: 'not_stated' } } }, requestId: 'native-D1-read', signal: new AbortController().signal, context: {}, orientationText: '' } as never);
+  expect(payload).toBeDefined(); expect(engine).not.toHaveBeenCalled(); expect(w.writes).toHaveLength(1);
+  expect(payload!.graph.nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').observed_state).toMatchObject({ value: 0.8 });
 });

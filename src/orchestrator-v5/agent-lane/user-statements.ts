@@ -87,6 +87,8 @@ export interface StatementRules {
   readonly period?: string;
   /** The figures the quote states, in `unit`, each as its two ends (a single figure has both equal). */
   readonly figuresIn: (quote: string) => readonly { readonly low: number; readonly high: number }[];
+  /** This description grounds an Olumi numeric estimate; a stated figure for its quantity must use a figure-bearing form. */
+  readonly describesNumericEstimate?: true;
   /** Whether the Agent's figure is the stated one (the server keeps the stated one, never the Agent's rendering). */
   readonly sameFigure?: (quote: string, given: number, stated: number) => boolean;
   /** A stated 0 is a figure of this field ("no budget", "0% now"), never refused as missing (PROMPT sys2; a level or target). */
@@ -156,6 +158,9 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
     ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
     ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
+  // Recording a measure/source may retain numbers in its words; using them to ground a figure-free estimate may not.
+  if (form === 'describes' && rules.describesNumericEstimate === true && rules.figuresIn(quote).length > 0) return { kind: 'refused', refusal: 'figure_not_in_quote',
+    detail: 'These words state a figure for this quantity. Use the figure-bearing form in its stated unit, rather than a figure-free description. Nothing was prepared.' };
   // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
   if (FIGURE_FREE.has(form)) return { kind: 'verified', statement: base };
   const stated = rules.figuresIn(quote);

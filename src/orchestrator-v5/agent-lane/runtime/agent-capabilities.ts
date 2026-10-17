@@ -25,7 +25,7 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
 import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
 import { optionCapacityRecordedWords } from '../../statement-door/fields/option-capacity.js';
 import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
-import { readStatement, type DoorContext } from '../../statement-door/read.js';
+import { readStatement, statementBoundTo, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
 import { resolveSubject } from '../../statement-door/subject.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
@@ -7343,7 +7343,7 @@ export function createAgentCapabilities(
         const source = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
           .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? '';
         // Near-only pairs a point for display; it cannot attest its speaker or original field role.
-        const bound = writtenAbout && isFactorNamedByUser(node.label, bindingWords)
+        const bound = writtenAbout && isFactorNamedByUser(node.label, bindingWords ?? '')
           && !quoteIsNotTheUsersClaim(source, source)
           && comparatorTheUserWroteFor(source, Number(a.value)) === null;
         const bindingUnverified = origin === 'human' && !bound;
@@ -7357,7 +7357,13 @@ export function createAgentCapabilities(
         if (a?.user_stated === false && Array.isArray(a?.statements)) {
           const v = verifyStatements(a.statements, { now: ctx.user_turn_text, conversation: ctx.user_text,
             unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
-          { subject: { quantity: 'level_today', node_id: node.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
+          { subject: { quantity: 'level_today', node_id: node.id }, unit: '', forms: ['describes'], describesNumericEstimate: true, figuresIn: quote => {
+            // The shared subject binder can establish that a named OTHER factor owns a figure. An unresolved
+            // pronoun does not establish that, so a compatible number cannot ground a figure-free estimate here.
+            if (statementBoundTo(g.raw, { kind: 'factor', id: node.id, field: 'level' }, quote) === 'another') return [];
+            return findLinkEffectAmounts(quote).filter(amount => figureTheUserWrote(amount.magnitude, a?.unit ?? nodeUnit, quote))
+              .map(amount => ({ low: amount.magnitude, high: amount.magnitude }));
+          } });
           if (v.kind === 'refused') {
             return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'description_not_stated',
               detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
@@ -7602,7 +7608,7 @@ export function createAgentCapabilities(
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
       // A false human-percentage attribution refuses the whole offered starting point, including any level half.
-      if (a?.ok === false && a.refusal === 'figure_not_in_users_words') return a;
+      if (a?.ok === false && (a.refusal === 'figure_not_in_users_words' || a.refusal === 'description_not_stated')) return a;
       // What THIS starting point would make each factor's starting value — read off the stored
       // value half, never the Agent's arguments — so a held level that only restates it is caught.
       const valueHalf = a !== null && a.ok === true && typeof a.proposal_id === 'string' ? proposals.get(a.proposal_id) : undefined;
