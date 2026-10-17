@@ -21,6 +21,7 @@ import { runFactsOf } from '../run-facts.js';
 import { currentStatementRetention, userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { turnContextItems } from '../turn-context.js';
+import { ANSWERED_EARLIER_LABEL } from '../history-store.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP,
@@ -4072,7 +4073,9 @@ export function createAgentCapabilities(
     const context = { current_model: projectModelContext(before), objections: objections.map(o => o.statement),
       retained: { brief: before.brief_text,
         items: turnContextItems({ now: new Date(), briefText: before.brief_text, conversation: opts.readTurnHistory?.() ?? [],
-          verifiedUserMessages: typed, request: currentRequest, currentRequestOrigin: 'typed' }),
+          verifiedUserMessages: typed, request: currentRequest, currentRequestOrigin: 'typed' }).filter(item =>
+          isPlainRecord(item) && Array.isArray(item.content) && item.content.some(part =>
+            isPlainRecord(part) && typeof part.text === 'string' && part.text.startsWith(ANSWERED_EARLIER_LABEL))),
         conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: "Olumi’s proposed replacement framing (context only, not user source or a saved model):\n" + framing }, ...history.messages.filter(m => !typed.includes(m)).map(text => ({ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text })),
           ...typed.map(text => ({ speaker: 'user' as const, source: 'typed' as const, text }))] } };
     const built = await runPreparingDraftReplacement(ctx.scenario_id, () => buildWithDrafterRawRecord(ctx, source,

@@ -6,7 +6,7 @@ import { prepareRequestedRebuild } from '../runtime/draft-replacement.js';
 import { levelFrameOf, projectModelContext } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { HistoryStore, answeredEarlierItem, ANSWERED_EARLIER_LABEL } from '../history-store.js';
-import { turnContextItems } from '../turn-context.js';
+import { BRIEF_LABEL, turnContextItems } from '../turn-context.js';
 
 const cases = [
   { name: 'distribution', factor: 'Dispatch updates', risk: 'Service disruption', retained: 'delayed scans', withdrawn: 'the entire shift has stopped',
@@ -145,7 +145,8 @@ function structuredDraft(row: typeof cases[number]): Rec {
 }
 it('ONE combined real explicit rebuild → structured stub → restored own card → native register → cold graph', async () => {
   const row = cases[0]!, history = new HistoryStore(), calls: Rec[] = [];
-  const pairItem = answeredEarlierItem([{ olumi: row.question, reply: row.answer, reply_source: 'typed' }])!;
+  const pairItem = answeredEarlierItem([{ olumi: row.question, reply: row.answer, reply_source: 'typed' },
+    { olumi: row.question, reply: row.answer, reply_source: 'unknown' }])!;
   const w = await savedWorld(row, { readTurnHistory: () => [pairItem, ...history.get('r3')], provider: async req => {
     calls.push(structuredClone(req)); return { text: JSON.stringify(structuredDraft(row)), status: 'completed' };
   } });
@@ -158,9 +159,7 @@ it('ONE combined real explicit rebuild → structured stub → restored own card
   const input = calls[0]!.input as string;
   const beforeModel = input.split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!;
   const items = JSON.parse(beforeModel.split('\n\n').at(-1)!);
-  const expected = turnContextItems({ now: new Date(), briefText: w.f.brief, conversation: [pairItem, ...history.get('r3')],
-    verifiedUserMessages: [request], request, currentRequestOrigin: 'typed' });
-  expect(items).toEqual(expected);
+  expect(items).toEqual([pairItem]);
   expect(jsonAfter(input, CURRENT_MODEL_CONTEXT_LEAD).recorded_reasoning).toEqual(project(saved).recorded_reasoning);
   const pid = String(offered.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, offered, 'propose_change');
   expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
@@ -171,4 +170,32 @@ it('ONE combined real explicit rebuild → structured stub → restored own card
   expect(cold.body.graph.goal_constraints).toEqual(saved.goal_constraints);
   expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true });
   expect(w.writes).toHaveLength(writes + 1);
+});
+
+it('construction input contains each user statement exactly once by identity across both briefs', async () => {
+  for (const row of cases) {
+    const calls: Rec[] = [];
+    const recent = 'The night team still disputes the mechanism.';
+    const pairItem = answeredEarlierItem([{ olumi: row.question, reply: row.answer, reply_source: 'typed' }])!;
+    const w = await savedWorld(row, { readTurnHistory: () => [pairItem,
+      { role: 'assistant', content: 'Which assumptions remain disputed?' }, { role: 'user', content: recent }],
+      provider: async req => { calls.push(structuredClone(req)); return { text: JSON.stringify(structuredDraft(row)), status: 'completed' }; } });
+    w.ctx.verified_user_messages = [recent, request, recent];
+    await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), w.ctx, w.caps());
+    const input = (calls[0]!.input as string).split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!;
+    const [conversation, items] = input.split(`${LATER_MESSAGES_CONTEXT_LEAD} `)[1]!.split('\n\n').map(s => JSON.parse(s));
+    const identities: string[] = [input.split('\n\n')[0]!];
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string') {
+        identities.push(value);
+        const payload = value.slice(value.indexOf('\n') + 1);
+        if (payload.startsWith('{')) collect(JSON.parse(payload));
+      } else if (Array.isArray(value)) value.forEach(collect);
+      else if (value !== null && typeof value === 'object') Object.values(value).forEach(collect);
+    };
+    collect(conversation); collect(items);
+    for (const statement of [w.f.brief, recent, request, row.answer]) {
+      expect.soft(identities.filter(text => text === statement || text === `${BRIEF_LABEL}\n${statement}`), statement).toHaveLength(1);
+    }
+  }
 });
