@@ -28,14 +28,16 @@ const close: Array<() => Promise<unknown>> = [];
 afterEach(async () => { while (close.length) await close.pop()!(); });
 
 /** Real register/read routes over a JSON-rehydrated store double; no provider, database or remote service. */
-export async function correctionWorld(original: Rec, message: string) {
+export async function correctionWorld(original: Rec, message: string, options: {
+  brief?: string; provider?: (...args: any[]) => Promise<any>; readTurnHistory?: () => readonly unknown[];
+} = {}) {
   const scenario = randomUUID();
   let graph: Rec = structuredClone(original), revision = 2;
   const writes: Rec[] = [], registers: Rec[] = [], responses: Rec[] = [];
   const installStore = () => { storeRef.value = {
     append: async (write: Rec) => { graph = structuredClone(write.graph); writes.push(structuredClone(write)); revision += 1; return { id: `turn-${revision}` }; },
     loadGraph: async () => structuredClone(graph),
-    loadGraphAndBriefText: async () => ({ graph: structuredClone(graph), briefText: null, revision }),
+    loadGraphAndBriefText: async () => ({ graph: structuredClone(graph), briefText: options.brief ?? null, revision }),
     ensureScenarioExists: async () => ({ user_id: null }), getScenarioOwner: async () => null,
     scenarioExists: async () => true, readCommittedTurn: async () => null, readMostRecentPendingActions: async () => [], readRecent: async () => [],
   }; };
@@ -44,6 +46,7 @@ export async function correctionWorld(original: Rec, message: string) {
   let app = await appOf(); close.push(() => app.close());
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(graph),
+      brief_text: options.brief,
       graph_hash: computeAnalysisAffectingGraphHash(graph as never), graph_identity_hash: computeGraphIdentityHash(graph as never) } };
     if (!path.endsWith('/graph/register')) throw new Error(`No provider or other writer is allowed: ${path}`);
     registers.push(structuredClone(body as Rec));
@@ -52,8 +55,9 @@ export async function correctionWorld(original: Rec, message: string) {
     return { status: response.statusCode, json: response.json() };
   };
   const proposals = new ProposalStore();
-  const caps = (store = proposals) => createAgentCapabilities(dispatch, store, undefined, 'full', undefined, { turnAuthority: true,
-    readCommittedTurnLedger: async () => ({ first_user_message: message, messages: [], complete: true,
+  const caps = (store = proposals) => createAgentCapabilities(dispatch, store, options.provider, 'full', undefined, { turnAuthority: true,
+    readTurnHistory: options.readTurnHistory, readStatedObjections: async () => [],
+    readCommittedTurnLedger: async () => ({ first_user_message: options.brief ?? message, messages: [], complete: true, user_message_turn_ids: ['first'],
       write_turn_ids: writes.map(w => w.turn_id) }) as never });
   const ctx: AgentToolContext = { scenario_id: scenario, authenticated_user_id: null, request_id: 'native-correction', turn_id: randomUUID(),
     user_turn_text: message, user_text: message, verified_user_messages: [message], user_text_complete: true };

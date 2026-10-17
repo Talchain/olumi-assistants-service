@@ -18,6 +18,7 @@ import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHo
 import { runFactsOf } from '../run-facts.js';
 import { userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
+import { turnContextItems } from '../turn-context.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP,
@@ -1671,14 +1672,11 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // ⭐ S7 B2 (hiring e2e c1e944a4 item 6): a date Olumi read from the user's words, which the user approved, says so:
       // approval is not authorship, so it is never "what you supplied" (`approvedDeadlineReadingOf`).
       ...((reading) => (deadline === undefined || reading === undefined ? {} : { deadline_set_by: reading }))(approvedDeadlineReadingOf(g.raw, n.id)),
-      // ⭐ M3a (AIE 6180193788 §1): the user's recorded statements about the goal, verbatim, and the measure one of them defines,
-      // so THIS working input and a cold reopen hold the user's definition apart from Olumi's reading.
+      // The measure's plain words remain beside the goal; complete sources live in recorded_reasoning below.
       ...((): Record<string, unknown> => {
         const node = (Array.isArray(g.raw.nodes) ? g.raw.nodes as unknown[] : []).find((x) => isPlainRecord(x) && x.id === n.id);
-        const said = userStatementsOn(node);
         const measure = recordedMeasureOf(node);
-        return said.length === 0 ? {} : { user_statements: said.map((r) => ({ field: r.field, said: r.statements.map((x) => x.quote), speaker: 'user' })),
-          ...(measure === undefined ? {} : { measured_in: measure }) };
+        return measure === undefined ? {} : { measured_in: measure };
       })(),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
@@ -1803,7 +1801,15 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   });
   // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
   const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
+  const recordedReasoning = (Array.isArray(g.raw.nodes) ? g.raw.nodes : []).filter(isPlainRecord).flatMap(n => {
+    const records = userStatementsOn(n);
+    return records.length === 0 && n.analysis_participation !== 'retained_excluded' ? [] : [{
+      id: n.id, kind: n.kind, label: n.label,
+      ...pickKeys(n, ['description', 'provenance', 'analysis_participation']), user_statements: records,
+    }];
+  });
   return {
+    ...(recordedReasoning.length === 0 ? {} : { recorded_reasoning: recordedReasoning }),
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
     ...(hiringTimes.length === 0 ? {} : { hiring_times: { use: HIRING_TIMES_USE, options: hiringTimes } }),
@@ -2553,6 +2559,8 @@ export function createAgentCapabilities(
     readonly readStatedObjections?: (scenarioId: string, requestId: string) => Promise<readonly StatedObjection[]>;
     /** The scenario's committed turn ledger (`SessionStore.readCommittedTurnLedger`): draft context and exact-operation recovery. */
     readonly readCommittedTurnLedger?: (scenarioId: string) => Promise<CommittedTurnLedger>;
+    /** This request's existing history, read after route reseeding; never a new persisted carrier. */
+    readonly readTurnHistory?: () => readonly unknown[];
     /**
      * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
      * (ChatGPT #70 5847200462): the product's own level writer, reached in-process (`commitOptionLevelsInProcess`).
@@ -4055,6 +4063,8 @@ export function createAgentCapabilities(
     const source = revisedDraftBrief(before.brief_text, typed);
     const context = { current_model: projectModelContext(before), objections: objections.map(o => o.statement),
       retained: { brief: before.brief_text,
+        items: turnContextItems({ now: new Date(), briefText: before.brief_text, conversation: opts.readTurnHistory?.() ?? [],
+          verifiedUserMessages: typed, request: currentRequest, currentRequestOrigin: 'typed' }),
         conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: "Olumi’s proposed replacement framing (context only, not user source or a saved model):\n" + framing }, ...history.messages.filter(m => !typed.includes(m)).map(text => ({ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text })),
           ...typed.map(text => ({ speaker: 'user' as const, source: 'typed' as const, text }))] } };
     const built = await runPreparingDraftReplacement(ctx.scenario_id, () => buildWithDrafterRawRecord(ctx, source,
@@ -10512,7 +10522,7 @@ export function createAgentCapabilities(
         // get_canonical_state, so the first reply never contradicts the Run control.
         // ⭐ S7 B2 (capacity e2e c1e944a4 turn 01, judge item 4): the risks the Run leaves out, WITH their typed reason, as
         // get_canonical_state gives them. Without it the build turn's AI saw `relies_on` and no reason, and invented one.
-        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'links', 'readiness', 'left_out_of_run']),
+        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'links', 'readiness', 'left_out_of_run', 'recorded_reasoning']),
         // BYPASS1: the ONE next step of the model just built (of its first pass when one ran), as get_canonical_state gives it.
         ...nextStepFactOf(postRunState ?? after),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
