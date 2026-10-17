@@ -10238,7 +10238,12 @@ export function createAgentCapabilities(
       const brief = typeof args?.brief === 'string' ? args.brief.trim() : '';
       if (brief.length === 0) return { ok: false, mutated: false, refusal: 'empty_brief' };
 
-      if (args.explicit_rebuild_request !== undefined) return prepareExplicitRebuild(ctx, brief, args.explicit_rebuild_request);
+      if (args.explicit_rebuild_request !== undefined) {
+        const saved = await readGraph(ctx.scenario_id);
+        if (saved === null) return { ok: false, mutated: false, refusal: 'not_found' };
+        // A replacement request applies only to a saved model. An empty scenario still uses normal first construction.
+        if (saved.nodes.length > 0) return prepareExplicitRebuild(ctx, brief, args.explicit_rebuild_request);
+      }
 
       /**
        * ⭐ FIRST ASK WHETHER THIS CONSTRUCTION ALREADY COMMITTED — before the

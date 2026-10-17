@@ -682,6 +682,21 @@ async function bakeryWorld(options: Parameters<typeof world>[1] = {}, change?: (
 }
 
 describe('explicit CURRENT rebuild through the native correction writer', () => {
+  it.each([undefined, 'An incidental fragment supplied as a rebuild flag'])('first build follows normal construction on an empty scenario (flag: %s)', async flag => {
+    const provider = vi.fn(async () => ({ text: JSON.stringify(bakery.draft), status: 'completed' }));
+    const w = await world({ graph: { nodes: [], edges: [] }, brief: bakery.brief, message: bakery.brief }, { provider });
+    const built = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: bakery.brief,
+      ...(flag === undefined ? {} : { explicit_rebuild_request: flag }) }), w.ctx, w.caps());
+    expect(built, JSON.stringify(built)).toMatchObject({ ok: true, mutated: true });
+    expect(provider).toHaveBeenCalled();
+    // The real register route and serialized append store the constructed graph once; this is no read-only success fake.
+    expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
+    expect(w.graph().nodes.length).toBeGreaterThan(0);
+    expect(w.graph().nodes.some((n: Rec) => n.kind === 'goal')).toBe(true);
+    expect(approvedGraphHeld(w.sent[0]!.graph, w.graph())).toBe(true);
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
+  });
+
   it('⭐ prepares the full report with zero writes, cold-restores its own card, saves once and keeps exact sources from an earlier instant', async () => {
     const w = await bakeryWorld({}, g => { g.nodes[0].description = 'The manager disputes this forecast unless the pilot works.';
       const goal = g.nodes.find((n: Rec) => n.kind === 'goal'); goal.goal_horizon = { deadline: '2027-06-30' }; goal.goal_deadline_as_stated = 'by the end of June 2027'; });
