@@ -38,22 +38,29 @@ describe('Olumi\'s working point from a link\'s brief range', () => {
     expect(QUARTILES_APART_IN_SD).toBeCloseTo(1.349, 3);
   });
 
-  it('⭐ a negative link keeps its direction: the working point is signed by it', () => {
-    expect(linkWorkingPointOf(withRange(graph({ edge: { effect_direction: 'negative', strength: { mean: -0.1, std: 0.05 } } })), FROM, TO)?.mean).toBeCloseTo(-0.055, 12);
+  it('⭐ a negative link keeps its direction: the working point is signed by it, and its words say a decrease', () => {
+    const g = withRange(graph({ edge: { effect_direction: 'negative', strength: { mean: -0.1, std: 0.05 } } }));
+    const wp = linkWorkingPointOf(g, FROM, TO)!;
+    expect(wp.mean).toBeCloseTo(-0.055, 12);
+    expect(linkWorkingPointWords(g, wp)).toContain('Olumi proposes a decrease of 5.5 percentage points, the middle of 4 to 7 percentage points');
   });
 
   it('⭐ the words: the user\'s sentence whole, the reading as Olumi\'s, the convention as Olumi\'s, its limitation, what stays', () => {
     const g = withRange(graph());
     const words = linkWorkingPointWords(g, linkWorkingPointOf(g, FROM, TO)!);
-    expect(words).toBe(`Your brief says: “${QUOTE}” Olumi reads it as a range of 4 percentage points to 7 percentage points for how much `
-      + 'switching on ‘Weekly food collection running’ changes ‘Household recycling rate’, in the unit ‘Household recycling rate’ is measured '
-      + 'in; any other qualifications or conditions in those words were not read. Olumi proposes a working point for this link, for this '
-      + 'analysis: 5.5 percentage points, the middle of that range, with a spread that reads your two ends as the middle half of likely '
-      + 'effects (about one chance in four below 4 percentage points and one in four above 7 percentage points). That reading is Olumi’s '
-      + 'modelling convention, not something your words say, and not a measured calibration. Its limitation: the spread is symmetric '
-      + 'around 5.5 percentage points with no outer limit, so effects beyond either end, and occasionally in the opposite direction, stay '
-      + 'possible in the analysis. Your range stays recorded as you stated it, and a chance shown with this working point rests on it and '
-      + 'stays provisional. Record this link to use Olumi’s working point, or change or reject it instead.');
+    // The AIE's AMEND (17 Oct, on #3346), filled with this link's facts.
+    expect(words).toBe(`Your brief says: “${QUOTE}” Olumi reads it as a range of 4 to 7 percentage points for how much switching on `
+      + '‘Weekly food collection running’ changes ‘Household recycling rate’, in the unit ‘Household recycling rate’ is measured in. Other '
+      + 'qualifications or conditions in these words have not yet been interpreted. This proposal does not establish that they hold or are '
+      + 'included in the calculation. For this conditional analysis, Olumi proposes an increase of 5.5 percentage points, the middle of 4 to '
+      + '7 percentage points, using a symmetric Normal spread with no outer limits. In this assumed model, half of the effects lie between 4 '
+      + 'percentage points and 7 percentage points, with one quarter below and one quarter above. Those probabilities and the spread are '
+      + 'Olumi’s modelling assumptions, not probabilities you supplied or an empirical calibration. The assumed spread permits effects '
+      + 'beyond both ends, including effects in the opposite direction; it does not establish how frequently those outcomes occur in '
+      + 'reality. Adopt this displayed Olumi approximation, or change or reject it. Your original range and full source remain unchanged. '
+      + 'Any permitted result rests on these assumptions and on the qualifications or conditions in your words that have not yet been '
+      + 'interpreted.');
+    expect(words).not.toMatch(/occasionally/u);
   });
 
   it.each([
@@ -69,6 +76,8 @@ describe('Olumi\'s working point from a link\'s brief range', () => {
     // placeholder rule refuses it).
     ['a link Olumi already estimated (not a placeholder)', () => withRange(graph({ edge: { provenance: { source: 'brief_extraction', magnitude: 'olumi_estimate' }, defaulted: undefined } }))],
     ['no range at all', () => graph()],
+    // AIE 17 Oct: a range the reading bound to conditions is conditional; no reader after the press carries that scope.
+    ['a range stated under conditions the reading bound', () => withRange(graph(), [statement({ conditions: 'if the council funds the extra rounds' })])],
   ])('⛔ no working point: %s', (_why, g) => {
     expect(linkWorkingPointOf(g(), FROM, TO)).toBeUndefined();
   });

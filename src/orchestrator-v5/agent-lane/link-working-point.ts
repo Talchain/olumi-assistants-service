@@ -64,6 +64,9 @@ export function linkWorkingPointOf(graph: unknown, from: string, to: string): Li
   const st = record?.statements.length === 1 ? record.statements[0] : undefined;
   if (st === undefined || !finite(st.low) || !finite(st.high) || st.low < 0 || !(st.low < st.high)
     || typeof st.unit !== 'string' || typeof st.quote !== 'string') return undefined;
+  // ⛔ AIE (17 Oct, on #3346): a range stated UNDER conditions the reading bound is a conditional effect, and no reader after the
+  // press carries that scope, so no working point: the words and their reasoning stay, the dependent number is not proposed.
+  if (typeof st.conditions === 'string' && st.conditions.trim() !== '') return undefined;
   const units = linkEffectEndUnits(graph, from, to);
   if (units === null || !units.source.own.includes('switch')) return undefined;
   if (!statedInOneOf(st.unit, [...units.target.own, units.target.adopted])) return undefined;
@@ -88,23 +91,25 @@ export function linkWorkingPointOf(graph: unknown, from: string, to: string): Li
 }
 
 /**
- * The card's words for one working point (Olumi's convention, its basis and its limitation, said before the press; BUDDY-A
- * 02:58Z): the user's sentence whole, the range as Olumi read it, the working point and its spread as Olumi's, and what stays.
+ * The card's words for one working point, the AIE's AMEND (17 Oct, on #3346) filled with this link's facts: the user's sentence
+ * whole, the range as Olumi read it, the conditions not yet interpreted, the working point and its spread as Olumi's assumptions
+ * (never the user's probabilities or a calibration), the unbounded tails without a claimed frequency, and the AIE's closing.
  */
 export function linkWorkingPointWords(graph: unknown, wp: LinkWorkingPoint): string {
   const from = labelOf(graph, wp.from);
   const to = labelOf(graph, wp.to);
   const say = (n: number): string => `${fmt(n)} ${wp.unit}`;
-  const mid = (wp.low + wp.high) / 2;
+  const range = `${fmt(wp.low)} to ${fmt(wp.high)} ${wp.unit}`;
   const said = wp.quote.trim();
-  return `Your brief says: “${said}”${/[.!?]$/u.test(said) ? '' : '.'} Olumi reads it as a range of ${say(wp.low)} to ${say(wp.high)} `
-    + `for how much switching on ‘${from}’ changes ‘${to}’, in the unit ‘${to}’ is measured in; any other qualifications or `
-    + 'conditions in those words were not read. '
-    + `Olumi proposes a working point for this link, for this analysis: ${say(mid)}, the middle of that range, with a spread that `
-    + `reads your two ends as the middle half of likely effects (about one chance in four below ${say(wp.low)} and one in four above `
-    + `${say(wp.high)}). That reading is Olumi’s modelling convention, not something your words say, and not a measured calibration. `
-    + `Its limitation: the spread is symmetric around ${say(mid)} with no outer limit, so effects beyond either end, and occasionally `
-    + 'in the opposite direction, stay possible in the analysis. '
-    + 'Your range stays recorded as you stated it, and a chance shown with this working point rests on it and stays provisional. '
-    + 'Record this link to use Olumi’s working point, or change or reject it instead.';
+  return `Your brief says: “${said}”${/[.!?]$/u.test(said) ? '' : '.'} Olumi reads it as a range of ${range} for how much switching on `
+    + `‘${from}’ changes ‘${to}’, in the unit ‘${to}’ is measured in. Other qualifications or conditions in these words have not yet `
+    + 'been interpreted. This proposal does not establish that they hold or are included in the calculation. '
+    + `For this conditional analysis, Olumi proposes ${wp.mean < 0 ? 'a decrease' : 'an increase'} of ${say((wp.low + wp.high) / 2)}, `
+    + `the middle of ${range}, using a symmetric Normal spread with no outer limits. In this assumed model, half of the effects lie `
+    + `between ${say(wp.low)} and ${say(wp.high)}, with one quarter below and one quarter above. Those probabilities and the spread are `
+    + 'Olumi’s modelling assumptions, not probabilities you supplied or an empirical calibration. The assumed spread permits effects '
+    + 'beyond both ends, including effects in the opposite direction; it does not establish how frequently those outcomes occur in '
+    + 'reality. Adopt this displayed Olumi approximation, or change or reject it. Your original range and full source remain '
+    + 'unchanged. Any permitted result rests on these assumptions and on the qualifications or conditions in your words that have '
+    + 'not yet been interpreted.';
 }
