@@ -22,6 +22,7 @@ import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
+import { sameUnit } from './same-unit.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -287,8 +288,11 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
  * reader missed it there (the figure reads as about "scrap", the goal, not the camera). The text is the range as the
  * sentence writes it, else its ends; the A4 sentence quotes it as written and names the end the model uses. `null`: no such
  * statement; `undefined`: a draft without statements.
+ * ⛔ BUDDY-A #3356 R1 B1: an end is this link's size only in the unit that size is in. The statement's unit, written straight after
+ * the range, must be the target's operative unit (`unit`, read by `sameUnit`): "between 4 and 6 lb a day" never makes −4 kg the
+ * user's. Otherwise no end is claimed; the range stays recorded on the link with its own unit (construction's record).
  */
-export function linkEffectRangeEnd(model: unknown, brief: string, from: string, to: string, amount: number): StatedRangeOfLink | null | undefined {
+export function linkEffectRangeEnd(model: unknown, brief: string, from: string, to: string, amount: number, unit: string | undefined): StatedRangeOfLink | null | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
   if (!Array.isArray(m.statements)) return undefined;
   if (!Number.isFinite(amount) || amount === 0) return null;
@@ -300,12 +304,21 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
     const high = Math.max(Math.abs(st.low), Math.abs(st.high));
     const end = size === low ? 'low' : size === high ? 'high' : null;
     if (end === null || !(low < high)) continue;
+    const written = unitWrittenAfterRange(st, low, high);
+    if (written === undefined || typeof unit !== 'string' || !sameUnit(written, unit)) continue;
     // ⛔ BUDDY-A #3297 B1: the WHOLE verified quote, never a clause cut at punctuation. A shorter "clause" dropped its speaker
     // and condition ("The supplier estimates that, if the pilot succeeds, …" became only the numbers' clause) and was still
     // said "as the brief puts it"; the AIE disposition keeps the full attributed range with its speaker and conditions.
     return { low, high, text: rangeTextAsWritten(st, low, high), end, reported: st.quote };
   }
   return null;
+}
+
+/** The statement's own unit, when the sentence writes it straight after the range ("3 and 5 Ml/d"); else none. */
+function unitWrittenAfterRange(st: UserStatement, low: number, high: number): string | undefined {
+  const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === low && r.high.magnitude === high);
+  const after = joined === undefined ? '' : st.quote.slice(joined.high.index + joined.high.matchedText.length);
+  return st.unit !== undefined && st.unit !== '' && after.toLowerCase().startsWith(` ${st.unit.toLowerCase()}`) ? st.unit : undefined;
 }
 
 /** The words the sentence writes for the range, with the unit it writes straight after them ("1.5 to 2.5 percentage points"). */

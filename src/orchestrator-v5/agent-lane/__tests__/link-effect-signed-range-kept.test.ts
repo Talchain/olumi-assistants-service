@@ -18,14 +18,20 @@ const GOAL = 'We want to bring daily food waste down from about 40 kg today to a
 const RANGE = 'Our kitchen manager reckons switching on a pre-order system would cut waste by between 4 and 6 kg a day.';
 const OTHER = 'Our supplier thinks smaller daily deliveries would cut waste by between 4 and 6 kg a day.';
 const BRIEF = `${GOAL} ${RANGE} ${OTHER} We can afford only one of them this year.`;
+/** BUDDY-A #3356 R1 B1: the same sentence in POUNDS, on the kilogram goal. */
+const RANGE_LB = RANGE.replace('kg a day', 'lb a day');
+const BRIEF_LB = BRIEF.replace(RANGE, RANGE_LB);
 const PRE = 'Pre-order system in use';
 const DEL = 'Smaller daily deliveries';
 const WASTE = 'Daily food waste';
 
-interface Shape { readonly on?: string; readonly low?: number; readonly high?: number; readonly negated?: true; readonly size?: number; readonly drawn?: 'positive' }
+interface Shape {
+  readonly on?: string; readonly low?: number; readonly high?: number; readonly negated?: true; readonly size?: number; readonly drawn?: 'positive';
+  readonly pounds?: true;
+}
 const rangeStatement = (s: Shape): Rec => ({
-  quote: s.on === DEL ? OTHER : RANGE, subject: { kind: 'link', label: s.on ?? PRE, to_label: WASTE, factor_label: null }, field: 'effect',
-  form: 'range', value: null, low: s.low ?? -6, high: s.high ?? -4, unit: 'kg', qualifier: null, conditions: null,
+  quote: s.on === DEL ? OTHER : s.pounds === true ? RANGE_LB : RANGE, subject: { kind: 'link', label: s.on ?? PRE, to_label: WASTE, factor_label: null },
+  field: 'effect', form: 'range', value: null, low: s.low ?? -6, high: s.high ?? -4, unit: s.pounds === true ? 'lb' : 'kg', qualifier: null, conditions: null,
   ...(s.negated === true ? { negated: true } : {}),
 });
 function draft(s: Shape = {}): Rec {
@@ -57,14 +63,14 @@ function draft(s: Shape = {}): Rec {
     ],
   };
 }
-const admitted = (model: Rec) => admitCandidateModel(model as CandidateModel, {}, BRIEF, (v, u) => figureTheUserWrote(v, u, BRIEF));
+const admitted = (model: Rec, brief = BRIEF) => admitCandidateModel(model as CandidateModel, {}, brief, (v, u) => figureTheUserWrote(v, u, brief));
 const edgeFrom = (out: { nodes: readonly Rec[]; edges: readonly Rec[] }, label: string): Rec => {
   const id = out.nodes.find((n) => n.label === label)!.id;
   return out.edges.find((e) => e.from === id)!;
 };
-async function registered(model: Rec): Promise<Rec> {
+async function registered(model: Rec, brief = BRIEF): Promise<Rec> {
   let graph: Rec | undefined;
-  const r = await buildModelFromBrief('5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a', BRIEF, (async (path: string, body: Rec) => {
+  const r = await buildModelFromBrief('5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a', brief, (async (path: string, body: Rec) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { registered: true, model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   }) as never, (async () => ({ text: JSON.stringify(model), status: 'completed' })) as never) as Rec;
@@ -95,6 +101,21 @@ describe('a stated effect range stays the user\'s, on its link (G3 a735)', () =>
     expect(record, JSON.stringify(pre.user_statements ?? null)).toMatchObject({ attest: { recorded_by: 'construction' },
       statements: [expect.objectContaining({ speaker: 'user', quote: RANGE, form: 'range', low: 4, high: 6 })] });
     expect(linkHoldsStatedRange(graph, pre.id, waste.id)).toBe(true);
+  });
+
+  it('⛔ BUDDY-A #3356 R1 B1, real build → register: a range in POUNDS on a kilogram goal never makes the drafted −4 kg the user\'s; their range is kept with its own unit', async () => {
+    const edge = edgeFrom(admitted(draft({ pounds: true }), BRIEF_LB), PRE);
+    expect(edge.provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: 'Uses the stated lower end as a provisional planning effect.' });
+    expect(edge.provenance.natural_effect?.stated_range).toBeUndefined();
+    const graph = await registered(draft({ pounds: true }), BRIEF_LB);
+    const pre = graph.nodes.find((n: Rec) => n.label === PRE);
+    const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
+    const saved = graph.edges.find((e: Rec) => e.from === pre.id && e.to === waste.id);
+    expect(saved.provenance.magnitude).toBe('olumi_estimate');
+    expect(saved.provenance.natural_effect?.stated_range).toBeUndefined();
+    // The user's own words and range stay on the link, in pounds, as theirs.
+    const record = pre.user_statements?.find((r: Rec) => r.subject_key === `link|${pre.id}|${waste.id}||effect`);
+    expect(record?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: RANGE_LB, form: 'range', low: 4, high: 6, unit: 'lb' })]);
   });
 
   it('CONTRAST: a range the AI writes with positive ends is verified exactly as before, and the same as the signed one', () => {
