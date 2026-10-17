@@ -94,12 +94,10 @@ function forwardDurations(brief: string): Span[] {
   for (const m of brief.matchAll(RANGE_DURATION)) {
     const lead = m[1] ?? '';
     const lowAt = (m.index ?? 0) + lead.length;
-    const after = brief.slice((m.index ?? 0) + m[0].length);
-    if (/\b(?:last|past|previous|prior)\s+$/i.test(brief.slice(Math.max(0, lowAt - 16), lowAt)) || PAST_AFTER.test(after)) continue;
-    if (!(Number(m[2]) < Number(m[3]))) continue;
-    // `months` NaN: a range is never one count, so no claim is ever attested from it.
+    // `months` NaN: a range is never one count, so no claim is ever attested from it. Only a forward-led one is a deadline's
+    // form ("over the last 6-12 months" and "a runway of 6-12 months" are not led, so they never reach the role rules).
     spans.push({ months: Number.NaN, wording: m[0].trim(), index: m.index ?? 0,
-      led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, lowAt - 32), lowAt)) || ALLOTTED_AFTER.test(after) });
+      led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, lowAt - 32), lowAt)) || ALLOTTED_AFTER.test(brief.slice((m.index ?? 0) + m[0].length)) });
   }
   for (const m of brief.matchAll(SPELLED_DURATION)) {
     if (PAST_AFTER.test(brief.slice((m.index ?? 0) + m[0].length))) continue;
