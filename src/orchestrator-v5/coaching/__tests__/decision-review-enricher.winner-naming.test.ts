@@ -62,6 +62,8 @@ import * as invokeMod from '../../../cee/decision-review/invoke.js';
 import { narrativeNamesOption } from '../../../cee/decision-review/decompose.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import {
   buildWinnerNamingReplacement,
   WINNER_NAMING_REASON,
@@ -140,6 +142,9 @@ function runAnalysisFact(
   enrichment: Record<string, unknown>,
   extraResult: Record<string, unknown> = {},
 ): HandlerFact {
+  // R4: winner-name negatives need independent current-model evidence as well as entitlement.
+  const hash = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(enrichment.graph));
+  if (hash === null) throw new Error('winner fixture requires a bound graph');
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -148,6 +153,7 @@ function runAnalysisFact(
       scenario_id: 'scen-wn',
       leading_option_id: 'opt-1',
       summary: 'Ran analysis',
+      graph_hash_at_run: hash,
       // PRECONDITION, PINNED RATHER THAN INHERITED. The leader claim must be
       // PERMITTED for these five cases: that is the state the three defective
       // runs were measured in (each shipped a headline naming an option), and
@@ -177,7 +183,10 @@ function enrichmentFor(pair: Pair): Record<string, unknown> {
     ],
     factor_sensitivity: [{ label: 'Price', direction: 'positive', elasticity: 0.2 }],
     robustness: { level: 'stable', fragile_edges: [] },
-    graph: { nodes: [], edges: [] },
+    graph: { nodes: [
+      { id: 'opt-1', kind: 'option', label: pair.storedLabel },
+      { id: 'opt-2', kind: 'option', label: 'Hold the price at £39' },
+    ], edges: [] },
   };
 }
 
@@ -210,8 +219,11 @@ async function shipReview(
     resolution: MOCK_RESOLUTION,
   } as never);
 
+  const currentGraph = enrichmentFor(pair).graph;
   const out = await enrichRunAnalysisWithDecisionReview({
     handlerFacts: [runAnalysisFact(enrichmentFor(pair), extraResult)],
+    runGraph: currentGraph,
+    currentGraph,
     requestId: REQUEST_ID,
     scenarioId: 'scen-wn',
     signal: new AbortController().signal,

@@ -863,7 +863,7 @@ describe('deriveAnalysisFreshness — option-identity guard', () => {
 });
 
 
-describe('C2 occurrence revision fallback and scientific guards', () => {
+describe('R4: recorded revisions preserve identity without replacing analysis hashes', () => {
   function recorded(hash: string | null, revision = 4) {
     const fact = mkRunAnalysisFact({ graph_hash_at_run: hash, computed_at: '2026-04-30T00:00:00.000Z' });
     bindRunAnalysisOccurrence({ fact, fact_row_id: 'c2-row', evaluated_scenario_revision: revision });
@@ -874,11 +874,31 @@ describe('C2 occurrence revision fallback and scientific guards', () => {
     expect(derivation.freshness).toBe('unknown');
     expect(derivation.run_revision).toEqual({ value: 4, source: 'recorded' });
   });
-  it('zero is a valid recorded value only when it was actually supplied', () => {
+  it('zero is retained as a real recorded revision but cannot replace missing hashes', () => {
     const derivation = deriveAnalysisFreshness([recorded(null, 0)], null, undefined, { currentScenarioRevision: 0 });
-    expect(derivation.freshness).toBe('fresh');
-    expect(derivation.basis).toBe('recorded_run_revision');
+    expect(derivation.freshness).toBe('unknown');
+    expect(derivation.basis).toBe('analysis_graph_hash_interim');
     expect(derivation.run_revision).toEqual({ value: 0, source: 'recorded' });
+  });
+  it.each(['Delivery capacity', 'Service throughput', 'Recurring revenue', 'Hiring throughput'])('%s: either missing hash stays unknown even at the recorded revision', topic => {
+    for (const [runHash, currentHash, reason] of [
+      [null, 'current', 'legacy_fact_missing_hash'],
+      ['run', null, 'current_graph_hash_unavailable'],
+      [null, null, 'legacy_fact_missing_hash'],
+    ] as const) {
+      const fact = recorded(runHash);
+      fact.result.summary = `Computed ${topic}`;
+      const out = deriveAnalysisFreshness([fact], currentHash, undefined, { currentScenarioRevision: 4 });
+      expect(out.freshness).toBe('unknown');
+      expect(out.reason).toBe(reason);
+      expect(out.selected_fact_row_id).toBe('c2-row');
+      expect(out.run_revision).toEqual({ value: 4, source: 'recorded' });
+      expect(out.basis).toBe('analysis_graph_hash_interim');
+      expect(out.graph_hash_at_run).toBe(runHash);
+      expect(out.current_graph_hash).toBe(currentHash);
+    }
+    expect(deriveAnalysisFreshness([recorded('same')], 'same', undefined, { currentScenarioRevision: 4 }).freshness).toBe('fresh');
+    expect(deriveAnalysisFreshness([recorded('before')], 'after', undefined, { currentScenarioRevision: 4 }).freshness).toBe('stale');
   });
   it('restore still rejects a no-hash recorded match', () => {
     const derivation = deriveAnalysisFreshness([recorded(null)], null, undefined, {

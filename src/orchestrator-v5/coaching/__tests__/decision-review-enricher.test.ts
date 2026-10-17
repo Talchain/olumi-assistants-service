@@ -690,6 +690,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
       runGraph: fact.result.enrichment?.graph,
+      currentGraph: fact.result.enrichment?.graph, // R4: explicit latest-model read, matching the real chip caller.
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -720,6 +721,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
       runGraph: fact.result.enrichment?.graph,
+      currentGraph: fact.result.enrichment?.graph, // R4: explicit latest-model read, matching the real chip caller.
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -754,6 +756,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
       runGraph: fact.result.enrichment?.graph,
+      currentGraph: fact.result.enrichment?.graph, // R4: explicit latest-model read, matching the real chip caller.
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -844,6 +847,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
       runGraph: fact.result.enrichment?.graph,
+      currentGraph: fact.result.enrichment?.graph, // R4: explicit latest-model read, matching the real chip caller.
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -892,6 +896,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
       runGraph: fact.result.enrichment?.graph,
+      currentGraph: fact.result.enrichment?.graph, // R4: explicit latest-model read, matching the real chip caller.
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];
@@ -940,6 +945,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
       runGraph: fact.result.enrichment?.graph,
+      currentGraph: fact.result.enrichment?.graph, // R4: explicit latest-model read, matching the real chip caller.
     });
     expect(spy).toHaveBeenCalledTimes(1);
     const callArg = spy.mock.calls[0]![0];

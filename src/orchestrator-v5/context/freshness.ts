@@ -1,4 +1,4 @@
-import { readRunAnalysisOccurrence, validatedScenarioRevision } from '../types/handler-fact.js';
+import { readRunAnalysisOccurrence } from '../types/handler-fact.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 /**
@@ -711,7 +711,6 @@ export function deriveAnalysisFreshness(
   };
   const finish = (value: FreshnessDerivation) => ({ ...enforceInvariants(value),
     run_revision: provenance.run_revision, basis: value.basis ?? provenance.basis });
-  const currentRevision = validatedScenarioRevision(opts?.currentScenarioRevision);
   if (currentGraphHash === '') currentGraphHash = null;
 
   if (selected === null) {
@@ -840,10 +839,8 @@ export function deriveAnalysisFreshness(
     };
   }
 
-  if ((base.reason === 'legacy_fact_missing_hash' || base.reason === 'current_graph_hash_unavailable')
-    && recordedRevision !== null && currentRevision !== null && recordedRevision === currentRevision) {
-    base = { ...base, freshness: 'fresh', basis: 'recorded_run_revision' };
-  }
+  // R4: occurrence revisions identify the selected Run; neither revision equality nor
+  // a second carrier can supply a missing analysis hash.
 
   const legacyEdits = opts?.legacyEditFacts;
   const legacyRun = selected.fact.fact_type === 'run_analysis'

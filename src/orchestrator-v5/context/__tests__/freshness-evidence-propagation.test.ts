@@ -113,8 +113,8 @@ describe('complete freshness evidence at every dispatch/recovery derivation', ()
       expect(result).toEqual(deriveAnalysisFreshness(facts as never, hash, undefined, { ...options, currentGraph: graph } as never));
       expect(selected.result).toMatchObject({ run_id: 'legacy-original', graph_hash_at_run: hash, computed_at: AT, scenario_id: SCENARIO });
       if (kind === 'stamped' && scenario === 'healthy') {
-        // Make revision threading consequential; equal hashes alone could hide
-        // an omitted current revision in any of these real source expressions.
+        // R4: recorded identity survives, but no caller can upgrade a missing
+        // Run hash merely because the scenario revisions match.
         const recorded = structuredClone(selected);
         delete recorded.result.graph_hash_at_run;
         bindRunAnalysisOccurrence({ fact: recorded, fact_row_id: 'evaluated-run-row', evaluated_scenario_revision: 7 });
@@ -122,23 +122,19 @@ describe('complete freshness evidence at every dispatch/recovery derivation', ()
         scope.priorFactsForRecovery = [recorded]; scope.postDispatchFacts = [recorded];
         scope.read = { factSet, hotWindow: { status: 'ok', facts: [recorded] },
           analysisInvalidatedAt: null, priorFactsWithTurn };
-        // Neither a candidate edit nor a graph-only writer has a current
-        // persisted revision available to authorise the no-hash fallback.
-        const candidate = site.node.getText(site.source).includes('currentGraph: persistedPostEditGraph');
-        const revisionUnavailable = candidate || graphOnlyWriter;
         expect(expression(site.source, site.node, scope)).toEqual({
           selected_fact_row_id: 'evaluated-run-row', run_revision: { value: 7, source: 'recorded' },
-          basis: revisionUnavailable ? 'analysis_graph_hash_interim' : 'recorded_run_revision',
-          freshness: revisionUnavailable ? 'unknown' : 'fresh', reason: 'legacy_fact_missing_hash', selected_fact_index: 0,
+          basis: 'analysis_graph_hash_interim',
+          freshness: 'unknown', reason: 'legacy_fact_missing_hash', selected_fact_index: 0,
           graph_hash_at_run: null, current_graph_hash: hash, computed_at: AT,
         });
         if (graphOnlyWriter) {
-          // The same helper also serves writes whose existing v6 snapshot or
-          // commit result supplies a revision. Keep that threading decisive.
+          // A writer's supplied revision preserves occurrence metadata but
+          // cannot supply the missing hash either.
           scope.currentScenarioRevision = 7;
           expect(expression(site.source, site.node, scope)).toEqual({
             selected_fact_row_id: 'evaluated-run-row', run_revision: { value: 7, source: 'recorded' },
-            basis: 'recorded_run_revision', freshness: 'fresh', reason: 'legacy_fact_missing_hash', selected_fact_index: 0,
+            basis: 'analysis_graph_hash_interim', freshness: 'unknown', reason: 'legacy_fact_missing_hash', selected_fact_index: 0,
             graph_hash_at_run: null, current_graph_hash: hash, computed_at: AT,
           });
           scope.currentScenarioRevision = undefined;

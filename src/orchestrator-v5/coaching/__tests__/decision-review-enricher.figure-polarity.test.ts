@@ -36,6 +36,8 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import * as invokeMod from '../../../cee/decision-review/invoke.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 
 const MOCK_RESOLUTION: ModelResolution = {
   task: 'decision_review',
@@ -48,6 +50,9 @@ const HOLDS_70 = 'Across the model, the ordering holds in about 70% of variation
 const PRIMARY_RISK_SENTENCE = 'The main risk is the link from Scope to Delivery date.';
 
 function runAnalysisFact(enrichment: Record<string, unknown>): HandlerFact {
+  // R4: preserve the figure-policy specimen on a genuinely current synthetic Run.
+  const hash = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(enrichment.graph));
+  if (hash === null) throw new Error('figure-policy fixture requires a bound graph');
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -56,6 +61,7 @@ function runAnalysisFact(enrichment: Record<string, unknown>): HandlerFact {
       scenario_id: 'scen-58af9704',
       leading_option_id: 'opt_scope',
       summary: 'Ran analysis',
+      graph_hash_at_run: hash,
       enrichment,
     },
   } as HandlerFact;
@@ -85,7 +91,11 @@ function paulsRunEnrichment(robustnessExtra: Record<string, unknown> = {}): Reco
       ],
       ...robustnessExtra,
     },
-    graph: { nodes: [], edges: [] },
+    graph: { nodes: [
+      { id: 'opt_scope', kind: 'option', label: 'Reduce scope' },
+      { id: 'opt_contractor', kind: 'option', label: 'Hire a contractor' },
+      { id: 'opt_sq', kind: 'option', label: 'Status quo' },
+    ], edges: [] },
   };
 }
 
@@ -119,6 +129,8 @@ async function enrichAndReadReview(
   } as never);
   const out = await enrichRunAnalysisWithDecisionReview({
     handlerFacts: [runAnalysisFact(enrichment)],
+    runGraph: enrichment.graph,
+    currentGraph: enrichment.graph,
     requestId: 'req-58af9704',
     scenarioId: 'scen-58af9704',
     signal: new AbortController().signal,
