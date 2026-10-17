@@ -18,7 +18,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { currentStatementRetention, userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
@@ -1679,7 +1679,11 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
         const node = (Array.isArray(g.raw.nodes) ? g.raw.nodes as unknown[] : []).find((x) => isPlainRecord(x) && x.id === n.id);
         const said = userStatementsOn(node);
         const measure = recordedMeasureOf(node);
-        return said.length === 0 ? {} : { user_statements: said.map((r) => ({ field: r.field, said: r.statements.map((x) => x.quote), speaker: 'user' })),
+        return said.length === 0 ? {} : { user_statements: said.map(r => {
+          const current = currentStatementRetention(r);
+          return current === undefined ? { field: r.field, said: r.statements.map(x => x.quote), speaker: 'user' }
+            : { field: r.field, current_retained: current, source_record: r };
+        }),
           ...(measure === undefined ? {} : { measured_in: measure }) };
       })(),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
@@ -4093,7 +4097,15 @@ export function createAgentCapabilities(
       return typeof raw === 'number' ? `; current figure: ${sayFigureExactly(raw, String(os?.unit ?? '')) ?? raw} (${source})` : '';
     };
     const partWords = (n: Record<string, unknown>) => `“${String(n.label)}”` + (typeof n.description === 'string' ? ` — ${n.description}` : '') + figureWords(n)
-      + userStatementsOn(n).flatMap(r => r.statements.map(s => `; ${r.field}, ${s.speaker === 'user' ? 'recorded user words' : 'source not verified'}: “${s.source}” (quoted: “${s.quote}”; reading: ${s.reading})`)).join('');
+      + userStatementsOn(n).map(r => {
+        const words = r.statements.map(s => `; ${r.field}, ${s.speaker === 'user' ? 'recorded user words' : 'source not verified'}: “${s.source}” (quoted: “${s.quote}”; reading: ${s.reading})`).join('');
+        const current = currentStatementRetention(r);
+        if (current === undefined) return words;
+        const retained = !current.complete ? 'The saved source does not confirm which earlier parts still apply.'
+          : current.spans.length === 0 ? 'No earlier parts remain current.'
+            : current.spans.map(s => `“${s.text}” (${s.origin === 'held_user_statement' ? 'recorded user source' : 'earlier speaker and source not verified'})`).join('; ');
+        return `; ${r.field}, current retained account: ${retained}; Complete source record (correction request and earlier history; only the retained parts above remain current): ${words}`;
+      }).join('');
     const scales = buildFactorScaleMap(candidate.nodes as GraphRead['nodes']);
     const settingWords = (n: Record<string, unknown>): string[] => Object.entries(mergeInterventionSourceObjects(n as never)).map(([id, cell]) => {
       const factor = (candidate.nodes as Record<string, unknown>[]).find(x => x.id === id);

@@ -29,6 +29,35 @@ export interface UserStatementRecord {
   readonly attest?: StatementAttest;
 }
 
+/** Current retained text is a reading of correction metadata, never a rewritten human quote. */
+export function currentStatementRetention(record: UserStatementRecord): {
+  readonly spans: readonly { readonly text: string; readonly origin: 'held_user_statement' | 'unknown' }[];
+  readonly complete: boolean;
+} | undefined {
+  const a = record.attest;
+  if (a?.recorded_by !== 'correction') return undefined;
+  const unreadable = { spans: [], complete: false } as const;
+  const limit = Object.keys(a).length;
+  const countOf = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= limit;
+  const count = a.retained_count;
+  if (!countOf(count)) return unreadable;
+  const spans: { text: string; origin: 'held_user_statement' | 'unknown' }[] = [];
+  for (let i = 0; i < count; i++) {
+    const key = `retained_${i}`, parts = a[`${key}_parts`];
+    let text = a[key];
+    if (text === undefined) {
+      if (!countOf(parts) || parts === 0) return unreadable;
+      const pieces = Array.from({ length: parts }, (_, p) => a[`${key}_part_${p}`]);
+      if (!pieces.every(p => typeof p === 'string' && p.length > 0)) return unreadable;
+      text = pieces.join('');
+    } else if (parts !== undefined) return unreadable;
+    const origin = a[`${key}_origin`];
+    if (typeof text !== 'string' || text.trim() === '' || (origin !== 'held_user_statement' && origin !== 'unknown')) return unreadable;
+    spans.push({ text, origin });
+  }
+  return { spans, complete: true };
+}
+
 const text = (v: unknown, max: number): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= max;
 const attestOf = (v: unknown): StatementAttest | undefined | null => {
   if (v === undefined) return undefined;

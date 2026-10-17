@@ -1,4 +1,8 @@
 import { HistoryStore } from '../../orchestrator-v5/agent-lane/history-store.js';
+import { prepareStatementCorrection } from '../../orchestrator-v5/statement-door/fields/correction.js';
+import { userStatementOf } from '../../orchestrator-v5/agent-lane/user-statements.js';
+import { userStatementRecord, withUserStatement } from '../../orchestrator-v5/statement-door/statements.js';
+import { subjectKey } from '../../orchestrator-v5/statement-door/subject.js';
 import { typedByUser, userWordsOf } from '../../orchestrator-v5/agent-lane/stated-by-user.js';
 import { log } from '../../utils/telemetry.js';
 /** Saved-model corrections: real canonical adapters → own card → one native CAS registration → whole readback. */
@@ -1052,6 +1056,40 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
     expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
     expect(decisions(w.graph())).toEqual([savedDecision]);
+  });
+  it('N6: a corrected source has current retained words and labelled history on the complete card, cold save and read', async () => {
+    const old = 'For weekly loaves sold, we count loaves sold, including wasted loaves.';
+    const quote = 'For weekly loaves sold, withdraw “including wasted loaves” and keep “loaves sold”.';
+    const subject = { kind: 'goal' as const, id: 'weekly_loaves_sold', field: 'measure' as const };
+    const w = await bakeryWorld({}, graph => {
+      const statement = userStatementOf({ speaker: 'user', quote: old, source: old, reading: 'olumi', form: 'describes',
+        subject: { quantity: subjectKey(subject), node_id: subject.id } });
+      expect(statement).toBeDefined();
+      const held = withUserStatement(graph as Rec & { nodes: unknown[] }, userStatementRecord(subject, [statement!],
+        '2026-10-17T12:00:00Z', { recorded_by: 'construction' }), subject)!;
+      const corrected = prepareStatementCorrection(held, { quote, edits: [{ subject,
+        retirement: { quote: 'including wasted loaves', scope: 'part', disposition: 'retracted' }, retained: ['loaves sold'],
+        reading_words: 'The wasted-loaves phrase is withdrawn; retain the sold-loaves measure.' }] }, { now: quote }, '2026-10-17T13:00:00Z');
+      if ('refused' in corrected) throw new Error(corrected.refused);
+      Object.assign(graph, corrected.candidate);
+    });
+    const beforeRecord = w.original.nodes.find((n: Rec) => n.id === subject.id).user_statements.find((r: Rec) => r.field === 'measure');
+    const offered = await w.offer(); expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain('measure, current retained account: “loaves sold” (recorded user source)');
+    expect(offered.public_label).toContain('Complete source record (correction request and earlier history; only the retained parts above remain current):');
+    expect(offered.public_label).toContain(old);
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
+    const cold = restoreCard(held, offered, w.ctx), caps = w.caps(cold);
+    expect(await caps.authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+    const press = { ...w.ctx, turn_id: randomUUID(), user_turn_text: '', typed_approval_of: pid };
+    expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
+    const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
+    expect(read.goal.user_statements.find((r: Rec) => r.field === 'measure')).toEqual({ field: 'measure',
+      current_retained: { spans: [{ text: 'loaves sold', origin: 'held_user_statement' }], complete: true }, source_record: beforeRecord });
+    expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
   });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });

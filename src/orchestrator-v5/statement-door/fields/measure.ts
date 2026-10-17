@@ -22,7 +22,7 @@ import {
 } from '../../goal-target/goal-reading-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf } from '../statements.js';
+import { currentStatementRetention, holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf } from '../statements.js';
 import { subjectKey, type DoorSubject } from '../subject.js';
 import type { FieldWriter } from '../write.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -174,5 +174,8 @@ export function recordedMeasureOf(goal: unknown): string | undefined {
   if (m === null) return undefined;
   const key = subjectKey({ kind: 'goal', id: goal.id, field: 'measure' });
   const record = userStatementOnNode(goal, key);
-  return record !== undefined && record.field === 'measure' && record.statements.some((s) => wordsTheUserWrote(m[1], s.quote)) ? m[1] : undefined;
+  const current = record === undefined ? undefined : currentStatementRetention(record);
+  return record !== undefined && record.field === 'measure' && (current === undefined
+    ? record.statements.some(s => wordsTheUserWrote(m[1], s.quote))
+    : current.complete && current.spans.some(s => s.origin === 'held_user_statement' && wordsTheUserWrote(m[1], s.text))) ? m[1] : undefined;
 }
