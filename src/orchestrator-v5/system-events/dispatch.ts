@@ -3432,6 +3432,11 @@ export type CommitOptionLevelsInput = {
     readonly band: import('../format/influence-bands.js').InfluenceBand;
     /** Whose band: an Olumi band is stamped `olumi_estimate` through the writer's adoption authority, never as the user's. */
     readonly author: 'user_specified' | 'model_proposed';
+    /**
+     * ⭐ G3 WORKING POINT (BANKED for the Founder; DL-3 04:15Z): Olumi's spread for an adopted Olumi estimate (`model_proposed`
+     * `set` only), the working point's own, written as the link's std instead of `olumiSpreadForMean`. Still Olumi's spread.
+     */
+    readonly std?: number;
   }[];
   /**
    * ⭐ ONE USER-STATED LINK EFFECT (Canonical #72 5882780438 / 5882989451): the user's natural-units answer to "how much
@@ -3598,6 +3603,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       // (`adopted_estimate_not_a_set`). D1 (DL 12 Oct, Batch D): Olumi's band on a placeholder now arrives as a `set` at the
       // band's midpoint (a placeholder has no current band), so it is adopted here as Olumi's estimate, never its default.
       adopted: l.author === 'model_proposed' && l.intent === 'set',
+      ...(l.std !== undefined ? { std: l.std } : {}),
       // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
       ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,

@@ -152,6 +152,8 @@ export interface ApprovedLinkAdoption {
   readonly magnitude: number;
   /** Olumi's band the user agreed to: recorded on the review (`reviewed_by_user.band`). */
   readonly band: import('../format/influence-bands.js').InfluenceBand;
+  /** ⭐ G3 WORKING POINT (BANKED for the Founder): the spread of Olumi's estimate, adopted with it (`ApprovedLinkStrength.std`). */
+  readonly std?: number;
 }
 
 const linkStore = new AsyncLocalStorage<readonly ApprovedLinkAdoption[]>();
@@ -170,10 +172,10 @@ export function approvedLinkAdoptionFor(
   from: string,
   to: string,
   magnitude: unknown,
-): { readonly band: import('../format/influence-bands.js').InfluenceBand } | undefined {
+): { readonly band: import('../format/influence-bands.js').InfluenceBand; readonly std?: number } | undefined {
   const adoptions = linkStore.getStore();
   if (adoptions === undefined) return undefined;
   if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return undefined;
   const a = adoptions.find(x => x.scenarioId === scenarioId && x.from === from && x.to === to && x.magnitude === Math.abs(magnitude));
-  return a === undefined ? undefined : { band: a.band };
+  return a === undefined ? undefined : { band: a.band, ...(a.std !== undefined ? { std: a.std } : {}) };
 }
