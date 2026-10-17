@@ -111,6 +111,18 @@ describe('a later ambition is never an active target (G1 turn 01)', () => {
     const without = aiCalls;
     await registered(onFactor('ambition'));
     expect(aiCalls).toBe(without);
+    // The same for a later ambition held as a share on an OUTCOME (the reader re-kinds a percent-level outcome).
+    const onShare = (role: 'ambition' | null): Rec => {
+      const d = draft(null);
+      d.outcomes.push({ label: 'Repeat investor share', provenance: 'inferred' });
+      d.links.push({ ...d.links[0], to: 'Repeat investor share' });
+      if (role !== null) d.constraints = [{ metric: 'Repeat investor share', operator: '>=', value: 40, unit: '%', provenance: 'explicit', frame: 'level', role }];
+      return d;
+    };
+    await registered(onShare(null));
+    const share = aiCalls;
+    await registered(onShare('ambition'));
+    expect(aiCalls).toBe(share);
   }, 60_000);
 
   it('through the real build and register: the saved graph carries no active target for the later ambition', async () => {
