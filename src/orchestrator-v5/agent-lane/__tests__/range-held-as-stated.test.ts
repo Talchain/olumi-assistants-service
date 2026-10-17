@@ -120,14 +120,16 @@ describe('construction: a stated effect RANGE is held as the user’s statement 
     const g = await built(brief, draftOf({ ...A, amount: 5, perSource: 1, effect: { quote, low: 4, high: 7, unit: 'attendance points', value: 5 } }));
     expect(linkOf(g, 'Corporate deal active', 'weekday attendance').provenance.natural_effect.stated_range).toMatchObject({ low: 4, high: 7, end: 'centre' });
   });
-  it('⭐ per-one count: "each author evening … somewhere between 20 and 40 extra visitors" is held whole on its link', async () => {
+  // ⛔ CHANGED EXPECTATION (DL-3 exit on BUDDY-A #3356 R7): "extra visitors" is not the AI's "visitors" by complete-unit equality, so
+  // the range is held whole on its link, UNCONVERTED (no unit); a noun with other words can be another population ("non-paying").
+  it('⭐ per-one count: "each author evening … somewhere between 20 and 40 extra visitors" is held whole on its link, unconverted', async () => {
     const g = await built(B_BRIEF, draftOf({
       goal: { metric: 'weekly visitor conversion', baseline: 12, target: 15, levelQuote: B_LEVEL, targetQuote: B_TARGET },
       option: 'Run author evenings', factor: 'Author evenings held', factorUnit: 'evenings', perSource: null, amount: null,
       effect: { quote: B_EFFECT, low: 20, high: 40, unit: 'visitors' },
     }));
     expect(effectRecord(g, 'Author evenings held', 'weekly visitor conversion')?.statements[0])
-      .toMatchObject({ form: 'range', low: 20, high: 40, unit: 'visitors', quote: B_EFFECT });
+      .toMatchObject({ form: 'range', low: 20, high: 40, unit: '', quote: B_EFFECT });
   });
   it('NEGATIVE: a range whose sign the sentence does not write (−7 to −4 for "add") is never held as the user’s', async () => {
     const g = await built(A_BRIEF, draftOf({ ...A, effect: { ...A.effect, low: -7, high: -4 } }));

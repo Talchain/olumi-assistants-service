@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -3858,6 +3858,26 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
   return { ...model, nodes, loss: [...model.loss, ...loss] };
 }
 
+/** The user's range in another unit than this link's: said as theirs, and why Olumi has not sized the link from it (G3 a735). */
+function statedRangeOtherUnitEntry(l: CandidateLink, range: { readonly low: number; readonly high: number; readonly quote: string },
+  source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
+  const said = range.quote.trim();
+  // The AIE's words (prompt/AIE-UNIT-REFERENCE-WORDING-20261017-v1.json, 16:04Z): never "cannot be converted", never the user's figure.
+  const reason = `"${source.label}" → "${target.label}": "${said}", as stated in the brief. Olumi has not converted this range into `
+    + `"${naturalAmountUnitOf(target)}" for this effect. The model currently holds a separate provisional Olumi estimate, not the stated range.`;
+  return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_other_unit`,
+    before: { low: range.low, high: range.high, effect_amount: l.effect_amount ?? null }, after: null, reason, severity: 'warn' } as RepairEntry;
+}
+
+/** The user's range, said as theirs beside the separate approximation Olumi's estimate is (G3 a735 green core). */
+function statedRangeBesideEstimateEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
+  const said = range.reported.trim();
+  const reason = `"${source.label}" → "${target.label}": "${said}", as the brief puts it. The current calculation uses a separate `
+    + `approximation, Olumi's: ${sized.statement ?? 'its own size'}, not that range.`;
+  return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_beside_estimate`,
+    before: { low: range.low, high: range.high, text: range.text }, after: sized.natural_effect?.amount ?? null, reason, severity: 'info' } as RepairEntry;
+}
+
 /**
  * ⭐ ITEM 3 (AIE 16 Oct range contract, in its own words): the one disclosure for a link whose effect the USER stated as a
  * range while nobody gave it a size. The user's whole attributed sentence is recorded on the link (construction's statement
@@ -5156,7 +5176,7 @@ function admitOnce(
         source: source.label,
         sourceUnit: source.unit,
         others: quantityLabels.filter((q) => q !== source.label),
-      }) ?? (typeof brief === 'string' ? linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount as number) ?? null : null)
+      }) ?? (typeof brief === 'string' ? linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount as number, naturalAmountUnitOf(target)) ?? null : null)
       : null;
     // ⭐ SCIENCE §(u)(b): for an OLUMI-drafted size the drawn direction is the one source of sign, and the size is
     // |amount| per |change| (P44 arm: +3, +2.5 and +10,368 were written on links drawn as negative, and all were set aside
@@ -5182,12 +5202,19 @@ function admitOnce(
     // placeholder (a bare range gives no mean, spread or tails), said once against that range, never asked again.
     const sourceRange = !user_stated && typeof l.effect_amount !== 'number' && typeof brief === 'string'
       ? linkEffectStatedRange(model, brief, source.label, target.label) ?? undefined : undefined;
+    // ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R1–R3): an Olumi size taken from the user's range in ANOTHER unit ("4 to 6 lb" on a
+    // kilogram link; "4 and 6 mm" read as metres) is a figure in the wrong unit: set aside, so the link keeps Olumi's placeholder
+    // and says why. Never converted here, never the user's figure.
+    const otherUnit = !user_stated && typeof signed.amount === 'number' && typeof brief === 'string'
+      ? linkEffectRangeInOtherUnit(model, brief, source.label, target.label, naturalAmountUnitOf(target)) ?? null : null;
+    const wrongUnit = otherUnit !== null && Math.abs(signed.amount as number) >= otherUnit.low && Math.abs(signed.amount as number) <= otherUnit.high;
+    if (wrongUnit) loss.push(statedRangeOtherUnitEntry(l, otherUnit!, source, target));
     const statement = {
       // A corrected estimate sign cannot prove the drafter's original definition.
       definitional: l.definitional === true && !signed.resolved,
       direction: l.direction,
-      effect_amount: signed.amount,
-      effect_per_source_change: signed.per,
+      effect_amount: wrongUnit ? null : signed.amount,
+      effect_per_source_change: wrongUnit ? null : signed.per,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
       ...(sourceRange !== undefined ? { source_range: sourceRange } : {}),
@@ -5199,6 +5226,12 @@ function admitOnce(
     if (sourceRange !== undefined && framed.outcome !== 'user_stated' && framed.outcome !== 'estimate') {
       loss.push(statedRangeUnsizedEntry(l, sourceRange, framed, source, target));
     }
+    // ⭐ G3 a735 GREEN CORE (DL-3 ruling B, 17 Oct; AIE A3 13:11Z; spec §1): a link OLUMI sized whose effect the user stated as a
+    // range keeps Olumi's estimate, a separate approximation, and the user's range is said beside it as theirs, as the brief puts it.
+    // A drafted end of their range is Olumi's choice, never the user's figure (three BUDDY-A rounds on crediting it: stopped).
+    const besideEstimate = !user_stated && typeof l.effect_amount === 'number' && typeof brief === 'string'
+      ? linkEffectStatedRange(model, brief, source.label, target.label) ?? undefined : undefined;
+    if (besideEstimate !== undefined && framed.outcome === 'estimate') loss.push(statedRangeBesideEstimateEntry(l, besideEstimate, framed, source, target));
     sizing.set(`${l.from}::${l.to}`, l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
       ? framed : sizeLink(statement, source, unframed));
   }
