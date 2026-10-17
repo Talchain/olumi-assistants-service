@@ -41,7 +41,7 @@ it.each([
   ['missing quote', 'correction_not_stated', 'correction.quote_present'],
   ['partial quote', 'correction_not_stated', 'correction.quote_whole_current_turn'],
   ['empty edits', 'correction_not_stated', 'correction.edits_nonempty'],
-  ['unrelated source', 'unrelated_correction', 'correction.postimage.unrelated_correction'],
+  ['unrelated source', 'unrelated_correction', 'correction.postimage.unrelated_correction.unbound'],
   ['ordinary subject', 'subject_not_found', 'propose_statement.subject_not_found'],
 ])('refusal source diagnostic: %s keeps text private and changes no verdict', async (fault, refusal, check) => {
   const f = fixture(cases[0]!), secret = 'PRIVATE_SOURCE_AND_READING_CANARY_7d92';
@@ -72,13 +72,34 @@ it.each([
     const quoted = fault === 'ordinary subject' ? event.statements[0] : event.correction;
     const quote = fault === 'ordinary subject' ? message : args.correction.quote ?? '';
     expect(quoted).toMatchObject({ quote_length: quote.length, quote_sha256: createHash('sha256').update(quote).digest('hex'),
-      quote_found_in_current_turn: fault !== 'missing quote',
       quote_is_whole_current_statement: !['missing quote', 'partial quote'].includes(fault) });
+    expect(quoted).not.toHaveProperty('quote_found_in_current_turn'); // No second quote-normalisation rule.
     expect(event.correction.edits.every((e: Rec) => e.subject_id_present)).toBe(true);
     expect(JSON.stringify(event)).not.toContain(secret);
     expect(JSON.stringify(event)).not.toContain(message);
     expect(w.graph()).toEqual(f.graph);
     expect(w.proposals.size()).toBe(0); expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  } finally { spy.mockRestore(); }
+});
+
+it.each([
+  { words: 'For Energy use, retract the earlier account.', binder: 'another', index: 0 },
+  { words: 'Retract the earlier account.', binder: 'unbound', index: 0 },
+  { words: 'For Dispatch updates, retract the earlier account.', binder: 'unbound', index: 1 },
+])('native diagnostic distinguishes $binder at edit $index', async ({ words, binder, index }) => {
+  const f = fixture(cases[0]!);
+  f.graph.nodes.push({ id: 'energy', kind: 'factor', label: 'Energy use' });
+  const w = await correctionWorld(f.graph, words), spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+  try {
+    const result = await w.offer('propose_statement', { correction: { ...f.request, quote: words,
+      edits: index === 0 ? [f.request.edits[0]] : f.request.edits } });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+    const event = spy.mock.calls.map(([e]) => e as Rec).find(e => e.diagnostic_source === 'statement_preparation')!;
+    expect(event).toMatchObject({ request_id: w.ctx.request_id, binder_result: binder, failed_edit_index: index,
+      failed_checks: [`correction.postimage.unrelated_correction.${binder}`] });
+    expect(JSON.stringify(event)).not.toContain(words);
+    expect(JSON.stringify(event)).not.toContain('Energy use');
+    expect(w.graph()).toEqual(f.graph); expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0);
   } finally { spy.mockRestore(); }
 });
 

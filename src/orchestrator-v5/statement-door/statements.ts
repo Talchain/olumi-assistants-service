@@ -280,8 +280,15 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
   return { ...value, source, edits };
 }
 
+interface CorrectionDiagnostic {
+  failed_check?: string;
+  binder_result?: ReturnType<typeof statementBoundTo>;
+  /** Zero-based index in the requested edit list. */
+  failed_edit_index?: number;
+}
+
 /** The native postimage. Expected records/nodes are checked before any member changes; a refusal changes nothing. */
-export function applyStatementCorrection(graph: unknown, value: unknown): { candidate?: Rec; refused?: string; unchanged?: true } {
+export function applyStatementCorrection(graph: unknown, value: unknown, diagnostic?: CorrectionDiagnostic): { candidate?: Rec; refused?: string; unchanged?: true } {
   const approved = statementCorrectionOf(value);
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || approved === undefined) return { refused: 'invalid_statement' };
   if (approved.edits.some(e => protectedAttestation(e.expected_record))) return { refused: 'correction_attestation_protected' };
@@ -292,13 +299,18 @@ export function applyStatementCorrection(graph: unknown, value: unknown): { cand
       && (e.legacy === undefined || isDeepStrictEqual(legacyOf(node, e.legacy.field), e.legacy.replacement === null ? undefined : e.legacy.replacement));
   });
   if (held) return { candidate: graph, unchanged: true };
-  for (const e of approved.edits) {
+  for (const [editIndex, e] of approved.edits.entries()) {
     const resolved = resolveSubject(graph, e.subject);
     const node = nodeOf(graph, e.subject.id);
     if (resolved.kind !== 'resolved' || !isDeepStrictEqual(resolved.subject, e.subject) || node === undefined) return { refused: 'node_not_found' };
     if (!isDeepStrictEqual(node, e.expected_node)
       || !isDeepStrictEqual(userStatementFor(graph, e.subject) ?? null, e.expected_record)) return { refused: 'node_changed' };
-    if (statementBoundTo(graph, e.subject, approved.source.quote) !== 'bound') return { refused: 'unrelated_correction' };
+    const binding = statementBoundTo(graph, e.subject, approved.source.quote);
+    if (binding !== 'bound') {
+      if (diagnostic !== undefined) Object.assign(diagnostic, { binder_result: binding, failed_edit_index: editIndex,
+        failed_check: `correction.postimage.unrelated_correction.${binding}` });
+      return { refused: 'unrelated_correction' };
+    }
     const oldQuotes = e.expected_record?.statements.map(s => s.quote) ?? [];
     if (e.legacy !== undefined) {
       if (legacyOf(node, e.legacy.field) !== e.legacy.expected) return { refused: 'node_changed' };
@@ -363,7 +375,7 @@ export function statementCorrectionWords(c: StatementCorrection): string {
 }
 
 export function prepareStatementCorrection(graph: unknown, request: StatementCorrectionRequest,
-  texts: { now?: string; conversation?: string }, at: string, diagnostic?: { failed_check?: string }): CorrectionResult {
+  texts: { now?: string; conversation?: string }, at: string, diagnostic?: CorrectionDiagnostic): CorrectionResult {
   const refused = (reason: string, check: string): CorrectionResult => {
     if (diagnostic !== undefined) diagnostic.failed_check = check;
     return { refused: reason };
@@ -392,7 +404,7 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
         correctionAttest({ ...e, expected_record: expected })) });
   }
   const correction: StatementCorrection = { source: source!, edits };
-  const written = applyStatementCorrection(graph, correction);
-  if (written.refused || written.candidate === undefined) return refused(written.refused ?? 'invalid_statement', `correction.postimage.${written.refused ?? 'invalid_statement'}`);
+  const written = applyStatementCorrection(graph, correction, diagnostic);
+  if (written.refused || written.candidate === undefined) return refused(written.refused ?? 'invalid_statement', diagnostic?.failed_check ?? `correction.postimage.${written.refused ?? 'invalid_statement'}`);
   return { correction, candidate: written.candidate, words: statementCorrectionWords(correction) };
 }

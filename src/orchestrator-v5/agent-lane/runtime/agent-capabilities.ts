@@ -6762,7 +6762,7 @@ export function createAgentCapabilities(
      * (`readStatement`), and the row's writer prepares its carrier's write. ONE card in the door's template; nothing is written.
      */
     async proposeStatement(ctx, args): Promise<ToolResult> {
-      const diagnostic: { failed_check?: string } = {};
+      const diagnostic: NonNullable<Parameters<typeof proposeStatementCorrection>[5]> = {};
       const result = await (async (): Promise<ToolResult> => {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
@@ -6820,13 +6820,13 @@ export function createAgentCapabilities(
           const quote = isPlainRecord(value) && typeof value.quote === 'string' ? value.quote : '';
           return { quote_present: isPlainRecord(value) && typeof value.quote === 'string', quote_length: quote.length,
             quote_sha256: createHash('sha256').update(quote).digest('hex'),
-            quote_found_in_current_turn: quote !== '' && (ctx.user_turn_text ?? '').includes(quote),
             quote_is_whole_current_statement: wholeStatementIn(ctx.user_turn_text ?? '', quote) };
         };
         // Separate from the loop's scalar refusal event, so diagnostics do not count as another refused tool call.
         log.info({ event: 'v5.agent.tool_refusal_diagnostic', request_id: ctx.request_id, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id,
           diagnostic_source: 'statement_preparation',
           tool: 'propose_statement', refusal: result.refusal, failed_checks: [diagnostic.failed_check ?? `propose_statement.${result.refusal}`],
+          ...(diagnostic.binder_result === undefined ? {} : { binder_result: diagnostic.binder_result, failed_edit_index: diagnostic.failed_edit_index }),
           variant: args?.correction === undefined ? 'statement' : 'correction', agent_mode: mode,
           fields_present: fields(args, ['correction', 'subject', 'statements']),
           subject_id_present: isPlainRecord(args?.subject) && typeof args.subject.id === 'string',

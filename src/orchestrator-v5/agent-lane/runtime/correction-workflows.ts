@@ -24,7 +24,7 @@ const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v ===
 
 /** Prepare the existing set_statement_record card. The Founder adapter only supplies the canonical read and store. */
 export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown, baseHash: string,
-  request: StatementCorrectionRequest, proposals: ProposalStore, diagnostic?: { failed_check?: string }): ToolResult {
+  request: StatementCorrectionRequest, proposals: ProposalStore, diagnostic?: Parameters<typeof prepareStatementCorrection>[4]): ToolResult {
   const prepared = prepareStatementCorrection(graph, request, { now: ctx.user_turn_text, conversation: ctx.user_text }, new Date().toISOString(), diagnostic);
   if ('refused' in prepared) return { ok: false, mutated: false, refusal: prepared.refused,
     detail: prepared.refused === 'correction_attestation_protected'
