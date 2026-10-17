@@ -319,132 +319,18 @@ export function semanticReasons(): readonly { readonly code: AdmissionReasonCode
   return [...Object.values(SEMANTIC_REASON), ALL_MATERIAL_LINKS_USER_STATED_REASON, MIXED_MATERIAL_LINKS_USER_STATED_SHORT];
 }
 
-/**
- * ⭐ THE ONE ANSWER TO "DOES THE MODEL LICENSE NAMING A LEADER?", shared by every
- * claim-safety rail so they cannot drift into two authorities on one question.
- *
- * ⚠ WHAT THIS IS NOT. It is NOT `leader_claim.permitted`, NOT
- * `mayNameLeadingOption`, and it does not replace either. Those answer
- * *"is THIS TURN entitled?"* and *"did THIS RESULT separate the arms?"*. This
- * answers *"does the MODEL license the claim at all?"* — the third question the
- * schema names, and the one no rail read before. The schema's own consumer note
- * spells out that they are CONJOINED, never reconciled:
- *
- *   *"gate any leading-option / 'stable' / 'robust' wording on
- *   `permitted_analysis_mode === 'comparative_leader'` CONJOINED with the
- *   post-run evidence they already read (`leader_claim.permitted`). The two
- *   answer different questions."*
- *
- * Aligning their defaults instead of conjoining them is exactly how #709/#737
- * was created (CLAUDE.md trap 21), which is why this is a separate predicate
- * with a separate name rather than a new branch inside either verdict.
- *
- * FAIL OPEN, DELIBERATELY. Absent, malformed, or unrecognised ⇒ `true`, so a
- * producer that predates `analysis_admission` behaves byte-identically. Over-
- * suppression here would silence leader prose on every legitimate turn, which
- * `leading-option-wire-enforcement.ts` records as *"a WORSE product defect than
- * the one being fixed"*.
- *
- * ⭐⭐ AND `structurally_analysable: false` FAILS OPEN TOO — MEASURED, NOT
- * ASSUMED, AND THIS IS THE NARROWING THAT MAKES THE PREDICATE HONEST.
- *
- * The first cut of this function tested the mode alone. It turned THREE of the
- * estate's own PERMIT-WINS controls red — the arms whose message is *"a blanket
- * suppression would be a WORSE defect than the leak — this arm is what catches
- * it"* — plus the real post-analysis advice-gate answer, which lost both its
- * option name and its `_answer_shape` sidecar. Instrumenting the reader showed
- * why: on those turns the mode is `'none'`, not `'quantified_provisional'`.
- *
- * `'none'` means *"the model has blockers; nothing may RUN"*. That is a
- * statement about whether the CURRENT model can be analysed — NOT a cap on what
- * may be claimed about a result that already exists. Readiness is recomputed per
- * turn, so a post-analysis explain turn whose graph has since drifted into a
- * blocked state reads `'none'` while its completed result is perfectly
- * legitimate prose. Conjoining that would suppress leader text on the entire
- * post-analysis population — the exact WORSE defect, arrived at from the other
- * side.
- *
- * ⚠⚠ THE ENUM IS TWO AXES, NOT ONE SCALE (CLAUDE.md trap 21) — AND THE
- * NARROWING SPLITS IT EXACTLY ALONG THAT BOUNDARY. This is the clearest
- * statement of the design, and unlike the red-test argument above it is
- * PROVABLE FROM THE PRODUCER rather than only observed.
- *
- * `permitted_analysis_mode` and `structurally_analysable` have exactly ONE
- * runtime writer each, side by side in {@link analysisAdmissionFrom}, off the
- * same `admission` binding: the mode comes from `deriveMode`, the flag IS
- * `admission.willProceed`. And `analysis_admission` has exactly ONE mint site
- * (`orchestrator/tools/analysis-ready-helper.ts`). The joint domain is therefore
- * total and closed:
- *
- *   RUN-REFUSAL AXIS — `none`, `exploratory`
- *       ⟺ `structurally_analysable === false`. `deriveMode` returns these two
- *       ONLY inside its `!admission.willProceed` branch, which is the same
- *       boolean the flag is minted from. They answer *"may this model RUN?"*,
- *       say nothing about a result that already completed, and — the correction
- *       that matters — NEITHER CAN EVER REACH THE MODE READER BELOW: the
- *       structural check stands down first and lets `mayNameLeadingOption`
- *       answer alone.
- *
- *   CLAIM-STRENGTH AXIS — `quantified_provisional`, `comparative_leader`
- *       ⟺ `structurally_analysable === true`. These answer *"how strong a CLAIM
- *       does this model license?"* — the real cap, and the only axis that binds
- *       here.
- *
- * ⭐ SO SUPPRESSION FIRES IFF `mode === 'quantified_provisional'` — precisely
- * the cell the admission itself caps in writing. When this was written, every
- * sentence that cell could ship (`SEMANTIC_REASON`, routed by `modeReason`)
- * denied a leader: two said verbatim *"no option can be called the leader"*, the
- * third that there is *"no comparison to draw a leader from"*.
- *
- * ⚠ CORRECTED 26 Sep 2026 (DL #70 5845827326), NOT DELETED: Paul's 7 Sep ruling
- * for this class is "caveat, not withhold" (programme-docs#38 5576895511), and
- * the agent lane names a separated leader here WITH a caveat
- * (`agentLaneLeaderWithheld`). A denial beside that caveated leader was one fact
- * stated two ways, so the two machine-estimate sentences now say figures, *and
- * which option they favour*, can be shown only as provisional. This predicate is
- * UNCHANGED: it still caps the claim on this cell, and the agent-lane mirror
- * still decides WHETHER the caveated form may ship. No other legitimate
- * population is caught.
- *
- * ⚠⚠ THE STAND-DOWN ON `exploratory` IS A JUDGEMENT, NOT A MEASUREMENT — SAID
- * PLAINLY SO THE NEXT READER DOES NOT INHERIT IT AS EVIDENCE. Every red control
- * that forced this narrowing sat in the `'none'` cell; nothing measured
- * `exploratory`. MEASURED 5 Sep 2026, whole required suite, mutating this
- * predicate to stand down only on `'none'` so that `exploratory` BINDS:
- * `4 failed / 37,465 passed` over 2,115 spec files, with ALL FOUR failures
- * inside this change's own spec and NONE of them about `exploratory`. Zero
- * pre-existing control pins it in either direction. The extension therefore
- * rests on the structural derivation above (`exploratory` cannot reach the mode
- * reader on any producer-minted payload) plus the judgement that the drift
- * argument applies to it identically — not on evidence.
- *
- * The founder's cell is unaffected by the narrowing and that is the test of it:
- * her admission said *"Figures CAN be shown as provisional"* — the run
- * proceeded, `structurally_analysable` is `true`, and the cap is
- * `quantified_provisional`. Still suppressed, exactly as intended.
- *
- * RANK COMPARISON, NEVER A STRING TEST — see {@link modePermitsAtLeast}.
- *
- * ⚠⚠ THIS RAIL DEVIATES FROM THE SCHEMA'S PUBLISHED CONSUMER RULE, AND THE
- * DEVIATION IS RECORDED AT THE SCHEMA RATHER THAN LEFT FOR A UI AUTHOR TO
- * DISCOVER. `schemas/analysis-ready.ts` instructs consumers to gate leader
- * wording on `permitted_analysis_mode === 'comparative_leader'`. This predicate
- * is strictly NARROWER — it suppresses only on `quantified_provisional` — so on
- * the `structurally_analysable === false` half a schema-following UI hides its
- * structured leader display while this prose rail stands down. That divergence
- * is real, is not closed, and is written up in full on the `analysis_admission`
- * field in `schemas/analysis-ready.ts`. Read it before widening either side.
+/** Admission caps current comparative wording; it grants no goal chance or independent claim licence.
+ * Missing legacy admission remains subject to the existing licence owners, while an explicit refusal cannot name a leader.
  */
 export function analysisReadyPermitsLeaderNaming(analysisReady: unknown): boolean {
+  if ((analysisReady as { readonly may_run?: unknown } | null | undefined)?.may_run === false) return false;
   const admission = (
     analysisReady as { readonly analysis_admission?: unknown } | null | undefined
   )?.analysis_admission;
   if (admission === null || typeof admission !== 'object') return true;
-  // The run itself is refused ⇒ this field is answering the OTHER question. Read
-  // `structurally_analysable` rather than testing `mode !== 'none'`: a mode added
-  // below the floor for a RUNNABLE model must still cap the claim.
-  if ((admission as { readonly structurally_analysable?: unknown }).structurally_analysable !== true)
-    return true;
+  // The same refused admission must bind the prose rail as well as structured display.
+  const structural = (admission as { readonly structurally_analysable?: unknown }).structurally_analysable;
+  if (structural !== true) return structural !== false;
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
   if (mode === null) return true;
   return modePermitsAtLeast(mode, 'comparative_leader');
@@ -1316,6 +1202,11 @@ export function analysisAdmissionFrom(
       code: admission.strict.safeToAnalyse ? 'NOTHING_TO_COMPARE' : 'MODEL_HAS_BLOCKERS',
       message: admission.blockedNextStep ?? MODE_REASON.none.message,
     });
+  } else if (admission.submission && (admission.submission.userStatus.excluded.length > 0
+    || admission.submission.olumiFilter.participation.some(o => o.state === 'excluded_olumi_proposed'))
+    && admission.plan.excluded_option_ids.length === 0) {
+    reasons.push({ field: 'structurally_analysable', code: 'RUN_WILL_EXCLUDE_OPTIONS',
+      message: 'Analysis can compare the included options. Options kept out of this comparison remain in your model.' });
   } else if (admission.plan.excluded_option_ids.length > 0) {
     // Counts what the run LEAVES OUT, never what it waives: a held status quo is waived AND compared
     // (`ScaffoldPlan.excluded_option_ids`).

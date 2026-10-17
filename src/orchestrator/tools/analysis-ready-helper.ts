@@ -44,10 +44,7 @@ import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, ri
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
-import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
-import { comparisonAfterExclusionsRefusal, gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
-import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
-import { buildFactorScaleMap, decideAnalysisScaleBlock, findScaleIncoherentBaselineFactorIds, projectRequestInterventionsToWireScale } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
+import { projectRunOptionSubmission } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -212,6 +209,7 @@ export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_rea
 };
 
 export interface CanonicalReadinessAssessment {
+  readonly submission?: ReturnType<typeof projectRunOptionSubmission>;
   readonly analysisReady: AnalysisReadyPayload | undefined;
   readonly issues: readonly CanonicalReadinessIssue[];
   readonly blockingIssues: readonly CanonicalReadinessIssue[];
@@ -1250,9 +1248,7 @@ function optionsTheRunSubmits(graph: GraphV3T, rawGraph: unknown, payload: Analy
 }
 
 /** The Run's submission, with the analysable gate's scaffold record (`held`: the values CEE supplied, per option). */
-function runSubmission(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload):
-  { options: ReadonlyArray<Record<string, unknown>>; held: ReadonlyArray<{ option_id: string; factor_ids: readonly string[] }>;
-    comparisonRefusal: ReturnType<typeof comparisonAfterExclusionsRefusal> } {
+function runSubmission(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload) {
   // As the snapshot loader builds them (`build-turn-context.ts` mergeOptionInterventionObjects).
   const optionNodes = new Map<string, Record<string, unknown>>(graph.nodes
     .filter((node) => node.kind === 'option').map((node): [string, Record<string, unknown>] => [node.id, { ...node }]));
@@ -1263,12 +1259,9 @@ function runSubmission(graph: GraphV3T, rawGraph: unknown, payload: AnalysisRead
       ...((option as { is_baseline?: boolean }).is_baseline !== undefined
         ? { is_baseline: (option as { is_baseline?: boolean }).is_baseline } : {}) };
   });
-  const user = userExcludedOptions({ options, graph: rawGraph });
-  const gate = gateAnalysableOptions({ options: user.options, graph, rawPersistedGraph: rawGraph, scaleNetEnabled: true });
-  return { options: filterOlumiProposedOptions({ submitted: gate.options as ReadonlyArray<Record<string, unknown>>, graph: rawGraph,
-    unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options, held: gate.held,
-    // Existing no-value admission remains unchanged; this closes the user's excluded-option count loss.
-    comparisonRefusal: user.excluded.length > 0 ? comparisonAfterExclusionsRefusal(gate, user.excluded) : null };
+  const submission = projectRunOptionSubmission({ options, graph, rawPersistedGraph: rawGraph,
+    scaleNetEnabled: true, goalNodeId: payload.goal_node_id });
+  return { ...submission, options: submission.submittedOptions, held: submission.gate.held };
 }
 
 function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
@@ -1555,12 +1548,10 @@ function appendSemanticIssues(
  */
 function runScaleGaps(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload):
   { reason: 'mixed_scale_unresolved' | 'baseline_scale_unresolved'; gaps: Array<{ id: string; label: string; value: number; unit?: string; levelHasNoScale: boolean }> } | null {
-  const { options, held } = runSubmission(graph, rawGraph, payload);
-  const raw = options.map((o) => (isPlainObject(o.interventions) ? o.interventions as Record<string, unknown> : {}));
-  const heldBy = new Map(held.map((r) => [r.option_id, new Set(r.factor_ids)] as const));
-  const synthesised = options.map((o) => heldBy.get(String(o.option_id ?? o.id)) ?? new Set<string>());
-  const baseline = findScaleIncoherentBaselineFactorIds(graph.nodes, raw, synthesised);
-  const verdict = decideAnalysisScaleBlock(projectRequestInterventionsToWireScale(raw, buildFactorScaleMap(graph.nodes), synthesised), baseline);
+  const submission = runSubmission(graph, rawGraph, payload);
+  const raw = submission.rawObjectsPerOption;
+  const baseline = submission.baselineIds;
+  const verdict = submission.scaleBlock;
   if (!verdict.blocked) return null;
   // One question per factor: a factor an option sets as a CATEGORY is the encoding check's (`needs_encoding`), never a scale ask.
   const categorical = new Set(raw.flatMap((ivs) => Object.entries(ivs)
@@ -1694,7 +1685,8 @@ export function assessCanonicalAnalysisReadiness(
     });
 
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
-    const comparisonRefusal = semantic ? runSubmission(parsed.data, graph, semantic).comparisonRefusal : null;
+    const submission = semantic ? runSubmission(parsed.data, graph, semantic) : undefined;
+    const comparisonRefusal = submission && submission.userStatus.excluded.length > 0 ? submission.comparisonRefusal : null;
     if (comparisonRefusal !== null) {
       blockingIssues.push({ issue_id: 'comparison_options_1', code: 'FEWER_THAN_TWO_OPTIONS', category: 'graph_structure',
         message: comparisonRefusal.nextStep, repairability: 'human_input_required' });
@@ -1702,8 +1694,17 @@ export function assessCanonicalAnalysisReadiness(
     // Derived from `parsed.data` — the SAME graph `projectSemanticAnalysisReadyFromGraph`
     // reads, schema-validated, so the disclosure can never describe a different
     // model than the ask it rides on.
+    const userExcludedIds = new Set(submission?.userStatus.excluded.map(o => o.option_id) ?? []);
+    const scopedGraph = userExcludedIds.size > 0 && isPlainObject(proposalGraph)
+      && Array.isArray(proposalGraph.nodes) && Array.isArray(proposalGraph.edges)
+      ? { ...proposalGraph,
+          nodes: proposalGraph.nodes.filter(n => !isPlainObject(n) || !userExcludedIds.has(String(n.id))),
+          edges: proposalGraph.edges.filter(e => !isPlainObject(e)
+            || (!userExcludedIds.has(String(e.from)) && !userExcludedIds.has(String(e.to)))),
+        } : proposalGraph;
+    const semanticForAdmission = userExcludedIds.size > 0 ? projectSemanticAnalysisReadyFromGraph(scopedGraph) : semantic;
     appendSemanticIssues(
-      semantic,
+      semanticForAdmission,
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
@@ -1852,13 +1853,14 @@ export function assessCanonicalAnalysisReadiness(
         || issue.category === 'numeric_integrity'
         || issue.category === 'internal',
     );
-    const activeSemanticBlockers = (semantic?.blockers ?? []).filter((blocker) => {
+    const activeSemanticBlockers = (semanticForAdmission?.blockers ?? []).filter((blocker) => {
       const issue = blockerIssue(blocker, 0, semantic?.status ?? 'ready');
       return issue?.code !== 'CONSTRAINT_REVIEW_REQUIRED' && issue?.code !== 'UNREACHABLE_CONTROLLABLE_FACTOR';
     });
     const analysisReady = semantic
       ? {
           ...semantic,
+          ...(semanticForAdmission ? { status: semanticForAdmission.status, blockers: activeSemanticBlockers } : {}),
           ...(policyIssues.length > 0 ? {
             blockers: activeSemanticBlockers,
             ...(blockingIssues.length === 0 && semantic.options.length >= 2
@@ -1897,6 +1899,7 @@ export function assessCanonicalAnalysisReadiness(
       ? strictEncoding.graph
       : null;
     return {
+      submission,
       analysisReady,
       issues: allIssues,
       blockingIssues,

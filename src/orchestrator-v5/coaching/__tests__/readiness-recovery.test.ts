@@ -105,11 +105,14 @@ describe('readiness effect pending producer', () => {
 });
 
 describe('readiness recovery authority', () => {
-  it('admits Run only for exact ready', () => {
-    const recovery = projectReadinessRecovery({ status: 'ready' }, NODES);
+  it('offers Run only from the admission verdict', () => {
+    const readiness = { status: 'ready', may_run: true };
+    const recovery = projectReadinessRecovery(readiness, NODES);
     expect(recovery.kind).toBe('run');
     expect(recovery.nextStep).toContain('run the analysis');
-    expect(buildReadinessRecoveryChip({ status: 'ready' }, NODES)).toBeNull();
+    expect(buildReadinessRecoveryChip(readiness, NODES)).toBeNull();
+    expect(projectReadinessRecovery({ status: 'ready', may_run: false }, NODES).kind).not.toBe('run');
+    expect(projectReadinessRecovery({ status: 'ready' }, NODES).kind).not.toBe('run');
   });
 
   it('keeps blocked authoritative over an incidental value blocker', () => {

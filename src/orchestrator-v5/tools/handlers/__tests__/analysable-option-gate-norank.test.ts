@@ -689,11 +689,8 @@ describe('no-rank ruling — paths the gate must NOT touch', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('a PRE-EXISTING single-option scenario still attempts the call — the refusal is gated on EXCLUSION', async () => {
-    // A scenario that always had exactly one configured option is a
-    // pre-existing shape, not this lane's to alter. Its twin (§2.56, above)
-    // fires only when the gate itself excluded something. Without this pin the
-    // new refusal would silently widen to a shape it was never ratified for.
+  it('a single configured option refuses the same comparison floor before the engine', async () => {
+    // R2 retires the legacy direct-handler exception: PLoT requires two distinct submitted options.
     const graph = makeGraph([], []);
     const { client, run } = makePlotClient();
     const handler = createRunAnalysisHandler({
@@ -701,9 +698,12 @@ describe('no-rank ruling — paths the gate must NOT touch', () => {
       scenarioReader: makeReader(makeSnapshot([CONFIGURED_TECH_LEAD], graph)),
     });
 
-    await handler(makeInvocation()).catch(() => undefined);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(sentOptions(run)).toHaveLength(1);
+    const failure = await handler(makeInvocation()).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HandlerInvocationFailedError);
+    if (!(failure instanceof HandlerInvocationFailedError)) throw failure;
+    expect(failure.cause_kind).toBe('analysis_not_ready');
+    expect(failure.details.reason_code).toBe('insufficient_analysable_options');
+    expect(run).toHaveBeenCalledTimes(0);
   });
 
   it('an ANONYMOUS unanalysable option stays in the submission — PLoT owns it, loudly', async () => {

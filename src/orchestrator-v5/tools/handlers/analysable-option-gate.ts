@@ -72,6 +72,13 @@
  * byte. Pinned by identity (`toBe`), not by deep equality.
  */
 
+import { userExcludedOptions } from './user-option-status-filter.js';
+import { filterOlumiProposedOptions } from './olumi-option-filter.js';
+import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
+import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
+import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
+import { withoutUnsizedOlumiRisksRecorded } from '../../agent-lane/unsized-risk.js';
+import { projectRequestInterventionsToWireScale, decideAnalysisScaleBlock, findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
 import type { ScaffoldedOptionRecord } from '../../coaching/scaffold-disclosure.js';
 import {
   buildFactorScaleMap,
@@ -234,8 +241,8 @@ export interface ScaffoldPlan {
  * Pure / total: inherits the gate's fail-safe (any internal failure ⇒ the
  * ungated outcome ⇒ `will_scaffold_options: false`).
  */
-export function computeScaffoldPlan(input: AnalysableOptionGateInput): ScaffoldPlan {
-  const outcome = gateAnalysableOptions(input);
+export function computeScaffoldPlan(input: AnalysableOptionGateInput, projected?: AnalysableOptionGateOutcome): ScaffoldPlan {
+  const outcome = projected ?? gateAnalysableOptions(input);
   const touchedIds = [
     ...outcome.held.map((s) => s.option_id),
     ...outcome.excluded.map((s) => s.option_id),
@@ -590,4 +597,227 @@ export function gateAnalysableOptions(
     );
     return ungated;
   }
+}
+
+export function interventionFingerprint(interventions: Record<string, unknown>): string {
+  return Object.entries(interventions)
+      .map(([key, raw]) => {
+        const v =
+          raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
+            ? (raw as { value: unknown }).value
+            : raw;
+        return `${key}:${typeof v === 'number' ? Math.round(v / 1e-9) * 1e-9 : String(v)}`;
+      })
+      .sort()
+      .join('|');
+}
+
+export const NO_COMPARISON_NEXT_STEP =
+  'Name at least two different options you are weighing, then run analysis.';
+
+/** One ordered projection used by admission and the actual Run; graph and source carriers stay unchanged. */
+export function projectRunOptionSubmission(
+  input: AnalysableOptionGateInput & {
+    readonly goalNodeId?: string;
+    readonly requestId?: string;
+    readonly scenarioId?: string;
+  },
+) {
+  const snapshot = input;
+  const userStatus = userExcludedOptions({
+    options: snapshot.options,
+    graph: snapshot.rawPersistedGraph ?? snapshot.graph,
+  });
+  const gate = gateAnalysableOptions({
+    options: userStatus.options,
+    graph: snapshot.graph,
+    rawPersistedGraph: snapshot.rawPersistedGraph,
+    // P1-1 (one scale convention): the egress scale net is UNCONDITIONAL
+    // since 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED
+    // deleted) — the gate routes its hold candidates through the same
+    // always-on RAW-scale projection as the configured siblings.
+    // (`scaleNetEnabled` survives as a pure-function parameter, pinned true
+    // at this, its only production call site.)
+    scaleNetEnabled: true,
+  });
+
+  const olumiFilter = filterOlumiProposedOptions({
+    submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
+    graph: snapshot.rawPersistedGraph ?? snapshot.graph,
+    unanalysableOptionIds: gate.excluded.map((s) => s.option_id),
+  });
+
+  const graphAfterIntercepts = guardAnalysisGraphIntercepts(snapshot.graph, {
+    requestId: input.requestId,
+    scenarioId: input.scenarioId,
+  }).graph;
+
+  // --- 2.7. Participation guard (COLLAB Track A) -------------------------
+  // Honours `node.analysis_participation === 'retained_excluded'`: the node
+  // stays in `scenarios.graph` with its label, value and authorship intact
+  // and is simply ABSENT from the wire graph — the same construction the
+  // option gate above uses, one level down. Incident edges go with it
+  // because PLoT's preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for
+  // a dangling endpoint, so leaving them would refuse the whole run.
+  // See `run-analysis-participation-guard.ts` for the full doctrine.
+  const optionsForParticipation = olumiFilter.options;
+  const optionInterventionTargetIds = new Set<string>();
+  const submittedOptionIds = new Set<string>();
+  for (const opt of optionsForParticipation) {
+    const optionId =
+      typeof opt.option_id === 'string' && opt.option_id.length > 0
+        ? opt.option_id
+        : typeof opt.id === 'string' && opt.id.length > 0
+          ? opt.id
+          : null;
+    if (optionId !== null) submittedOptionIds.add(optionId);
+    const interventions = opt.interventions;
+    if (interventions !== null && typeof interventions === 'object') {
+      for (const targetId of Object.keys(interventions as Record<string, unknown>)) {
+        optionInterventionTargetIds.add(targetId);
+      }
+    }
+  }
+  const participation = guardAnalysisParticipation(graphAfterIntercepts, {
+    goalNodeId: input.goalNodeId,
+    optionInterventionTargetIds,
+    submittedOptionIds,
+    requestId: input.requestId,
+    scenarioId: input.scenarioId,
+  });
+
+  const unsizedProjection = withoutUnsizedOlumiRisksRecorded(
+    withoutPreconditionRisks(participation.graph, snapshot.graph),
+    snapshot.graph,
+  );
+
+  const graphForAnalysis = unsizedProjection.graph;
+  const graphNodesForScale = (graphForAnalysis as { nodes?: unknown })?.nodes;
+  const factorScaleById = buildFactorScaleMap(graphNodesForScale);
+  const submittedOptions = olumiFilter.options;
+  const rawObjectsPerOption = submittedOptions.map((opt) =>
+    opt.interventions !== null && typeof opt.interventions === 'object'
+      ? (opt.interventions as Record<string, unknown>)
+      : {},
+  );
+  // ROUND 5 — provenance for the scale decision. `gate.held` already records
+  // exactly which factor ids CEE supplied on which option, so nothing new has
+  // to be derived or remembered: the marker is read off the gate's own
+  // disclosure record. A CEE-supplied value must not establish the scale
+  // reference frame for a value the user authored.
+  const scaffoldedFactorIdsByOptionId = new Map<string, ReadonlySet<string>>();
+  for (const record of gate.held) {
+    scaffoldedFactorIdsByOptionId.set(record.option_id, new Set(record.factor_ids));
+  }
+  const EMPTY_SYNTHESISED: ReadonlySet<string> = new Set<string>();
+  const synthesisedByOption = submittedOptions.map((opt) => {
+    const optionId =
+      typeof opt.option_id === 'string' && opt.option_id.length > 0
+        ? opt.option_id
+        : typeof opt.id === 'string' && opt.id.length > 0
+          ? opt.id
+          : null;
+    return (optionId !== null ? scaffoldedFactorIdsByOptionId.get(optionId) : undefined) ?? EMPTY_SYNTHESISED;
+  });
+  const requestProjection = projectRequestInterventionsToWireScale(
+    rawObjectsPerOption,
+    factorScaleById,
+    synthesisedByOption,
+  );
+
+  const wireOptions = submittedOptions.map((option, index) => ({
+    ...option,
+    interventions: requestProjection.perOption[index] ?? {},
+  }));
+  const distinctMapCount = new Set(
+    wireOptions
+      .filter((o) => Object.keys(o.interventions).length > 0)
+      .map((o) => interventionFingerprint(o.interventions)),
+  ).size;
+  const comparisonRefusal =
+    comparisonAfterExclusionsRefusal({ ...gate, options: wireOptions }, userStatus.excluded) ??
+    (distinctMapCount < PLOT_MIN_COMPARISON_OPTIONS
+      ? { message: 'The submitted options do not retain a comparison', nextStep: NO_COMPARISON_NEXT_STEP }
+      : null);
+  const refusal = participation.refusals[0];
+  const nodes =
+    (graphAfterIntercepts as { nodes?: readonly { id?: unknown; label?: unknown }[] } | null)?.nodes ?? [];
+  const label = refusal
+    ? nodes.find((n) => n !== null && typeof n === 'object' && n.id === refusal.node_id)?.label
+    : undefined;
+  const participationNamed =
+    typeof label === 'string' && label.trim() !== '' ? `'${label.trim()}'` : 'that part of your model';
+  const participationNextStep = refusal
+    ? refusal.reason === 'goal_node'
+      ? `You've kept ${participationNamed} out of the calculation, but it's the outcome the ` +
+        `analysis is measuring — so there's nothing left to compare the options ` +
+        `against. Put ${participationNamed} back into the calculation, or choose a different ` +
+        `goal, and ask me to run the analysis again.`
+      : refusal.reason === 'submitted_option'
+        ? `You've kept ${participationNamed} out of the calculation, but it's one of the options ` +
+          `I'd be comparing — so I've stopped rather than rank an option you've ` +
+          `excluded. Put it back into the calculation or remove it from this ` +
+          `comparison, then ask me to run the analysis again.`
+        : `You've kept ${participationNamed} out of the calculation, but one of your options ` +
+          `changes it — so I can't leave it out and still work out what that option ` +
+          `does. That's worth a second look: either ${participationNamed} belongs in the ` +
+          `calculation after all, or that option shouldn't be changing it. Settle ` +
+          `which, and ask me to run the analysis again.`
+    : null;
+  const baselineIds = findScaleIncoherentBaselineFactorIds(
+    graphNodesForScale,
+    rawObjectsPerOption,
+    synthesisedByOption,
+  );
+  const scaleBlock = decideAnalysisScaleBlock(requestProjection, baselineIds);
+  const labelById = new Map<string, string>();
+  if (Array.isArray(graphNodesForScale)) {
+    for (const n of graphNodesForScale) {
+      const node = n as { id?: unknown; label?: unknown };
+      if (typeof node.id === 'string' && typeof node.label === 'string') {
+        labelById.set(node.id, node.label);
+      }
+    }
+  }
+  const factorNames = (scaleBlock.blocked ? scaleBlock.unresolvedFactorIds : [])
+    .map((id) => labelById.get(id))
+    .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
+  const named = factorNames.length > 0 ? factorNames.join(', ') : 'some of the factors';
+  const scaleNextStep = scaleBlock.blocked
+    ? scaleBlock.reason_code === 'mixed_scale_unresolved'
+      ? `I can't run this analysis safely. The request I assembled carries values for ${named} that the analysis engine would silently rescale, so the numbers it gave back would not be the ones your model states. I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I prepare the analysis, not a verdict on your model. I don't have a step I can promise will clear it, so please don't rewrite your own numbers to try; ask me to run it again after any change and I'll re-check.`
+      : `I can't run this analysis safely. ${named} is recorded as a bare amount with no range for me to measure it against, so I can't tell the analysis engine what it means next to everything else, and the numbers would not be the ones your model states. I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I record and prepare values, not a verdict on your model. Telling me the same amount again won't clear it; ask me to run it again after any change and I'll re-check.`
+    : null;
+  const finalSubmittedOptionIds = submittedOptions.flatMap((o) =>
+    typeof o.option_id === 'string' ? [o.option_id] : typeof o.id === 'string' ? [o.id] : [],
+  );
+  return {
+    userStatus,
+    gate,
+    olumiFilter,
+    graphAfterIntercepts,
+    participation,
+    unsizedProjection,
+    graphForAnalysis,
+    graphNodesForScale,
+    factorScaleById,
+    submittedOptions,
+    rawObjectsPerOption,
+    synthesisedByOption,
+    scaffoldedFactorIdsByOptionId,
+    requestProjection,
+    wireOptions,
+    distinctMapCount,
+    comparisonRefusal,
+    participationNextStep,
+    scaleNextStep,
+    scaleBlock,
+    baselineIds,
+    submittedOptionIds: finalSubmittedOptionIds,
+    eligible:
+      comparisonRefusal === null &&
+      participation.refusals.length === 0 &&
+      !scaleBlock.blocked &&
+      !requestProjection.postconditionViolated,
+  };
 }
