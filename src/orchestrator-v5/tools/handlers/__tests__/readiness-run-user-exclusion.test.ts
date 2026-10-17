@@ -114,4 +114,21 @@ describe('one comparison admission after user exclusions', () => {
     await result();
     expect((run.mock.calls[0]![0].options as Array<{ option_id: string }>).map(o => o.option_id)).toEqual(['a', 'b', 'c']);
   });
+  it.each(['Delivery capacity', 'Service throughput'])('%s: an excluded distinct option cannot rescue identical remaining options', async topic => {
+    const graph = synthetic(topic, 1);
+    const b = graph.nodes.find(n => n.id === 'b')!;
+    const c = graph.nodes.find(n => n.id === 'c')!;
+    if (!('interventions' in b)) throw new Error('the valued option must keep its settings');
+    Object.assign(c, { interventions: structuredClone(b.interventions) });
+    const before = structuredClone(graph);
+    const ready = buildCanonicalAnalysisReadyFromGraph(graph)!;
+    expect(ready.may_run).toBe(false);
+    const production = invoke(graph, true);
+    const failure = await production.result().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(HandlerInvocationFailedError);
+    if (!(failure instanceof HandlerInvocationFailedError)) throw failure;
+    expect(failure.cause_kind).toBe('analysis_not_ready');
+    expect(production.run).not.toHaveBeenCalled();
+    expect(graph).toEqual(before);
+  });
 });
