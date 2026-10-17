@@ -1175,16 +1175,22 @@ describe('N2: a paired premise cannot earn an exact joint chance', () => {
     expect((run.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(joint);
   });
 
-  it.each(['quantity', 'target', 'operator', 'unit', 'frame', 'reference', 'window', 'deadline', 'period', 'conditions', 'selected goal', 'selected option'])(
+  it.each(['quantity', 'target', 'cap', 'operator', 'unit', 'frame', 'reference', 'baseline', 'encoded level', 'raw level', 'reference unit', 'missing reference', 'window', 'deadline', 'period', 'conditions', 'selected goal', 'selected option'])(
     'earned primary zero cannot license a different %s', mismatch => {
       const { g, run, constraints } = example(0, 0);
       const sent = (constraints.sentRun.graph.nodes as Rec[]).find(n => n.id === 'new_customers')!;
       if (mismatch === 'quantity') sent.quantity_frame = 'change';
       if (mismatch === 'target') sent.goal_threshold_raw = 21;
+      if (mismatch === 'cap') sent.goal_threshold_cap = 50;
       if (mismatch === 'operator') constraints.sentRun.goal_direction = 'minimise';
       if (mismatch === 'unit') sent.goal_threshold_unit = 'GBP';
       if (mismatch === 'frame') sent.goal_threshold_frame = 'delta';
       if (mismatch === 'reference') (sent.goal_target_basis as Rec).reference = 'launch';
+      if (mismatch === 'baseline') (sent.observed_state as Rec).baseline = 0.3;
+      if (mismatch === 'encoded level') (sent.observed_state as Rec).value = 0.3;
+      if (mismatch === 'raw level') (sent.observed_state as Rec).raw_value = 6;
+      if (mismatch === 'reference unit') (sent.observed_state as Rec).unit = 'GBP';
+      if (mismatch === 'missing reference') delete (sent.observed_state as Rec).raw_value;
       if (mismatch === 'window') (sent.goal_target_basis as Rec).period_months = 4;
       if (mismatch === 'deadline') sent.goal_horizon_months = 4;
       if (mismatch === 'period') sent.goal_period = 'month';

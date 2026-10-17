@@ -1216,12 +1216,20 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const primaryRow = c.goal !== undefined && isRec(c.graph) ? goalTargetRow(c.graph, c.goal) : undefined;
   const primaryP = sqRecord?.probability_of_goal, jointP = sqRecord?.probability_of_joint_goal;
   const dispatched = readDispatchedGoalThreshold(request, primaryId);
+  const sentNodes = isRec(request?.graph) && Array.isArray(request.graph.nodes) ? request.graph.nodes.filter(isRec) : [];
+  const sentGoal = sentNodes.find(n => n.id === primaryId && n.kind === 'goal');
+  const heldState = isRec(c.goal?.observed_state) ? c.goal.observed_state : undefined;
+  const sentState = isRec(sentGoal?.observed_state) ? sentGoal.observed_state : undefined;
   const independentZero = !c.primaryRefused && sqId !== undefined && primaryId !== undefined && primaryP === 0 && jointP === 0
     && dispatched?.frame === 'level' && dispatched.status_quo_option_id === sqId
+    && finite(heldState?.value) && sentState?.value === heldState.value && dispatched.baseline === (heldState.baseline ?? heldState.value)
+    && finite(heldState?.raw_value) && sentState?.raw_value === heldState.raw_value
+    && sameUnit(sentState.unit, heldState.unit) && sameUnit(heldState.unit, held?.target?.unit)
     && held?.target?.frame === 'level' && targetRows.some(r => r.constraint_id === primaryRow?.constraint_id && r.node_id === primaryId
       && r.operator === held.target?.comparator && r.value === held.target?.raw && sameUnit(r.unit, held.target?.unit)
       && r.value_frame === held.target?.frame)
     && sentRunScoresHeldChange(request, c.graph, primaryId, held.target.comparator ?? '')
+    && scored?.target?.cap === held.target.cap
     && JSON.stringify(scored?.horizon) === JSON.stringify(held.horizon) && scored?.period === held.period
     && c.earned?.(sqId, primaryP) === true;
   const fromJoint = jointMovedIds.size > 0 || (!independentZero && (allAssumed
