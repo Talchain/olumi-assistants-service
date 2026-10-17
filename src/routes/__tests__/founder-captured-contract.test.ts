@@ -98,7 +98,7 @@ async function goalWorld(change?: (graph: Rec) => void, message = source) {
 const offer = (w: Awaited<ReturnType<typeof goalWorld>>, extra: Rec = {}) => dispatchTool('propose_goal_target', JSON.stringify({ ...goalArgs, ...extra }), w.ctx, w.caps());
 const noPath = (g: Rec) => validateGraphStructure(GraphV3.parse(g), { leaveOutInertRisks: true }).violations.filter(v => v.code === 'NO_PATH_TO_GOAL');
 const valueOf = (w: Awaited<ReturnType<typeof world>>, r: Rec) => w.proposals.get(String(r.proposal_id))!.operations[0]!.value as Rec;
-const events = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map(([x]) => x as Rec).filter(x => x.event === 'v5.agent.tool_refused');
+const events = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map(([x]: unknown[]) => x as Rec).filter((x: Rec) => x.event === 'v5.agent.tool_refused');
 
 describe('captured G1 whole goal-change scope', () => {
   it('complete card → cold own press → one native save/retry; all words, settings and directed relationships survive', async () => {
