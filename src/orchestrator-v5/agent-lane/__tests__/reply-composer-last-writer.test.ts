@@ -91,7 +91,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
 
   it('r11: live, preview, forwarded replies, same-id replay and reload use the ONE estimate point classifier', () => {
     const gate = 'withEstimateGoalPointsAtEgress(';
-    expect(ROUTE.split(gate).length - 1).toBe(7); // Six upstream sites are retained; the final validator adds the seventh.
+    expect(ROUTE.split(gate).length - 1).toBe(6); // Five upstream producer sites plus the final validator; replay prose is immutable.
     expect(RELOAD.split(gate).length - 1).toBe(1);
     const liveAt = ROUTE.lastIndexOf(gate);
     expect(liveAt).toBeLessThan(ROUTE.indexOf(CALL));

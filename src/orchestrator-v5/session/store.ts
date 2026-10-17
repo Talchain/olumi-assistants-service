@@ -172,6 +172,11 @@ export interface ScenarioRunAnalysisFactReadOptions {
 }
 
 export interface SessionTurnWrite {
+  /** Reply-only preparation, run by append after its final carriers are known, again on every CAS attempt. */
+  readonly prepare?: (write: SessionTurnWrite, context: {
+    readonly finalPending: readonly PendingAction[];
+    readonly prospectiveGuidance: GuidanceState | null;
+  }) => Pick<SessionTurnWrite, 'assistantMessage' | 'handler_facts' | 'pending_actions' | 'suggested_actions'>;
   readonly scenario_id: string;
   readonly turn_id: string;
   readonly turn_class: ConversationTurnClass;

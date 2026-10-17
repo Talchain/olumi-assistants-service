@@ -11,6 +11,8 @@ let pendingUnavailable = false;
 let receipted = false;
 let deliveredAsk = false;
 let offeredProposal: Rec | undefined;
+let appendUnavailable = false;
+let unsafeBar = false;
 const receipt = { version: 2, version_id: 'saved-v2', mutation_id: 'mutation-v2', source_turn_id: 'approved-turn' };
 const store = {
   ensureScenarioExists: async () => ({ user_id: null }),
@@ -20,8 +22,11 @@ const store = {
     return [];
   },
   append: vi.fn(async (write: Rec) => {
+    if (appendUnavailable && write.prepare) throw new Error('answer append unavailable');
     const previous = rows.get(write.turn_id);
     if (previous) return { id: previous.id, replayedPriorTurn: true };
+    const { prepare, ...stored } = write;
+    write = prepare ? { ...stored, ...prepare(write, { finalPending: write.pending_actions ?? [], prospectiveGuidance: null }) } : stored;
     rows.set(write.turn_id, { ...write, id: `row-${rows.size}`, assistant_message: write.assistantMessage,
       user_message: write.userMessage, run_narration: write.run_narration });
     return { id: `row-${rows.size}` };
@@ -47,6 +52,13 @@ vi.mock('../reply/compose-reply.js', async original => {
   const actual = await original<Rec>();
   return { ...actual, composeReplyShape: (input: Rec) => ({ ...actual.composeReplyShape(input), text: lateText || input.text, shape: null }) };
 });
+vi.mock('../actions/rank.js', async original => {
+  const actual = await original<Rec>();
+  return { ...actual, actionBarOf: (...args: unknown[]) => {
+    const bar = actual.actionBarOf(...args);
+    return unsafeBar ? { ...bar, more: [{ ...bar.standard[0], label: 'You should choose Option A.' }] } : bar;
+  } };
+});
 const SID = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue' },
   { id: 'a', kind: 'option', label: 'Option A' }, { id: 'b', kind: 'option', label: 'Option B' }, { id: 'factor', kind: 'factor', label: 'Retention', unit: '%' }], edges: [] };
@@ -68,7 +80,7 @@ describe('B4 final reply boundary through the real Agent route', () => {
     isFinalised = (await import('../../response-finaliser.js')).isFinalisedV5Response;
   });
   beforeEach(async () => {
-    rows.clear(); lateText = ''; stale = false; licensed = true; pendingUnavailable = false; receipted = false; deliveredAsk = false; offeredProposal = undefined;
+    rows.clear(); lateText = ''; stale = false; licensed = true; pendingUnavailable = false; receipted = false; deliveredAsk = false; offeredProposal = undefined; appendUnavailable = false; unsafeBar = false;
     regenerate.mockReset().mockImplementation(async () => answer(safe)); store.append.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('provider calls prohibited'); }));
     app = Fastify({ logger: false });
@@ -257,6 +269,17 @@ describe('B4 final reply boundary through the real Agent route', () => {
     expect(replay.json().assistant_text).toBe(legacy);
     expect(rows.get(id)?.assistant_message).toBe(legacy);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('append failure cannot restore a control the final gate withheld', async () => {
+    appendUnavailable = true; unsafeBar = true;
+    const id = randomUUID();
+    const response = await turn(id);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().assistant_text).toBe('The explanation is unavailable.');
+    expect(response.json().action_bar).toBeUndefined();
+    expect(rows.has(id)).toBe(false);
+    expect(regenerate).toHaveBeenCalledOnce();
   });
 
   it('early unavailable is checked without a model or replacement answer append', async () => {
