@@ -81,6 +81,7 @@ import { authorshipReasonForRun } from './compose/authorship-reason-for-run.js';
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { Limit } from './agent-lane/reasoning-limits.js';
 
 import { config } from '../config/index.js';
 import { emit, TelemetryEvents } from '../utils/telemetry.js';
@@ -184,9 +185,46 @@ export function isFinalisedV5Response(value: unknown): value is FinalisedV5Respo
   return typeof value === 'object' && value !== null && FINALISED_RESPONSES.has(value);
 }
 
+export interface ReplyValidationFailure {
+  readonly check: 'a' | 'b' | 'c' | 'd' | 'f';
+  readonly code: string;
+}
+
+export class ReplyValidationError extends Error {
+  constructor(readonly failures: readonly ReplyValidationFailure[]) {
+    super('The complete reply did not pass final validation.');
+    this.name = 'ReplyValidationError';
+  }
+}
+
+export interface FinalReplyValidation {
+  readonly check: (candidate: OlumiResponse) => readonly ReplyValidationFailure[];
+  /** Stage 2b supplies typed claim checks; explanatory prose is never a veto. */
+  readonly reasoning_limits?: readonly Limit[];
+}
+
+/** Stamp and then validate the complete candidate. No producer runs inside this boundary. */
+export function validateFinalReply<T extends OlumiResponse>(
+  candidate: T,
+  context: FinaliserContext,
+  validation: FinalReplyValidation,
+): T & FinalisedV5Response {
+  try {
+    const stamped = finaliseV5Response(candidate, { ...context, finalReplyAnalysisState: candidate.analysis_state });
+    const failures = validation.check(stamped);
+    if (failures.length > 0) throw new ReplyValidationError(failures);
+    return stamped as T & FinalisedV5Response;
+  } catch (error) {
+    if (error instanceof ReplyValidationError) throw error;
+    throw new ReplyValidationError([{ check: 'a', code: 'validator_unavailable' }]);
+  }
+}
+
 // ─── Context ──────────────────────────────────────────────────────────────
 
 export interface FinaliserContext {
+  /** Only the final reply boundary supplies the already-bound, same-snapshot state. */
+  readonly finalReplyAnalysisState?: OlumiResponse['analysis_state'];
   readonly goalScopeClaimInput?: import('./compose/goal-scope-claim-input.js').GoalScopeClaimInput;
   /** Already carried by sendFinalised200; independent of selected fact scope. */
   readonly scenarioId?: string;
@@ -595,6 +633,7 @@ function attachAnalysisState(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): OlumiResponse {
+  if (ctx.finalReplyAnalysisState !== undefined) return { ...response, analysis_state: ctx.finalReplyAnalysisState };
   // G3 — MIGRATED READER 2 of 2. The resolved canonical state wins over the
   // dispatch's own when the scenario-bound verdict superseded a hot-window
   // `none`. FIRST in the chain, because on the only exit that can supply it
@@ -889,7 +928,7 @@ function attachRunDelta(
 
   // Read the composer's identity verdict. An unbound pair must not add a new
   // comparative delta after the analysis block has been confined.
-  const bindingReason = response.analysis_state?.leader_claim.withheld_reason;
+  const bindingReason = response.analysis_state?.leader_claim?.withheld_reason;
   if (bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED || bindingReason === WITHHELD_RUN_IDENTITY_CONFLICT) {
     const { run_delta: _unboundDelta, ...withoutDelta } = response;
     return disclose(
@@ -903,7 +942,7 @@ function attachRunDelta(
   // C2: the delta builder selects successful Runs. A newer partial Run can
   // supersede both without appearing in that pair, so their old comparison
   // must not be presented as the current turn's change.
-  if (response.analysis_state?.contradictions.includes('fact_status_success_but_degraded_newer')) {
+  if (response.analysis_state?.contradictions?.includes('fact_status_success_but_degraded_newer')) {
     const { run_delta: _shadowedDelta, ...withoutDelta } = response;
     return disclose('skipped', 'newer_run_degraded', withoutDelta as OlumiResponse);
   }
