@@ -559,6 +559,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'remains Olumi\u2019s separate grounded proposal on the complete card. '
       + 'It also supports when ONE option\u2019s effect would be fully in place (subject the option, field lead), with reading_words set to the '
       + 'user\u2019s own words for that option that state the month(s). '
+      // DL-3 05:21Z (the qualitative home): a factor's own definition, words only.
+      + 'It also records what a factor\u2019s quantity covers, in the user\u2019s words (subject the factor, field measure), with reading_words '
+      + 'set to the words that say it, copied from the quote or from your own question the quote answers in this message (answering quotes '
+      + 'that question exactly); it changes no figure. '
       + 'Olumi proposes the interpretation; a complete quote or matching label alone does not verify it. Do not '
       + 'supply an Olumi estimate here or substitute a different event, quantity or time window. If the meaning or current carrier is '
       + 'unsupported, retain the original statement and explain that exact gap. This tool prepares one card and changes nothing. Only the '
@@ -580,7 +584,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({
         quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
         answering: { type: 'string', description: 'Only when the statement answers a question you asked: that question, copied exactly from your reply.' },
-        reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place), or for when one option\u2019s effect is fully in place: the user\u2019s own words that say it, copied from the quote.' },
+        reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, what a factor covers, or when effects are in place), or for when one option\u2019s effect is fully in place: the user\u2019s own words that say it, copied from the quote (for what a factor covers, or from your own question it answers).' },
         // AIE amended semantic guidance; these optional readings do not establish a verified human fact.
         form: { type: 'string', enum: ['range'], description: 'Use range only for a range of this link’s effect on its target quantity, with the stated reference and conditions; a duration, budget, current level, goal or another quantity is not that effect.' },
         low: { type: 'number', description: 'Only with form:range: the lower endpoint of that effect range as stated, preserving its sign and scale.' },

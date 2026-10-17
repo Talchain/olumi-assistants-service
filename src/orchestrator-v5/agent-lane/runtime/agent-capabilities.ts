@@ -1607,6 +1607,15 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
               ? { analysis_participation: n.analysis_participation } : {}),
             // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
             ...(n.kind === 'option' && (n.option_status === 'removed' || n.option_status === 'infeasible') ? { option_status: n.option_status } : {}),
+            // ⭐ THE QUALITATIVE HOME (DL-3 05:21Z; BUDDY-A 05:30Z §3): what a factor's quantity covers, recorded by the user's press,
+            // in their words with the question each answers (Olumi's, kept apart), so this working input and a cold reopen hold it.
+            // Only press-recorded definitions: construction's brief records are not added here (every sent body would change).
+            ...((): Record<string, unknown> => {
+              const said = n.kind === 'factor' ? userStatementsOn(n).filter((r) => r.field === 'measure' && r.attest === undefined) : [];
+              return said.length === 0 ? {} : { user_statements: said.map((r) => ({ field: r.field, said: r.statements.map((x) => x.quote),
+                ...(r.statements.some((x) => x.answering !== undefined) ? { answering: r.statements.map((x) => x.answering ?? null) } : {}),
+                speaker: 'user' })) };
+            })(),
           };
         }
 
