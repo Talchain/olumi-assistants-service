@@ -54,8 +54,15 @@ const CALENDAR_POINT = new RegExp(
   'gi',
 );
 
-/** Words just before a figure that make it a past period or the far end of a range. */
-const PAST_OR_RANGE_BEFORE = /(?:\b(?:last|past|previous|prior)\s+|\d\s*[-–]\s*)$/i;
+/** Words just before a figure that make it a past period or the far end of a range ("6-12 months", "6 to 12 months"). */
+const PAST_OR_RANGE_BEFORE = /(?:\b(?:last|past|previous|prior)\s+|\d\s*(?:[-–]|to)\s*)$/i;
+/**
+ * ⭐ A RANGE OF TIME IS ONE SPAN, NEVER A COUNT (DL-3 02:54Z; BUDDY-A 02:58Z; Paul's served "in the next 6-12 months"): its whole
+ * words are kept and neither end is ever attested. Its role is always asked first (`unbound`: "Is … the period by which … should
+ * be achieved?"), wherever it sits (#3342 R2, below). Before, both ends were skipped and the brief's words were lost, leaving only
+ * the drafter's own pick of one end ("Does … get there within 12 months?").
+ */
+const RANGE_DURATION = new RegExp(String.raw`(${LEAD})?(?<![\d.,])(\d+)\s*(?:[-–]|to)\s*(\d+)(?:\s+|\s*-\s*)(month|year)s?\b`, 'gi');
 /** Words just after that make it a past period. */
 const PAST_AFTER = /^\s+ago\b/i;
 
@@ -83,6 +90,14 @@ function forwardDurations(brief: string): Span[] {
     if ((lead === '' && PAST_OR_RANGE_BEFORE.test(before)) || PAST_AFTER.test(after)) continue;
     spans.push({ months: Number(m[2]) * MONTHS_PER[m[3]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0,
       led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, figureAt - 32), figureAt)) || ALLOTTED_AFTER.test(after) });
+  }
+  for (const m of brief.matchAll(RANGE_DURATION)) {
+    const lead = m[1] ?? '';
+    const lowAt = (m.index ?? 0) + lead.length;
+    // `months` NaN: a range is never one count, so no claim is ever attested from it. Only a forward-led one is a deadline's
+    // form ("over the last 6-12 months" and "a runway of 6-12 months" are not led, so they never reach the role rules).
+    spans.push({ months: Number.NaN, wording: m[0].trim(), index: m.index ?? 0,
+      led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, lowAt - 32), lowAt)) || ALLOTTED_AFTER.test(brief.slice((m.index ?? 0) + m[0].length)) });
   }
   for (const m of brief.matchAll(SPELLED_DURATION)) {
     if (PAST_AFTER.test(brief.slice((m.index ?? 0) + m[0].length))) continue;
@@ -169,8 +184,12 @@ export function attestHorizon(
     if (match !== undefined) return { months: claimed, wording: match.wording, status: 'attested' };
   }
   const calendar = [...brief.matchAll(CALENDAR_POINT)].map((m) => ({ wording: m[0].trim(), index: m.index ?? 0 }));
+  // ⛔ #3342 R2 (BUDDY-A B1 03:24Z; AIE 6184383302: containment alone never proves a period's role): a RANGE is never the goal's
+  // deadline by sitting inside its target sentence ("We want £100k MRR; the Pro feature release is planned in the next 6-12
+  // months."). Its whole words always come back `unbound`, so the role is asked first; a single span keeps the existing rule.
+  const range = (d: { readonly wording: string; readonly months?: unknown }): boolean => typeof d.months === 'number' && Number.isNaN(d.months);
   const first = [...calendar, ...durations.filter((d) => d.led)].sort((a, b) => a.index - b.index)
-    .find((d) => governed(d.index, d.wording));
+    .find((d) => (range(d) ? ((unbound ??= d.wording), false) : governed(d.index, d.wording)));
   if (first !== undefined) return { months: null, wording: first.wording, status: 'unresolved' };
   return unbound === undefined ? absent : { ...absent, unbound };
 }
