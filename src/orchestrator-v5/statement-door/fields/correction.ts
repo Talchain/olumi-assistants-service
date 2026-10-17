@@ -8,7 +8,7 @@ import { userStatementFor, userStatementRecord, userStatementRecordOf, withUserS
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
-export interface CorrectionEditRequest {
+interface CorrectionEditRequest {
   readonly subject: DoorSubject;
   readonly expected_record?: UserStatementRecord | null;
   readonly retirement: { readonly quote: string; readonly scope: 'whole' | 'part'; readonly disposition: 'historical' | 'retracted' };
@@ -18,7 +18,7 @@ export interface CorrectionEditRequest {
   readonly legacy?: { readonly field: 'already_true_quote' | 'dependency'; readonly expected: string; readonly replacement: string | null };
 }
 export interface StatementCorrectionRequest { readonly quote: string; readonly edits: readonly CorrectionEditRequest[] }
-export interface ApprovedCorrectionEdit extends CorrectionEditRequest {
+interface ApprovedCorrectionEdit extends CorrectionEditRequest {
   readonly expected_record: UserStatementRecord | null;
   readonly expected_node: Rec;
   readonly record: UserStatementRecord;
@@ -27,7 +27,7 @@ export interface StatementCorrection {
   readonly source: UserStatement;
   readonly edits: readonly ApprovedCorrectionEdit[];
 }
-export type CorrectionResult = { readonly refused: string } | { readonly correction: StatementCorrection; readonly candidate: Rec; readonly words: string };
+type CorrectionResult = { readonly refused: string } | { readonly correction: StatementCorrection; readonly candidate: Rec; readonly words: string };
 
 const nodeOf = (graph: Rec, id: string): Rec | undefined => Array.isArray(graph.nodes)
   ? graph.nodes.find((n): n is Rec => rec(n) && n.id === id) : undefined;
@@ -36,7 +36,8 @@ const legacyOf = (node: Rec, field: 'already_true_quote' | 'dependency'): unknow
 
 /** A source correction cannot silently replace adoption or other held attestation. Carry-forward needs its own contract. */
 function protectedAttestation(record: UserStatementRecord | null | undefined): boolean {
-  return Object.keys(record?.attest ?? {}).some(key => key !== 'recorded_by');
+  const by = record?.attest?.recorded_by;
+  return record?.attest !== undefined && by !== 'construction' && by !== 'correction';
 }
 
 /** Retention describes the correction, never the conditions under which the human statement holds. */
@@ -46,12 +47,7 @@ function correctionAttest(e: CorrectionEditRequest): StatementAttest {
   e.retained.forEach((span, index) => {
     if (typeof span !== 'string') return;
     const key = `retained_${index}`;
-    // Existing attestation strings have a 200-character limit; preserve longer spans losslessly in ordered pieces.
-    if (span.length <= 200) metadata[key] = span;
-    else {
-      metadata[`${key}_parts`] = Math.ceil(span.length / 200);
-      for (let start = 0; start < span.length; start += 200) metadata[`${key}_part_${start / 200}`] = span.slice(start, start + 200);
-    }
+    metadata[key] = span;
     metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
   });
   return metadata;
@@ -193,6 +189,7 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     if (verified.kind === 'refused') return { refused: verified.refusal };
     source = verified.statements[0]!;
     if (!Array.isArray(e.retained)) return { refused: 'retained_list_required' };
+    if (e.retained.some(span => typeof span === 'string' && span.length > 200)) return { refused: 'retained_source_not_stated' };
     const expected = e.expected_record === undefined ? userStatementFor(graph, e.subject) ?? null : e.expected_record;
     if (protectedAttestation(expected)) return { refused: 'correction_attestation_protected' };
     edits.push({ ...e, expected_record: expected, expected_node: structuredClone(node),

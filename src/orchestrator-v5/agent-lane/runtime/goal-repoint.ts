@@ -25,7 +25,7 @@ import { constructionOperationId } from './build-model.js';
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-export interface QualitativeReframeRequest {
+interface QualitativeReframeRequest {
   readonly goal_id: string;
   readonly quote: string;
   /** A proposed label, visibly Olumi's reading rather than a verified quotation. */
@@ -37,7 +37,7 @@ export interface ReframeRead {
 const identityOf = (g: unknown): string => computeGraphIdentityHash(g as never)?.value ?? '';
 
 /** A qualitative repoint uses the same old-goal node for history, and introduces no operative number or new store. */
-export function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: QualitativeReframeRequest,
+function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: QualitativeReframeRequest,
   at: string): { refused: string } | { candidate: Rec; new_id: string; words: string; source_line: string } {
   const nodes = Array.isArray(before.raw.nodes) ? before.raw.nodes.filter(rec) : [];
   const old = nodes.find(n => n.id === request?.goal_id && n.kind === 'goal');

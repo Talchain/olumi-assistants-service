@@ -173,6 +173,56 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(w.writes).toHaveLength(0);
   });
 
+  it('Lane A B3: a second correction applies without claiming the record holds an approval', async () => {
+    const f = fixture(row), subject = { kind: 'factor' as const, id: 'report', field: 'level' as const };
+    const source = `${row.factor} number about 40 people, mostly on nights.`;
+    f.graph.nodes[1].user_statements = [userStatementRecord(subject, [{ source, quote: source, speaker: 'user', reading: 'olumi',
+      form: 'point', low: 40, high: 40, unit: 'people', qualifier: 'about', subject: { quantity: row.factor, node_id: 'report' } }],
+    '2026-08-01T00:00:00Z', { recorded_by: 'construction' })];
+    const firstMessage = `For ${row.factor}, retract “mostly on nights”; keep “about 40 people” as it was.`;
+    const w = await correctionWorld(f.graph, firstMessage);
+    const first = await w.offer('propose_statement', { correction: { quote: firstMessage, edits: [{ subject,
+      retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' }, retained: ['about 40 people'], reading_words: 'about 40; not mostly nights' }] } });
+    expect(first.ok, JSON.stringify(first)).toBe(true);
+    const applied = await w.press(String(first.proposal_id));
+    expect(applied).toMatchObject({ ok: true, applied: true });
+    const message = `For ${row.factor}, retract “about 40 people” too; we do not know the headcount.`;
+    const second = await correctionWorld(w.graph(), message);
+    const card = await second.offer('propose_statement', { correction: { quote: message, edits: [{ subject,
+      retirement: { quote: 'about 40 people', scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'headcount unknown' }] } });
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    const result = await second.press(String(card.proposal_id));
+    expect(result).toMatchObject({ ok: true, applied: true });
+    for (const response of [first, applied, card, result]) expect(JSON.stringify(response)).not.toContain('holds an approval');
+    const saved = userStatementFor(second.graph(), subject)!;
+    expect(saved.statements).toEqual([expect.objectContaining({ source: message, quote: message, speaker: 'user', reading: 'olumi' })]);
+    expect(saved.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'whole', retained_count: 0 });
+    expect(userStatementFor((await second.cold()).body.graph, subject)).toEqual(saved);
+    expect(userStatementFor(second.graph(), f.other)).toEqual(userStatementFor(f.graph, f.other));
+    expect(w.writes).toHaveLength(1); expect(second.writes).toHaveLength(1);
+  });
+
+  it.each([200, 201])('N5: retained span of %i characters respects the existing carrier limit', async length => {
+    const f = fixture(row), span = 'a'.repeat(length), source = `${row.factor} reports ${span} and ${row.withdrawn}.`;
+    const record = f.graph.nodes[1].user_statements[0];
+    record.statements[0].source = source; record.statements[0].quote = source;
+    const message = `For ${row.factor}, retract “${row.withdrawn}”; keep the earlier report.`;
+    const w = await correctionWorld(f.graph, message), card = await w.offer('propose_statement', { correction: { quote: message,
+      edits: [{ subject: f.subject, retirement: { quote: row.withdrawn, scope: 'part', disposition: 'retracted' }, retained: [span], reading_words: 'earlier report only' }] } });
+    if (length === 200) {
+      expect(card.ok, JSON.stringify(card)).toBe(true); expect((await w.press(String(card.proposal_id))).ok).toBe(true);
+      expect(userStatementFor(w.graph(), f.subject)!.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'part',
+        retained_count: 1, retained_0: span, retained_0_origin: 'held_user_statement' });
+    } else {
+      expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'retained_source_not_stated' });
+      expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+      const whole = await w.offer('propose_statement', { correction: { quote: message,
+        edits: [{ subject: f.subject, retirement: { quote: source, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'earlier report withdrawn' }] } });
+      expect(whole.ok, JSON.stringify(whole)).toBe(true); expect((await w.press(String(whole.proposal_id))).ok).toBe(true);
+      expect(userStatementFor(w.graph(), f.subject)!.statements).toEqual([expect.objectContaining({ quote: message })]);
+    }
+  });
+
   it('Lane A B1: an adopted option range refuses before a card and keeps its own adoption', async () => {
     const f = fixture(row), subject = rangeLawSubject('option', 'report');
     const source = `Explore process changes would bring ${row.factor} to between 40 and 60 people, mostly on nights.`;
@@ -191,9 +241,9 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(rangeLawAdopted(w.graph(), 'option', { factor_id: 'report', low: 40, high: 60 })).toBe(true);
   });
 
-  it.each([{ fingerprint: 'held-approval' }, { retained_flag: false }])('B1 refuses any extra attestation, including %j', async extra => {
+  it.each([{ fingerprint: 'held-approval' }, { retained_flag: false }])('B1 refuses other writers’ attestation, including %j', async extra => {
     const f = fixture(row);
-    f.graph.nodes[1].user_statements[0].attest = { recorded_by: 'construction', ...extra };
+    f.graph.nodes[1].user_statements[0].attest = { recorded_by: 'approval', ...extra };
     const w = await correctionWorld(f.graph, f.message), result = await w.offer('propose_statement', { correction: f.request });
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_attestation_protected' });
     expect(result).not.toHaveProperty('proposal_id'); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
