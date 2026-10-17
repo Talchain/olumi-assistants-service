@@ -78,16 +78,32 @@ describe('decision review decomposed: serialized provider contract', () => {
     for (const i of [0, 2]) expect(array(w.slices[i]!.OPTION_COMPARISON).map(object))
       .toContainEqual(expect.objectContaining({ option_id: 'raise_price_to_59', win_probability: 1 }));
   });
-  it('missing current graph uses grounding hash, preserving matching Run and withholding changed grounding', async () => {
-    const current = await reviewCapture('current', true, false);
+  it('explicit current graph preserves the matching Run and withholds changed grounding', async () => {
+    // R4: preserve the original figure/flip contrasts with the explicit current evidence the runtime supplies.
+    const current = await reviewCapture('current', true);
     expect(object(object(current.slices[0]!.DECISION_CONTEXT).winner)).toHaveProperty('win_probability', 1);
     expect(array(current.slices[2]!.FLIP_THRESHOLD_DATA)).toHaveLength(1);
-    const stale = await reviewCapture('stale', true, false);
+    const stale = await reviewCapture('stale', true);
     for (const slice of stale.slices) {
       expect(array(slice.FLIP_THRESHOLD_DATA)).toEqual([]);
       expect(object(object(object(slice.DECISION_CONTEXT).analysis).run_state).kind).toBe('complete_stale');
     }
     expect(valueAt(stale.calls.flatMap(call => call.payloads), 'win_probability')).toEqual([]);
+  }, 60_000);
+
+  it.each(['current', 'stale'] as const)('missing current graph stays unknown with %s grounding in every serialized slice', async variant => {
+    // Grounding is the Run's context, never evidence that today's model still matches it.
+    const w = await reviewCapture(variant, true, false);
+    for (const slice of w.slices) {
+      expect(object(object(object(slice.DECISION_CONTEXT).analysis).run_state).kind).toBe('unknown_degraded');
+      expect(object(object(slice.DECISION_CONTEXT).winner)).not.toHaveProperty('win_probability');
+      expect(array(slice.FLIP_THRESHOLD_DATA)).toEqual([]);
+      expect(array(slice.FACTOR_SENSITIVITY)).toEqual([]);
+      expect(array(slice.FRAGILE_EDGES)).toEqual([]);
+      expect(slice.DRIVER_HINT ?? null).toBeNull();
+      expect(JSON.stringify(slice)).not.toContain(REVIEW_PRODUCER_PROSE);
+    }
+    expect(valueAt(w.calls.flatMap(call => call.payloads), 'win_probability')).toEqual([]);
   }, 60_000);
 
 });
