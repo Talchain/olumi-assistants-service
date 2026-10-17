@@ -1,0 +1,1606 @@
+{
+ "_source": {
+  "run": "live/runs/2026-10-17T043507Z-funding-verify-founder-e6253e00",
+  "read": "funding/reads 01 (via codex/founder-current-request/captured-contract/reads/01-12-before-approve.json)",
+  "read_sha256": "01f3de5187ba7dad84c73caee837c72a5f1089e8e7c4ee994e3478266197ddcc",
+  "served": "UI f84138b8 · CEE e6253e00 · PLoT 58b3e3c4 · ISL a5725a15",
+  "typed": "turns/05.json and turns/08.json request_body.message, verbatim"
+ },
+ "typed": {
+  "05": "Yes, it's really bad that this risk was generated, but it connects to nothing, so it's pretty much useless. I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process. They need to be really good to attract talent, but the more time I spend on them, the less I can spend on other things. I feel like all of this should be pretty obvious to you.",
+  "08": "I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly. Or, if I was to complete it more slowly, I could spend less time on it."
+ },
+ "body": {
+  "schema": "scenario_graph.v1",
+  "proposal_fields": {
+   "version": 1,
+   "graph_hash": "0decea981b23b75b",
+   "proposals": [
+    {
+     "proposal_id": "prop_72a622f3999db76c0f99f4cb4f56c153",
+     "revision": "80c33cd8-b36c-4b48-9d9d-84545bde6431",
+     "digest": "7b080d699a7a8e1dee588b3aa77af308",
+     "approve_action": {
+      "id": "agent-approve-proposal:prop_72a622f3999db76c0f99f4cb4f56c153",
+      "label": "Make this change",
+      "message": "Yes, make that change."
+     },
+     "decline_action": {
+      "id": "agent-decline-proposal:prop_72a622f3999db76c0f99f4cb4f56c153",
+      "label": "Not now",
+      "message": "Not now."
+     },
+     "issued_turn_id": "32705576-c1ce-458d-8fd1-d41c634221f7",
+     "fields": [],
+     "missing": []
+    },
+    {
+     "proposal_id": "prop_d67121bd2944e39fd3bf282307a09676",
+     "revision": "fac3ff4f-9eb5-4bf3-ae3e-74ed68f01bc6",
+     "digest": "b03a8e188274ff969cbbc343783a2a86",
+     "approve_action": {
+      "id": "agent-approve-proposal:prop_d67121bd2944e39fd3bf282307a09676",
+      "label": "Change the goal",
+      "message": "Apply the complete goal change shown on this card.",
+      "detail": "From your message: “If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.”. Olumi proposes making “Angel funding secured” the current goal: at least £250,000. Olumi reads the target as at least £250,000; this direction is a proposal, not a comparator the user stated. “Funding secured” stays as a later ambition, as Olumi reads “I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.”, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal. The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below. Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.\nNot included on this card: Today’s level of Angel funding secured isn't included: Olumi couldn't verify it as a current figure from your words.; Deadline isn't included: Olumi couldn't safely include this change. This card won’t apply those omitted changes; they remain unresolved."
+     },
+     "decline_action": {
+      "id": "agent-decline-proposal:prop_d67121bd2944e39fd3bf282307a09676",
+      "label": "Not now",
+      "message": "Not now."
+     },
+     "issued_turn_id": "b31101b0-7fbe-49fb-84f0-d99674c33d46",
+     "fields": [],
+     "missing": []
+    }
+   ]
+  },
+  "changed_since_run": {
+   "version": 1,
+   "since_run_id": null,
+   "node_ids": [],
+   "links": [],
+   "unattributed_changes": 0,
+   "complete": true
+  },
+  "scenario_id": "15f20648-cc8c-47c6-812a-20f1fa74dfda",
+  "graph": {
+   "edges": [
+    {
+     "to": "current_split_reference",
+     "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "angel_first_split",
+     "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "poc_first_split",
+     "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "balanced_founder_split",
+     "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_angel_outreach",
+     "from": "angel_first_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_poc_testing_and_improvement",
+     "from": "angel_first_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_job_specifications",
+     "from": "angel_first_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_angel_outreach",
+     "from": "poc_first_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_poc_testing_and_improvement",
+     "from": "poc_first_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_job_specifications",
+     "from": "poc_first_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_angel_outreach",
+     "from": "balanced_founder_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_poc_testing_and_improvement",
+     "from": "balanced_founder_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_job_specifications",
+     "from": "balanced_founder_split",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_angel_outreach",
+     "from": "current_split_reference",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_poc_testing_and_improvement",
+     "from": "current_split_reference",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "founder_time_on_job_specifications",
+     "from": "current_split_reference",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "angel_investor_conversations",
+     "from": "founder_time_on_angel_outreach",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "angel_funding_secured",
+     "from": "angel_investor_conversations",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "poc_quality",
+     "from": "founder_time_on_poc_testing_and_improvement",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "brief_extraction",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "hiring_readiness",
+     "from": "founder_time_on_job_specifications",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "poc_quality",
+     "from": "hiring_readiness",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "angel_funding_secured",
+     "from": "poc_quality",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "larger_fund_secured",
+     "from": "poc_quality",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "funding_delay_from_weak_poc_evidence",
+     "from": "poc_quality",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "angel_funding_secured",
+     "from": "funding_delay_from_weak_poc_evidence",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "funding_secured",
+     "from": "angel_funding_secured",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "funding_secured",
+     "from": "larger_fund_secured",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_placeholder",
+      "mean_projected": true
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    }
+   ],
+   "nodes": [
+    {
+     "id": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+     "ref": "D1",
+     "kind": "decision",
+     "label": "I need to determine what I should prioritise and how I should spend my time…",
+     "provenance": "from_brief",
+     "description": "I need to determine what I should prioritise and how I should spend my time across these."
+    },
+    {
+     "id": "funding_secured",
+     "ref": "G1",
+     "kind": "goal",
+     "label": "Funding secured",
+     "provenance": "from_brief",
+     "user_statements": [
+      {
+       "field": "measure",
+       "attest": {
+        "recorded_by": "construction"
+       },
+       "statements": [
+        {
+         "form": "describes",
+         "unit": "£",
+         "quote": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+         "source": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+         "reading": "olumi",
+         "speaker": "user",
+         "subject": {
+          "quantity": "goal|funding secured|||measure"
+         },
+         "qualifier": "urgently",
+         "conditions": "both fast-paced angel and, eventually, a larger fund",
+         "qualifier_in_quote": true
+        }
+       ],
+       "recorded_at": "2026-10-17T04:36:28.230Z",
+       "subject_key": "goal|funding_secured|||measure"
+      }
+     ],
+     "goal_threshold_unit": "£",
+     "goal_threshold_frame": "level"
+    },
+    {
+     "id": "current_split_reference",
+     "ref": "O1",
+     "kind": "option",
+     "label": "Current split reference",
+     "provenance": "ai_inferred",
+     "is_baseline": true,
+     "user_statements": [
+      {
+       "field": "target",
+       "attest": {
+        "recorded_by": "construction"
+       },
+       "statements": [
+        {
+         "low": 1300000,
+         "form": "lower_bound",
+         "unit": "£",
+         "quote": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+         "source": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+         "reading": "olumi",
+         "speaker": "user",
+         "subject": {
+          "quantity": "option|current split reference|||target"
+         },
+         "qualifier": "eventually",
+         "conditions": "larger fund",
+         "qualifier_in_quote": true
+        }
+       ],
+       "recorded_at": "2026-10-17T04:36:28.230Z",
+       "subject_key": "option|current_split_reference|||target"
+      }
+     ]
+    },
+    {
+     "id": "angel_first_split",
+     "ref": "O2",
+     "kind": "option",
+     "label": "Angel-first split",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "interventions": {
+      "founder_time_on_angel_outreach": {
+       "unit": "% of founder working time",
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "raw_value": 60,
+       "target_match": {
+        "node_id": "founder_time_on_angel_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "founder_time_on_job_specifications": {
+       "unit": "% of founder working time",
+       "value": 0.15,
+       "source": "cee_hypothesis",
+       "raw_value": 15,
+       "target_match": {
+        "node_id": "founder_time_on_job_specifications",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "founder_time_on_poc_testing_and_improvement": {
+       "unit": "% of founder working time",
+       "value": 0.25,
+       "source": "cee_hypothesis",
+       "raw_value": 25,
+       "target_match": {
+        "node_id": "founder_time_on_poc_testing_and_improvement",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "poc_first_split",
+     "ref": "O3",
+     "kind": "option",
+     "label": "PoC-first split",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "interventions": {
+      "founder_time_on_angel_outreach": {
+       "unit": "% of founder working time",
+       "value": 0.25,
+       "source": "cee_hypothesis",
+       "raw_value": 25,
+       "target_match": {
+        "node_id": "founder_time_on_angel_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "founder_time_on_job_specifications": {
+       "unit": "% of founder working time",
+       "value": 0.15,
+       "source": "cee_hypothesis",
+       "raw_value": 15,
+       "target_match": {
+        "node_id": "founder_time_on_job_specifications",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "founder_time_on_poc_testing_and_improvement": {
+       "unit": "% of founder working time",
+       "value": 0.6,
+       "source": "cee_hypothesis",
+       "raw_value": 60,
+       "target_match": {
+        "node_id": "founder_time_on_poc_testing_and_improvement",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "balanced_founder_split",
+     "ref": "O4",
+     "kind": "option",
+     "label": "Balanced founder split",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "interventions": {
+      "founder_time_on_angel_outreach": {
+       "unit": "% of founder working time",
+       "value": 0.45,
+       "source": "cee_hypothesis",
+       "raw_value": 45,
+       "target_match": {
+        "node_id": "founder_time_on_angel_outreach",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "founder_time_on_job_specifications": {
+       "unit": "% of founder working time",
+       "value": 0.15,
+       "source": "cee_hypothesis",
+       "raw_value": 15,
+       "target_match": {
+        "node_id": "founder_time_on_job_specifications",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "founder_time_on_poc_testing_and_improvement": {
+       "unit": "% of founder working time",
+       "value": 0.4,
+       "source": "cee_hypothesis",
+       "raw_value": 40,
+       "target_match": {
+        "node_id": "founder_time_on_poc_testing_and_improvement",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "founder_time_on_angel_outreach",
+     "ref": "F1",
+     "kind": "factor",
+     "label": "Founder time on angel outreach",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "scale_frame": 100
+    },
+    {
+     "id": "founder_time_on_poc_testing_and_improvement",
+     "ref": "F2",
+     "kind": "factor",
+     "label": "Founder time on PoC testing and improvement",
+     "category": "controllable",
+     "provenance": "from_brief",
+     "scale_frame": 100,
+     "user_statements": [
+      {
+       "field": "measure",
+       "attest": {
+        "recorded_by": "construction"
+       },
+       "statements": [
+        {
+         "form": "describes",
+         "unit": "",
+         "quote": "I need to complete the PoC.",
+         "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+         "reading": "olumi",
+         "speaker": "user",
+         "subject": {
+          "quantity": "factor|founder time on poc testing and improvement|||measure"
+         }
+        }
+       ],
+       "recorded_at": "2026-10-17T04:36:28.230Z",
+       "subject_key": "factor|founder_time_on_poc_testing_and_improvement|||measure"
+      },
+      {
+       "field": "relation",
+       "attest": {
+        "recorded_by": "construction"
+       },
+       "statements": [
+        {
+         "form": "describes",
+         "unit": "",
+         "quote": "I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+         "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+         "reading": "olumi",
+         "speaker": "user",
+         "subject": {
+          "quantity": "link|founder time on poc testing and improvement|poc quality||relation"
+         },
+         "qualifier": "I don't need to be on it all of the time",
+         "conditions": "I have AI working on it",
+         "qualifier_in_quote": true
+        }
+       ],
+       "recorded_at": "2026-10-17T04:36:28.230Z",
+       "subject_key": "link|founder_time_on_poc_testing_and_improvement|poc_quality||relation"
+      }
+     ]
+    },
+    {
+     "id": "founder_time_on_job_specifications",
+     "ref": "F3",
+     "kind": "factor",
+     "label": "Founder time on job specifications",
+     "category": "controllable",
+     "provenance": "from_brief",
+     "scale_frame": 100,
+     "user_statements": [
+      {
+       "field": "measure",
+       "attest": {
+        "recorded_by": "construction"
+       },
+       "statements": [
+        {
+         "form": "describes",
+         "unit": "",
+         "quote": "I need to put job specs out for the resource we need.",
+         "source": "I need to put job specs out for the resource we need.",
+         "reading": "olumi",
+         "speaker": "user",
+         "subject": {
+          "quantity": "factor|founder time on job specifications|||measure"
+         },
+         "conditions": "for the resource we need"
+        }
+       ],
+       "recorded_at": "2026-10-17T04:36:28.230Z",
+       "subject_key": "factor|founder_time_on_job_specifications|||measure"
+      }
+     ]
+    },
+    {
+     "id": "funding_delay_from_weak_poc_evidence",
+     "ref": "R1",
+     "kind": "risk",
+     "label": "Funding delay from weak PoC evidence",
+     "provenance": "ai_inferred"
+    },
+    {
+     "id": "investor_outreach_pipeline_stalls",
+     "ref": "R2",
+     "kind": "risk",
+     "label": "Investor outreach pipeline stalls",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "draft_widening": {
+      "hits": {
+       "id": "poc_first_split",
+       "kind": "option",
+       "label": "PoC-first split"
+      },
+      "affects": {
+       "id": "angel_investor_conversations",
+       "label": "Angel investor conversations",
+       "direction": "negative"
+      },
+      "through": {
+       "id": "founder_time_on_angel_outreach",
+       "label": "Founder time on angel outreach",
+       "direction": "negative"
+      },
+      "mechanism": "relies_on",
+      "relies_on": "maintaining angel follow-up momentum",
+      "watch_for": "Follow-ups and meetings accumulate",
+      "provenance": "ai_suggested_widen"
+     },
+     "analysis_participation": "retained_excluded"
+    },
+    {
+     "id": "testing_bottleneck_from_founder_absence",
+     "ref": "R3",
+     "kind": "risk",
+     "label": "Testing bottleneck from founder absence",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "draft_widening": {
+      "hits": {
+       "id": "angel_first_split",
+       "kind": "option",
+       "label": "Angel-first split"
+      },
+      "affects": {
+       "id": "poc_quality",
+       "label": "PoC quality",
+       "direction": "negative"
+      },
+      "through": {
+       "id": "founder_time_on_poc_testing_and_improvement",
+       "label": "Founder time on PoC testing and improvement",
+       "direction": "negative"
+      },
+      "mechanism": "drives",
+      "relies_on": "Founder testing input",
+      "watch_for": "AI output awaits founder feedback",
+      "provenance": "ai_suggested_widen"
+     },
+     "analysis_participation": "retained_excluded"
+    },
+    {
+     "id": "hiring_specifications_remain_incomplete",
+     "ref": "R4",
+     "kind": "risk",
+     "label": "Hiring specifications remain incomplete",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "draft_widening": {
+      "hits": {
+       "id": "balanced_founder_split",
+       "kind": "option",
+       "label": "Balanced founder split"
+      },
+      "affects": {
+       "id": "hiring_readiness",
+       "label": "Hiring readiness",
+       "direction": "negative"
+      },
+      "through": {
+       "id": "founder_time_on_job_specifications",
+       "label": "Founder time on job specifications",
+       "direction": "negative"
+      },
+      "mechanism": "relies_on",
+      "relies_on": "finalising role requirements promptly",
+      "watch_for": "Role scope remains unresolved",
+      "provenance": "ai_suggested_widen"
+     },
+     "analysis_participation": "retained_excluded"
+    },
+    {
+     "id": "angel_investor_conversations",
+     "ref": "OC1",
+     "kind": "outcome",
+     "label": "Angel investor conversations",
+     "provenance": "ai_inferred",
+     "scale_frame": 100
+    },
+    {
+     "id": "poc_quality",
+     "ref": "OC2",
+     "kind": "outcome",
+     "label": "PoC quality",
+     "provenance": "from_brief",
+     "scale_frame": 100
+    },
+    {
+     "id": "hiring_readiness",
+     "ref": "OC3",
+     "kind": "outcome",
+     "label": "Hiring readiness",
+     "provenance": "ai_inferred",
+     "scale_frame": 100
+    },
+    {
+     "id": "angel_funding_secured",
+     "ref": "OC4",
+     "kind": "outcome",
+     "label": "Angel funding secured",
+     "provenance": "ai_inferred",
+     "scale_frame": 5000000
+    },
+    {
+     "id": "larger_fund_secured",
+     "ref": "OC5",
+     "kind": "outcome",
+     "label": "Larger fund secured",
+     "provenance": "from_brief",
+     "description": "Larger fund secured\nLater ambition, as Olumi reads your words (‘Larger fund secured’, at least 1300000 £). Your source stays yours; the later role is a modelling interpretation, and it does not set a target this model tests.",
+     "scale_frame": 10000000
+    }
+   ],
+   "ref_high_water": {
+    "D": 1,
+    "F": 3,
+    "G": 1,
+    "O": 4,
+    "R": 4,
+    "OC": 5
+   }
+  },
+  "graph_present": true,
+  "brief_text": "I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.",
+  "scenario_created_at": "2026-10-17T04:35:18.19031+00:00",
+  "graph_identity_hash": {
+   "kind": "graph_identity_hash",
+   "value": "813a83c398c9d61d4e8731b6d6c001061ee968f6d0682f3b2acf4edac123ef64",
+   "algorithm": "sha256",
+   "projection_version": "identity.v1",
+   "graph_schema_version": "graph_v3",
+   "normaliser_version": "1"
+  },
+  "graph_hash": "0decea981b23b75b",
+  "layout_present": false,
+  "not_modelled": {
+   "schema": "not_modelled.v1",
+   "status": "derived",
+   "unavailable_reason": null,
+   "scope": {
+    "searched": "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+    "model_surface": [
+     "node and option values, caps, units, labels and encoding maps"
+    ],
+    "prose_surface": [
+     "coaching cards",
+     "draft warnings",
+     "validation warnings"
+    ],
+    "excluded_from_search": [
+     "bare numbers carrying no unit, currency or percent sign",
+     "everything in not_tracked"
+    ]
+   },
+   "quantities": {
+    "total": 0,
+    "in_model": 0,
+    "in_model_anchored": 0,
+    "in_model_unanchored": 0,
+    "prose_only": 0,
+    "absent": 0,
+    "truncated": false,
+    "items": []
+   },
+   "stated_kinds": {
+    "status": "derived",
+    "tally": {
+     "goal": 0,
+     "option": 0,
+     "constraint": 0,
+     "figure": 0,
+     "evidence": 0,
+     "assumption": 0,
+     "disagreement": 0,
+     "correction": 0
+    },
+    "sourced": [
+     "constraint",
+     "figure"
+    ],
+    "unsourced": [
+     "goal",
+     "option",
+     "evidence",
+     "assumption",
+     "disagreement",
+     "correction"
+    ],
+    "producers": {
+     "figure": "extractStatedQuantities (this module) — quantities stated in the brief",
+     "constraint": "graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)"
+    }
+   },
+   "declared_exclusions": {
+    "status": "not_recorded",
+    "items": []
+   },
+   "inferred_factors": {
+    "status": "derived",
+    "items": []
+   },
+   "not_tracked": [
+    "competing_or_dissenting_proposals",
+    "corrections_and_second_thoughts",
+    "named_evidence_sources_and_their_pedigree",
+    "qualitative_constraints_and_rules",
+    "stated_confidence_and_self_flagged_weakness",
+    "statements_the_drafting_model_did_not_report_discarding"
+   ]
+  },
+  "analysis_state": {
+   "run_state": {
+    "kind": "never_run"
+   },
+   "readiness": {
+    "status": "needs_user_input",
+    "blockers": [
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder time on angel outreach\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_time_on_angel_outreach",
+      "factor_label": "Founder time on angel outreach"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder time on PoC testing and improvement\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_time_on_poc_testing_and_improvement",
+      "factor_label": "Founder time on PoC testing and improvement"
+     },
+     {
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder time on job specifications\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_time_on_job_specifications",
+      "factor_label": "Founder time on job specifications"
+     }
+    ]
+   },
+   "leader_claim": {
+    "permitted": false,
+    "withheld_reason": "analysis_no_result"
+   },
+   "robustness": {},
+   "usable_for_prose": false,
+   "usable_for_chips": false,
+   "usable_for_followup": false,
+   "requires_rerun": false,
+   "blocked_unusable": false,
+   "contradictions": []
+  },
+  "analysis_result": null,
+  "canonical_analysis_view": {
+   "schema": "canonical_analysis_view.v1",
+   "source": "stored_run_facts",
+   "run": null,
+   "staleness": {
+    "stale": null,
+    "revision": 2,
+    "run_revision": null,
+    "run_revision_source": "legacy_unknown",
+    "basis": "analysis_graph_hash_interim",
+    "reason": null,
+    "limitation": "Hash equality cannot detect brief, framing or stage changes."
+   },
+   "leader_licence": "withheld",
+   "leader": {
+    "licence": "withheld",
+    "option_id": null,
+    "goal_chance_leader": null,
+    "similar_option_ids": [],
+    "near_tie": false,
+    "robustness": null
+   },
+   "options": []
+  },
+  "current_read": {
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "current_split_reference",
+      "label": "Current split reference",
+      "status": "ready",
+      "interventions": {},
+      "is_baseline": true,
+      "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+     },
+     {
+      "option_id": "angel_first_split",
+      "label": "Angel-first split",
+      "status": "ready",
+      "interventions": {
+       "founder_time_on_angel_outreach": 0.6,
+       "founder_time_on_job_specifications": 0.15,
+       "founder_time_on_poc_testing_and_improvement": 0.25
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "founder_time_on_angel_outreach": {
+        "display_value": "60 % of founder working time",
+        "normalised_value": 0.6,
+        "raw_value": 60,
+        "unit": "% of founder working time"
+       },
+       "founder_time_on_job_specifications": {
+        "display_value": "15 % of founder working time",
+        "normalised_value": 0.15,
+        "raw_value": 15,
+        "unit": "% of founder working time"
+       },
+       "founder_time_on_poc_testing_and_improvement": {
+        "display_value": "25 % of founder working time",
+        "normalised_value": 0.25,
+        "raw_value": 25,
+        "unit": "% of founder working time"
+       }
+      },
+      "raw_interventions": {
+       "founder_time_on_angel_outreach": 60,
+       "founder_time_on_job_specifications": 15,
+       "founder_time_on_poc_testing_and_improvement": 25
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "poc_first_split",
+      "label": "PoC-first split",
+      "status": "ready",
+      "interventions": {
+       "founder_time_on_angel_outreach": 0.25,
+       "founder_time_on_job_specifications": 0.15,
+       "founder_time_on_poc_testing_and_improvement": 0.6
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "founder_time_on_angel_outreach": {
+        "display_value": "25 % of founder working time",
+        "normalised_value": 0.25,
+        "raw_value": 25,
+        "unit": "% of founder working time"
+       },
+       "founder_time_on_job_specifications": {
+        "display_value": "15 % of founder working time",
+        "normalised_value": 0.15,
+        "raw_value": 15,
+        "unit": "% of founder working time"
+       },
+       "founder_time_on_poc_testing_and_improvement": {
+        "display_value": "60 % of founder working time",
+        "normalised_value": 0.6,
+        "raw_value": 60,
+        "unit": "% of founder working time"
+       }
+      },
+      "raw_interventions": {
+       "founder_time_on_angel_outreach": 25,
+       "founder_time_on_job_specifications": 15,
+       "founder_time_on_poc_testing_and_improvement": 60
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "balanced_founder_split",
+      "label": "Balanced founder split",
+      "status": "ready",
+      "interventions": {
+       "founder_time_on_angel_outreach": 0.45,
+       "founder_time_on_job_specifications": 0.15,
+       "founder_time_on_poc_testing_and_improvement": 0.4
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "founder_time_on_angel_outreach": {
+        "display_value": "45 % of founder working time",
+        "normalised_value": 0.45,
+        "raw_value": 45,
+        "unit": "% of founder working time"
+       },
+       "founder_time_on_job_specifications": {
+        "display_value": "15 % of founder working time",
+        "normalised_value": 0.15,
+        "raw_value": 15,
+        "unit": "% of founder working time"
+       },
+       "founder_time_on_poc_testing_and_improvement": {
+        "display_value": "40 % of founder working time",
+        "normalised_value": 0.4,
+        "raw_value": 40,
+        "unit": "% of founder working time"
+       }
+      },
+      "raw_interventions": {
+       "founder_time_on_angel_outreach": 45,
+       "founder_time_on_job_specifications": 15,
+       "founder_time_on_poc_testing_and_improvement": 40
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "funding_secured",
+    "status": "needs_user_input",
+    "bias_findings": [],
+    "blockers": [
+     {
+      "factor_id": "founder_time_on_angel_outreach",
+      "factor_label": "Founder time on angel outreach",
+      "blocker_type": "missing_value",
+      "message": "What is \"Founder time on angel outreach\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "founder_time_on_poc_testing_and_improvement",
+      "factor_label": "Founder time on PoC testing and improvement",
+      "blocker_type": "missing_value",
+      "message": "What is \"Founder time on PoC testing and improvement\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     },
+     {
+      "factor_id": "founder_time_on_job_specifications",
+      "factor_label": "Founder time on job specifications",
+      "blocker_type": "missing_value",
+      "message": "What is \"Founder time on job specifications\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "suggested_action": "add_value"
+     }
+    ],
+    "readiness_issues": [
+     {
+      "issue_id": "level_1",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder time on angel outreach\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_time_on_angel_outreach",
+      "factor_label": "Founder time on angel outreach",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_2",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder time on PoC testing and improvement\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_time_on_poc_testing_and_improvement",
+      "factor_label": "Founder time on PoC testing and improvement",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     },
+     {
+      "issue_id": "level_3",
+      "code": "MISSING_FACTOR_LEVEL",
+      "category": "option_values",
+      "message": "What is \"Founder time on job specifications\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+      "repairability": "human_input_required",
+      "factor_id": "founder_time_on_job_specifications",
+      "factor_label": "Founder time on job specifications",
+      "provenance": "system_repaired",
+      "obligation": "required"
+     }
+    ],
+    "repair_proposal": {
+     "proposal_version": "readiness_repair_v1",
+     "complete": true,
+     "issue_ids": [
+      "level_1",
+      "level_2",
+      "level_3"
+     ],
+     "changes": [],
+     "unresolved_inputs": [
+      {
+       "issue_id": "level_1",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Founder time on angel outreach\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "founder_time_on_angel_outreach",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      },
+      {
+       "issue_id": "level_2",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Founder time on PoC testing and improvement\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "founder_time_on_poc_testing_and_improvement",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      },
+      {
+       "issue_id": "level_3",
+       "kind": "option_effect_value",
+       "prompt": "What is \"Founder time on job specifications\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "factor_id": "founder_time_on_job_specifications",
+       "obligation": "required",
+       "provenance": "system_repaired"
+      }
+     ]
+    },
+    "may_run": false,
+    "analysis_admission": {
+     "structurally_analysable": false,
+     "missing_important_inputs": [
+      {
+       "issue_id": "level_1",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "founder_time_on_angel_outreach",
+       "factor_label": "Founder time on angel outreach",
+       "why_it_matters": "What is \"Founder time on angel outreach\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_2",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "founder_time_on_poc_testing_and_improvement",
+       "factor_label": "Founder time on PoC testing and improvement",
+       "why_it_matters": "What is \"Founder time on PoC testing and improvement\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "level_3",
+       "code": "MISSING_FACTOR_LEVEL",
+       "factor_id": "founder_time_on_job_specifications",
+       "factor_label": "Founder time on job specifications",
+       "why_it_matters": "What is \"Founder time on job specifications\" today, before any option changes it? Without a current level the analysis would treat it as zero.",
+       "obligation": "required",
+       "waived_by_exclusion": false
+      }
+     ],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "none",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "Review all 3 readiness issues together before analysis."
+      },
+      {
+       "field": "missing_important_inputs",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "3 inputs are still needed from you."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "This model cannot be analysed yet."
+      }
+     ],
+     "graph_hash": "0decea981b23b75b8abe41927e2b53f42f9ec355d3ea094b2ab3e1d5a99013c4",
+     "semantic_signals": {
+      "confidence_parameters_total": 24,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 14,
+      "confidence_parameters_unattributed": 10,
+      "material_parameters_total": 14,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 3,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "founder_time_on_angel_outreach",
+       "founder_time_on_poc_testing_and_improvement",
+       "founder_time_on_job_specifications"
+      ],
+      "goal_target_stated": false
+     }
+    },
+    "current_graph_hash": "0decea981b23b75b"
+   },
+   "run_state": {
+    "kind": "never_run"
+   },
+   "computed_against_hash": null,
+   "current_analysis_hash": "0decea981b23b75b",
+   "figures": []
+  },
+  "analysis_identity_run_use": null,
+  "analysis_admission": {
+   "admitted": false,
+   "permitted_analysis_mode": "none",
+   "semantic_quality_sufficient": false,
+   "reason_codes": [
+    "MODEL_HAS_BLOCKERS",
+    "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED"
+   ],
+   "missing_input_codes": [
+    "MISSING_FACTOR_LEVEL"
+   ],
+   "missing_input_count": 3,
+   "inputs_demanded_of_user": 3,
+   "inputs_waived_by_exclusion": 0,
+   "graph_hash": "0decea981b23b75b8abe41927e2b53f42f9ec355d3ea094b2ab3e1d5a99013c4",
+   "semantic_signals": {
+    "material_parameters_awaiting_user_node_ids": [
+     "founder_time_on_angel_outreach",
+     "founder_time_on_poc_testing_and_improvement",
+     "founder_time_on_job_specifications"
+    ]
+   }
+  },
+  "conversation_turns": [
+   {
+    "turn_id": "dea72415-3b54-4572-98ab-58911d86ebab",
+    "created_at": "2026-10-17T04:36:47.1487+00:00",
+    "user_message": "I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.",
+    "assistant_message": "I’ve mapped four ways of splitting your time: current split, angel-first, PoC-first, and balanced. The model treats fast angel funding as the near-term route to “Funding secured”; the £1.3m fund is retained as a later ambition.\n\nThe first pass cannot be analysed yet. It lacks:\n- a definition of success for the immediate funding goal — amount and deadline;\n- your current time allocation across angel outreach, PoC work, and job specifications.\n\nI tried to prepare clearly labelled starting assumptions for those allocations, but the model could not accept them because its saved time scale does not match the proposed figures. Nothing has been changed or is awaiting approval.\n\nThe key strategic dependency is whether investor interest needs stronger PoC evidence now, or whether outreach momentum is the tighter constraint.\n\n**One question:** what funding amount do you need to secure, and by what date, for the immediate angel round?\n\nThe first analysis could not run yet: Review all 3 readiness issues together before analysis.\n\nThe analysis can't run yet. What is \"Founder time on angel outreach\" today, before any option changes it? Without a current level the analysis would treat it as zero. What is \"Founder time on PoC testing and improvement\" today, before any option changes it? Without a current level the analysis would treat it as zero."
+   },
+   {
+    "turn_id": "eb5f04f1-00ec-40f7-bfe5-8c826ef0eee1",
+    "created_at": "2026-10-17T04:37:07.730537+00:00",
+    "user_message": "Once funding is secured, then that changes this question completely. Securing funding is an outcome that would result in a new decision, not influence this decision.",
+    "assistant_message": "Yes — **securing funding is an outcome of today’s allocation, and a trigger to reconsider that allocation**, not something that determines how you spend time before it happens.\n\nThe current model has no link feeding secured funding back into your present allocation, so there is no such link to remove. Your clarification sets the boundary: **how to divide your attention while funding remains unsecured**. After funding, you face a new question with different resources and constraints.\n\nMy view: we should distinguish PoC work and job specifications that help secure funding from work whose main benefit comes afterwards. Their contribution to funding is currently Olumi’s assumption, not an established fact.\n\nWhat amount of near-term funding, secured by when, would mark that transition for you?"
+   },
+   {
+    "turn_id": "df8717a0-dabf-4d36-979a-35bdd17740c2",
+    "created_at": "2026-10-17T04:37:30.207779+00:00",
+    "user_message": "I feel like you're going down the wrong route. We have no funding. I cannot carry on as I am now. I need to get funding as soon as possible. I probably need a PoC as soon as I have an interview/meeting with an investor, but I obviously need to get investors to ask to speak to me first.",
+    "assistant_message": "You’re right. I treated this as a fixed time-split problem when you’re describing **a sequence with a changing deadline**.\n\nFrom what you’ve said:\n- Investor outreach creates the opportunity for a meeting.\n- The PoC probably needs to be ready for that meeting—not necessarily before outreach begins.\n- Funding secured ends this allocation question and starts a new one.\n- Carrying on unchanged is not a viable choice for you.\n\n**My reading:** the useful comparison is between ways of coordinating outreach and PoC readiness, rather than permanent percentage splits. The uncertainty is whether the PoC can reach a credible demonstration standard before an investor meeting materialises. Job specifications remain necessary, but you haven’t established that they must precede either step.\n\nNothing has changed in the model. I also tried to record “no funding” as £0, but the tool would not accept that wording as a numerical figure.\n\nFor a numerical funding analysis, the model still needs a near-term amount and deadline; “as soon as possible” does not supply those. We can clarify the sequencing without inventing them:\n\n**How much founder testing and improvement does the PoC still need before you could show it to an investor?**"
+   },
+   {
+    "turn_id": "32705576-c1ce-458d-8fd1-d41c634221f7",
+    "created_at": "2026-10-17T04:37:50.367925+00:00",
+    "user_message": "Make this change",
+    "assistant_message": "I’ve proposed marking **“Current split reference”** as not feasible and taking it out of the comparison. It stays in your model, but carrying on unchanged would no longer be treated as an available option.\n\nThis does **not** yet replace the fixed time splits with the sequencing you described: outreach creates meetings, and the PoC probably needs to be ready by a meeting. That broader change remains unrepresented.\n\nDo you approve taking “Current split reference” out of the comparison?"
+   },
+   {
+    "turn_id": "74168917-81d3-42f9-b950-758d13e57760",
+    "created_at": "2026-10-17T04:38:11.858306+00:00",
+    "user_message": "Yes, it's really bad that this risk was generated, but it connects to nothing, so it's pretty much useless. I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process. They need to be really good to attract talent, but the more time I spend on them, the less I can spend on other things. I feel like all of this should be pretty obvious to you.",
+    "assistant_message": "You’re right. I generated the hiring risk without making it useful to the reasoning.\n\n**“Hiring specifications remain incomplete” is Olumi’s addition.** It has no causal connections and is excluded from analysis. It therefore does not capture what you’ve now explained:\n\n- **Completion is a prerequisite:** recruitment cannot proceed until the specifications are finished.\n- **Quality matters:** the specifications need to attract talent, not merely exist.\n- **Your attention is limited:** time spent on them reduces time available for investor outreach and PoC work.\n\nThe existing link from time on specifications to “Hiring readiness” is also Olumi’s assumption. It doesn’t distinguish completion from quality or enforce the recruitment prerequisite. Nor do the separate time allocations explicitly enforce that trade-off.\n\n“I haven’t started” describes the specifications’ progress—not necessarily your ongoing time allocation—so I should not turn it into a percentage.\n\nNo change was saved. The next useful modelling step is to clarify those completion and quality requirements, rather than add another disconnected risk. Separately, the funding analysis still lacks its success condition: **what near-term funding amount would count as secured, and by when?**\n\nNot saved yet: press the approval button on the card."
+   },
+   {
+    "turn_id": "152b4608-d108-4366-9eb5-89e6b2a78739",
+    "created_at": "2026-10-17T04:38:29.062959+00:00",
+    "user_message": "The job specification is just the work I would be doing if I was focusing on that, so I'm not sure we should be focusing on it. The question I'm trying to answer is how to best divide my time.",
+    "assistant_message": "Yes — **job specifications are one use of your time, not the central question.** I over-focused on the task instead of the allocation you’re trying to work out.\n\nThe question is how to divide your limited attention, before funding, between:\n- **Investor outreach:** creating opportunities for meetings.\n- **PoC testing and improvement:** being ready to demonstrate it when a meeting arises.\n- **Recruitment preparation:** getting the specifications ready so recruitment can proceed.\n\nYour clarification also means the split may change when a meeting is booked, rather than stay fixed indefinitely. That is my interpretation, not a saved change.\n\nThe model’s existing percentage splits are Olumi’s unvalidated suggestions—not figures you supplied or conclusions about how you should spend your time. There is no analysis result yet.\n\nTo assess allocations against funding success, one gap remains: **what near-term funding amount would count as success, and by when?**"
+   },
+   {
+    "turn_id": "a6bdc562-271d-4dd6-b2c1-48927acafad4",
+    "created_at": "2026-10-17T04:38:41.944803+00:00",
+    "user_message": "Let's assume 60 and possibly more if I needed to.",
+    "assistant_message": "Do you mean **60 working hours per week available to divide across outreach, the PoC and recruitment preparation**, with the possibility of working more if needed?"
+   },
+   {
+    "turn_id": "510bacdb-77ae-4f50-9f8a-f6c8c8c37482",
+    "created_at": "2026-10-17T04:38:55.489182+00:00",
+    "user_message": "I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly. Or, if I was to complete it more slowly, I could spend less time on it.",
+    "assistant_message": "That distinguishes **your current allocation—probably 80%—from the allocation you want to choose**. It does not establish that 80% is necessary: that is your working assumption about completing it quickly.\n\nBefore I attach that figure to the model, does “it” mean **PoC testing and improvement**?"
+   },
+   {
+    "turn_id": "91e8fda5-d0f5-4252-ad2c-49a2fdbbf4d7",
+    "created_at": "2026-10-17T04:39:17.18152+00:00",
+    "user_message": "I feel like you're getting into minutia. I need a quick decision on the split of my time. How do we model that to help me decide? What are the key factors, risks, and likely outcomes?",
+    "assistant_message": "You’re right: we need a **small time-allocation model**, not a detailed model of every task.\n\n### What to compare\nThe saved model contains three **Olumi-proposed, unvalidated splits**:\n\n| Split | Investor outreach | PoC | Recruitment preparation |\n|---|---:|---:|---:|\n| Angel-first | 60% | 25% | 15% |\n| PoC-first | 25% | 60% | 15% |\n| Balanced | 45% | 40% | 15% |\n\nThese are alternatives to test, not conclusions. Keeping recruitment preparation at 15% in all three means the current comparison **doesn’t test that part of your question**.\n\n### Key factors and risks\nMy proposed reasoning framework is:\n\n- **Investor access:** how outreach turns into credible meetings. Risk: too little outreach means no opportunities to demonstrate the PoC.\n- **PoC readiness:** how much founder input is needed to demonstrate it credibly. Risk: a meeting arrives before it is ready.\n- **Recruitment readiness:** whether preparation needs to happen before funding or can wait. Risk: unfinished preparation delays recruitment later.\n- **Timing and limited attention:** progress in one area consumes time available elsewhere. The allocation can change when a meeting is booked; it needn’t be permanent.\n\n### Outcomes to examine\nQualitatively—not as calculated forecasts:\n- More outreach could create meetings sooner, but leave less preparation time.\n- More PoC work could improve demonstration readiness, but delay investor contact.\n- More recruitment preparation could reduce later hiring delays, but take time from both immediate activities.\n\n**My view:** the useful test is whether each split gets investor interest and PoC readiness to coincide—not whether it maximises PoC quality alone. Funding secured ends this question and triggers a new allocation.\n\nThere is no calculated result yet. The model lacks current allocations, its causal effects are unquantified, and the three task-specific risks are excluded from calculation. I can offer starting assumptions rather than ask you to estimate every detail, but they would remain assumptions.\n\nFor a numerical funding-success comparison, one definition is still missing: **what near-term funding amount would count as success, and by when?**"
+   },
+   {
+    "turn_id": "9fca9cca-72db-4867-b922-dfc9df5e8e79",
+    "created_at": "2026-10-17T04:39:40.326226+00:00",
+    "user_message": "If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.",
+    "assistant_message": "**£250,000 gives us a concrete near-term funding target:** the breathing space you want to bring in technical resource. The extra capacity comes after funding; it should not feed back into your pre-funding time allocation.\n\nI’ve proposed making **“Angel funding secured”** the current goal, with a target of **at least £250,000**. “At least” is Olumi’s reading of “even £250,000”, for you to accept or correct.\n\nThe approval card:\n- Keeps the options and their settings unchanged.\n- Retains the earlier “Funding secured” aim and your eventual £1.3 million ambition as context, outside this analysis.\n- Does **not** record today’s funding level: the tool could not verify “no funding” as a numerical figure.\n- Does **not** set a deadline: none was supplied in this message.\n\nNothing has been saved. You can approve the goal change on its card.\n\n**By when would you need to secure that £250,000?**"
+   },
+   {
+    "turn_id": "b31101b0-7fbe-49fb-84f0-d99674c33d46",
+    "created_at": "2026-10-17T04:40:10.579687+00:00",
+    "user_message": "I feel like we're going around in circles. Can you just update the model to reflect our conversation so I can actually decide what to spend my time on?",
+    "assistant_message": "You’re right—we’ve spent too long clarifying without making useful progress.\n\nI’ve prepared a targeted change to make **“Angel funding secured”** the current goal, with **at least £250,000** as the success target. The amount is yours; “at least” is Olumi’s interpretation for approval.\n\nThe card:\n- Keeps your existing allocation options and settings.\n- Retains the eventual £1.3 million ambition as context, outside this near-term analysis.\n- Leaves today’s funding level unset: the tool did not accept “no funding” as a numerical figure.\n- Leaves the deadline unset: “as soon as possible” cannot be converted into a date.\n\n**This is not the complete correction you asked for**, and nothing has been saved. It does not yet capture changing your split when an investor meeting is booked, or funding ending this allocation question. Nor does it remove carrying on unchanged.\n\nMy view remains that the model should compare **pre-funding allocations**, with investor outreach creating meetings and PoC work preparing you for them—not treat every task as an independent objective.\n\nApprove the **“Angel funding secured”** change on its card. The remaining missing timing input is: **by what date do you need the £250,000?**\n\nThe held change \"From your message: “If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.”. Olumi proposes making “Angel funding secured” the current goal: at least £250,000. Olumi reads the target as at least £250,000; this direction is a proposal, not a comparator the user stated. “Funding secured” stays as a later ambition, as Olumi reads “I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.”, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal. The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below. Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.\nNot included on this card: Today’s level of Angel funding secured isn't included: Olumi couldn't verify it as a current figure from your words.; Deadline isn't included: Olumi couldn't safely include this change. This card won’t apply those omitted changes; they remain unresolved\" was replaced by the newer card for the same change; nothing in the model changed."
+   },
+   {
+    "turn_id": "061bdfa4-8388-435e-a2b0-ff4413d85e0c",
+    "created_at": "2026-10-17T04:40:25.074335+00:00",
+    "user_message": "Yes, at least",
+    "assistant_message": "Understood: **at least £250,000 in angel funding**.\n\nTwo changes are awaiting approval. Do you want me to apply **the £250,000 funding goal**, **remove “Current split reference” from the comparison**, or **both**?"
+   }
+  ],
+  "action_bar": {
+   "v": 1,
+   "state_key": "fb54ce5054816037",
+   "revision": {
+    "graph_hash": "0decea981b23b75b",
+    "run_key": null
+   },
+   "priority": [
+    {
+     "action_id": "more_options",
+     "label": "More options",
+     "icon": "GitFork",
+     "group": "gap",
+     "press_id": "agent-next-widen",
+     "user_line": "Suggest options I haven’t considered.",
+     "enabled": true,
+     "why_now": "Your options all work through the same lever.",
+     "offer_key": "7968af8f1541eaad"
+    }
+   ],
+   "standard": [
+    {
+     "action_id": "review",
+     "label": "Review",
+     "icon": "ListChecks",
+     "group": "review",
+     "press_id": "agent-next-review-decision",
+     "user_line": "Review this model: what should I check before relying on it?",
+     "enabled": false,
+     "disabled_reason": "Needs a current analysis.",
+     "offer_key": "99e356b0632e6812"
+    },
+    {
+     "action_id": "what_changes",
+     "label": "What changes",
+     "icon": "SlidersHorizontal",
+     "group": "method",
+     "press_id": "agent-next-what-would-change",
+     "user_line": "What would most likely change this result?",
+     "enabled": false,
+     "disabled_reason": "Needs a current analysis.",
+     "offer_key": "0a5c28fb2e8155a1"
+    },
+    {
+     "action_id": "strengthen",
+     "label": "Strengthen",
+     "icon": "ShieldCheck",
+     "group": "review",
+     "press_id": "agent-next-strengthen",
+     "user_line": "What would most strengthen this model?",
+     "enabled": false,
+     "disabled_reason": "Needs a current analysis.",
+     "offer_key": "ed5a48d984aabf15"
+    },
+    {
+     "action_id": "pre_mortem",
+     "label": "Pre-mortem",
+     "icon": "ClipboardList",
+     "group": "method",
+     "press_id": "agent-next-pre-mortem",
+     "user_line": "Run a pre-mortem with me: imagine we went ahead and it went badly. What most plausibly went wrong?",
+     "enabled": false,
+     "disabled_reason": "Waiting for your yes on the suggested change. Approve it, or change something first.",
+     "offer_key": "8b2c8cd047c406b8"
+    }
+   ],
+   "more": [
+    {
+     "action_id": "set_goal",
+     "label": "Set target",
+     "icon": "Target",
+     "group": "gap",
+     "press_id": "act:set_goal",
+     "user_line": "Help me set a target for my goal.",
+     "enabled": true,
+     "why_now": "Your goal has no target yet, so no chance of meeting it can be worked out.",
+     "offer_key": "e36e24c2d794c5f3"
+    },
+    {
+     "action_id": "frame_brief",
+     "label": "Frame brief",
+     "icon": "FileText",
+     "group": "gap",
+     "press_id": "act:frame_brief",
+     "user_line": "Help me frame my brief: what is missing from it?",
+     "enabled": true,
+     "why_now": "See what your brief has and what it is missing.",
+     "offer_key": "39f117a92d83d6b5"
+    },
+    {
+     "action_id": "more_risks",
+     "label": "More risks",
+     "icon": "ShieldAlert",
+     "group": "gap",
+     "press_id": "agent-next-suggest-risks",
+     "user_line": "Suggest risks I haven't considered.",
+     "enabled": true,
+     "why_now": "Find risks you haven’t considered yet.",
+     "offer_key": "2de1ac12c89ce220"
+    },
+    {
+     "action_id": "bias_check",
+     "label": "Bias check",
+     "icon": "ScanSearch",
+     "group": "method",
+     "press_id": "act:bias_check",
+     "user_line": "Where could a common reasoning pattern bite in this model?",
+     "enabled": true,
+     "why_now": "See where common reasoning patterns could bite in this model.",
+     "offer_key": "742316ad9ec0a07c"
+    }
+   ],
+   "bias_risk": {
+    "v": 1,
+    "items": [
+     {
+      "claim_id": "DSK-B-007",
+      "name": "Narrow framing",
+      "why": "These options all work through the same lever, which can hide better routes.",
+      "action_id": "more_options",
+      "press_id": "agent-next-widen",
+      "offer_key": "7968af8f1541eaad",
+      "science": {
+       "claim_id": "DSK-B-007",
+       "claim_title": "Narrow framing and insufficient option generation",
+       "evidence_strength": "medium"
+      }
+     }
+    ]
+   }
+  },
+  "request_id": "e7b8c3a5-27e9-4b1a-ab7a-2de21e6e9517"
+ }
+}

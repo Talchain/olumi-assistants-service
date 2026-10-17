@@ -415,7 +415,9 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r).not.toHaveProperty('levels_not_accepted');
       expect(p.posted).toEqual([]);
-      expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+      expect(await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).toMatchObject({ ok: false, refusal: 'approval_required' });
+      expect(p.posted).toEqual([]);
+      expect((await caps.authoriseChange({ ...ctx, typed_approval_of: String(r.proposal_id) }, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
       expect(p.posted).toContain(`level ${SQ}::developers_hired`);
     });
 

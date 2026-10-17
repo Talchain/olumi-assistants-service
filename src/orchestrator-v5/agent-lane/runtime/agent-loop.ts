@@ -404,6 +404,20 @@ const proposedScalars = (raw: unknown): Record<string, string | number | boolean
   return summary;
 };
 
+/** Lists are deliberately absent from the scalar preview; counts do not pretend they were empty. */
+const startingPointListSummary = (raw: unknown, result: ToolResult): Record<string, string | number> => {
+  let args: unknown;
+  try { args = typeof raw === 'string' ? JSON.parse(raw) : undefined; } catch { return {}; }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return {};
+  const lists = args as Record<string, unknown>;
+  const native = result.native_refusal as { valueIndex?: unknown } | undefined;
+  return { proposed_preview: 'scalar_only_lists_omitted',
+    ...(Array.isArray(lists.assumptions) ? { assumption_count: lists.assumptions.length } : {}),
+    ...(Array.isArray(lists.option_levels) ? { option_level_count: lists.option_levels.length } : {}),
+    ...(typeof native?.valueIndex === 'number' && Number.isSafeInteger(native.valueIndex) && native.valueIndex >= 0
+      ? { value_index: native.valueIndex } : {}) };
+};
+
 const textOf = (items: readonly Record<string, unknown>[]): string => {
   let t = '';
   for (const i of items) {
@@ -826,6 +840,7 @@ export async function runAgentTurn(
           refusal: result.refusal,
           detail: refusalDetail(result.detail),
           proposed: proposedScalars(call.arguments),
+          ...(call.name === 'propose_starting_point' ? startingPointListSummary(call.arguments, result) : {}),
         }, 'Agent mutation tool refused');
       }
       toolCalls.push({

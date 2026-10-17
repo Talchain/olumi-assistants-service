@@ -115,8 +115,13 @@ it.each([true, false])('a claimed 7 when the human typed 6.5 never becomes human
     request_id: 'source', user_text: 'Churn is 6.5%.', user_turn_text: 'Churn is 6.5%.', user_text_complete: complete },
     { assumptions: [{ factor_label: 'Churn', value: 7, unit: '%', user_stated: true, revise: true, basis: 'proposed reading' }] });
   if (complete) {
-    expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(store.get(String(result.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'model_proposed' });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'figure_not_in_users_words' });
+    expect(store.outstanding('absent-point', null)).toHaveLength(0);
+    const estimate = await createAgentCapabilities(d, store).proposeAssumptions({ scenario_id: 'absent-point', authenticated_user_id: null,
+      request_id: 'estimate', user_text: 'Churn is 6.5%.', user_turn_text: 'Churn is 6.5%.', user_text_complete: true },
+    { assumptions: [{ factor_label: 'Churn', value: 7, unit: '%', user_stated: false, revise: true, basis: 'Olumi’s separate estimate, never the user’s 6.5%.' }] });
+    expect(estimate.ok, JSON.stringify(estimate)).toBe(true);
+    expect(store.get(String(estimate.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'model_proposed' });
   } else {
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(store.outstanding('absent-point', null)).toHaveLength(0);

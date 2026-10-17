@@ -83,7 +83,9 @@ describe('the user\'s "25% cheaper" lands first time, as theirs, in the factor\'
 
   it('CONTROL: percentage POINTS are never converted; over 100% is no share; a %-native factor is left as given', async () => {
     expect((await propose(EDIT, 25, 'pp')).op).toMatchObject({ value: 25, unit: 'pp' });
-    expect((await propose(EDIT, 150, '%')).op).toMatchObject({ value: 150, unit: '%' });
+    // A human percentage must actually be in the source; keep the >100 no-conversion control with its stated figure.
+    expect((await propose(EDIT, 150, '%')).r).toMatchObject({ ok: false, refusal: 'figure_not_in_users_words' });
+    expect((await propose(EDIT.replace('25%', '150%'), 150, '%')).op).toMatchObject({ value: 150, unit: '%' });
     const pct = await propose(EDIT, 25, '%', (g) => { Object.assign(g.nodes.find((n: Json) => n.id === 'gcp_saving_rate').observed_state, { unit: '%', value: 0.2, cap: 100, raw_value: 20 }); });
     expect(pct.op).toMatchObject({ value: 25, unit: '%' });
   });

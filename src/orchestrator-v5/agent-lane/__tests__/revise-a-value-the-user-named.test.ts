@@ -55,7 +55,7 @@ describe('the user can change an assumption the analysis named', () => {
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.assumptions).toEqual([
-      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked what 6% would do', replaces: 4, your_figure: true },
+      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked what 6% would do', replaces: 4, interpretation: 'olumi', user_material_unverified: true, source: ctx.user_text },
     ]);
   });
 
@@ -79,7 +79,7 @@ describe('the user can change an assumption the analysis named', () => {
     // The old figure must be in the label the receipt quotes, not only the new one.
     expect(r.public_label).toContain('4%');
     expect(r.public_label).toContain('6%');
-    expect(r.public_label).toMatch(/^Revise 1 value you asked to change: /);
+    expect(r.public_label).toBe(`From your words: “${ctx.user_text}”. The quoted source is retained; these field bindings are Olumi’s reading, including after approval. Revise 1 value you asked to change: Monthly churn rate: 4% → 6% (figure from the quoted message; field binding unverified)`);
   });
 
   it('a revision the user named is THEIRS, not the model’s', async () => {
@@ -90,7 +90,8 @@ describe('the user can change an assumption the analysis named', () => {
       assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'b', revise: true }],
     });
     const stored = store.get(String(r.proposal_id));
-    expect(stored?.provenance.authored_by).toBe('user_stated');
+    expect(stored?.provenance.authored_by).toBe('model_proposed');
+    expect(stored!.operations[0]!.value).toMatchObject({ authored_by: 'user_stated', user_material_unverified: true, confirmation: { source: ctx.user_text } });
   });
 
   it('CONTROL: a mixed proposal is not laundered into the user’s name', async () => {
@@ -106,7 +107,11 @@ describe('the user can change an assumption the analysis named', () => {
     const stored = store.get(String(r.proposal_id));
     // One half is the model's own suggestion, so the whole proposal stays model_proposed.
     expect(stored?.provenance.authored_by).toBe('model_proposed');
-    expect(r.public_label).toMatch(/^Revise 1 value and adopt 1 starting assumption: /);
+    expect(r.public_label).toContain('Revise 1 value and adopt 1 starting assumption: ');
+    expect(r.public_label).toContain(ctx.user_text);
+    expect(r.public_label).toContain('field bindings are Olumi’s reading, including after approval');
+    expect(stored!.operations[0]!.value).toMatchObject({ authored_by: 'user_stated', user_material_unverified: true });
+    expect(stored!.operations[1]!.value).toMatchObject({ authored_by: 'model_proposed' });
   });
 
   it('⛔ PROPOSES ONLY — a revision still writes nothing without authorise_change', async () => {
@@ -269,9 +274,11 @@ describe('a value the user revises is saved on its own frame, and only called sa
       assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', revise: true }],
     });
     expect(proposed.assumptions).toEqual([
-      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4, your_figure: true },
+      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4, interpretation: 'olumi', user_material_unverified: true, source: ctx.user_text },
     ]);
-    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) })).toMatchObject({ ok: false, refusal: 'approval_required' });
+    expect(p.posted).toHaveLength(0);
+    await caps.authoriseChange({ ...ctx, typed_approval_of: String(proposed.proposal_id) }, { proposal_id: String(proposed.proposal_id) });
     const edit = (p.posted as Record<string, unknown>[]).find((e) => e?.kind === 'factor_value_edit');
     expect(edit!.value, 'an uncapped input reaches the writer exactly as the user gave it').toBe(6);
     expect(edit!.raw_value, 'and carries no invented frame').toBeUndefined();
