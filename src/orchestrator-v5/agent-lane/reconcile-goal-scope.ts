@@ -30,9 +30,9 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   if (!scope) return fail('scope_unresolved', prior?.question ?? 'State whether this goal covers the whole metric or a component. Nothing was recorded.');
   if (args.component_share !== undefined || args.component_basis !== undefined || args.count_basis !== undefined) {
     if (!scope.component || !args.source_quote || !words.includes(args.source_quote)) return fail('source_not_stated', 'Use the user’s exact words for this component. Nothing was recorded.');
-    const explicitlyNamed = figureTheUserWroteFor(args.component_share ?? 0, '%', args.source_quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
+    const explicitlyNamed = figureTheUserWroteFor(args.component_share ?? 0, 'proportion', args.source_quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
     if (args.component_share !== undefined && (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)
-      || !figureTheUserWrote(args.component_share, '%', args.source_quote))) {
+      || !figureTheUserWrote(args.component_share, 'proportion', args.source_quote))) {
       if (!prior) return fail('share_not_bound', 'Name the component this share describes.');
       const action = { ...prior, expected: 'component_share' as const, question: `What share of the current ${goal.label} comes from ${scope.component.label}?` };
       return { ok: true, mutated: false, refusal: 'share_not_bound', pending_action: reconciliationPending(ctx.scenario_id, action), reconciliation: action, detail: action.question };
@@ -49,7 +49,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   }
   if (scope.component?.share !== undefined && scope.component.share !== (prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))?.component?.share && args.component_share === undefined) {
     const quote = scope.component.source.quote;
-    const explicitlyNamed = figureTheUserWroteFor(scope.component.share, '%', quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
+    const explicitlyNamed = figureTheUserWroteFor(scope.component.share, 'proportion', quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
     if (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)) return fail('share_not_bound', 'Name which component this share describes, or answer its fresh scoped question. Nothing was recorded.');
   }
   if (scope.component && (scope.component.rate_id === scope.component.count_id || ![scope.component.rate_id, scope.component.count_id].every(id => nodesOf(graph.raw).some(n => n.id === id && n.kind === 'factor')))) {

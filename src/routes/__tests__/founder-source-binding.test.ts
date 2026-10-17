@@ -120,6 +120,12 @@ it('the one numeric verifier keeps raw percentages distinct while retaining genu
   expect(figureTheUserWrote(0.8, 'proportion', 'I spend 80% of my time on it.')).toBe(true);
   expect(figureTheUserWrote(0.4, '%', 'I spend 0.4% of my time on it.')).toBe(true);
 });
+it('one percent verifies as 0.01 in a declared proportion, never a whole-share value of 1', () => {
+  const quote = 'Pro contributes 1% of total MRR.';
+  expect(figureTheUserWrote(0.01, 'proportion', quote)).toBe(true);
+  expect(figureTheUserWrote(1, 'proportion', quote)).toBe(false);
+  expect(figureTheUserWrote(1, '%', quote)).toBe(true);
+});
 it.each(['and', 'plus'])('same-turn pronoun stays an Olumi field reading even when the label contains %s', async join => {
   const quote = "I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly.";
   const w = await goalWorld(g => { g.nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').label = `Founder time on PoC testing ${join} improvement`; }, quote);
@@ -148,15 +154,26 @@ describe('D3: a numeric quote cannot ground a figure-free describes estimate', (
     expect(map.verified.get(subjectKey(subject, 'measure'))).toEqual([expect.objectContaining({ quote: held.quote,
       source: held.source, form: 'describes', qualifier: 'urgently', conditions: held.conditions, reading: 'olumi' })]);
   });
-  it.each([{ quote: '20% of my time is going into them.', ok: false },
-    { quote: "I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process.", ok: true }])('qualitative zero from “$quote” is offered=$ok', async ({ quote, ok }) => {
+  it.each([{ quote: '20% of my time is going into them.', ok: false, unit: '% of founder working time' },
+    { quote: '20% of my time is going into them.', ok: false, unit: '' },
+    { quote: "I haven't started the job specifications, and if they're not completed, I cannot perform the recruitment process.", ok: true, unit: '% of founder working time' }])('qualitative zero from “$quote” in unit “$unit” is offered=$ok', async ({ quote, ok, unit }) => {
     const w = await goalWorld(undefined, quote);
-    const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: 'Founder time on job specifications', value: 0, unit: '% of founder working time', user_stated: false, basis: 'Olumi reads the quoted description as no time spent now; provisional, not a measurement.', statements: [{ quote, form: 'describes' }] }], option_levels: [] }), w.ctx, w.caps());
+    const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: 'Founder time on job specifications', value: 0, unit, user_stated: false, basis: 'Olumi reads the quoted description as no time spent now; provisional, not a measurement.', statements: [{ quote, form: 'describes' }] }], option_levels: [] }), w.ctx, w.caps());
     if (!ok) { expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'description_not_stated' }); expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original); return; }
     expect(r.ok, JSON.stringify(r)).toBe(true); expect(r.public_label).toContain(quote); expect(r.public_label).toContain('Olumi’s figure from them is its own estimate, not yours');
     expect(r.public_label).not.toContain('figure you gave'); const pid = String(r.proposal_id);
     expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
     expect(w.graph().nodes.find((n: Rec) => n.id === 'founder_time_on_job_specifications').observed_state).toMatchObject({ raw_value: 0, value: 0, source: 'user_assumption' }); expect(w.writes).toHaveLength(1);
+  });
+  it('a time percentage elsewhere in the whole statement does not become a figure for a unit-free experience estimate', async () => {
+    const quote = "I can't spend more than 25% of my time on this, and I'm not that experienced with marketing.";
+    const w = await goalWorld(g => { g.nodes.push({ id: 'marketing_experience', kind: 'factor', label: 'Marketing experience', scale_frame: 100, provenance: 'from_brief' }); }, quote);
+    const r = await w.caps().proposeAssumptions(w.ctx, { assumptions: [{ factor_label: 'Marketing experience', value: 20, unit: '', user_stated: false,
+      basis: 'Olumi proposes an experience estimate from the qualitative description, not from the time limit.', statements: [{ quote, form: 'describes' }] }] });
+    expect(r.ok, JSON.stringify(r)).toBe(true); expect(r.public_label).toContain(quote);
+    expect(r.public_label).toContain('Olumi’s figure from them is its own estimate, not yours');
+    expect(w.proposals.get(String(r.proposal_id))!.operations[0]!.value).toMatchObject({ authored_by: 'model_proposed', value: 20 });
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
   });
 });
 

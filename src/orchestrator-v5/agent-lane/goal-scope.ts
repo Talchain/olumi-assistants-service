@@ -85,7 +85,7 @@ export function scopeSourcesAreUserWords(scope: GoalScope, words: string, prior?
   if (!written(c.source.quote, prior?.component?.source.quote)) return false;
   if (prior?.component && ['label', 'rate_id', 'count_id'].some(k => c[k as 'label'] !== prior.component![k as 'label']) && !words.includes(c.source.quote)) return false;
   if (c.basis !== 'unknown' && (c.basis !== prior?.component?.basis || c.count_basis !== prior?.component?.count_basis) && (!c.basis_source || !words.includes(c.basis_source.quote))) return false;
-  if (c.share !== undefined && c.share !== prior?.component?.share && !figureTheUserWrote(c.share, '%', c.source.quote)) return false;
+  if (c.share !== undefined && c.share !== prior?.component?.share && !figureTheUserWrote(c.share, 'proportion', c.source.quote)) return false;
   return true;
 }
 

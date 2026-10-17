@@ -43,6 +43,7 @@ import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
+import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { readCount } from './same-unit.js';
 
@@ -198,8 +199,13 @@ function amountIs(
     return (family === null || family === 'currency') && sameCurrency && same(a.magnitude, written);
   }
   // A raw percentage and a 0–1 share are different coordinates. Never attest 0.8% from the user's 80%.
-  if (a.kind === 'percent') return family === 'percent' ? same(a.magnitude, value)
-    : family === null && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  if (a.kind === 'percent') {
+    if (family === 'percent') return same(a.magnitude, value);
+    if (family !== null) return false;
+    // In a declared 0–1 unit, 1% is 0.01, never 1. Use the estate's existing share-unit rule.
+    const share = isProportionScaledFactor({ unit, cap: undefined, value: undefined, raw_value: undefined });
+    return share ? same(a.magnitude / 100, value) : same(a.magnitude, value) || same(a.magnitude / 100, value);
+  }
   // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
   if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
   if (scale !== 1 && !writtenWithALetter(a)) return false;

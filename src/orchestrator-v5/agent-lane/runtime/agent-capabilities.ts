@@ -1398,6 +1398,15 @@ function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<
  * when the frame recorded one, else the model value multiplied back up by the cap, else the
  * value itself (an unframed factor stores native already). `undefined` when it holds none.
  */
+/** Held option cells can declare a quantity's unit before its own starting value is recorded. */
+function optionUnitsForFactor(raw: unknown, factorId: string): string[] {
+  const nodes = isPlainRecord(raw) && Array.isArray(raw.nodes) ? raw.nodes.filter(isPlainRecord) : [];
+  return nodes.filter(n => n.kind === 'option').flatMap(n => {
+    const cell = mergeInterventionSourceObjects(n as never)[factorId];
+    return isPlainRecord(cell) && typeof cell.unit === 'string' && cell.unit.trim() !== '' ? [cell.unit] : [];
+  });
+}
+
 function nativeStartingValue(os: { value?: unknown; raw_value?: unknown; cap?: unknown } | undefined): number | undefined {
   const model = typeof os?.value === 'number' ? os.value : undefined;
   const cap = typeof os?.cap === 'number' && os.cap > 0 ? os.cap : undefined;
@@ -4889,11 +4898,8 @@ export function createAgentCapabilities(
         const value = input.values?.[native.refusal.valueIndex];
         const factor = before.nodes.find(n => n.id === value?.factor_id);
         if (factor !== undefined) {
-          const units = [...new Set([factorUnitOf(before.raw, factor),
-            ...(before.raw.nodes as Record<string, unknown>[]).filter(n => n.kind === 'option').map(n => {
-              const cell = mergeInterventionSourceObjects(n as never)[factor.id];
-              return isPlainRecord(cell) && typeof cell.unit === 'string' ? cell.unit : undefined;
-            })].filter((u): u is string => typeof u === 'string' && u.trim() !== ''))];
+          const units = [...new Set([factorUnitOf(before.raw, factor), ...optionUnitsForFactor(before.raw, factor.id)]
+            .filter((u): u is string => typeof u === 'string' && u.trim() !== ''))];
           const frame = levelFrameOf(factor);
           scopeDetail = ` The refused figure is for “${factor.label}”.` + (units.length === 1
             ? ` Its saved unit is exactly “${units[0]}”. Give the figure in that unit, not a model coordinate${frame === null ? '' : `; the saved model frame is 0–${frame}`}. Do not relabel the quantity.`
@@ -7355,13 +7361,19 @@ export function createAgentCapabilities(
          */
         let described: { source: string; quote: string } | undefined;
         if (a?.user_stated === false && Array.isArray(a?.statements)) {
+          const quantityUnits = [...new Set([a?.unit, nodeUnit, ...optionUnitsForFactor(g.raw, node.id)]
+            .filter((u): u is string => typeof u === 'string' && u.trim() !== ''))];
           const v = verifyStatements(a.statements, { now: ctx.user_turn_text, conversation: ctx.user_text,
             unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
           { subject: { quantity: 'level_today', node_id: node.id }, unit: '', forms: ['describes'], describesNumericEstimate: true, figuresIn: quote => {
             // The shared subject binder can establish that a named OTHER factor owns a figure. An unresolved
             // pronoun does not establish that, so a compatible number cannot ground a figure-free estimate here.
             if (statementBoundTo(g.raw, { kind: 'factor', id: node.id, field: 'level' }, quote) === 'another') return [];
-            return findLinkEffectAmounts(quote).filter(amount => figureTheUserWrote(amount.magnitude, a?.unit ?? nodeUnit, quote))
+            // A typed time percentage elsewhere in a whole source is not a figure in a unit-free experience score.
+            // Empty tool units do not discard the quantity's held unit.
+            return findLinkEffectAmounts(quote).filter(amount => quantityUnits.length > 0
+              ? quantityUnits.some(unit => figureTheUserWrote(amount.magnitude, unit, quote))
+              : amount.kind === 'plain' && figureTheUserWrote(amount.magnitude, undefined, quote))
               .map(amount => ({ low: amount.magnitude, high: amount.magnitude }));
           } });
           if (v.kind === 'refused') {
