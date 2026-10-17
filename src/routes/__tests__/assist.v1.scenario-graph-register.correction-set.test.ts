@@ -1048,3 +1048,54 @@ describe('78ca founder: complete current source through the existing correction 
     expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(value.candidate, w.graph())).toBe(true);
   });
 });
+
+// Row C: shareable DEV capture; no historical refused arguments or provider call is reconstructed.
+const rowCDevP03 = (): Rec => JSON.parse(readFileSync(new URL('./fixtures/row-c-p03-dev-baseline.json', import.meta.url), 'utf8'));
+it.each([undefined, '', 'SYNTHETIC ONLY: 1% in ten years'])('ROW-C DEV P03 declared correction with optional later quote %j', async later => {
+  const read = rowCDevP03();
+  const message = read.message;
+  const w = await world({ graph: read.graph, brief: read.brief_text, message });
+  const out = await dispatchTool('propose_goal_target', JSON.stringify({ value:3, unit:'% of bottles', constraint_type:'at_most',
+    governing_outcome:'Combined internal rejects and customer returns', goal_change_quote:message,
+    ...(later===undefined?{}:{later_ambition_quote:later}) }), w.ctx, w.caps());
+  expect(out, String(out.refusal)).toMatchObject({ok:true,mutated:false});
+  const pid=String(out.proposal_id), held=w.proposals.get(pid)!, candidate=(held.operations[0]!.value as Rec).candidate;
+  const cold=restoreCard(held,out,w.ctx), caps=w.caps(cold);
+  expect(await caps.authoriseChange(w.ctx,{proposal_id:pid})).toMatchObject({ok:false,mutated:false});
+  expect(w.writes).toHaveLength(0);
+  const press={...w.ctx,turn_id:randomUUID(),user_turn_text:'',typed_approval_of:pid};
+  expect(await caps.authoriseChange(press,{proposal_id:pid})).toMatchObject({ok:true,applied:true});
+  expect(w.writes).toHaveLength(1);expect(approvedGraphHeld(candidate,w.graph())).toBe(true);
+  const goal=w.graph().nodes.find((n:Rec)=>n.kind==='goal');
+  expect(goal.label).toBe('Combined internal rejects and customer returns');
+  const {readGoalRecord}=await import('../../orchestrator-v5/goal-target/goal-record.js');
+  expect(readGoalRecord(w.graph(),goal.id)?.target).toMatchObject({raw:3,unit:'% of bottles',comparator:'<'});
+  expect(goal.threshold_source).toBe('cee_inference');
+  const record=goal.user_statements.find((r:Rec)=>r.field==='target');
+  expect(record.statements).toEqual(expect.arrayContaining([expect.objectContaining({source:message,quote:message,speaker:'user',reading:'olumi'})]));
+  const old=w.graph().nodes.find((n:Rec)=>n.id==='leaking_caps_reaching_dispatch');
+  expect(old.user_statements).toEqual(read.graph.nodes.find((n:Rec)=>n.id===old.id).user_statements);
+  if(later) {expect(JSON.stringify(candidate)).not.toContain(later);expect(out.public_label).toContain('this card adds no such claim');}
+  expect(await caps.authoriseChange(press,{proposal_id:pid})).toMatchObject({ok:true,already_applied:true});expect(w.writes).toHaveLength(1);
+});
+
+it.each(['source', 'unit', 'typed authority'])('ROW-C DEV keeps the valid %s refusal on a current goal correction', async fault => {
+  const read = rowCDevP03(), message = read.message;
+  const w = await world({graph:read.graph,brief:read.brief_text,message});
+  const ctx = fault === 'typed authority' ? {...w.ctx, user_turn_text:'', user_text:'', verified_user_messages:[]} : w.ctx;
+  const out = await dispatchTool('propose_goal_target',JSON.stringify({value:3,unit:fault==='unit'?'£':'% of bottles',constraint_type:'at_most',
+    governing_outcome:'Combined internal rejects and customer returns',goal_change_quote:fault==='source'?'A fabricated source sentence.':message,
+    later_ambition_quote:'SYNTHETIC ONLY: an unsupported later claim'}),ctx,w.caps());
+  expect(out).toMatchObject({ok:false,mutated:false,refusal:'target_not_stated'});
+  expect(w.proposals.outstanding(w.ctx.scenario_id,null)).toHaveLength(0);expect(w.sent).toHaveLength(0);expect(w.writes).toHaveLength(0);
+});
+it('ROW-C DEV current correction keeps the whole-candidate compare-and-set boundary',async()=>{
+  const read=rowCDevP03(),message=read.message;
+  const w=await world({graph:read.graph,brief:read.brief_text,message},{race:true});
+  const offered=await dispatchTool('propose_goal_target',JSON.stringify({value:3,unit:'% of bottles',constraint_type:'at_most',
+    governing_outcome:'Combined internal rejects and customer returns',goal_change_quote:message,later_ambition_quote:'SYNTHETIC ONLY: unverified'}),w.ctx,w.caps());
+  expect(offered).toMatchObject({ok:true,mutated:false});
+  const pid=String(offered.proposal_id),cold=restoreCard(w.proposals.get(pid)!,offered,w.ctx);
+  const out=await w.caps(cold).authoriseChange({...w.ctx,typed_approval_of:pid},{proposal_id:pid});
+  expect(out).toMatchObject({ok:false,mutated:false});expect(w.writes).toHaveLength(0);
+});

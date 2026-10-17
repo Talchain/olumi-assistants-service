@@ -1,0 +1,817 @@
+{
+  "capture": {
+    "set": "shareable DEV P03",
+    "read_path": "/Users/paulslee/olumi-work/recovery/pilot/runs/20261017T115452Z-baseline/P03/reads/01-t1-brief.json",
+    "read_sha256": "4931d183c17ade5eeb824bc63aa09cc880de633eb4060b1e72cc7fc570329c51",
+    "correction_path": "/Users/paulslee/olumi-work/recovery/pilot/runs/20261017T115452Z-baseline/P03/steps/02-t2-correction.json",
+    "correction_sha256": "29efe24be688f3663845d44411579f906c19c7b5108bfe64d052066f233d082b",
+    "historical_refused_arguments": "UNKNOWN; test arguments are declared contrasts"
+  },
+  "graph": {
+    "edges": [
+      {
+        "to": "current_spot_checks",
+        "from": "i_d_like_you_to_help_me_think_this_through",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "install_camera_station",
+        "from": "i_d_like_you_to_help_me_think_this_through",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "prevent_capper_drift",
+        "from": "i_d_like_you_to_help_me_think_this_through",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "strengthen_changeover_checks",
+        "from": "i_d_like_you_to_help_me_think_this_through",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "camera_inspection_active",
+        "from": "install_camera_station",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "camera_project_spend",
+        "from": "install_camera_station",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "capper_preventive_maintenance_effort",
+        "from": "prevent_capper_drift",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "operator_spot_check_coverage",
+        "from": "strengthen_changeover_checks",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "camera_inspection_active",
+        "from": "current_spot_checks",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "camera_project_spend",
+        "from": "current_spot_checks",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "capper_preventive_maintenance_effort",
+        "from": "current_spot_checks",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "operator_spot_check_coverage",
+        "from": "current_spot_checks",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "leaking_caps_reaching_dispatch",
+        "from": "camera_inspection_active",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "reliance_on_in_factory_rejection",
+        "from": "camera_inspection_active",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "capper_alignment_stability",
+        "from": "capper_preventive_maintenance_effort",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "leaking_caps_reaching_dispatch",
+        "from": "capper_alignment_stability",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "leaking_caps_reaching_dispatch",
+        "from": "operator_spot_check_coverage",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "underlying_sealing_problem_persists",
+        "from": "reliance_on_in_factory_rejection",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "leaking_caps_reaching_dispatch",
+        "from": "underlying_sealing_problem_persists",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "nodes": [
+      {
+        "id": "i_d_like_you_to_help_me_think_this_through",
+        "ref": "D1",
+        "kind": "decision",
+        "label": "I'd like you to help me think this through.",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "leaking_caps_reaching_dispatch",
+        "ref": "G1",
+        "kind": "goal",
+        "label": "Leaking caps reaching dispatch",
+        "provenance": "from_brief",
+        "goal_direction": "<",
+        "goal_threshold": 0.5,
+        "user_statements": [
+          {
+            "field": "level",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "low": 4.8,
+                "form": "point",
+                "high": 4.8,
+                "unit": "% of bottles",
+                "quote": "We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "goal|leaking caps reaching dispatch|||level"
+                },
+                "qualifier": "current reject-and-return measure",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "goal|leaking_caps_reaching_dispatch|||level"
+          },
+          {
+            "field": "target",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "upper_bound",
+                "high": 3,
+                "unit": "% of bottles",
+                "quote": "We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "goal|leaking caps reaching dispatch|||target"
+                },
+                "qualifier": "below",
+                "conditions": "by the end of the next 16 weeks",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "goal|leaking_caps_reaching_dispatch|||target"
+          }
+        ],
+        "threshold_source": "brief_extraction",
+        "goal_target_basis": {
+          "source": "olumi_reading",
+          "reference": "today",
+          "target_raw": 3,
+          "effect_unit": "percentage points of bottles",
+          "period_kind": "at_end",
+          "target_frame": "level",
+          "also_required": [
+            "the sealing problem does not merely persist behind higher in-factory rejection"
+          ],
+          "period_months": 4,
+          "quantity_frame": "level",
+          "effects_at_period_end": false
+        },
+        "goal_threshold_cap": 6,
+        "goal_threshold_raw": 3,
+        "goal_threshold_unit": "% of bottles",
+        "goal_threshold_frame": "level",
+        "goal_threshold_cap_provenance": "level_frame"
+      },
+      {
+        "id": "current_spot_checks",
+        "ref": "O1",
+        "kind": "option",
+        "label": "Current spot checks",
+        "provenance": "ai_inferred",
+        "is_baseline": true
+      },
+      {
+        "id": "install_camera_station",
+        "ref": "O2",
+        "kind": "option",
+        "label": "Install camera station",
+        "provenance": "from_brief",
+        "interventions": {
+          "camera_project_spend": {
+            "unit": "£",
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 60000,
+            "target_match": {
+              "node_id": "camera_project_spend",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "camera_inspection_active": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "camera_inspection_active",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "prevent_capper_drift",
+        "ref": "O3",
+        "kind": "option",
+        "label": "Prevent capper drift",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "capper_preventive_maintenance_effort": {
+            "unit": "maintenance hours per week",
+            "value": 0.05,
+            "source": "cee_hypothesis",
+            "raw_value": 4,
+            "target_match": {
+              "node_id": "capper_preventive_maintenance_effort",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "strengthen_changeover_checks",
+        "ref": "O4",
+        "kind": "option",
+        "label": "Strengthen changeover checks",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "operator_spot_check_coverage": {
+            "unit": "% of required checks completed",
+            "value": 0.9,
+            "source": "cee_hypothesis",
+            "raw_value": 90,
+            "target_match": {
+              "node_id": "operator_spot_check_coverage",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "camera_inspection_active",
+        "ref": "F1",
+        "kind": "factor",
+        "label": "Camera inspection active",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "observed_state": {
+          "unit": "enabled",
+          "value": 0,
+          "source": "cee_inference",
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "relation",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "link|camera inspection active|leaking caps reaching dispatch||relation"
+                },
+                "qualifier": "the vendor says",
+                "conditions": "before packing",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "link|camera_inspection_active|leaking_caps_reaching_dispatch||relation"
+          },
+          {
+            "field": "measure",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I'd put the camera after capping and use the existing reject gate.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "option|install camera station||camera inspection active|measure"
+                },
+                "conditions": "after capping; using the existing reject gate"
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "factor|camera_inspection_active||install_camera_station|measure"
+          }
+        ]
+      },
+      {
+        "id": "camera_project_spend",
+        "ref": "F2",
+        "kind": "factor",
+        "label": "Camera project spend",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100000,
+        "observed_state": {
+          "unit": "£",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "target",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "upper_bound",
+                "high": 60000,
+                "unit": "£",
+                "quote": "Finance has allowed £60,000 for the project, although nobody has signed an order.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|camera project spend|||target"
+                },
+                "qualifier": "allowed",
+                "conditions": "for the project; nobody has signed an order",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "factor|camera_project_spend|||target"
+          }
+        ]
+      },
+      {
+        "id": "capper_preventive_maintenance_effort",
+        "ref": "F3",
+        "kind": "factor",
+        "label": "Capper preventive-maintenance effort",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 80,
+        "observed_state": {
+          "unit": "maintenance hours per week",
+          "value": 0.025,
+          "source": "cee_inference",
+          "raw_value": 2,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "capper_alignment_stability",
+        "ref": "F4",
+        "kind": "factor",
+        "label": "Capper alignment stability",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "user_statements": [
+          {
+            "field": "relation",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "link|capper alignment stability|leaking caps reaching dispatch||relation"
+                },
+                "qualifier": "Dev says",
+                "conditions": "after a long run",
+                "qualifier_in_quote": false
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "link|capper_alignment_stability|leaking_caps_reaching_dispatch||relation"
+          }
+        ]
+      },
+      {
+        "id": "operator_spot_check_coverage",
+        "ref": "F5",
+        "kind": "factor",
+        "label": "Operator spot-check coverage",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of required checks completed",
+          "value": 0.7,
+          "source": "cee_inference",
+          "raw_value": 70,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "holds_now",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "holds_now",
+                "unit": "",
+                "quote": "Operators already do spot checks and are stretched when we change bottle sizes.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|operator spot-check coverage|||holds_now"
+                },
+                "qualifier": "already",
+                "conditions": "when we change bottle sizes",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "factor|operator_spot_check_coverage|||holds_now"
+          }
+        ]
+      },
+      {
+        "id": "reliance_on_in_factory_rejection",
+        "ref": "F6",
+        "kind": "factor",
+        "label": "Reliance on in-factory rejection",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of leaking-cap cases addressed only by rejection",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "underlying_sealing_problem_persists",
+        "ref": "R1",
+        "kind": "risk",
+        "label": "Underlying sealing problem persists",
+        "provenance": "unverified_brief",
+        "user_statements": [
+          {
+            "field": "relation",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on.",
+                "source": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "risk|underlying sealing problem persists|||relation"
+                },
+                "qualifier": "My concern is",
+                "conditions": "while more bottles are rejected inside the factory",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-17T11:56:09.268Z",
+            "subject_key": "risk|underlying_sealing_problem_persists|||relation"
+          }
+        ]
+      },
+      {
+        "id": "camera_integration_misses_deadline",
+        "ref": "R2",
+        "kind": "risk",
+        "label": "Camera integration misses deadline",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "install_camera_station",
+            "kind": "option",
+            "label": "Install camera station"
+          },
+          "affects": {
+            "id": "leaking_caps_reaching_dispatch",
+            "label": "Leaking caps reaching dispatch",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "camera_inspection_active",
+            "label": "Camera inspection active",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "commissioning camera station before deadline",
+          "watch_for": "installation date remains unconfirmed",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "checks_lapse_during_changeovers",
+        "ref": "R3",
+        "kind": "risk",
+        "label": "Checks lapse during changeovers",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "strengthen_changeover_checks",
+            "kind": "option",
+            "label": "Strengthen changeover checks"
+          },
+          "affects": {
+            "id": "leaking_caps_reaching_dispatch",
+            "label": "Leaking caps reaching dispatch",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "operator_spot_check_coverage",
+            "label": "Operator spot-check coverage",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "operators completing checks during changeovers",
+          "watch_for": "missed checks recorded at changeover",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "maintenance_windows_unavailable",
+        "ref": "R4",
+        "kind": "risk",
+        "label": "Maintenance windows unavailable",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "prevent_capper_drift",
+            "kind": "option",
+            "label": "Prevent capper drift"
+          },
+          "affects": {
+            "id": "leaking_caps_reaching_dispatch",
+            "label": "Leaking caps reaching dispatch",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "capper_preventive_maintenance_effort",
+            "label": "Capper preventive-maintenance effort",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "maintenance access between production runs",
+          "watch_for": "maintenance tasks repeatedly deferred",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      }
+    ],
+    "ref_high_water": {
+      "D": 1,
+      "F": 6,
+      "G": 1,
+      "O": 4,
+      "R": 4
+    },
+    "goal_constraints": [
+      {
+        "unit": "£",
+        "label": "Camera project spend",
+        "value": 60000,
+        "node_id": "camera_project_spend",
+        "operator": "<=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:camera_project_spend:<="
+      }
+    ]
+  },
+  "brief_text": "Please help me put a proper case around the camera inspection station I've been pushing for on our bottle-filling line. We need fewer leaking caps reaching dispatch: the current reject-and-return measure is 4.8% of bottles, and I want it below 3% by the end of the next 16 weeks. I manage production; Dev, our maintenance lead, says the capper drifts after a long run, but the vendor says its camera can spot bad cap alignment before packing. That's why I favour it. Operators already do spot checks and are stretched when we change bottle sizes. Finance has allowed £60,000 for the project, although nobody has signed an order. I'd put the camera after capping and use the existing reject gate. My concern is that we will call this solved because we reject more bottles inside the factory while the sealing problem carries on. I haven't developed another plan; I'd like you to help me think this through.",
+  "message": "The 4.8% combines internal rejects and customer returns, so I was wrong to describe it as leaks reaching dispatch. We don't have a reliable baseline for escaped leaks. Keep the below-3% target for the combined measure, but flag that I also care about escaped leaks and haven't set their target."
+}

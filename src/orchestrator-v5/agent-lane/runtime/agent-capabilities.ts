@@ -3856,12 +3856,20 @@ export function createAgentCapabilities(
     const source = args.goal_change_quote;
     if (!ownSource(source) || !figureTheUserWrote(args.value, args.unit, source) || !isAmountStatedInBrief(args.value, args.unit, source)) return invalid('target_not_stated',
       'The goal change needs the complete verified human source and its figure/unit. Nothing was prepared.');
-    if (args.later_ambition_quote !== undefined && !ownSource(args.later_ambition_quote)) return invalid('ambition_not_stated',
-      'The earlier aim can be kept as history, but a later ambition needs its verified source. Nothing was prepared.');
     direction = comparatorTheUserWroteFor(source, args.value) ?? direction;
     inclusive = inclusiveTargetDirection(direction);
-    if (inclusive === 'at_least' && args.value <= 0) return invalid('target_not_positive', SUCCESS_TARGET_POSITIVE_USER_GUIDANCE);
     const old = before.nodes.find(n => n.kind === 'goal')!;
+    const heldTarget = readGoalRecord(before.raw, old.id)?.target;
+    const keepsHeldTarget = heldTarget !== undefined && heldTarget !== null && heldTarget.raw === args.value
+      && typeof heldTarget.unit === 'string' && unitComparisonKey(heldTarget.unit) === unitComparisonKey(args.unit)
+      && heldTarget.comparator === TARGET_OPERATOR[direction];
+    const laterAmbition = ownSource(args.later_ambition_quote) ? args.later_ambition_quote : undefined;
+    const laterAmbitionUnverified = typeof args.later_ambition_quote === 'string' && args.later_ambition_quote.trim() !== '' && laterAmbition === undefined;
+    // Correcting the subject while keeping its held target needs no new later-ambition claim. An unsupported optional
+    // reading stays out of the candidate; a genuinely changed target still keeps the existing source refusal.
+    if (laterAmbitionUnverified && !keepsHeldTarget) return invalid('ambition_not_stated',
+      'The earlier aim can be kept as history, but a later ambition needs its verified source. Nothing was prepared.');
+    if (inclusive === 'at_least' && args.value <= 0) return invalid('target_not_positive', SUCCESS_TARGET_POSITIVE_USER_GUIDANCE);
     let label = args.governing_outcome!.trim();
     if (label.length > 120 || norm(label) === norm(old.label)) return invalid('goal_not_resolved',
       'Name the new governing outcome; use the ordinary target card when the goal stays the same.');
@@ -3873,7 +3881,7 @@ export function createAgentCapabilities(
     if (args.current_level === undefined && typeof levelUnit === 'string' && unitComparisonKey(levelUnit) !== unitComparisonKey(args.unit)) {
       return invalid('current_level_unit_change', `The outcome holds today's level in ${levelUnit}; this target is in ${args.unit}. The native target adapter cannot silently rescale that earlier level. Nothing was prepared; retain the stated level and resolve its measurement explicitly.`);
     }
-    const priorDescription = priorAimDescription(before.raw, old.id, args.later_ambition_quote);
+    const priorDescription = priorAimDescription(before.raw, old.id, laterAmbition);
     if (priorDescription === undefined) return invalid('goal_not_readable', 'The earlier aim could not be read completely. Nothing was prepared.');
     let candidate = structuredClone(before.raw);
     const newId = matched[0]?.id ?? `outcome_${constructionOperationId(ctx.scenario_id, `${before.graph_identity_hash}:${label}`)}`;
@@ -3997,14 +4005,14 @@ export function createAgentCapabilities(
     const interpretation = said === null ? ` Olumi reads the target as ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}; this direction is a proposal, not a comparator the user stated.` : '';
     const public_label = `From your message: “${source}”. Olumi proposes making “${label}” the current goal: ${DIRECTION_WORDS[direction]} ${targetFigure(args.value, args.unit)}.`
       + interpretation + (matched.length === 0 ? ' This adds a new outcome; its label is Olumi’s proposal.' : '')
-      + ` “${old.label}”${earlierTarget} stays as ${args.later_ambition_quote !== undefined ? `a later ambition, as Olumi reads “${args.later_ambition_quote}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal. The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below.`
+      + ` “${old.label}”${earlierTarget} stays as ${laterAmbition !== undefined ? `a later ambition, as Olumi reads “${laterAmbition}”` : 'an earlier aim in history'}, in its existing description, with its original figures, quoted source and uncertainty. Its structured target rows and remaining metadata are not kept as current target controls. This card retains its figures and quoted words as text for context, without constraining the new goal.${laterAmbitionUnverified ? ' An optional later-ambition reading could not be verified against your recorded words, so this card adds no such claim; the earlier aim stays as history.' : ''} The earlier aim and its links remain visible as context and are left out of this analysis. Any earlier timing on the promoted outcome is history; this card sets a current deadline only when one is listed below.`
       + scope.excluded.map(id => ` “${String((candidate.nodes as Record<string, unknown>[]).find(n => n.id === id)!.label)}” leads only to the earlier aim, so its words and links also stay visible as context and are left out of this analysis.`).join('')
       + ` Options and settings stay as shown; any consequences of requested removals are listed below. The goal binding stays Olumi’s reading after approval. Original Runs describe their original model; new analysis is needed for this changed goal.`
       + (!hasIncoming ? ' The new goal has no incoming causal relationships yet. This card does not establish how the options affect it; that remains to be modelled.' : '')
       + (details.length ? `\n${details.join('\n')}` : '')
       + (notIncluded.length ? `\nNot included on this card: ${notIncluded.map(p => omittedGoalChangeWords(p.part, p.refusal)).join('; ')} This card won’t apply those omitted changes; they remain unresolved.` : '');
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
-      operations: [{ op: 'repoint_goal', path: newId, value: { candidate, scope_excluded: scope.excluded, previous_goal_id: old.id, later_ambition_quote: args.later_ambition_quote, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
+      operations: [{ op: 'repoint_goal', path: newId, value: { candidate, scope_excluded: scope.excluded, previous_goal_id: old.id, later_ambition_quote: laterAmbition, removals, expected_goal: readGoalRecord(candidate, newId), confirmation: { source, quote: source }, base_identity: before.graph_identity_hash,
         brief_text: before.brief_text, goal_turn_id: turn, operation_id: constructionOperationId(ctx.scenario_id, `repoint_goal:${before.graph_identity_hash}:${hash}`) } }],
       provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label });
     proposals.put(proposal);
