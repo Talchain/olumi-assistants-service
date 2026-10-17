@@ -69,7 +69,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
     expect(ROUTE).not.toContain('withheldRunFinding');
     expect(ROUTE).toContain("obligations: withA7AsDetail(obligations, a7Repeat, reply, chanceCells.some(cell => cell.kind === 'figure' || cell.kind === 'range')),");
     expect(ROUTE).toContain('&& composedCandidate.text === prior.assistant_message ? composedCandidate : null;');
-    expect(ROUTE).toContain('return withShapeOnlyIfItDerives(gatedReplay);');
+    expect(ROUTE).toContain('return repairFinalReply(withShapeOnlyIfItDerives(delivery),');
   });
   it('1-MUTANT (in memory): a third composer call is caught', () => {
     const mutant = ROUTE.replace(CALL, `const extra = composeReplyShape({ text: '' });\n    ${CALL}`);
@@ -79,7 +79,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
   it('2. after it, the only text write is the composer’s own, and no text writer runs', () => {
     const slice = afterComposer(ROUTE);
     expect(slice.length, 'the control: the slice reaches the send').toBeGreaterThan(2000);
-    expect(slice, 'the control: the send is in the slice').toContain('return reply.code(200).send({');
+    expect(slice, 'the control: the send is in the slice').toContain('return reply.code(200).send(wireBody);');
     expect(textWrites(slice)).toEqual(['assistant_text: composedReply.text']);
     for (const writer of TEXT_WRITERS) expect(slice, writer).not.toContain(writer);
   });
@@ -91,7 +91,7 @@ describe('the reply composer is the ONE last writer of `assistant_text` on the A
 
   it('r11: live, preview, forwarded replies, same-id replay and reload use the ONE estimate point classifier', () => {
     const gate = 'withEstimateGoalPointsAtEgress(';
-    expect(ROUTE.split(gate).length - 1).toBe(6); // Mutually exclusive AI and host-fallback live exits share this same check; #3310 adds the unreadable-held stop (no Run).
+    expect(ROUTE.split(gate).length - 1).toBe(6); // Five upstream producer sites plus the final validator; replay prose is immutable.
     expect(RELOAD.split(gate).length - 1).toBe(1);
     const liveAt = ROUTE.lastIndexOf(gate);
     expect(liveAt).toBeLessThan(ROUTE.indexOf(CALL));
