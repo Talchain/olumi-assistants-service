@@ -949,7 +949,7 @@ export function goalChanceLicenceOf(
     quantityFrame: readingFrame, olumiInputs: estimates.links + estimates.values + Object.keys(settingsByOption).length
       + estimates.acceptedValues + estimates.acceptedLinks + rangeUses.length > 0, unverifiedInputs,
     constraints, option_ids,
-    estimates, jointEstimates, earned,
+    estimates, jointEstimates,
   });
   // ⭐ AIE 6125204695 (3): beside a deadline chance on Olumi's range assumed from the user's single forecast, the input time
   // range is said once (the input, never a probability interval), on the licence's own notes.
@@ -981,7 +981,6 @@ function withBatchCWords(unframed: GoalChanceLicence, c: {
   readonly sqReading: StatusQuoReading; readonly timingOrdinary: boolean; readonly statusQuoLabel: string | undefined;
   readonly constraints: GoalChanceConstraintInputs; readonly option_ids: readonly string[];
   readonly estimates: GoalChanceEstimates; readonly jointEstimates: GoalChanceEstimates | undefined;
-  readonly earned: (optionId: string, p: 0 | 1) => boolean;
   /** G: the AIE's note, present only on the conditional reading ({@link periodEndConditionalOf}). */
   readonly periodEndNote?: string;
   readonly staticLevel?: boolean;
@@ -1165,7 +1164,6 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   readonly estimates: GoalChanceEstimates; readonly estimateOnly: boolean;
   /** Re-scope (r2 BLOCKING 4; DL AMEND item 3): the joint's census — the union over every condition the Run sent. */
   readonly jointEstimates: GoalChanceEstimates | undefined;
-  readonly earned?: (optionId: string, p: 0 | 1) => boolean;
 }): GoalChanceLicence {
   // ⭐ AIE status-quo disposition (12 Oct) item 4: a joint and its marginals keep each condition's OWN reference — the
   // primary goal's unchanged reference never attests a secondary target. Each target condition is read on its own checked
@@ -1207,33 +1205,9 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
   const jointMovedIds = new Set([...readings].filter(([, r]) => r === 'moved').map(([id]) => id));
   const allAssumed = targetRows.length > 0 && jointRows.length > 0 && [...readings.values()].every((r) => r === 'assumed');
   // N2: an uncertain second condition cannot turn an unlicensed paired premise into an exact joint chance.
-  // Only this Run's upstream PRIMARY impossibility can prove AND0 independently; primary1 never proves AND1.
-  // Reuse the existing event binding (including its whole reference/period/conditions), not a matching numeral.
-  const primaryId = typeof c.goal?.id === 'string' ? c.goal.id : undefined;
-  const held = primaryId === undefined ? null : readGoalRecord(c.graph, primaryId);
-  const request = c.constraints.sentRun;
-  const scored = primaryId === undefined ? null : readGoalRecord(request?.graph, primaryId);
-  const primaryRow = c.goal !== undefined && isRec(c.graph) ? goalTargetRow(c.graph, c.goal) : undefined;
-  const primaryP = sqRecord?.probability_of_goal, jointP = sqRecord?.probability_of_joint_goal;
-  const dispatched = readDispatchedGoalThreshold(request, primaryId);
-  const sentNodes = isRec(request?.graph) && Array.isArray(request.graph.nodes) ? request.graph.nodes.filter(isRec) : [];
-  const sentGoal = sentNodes.find(n => n.id === primaryId && n.kind === 'goal');
-  const heldState = isRec(c.goal?.observed_state) ? c.goal.observed_state : undefined;
-  const sentState = isRec(sentGoal?.observed_state) ? sentGoal.observed_state : undefined;
-  const independentZero = !c.primaryRefused && sqId !== undefined && primaryId !== undefined && primaryP === 0 && jointP === 0
-    && dispatched?.frame === 'level' && dispatched.status_quo_option_id === sqId
-    && finite(heldState?.value) && sentState?.value === heldState.value && dispatched.baseline === (heldState.baseline ?? heldState.value)
-    && finite(heldState?.raw_value) && sentState?.raw_value === heldState.raw_value
-    && sameUnit(sentState.unit, heldState.unit) && sameUnit(heldState.unit, held?.target?.unit)
-    && held?.target?.frame === 'level' && targetRows.some(r => r.constraint_id === primaryRow?.constraint_id && r.node_id === primaryId
-      && r.operator === held.target?.comparator && r.value === held.target?.raw && sameUnit(r.unit, held.target?.unit)
-      && r.value_frame === held.target?.frame)
-    && sentRunScoresHeldChange(request, c.graph, primaryId, held.target.comparator ?? '')
-    && scored?.target?.cap === held.target.cap
-    && JSON.stringify(scored?.horizon) === JSON.stringify(held.horizon) && scored?.period === held.period
-    && c.earned?.(sqId, primaryP) === true;
-  const fromJoint = jointMovedIds.size > 0 || (!independentZero && (allAssumed
-    || ((jointP === 0 || jointP === 1) && [...readings.values()].some(r => r === 'assumed'))));
+  const jointP = sqRecord?.probability_of_joint_goal;
+  const fromJoint = allAssumed || jointMovedIds.size > 0
+    || ((jointP === 0 || jointP === 1) && [...readings.values()].some(r => r === 'assumed'));
   let block = goalTargetsBlockOf({
     envelope: c.envelope, graph: c.graph, storedConstraints: c.constraints.storedConstraints,
     sentConstraints: c.constraints.sentConstraints, optionIds: c.option_ids,

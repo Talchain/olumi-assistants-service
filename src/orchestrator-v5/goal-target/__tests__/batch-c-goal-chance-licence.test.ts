@@ -1166,7 +1166,7 @@ describe('N2: a paired premise cannot earn an exact joint chance', () => {
     const { g, run, constraints } = example(primary, joint, assumed);
     const callback = vi.fn((id: string, p: 0 | 1) => earned && id === 'carry_on' && p === primary);
     const l = goalChanceLicenceOf(run, g, 'new_customers', callback, undefined, g, constraints)!;
-    const shown = !assumed || joint === 0.4 || (joint === 0 && primary === 0 && earned);
+    const shown = !assumed || joint === 0.4;
     expect(l.pct_by_option).toMatchObject({ hire_manager: 35, ai_plus_ads: 48 });
     expect(Object.hasOwn(l.pct_by_option, 'carry_on')).toBe(shown);
     if (shown) expect(l.pct_by_option.carry_on).toBe(joint * 100);
@@ -1202,9 +1202,10 @@ describe('N2: a paired premise cannot earn an exact joint chance', () => {
       expect(l.withheld_option_ids).toContain('carry_on');
     });
 
-  it('the actual certainty producer, stored licence, Agent and canonical cells preserve the permission and raw Run', () => {
+  it('an outcome-less status quo stays withheld despite the actual upstream earned flag; raw Run and reader protections remain', () => {
     const { g, run, constraints } = example(0, 0);
     const before = structuredClone(run);
+    expect((run.option_comparison as Rec[]).at(-1)).not.toHaveProperty('outcome');
     const certainty = recordGoalCertainty(g, run, computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(g)));
     expect(certainty).toMatchObject({ recorded: true, decisions: [{ option_id: 'carry_on', probability_of_goal: 0, earned: true }] });
     const earned = (id: string, p: 0 | 1) => certainty.recorded && certainty.decisions.some(d => d.option_id === id && d.probability_of_goal === p && d.earned);
@@ -1214,15 +1215,10 @@ describe('N2: a paired premise cannot earn an exact joint chance', () => {
       const l = goalChanceLicenceForAgent(result)!;
       const record = agentLicenceRecordOf(result)!;
       const cell = projectCanonicalAnalysisCells(result as never, g).find(r => r.option_id === 'carry_on')!.cell;
-      if (permission === earned) {
-        expect(record.pct_by_option).toMatchObject({ carry_on: 0 });
-        expect(cell).toMatchObject({ kind: 'figure', display: 'less than 1%' });
-      } else {
-        expect(record.pct_by_option).not.toHaveProperty('carry_on');
-        expect(cell).toMatchObject({ kind: 'withheld' });
-        expect((cell as Rec).face).not.toMatch(/0%|100%/);
-        expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');
-      }
+      expect(record.pct_by_option).not.toHaveProperty('carry_on');
+      expect(cell).toMatchObject({ kind: 'withheld' });
+      expect((cell as Rec).face).not.toMatch(/0%|100%/);
+      expect(l.notes).toContain('This assumes carrying on as now leaves ‘New customers’ and ‘Conversion rate’ unchanged through month three; each option is measured against that.');
       expect((enrichment.option_comparison as Rec[]).at(-1)!.probability_of_joint_goal).toBe(0);
     }
     expect(run).toEqual(before);
