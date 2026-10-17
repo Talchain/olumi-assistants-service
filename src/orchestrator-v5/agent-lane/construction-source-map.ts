@@ -23,6 +23,7 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { sameUnit } from './same-unit.js';
+import { periodNoun, shareKind } from '../../utils/unit-alphabet.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -192,23 +193,28 @@ const UNIT_WORDS: Readonly<Record<string, string>> = {
   km: 'km', kilometre: 'km', kilometer: 'km', inch: 'in', ft: 'ft', foot: 'ft', feet: 'ft', mile: 'mi',
   mg: 'mg', milligram: 'mg', g: 'g', gram: 'g', kg: 'kg', kilogram: 'kg', kilo: 'kg', tonne: 't', lb: 'lb', pound: 'lb', oz: 'oz', ounce: 'oz',
   ml: 'ml', millilitre: 'ml', milliliter: 'ml', l: 'l', litre: 'l', liter: 'l',
-  ms: 'ms', millisecond: 'ms', s: 's', sec: 's', second: 's', min: 'min', minute: 'min', h: 'h', hr: 'h', hour: 'h',
-  day: 'day', week: 'week', month: 'month', year: 'year', yr: 'year',
-  '%': '%', percent: '%', pc: '%', point: 'pp', pp: 'pp',
+  // Time and shares come from the ONE unit vocabulary (`utils/unit-alphabet.ts`); only abbreviations it does not spell are here.
+  ms: 'ms', millisecond: 'ms', s: 't:second', sec: 't:second', min: 't:minute', h: 't:hour',
 };
 const unitWord = (w: string): string | undefined => {
   const x = w.toLowerCase();
-  return UNIT_WORDS[x] ?? (x.endsWith('s') ? UNIT_WORDS[x.slice(0, -1)] : undefined) ?? (x.endsWith('es') ? UNIT_WORDS[x.slice(0, -2)] : undefined);
+  const own = UNIT_WORDS[x] ?? (x.endsWith('s') ? UNIT_WORDS[x.slice(0, -1)] : undefined) ?? (x.endsWith('es') ? UNIT_WORDS[x.slice(0, -2)] : undefined);
+  if (own !== undefined) return own;
+  const period = periodNoun(x);
+  return period === null ? undefined : `t:${period}`;
 };
-/** The unit family words START with, or `undefined` ("percentage points", "per cent" and "%" read whole). */
+/** The unit family words START with, or `undefined`. A share ("%", "per cent", "percentage points") is read whole, longest first. */
 function unitLeading(text: string): string | undefined {
-  if (/^\s*%/u.test(text)) return '%';
-  if (/^\s*percentage\s+points?(?![\p{L}])/iu.test(text)) return 'pp';
-  if (/^\s*per\s+cent(?![\p{L}])/iu.test(text)) return '%';
+  const words = text.trimStart().split(/\s+/u).slice(0, 3).map((w) => w.replace(/[.,;:!?)]+$/u, ''));
+  for (let n = words.length; n >= 1; n -= 1) {
+    const share = words[0] === '' ? null : shareKind(words.slice(0, n).join(' '));
+    if (share !== null) return `share:${share}`;
+  }
+  if (/^\s*%/u.test(text)) return 'share:percent';
   const w = /^\s*(\p{L}+)/u.exec(text)?.[1];
   return w === undefined ? undefined : unitWord(w);
 }
-/** A unit string's family: its first word that names one ("kg a day" → kg; "calendar days" → day; "% of bottles" → %). */
+/** A unit string's family: its first word that names one ("kg a day" → kg; "calendar days" → a day; "% of bottles" → a percent). */
 export function unitFamily(unit: string): string | undefined {
   const words = unit.trim().split(/[\s/]+/u);
   for (let i = 0; i < words.length; i += 1) {
@@ -219,7 +225,8 @@ export function unitFamily(unit: string): string | undefined {
 }
 /** The unit the words write at a range's own high end (straight after it, or as its "%"), or `undefined`. */
 function unitAtRange(quote: string, high: { readonly index: number; readonly matchedText: string }): string | undefined {
-  return /%\s*$/u.test(high.matchedText) ? '%' : unitLeading(quote.slice(high.index + high.matchedText.length));
+  const rest = quote.slice(high.index + high.matchedText.length);
+  return unitLeading(/%\s*$/u.test(high.matchedText) ? `%${rest}` : rest);
 }
 /** Two units differ: both in the vocabulary and in different families, or (outside it) not `sameUnit`. */
 function unitsDiffer(a: string, b: string): boolean {
@@ -229,10 +236,10 @@ function unitsDiffer(a: string, b: string): boolean {
 
 /**
  * Positive evidence that a range's claimed unit is not its own: the words write a different unit at the range's own high end
- * ("between 4 and 6 lb" read as kg; "6 mm" read as m; "6 kg" read as g), or the claimed unit is written only after an unrelated
- * figure equal to that end ("between 4 and 6 mm … a platform 6 metres high"). A range whose words write no unit at its end
- * ("between 20 and 40 extra visitors"; "about 5 points, between 4 and 7") is read as before; a currency is the amounts' own
- * symbol (`figuresWritten` reads it with them).
+ * ("between 4 and 6 lb" read as kg; "6 mm" read as m; "6 kg" read as g), the claimed unit is written only after an unrelated
+ * figure equal to that end ("between 4 and 6 mm … a platform 6 metres high"), or the words never write it at all. A range whose
+ * words write its unit elsewhere ("between 20 and 40 extra visitors"; "about 5 points, between 4 and 7") is read as before; a
+ * currency is the amounts' own symbol (`figuresWritten` reads it with them).
  */
 function rangeUnitNotItsOwn(st: UserStatement): boolean {
   if (typeof st.low !== 'number' || typeof st.high !== 'number' || st.unit === undefined || st.unit.trim() === '') return false;
@@ -246,8 +253,6 @@ function rangeUnitNotItsOwn(st: UserStatement): boolean {
   const high = st.high, unit = st.unit;
   if (findStatedAmounts(st.quote).some((x) => x.index !== joined.high.index && Math.abs(x.magnitude) === Math.abs(high)
     && (unitWrittenAfter(st.quote, high, unit, x.index) || (claimed !== undefined && unitAtRange(st.quote, x) === claimed)))) return true;
-  const next = /^\s*(\p{L}+)/u.exec(st.quote.slice(joined.high.index + joined.high.matchedText.length))?.[1]?.toLowerCase();
-  if (next !== undefined && next.startsWith(st.unit.trim().toLowerCase())) return true;
   return !quoteNamesUnit(st.quote, st.unit);
 }
 
@@ -466,7 +471,7 @@ export function linkEffectRangeInOtherUnit(model: unknown, brief: string, from: 
     if (e === undefined || typeof r.quote !== 'string') continue;
     // Refused for its claimed unit: an Olumi size from it is set aside unless its own words write this link's unit there.
     const words = writtenAt(r.quote, e);
-    if (words === undefined || unitsDiffer(words, unit)) return { ...e, quote: r.quote };
+    if (words === undefined || words !== unitFamily(unit)) return { ...e, quote: r.quote };
   }
   return null;
 }
