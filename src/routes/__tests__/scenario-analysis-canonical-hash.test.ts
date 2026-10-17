@@ -592,12 +592,12 @@ describe('C2 recorded Run revision on the real reload route', () => {
     parity(body);
   });
 
-  it.each([null, ''])('no usable stored hash %s: recorded match alone supplies the revision basis', async hash => {
+  it.each([null, ''])('R4: no usable stored hash %s stays unknown despite a recorded match', async hash => {
     seedRevision(makeBase(), hash, 11, 11);
     const body = await reload();
-    expect(runStateOf(body)?.kind).toBe('complete_current');
-    expect(staleness(body)).toMatchObject({ stale: false, run_revision: 11, run_revision_source: 'recorded',
-      basis: 'recorded_run_revision', limitation: 'No analysis hash was available; only the scenario revision was compared.' });
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect(staleness(body)).toMatchObject({ stale: null, run_revision: 11, run_revision_source: 'recorded',
+      basis: 'analysis_graph_hash_interim' });
     parity(body);
   });
 
@@ -639,13 +639,13 @@ describe('C2 recorded Run revision on the real reload route', () => {
     parity(body);
   });
 
-  it('no usable current graph hash: a recorded match uses the same revision fallback', async () => {
+  it('R4: no usable current graph hash stays unknown despite a recorded match', async () => {
     const graph = makeBase(); const hash = await runStampFor(graph);
     delete (graph.nodes as Dict[]).find(node => node.id === 'fac_annual_cost')!.label;
     seedRevision(graph, hash, 11, 11);
     const body = await reload();
-    expect(runStateOf(body)?.kind).toBe('complete_current');
-    expect(staleness(body)).toMatchObject({ basis: 'recorded_run_revision', run_revision: 11, stale: false });
+    expect(runStateOf(body)?.kind).toBe('unknown_degraded');
+    expect(staleness(body)).toMatchObject({ basis: 'analysis_graph_hash_interim', run_revision: 11, stale: null });
     parity(body);
   });
 

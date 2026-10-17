@@ -6,6 +6,10 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createNoopSessionStore } from '../../../session/__tests__/fixtures.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { AnalysisNotReadyError } from '../analysis-ready-core.js';
+import { composeAnalysisStateV1 } from '../../../compose/analysis-state-v1.js';
+import { selectCanonicalAnalysisState } from '../../../context/canonical-analysis-state.js';
+import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
 import { resolveRunAdmission } from '../analysis-ready-core.js';
 import { projectReadinessRecovery } from '../../../coaching/readiness-recovery.js';
 import { analysisReadyPermitsLeaderNaming } from '../../../admission/analysis-admission.js';
@@ -248,6 +252,28 @@ describe('one comparison admission after user exclusions', () => {
     const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
     if (!fact || fact.fact_type !== 'run_analysis') throw new Error('the completed Run must record its input snapshot');
     expect(fact.result.input_snapshot?.options.map(o => o.option_id)).toEqual(admission.submission?.submittedOptionIds);
+  });
+  it.each(['Delivery capacity', 'Service throughput'])('R4 %s: a refused rerun never labels the earlier result current for the changed model', async topic => {
+    const before = synthetic(topic, 1);
+    const first = invoke(before, true);
+    const outcome = await first.result();
+    const fact = outcome.handler_facts.find(f => f.fact_type === 'run_analysis');
+    if (!fact || fact.fact_type !== 'run_analysis') throw new Error('the prior Run must be recorded');
+    const changed = structuredClone(before);
+    Object.assign(changed.nodes.find(n => n.id === 'c')!, { option_status: 'removed', analysis_participation: 'retained_excluded' });
+    Object.assign(changed.nodes.find(n => n.id === 'b')!, { interventions: { factor: { value: 0.45, source: 'user_specified' } } });
+    const refused = invoke(changed, true);
+    await expect(refused.result()).rejects.toBeInstanceOf(HandlerInvocationFailedError);
+    expect(refused.run).not.toHaveBeenCalled();
+    expect(refused.ready.may_run).toBe(false);
+    const currentHash = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(changed));
+    expect(currentHash).not.toBe(fact.result.graph_hash_at_run);
+    const selected = selectCanonicalAnalysisState({ priorFacts: [fact], currentGraphHash: currentHash, currentGraph: changed });
+    expect(selected.freshness).toBe('stale');
+    expect(selected.selected_fact_index).toBe(0);
+    expect(selected.graph_hash_at_run).toBe(fact.result.graph_hash_at_run);
+    expect(selected.computed_at).toBe(fact.result.computed_at);
+    expect(composeAnalysisStateV1({ canonical: selected, mayNameLeadingOption: false, rawRobustness: null })?.run_state.kind).toBe('complete_stale');
   });
   it('a matching label or an unknown option status cannot exclude another entity', async () => {
     const graph = synthetic('Retention', 0);

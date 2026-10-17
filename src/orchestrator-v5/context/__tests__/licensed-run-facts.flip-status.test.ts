@@ -9,6 +9,10 @@
 import { describe, it, expect } from 'vitest';
 import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { buildLicensedRunFacts } from '../licensed-run-facts.js';
+import { computeAnalysisAffectingGraphHash } from '../graph-hash.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { legacyGraph, legacyRun } from './legacy-gap-projection.fixture.js';
+import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 
 type Rec = Record<string, unknown>;
 const SCENARIO = '8f5b0e4a-3c1d-4f6e-9a77-1b2c3d4e5f60';
@@ -114,15 +118,65 @@ describe('flip admission follows the producer\'s own status word', () => {
     const available = JSON.stringify(facts({ flip_thresholds: [PAIR], flip_thresholds_status: 'computed', ...critiques }).enrichment);
     expect(available).toContain('could flip at 4.2%');
   });
-  describe('a supplied current graph that cannot be read fails CLOSED; no graph at all does not', () => {
+  describe('R4: a current-model hash is required independently of the Run', () => {
     const readable = { nodes: [
       { id: 'goal', kind: 'goal', label: 'MRR' }, { id: 'keep', kind: 'option', label: 'Keep price' },
       { id: 'raise', kind: 'option', label: 'Raise price' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }], edges: [] };
     const enrichment = { flip_thresholds: [PAIR], flip_thresholds_status: 'computed' };
-    it('CONTRAST: no graph supplied anywhere keeps the Run current (the review fires in its own request)', () => {
+    it('no graph supplied cannot make the Run current by comparing it with itself', () => {
       const out = buildLicensedRunFacts(factWith(enrichment), SCENARIO, undefined);
-      expect(out.current).toBe(true);
-      expect(ids(out.flipRows)).toEqual(['churn']);
+      expect(out.current).toBe(false);
+      expect(out.analysis.run_state).toMatchObject({ kind: 'unknown_degraded' });
+      expect(out.flipRows).toEqual([]);
+    });
+    it.each(['Delivery capacity', 'Service throughput'])('%s: an absent current hash or Run hash withholds every dependent finding', topic => {
+      const base = factWith({ ...enrichment, m1_coaching: { summary: `Current ${topic} leader` } });
+      for (const currentHash of [null, undefined]) {
+        const out = buildLicensedRunFacts(base, SCENARIO, undefined, undefined, currentHash);
+        expect(out.current).toBe(false);
+        expect(out.mayNameLeader).toBe(false);
+        expect(out.flipRows).toEqual([]);
+        expect(out.enrichment).not.toHaveProperty('m1_coaching');
+      }
+      const missing = structuredClone(base);
+      delete missing.result.graph_hash_at_run;
+      const out = buildLicensedRunFacts(missing, SCENARIO, graph, graph, HASH);
+      expect(out.current).toBe(false);
+      expect(out.mayNameLeader).toBe(false);
+      expect(out.flipRows).toEqual([]);
+      expect(out.enrichment).not.toHaveProperty('m1_coaching');
+      const current = buildLicensedRunFacts(base, SCENARIO, graph, undefined, HASH);
+      expect(current.current).toBe(true);
+      expect(ids(current.flipRows)).toEqual(['churn']);
+    });
+    it.each(['Delivery capacity', 'Service throughput'])('%s: Run grounding cannot stand in for an absent current-model read', topic => {
+      const grounded = { ...readable, nodes: readable.nodes.map(n => n.id === 'goal' ? { ...n, label: topic } : n) };
+      const fact = factWith(enrichment);
+      fact.result.graph_hash_at_run = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(grounded))!;
+      const unknown = buildLicensedRunFacts(fact, SCENARIO, grounded);
+      expect(unknown.current).toBe(false);
+      expect(unknown.analysis.run_state).toMatchObject({ kind: 'unknown_degraded' });
+      expect(unknown.flipRows).toEqual([]);
+      const current = buildLicensedRunFacts(fact, SCENARIO, grounded, grounded);
+      expect(current.current).toBe(true);
+      expect(ids(current.flipRows)).toEqual(['churn']);
+    });
+    it.each(['Delivery capacity', 'Service throughput'])('%s: review passes its current graph to the selected Run goal-snapshot check', topic => {
+      const currentGraph = legacyGraph('node', []);
+      const goal = currentGraph.nodes.find(n => n.id === 'goal')!;
+      Object.assign(goal, { label: topic, goal_threshold_unit: 'GBP/month' });
+      const fact = legacyRun('node', false, true);
+      fact.result.enrichment = stampRunAnalysisProjection(fact.result.enrichment!);
+      fact.result.graph_hash_at_run = computeAnalysisAffectingGraphHash(currentGraph)!;
+      fact.result.input_snapshot!.goal = { node_id: 'goal', label: topic, target_raw: 85000, unit: 'GBP/month' };
+      const current = buildLicensedRunFacts(fact, fact.result.scenario_id, currentGraph, currentGraph);
+      expect(current.current).toBe(true);
+      const changed = structuredClone(currentGraph);
+      Object.assign(changed.nodes.find(n => n.id === 'goal')!, { goal_threshold_unit: 'USD/month' });
+      expect(computeAnalysisAffectingGraphHash(changed)).toBe(fact.result.graph_hash_at_run);
+      const stale = buildLicensedRunFacts(fact, fact.result.scenario_id, currentGraph, changed);
+      expect(stale.current).toBe(false);
+      expect(stale.analysis.run_state).toMatchObject({ kind: 'complete_stale' });
     });
     it('a supplied but unreadable current graph withholds the staleness-sensitive findings', () => {
       const out = buildLicensedRunFacts(factWith(enrichment), SCENARIO, readable, { nodes: 'garbage', edges: 7 });
