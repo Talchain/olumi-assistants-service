@@ -191,8 +191,8 @@ export type FigureSource = 'user' | 'unverified' | 'unclaimed';
  * Qualitative introduction uses the SAME verified source map, not the drafter's provenance flag.
  * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3327 B1 and its 22:59Z AMEND): a reading the host cannot check against the
  * words is OLUMI'S READING of the user's words, never the user's statement of it:
- *  · only a verified statement of a FIGURE the quote writes (a stated chance) makes the subject the user's;
- *  · a figure-free reading (holds_now, describes, any other form) never does, nor does `retained` (words the drafter attached to the
+ *  · no statement makes a risk the user's at construction: a figure the quote writes proves the number, not its subject or role,
+ *    and a figure-free reading (holds_now, describes, any other form) is Olumi's. Nor does `retained` (words the drafter attached to the
  *    subject outside its statements, a risk's `already_true_evidence`). A whole sentence of the user's there keeps the subject
  *    unverified human material, its words kept in `claimed`; never Olumi's estimate;
  *  · `holdsNowReading` is that reading's whole quote, for the door's card (the card IS the ask; only the press adopts it, as
@@ -238,13 +238,11 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
     return keptWords ? unverifiedHuman(claimed)
       : out({ author: authorshipOf({ words: { verified: false, unknown: false, sourceComplete: true } }), statements: [], claimed: [...claimed, ...kept] });
   }
-  // ⭐ DL-3 23:52Z (BUDDY-A #3327 R2 B1, the CLASS): for a risk, only a FIGURE the verifier checks (a stated chance) is the user's
-  // statement. Every figure-free form (holds_now, describes, any other) is Olumi's reading of their words, whatever it is called.
-  const supported = (st: UserStatement): boolean => st.low !== undefined || st.high !== undefined;
-  if (statements.some(({ statement: st }) => supported(st) && !quoteIsNotTheUsersClaim(st.source, st.quote) && !rivalled(st.quote))) {
-    return out({ author: authorshipOf({ words: { verified: true, unknown: false } }), statements, claimed: [...claimed, ...kept] });
-  }
-  // Known human words with an unverified field/figure (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
+  // ⭐ GREEN CORE (DL-3 stop rule; BUDDY-A #3327 R2 + R3 B1): for a risk, NO construction statement verifies the user. A figure the
+  // quote writes proves the number, not that it is THIS risk's chance (the budget's £2 million read as an occurrence), and a
+  // figure-free reading is Olumi's. The user's whole words stay human material, unverified; their chance is recorded only by the
+  // door's own occurrence card, on their press.
+  // Known human words (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
   return claims.some(c => typeof c.quote === 'string' && usersWords(c.quote)) || keptWords ? unverifiedHuman(claimed) : unknown(claimed);
 }
 
@@ -376,8 +374,8 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     if (drafted === undefined || field === undefined) continue;
     if (drafted.kind === 'risk') {
       // The user's words are recorded on a risk they are human material for. A holds-now reading is Olumi's, carried only by its card
-      // (`already_true_quote`): never a construction record of theirs (DL-3 RULING 23:12Z + 23:52Z).
-      if (field === 'holds_now') continue;
+      // (`already_true_quote`), and a risk's chance only by the door's occurrence card: never a construction record of either.
+      if (field === 'holds_now' || field === 'occurrence') continue;
       const source = subjectSource({ statements: entries }, brief, drafted);
       if (source.author.origin !== 'human') continue;
     }

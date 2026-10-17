@@ -223,13 +223,14 @@ describe('draft source → risk admission → retained participation → readine
     expect(JSON.stringify(out.loss)).toContain(quote);
   });
 
-  it('draft participation/widening marks cannot overrule verified human origin', () => {
-    // Verified human = a FIGURE the verifier checks (the user's own stated chance), whatever the draft's marks say.
+  // ⭐ GREEN CORE (DL-3 00:1xZ; BUDDY-A #3327 R3 B1): no construction statement makes a risk the user's, so the protection this row keeps
+  // is the other half: the draft's own marks never make the user's words Olumi's suggestion or leave the risk out of the Run.
+  it('draft participation/widening marks cannot make the user\'s words Olumi\'s or leave the risk out', () => {
     const quote = 'There is about a 30% chance that specialist capacity falls below target.';
     const model = draft([riskStatement(quote, { field: 'occurrence', form: 'point', value: 30, unit: '%' })]);
     model.risks[0].analysis_participation = 'retained_excluded'; model.risks[0].draft_widening = { basis: 'model suggestion' };
     const { risk, graph } = admitted(model, `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('from_brief'); expect(risk.proposed_by).toBeUndefined();
+    expect(risk.provenance).toBe('unverified_brief'); expect(risk.proposed_by).toBeUndefined();
     expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
     expect(resolveRunAdmission(graph).willProceed).toBe(false);
   });
@@ -243,14 +244,26 @@ describe('draft source → risk admission → retained participation → readine
   });
 
 
-  it('a human occurrence range remains a range with its whole source and conditions', () => {
+  // The figure proves the number, not that it is THIS risk's chance: the whole words and conditions are kept as human material, and the
+  // chance is recorded only by the door's own occurrence card, on the user's press (no construction occurrence record).
+  it('a human occurrence range keeps its whole words and conditions as human material; no construction record of a chance', () => {
     const quote = 'If recruitment is delayed, I estimate between 10% and 30% likelihood of specialist capacity below target.';
     const st = { ...riskStatement(quote), field: 'occurrence', form: 'range', low: 10, high: 30, unit: '%', conditions: 'If recruitment is delayed' };
-    const { risk } = admitted(draft([st]), `${BASE} ${quote}`);
-    expect(risk.provenance).toBe('from_brief'); expect(risk.analysis_participation).toBeUndefined();
-    expect(JSON.stringify(risk.user_statements)).toContain(quote);
-    expect(JSON.stringify(risk.user_statements)).toContain('"low":10,"high":30');
+    const { risk, out } = admitted(draft([st]), `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief'); expect(risk.analysis_participation).toBeUndefined();
+    expect(JSON.stringify(out.loss)).toContain(quote);
+    expect(JSON.stringify(out.loss)).toContain('If recruitment is delayed');
+    expect(risk.user_statements).toBeUndefined();
     expect(risk.event_risk).toBeUndefined();
+  });
+
+  it('BUDDY-A R3 numeric misbind: the budget\'s £2 million read as the risk\'s occurrence lends no number or credit to the risk', () => {
+    const st = { ...riskStatement(BUDGET), field: 'occurrence', form: 'point', value: 2000000, unit: 'GBP' };
+    const { risk, out } = admitted(draft([st]), `${BASE} ${BUDGET}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.user_statements).toBeUndefined();
+    expect(risk.event_risk).toBeUndefined();
+    expect(JSON.stringify(out.loss)).toContain(BUDGET);
   });
 
   it.each(['included', 'sized', 'occurrence', 'option link', 'constraint', 'incoming cause', 'duplicate id'] as const)(
