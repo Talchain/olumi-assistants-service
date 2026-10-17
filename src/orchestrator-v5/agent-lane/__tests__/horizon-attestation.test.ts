@@ -114,8 +114,25 @@ describe('attestHorizon: the brief confirms the drafter\'s month count, or it is
     ['over the last 12 months', 'a past period'],
     ['12 months ago', 'a past period'],
     ['in 3-12 months', 'the far end of a range'],
+    ['within 6 to 12 months', 'the far end of a range written with "to"'],
   ])('CONTRAST: "%s" never attests 12 (%s)', (words) => {
     expect(attestHorizon(withDeadline(words), { horizon_months: 12 }).status).not.toBe('attested');
+  });
+
+  // ⭐ A RANGE OF TIME IS ONE SPAN, NEVER A COUNT (DL-3 02:54Z; BUDDY-A 02:58Z; Paul's served "in the next 6-12 months").
+  it('⭐ a forward-led range keeps its whole words and is never a month count, claimed or not; past and unled ranges stay out', () => {
+    const brief = withDeadline('in the next 6-12 months');
+    for (const claim of [null, 6, 12]) {
+      expect(attestHorizon(brief, { horizon_months: claim })).toEqual({ months: null, wording: 'in the next 6-12 months', status: 'unresolved' });
+    }
+    expect(attestHorizon(withDeadline('within 6 to 12 months'), { horizon_months: null })).toEqual({ months: null, wording: 'within 6 to 12 months', status: 'unresolved' });
+    expect(attestHorizon(withDeadline('over the last 6-12 months'), { horizon_months: null }).status).toBe('absent');
+    expect(attestHorizon(withDeadline('with a runway of 6-12 months'), { horizon_months: null }).status).toBe('absent');
+  });
+
+  it('⭐ the range\'s role is the existing rule: outside the goal\'s own target statement its words come back unbound, never a deadline', () => {
+    expect(attestHorizon(withDeadline('in the next 6-12 months'), { horizon_months: 12 }, ['A sentence about something else.']))
+      .toEqual({ months: null, wording: '', status: 'absent', unbound: 'in the next 6-12 months' });
   });
 
   it('CONTRAST: a written duration that is not the drafter\'s count is unresolved, never the brief\'s figure swapped in', () => {
@@ -207,4 +224,18 @@ it('AIE 6184383302: the same unmatched spans with NO target statement are asked 
   const numeric = await registeredGoal(withDeadline('at month 9'), 18,
     'Is "month 9" the period by which "MRR" should be achieved? Your brief does not say, so the model holds no deadline for it.');
   expect(Object.hasOwn(numeric, 'goal_deadline_as_stated')).toBe(false);
+});
+
+it('⭐ real build: a range inside the goal\'s target statement is held as the brief\'s words and asked which date, with no month count', async () => {
+  const goal = await registeredGoal(withDeadline('in the next 6-12 months'), 12,
+    'Which date does "in the next 6-12 months" mean? It is the deadline your brief sets for "MRR"; the model keeps your words but no date, so no result answers whether it is met by then.', true);
+  expect(goal.goal_deadline_as_stated).toBe('in the next 6-12 months');
+  expect(goal.goal_horizon_months).toBeUndefined();
+});
+
+it('⭐ real build: the same range with no target statement holding it is asked for its role first; nothing is held as a deadline', async () => {
+  const goal = await registeredGoal(withDeadline('in the next 6-12 months'), 12,
+    'Is "in the next 6-12 months" the period by which "MRR" should be achieved? Your brief does not say, so the model holds no deadline for it.');
+  expect(Object.hasOwn(goal, 'goal_deadline_as_stated')).toBe(false);
+  expect(goal.goal_horizon_months).toBeUndefined();
 });

@@ -54,8 +54,15 @@ const CALENDAR_POINT = new RegExp(
   'gi',
 );
 
-/** Words just before a figure that make it a past period or the far end of a range. */
-const PAST_OR_RANGE_BEFORE = /(?:\b(?:last|past|previous|prior)\s+|\d\s*[-–]\s*)$/i;
+/** Words just before a figure that make it a past period or the far end of a range ("6-12 months", "6 to 12 months"). */
+const PAST_OR_RANGE_BEFORE = /(?:\b(?:last|past|previous|prior)\s+|\d\s*(?:[-–]|to)\s*)$/i;
+/**
+ * ⭐ A RANGE OF TIME IS ONE SPAN, NEVER A COUNT (DL-3 02:54Z; BUDDY-A 02:58Z; Paul's served "in the next 6-12 months"): its whole
+ * words are kept and neither end is ever attested, so the existing role rules below say it (`unbound`: "Is … the period by which …
+ * should be achieved?"; inside the goal's own target statement, `unresolved` and held as words). Before, both ends were skipped and
+ * the brief's words were lost, leaving only the drafter's own pick of one end ("Does … get there within 12 months?").
+ */
+const RANGE_DURATION = new RegExp(String.raw`(${LEAD})?(?<![\d.,])(\d+)\s*(?:[-–]|to)\s*(\d+)(?:\s+|\s*-\s*)(month|year)s?\b`, 'gi');
 /** Words just after that make it a past period. */
 const PAST_AFTER = /^\s+ago\b/i;
 
@@ -83,6 +90,16 @@ function forwardDurations(brief: string): Span[] {
     if ((lead === '' && PAST_OR_RANGE_BEFORE.test(before)) || PAST_AFTER.test(after)) continue;
     spans.push({ months: Number(m[2]) * MONTHS_PER[m[3]!.toLowerCase()]!, wording: m[0].trim(), index: m.index ?? 0,
       led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, figureAt - 32), figureAt)) || ALLOTTED_AFTER.test(after) });
+  }
+  for (const m of brief.matchAll(RANGE_DURATION)) {
+    const lead = m[1] ?? '';
+    const lowAt = (m.index ?? 0) + lead.length;
+    const after = brief.slice((m.index ?? 0) + m[0].length);
+    if (/\b(?:last|past|previous|prior)\s+$/i.test(brief.slice(Math.max(0, lowAt - 16), lowAt)) || PAST_AFTER.test(after)) continue;
+    if (!(Number(m[2]) < Number(m[3]))) continue;
+    // `months` NaN: a range is never one count, so no claim is ever attested from it.
+    spans.push({ months: Number.NaN, wording: m[0].trim(), index: m.index ?? 0,
+      led: lead !== '' || LED_BEFORE.test(brief.slice(Math.max(0, lowAt - 32), lowAt)) || ALLOTTED_AFTER.test(after) });
   }
   for (const m of brief.matchAll(SPELLED_DURATION)) {
     if (PAST_AFTER.test(brief.slice((m.index ?? 0) + m[0].length))) continue;
