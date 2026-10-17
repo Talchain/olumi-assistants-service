@@ -9,7 +9,7 @@ import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { sentencesOf } from '../reply/compose-reply.js';
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
-import { RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync('tests/fixtures/batch-g/served-hiring-run4-turn07-20261012T172858Z.json', 'utf8')) as Rec;
@@ -405,7 +405,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     expect(store.append).not.toHaveBeenCalled(); expect(rows).toEqual(savedRows);
   });
 
-  it('a moved Explain replay reports its explanation unavailable beside the current result without Explain', async () => {
+  it('a moved Explain resend delivers its recorded words beside non-current explanation controls', async () => {
     const first = (await press()).json();
     const chip = first.suggested_actions.find((a: Rec) => a.id.startsWith('agent-explain-run:'));
     expect(chip).toBeDefined();
@@ -421,9 +421,9 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     const replay = await press(request);
     expect(replay.statusCode, replay.body).toBe(200);
     const body = replay.json();
-    expect(body.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
-    expect(body.assistant_text).not.toBe(live.assistant_text);
-    // Separate Explain replay retains the current result; the old explanation is unavailable.
+    expect(body.assistant_text).toBe(live.assistant_text);
+    expect(body.assistant_text).toBe(savedRows.find(row => row.turn_id === request.turn_id)!.assistant_message);
+    // DL-3: resend delivers the historical answer; currentness still governs its controls.
     expect(body.blocks).toEqual([block]);
     expect(body.narration).toEqual({ status: 'stale', run_key: live.narration.run_key });
     expect(body.suggested_actions.some((a: Rec) => a.id.startsWith('agent-explain-run:'))).toBe(false);
