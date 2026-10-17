@@ -7343,8 +7343,7 @@ export function createAgentCapabilities(
         const source = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
           .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? '';
         // Near-only pairs a point for display; it cannot attest its speaker or original field role.
-        const bound = writtenAbout && factorTheUserNamed(node.label, bindingWords, {
-          options: [], others: ownerScope.rivals ?? ownerScope.others })
+        const bound = writtenAbout && isFactorNamedByUser(node.label, bindingWords)
           && !quoteIsNotTheUsersClaim(source, source)
           && comparatorTheUserWroteFor(source, Number(a.value)) === null;
         const bindingUnverified = origin === 'human' && !bound;
