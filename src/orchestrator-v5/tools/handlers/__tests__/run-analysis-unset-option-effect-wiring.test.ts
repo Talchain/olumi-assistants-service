@@ -238,6 +238,8 @@ function makePlotClient(factorSensitivity: ReadonlyArray<Record<string, unknown>
     response_hash: 'unset-effect-wiring',
     analysis_status: 'computed',
     option_comparison: OPTION_COMPARISON,
+    // Separation evidence licenses the headline so these arms test the unset-factor binding.
+    robustness: { level: 'strong', near_tie: { is_tie: false } },
     factor_sensitivity: factorSensitivity,
   } as unknown as V2RunResponseEnvelope;
   return {

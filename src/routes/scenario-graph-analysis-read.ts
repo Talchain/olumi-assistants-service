@@ -549,9 +549,13 @@ export async function readScenarioAnalysis(
             : null,
       }) ?? null;
 
-    const builtResult = analysisResult !== null && analysisState !== null
-      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState, derivation.reason)[0] ?? null
-      : analysisResult;
+    // Build the saved summary under this read's actual licence, before any egress projection.
+    const savedResult = fact !== null
+      ? buildAnalysisResultBlock(fact, analysisReady, leaderLicenceFromState(analysisState, analysisReady))
+      : null;
+    const builtResult = savedResult !== null && analysisState !== null
+      ? projectAnalysisBlocksForRunBinding([savedResult], analysisState, derivation.reason)[0] ?? null
+      : savedResult;
     // SC-24: the displayed Run's comparison with the Run before it — the same producer and permission the turn used.
     // Only for a DELIVERED fact that is the pair's newer end, with no newer Run withholding its claim; `current_read`
     // then adds its own currentness gate (row 1). It never rides top-level on the read.
@@ -663,12 +667,16 @@ export async function readScenarioAnalysis(
       ),
       graphHash,
     ) as AnalysisReadyPayload;
+    // R4's optional historicalResult carrier is consumed after #3361; current claims remain gated here.
+    const canonicalViewInput = {
+      revision: params.revision, graph: params.graph,
+      runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
+      derivation, analysisState, analysisReady, currentResult: boundResult,
+      historicalResult: derivation.freshness === 'unknown' && historical?.fact.fact_type === 'run_analysis'
+        ? buildAnalysisResultBlock(historical.fact as RunAnalysisHandlerFact) : null,
+    };
     return {
-      canonical_analysis_view: projectCanonicalAnalysisView({
-        revision: params.revision, graph: params.graph,
-        runFact: historical?.fact.fact_type === 'run_analysis' ? historical.fact as RunAnalysisHandlerFact : null,
-        derivation, analysisState, analysisReady, currentResult: boundResult,
-      }),
+      canonical_analysis_view: projectCanonicalAnalysisView(canonicalViewInput),
       ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })

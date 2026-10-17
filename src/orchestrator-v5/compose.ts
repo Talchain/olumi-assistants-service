@@ -88,6 +88,7 @@ import { readOptionResultSources } from '../orchestrator/context/option-result-s
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
+import type { LeaderLicence } from './compose/leader-licence.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -1293,6 +1294,7 @@ export function toSafeTransportEnrichment(
  */
 function buildAnalysisResultBlockUnconfined(
   fact: RunAnalysisHandlerFact,
+  licence?: LeaderLicence,
 ): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
   const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =
     fact.result;
@@ -1330,7 +1332,9 @@ function buildAnalysisResultBlockUnconfined(
   // a leader this very block had just nulled. `mayPresentLeaderClaimForFact` is
   // the one shared admission; see
   // `compose/unrequested-analysis-confinement.ts` for that history.
-  const mayNameLeadingOption = mayPresentLeaderClaimForFact(fact);
+  // A canonical saved read supplies the same licence its egress consumes.
+  // Apply it once here to the summary and every existing leader projection.
+  const mayNameLeadingOption = mayPresentLeaderClaimForFact(fact) && licence !== 'withheld';
   // E2 (ROADMAP 1.272) — the permission is read BEFORE the clone and the
   // drop-set is a frozen module constant, so on a withheld turn the blobs that
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
@@ -1452,9 +1456,10 @@ function buildAnalysisResultBlockUnconfined(
 export function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
   analysisReady?: unknown,
+  licence?: LeaderLicence,
 ): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
   return confineUnrequestedAnalysisBlock(
-    buildAnalysisResultBlockUnconfined(fact),
+    buildAnalysisResultBlockUnconfined(fact, licence),
     fact,
     analysisReady,
   );

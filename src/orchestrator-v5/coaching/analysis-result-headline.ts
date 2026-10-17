@@ -55,6 +55,7 @@ import {
   readRobustnessLevel,
   buildNodeLabelMap,
 } from './decision-review-enricher.js';
+import type { LeaderLicence } from '../compose/leader-licence.js';
 import { RETAINED_LIMIT_WITHHELD, RETAINED_LIMIT_QUANTITY_WITHHELD } from '../../graph/retained-limit.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { orderFragilityPriorityRows } from '../../orchestrator/shared/fragile-edge-authority.js';
@@ -937,8 +938,9 @@ interface HeadlineResult {
 }
 
 /** One owner for the comparison permission and the disclosures retained when its lead is retired. */
-export function buildAnalysisResultHeadlineParts(input: AnalysisResultHeadlineInput): HeadlineResult {
-  return computeHeadline(input);
+export function buildAnalysisResultHeadlineParts(input: AnalysisResultHeadlineInput, licence?: LeaderLicence): HeadlineResult {
+  const result = computeHeadline(input);
+  return licence === 'withheld' ? { ...result, text: null } : result;
 }
 
 /** Returns the existing comparison sentence, or null when it is not supported. */

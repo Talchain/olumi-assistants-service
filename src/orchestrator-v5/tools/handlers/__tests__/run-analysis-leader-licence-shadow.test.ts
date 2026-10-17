@@ -220,16 +220,15 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     expect(e.disagreements).toEqual([{ site: 'CV', live: true, verdict: false }]);
   });
 
-  it('L1-d (near tie, SYNTHETIC tie flag): `withheld`/`options_do_not_separate`; the stored leader and summary still name one', async () => {
+  it('L1-d (near tie, SYNTHETIC tie flag): `withheld`/`options_do_not_separate`; the stored leader still names one; the summary names no leader', async () => {
     const r = await runOnce(FA027, fa027Legacy, plotDouble('near_tie'));
     expect(r.fact.result.leading_option_id).toBe(LEADER);
     const e = shadowOf(r);
     expect(e).toMatchObject({ verdict: 'withheld', reason: 'options_do_not_separate', claim_reason: WITHHELD_NEAR_TIE });
-    // The live finding L2 must close: three sites still name a leader the verdict withholds.
+    // Contract B closes the summary finding; CV and stored_leader remain L2 work.
     expect(e.disagreements).toEqual([
       { site: 'CV', live: true, verdict: false },
       { site: 'stored_leader', live: true, verdict: false },
-      { site: 'summary_leader', live: true, verdict: false },
     ]);
   });
 

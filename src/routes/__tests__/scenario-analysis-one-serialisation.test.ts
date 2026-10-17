@@ -31,12 +31,23 @@ vi.mock('../../utils/telemetry.js', () => ({
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
+const canonicalViewInputs = vi.hoisted(() => [] as Rec[]);
+vi.mock('../canonical-analysis-view.js', async original => {
+  const actual = await original<typeof import('../canonical-analysis-view.js')>();
+  return { ...actual, projectCanonicalAnalysisView: (input: Parameters<typeof actual.projectCanonicalAnalysisView>[0]) => {
+    canonicalViewInputs.push(input);
+    return actual.projectCanonicalAnalysisView(input);
+  } };
+});
+
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
 import { readBackState } from '../agent-v1-turn.js';
 import { buildAnalysisResultBlock } from '../../orchestrator-v5/compose.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { leaderLicenceFromState } from '../../orchestrator-v5/compose/leader-licence.js';
+import { WITHHELD_ANALYSIS_SUMMARY } from '../../orchestrator-v5/compose/withheld-claim-projection.js';
+import { buildAnalysisResultHeadlineParts } from '../../orchestrator-v5/coaching/analysis-result-headline.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { currentAnalysisCoaching } from '../../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import { reconciliationPending } from '../../orchestrator-v5/agent-lane/goal-scope.js';
@@ -116,6 +127,145 @@ beforeEach(() => {
   vi.clearAllMocks();
   readMostRecentPendingActions.mockResolvedValue([]);
   readAnalysisInvalidatedAt.mockResolvedValue(null);
+});
+
+describe('canonical saved-summary producer consumes the existing leader licence', () => {
+  // Small synthetic envelopes, sweeping label length to exercise numbered and shed forms.
+  const bands = [
+    { probabilities: [0.62, 0.38], fragile: true },
+    { probabilities: [0.62, 0.38], driver: true },
+    { probabilities: [0.62, 0.38] },
+    { probabilities: [0.62] },
+    { probabilities: [0.34, 0.22], driver: true },
+    { probabilities: [0.34, 0.22], fragile: true },
+    { probabilities: [0.34, 0.22] },
+    { probabilities: [0.45, 0.42] },
+    { probabilities: [0.41, 0.40] },
+    { probabilities: [0.62, 0.38], tied: true },
+    { probabilities: [0.54, 0.55] },
+  ];
+  const forms = new Map<string, string>();
+  bands.forEach((band, index) => {
+    for (let length = 7; length <= 210; length++) {
+      const result = buildAnalysisResultHeadlineParts({ leading_option_id: 'option-b', status_kind: 'ok', enrichment: {
+        results: band.probabilities.map((win_probability, i) => ({ option_id: i === 0 ? 'option-b' : 'option-a',
+          option_label: i === 0 ? 'Option ' + 'B'.repeat(length - 7) : 'Option A', win_probability })),
+        ...(band.driver ? { factor_sensitivity: [{ label: 'Demand', influence_score: 0.6 }] } : {}),
+        robustness: { level: 'moderate', ...(band.tied ? { near_tie: { is_tie: true } } : {}),
+          ...(band.fragile ? { fragile_edges: [{ from_label: 'Demand', switch_probability: 0.5 }] } : {}) },
+      } });
+      if (result.text !== null) {
+        const key = `${result.descriptor.case}/${result.text.includes('%') ? 'numbered' : 'shed'}/${index}`;
+        if (!forms.has(key)) forms.set(key, result.text);
+      }
+    }
+  });
+
+  it('covers every emitted case, including numbered and length-shed forms', () => {
+    expect([...new Set([...forms.keys()].map(key => key.split('/')[0]))].sort()).toEqual(['A', 'B', 'C', 'D', 'E', 'LT', 'NT', 'SC']);
+    expect([...forms.keys()].some(key => key.startsWith('C/shed/'))).toBe(true);
+    expect([...forms.keys()].some(key => key.startsWith('B/shed/'))).toBe(true);
+    expect([...forms.keys()].some(key => key.startsWith('SC/shed/'))).toBe(true);
+  });
+
+  it.each([true, false])('numbered/shed forms follow the shared licence (permitted=%s)', (permitted) => {
+    const ready = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
+    const licence = leaderLicenceFromState({ leader_claim: { permitted, separation: 'separated' } }, ready);
+    expect(licence).toBe(permitted ? 'permitted' : 'withheld');
+    for (const [form, summary] of forms) {
+      const fact = runFact({ separated: true });
+      fact.result.summary = summary;
+      const before = structuredClone(fact);
+      const block = buildAnalysisResultBlock(fact, ready, licence);
+      expect(block.summary, form).toBe(permitted ? summary : WITHHELD_ANALYSIS_SUMMARY);
+      expect(block.leading_option_id).toBe(permitted ? 'option-b' : null);
+      expect((block.enrichment?.decision_brief as Rec).headline).toBe(permitted ? 'Option B currently leads.' : undefined);
+      expect(fact).toEqual(before);
+    }
+  });
+
+  it.each([false, true])('actual saved reader preserves its own summary under licence and repeated read (separated=%s)', async (separated) => {
+    const fact = runFact({ separated });
+    fact.result.summary = 'Option B was supported by 65% of runs of this model.';
+    const before = structuredClone(fact);
+    const read = await reload(fact, 'saved-summary');
+    const expected = separated ? fact.result.summary : WITHHELD_ANALYSIS_SUMMARY;
+    expect(read.analysis_result.summary).toBe(expected);
+    expect(read.current_read.result).toBe(read.analysis_result);
+    const repeated = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'saved-summary-repeat' });
+    expect(repeated.analysis_result).toEqual(read.analysis_result);
+    expect(fact).toEqual(before);
+  });
+
+  it('no admission cannot borrow permission or words from another Run', async () => {
+    const fact = runFact({ separated: true });
+    fact.result.summary = 'Option B scored highest against your goal in 65% of runs of this model; Option A scored highest in 35%.';
+    const licence = leaderLicenceFromState({ leader_claim: { permitted: true, separation: 'separated' } }, undefined);
+    expect(licence).toBe('withheld');
+    expect(buildAnalysisResultBlock(fact, undefined, licence).summary).toBe(WITHHELD_ANALYSIS_SUMMARY);
+    const read = await reload(fact, 'scope-summary-seed');
+    expect(read.analysis_result.summary).toBe(fact.result.summary);
+    const withheld = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'scope-summary',
+      goalScopeClaimInput: { status: 'unavailable', issues: [] } });
+    expect(withheld.analysis_result?.type).toBe('analysis_result');
+    expect((withheld.analysis_result as Rec).summary).toBe(WITHHELD_ANALYSIS_SUMMARY);
+  });
+
+  it.each(['stale', 'foreign'] as const)('does not attach a saved summary to a %s selected Run', async (kind) => {
+    const fact = runFact({ separated: true });
+    fact.result.summary = 'Option B was supported by 65% of runs of this model.';
+    if (kind === 'foreign') fact.result.scenario_id = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const initial = await reload(fact, 'selected-summary');
+    const read = kind === 'stale' ? await readScenarioAnalysis({ scenarioId: SCENARIO, requestId: 'stale-summary',
+      graph: { ...GRAPH, nodes: GRAPH.nodes.map(node => node.id === 'factor'
+        ? { ...node, observed_state: { value: 2 } } : node) } as GraphStateIngress }) : initial;
+    expect(read.analysis_result).toBeNull();
+    expect(read.current_read.result).toBeNull();
+    expect(read.analysis_state?.leader_claim.permitted).toBe(false);
+    expect(fact.result.summary).toBe('Option B was supported by 65% of runs of this model.');
+  });
+});
+
+describe('R4 selected historical result carrier', () => {
+  it.each(['Revenue', 'Delivery capacity'].flatMap(label => ['run', 'current', 'both'].map(missing => ({ label, missing }))))(
+    '$label / missing $missing hash: selected historical block only; current claims stay closed', async ({ label, missing }) => {
+    const fact = runFact({ separated: true });
+    if (missing !== 'current') delete fact.result.graph_hash_at_run;
+    fact.result.summary = `${label} recorded on the earlier Run.`;
+    fact.result.enrichment = { ...fact.result.enrichment,
+      option_comparison: [{ option_id: 'option-a', probability_of_goal: 0.99 }, { option_id: 'option-b', probability_of_goal: 0.01 }],
+      inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
+        option_ids: ['option-a', 'option-b'], pct_by_option: { 'option-a': 47, 'option-b': 52 },
+        option_labels_by_option: { 'option-a': `${label}: earlier A`, 'option-b': `${label}: earlier B` } }],
+    };
+    const before = structuredClone(fact);
+    await reload(fact, 'r4-unknown');
+    const read = await readScenarioAnalysis({ scenarioId: SCENARIO, requestId: 'r4-other-label',
+      graph: { ...GRAPH, nodes: GRAPH.nodes.map(n => n.id === 'goal' ? { ...n, label: 'Unrelated current £2m' }
+        : n.id === 'factor' && missing !== 'run' ? { ...n, label: undefined } : n) } as GraphStateIngress });
+    const carrier = canonicalViewInputs.at(-1)!;
+    expect(carrier.derivation.freshness).toBe('unknown');
+    expect(carrier.currentResult).toBeNull();
+    expect(carrier.historicalResult).toEqual(buildAnalysisResultBlock(fact));
+    expect(carrier.historicalResult.summary).toBe(`${label} recorded on the earlier Run.`);
+    expect(read.analysis_result).toBeNull();
+    expect(read.current_read.result).toBeNull();
+    expect(read.current_read.figures).toEqual([]);
+    expect(read.canonical_analysis_view.options).toEqual([]);
+    expect(read.canonical_analysis_view.historical_figures?.options).toEqual([
+      { option_id: 'option-a', option_label: `${label}: earlier A`, display: 'about 47%' },
+      { option_id: 'option-b', option_label: `${label}: earlier B`, display: 'about 52%' },
+    ]);
+    expect(read.canonical_analysis_view.staleness.stale).toBeNull();
+    expect(read.canonical_analysis_view.face_when_stale).toBe('This earlier Run may be out of date. Run the analysis again.');
+    expect(read.canonical_analysis_view.leader_licence).toBe('withheld');
+    expect(read.canonical_analysis_view.leader.option_id).toBeNull();
+    expect(read.canonical_analysis_view).not.toHaveProperty('goal_chance');
+    expect(fact).toEqual(before);
+    // The carrier must not be added to a known-current read.
+    await reload(runFact({ separated: true }), 'r4-current');
+    expect(canonicalViewInputs.at(-1)!.historicalResult).toBeNull();
+  });
 });
 
 describe('one Run, one serialisation — the reload ships the block the Run turn shipped', () => {
