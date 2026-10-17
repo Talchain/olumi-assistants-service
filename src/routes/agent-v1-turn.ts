@@ -1919,7 +1919,8 @@ function finalReplyValidation(evidence: ReplyEvidence): FinalReplyValidation {
     const labels = { ...rankingLabelContext(graph, evidence.analysisReady), licensedChances: licences };
     const producerLines = current ? [...goalChanceScreenLinesForAgent(evidence.analysisResult, graph, true)
       .flatMap(line => [line.chance, line.depends]), ...goalChanceNotesForAgent(evidence.analysisResult, graph, true)] : [];
-    const protectedSource = (sentence: string): boolean => evidence.sources.some(source => recordedSentenceIn(source, sentence));
+    const protectedSource = (sentence: string): boolean => evidence.sources.some(source => recordedSentenceIn(source,
+      sentence.startsWith('From your message: ') ? sentence.slice('From your message: '.length) : sentence));
     const failed: ReplyValidationFailure[] = [];
     const fail = (check: ReplyValidationFailure['check'], code: string): void => { if (!failed.some(f => f.check === check && f.code === code)) failed.push({ check, code }); };
     // Existing typed method rows own their counterfactual quantities; they are not this Run's goal-chance tuple.
@@ -2640,9 +2641,8 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
       const replayGuidedText = guidedSizingReplyText(replayScopedDraftForRun).guided;
       /**
        * RESULT-FIRST REPLAY: canonical readback still owns current result blocks, narration status and enabled controls.
-       * DL-3's resend ruling keeps the recorded prose byte-identical, including legacy rows and moved Runs. The working
-       * reconstruction below supplies those typed display units; its prose is used only when no answer was recorded.
-       * The final boundary receives recorded prose as historical delivery, separately from new display units.
+       * Recorded bytes replay only while the existing state-bound presenter permits their basis.
+       * Its staleness/withholding reply takes precedence when that basis moved or cannot be verified.
        */
       const replayChip = runExplanationChip(scenarioId, state);
       // What this exact answer was sent with: this process's memory of its controls, else the narration stored WITH its row.
@@ -2694,7 +2694,8 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         // still the bound one, else today's coaching. Never measured again here.
         const remembered = turnId !== undefined ? measuredWhatChanges.get(`${scenarioId}:${turnId}`) ?? null : null;
         const answer = whatWouldChangeAnswer(scenarioId, state, remembered, prior.assistant_message);
-        replayText = answer.text;
+        replayText = remembered !== null && runExplanationMatches(remembered.runKey, scenarioId, state)
+          ? prior.assistant_message ?? answer.text : answer.text;
         if (answer.measured !== null && turnId !== undefined) {
           replayMethodResult = whatChangesMethodResult(answer.measured.turn, {
             scenarioId, turnId, run: null, analysisResult: state.analysisResult,
@@ -2710,9 +2711,9 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
           goalScopeClaimInput: goalScopeClaimInput([...currentScope, ...scopeIssues].filter(p => p.scenario_id === scenarioId), state.graph),
         });
         const presented = structuralChallengeReplay(remembered, receipt);
-        // Replay the stored words (including live egress tails) only while today's fresh receipt re-presents the
-        // identical typed answer. Compare only the two deterministic composer outputs, never stored wording.
-        replayText = remembered !== undefined && presented.reply === remembered.reply
+        // A fresh receipt owns currentness; a changed presentation on that same basis does not replace recorded bytes.
+        // Typed sidecars below still require an identical re-presentation.
+        replayText = remembered !== undefined && (remembered.result?.status !== 'completed' || presented.result?.status === 'completed')
           ? prior.assistant_message ?? presented.reply : presented.reply;
         if (remembered !== undefined && presented.reply === remembered.reply && turnId !== undefined) {
           replayMethodResult = testLinkMethodResult(presented, { scenarioId, turnId });
@@ -2957,7 +2958,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         ? composedCandidate : null);
       const composedReplay = composeDirectAnswerResponse({
         // Recorded bytes remain opaque to current-model prose producers. Fresh controls still cross every guard below.
-        assistant_text: prior.assistant_message !== null ? '' : replayComposed?.text ?? withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells),
+        assistant_text: replayText === prior.assistant_message ? '' : replayComposed?.text ?? withCellHorizon(withoutProposalIds(replayText), state.graph, replayChanceCells),
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
@@ -2985,14 +2986,15 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
-      // Recorded prose is immutable; the final gate checks only the newly derived display units.
-      const replayMethod = methodResultForEgress(replayMethodResult, prior.assistant_message ?? replayBody.assistant_text);
-      const delivery = { ...replayBody, assistant_text: prior.assistant_message ?? replayBody.assistant_text,
+      // Preserve validated bytes only when the basis-aware presenter still permits them.
+      const recordedText = replayText === prior.assistant_message ? prior.assistant_message : undefined;
+      const replayMethod = methodResultForEgress(replayMethodResult, recordedText ?? replayBody.assistant_text);
+      const delivery = { ...replayBody, assistant_text: recordedText ?? replayBody.assistant_text,
         ...(replayMethod === null ? {} : { _method_result: replayMethod }) };
       return repairFinalReply(withShapeOnlyIfItDerives(delivery), { model: state.graph, analysisResult: state.analysisResult,
         analysisState: state.analysisState, analysisReady: state.analysisReady,
         sources: replaySources, receipts: [],
-        recordedText: prior.assistant_message ?? undefined, hasCard: replayRecords.length > 0, cardTexts: deliveredCardTexts(replayRecords, replayActions),
+        recordedText, hasCard: replayRecords.length > 0, cardTexts: deliveredCardTexts(replayRecords, replayActions),
       }, false);
     };
     /**
@@ -6250,8 +6252,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
       .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id: storedOfferId(id), label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
-    const answerNarration = answerRunNarrationOf(wireBody.narration)
-      ?? (answerOffersRunKey === null ? null : { status: 'ready' as const, run_key: answerOffersRunKey });
+    const answerNarration = answerRunNarrationOf(wireBody.narration);
     /**
      * ⭐ 0.79 SD-1 Slice R — THE run_delivery WRITER (DL #87 option A; rebuilt from #2657 on DL 13:07Z 14 Oct, prod CEE on
      * schemas 0.81): what this Run's turn DELIVERED, recorded on this answer row as an append-only `run_delivery` fact, so a
@@ -6509,8 +6510,23 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         .filter((line): line is string => typeof line === 'string' && line !== ''),
       hasCard: heldRecords.length > 0, cardTexts: deliveredCardTexts(heldRecords, wireBody.suggested_actions),
     };
+    const publishReplyHistory = (): void => {
+      const displayedQuestion = automaticDeadlineLabel !== undefined
+        && wireBody.suggested_actions.some(action => action.detail === automaticDeadlineLabel)
+        && !String(wireBody.assistant_text).includes(automaticDeadlineLabel) ? automaticDeadlineLabel : undefined;
+      const historyReply = displayedQuestion === undefined ? String(wireBody.assistant_text)
+        : `${wireBody.assistant_text}\n\n[Card displayed beside this reply; reference data]\n${displayedQuestion}`;
+      const sentItems = fastPath === 'method'
+        ? methodTurnItems(history, message, historyReply)
+        : historyWithSentText(result.items, historyReply);
+      histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
+    };
     for (;;) {
       try {
+        wireBody = checkFinalReply(wireBody, replyEvidence);
+        publishReplyHistory();
+        // Validated session history is published before ownership is rechecked at the persistence door.
+        recordUnsavableEffect();
         let replyChecked = false;
         if (rowTurnId !== undefined) {
           try {
@@ -6718,17 +6734,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
     });
     rememberResearchOffers(approveKey, wireBody.suggested_actions);
     rememberApprove(approveKey, wireBody.suggested_actions);
-    const displayedQuestion = automaticDeadlineLabel !== undefined
-      && wireBody.suggested_actions.some(action => action.detail === automaticDeadlineLabel)
-      && !String(wireBody.assistant_text).includes(automaticDeadlineLabel) ? automaticDeadlineLabel : undefined;
-    const historyReply = displayedQuestion === undefined ? String(wireBody.assistant_text)
-      : `${wireBody.assistant_text}\n\n[Card displayed beside this reply; reference data]\n${displayedQuestion}`;
-    const sentItems = fastPath === 'method'
-      ? methodTurnItems(history, message, historyReply)
-      : historyWithSentText(result.items, historyReply);
-    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
-    // Published to in-memory session history, not a durable save; no-save copy is now false.
-    recordUnsavableEffect();
+    publishReplyHistory();
 
 
     // Receipt bookkeeping changes no validated prose or control, and retains the finaliser's object identity.

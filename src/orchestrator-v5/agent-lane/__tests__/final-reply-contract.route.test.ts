@@ -148,6 +148,28 @@ describe('B4 final reply boundary through the real Agent route', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'Supplier cancellation has a 20% chance within six months.',
+    'Delivery delay has a 30% chance within three months.',
+  ])('an exact cited input keeps its own subject and period: %s', async human => {
+    licensed = false; lateText = `From your message: “${human}”`;
+    const response = await turn(randomUUID(), human);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().assistant_text).toBe(lateText);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'From your message: “Delivery delay has a 30% chance within three months.”',
+    'From your message: “Supplier cancellation has a 30% chance within three months.” Option A has an 88% chance of meeting your goal.',
+  ])('a cited source never credits another subject or an adjacent analytical claim: %s', async bad => {
+    licensed = false; lateText = bad;
+    const response = await turn(randomUUID(), 'Supplier cancellation has a 30% chance within three months.');
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().assistant_text).toBe(safe);
+    expect(regenerate).toHaveBeenCalledOnce();
+  });
+
   it('a labelled provisional Olumi input keeps its scale and condition without a chance licence', async () => {
     licensed = false;
     lateText = 'Olumi’s provisional estimate is 2.5% monthly churn if service stays unchanged.';
