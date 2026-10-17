@@ -72,6 +72,12 @@ describe('Olumi\'s working point from a link\'s brief range', () => {
 
   // The graded source is framed so that, read as if it were a switch, its working point WOULD be valid (0.11 on its frame of 2):
   // only the switch rule refuses it, never a size or spread bound.
+  // ⛔ #3346 R1 (BUDDY-A B1): a placeholder already at the working point's exact mean (another spread) cannot be sized by the press.
+  it('⛔ a placeholder already at the working point\'s exact mean: no working point (the press could not size it)', () => {
+    const mean = linkWorkingPointOf(withRange(graph()), FROM, TO)!.mean;
+    expect(linkWorkingPointOf(withRange(graph({ edge: { strength: { mean, std: 0.0275 } } })), FROM, TO)).toBeUndefined();
+  });
+
   it('⛔ CONTRAST: the same range on a GRADED source (staff, frame 2) gives no "per what", so no working point; the switch does', () => {
     const graded = withRange(graph({ from: { label: 'Collection staff', observed_state: { value: 0.5, baseline: 0.5, raw_value: 1, unit: 'staff', cap: 2 } } }));
     expect(linkWorkingPointOf(graded, FROM, TO)).toBeUndefined();

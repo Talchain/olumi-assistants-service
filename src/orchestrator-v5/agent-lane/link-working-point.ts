@@ -13,7 +13,7 @@
  * direction, stay possible. Pure.
  */
 import { convertLinkEffect } from '../../cee/magnitude/link-effect.js';
-import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, linkSizing, sizedByApproval } from '../../cee/magnitude/link-sizing.js';
 import { ADJUST_EDGE_STRENGTH_STD_MAX } from '../../cee/magnitude/olumi-spread.js';
 import { edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
@@ -77,7 +77,13 @@ export function linkWorkingPointOf(graph: unknown, from: string, to: string): Li
   const size = (lo + hi) / 2;
   const std = (hi - lo) / QUARTILES_APART_IN_SD;
   if (!(size > 0) || size > 1 || !(std > 0) || std > ADJUST_EDGE_STRENGTH_STD_MAX) return undefined;
-  return { from, to, quote: st.quote, low: st.low, high: st.high, unit: st.unit.trim(), mean: negative ? -size : size, std,
+  const signed = negative ? -size : size;
+  // ⛔ #3346 R1 (BUDDY-A B1): the press must SIZE the link. By the canonical approval rule, as the card's own preview reads it
+  // (`sizedByApproval`), a working point equal to the stored mean leaves the placeholder unsized, and the writer refuses that
+  // `set` as unchanged. So no card then: the existing size ask stays.
+  const provenance = isRec(edge.provenance) ? edge.provenance : {};
+  if (linkSizing({ ...edge, provenance: sizedByApproval({ ...provenance, reviewed_by_user: { intent: 'confirm' } }, edge, signed) }) !== 'olumi_accepted') return undefined;
+  return { from, to, quote: st.quote, low: st.low, high: st.high, unit: st.unit.trim(), mean: signed, std,
     band: edgeBandFromMagnitude(size) };
 }
 

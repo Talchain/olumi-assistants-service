@@ -227,6 +227,23 @@ describe('G3: a brief range becomes Olumi\'s working point only by its own press
     expect(rows.size).toBe(0);
   });
 
+  // ⛔ #3346 R1 (BUDDY-A B1, its counterexample): the placeholder already holds the working point's exact mean with another spread.
+  // The press could not size it (the writer refuses an unchanged `set`), so no card is offered: the existing size ask stays.
+  it('⛔ a placeholder already at the working point\'s exact mean: the honest size ask, no card, no write', async () => {
+    const mean = linkWorkingPointOf(persisted, FROM, TO)!.mean;
+    persisted = storedGraph({ edge: { strength: { mean, std: 0.0275 } } });
+    const before = structuredClone(edgeOf(persisted));
+    const card = strengthenCardFor({ graph: persisted, analysisState: RUN_STATE, optionParticipation: [] });
+    expect(card, JSON.stringify(card)).toMatchObject({ ask_only: true, target: { from_id: FROM, to_id: TO } });
+    expect(card?.args.links[0]).not.toHaveProperty('origin');
+    // The host origin asked directly is left out too, so no card the writer cannot honour is ever prepared.
+    const p = await capabilities().proposeLinkStrengths!(ctx, { links: [{ from_label: 'Weekly food collection running', to_label: 'Household recycling rate',
+      strength: 'weak', origin: 'working_point' }], rationale: 'r' } as never);
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(edgeOf(persisted)).toEqual(before);
+    expect(rows.size).toBe(0);
+  });
+
   it('⛔ a link the user sized: a working-point request leaves it out as unknown, prepares nothing, and the link is untouched', async () => {
     persisted = storedGraph({ edge: { strength: { mean: 0.2, std: 0.05 }, provenance: { source: 'user_specified' }, defaulted: undefined } });
     const before = structuredClone(edgeOf(persisted));
