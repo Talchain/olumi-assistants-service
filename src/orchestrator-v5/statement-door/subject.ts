@@ -66,9 +66,11 @@ export function resolveSubject(graph: unknown, ref: SubjectRef): SubjectResoluti
     const byCase = folded === undefined ? [] : nodes.filter((n) => typeof n.label === 'string' && n.label.trim().toLocaleLowerCase('en-GB') === folded && of(n));
     return byCase.length > 1 ? 'ambiguous' : byCase[0];
   };
-  const option = ref.option_id !== undefined || ref.option_label !== undefined ? nodeOf(ref.option_id, ref.option_label, ['option']) : undefined;
+  const named = (v: unknown): boolean => v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');
+  const hasOption = named(ref.option_id) || named(ref.option_label);
+  const option = hasOption ? nodeOf(ref.option_id, ref.option_label, ['option']) : undefined;
   if (option === 'ambiguous') return { kind: 'unresolved', reason: 'ambiguous' };
-  if ((ref.option_id !== undefined || ref.option_label !== undefined) && option === undefined) return { kind: 'unresolved', reason: 'not_found' };
+  if (hasOption && option === undefined) return { kind: 'unresolved', reason: 'not_found' };
   const withOption = option === undefined ? {} : { option_id: String(option.id) };
   if (kind === 'link') {
     const from = nodeOf(ref.id, ref.label), to = nodeOf(ref.to_id, ref.to_label);
