@@ -3496,13 +3496,18 @@ export interface ConstructionAdmission {
  */
 export function admitCandidateModel(...args: Parameters<typeof admitCandidateModelOnce>): AdmittedModel {
   const [candidate, , brief] = args;
-  const ambitions = Array.isArray(candidate.constraints) ? candidate.constraints.filter((c) => c?.role === 'ambition') : [];
-  if (ambitions.length === 0) return admitCandidateModelOnce(...args);
-  const rest = candidate.constraints.filter((c) => c?.role !== 'ambition');
-  const admitted = admitCandidateModelOnce({ ...candidate, constraints: rest }, ...(args.slice(1) as DropFirst<typeof args>));
-  return { ...admitted, loss: [...admitted.loss, ...ambitions.map((a) => laterAmbitionLoss(candidate, brief, a))] };
+  return keepingLaterAmbitions(candidate, brief, (c) => admitCandidateModelOnce(c, ...(args.slice(1) as DropFirst<typeof args>)));
 }
 type DropFirst<T extends readonly unknown[]> = T extends readonly [unknown, ...infer R] ? R : never;
+
+/** Both admission doors (this one and `admitOrdinaryCandidateModel`, which the build's fallbacks call directly) keep a later
+ *  ambition out of every constraint; inside, the other door then finds none, so nothing is recorded twice. */
+function keepingLaterAmbitions(candidate: CandidateModel, brief: string | undefined, admit: (c: CandidateModel) => AdmittedModel): AdmittedModel {
+  const ambitions = Array.isArray(candidate.constraints) ? candidate.constraints.filter((c) => c?.role === 'ambition') : [];
+  if (ambitions.length === 0) return admit(candidate);
+  const admitted = admit({ ...candidate, constraints: candidate.constraints.filter((c) => c?.role !== 'ambition') });
+  return { ...admitted, loss: [...admitted.loss, ...ambitions.map((a) => laterAmbitionLoss(candidate, brief, a))] };
+}
 
 /** The words of a later ambition, kept: the user's own sentence for its figure (the AI's verified target statement), else none. */
 function laterAmbitionLoss(candidate: CandidateModel, brief: string | undefined, a: CandidateConstraint): RepairEntry {
@@ -3619,7 +3624,12 @@ function admitCandidateModelOnce(
 }
 
 /** The existing ordinary path, also used internally by construction before its bounded repair is complete. */
-export function admitOrdinaryCandidateModel(
+export function admitOrdinaryCandidateModel(...args: Parameters<typeof admitOrdinaryCandidateModelOnce>): AdmittedModel {
+  const [candidate, , brief] = args;
+  return keepingLaterAmbitions(candidate, brief, (c) => admitOrdinaryCandidateModelOnce(c, ...(args.slice(1) as DropFirst<typeof args>)));
+}
+
+function admitOrdinaryCandidateModelOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
   brief?: string,

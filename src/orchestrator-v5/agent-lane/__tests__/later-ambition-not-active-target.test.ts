@@ -6,7 +6,7 @@
  * SYNTHETIC brief (an analogue of the served founder brief, never the brief itself).
  */
 import { describe, expect, it } from 'vitest';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
 
@@ -47,12 +47,14 @@ function draft(role: 'ambition' | 'target' | null, withStatement = false): Rec {
 }
 const admitted = (model: Rec) => admitCandidateModel(model as CandidateModel, {}, BRIEF, (v, u) => figureTheUserWrote(v, u, BRIEF));
 const outcomeId = (out: { nodes: readonly Rec[] }): string => out.nodes.find((n) => n.label === 'Larger round raised')!.id as string;
+let aiCalls = 0;
 async function registered(model: Rec): Promise<Rec> {
   let graph: Rec | undefined;
+  aiCalls = 0;
   const r = await buildModelFromBrief('7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e7e', BRIEF, (async (path: string, body: Rec) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { registered: true, model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
-  }) as never, (async () => ({ text: JSON.stringify(model), status: 'completed' })) as never) as Rec;
+  }) as never, (async () => { aiCalls += 1; return { text: JSON.stringify(model), status: 'completed' }; }) as never) as Rec;
   expect(r.ok, JSON.stringify(r).slice(0, 1200)).toBe(true);
   return graph!;
 }
@@ -88,6 +90,20 @@ describe('a later ambition is never an active target (G1 turn 01)', () => {
   it('CONTRAST: a model with no later aim admits byte-identically', () => {
     expect(admitted(draft('ambition')).goal_constraints).toEqual(admitted(draft(null)).goal_constraints);
   });
+
+  it('the build\'s fallback door (admitOrdinaryCandidateModel, called directly) keeps it out too; each door records it once', () => {
+    const out = admitOrdinaryCandidateModel(draft('ambition', true) as CandidateModel, {}, BRIEF, (v, u) => figureTheUserWrote(v, u, BRIEF));
+    expect(out.goal_constraints.filter((c) => c.node_id === outcomeId(out))).toEqual([]);
+    expect(out.loss.filter((l) => l.after === 'retained_later_ambition')).toHaveLength(1);
+    expect(admitted(draft('ambition', true)).loss.filter((l) => l.after === 'retained_later_ambition')).toHaveLength(1);
+  });
+
+  it('through the real build: a later ambition asks the AI for no "today\'s level" as if it were a limit (same calls as no later aim)', async () => {
+    await registered(draft(null, true));
+    const without = aiCalls;
+    await registered(draft('ambition', true));
+    expect(aiCalls).toBe(without);
+  }, 60_000);
 
   it('through the real build and register: the saved graph carries no active target for the later ambition', async () => {
     const g = await registered(draft('ambition', true));

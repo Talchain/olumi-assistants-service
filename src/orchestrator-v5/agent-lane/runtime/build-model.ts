@@ -1368,7 +1368,8 @@ export function findCoverageGaps(
   // The quantity of a limit that needs today's level (`limitNeedsTodaysLevel`: a level, or a change RELATIVE to today; an
   // absolute change is read against the status quo and needs none), named as admission names a limit's node
   // (`metricNamesLabel`), so "Monthly Churn" is the factor "Monthly churn" (verifier LOW).
-  const limited = (model.constraints ?? []).filter((c) => limitNeedsTodaysLevel(c.frame)).map((c) => c.metric);
+  // A later ambition (`role: 'ambition'`) is no limit and asks for no level (G1 turn 01): admission keeps it out of every constraint.
+  const limited = (model.constraints ?? []).filter((c) => c.role !== 'ambition' && limitNeedsTodaysLevel(c.frame)).map((c) => c.metric);
   for (const f of model.factors) {
     if (limited.some((m) => metricNamesLabel(m, f.label)) && !actedOn.has(f.label) && !userOwnedBaseline.has(f.label) && noBaseline(f)) {
       baseline_gaps.push({ factor: f.label, because: 'limit' });
@@ -1380,7 +1381,7 @@ export function findCoverageGaps(
   // (goal, options, factors, risks, then outcomes), so an outcome sharing its identity with any of those registers as
   // that entity — a factor is judged by the rules above, once (verifier FIX_FIRST (3) on f773a217: factor AND outcome
   // drew two gaps and two retry lines).
-  const rekinded = (model.constraints ?? []).filter((c) => !isChangeFrame(c.frame) && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
+  const rekinded = (model.constraints ?? []).filter((c) => c.role !== 'ambition' && !isChangeFrame(c.frame) && limitedOutcomeFrame(c) !== undefined).map((c) => c.metric);
   const registeredFirst = new Set([
     ...(typeof model.goal?.metric === 'string' ? [model.goal.metric] : []),
     ...model.options.map((o) => o.label), ...model.factors.map((f) => f.label), ...(model.risks ?? []).map((r) => r.label),
