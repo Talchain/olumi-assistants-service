@@ -87,7 +87,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { draftStatements, figureSource, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { draftStatements, figureSource, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements, wordsAboutWithheldLink } from '../construction-source-map.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -2614,7 +2614,8 @@ export async function buildModelFromBrief(
     }));
     admitted = { ...admitted, loss: admitted.loss.filter((l) => !fittedOlumiFields.has(l.field_path)) };
     // AIE 6183705670 (1): the draft's verified statements are recorded on their subjects, as the door records a press.
-    const graph = withConstructionStatements(clampForPersist(prePersistGraph), draftStatements(candidate), brief, new Date().toISOString());
+    const graph = withConstructionStatements(clampForPersist(prePersistGraph), draftStatements(candidate), brief, new Date().toISOString(),
+      directionUnknown(admitted.withheld));
 
     const parked = (candidate as { unknowns?: unknown }).unknowns;
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
@@ -2649,6 +2650,9 @@ export async function buildModelFromBrief(
     openQuestions.unshift(...productIdentityOpenQuestions(admitted));
     // AIQ 5898415568 run 0 / R3 5898443502: Olumi's product refused for a part with no level asks for those figures, once.
     openQuestions.unshift(...unlevelledProductQuestions(admitted));
+    // ⛔ T1 HOST P11 (pilot 17 Oct): a relationship nobody gave a direction is named and asked, never only counted. A link cannot
+    // hold "unknown" (GraphV3 `effect_direction`), so it stays out of the model until the user says which way it runs.
+    openQuestions.push(...directionUnknownQuestions(directionUnknown(admitted.withheld), admitted.nodes));
     // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
     if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
     // ⭐ DL (dental): a link set aside between an option and its renamed namesake is asked where the user always sees it.
@@ -2825,7 +2829,7 @@ export async function buildModelFromBrief(
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
 
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
-  const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
+  const directionless = directionUnknown(admitted.withheld);
 
   // ⭐ What this construction reports about its graph, PREPARED or registered alike (FOUNDER explicit rebuild, DL-3 17:51Z):
   // a prepared candidate's card shows the same omissions, asks and disclosures a registered build says.
@@ -2909,7 +2913,8 @@ export async function buildModelFromBrief(
         `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
       ...preparation.levels_over_own_levers.map(sayOptionLevelOverOwnLevers),
       directionless.length > 0
-        ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
+        ? `Left out until someone says which way they run: ${directionless.map((w) => linkWords(w, admitted.nodes,
+          wordsAboutWithheldLink(admitted.nodes, draftStatements(candidate), brief, w))).join('; ')}.`
         : undefined,
       leftOut.length > 0
         ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
@@ -3215,4 +3220,21 @@ export function userFacingDrafterQuestions(parked: unknown): string[] {
   return Array.isArray(parked)
     ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '' && !carriesFieldPath(q))
     : [];
+}
+
+/** ⛔ T1 HOST P11: the links the admission withheld because nobody gave them a direction (the ONE owner of that condition). */
+function directionUnknown<W extends { readonly reason: string }>(withheld: readonly W[]): W[] {
+  return withheld.filter((w) => w.reason === 'no_authored_direction');
+}
+/** A withheld link in the user's labels, with the brief's own words about it where there are any: "A" → "B" ("…", as the brief puts it). */
+function linkWords(w: { readonly from: string; readonly to: string }, nodes: readonly { readonly id: string; readonly label?: string }[],
+  words: readonly string[]): string {
+  const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  return `"${label(w.from)}" → "${label(w.to)}"${words.length > 0 ? ` (${words.map((q) => `"${q}"`).join(' ')}, as the brief puts it)` : ''}`;
+}
+/** ⛔ T1 HOST P11: one question per relationship withheld for its unknown direction (`directionUnknown`), naming both ends. */
+function directionUnknownQuestions(withheld: readonly { readonly from: string; readonly to: string }[],
+  nodes: readonly { readonly id: string; readonly label?: string }[]): string[] {
+  const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  return withheld.map((w) => `Does "${label(w.from)}" raise or lower "${label(w.to)}"? Nobody has said which way, so that link is left out of the model for now.`);
 }

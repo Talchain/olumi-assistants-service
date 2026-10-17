@@ -364,7 +364,8 @@ export function goalTargetStatements(model: unknown, brief: string, figure: numb
  * exact label; never guessed). An option's setting of a factor is the door's `{factor, option_id}`. An entry whose subject does
  * not resolve, or that is refused, records nothing and stays in the map, unknown (never Olumi's). Pure.
  */
-export function withConstructionStatements<G extends { nodes: unknown[] }>(graph: G, raw: unknown, brief: string, recordedAt: string): G {
+export function withConstructionStatements<G extends { nodes: unknown[] }>(graph: G, raw: unknown, brief: string, recordedAt: string,
+  directionUnknown: readonly WithheldLinkIds[] = []): G {
   const entries = (Array.isArray(raw) ? raw : []).slice(0, MAX);
   const groups = new Map<string, { subject: DoorSubject; statements: UserStatement[] }>();
   for (const entry of entries) {
@@ -385,9 +386,14 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
       ? { kind: 'factor', label: drafted.factor_label, option_label: drafted.label, field }
       : { kind: drafted.kind, label: drafted.label, ...(drafted.to_label !== undefined ? { to_label: drafted.to_label } : {}), field };
     const resolved = resolveSubject(graph, ref);
-    if (resolved.kind !== 'resolved') continue;
-    const key = doorSubjectKey(resolved.subject);
-    const group = groups.get(key) ?? { subject: resolved.subject, statements: [] };
+    // ⛔ T1 HOST P11 (BUDDY-A 15:23Z AMEND): the user's figure-free words about a link the ADMISSION withheld for its unknown
+    // direction (that link's own ids, by the door's own resolver) stay on its SOURCE as its relation, whole: a link record needs its
+    // edge. Retention only, never the link, its sign or a press. A figure, or a link missing for any other reason, moves nothing.
+    const kept = resolved.kind === 'resolved' || drafted.kind !== 'link' || !verified.every((st) => FIGURE_FREE_FORMS.has(st.form))
+      ? resolved : sourceRelationOf(graph, resolveSubject({ nodes: graph.nodes, edges: directionUnknown }, ref));
+    if (kept.kind !== 'resolved') continue;
+    const key = doorSubjectKey(kept.subject);
+    const group = groups.get(key) ?? { subject: kept.subject, statements: [] };
     group.statements.push(...verified);
     groups.set(key, group);
   }
@@ -396,6 +402,32 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     out = (withUserStatement(out, userStatementRecord(subject, statements, recordedAt, CONSTRUCTION_ATTEST), subject) ?? out) as G & Record<string, unknown>;
   }
   return out;
+}
+
+const FIGURE_FREE_FORMS: ReadonlySet<StatementForm> = new Set<StatementForm>(['describes', 'holds_now', 'holds_in_window']);
+/** A link the admission withheld, by its node ids. */
+export interface WithheldLinkIds { readonly from: string; readonly to: string }
+/** The relation subject of the node a withheld link starts from, by that link's own `from` id. */
+function sourceRelationOf(graph: unknown, withheld: ReturnType<typeof resolveSubject>): ReturnType<typeof resolveSubject> {
+  if (withheld.kind !== 'resolved') return withheld;
+  for (const kind of ['factor', 'risk', 'goal'] as const) {
+    const r = resolveSubject(graph, { kind, id: withheld.subject.id, field: 'relation' });
+    if (r.kind === 'resolved') return r;
+  }
+  return { kind: 'unresolved', reason: 'not_found' };
+}
+/**
+ * ⛔ T1 HOST P11 (BUDDY-A 15:23Z AMEND 2): the user's verified words about ONE link the admission withheld for its unknown direction,
+ * by the door's own resolver, for the existing not-represented line: an outcome source, or a figure, has no record to keep them.
+ */
+export function wordsAboutWithheldLink(nodes: readonly unknown[], raw: unknown, brief: string, link: WithheldLinkIds): string[] {
+  const quotes = (Array.isArray(raw) ? raw : []).slice(0, MAX).flatMap((entry) => {
+    const drafted = subjectOf((entry as Record<string, unknown> | null | undefined)?.['subject']);
+    if (drafted?.kind !== 'link' || resolveSubject({ nodes, edges: [link] },
+      { kind: 'link', label: drafted.label, ...(drafted.to_label !== undefined ? { to_label: drafted.to_label } : {}), field: 'relation' }).kind !== 'resolved') return [];
+    return [...sourceMapOf([entry], brief).verified.values()].flat().map((st) => st.quote);
+  });
+  return [...new Set(quotes)];
 }
 
 const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound', '<': 'upper_bound', '>=': 'lower_bound', '>': 'lower_bound' };
