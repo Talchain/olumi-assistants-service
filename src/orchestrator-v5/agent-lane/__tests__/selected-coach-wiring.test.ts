@@ -18,7 +18,7 @@ const sha256 = (text: string | Buffer) => createHash('sha256').update(text).dige
 // OLUMI'S PURPOSE (DL 14 Oct; Paul via the DL): READINESS AND RESULTS' leader sentence never recommends or chooses for the
 // user, and says each option's chance and which is most likely to achieve the goal, in this model, with its uncertainty:
 // 8,006 → 8,207 bytes (+201). Reversing exactly that sentence on the new template reproduces 557b1cf2….
-const TEMPLATE_SHA = '7546b130973218710840fa1d76ebf867ceee8fc15a69ec0ba8c4398308852cce';
+const TEMPLATE_SHA = '07d756b5b4c2f7b16112ab7bd97539e9912cb42681065279872a50f994894671';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
@@ -95,7 +95,7 @@ const HOST_SHA = 'ffc8144ffc131379110e79504cf18bce484976581ee69a8817db052752e39d
 // + S10 fix 1 / AIE 6181933060 + 6182232796: the host contract's links clause only: 35,726 → 35,904 bytes (+178). Derived from
 //   the SENT body: staging 7fa0aa53d's SENT instructions reproduce a3d35f6f… and 35,726 bytes, and with exactly that clause
 //   swapped equal this head's SENT prefix byte for byte (staging 75fc1a95a's SENT body, clause swapped, equals this head's).
-const RENDERED_SHA = 'e3b4f5cf3ef119accd4a3b72bb43f2b4010faabb2fee1ec6db9a68d8e70e6a8d';
+const RENDERED_SHA = 'ddca2713415dfeff7a3f98c43ed4fd0e4b260de7a0d33297ac3e1f887bf1d040';
 const RENDERED_BYTES = 36_584;
 /**
  * BYPASS1 (AIE #94 6158232014): a call that offers the Agent's proposing tools carries the selected coach, then the

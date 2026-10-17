@@ -257,7 +257,7 @@ describe('Explain scoped assembly safety', () => {
       // All9 request hashes reverse to HEAD by replacing ONLY RUN_FACTS_USE (including nested JSON carriers).
       // This instruction hash and the run-facts full literal are the other2 pins; all11 need Claude challenge.
       // Current qualifications, tool constraints, numbers and negative assertions remain; generated quality is unverified.
-      .toBe('b378fe5c30858899e111155ab5244658970dead74f238c4e207e7c3898b14b83');
+      .toBe('c235a72bdc5514d8a000e5f935a9487aae37b15b36239e4b0bee8c7ea34edc47');
   },60000);
 });
 
