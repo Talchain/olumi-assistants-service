@@ -132,14 +132,8 @@ export function statesLossBefore(quote: string, index: number): boolean {
   return LOSS_BEFORE.test(quote.slice(0, index));
 }
 
-/**
- * ⭐ G3 a735 (DL-3 GO 17 Oct; CONTRACT A): an EFFECT's sign is its link's direction, never the AI's figure, and every range reader
- * takes the ends as magnitudes (`linkEffectRangeEnd`, `linkEffectStatedRange`). Served: the AI wrote "would cut leakage by between
- * 3 and 5" as −5 to −3, the verifier (positive ends only) refused the whole statement as malformed, and the user's range reached no
- * record and no reader, so the drafted low end was saved as Olumi's. Two negative ends are checked as the magnitudes the words
- * write (−5 to −3 → 3 to 5); the AI's sign is dropped, never trusted. A range across zero, and any other form or field, is as given.
- */
-function writtenEndsOfSignedRange(low: unknown, high: unknown): { readonly low: number; readonly high: number } | undefined {
+/** Two negative ends as the magnitudes they stand for (−6 to −4 → 4 to 6); anything else is no such range. */
+function writtenEndsOfNegativeRange(low: unknown, high: unknown): { readonly low: number; readonly high: number } | undefined {
   return typeof low === 'number' && typeof high === 'number' && Number.isFinite(low) && Number.isFinite(high) && low < 0 && high < 0
     ? { low: -high, high: -low } : undefined;
 }
@@ -171,9 +165,8 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
       return;
     }
     const key = subjectKey(subject, field);
-    const ends = field === 'effect' && form === 'range' ? writtenEndsOfSignedRange(r['low'], r['high']) : undefined;
-    const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: ends?.low ?? r['low'], high: ends?.high ?? r['high'],
-      qualifier: r['qualifier'], conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}) }],
+    const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: r['low'], high: r['high'], qualifier: r['qualifier'],
+      conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}) }],
       { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
     verified.set(key, [...(verified.get(key) ?? []), ...v.statements]);
@@ -300,7 +293,7 @@ export function linkEffectRangeEnd(model: unknown, brief: string, from: string, 
   if (!Array.isArray(m.statements)) return undefined;
   if (!Number.isFinite(amount) || amount === 0) return null;
   const size = Math.abs(amount);
-  const said = sourceMapOf(m.statements, brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [];
+  const said = sourceMapOf(draftStatements(model), brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [];
   for (const st of said) {
     if (st.form !== 'range' || st.negated === true || typeof st.low !== 'number' || typeof st.high !== 'number') continue;
     const low = Math.min(Math.abs(st.low), Math.abs(st.high));
@@ -334,7 +327,7 @@ function rangeTextAsWritten(st: UserStatement, low: number, high: number): strin
 export function linkEffectStatedRange(model: unknown, brief: string, from: string, to: string): StatedWholeRangeOfLink | null | undefined {
   const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
   if (!Array.isArray(m.statements)) return undefined;
-  const said = (sourceMapOf(m.statements, brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [])
+  const said = (sourceMapOf(draftStatements(model), brief).verified.get(subjectKey({ kind: 'link', label: from, to_label: to }, 'effect')) ?? [])
     .filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
   if (said.length !== 1) return null;
   const st = said[0]!;
@@ -421,7 +414,13 @@ const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound
  * of a subject for which the SAME draft declares a limit (`constraints[]`, role limit) with that exact figure is that limit's
  * bound, never today's level: "Our budget for the year is £100,000." beside the limit `Total annual campaign spend <= 100000`
  * is the level's upper bound. The role comes from the draft's own declared limit (the shared constraint contract: role and
- * operator), never from the sentence's words. Every other entry is returned as given. Pure.
+ * operator), never from the sentence's words.
+ * ⭐ G3 a735 (DL-3 GO 17 Oct; CONTRACT A): a LINK's effect range written with two negative ends, on a link the SAME draft draws
+ * `negative`, is the magnitudes its words write (−6 to −4 → 4 to 6): the link's direction carries the sign, as every range reader
+ * reads it (`linkEffectRangeEnd`, `linkEffectStatedRange`). Served: the AI wrote "would cut leakage by between 3 and 5" as −5 to −3,
+ * the verifier (ends as written, positive) refused it whole, and the user's range reached no record and no reader. A range signed
+ * against its own link's direction, on no drawn link, or across zero is returned as given (and refused, as before).
+ * Every other entry is returned as given. Pure.
  */
 export function draftStatements(model: unknown): unknown {
   const m = model !== null && typeof model === 'object' ? model as Record<string, unknown> : {};
@@ -433,10 +432,19 @@ export function draftStatements(model: unknown): unknown {
     return r['role'] === 'limit' && form !== undefined && typeof r['metric'] === 'string' && typeof r['value'] === 'number'
       ? [{ metric: norm(r['metric']), value: r['value'], form }] : [];
   });
-  if (limits.length === 0) return raw;
+  const drawnNegative = new Set((Array.isArray(m['links']) ? m['links'] : []).flatMap((l: unknown) => {
+    const r = l !== null && typeof l === 'object' ? l as Record<string, unknown> : {};
+    return r['direction'] === 'negative' && typeof r['from'] === 'string' && typeof r['to'] === 'string' ? [`${norm(r['from'])}|${norm(r['to'])}`] : [];
+  }));
+  if (limits.length === 0 && drawnNegative.size === 0) return raw;
   return raw.map((entry: unknown) => {
     const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
     const subject = subjectOf(r?.['subject']);
+    if (r !== undefined && subject?.kind === 'link' && subject.to_label !== undefined && r['field'] === 'effect' && r['form'] === 'range'
+      && drawnNegative.has(`${norm(subject.label)}|${norm(subject.to_label)}`)) {
+      const ends = writtenEndsOfNegativeRange(r['low'], r['high']);
+      return ends === undefined ? entry : { ...r, ...ends };
+    }
     if (r === undefined || subject === undefined || r['field'] !== 'level' || r['form'] !== 'point' || subject.factor_label !== undefined) return entry;
     const limit = limits.find((l) => l.metric === norm(subject.label) && l.value === r['value']);
     return limit === undefined ? entry : { ...r, form: limit.form };

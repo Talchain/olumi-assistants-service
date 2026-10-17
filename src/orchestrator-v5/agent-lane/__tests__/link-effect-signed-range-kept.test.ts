@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
-import { sourceMapOf } from '../construction-source-map.js';
+import { draftStatements, sourceMapOf } from '../construction-source-map.js';
 import { linkHoldsStatedRange } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
@@ -22,7 +22,7 @@ const PRE = 'Pre-order system in use';
 const DEL = 'Smaller daily deliveries';
 const WASTE = 'Daily food waste';
 
-interface Shape { readonly on?: string; readonly low?: number; readonly high?: number; readonly negated?: true; readonly size?: number }
+interface Shape { readonly on?: string; readonly low?: number; readonly high?: number; readonly negated?: true; readonly size?: number; readonly drawn?: 'positive' }
 const rangeStatement = (s: Shape): Rec => ({
   quote: s.on === DEL ? OTHER : RANGE, subject: { kind: 'link', label: s.on ?? PRE, to_label: WASTE, factor_label: null }, field: 'effect',
   form: 'range', value: null, low: s.low ?? -6, high: s.high ?? -4, unit: 'kg', qualifier: null, conditions: null,
@@ -45,7 +45,7 @@ function draft(s: Shape = {}): Rec {
     risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
     links: [
       // The served shape: the drafter sizes the link at one END of the range and flags that size as its own reading.
-      { from: PRE, to: WASTE, direction: 'negative', provenance: 'explicit', effect_amount: -(s.size ?? 4), effect_per_source_change: 100,
+      { from: PRE, to: WASTE, direction: s.drawn ?? 'negative', provenance: 'explicit', effect_amount: (s.drawn === 'positive' ? 1 : -1) * (s.size ?? 4), effect_per_source_change: 100,
         effect_provenance: 'inferred', definitional: null, basis: 'Uses the stated lower end as a provisional planning effect.', source_quote: RANGE },
       { from: DEL, to: WASTE, direction: 'negative', provenance: 'inferred', effect_amount: null, effect_per_source_change: null,
         effect_provenance: null, definitional: null, basis: null, source_quote: null },
@@ -98,16 +98,30 @@ describe('a stated effect range stays the user\'s, on its link (G3 a735)', () =>
   });
 
   it('CONTRAST: a range the AI writes with positive ends is verified exactly as before, and the same as the signed one', () => {
-    const signed = sourceMapOf(draft().statements, BRIEF).verified.get(`link|${PRE.toLowerCase()}|${WASTE.toLowerCase()}||effect`);
-    const positive = sourceMapOf(draft({ low: 4, high: 6 }).statements, BRIEF).verified.get(`link|${PRE.toLowerCase()}|${WASTE.toLowerCase()}||effect`);
+    const key = `link|${PRE.toLowerCase()}|${WASTE.toLowerCase()}||effect`;
+    const signed = sourceMapOf(draftStatements(draft()), BRIEF).verified.get(key);
+    const positive = sourceMapOf(draftStatements(draft({ low: 4, high: 6 })), BRIEF).verified.get(key);
+    // The raw positive range is the same statement as the AI's (no rewrite reaches it).
+    expect(sourceMapOf(draft({ low: 4, high: 6 }).statements, BRIEF).verified.get(key)).toEqual(positive);
     expect(positive).toEqual([expect.objectContaining({ form: 'range', low: 4, high: 6, quote: RANGE })]);
     expect(signed).toEqual(positive);
     expect(edgeFrom(admitted(draft({ low: 4, high: 6 })), PRE).provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { stated_range: { low: 4, high: 6 } } });
   });
 
   it('CONTRAST: a range across zero is still refused (the sign is never dropped where it carries meaning)', () => {
-    const map = sourceMapOf(draft({ low: -6, high: 4 }).statements, BRIEF);
+    const map = sourceMapOf(draftStatements(draft({ low: -6, high: 4 })), BRIEF);
     expect(map.refused.find((r) => r.key?.startsWith('link|'))?.refusal).toBe('statement_malformed');
+  });
+
+  it('CONTRAST: a range signed AGAINST its own link\'s direction is never the user\'s, and sizes nothing', async () => {
+    // The AI drew the link as raising waste, yet wrote the range as a cut: a contradiction, refused as before (no sign is guessed).
+    const out = admitted(draft({ drawn: 'positive' }));
+    expect(edgeFrom(out, PRE).provenance.magnitude).toBe('olumi_estimate');
+    expect(edgeFrom(out, PRE).provenance.natural_effect?.stated_range).toBeUndefined();
+    const graph = await registered(draft({ drawn: 'positive' }));
+    const pre = graph.nodes.find((n: Rec) => n.label === PRE);
+    const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
+    expect(linkHoldsStatedRange(graph, pre.id, waste.id)).toBe(false);
   });
 
   it('CONTRAST: a denied range is never a supplied effect: the drafted end stays Olumi\'s, and nothing holds a range', async () => {
