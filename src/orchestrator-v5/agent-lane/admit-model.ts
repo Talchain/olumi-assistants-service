@@ -3488,7 +3488,7 @@ export interface ConstructionAdmission {
 
 /**
  * ⭐ G1 TURN 01 (TL 00:18Z; PL 00:16Z; VERIFY-78ca2232-founder): "I urgently need to secure funding: both fast-paced angel and,
- * eventually, a larger fund of at least 1.3 million." was saved as an ACTIVE goal_target (≥ 1.3) on an outcome feeding the goal:
+ * eventually, a larger fund of at least …" (a stated figure) was saved as an ACTIVE goal_target (≥ 1.3) on an outcome feeding the goal:
  * the drafter could only type a later aim as `target` (Batch C's several targets) or `limit`. A later ambition is never an active
  * target. The AI reads it (`role: 'ambition'`); admission keeps it out of every constraint reader, and its figure and the user's
  * own sentence for it (the AI's verified target statement, when there is one) are kept, as Olumi's reading, in the loss record.
