@@ -45,7 +45,7 @@ import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
 import { userExcludedOptions } from "../../orchestrator-v5/tools/handlers/user-option-status-filter.js";
-import { gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
+import { comparisonAfterExclusionsRefusal, gateAnalysableOptions } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
 import { filterOlumiProposedOptions } from "../../orchestrator-v5/tools/handlers/olumi-option-filter.js";
 import { buildFactorScaleMap, decideAnalysisScaleBlock, findScaleIncoherentBaselineFactorIds, projectRequestInterventionsToWireScale } from "../../orchestrator-v5/tools/plot-intervention-scale.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
@@ -1251,7 +1251,8 @@ function optionsTheRunSubmits(graph: GraphV3T, rawGraph: unknown, payload: Analy
 
 /** The Run's submission, with the analysable gate's scaffold record (`held`: the values CEE supplied, per option). */
 function runSubmission(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload):
-  { options: ReadonlyArray<Record<string, unknown>>; held: ReadonlyArray<{ option_id: string; factor_ids: readonly string[] }> } {
+  { options: ReadonlyArray<Record<string, unknown>>; held: ReadonlyArray<{ option_id: string; factor_ids: readonly string[] }>;
+    comparisonRefusal: ReturnType<typeof comparisonAfterExclusionsRefusal> } {
   // As the snapshot loader builds them (`build-turn-context.ts` mergeOptionInterventionObjects).
   const optionNodes = new Map<string, Record<string, unknown>>(graph.nodes
     .filter((node) => node.kind === 'option').map((node): [string, Record<string, unknown>] => [node.id, { ...node }]));
@@ -1265,7 +1266,9 @@ function runSubmission(graph: GraphV3T, rawGraph: unknown, payload: AnalysisRead
   const user = userExcludedOptions({ options, graph: rawGraph });
   const gate = gateAnalysableOptions({ options: user.options, graph, rawPersistedGraph: rawGraph, scaleNetEnabled: true });
   return { options: filterOlumiProposedOptions({ submitted: gate.options as ReadonlyArray<Record<string, unknown>>, graph: rawGraph,
-    unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options, held: gate.held };
+    unanalysableOptionIds: gate.excluded.map((option) => option.option_id) }).options, held: gate.held,
+    // Existing no-value admission remains unchanged; this closes the user's excluded-option count loss.
+    comparisonRefusal: user.excluded.length > 0 ? comparisonAfterExclusionsRefusal(gate, user.excluded) : null };
 }
 
 function leftOutOfRun(graph: GraphV3T, rawGraph: unknown, payload: AnalysisReadyPayload, goalId: string): ReadonlySet<string> {
@@ -1691,6 +1694,11 @@ export function assessCanonicalAnalysisReadiness(
     });
 
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
+    const comparisonRefusal = semantic ? runSubmission(parsed.data, graph, semantic).comparisonRefusal : null;
+    if (comparisonRefusal !== null) {
+      blockingIssues.push({ issue_id: 'comparison_options_1', code: 'FEWER_THAN_TWO_OPTIONS', category: 'graph_structure',
+        message: comparisonRefusal.nextStep, repairability: 'human_input_required' });
+    }
     // Derived from `parsed.data` — the SAME graph `projectSemanticAnalysisReadyFromGraph`
     // reads, schema-validated, so the disclosure can never describe a different
     // model than the ask it rides on.

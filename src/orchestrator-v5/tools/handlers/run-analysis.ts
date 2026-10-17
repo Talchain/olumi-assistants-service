@@ -182,11 +182,11 @@ import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-pa
 import { buildGoalReadingDisclosure } from '../../coaching/goal-reading-disclosure.js';
 import {
   gateAnalysableOptions,
-  PLOT_MIN_COMPARISON_OPTIONS,
-  type ExcludedOptionRecord,
+  comparisonAfterExclusionsRefusal,
 } from './analysable-option-gate.js';
 // NOTE the path: `orchestrator-v5/context/`, NOT `orchestrator-v5/coaching/context/`.
-import { sanitiseLabel } from '../../context/enrichment-graph-labels.js';
+// Preserve the existing public label-control seam after moving its implementation beside the shared floor.
+export { firstUsableExcludedLabel } from './analysable-option-gate.js';
 import {
   buildFactorScaleMap,
   projectRequestInterventionsToWireScale,
@@ -700,66 +700,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       });
     }
 
-    // --- 2.56. Too few analysable options to compare -----------------------
-    // Exclusion can leave a submission PLoT will refuse: its `/v2/run` Ajv
-    // request schema declares `options` with `minItems: 2`, and
-    // `decision-brief.ts::buildBandedHeadline` returns null below two options
-    // ("no comparative claim without a comparison"). So we refuse FIRST, and
-    // say why in terms the user can act on — rather than let a 400 surface as
-    // an engine fault, or ship a "comparison" of one whose win probability is
-    // 1.0 by construction.
-    //
-    // Gated on `gate.excluded.length > 0` DELIBERATELY: a scenario that always
-    // had a single configured option is a pre-existing shape, not this lane's
-    // to alter. Its twin is pinned so the distinction cannot drift.
-    //
-    // `analysis_not_ready` is already in RECOVERABLE_HANDLER_CAUSES and its
-    // composer renders `details.next_step` VERBATIM — so this needs no new
-    // cause kind and no War-Room gate.
-    // ⭐ MG F1 T6: the user's own exclusions leave one option (or none): said in THEIR terms, never as "no values set".
-    if (userStatus.excluded.length > 0 && gate.excluded.length === 0 && gate.options.length < PLOT_MIN_COMPARISON_OPTIONS) {
-      const named = userStatus.excluded.map((e) => (e.label !== null ? `'${e.label}'` : 'an option')).join(', ');
-      throw new HandlerInvocationFailedError(
-        'The options the user took out leave too few to compare',
-        {
-          cause_kind: 'analysis_not_ready',
-          retryable: false,
-          details: {
-            handler_id: 'run_analysis',
-            scenario_id: args.scenario_id,
-            reason_code: 'insufficient_analysable_options',
-            next_step: `You've taken ${named} out of the comparison, and that leaves fewer than two options, so there's `
-              + `nothing to compare yet. Put one back, or add another option, and ask me to run the analysis again.`,
-          },
-        },
-      );
-    }
-    if (gate.excluded.length > 0 && gate.options.length < PLOT_MIN_COMPARISON_OPTIONS) {
-      const excludedLabel = firstUsableExcludedLabel(gate.excluded);
-      throw new HandlerInvocationFailedError(
-        'Excluding unanalysable options leaves too few to compare',
-        {
-          cause_kind: 'analysis_not_ready',
-          retryable: false,
-          details: {
-            handler_id: 'run_analysis',
-            scenario_id: args.scenario_id,
-            reason_code: 'insufficient_analysable_options',
-            next_step:
-              excludedLabel !== null
-                ? `I've left out the options that don't have any values set yet, and that leaves ` +
-                  `only one option — which isn't a comparison, so I've stopped rather than show ` +
-                  `you a result that just means "it was the only one". Tell me what ` +
-                  `'${excludedLabel}' changes and I'll write it into the model, then ask me to ` +
-                  `run the analysis again.`
-                : `I've left out the options that don't have any values set yet, and that leaves ` +
-                  `only one option — which isn't a comparison, so I've stopped rather than show ` +
-                  `you a result that just means "it was the only one". Tell me what your other ` +
-                  `options change and I'll write them into the model, then ask me to run the ` +
-                  `analysis again.`,
-          },
-        },
-      );
+    // The readiness assessor consumes this SAME post-exclusion floor and next step.
+    const comparisonRefusal = comparisonAfterExclusionsRefusal(gate, userStatus.excluded);
+    if (comparisonRefusal !== null) {
+      throw new HandlerInvocationFailedError(comparisonRefusal.message, {
+        cause_kind: 'analysis_not_ready', retryable: false,
+        details: { handler_id: 'run_analysis', scenario_id: args.scenario_id,
+          reason_code: 'insufficient_analysable_options', next_step: comparisonRefusal.nextStep },
+      });
     }
 
     // Keep an unadopted Olumi suggestion out of an ordinary comparison when
@@ -3944,30 +3892,6 @@ function extractOptionId(record: Record<string, unknown>): string | null {
  * composer payload; a null value still produces a coherent (if generic)
  * user-facing message.
  */
-/**
- * The first EXCLUDED option that can be safely named to the user, or null when
- * none can be — in which case the caller ships its generic twin.
- *
- * Guarded by `sanitiseLabel` (the same guard every other user-facing label
- * crosses): an empty label, a label that is just the option id, an ID-shaped
- * label or a UUID is NOT a name a user recognises, and putting one in a
- * next-step would prescribe a step against a token they have never seen.
- *
- * Exported for the spec that pins the named/generic pair — the generic branch
- * is unreachable from the labelled fixtures, so without a direct test it would
- * be a branch nothing exercises.
- */
-export function firstUsableExcludedLabel(
-  excluded: readonly ExcludedOptionRecord[],
-): string | null {
-  for (const record of excluded) {
-    if (record.label === null) continue;
-    const clean = sanitiseLabel(record.label, record.option_id);
-    if (clean !== null) return clean;
-  }
-  return null;
-}
-
 function firstOptionLabel(
   options: ReadonlyArray<Record<string, unknown>>,
 ): string | null {

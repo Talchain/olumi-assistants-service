@@ -80,6 +80,7 @@ import {
   type FactorScaleInfo,
 } from '../plot-intervention-scale.js';
 import { recoverScaleFrame } from './d1-shared/scale-frame.js';
+import { sanitiseLabel } from '../../context/enrichment-graph-labels.js';
 
 /**
  * PLoT's `/v2/run` Ajv request schema declares `options` with `minItems: 2`,
@@ -141,6 +142,46 @@ export interface AnalysableOptionGateOutcome {
   readonly held: readonly ScaffoldedOptionRecord[];
   /** Options left out of the submission entirely. */
   readonly excluded: readonly ExcludedOptionRecord[];
+}
+
+/** The same post-exclusion comparison floor for readiness and Run; never invent a comparator. */
+export function comparisonAfterExclusionsRefusal(
+  gate: AnalysableOptionGateOutcome,
+  userExcluded: readonly { readonly label: string | null }[],
+): { message: string; nextStep: string } | null {
+  if (gate.options.length >= PLOT_MIN_COMPARISON_OPTIONS) return null;
+  if (userExcluded.length > 0 && gate.excluded.length === 0) {
+    const named = userExcluded.map(e => e.label !== null ? `'${e.label}'` : 'an option').join(', ');
+    return {
+      message: 'The options the user took out leave too few to compare',
+      nextStep: `You've taken ${named} out of the comparison, and that leaves fewer than two options, so there's `
+        + 'nothing to compare yet. Put one back, or add another option, and ask me to run the analysis again.',
+    };
+  }
+  if (gate.excluded.length === 0) return null;
+  const label = firstUsableExcludedLabel(gate.excluded);
+  return {
+    message: 'Excluding unanalysable options leaves too few to compare',
+    nextStep: label !== null
+      ? `I've left out the options that don't have any values set yet, and that leaves `
+        + `only one option — which isn't a comparison, so I've stopped rather than show `
+        + `you a result that just means "it was the only one". Tell me what `
+        + `'${label}' changes and I'll write it into the model, then ask me to run the analysis again.`
+      : `I've left out the options that don't have any values set yet, and that leaves `
+        + `only one option — which isn't a comparison, so I've stopped rather than show `
+        + `you a result that just means "it was the only one". Tell me what your other `
+        + 'options change and I\'ll write them into the model, then ask me to run the analysis again.',
+  };
+}
+
+/** Labels cross the same sanitiser as the existing Run refusal; identity tokens are never names. */
+export function firstUsableExcludedLabel(excluded: readonly ExcludedOptionRecord[]): string | null {
+  for (const record of excluded) {
+    if (record.label === null) continue;
+    const clean = sanitiseLabel(record.label, record.option_id);
+    if (clean !== null) return clean;
+  }
+  return null;
 }
 
 /**
