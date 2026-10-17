@@ -38,6 +38,27 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     expect(wholeStatementIn(message, "'Crews start early only if parts arrive the day before.'")).toBe(false);
     expect(wholeStatementIn("Sam said 'parts first' and left.", "Sam said 'parts first'")).toBe(false);
   });
+  it('⭐ SWEEP (DL-3 14:28Z): every terminal × every closing mark × every speaker form, at the end, at the next start, and the negatives', () => {
+    const TERMINALS = ['.', '!', '?', ';'];
+    const MARKS: readonly (readonly [string, string])[] = [['', ''], ["'", "'"], ['"', '"'], ['‘', '’'], ['“', '”']];
+    const SPEAKERS = ['Sam, site lead: ', 'Sam said ', 'Sam: '];
+    const wrong: string[] = [];
+    const check = (message: string, quote: string, expected: boolean): void => {
+      if (wholeStatementIn(message, quote) !== expected) wrong.push(`${expected ? 'not whole' : 'whole'}: «${quote}» in «${message}»`);
+    };
+    for (const t of TERMINALS) for (const [open, close] of MARKS) for (const who of SPEAKERS) {
+      const speech = `${open}Crews start early only if parts arrive${t}${close}`;
+      const message = `We fit kitchens. ${who}${speech} He assumes the van is free.`;
+      check(message, `${who}${speech}`, true);
+      check(message, 'He assumes the van is free.', true);
+      // The words without their speaker are never whole (with their marks, or bare).
+      check(message, speech, false);
+      check(message, `Crews start early only if parts arrive${t}`, false);
+      // A closed fragment with no full stop of its own is never whole.
+      check(`${who}${open}parts first${close} and left.`, `${who}${open}parts first${close}`, false);
+    }
+    expect(wrong).toEqual([]);
+  });
   it('words the message never holds, and a non-string quote, are not whole', () => {
     expect(wholeStatementIn('Please size the links.', 'Price has a weak effect on MRR.')).toBe(false);
     expect(wholeStatementIn('Price has a weak effect on MRR.', undefined)).toBe(false);
