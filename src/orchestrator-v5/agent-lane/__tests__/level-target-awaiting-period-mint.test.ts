@@ -49,7 +49,7 @@ function draft(o: { horizon?: number | null; period?: number | null; conditions?
   };
 }
 const admitted = (model: Rec) => admitCandidateModel(model as CandidateModel, {}, BRIEF, (v, u) => figureTheUserWrote(v, u, BRIEF));
-const goalOf = (nodes: readonly Rec[]): Rec => nodes.find((n) => n.kind === 'goal')!;
+const goalOf = (nodes: readonly unknown[]): Rec => (nodes as readonly Rec[]).find((n) => n.kind === 'goal')!;
 const reasons = (out: { loss: readonly Rec[] }): string => JSON.stringify(out.loss.map((l) => l.reason));
 let lastResult: Rec = {};
 async function savedCold(model: Rec): Promise<Rec> {
@@ -131,14 +131,14 @@ describe('a level target whose period is not yet stated, with conditions beside 
     ['a condition cannot be kept whole', { conditions: ['Monthly churn stays\nat or below 10%', CONDITIONS[1]] }],
   ])('CONTRAST (admission, unchanged): %s → still no threshold and no reading, and why is said', (_why, o) => {
     const out = admitted(draft(o));
-    const goal = goalOf(out.nodes as Rec[]);
+    const goal = goalOf(out.nodes);
     expect(goal.goal_threshold).toBeUndefined();
     expect(goal.goal_target_basis).toBeUndefined();
     expect(reasons(out)).toContain('No chance of meeting the target for \\"Client base\\" is shown yet');
   });
 
   it('CONTRAST (admission, unchanged): a missing period with NO conditions mints as today and keeps no reading', () => {
-    const goal = goalOf(admitted(draft({ conditions: null })).nodes as Rec[]);
+    const goal = goalOf(admitted(draft({ conditions: null })).nodes);
     expect(goal).toMatchObject({ goal_threshold_cap: 750, goal_threshold: 0.8 });
     expect(goal.goal_target_basis).toBeUndefined();
   });
