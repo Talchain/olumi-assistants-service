@@ -9,6 +9,7 @@ import { createProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 import { subjectKey } from '../../orchestrator-v5/statement-door/subject.js';
 import { provenanceOf } from '../../cee/provenance/provenance-of.js';
+import { NodeKindV3 } from '../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
 const capture = JSON.parse(readFileSync(new URL('./fixtures/founder-e625-rebuild-read04.json', import.meta.url), 'utf8')) as Rec;
@@ -25,6 +26,57 @@ const omit = (g: Rec, ids: string[]) => {
 };
 
 describe('explicit rebuild retains the complete saved reasoning', () => {
+  const quantities = ['factor', 'outcome', 'risk'];
+  it.each(NodeKindV3.options.flatMap(savedKind =>
+    (quantities.includes(savedKind) ? quantities : [savedKind]).map(proposedKind => ({ savedKind, proposedKind }))))(
+    'B3 identity class: $savedKind → $proposedKind keeps the existing family or structural-kind boundary', ({ savedKind, proposedKind }) => {
+      const saved: Rec = { nodes: [
+        { id: 'sweep_goal', kind: 'goal', label: 'Current aim' },
+        { id: 'sweep_decision', kind: 'decision', label: 'Current question' },
+        { id: 'sweep_option', kind: 'option', label: 'Current option', interventions: {} },
+        { id: 'sweep_neighbour', kind: 'factor', label: 'Shared neighbour' },
+      ], edges: [
+        { from: 'sweep_decision', to: 'sweep_option' },
+        { from: 'sweep_option', to: 'sweep_neighbour' },
+        { from: 'sweep_neighbour', to: 'sweep_goal' },
+      ] };
+      const original = ['goal', 'decision', 'option'].includes(savedKind)
+        ? saved.nodes.find((n: Rec) => n.kind === savedKind)
+        : { id: 'sweep_saved', kind: savedKind, label: 'Saved reading', provenance: 'ai_inferred' };
+      if (!saved.nodes.includes(original)) {
+        saved.nodes.push(original);
+        saved.edges.push({ from: original.id, to: saved.nodes.find((n: Rec) => n.kind === 'goal').id,
+          strength: { mean: 0.5, std: 0.1 }, provenance: { source: 'cee_hypothesis' } });
+      }
+      const savedInput = structuredClone(saved), draft = structuredClone(saved);
+      // Options retain their existing collision/omission rules; do not extend quantity relabel inference to them.
+      const id = savedKind === 'option' ? original.id : 'sweep_proposed';
+      const added = { ...structuredClone(original), id, kind: proposedKind, label: 'Proposed reading' };
+      draft.nodes = draft.nodes.map((n: Rec) => n.id === original.id ? added : n);
+      draft.edges = draft.edges.map((e: Rec) => ({ ...e,
+        from: e.from === original.id ? id : e.from, to: e.to === original.id ? id : e.to }));
+      const draftInput = structuredClone(draft), refused = prepare(saved, draft);
+      expect(refused.candidate).toBeUndefined(); expect(refused.missing).not.toEqual([]);
+      if (savedKind === 'goal') expect(refused.missing).toEqual(['the saved governing outcome; use the existing goal-change card before rebuilding']);
+      else if (savedKind === 'option') expect(refused.missing_kind).toBe('saved_option');
+      else {
+        expect(refused.missing_kind).toBe('recorded_reasoning');
+        expect(refused.missing.join(' ')).toContain(original.label);
+        expect(refused.missing.join(' ')).toContain(added.label);
+      }
+      expect(saved).toEqual(savedInput); expect(draft).toEqual(draftInput);
+      const unchanged = prepare(saved, structuredClone(saved));
+      expect(unchanged.missing).toEqual([]);
+      expect(unchanged.candidate!.nodes.find((n: Rec) => n.id === original.id)).toEqual(original);
+      const omitted = structuredClone(saved); omit(omitted, [original.id]);
+      const carried = prepare(saved, omitted);
+      if (savedKind === 'goal') expect(carried.candidate).toBeUndefined();
+      else {
+        expect(carried.missing).toEqual([]);
+        expect(carried.candidate!.nodes.filter((n: Rec) => n.id === original.id)).toEqual([original]);
+        expect(carried.candidate!.edges).toEqual(expect.arrayContaining(saved.edges.filter((e: Rec) => e.from === original.id || e.to === original.id)));
+      }
+    });
   it('host carries an omitted saved baseline; no source or candidate input is mutated', () => {
     const saved = graph(), draft = graph(), baseline = saved.nodes.find((n: Rec) => n.id === 'current_split_reference');
     omit(draft, [baseline.id]); const input = structuredClone(draft);

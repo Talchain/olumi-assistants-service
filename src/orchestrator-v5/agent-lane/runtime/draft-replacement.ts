@@ -608,11 +608,12 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
     if (found.length === 0) kept.push(`the complete saved option “${String(option.label)}”`);
   }
   // Factor, outcome and risk are one quantity family: redrafting may change kind as well as label.
-  // Carrying an absent quantity beside a new neighbour-sharing quantity would leave their distinct identities unresolved.
+  // Other kinds retain same-kind protection; carrying either absent node beside its possible relabel leaves identity unresolved.
   const quantityKinds = new Set(['factor', 'outcome', 'risk']);
-  for (const saved of oldNodes.filter(n => quantityKinds.has(String(n.kind)) && matches(n, newNodes).length === 0)) {
+  for (const saved of oldNodes.filter(n => n.kind !== 'option' && matches(n, newNodes).length === 0)) {
     const neighbours = new Set(recs(before.edges).flatMap(e => e.from === saved.id ? [e.to] : e.to === saved.id ? [e.from] : []));
-    const possible = newNodes.find(added => quantityKinds.has(String(added.kind)) && matches(added, oldNodes).length === 0
+    const possible = newNodes.find(added => (quantityKinds.has(String(saved.kind)) ? quantityKinds.has(String(added.kind)) : added.kind === saved.kind)
+      && matches(added, oldNodes).length === 0
       && recs(draft.edges).some(e => {
         const id = e.from === added.id ? e.to : e.to === added.id ? e.from : undefined;
         const neighbour = newNodes.find(n => n.id === id);

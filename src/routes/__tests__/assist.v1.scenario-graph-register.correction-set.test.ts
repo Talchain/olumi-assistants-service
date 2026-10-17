@@ -1028,6 +1028,31 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
       expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
       expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
     });
+  it('B3: a saved brief-span decision question cannot become two decisions through a fallback relabel', async () => {
+    const seedDraft = structuredClone(bakery.draft) as Rec;
+    seedDraft.decision_question = 'We need to sell at least 520 loaves a week by the end of June';
+    const proposed = structuredClone(bakery.draft) as Rec; proposed.decision_question = null;
+    const seed = await runPreparingDraftReplacement('b3-decision-seed', () => buildModelFromBrief('b3-decision-seed', bakery.brief,
+      async () => { throw new Error('Preparation must not dispatch'); },
+      (async () => ({ text: JSON.stringify(seedDraft), status: 'completed' })) as never));
+    expect(seed.ok).toBe(true);
+    const draft = await runPreparingDraftReplacement('b3-decision-draft', () => buildModelFromBrief('b3-decision-draft', bakery.brief,
+      async () => { throw new Error('Preparation must not dispatch'); },
+      (async () => ({ text: JSON.stringify(proposed), status: 'completed' })) as never));
+    expect(draft.ok).toBe(true);
+    const decisions = (g: Rec) => g.nodes.filter((n: Rec) => n.kind === 'decision');
+    expect(decisions(seed.prepared_graph as Rec)).toHaveLength(1); expect(decisions(draft.prepared_graph as Rec)).toHaveLength(1);
+    const savedDecision = decisions(seed.prepared_graph as Rec)[0], draftDecision = decisions(draft.prepared_graph as Rec)[0];
+    expect(savedDecision.label).not.toBe(draftDecision.label);
+    const w = await world({ graph: seed.prepared_graph as Rec, brief: bakery.brief, message: rebuildRequest },
+      { provider: async () => ({ text: JSON.stringify(proposed), status: 'completed' }) });
+    const offered = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), w.ctx, w.caps());
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' });
+    expect(offered.follow_up).toContain(savedDecision.label); expect(offered.follow_up).toContain(draftDecision.label);
+    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
+    expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    expect(decisions(w.graph())).toEqual([savedDecision]);
+  });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });
     // DL04:00 ACK: the former 'partial' row lives at the actual durable source gate, not a sticky authorship flag.
