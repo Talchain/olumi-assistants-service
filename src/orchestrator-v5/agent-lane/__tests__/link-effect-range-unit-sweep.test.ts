@@ -3,14 +3,14 @@
  * BUDDY-A #3356 R5: ONE unit authority, never convert). A link-effect range is the user's range in the AI's unit only where that unit
  * agrees with the COMPLETE unit written WITH THAT RANGE (magnitude, period); otherwise it is still recorded, whole, with no unit.
  * Dimensions: magnitude unit × period × another quantity in the sentence × written or absent. ORACLE: complete-unit agreement by the
- * estate's own authority (`readUnitParts` + C3 `carrierCompatible`; `sameUnit` against the link), over the unit text THIS test writes
+ * estate's own authority (`readUnitParts` part by part; `sameUnit` against the link), over the unit text THIS test writes
  * at the range: the sweep proves which words count, never re-implements the unit grammar. SYNTHETIC sentences.
  */
 import { describe, expect, it } from 'vitest';
 import { sourceMapOf } from '../construction-source-map.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
-import { carrierCompatible, readUnitParts, sameUnit } from '../same-unit.js';
+import { readUnitParts, sameUnit } from '../same-unit.js';
 
 type Rec = Record<string, any>;
 /** Magnitude units as written (no bare "m": "6 m" is six million) and the AI's extra claimed spellings. */
@@ -18,11 +18,13 @@ const WRITTEN = ['mm', 'millimetres', 'cm', 'metres', 'km', 'mg', 'g', 'grams', 
   'seconds', 'minutes', 'mins', 'hours', 'days', 'weeks', 'percent', 'per cent', 'percentage points', 'crates'];
 const CLAIMED = [...WRITTEN, 'm', 'l', 's', 'h', 'pp', '%'];
 const PERIODS = ['', ' a day', ' per week'];
-/** The oracle: the claim states the complete unit written at the range: C3 agreement, and no part only one of them states. */
+/** The oracle (DL-3 fail-safe core): every part of the complete unit written at the range EQUALS the claim's, present alike; a count's
+ * noun may only hold words around the claim's ("extra visitors" holds "visitors"). */
 const agrees = (written: string, claimed: string): boolean => {
   const w = readUnitParts(written), c = readUnitParts(claimed);
-  const stated = (v: unknown): boolean => v !== null && !(Array.isArray(v) && v.length === 0);
-  return w !== null && c !== null && carrierCompatible(w, c) && (['period', 'per', 'base', 'qualifiers'] as const).every((k) => stated(w[k]) === stated(c[k]));
+  const words = (x: readonly string[] | null): string => (x ?? []).join(' ');
+  return w !== null && c !== null && w.kind === c.kind && w.code === c.code && w.period === c.period
+    && (['per', 'base', 'qualifiers'] as const).every((k) => words(w[k]) === words(c[k])) && ` ${words(w.noun)} `.includes(` ${words(c.noun)} `);
 };
 const KEY = 'link|pre-order system in use|daily food waste||effect';
 const statement = (quote: string, unit: string, low = 4, high = 6): Rec => ({ quote, subject: { kind: 'link', label: 'Pre-order system in use', to_label: 'Daily food waste', factor_label: null },
@@ -42,6 +44,30 @@ describe('SWEEP: a range is recorded in the AI\'s unit only where the complete u
         if (got !== expected) wrong.push(`"6 ${w}${p}" claimed ${c}: ${got === undefined ? 'no record' : `unit "${got}"`}, expected "${expected}"`);
       }
     }
+    expect(wrong).toEqual([]);
+  });
+
+  it('money and denominators (BUDDY-A R6): the complete written rate decides, never a currency alone or a contained denominator', () => {
+    const wrong: string[] = [];
+    const MONEY = [['£', ''], ['£', ' a week'], ['£', ' per day'], ['$', ' a day'], ['€', '']] as const;
+    const MONEY_CLAIMS = ['£', 'GBP', '£ per day', '£ per week', '$', 'USD per day', '$ per week', '€', 'EUR per day'];
+    for (const [sym, p] of MONEY) {
+      const quote = `Our manager reckons it would save between ${sym}4 and ${sym}6${p}.`;
+      for (const c of MONEY_CLAIMS) {
+        const expected = agrees(`${sym}${p}`, c) ? c : '';
+        if (recordedUnit(quote, c) !== expected) wrong.push(`"${sym}6${p}" claimed ${c}: "${recordedUnit(quote, c)}", expected "${expected}"`);
+      }
+    }
+    for (const w of ['kg per client', 'kg per new client', 'kg per client per week']) for (const c of ['kg per client', 'kg per new client', 'kg', 'kg per week', 'kg per client per week']) {
+      const quote = `Our manager reckons it would cut waste by between 4 and 6 ${w}.`;
+      const expected = agrees(w, c) ? c : '';
+      if (recordedUnit(quote, c) !== expected) wrong.push(`"6 ${w}" claimed ${c}: "${recordedUnit(quote, c)}", expected "${expected}"`);
+    }
+    // Not vacuous: each family has a case the AI's unit holds, and one it does not.
+    expect(recordedUnit('Our manager reckons it would save between £4 and £6 a week.', '£ per week')).toBe('£ per week');
+    expect(recordedUnit('Our manager reckons it would save between £4 and £6 a week.', '£ per day')).toBe('');
+    expect(recordedUnit('Our manager reckons it would cut waste by between 4 and 6 kg per new client.', 'kg per client')).toBe('');
+    expect(recordedUnit('Our manager reckons it would cut waste by between 4 and 6 kg per client.', 'kg per client')).toBe('kg per client');
     expect(wrong).toEqual([]);
   });
 

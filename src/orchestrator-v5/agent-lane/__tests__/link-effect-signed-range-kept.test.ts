@@ -243,6 +243,10 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
       { words: 'between 4 and 6 kg a day', claimed: 'kg', goal: 'kg' },
       { words: 'between 4 and 6 crates, with each crate weighing 10 kg', claimed: 'kg', goal: 'kg' },
       { words: 'between 4 and 6 lb a day', claimed: 'kg', goal: 'kg' },
+      // BUDDY-A R6: a contained denominator is never the same rate.
+      { words: 'between 4 and 6 kg per new client', claimed: 'kg per client', goal: 'kg per client' },
+      // BUDDY-A R6: money is read by the same tail reader: a weekly saving is never a daily one.
+      { words: 'between £4 and £6 a week', claimed: '£ per day', goal: '£ per day' },
     ];
     for (const c of cases) {
       const range = RANGE.replace('between 4 and 6 kg', c.words);
@@ -254,7 +258,8 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
         links: d.links.map((l: Rec) => (l.from === PRE ? { ...l, source_quote: range } : l)) };
       const out = admitted(model, brief);
       expect(edgeFrom(out, PRE).provenance.magnitude, c.words).toBe('olumi_placeholder');
-      expect(edgeFrom(out, PRE).provenance.natural_effect?.amount, `${c.words}: no −4 ${c.goal}`).toBeUndefined();
+      // Olumi's placeholder may carry its own size (a money goal's is sized to its range); never an end of the user's range.
+      expect([4, 6], `${c.words}: no end of the range in ${c.goal}`).not.toContain(Math.abs(edgeFrom(out, PRE).provenance.natural_effect?.amount ?? 0));
       expect(otherUnit(out)?.reason, c.words).toBe(otherUnitWords(range, c.goal));
       const graph = await registered(model, brief);
       expect(recordOn(graph)?.statements, c.words).toEqual([expect.objectContaining({ speaker: 'user', quote: range, form: 'range', low: 4, high: 6, unit: '' })]);
