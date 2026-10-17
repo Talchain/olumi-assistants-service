@@ -915,7 +915,7 @@ describe('independent check r1 — item 7: a withheld joint says truly why, with
 // ordinary anchored capacity (75% today, reached from ‘Developers’) and hiring's change quantity are the same-draw reference;
 // a root goal, a goal an option sets directly and a goal read from a launch are not established; a rates forecast is
 // carrying on's own projection; an ordinary paired Run whose status quo drifts or spreads is withheld until checked.
-const MOVED = (label: string): string => `Not shown: this run’s result for carrying on as now doesn’t match ‘${label}’ as it stands today in the model, so it needs checking first.`;
+const MOVED = (label: string): string => `Chance not shown: Olumi cannot verify this Run’s result for carrying on as now against the reference for ‘${label}’.`;
 const capacityWith = (sq: Rec): Rec => {
   const run = capacityRun();
   (run.option_comparison as Rec[])[2] = { ...(run.option_comparison as Rec[])[2], ...sq };
@@ -1222,14 +1222,33 @@ describe('N1: a fixed target at today’s level keeps its EXACT probability side
       const { g, run, threshold, constraints } = boundary(subject, operator, true);
       const node = (g.nodes as Rec[]).find(n => n.id === (subject === 'primary' ? 'new_customers' : 'conversion_rate'))!;
       (node.observed_state as Rec).unit = subject === 'primary' ? 'new customers' : 'percent';
-      (run.option_comparison as Rec[]).find(r => r.option_id === 'carry_on')!.outcome = {
-        p10: 0.4, p50: 0.4, p90: 0.4, mean: 0.4, std: 0,
-      };
+      const sqRow = (run.option_comparison as Rec[]).find(r => r.option_id === 'carry_on')!;
+      sqRow.outcome = { p10: 0.4, p50: 0.4, p90: 0.4, mean: 0.4, std: 0 };
       const l = goalChanceLicenceOf(run, g, 'new_customers', () => false, threshold, g, constraints)!;
       expect(l.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
       expect(l.pct_by_option).not.toHaveProperty('carry_on');
       if (l.targets!.joint.status === 'licensed') expect(l.targets!.joint.pct_by_option).not.toHaveProperty('carry_on');
+      // Missing output evidence never supplies a missing side: no frame/centres on the primary, no marginal on the secondary.
+      if (subject === 'primary') delete sqRow.outcome;
+      else delete (sqRow.constraint_probabilities as Rec)['target:conversion_rate'];
+      const unverified = goalChanceLicenceOf(run, g, 'new_customers', () => false, subject === 'primary' ? undefined : threshold, g, constraints)!;
+      expect(unverified.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
+      expect(unverified.pct_by_option).not.toHaveProperty('carry_on');
     });
+
+  it('unit follow-up primary GBP/£: a supported raw-unit side keeps the joint without a recorded threshold frame', () => {
+    const { g, run, constraints } = boundary('primary', '>=', false);
+    const goal = (g.nodes as Rec[]).find(n => n.id === 'new_customers')!;
+    Object.assign(goal, { label: 'Cash buffer', goal_threshold_unit: 'GBP' });
+    (goal.observed_state as Rec).unit = '£';
+    constraints.storedConstraints.find(r => r.constraint_id === 'target:new_customers')!.unit = 'GBP';
+    constraints.sentConstraints = wireGoalConstraints(constraints.storedConstraints);
+    // No output scale is used to establish the side; it comes from the recorded raw value and existing unit authority.
+    delete (run.option_comparison as Rec[]).find(r => r.option_id === 'carry_on')!.outcome;
+    const l = goalChanceLicenceOf(run, g, 'new_customers', () => false, undefined, g, constraints)!;
+    expect(l.pct_by_option.carry_on).toBe(40);
+    expect(l.withheld_option_ids ?? []).not.toContain('carry_on');
+  });
 
   it.each([false, true])('unit follow-up: existing GBP/£ authority retains a supported side and rejects its contradiction (%s)', contradiction => {
     const { g, run, threshold, constraints } = boundary('secondary', '>=', contradiction);

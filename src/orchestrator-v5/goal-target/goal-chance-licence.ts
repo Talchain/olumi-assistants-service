@@ -403,8 +403,7 @@ export function statusQuoReadingOf(a: {
     return (!finite(o.std) || sameFrameArithmeticAgreement(o.std, 0, reference, PAIRED_REFERENCE_PRECISION))
       && centres.every(k => !finite(o[k]) || sameFrameArithmeticAgreement(o[k], reference, reference, PAIRED_REFERENCE_PRECISION));
   };
-  const agrees = a.reference !== 'unknown' && a.referenceChance !== undefined
-    && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
+  const agrees = a.reference !== 'unknown' && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
   if (finite(o.std) && o.std > 0 && !agrees) return 'moved';
   if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90 && !agrees) return 'moved';
   // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".
@@ -754,6 +753,7 @@ export function goalChanceLicenceOf(
       // change target, never today's level with a change amount (75% today is not a +10-point target).
       ...(!changeQuantity ? { referenceChance: changeFrame !== undefined
         ? exactComparisonSide(0, held, target.value)
+        : sentThreshold !== undefined && finite(levelToday) ? exactComparisonSide(levelToday, held, sentThreshold.value)
         : finite(today) && sameUnit(goalState?.unit, target.unit) ? exactComparisonSide(today, held, target.value) : undefined } : {}),
       // G: D2 in the change frame — what a zero change scores against the held target (a level goal: unchanged, undefined).
       ...(changeQuantity ? { zeroChange: zeroChangeMeets(held, target.value) ? 1 as const : 0 as const } : {}),
@@ -1190,7 +1190,7 @@ function withSeveralTargets(l: GoalChanceLicence, c: {
       && sameUnit(row.unit, held?.unit) && row.value === held?.value
       ? exactComparisonSide(state.raw_value, row.operator, held.value) : undefined;
     if (side === undefined) return 'moved';
-    return typeof p === 'number' && ((p !== 0 && p !== 1) || (side !== undefined && p !== side)) ? 'moved' : 'assumed';
+    return typeof p === 'number' && ((p !== 0 && p !== 1) || p !== side) ? 'moved' : 'assumed';
   };
   const targetRows = sent.filter((r) => stored.some((x) => x.constraint_id === r.constraint_id && x.role === GOAL_TARGET_ROLE));
   // ⛔ RE-SCOPE 2 (R5-3; AIE open 1): the JOINT is every condition the Run sent — each target AND each included limit
