@@ -553,11 +553,11 @@ expect(source).toContain('readMayNameLeadingOptionVerdict(context.prior_facts, c
     // The load-bearing composition. If `summary` ever stops being
     // "withheld-able headline, else a locked template", the `gated` stance is
     // void — so the exact expression is pinned, not paraphrased.
-    // C46 stage 1: the headline is ALSO withheld when the leader's sign on a multiplied goal is not proven —
-    // still "withheld-able headline, else a locked template".
-    // An unadopted Olumi suggestion retained provisionally also cannot produce a leader headline, nor can a Run that compares
-    // a capacity-ratio option (its run-by-run comparison is not a shared draw; #3100, AIE 6175233964).
-    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional || ratioOptionCompared\n      ? null : headlineParts.text;');
+    // Contract B (#3368): the canonical licence is the single headline owner;
+    // the retired local withhold ternary must not become a second permission rule.
+    expect(RUN_ANALYSIS).toContain(
+      'const headlineParts = buildAnalysisResultHeadlineParts(headlineInput, headlineAuthority.licence);\n    const headline = headlineParts.text;',
+    );
     // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
     // constraint-gap one. The `gated` stance is unaffected and the pin is
     // updated rather than loosened: `summary` is still "withheld-able headline,

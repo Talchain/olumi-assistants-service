@@ -232,6 +232,12 @@ describe('R4 selected historical result carrier', () => {
     const fact = runFact({ separated: true });
     if (missing !== 'current') delete fact.result.graph_hash_at_run;
     fact.result.summary = `${label} recorded on the earlier Run.`;
+    fact.result.enrichment = { ...fact.result.enrichment,
+      option_comparison: [{ option_id: 'option-a', probability_of_goal: 0.99 }, { option_id: 'option-b', probability_of_goal: 0.01 }],
+      inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
+        option_ids: ['option-a', 'option-b'], pct_by_option: { 'option-a': 47, 'option-b': 52 },
+        option_labels_by_option: { 'option-a': `${label}: earlier A`, 'option-b': `${label}: earlier B` } }],
+    };
     const before = structuredClone(fact);
     await reload(fact, 'r4-unknown');
     const read = await readScenarioAnalysis({ scenarioId: SCENARIO, requestId: 'r4-other-label',
@@ -246,6 +252,15 @@ describe('R4 selected historical result carrier', () => {
     expect(read.current_read.result).toBeNull();
     expect(read.current_read.figures).toEqual([]);
     expect(read.canonical_analysis_view.options).toEqual([]);
+    expect(read.canonical_analysis_view.historical_figures?.options).toEqual([
+      { option_id: 'option-a', option_label: `${label}: earlier A`, display: 'about 47%' },
+      { option_id: 'option-b', option_label: `${label}: earlier B`, display: 'about 52%' },
+    ]);
+    expect(read.canonical_analysis_view.staleness.stale).toBeNull();
+    expect(read.canonical_analysis_view.face_when_stale).toBe('This earlier Run may be out of date. Run the analysis again.');
+    expect(read.canonical_analysis_view.leader_licence).toBe('withheld');
+    expect(read.canonical_analysis_view.leader.option_id).toBeNull();
+    expect(read.canonical_analysis_view).not.toHaveProperty('goal_chance');
     expect(fact).toEqual(before);
     // The carrier must not be added to a known-current read.
     await reload(runFact({ separated: true }), 'r4-current');

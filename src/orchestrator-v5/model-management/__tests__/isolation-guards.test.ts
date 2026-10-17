@@ -290,6 +290,8 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
     // A2 L1 (Science 0df0e1): the Run-time leader-licence SHADOW reads the SAME complete per-Run licence
     // (boundRunLeaderClaim) to log where the live predicates disagree. Pure, log-only: no version write, flag or schema.
     '../compose/leader-licence-shadow.ts',
+    // fresh Run consumes the one leader licence (contract B, #3368)
+    '../tools/handlers/run-analysis.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 
