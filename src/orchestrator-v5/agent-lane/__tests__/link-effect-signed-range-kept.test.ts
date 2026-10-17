@@ -21,6 +21,14 @@ const BRIEF = `${GOAL} ${RANGE} ${OTHER} We can afford only one of them this yea
 /** BUDDY-A #3356 R1 B1: the same sentence in POUNDS, on the kilogram goal. */
 const RANGE_LB = RANGE.replace('kg a day', 'lb a day');
 const BRIEF_LB = BRIEF.replace(RANGE, RANGE_LB);
+/**
+ * BUDDY-A #3356 R2 B1: a goal in metres and the sentence's own unit as written. Control: all in "metres" (a bare "6 m" reads as
+ * six million). Counterexample: the goal and the statement in "m", the sentence in "mm" ("m" is a prefix of "mm").
+ */
+type Metres = 'metres' | 'mm';
+const unitOfMetres = (w: Metres): string => (w === 'metres' ? 'metres' : 'm');
+const inMetres = (text: string, written: Metres): string => text.replace('at most 30 kg', `at most 30 ${unitOfMetres(written)}`)
+  .replace('about 40 kg', `about 40 ${unitOfMetres(written)}`).replace('6 kg a day', `6 ${written} a day`);
 const PRE = 'Pre-order system in use';
 const DEL = 'Smaller daily deliveries';
 const WASTE = 'Daily food waste';
@@ -28,13 +36,22 @@ const WASTE = 'Daily food waste';
 interface Shape {
   readonly on?: string; readonly low?: number; readonly high?: number; readonly negated?: true; readonly size?: number; readonly drawn?: 'positive';
   readonly pounds?: true;
+  /** The goal, the statement's unit and the sentence in metres; the sentence's own unit as written. */
+  readonly metres?: Metres;
 }
 const rangeStatement = (s: Shape): Rec => ({
-  quote: s.on === DEL ? OTHER : s.pounds === true ? RANGE_LB : RANGE, subject: { kind: 'link', label: s.on ?? PRE, to_label: WASTE, factor_label: null },
-  field: 'effect', form: 'range', value: null, low: s.low ?? -6, high: s.high ?? -4, unit: s.pounds === true ? 'lb' : 'kg', qualifier: null, conditions: null,
+  quote: s.on === DEL ? OTHER : s.pounds === true ? RANGE_LB : s.metres !== undefined ? inMetres(RANGE, s.metres) : RANGE,
+  subject: { kind: 'link', label: s.on ?? PRE, to_label: WASTE, factor_label: null }, field: 'effect', form: 'range', value: null,
+  low: s.low ?? -6, high: s.high ?? -4, unit: s.pounds === true ? 'lb' : s.metres !== undefined ? unitOfMetres(s.metres) : 'kg', qualifier: null, conditions: null,
   ...(s.negated === true ? { negated: true } : {}),
 });
 function draft(s: Shape = {}): Rec {
+  if (s.metres !== undefined) {
+    const d = draft({ ...s, metres: undefined });
+    const u = unitOfMetres(s.metres);
+    const unit = (x: Rec): Rec => ({ ...x, unit: x.unit === 'kg' ? u : x.unit, quote: typeof x.quote === 'string' ? inMetres(x.quote, s.metres!) : x.quote });
+    return { ...d, goal: { ...d.goal, unit: u, source_quote: inMetres(GOAL, s.metres) }, statements: [...d.statements.slice(0, 2).map(unit), rangeStatement(s)] };
+  }
   const option = (label: string, factor: string): Rec => ({ label, provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
     interventions: [{ factor_label: factor, value: 100, value_kind: 'absolute', unit: '%', provenance: 'explicit' }] });
   const factor = (label: string): Rec => ({ label, role: 'controllable', baseline_known: false, baseline_value: 0, unit: '%', provenance: 'ai_proposed', plausible_max: 100 });
@@ -116,6 +133,19 @@ describe('a stated effect range stays the user\'s, on its link (G3 a735)', () =>
     // The user's own words and range stay on the link, in pounds, as theirs.
     const record = pre.user_statements?.find((r: Rec) => r.subject_key === `link|${pre.id}|${waste.id}||effect`);
     expect(record?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: RANGE_LB, form: 'range', low: 4, high: 6, unit: 'lb' })]);
+  });
+
+  it('⛔ BUDDY-A #3356 R2 B1, real build → register: "m" is never "mm": a range written in millimetres on a metre goal credits nothing to the user (metres control credits it)', async () => {
+    const briefIn = (w: Metres): string => inMetres(BRIEF, w);
+    const control = edgeFrom(admitted(draft({ metres: 'metres' }), briefIn('metres')), PRE);
+    expect(control.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: -4, amount_unit: 'metres', stated_range: { low: 4, high: 6, end: 'low' } } });
+    const graph = await registered(draft({ metres: 'mm' }), briefIn('mm'));
+    const pre = graph.nodes.find((n: Rec) => n.label === PRE);
+    const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
+    const saved = graph.edges.find((e: Rec) => e.from === pre.id && e.to === waste.id);
+    expect(saved.provenance.magnitude).toBe('olumi_estimate');
+    expect(saved.provenance.natural_effect?.stated_range).toBeUndefined();
+    expect(saved.provenance.basis).toBe('Uses the stated lower end as a provisional planning effect.');
   });
 
   it('CONTRAST: a range the AI writes with positive ends is verified exactly as before, and the same as the signed one', () => {
