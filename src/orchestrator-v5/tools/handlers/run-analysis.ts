@@ -3134,8 +3134,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ SPEED cut 3 (undeployed/SPEED.md, DL 14 Oct): the factor review's gpt-4.1 call no longer sits on every Run's
     // critical path (2.7 s median, p90 4.3, 8 s cap). Its one reader, the decision-review press, computes it for the same
     // bound Run (`persistedFactorReviewFor`). A Run fact stored before this change keeps its enrichment and is still read.
-    const { [RUN_QUESTION_EVIDENCE_KEY]: _providerQuestion, ...runEnrichment } = response as Record<string, unknown>;
-    if (evaluatedQuestion !== undefined) runEnrichment[RUN_QUESTION_EVIDENCE_KEY] = evaluatedQuestion;
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -3151,7 +3149,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(runEnrichment),
+        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run
@@ -3215,6 +3213,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           : leaderPermission,
       },
     };
+    // Only this producer owns the descriptive evidence key. The stamped response is a copy; provider bytes stay put.
+    delete factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY];
+    if (evaluatedQuestion !== undefined) factCandidate.result.enrichment![RUN_QUESTION_EVIDENCE_KEY] = evaluatedQuestion;
 
     // The completed Run's final cells own every horizon form, after all withholds, licences and range scoping.
     // Use the response's public-block builder; its projection owns the claim gate, not the cell reader.

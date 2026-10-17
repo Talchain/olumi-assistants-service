@@ -229,7 +229,7 @@ describe('run_analysis handler — happy path', () => {
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([RUN_QUESTION_EVIDENCE_KEY, RUN_ANALYSIS_PROJECTION_KEY]);
+    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY, RUN_QUESTION_EVIDENCE_KEY]);
     expect(enrichment[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
     expect(enrichment[RUN_QUESTION_EVIDENCE_KEY]).toMatchObject({ run_id: fact.result.run_id,
       sent_digest: sentDigest(vi.mocked(plotClient.run).mock.calls[0]![0] as unknown as Record<string, unknown>) });

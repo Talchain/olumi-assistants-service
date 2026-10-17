@@ -312,7 +312,7 @@ export function recordRunQuestion(input: {
 }): RecordedRunQuestion | undefined {
   const snapshot = input.inputSnapshot;
   if (snapshot === null || snapshot.sent_digest !== sentDigest(input.dispatchedRequest)) return undefined;
-  const goalId = typeof input.dispatchedRequest.goal_node_id === 'string' ? input.dispatchedRequest.goal_node_id : undefined;
+  const goalId = snapshot.goal?.node_id;
   const dispatched = dispatchedQuestionOf(input.dispatchedRequest);
   const threshold = dispatched?.encoded_target ?? null;
   // A raw target can ride the graph without a scoring threshold. It belongs to ASKED, never to a performed comparison.
@@ -322,7 +322,9 @@ export function recordRunQuestion(input: {
     sent_digest: snapshot.sent_digest,
     asked: goalId === undefined ? null : askedQuestionOf(input.savedGraph, goalId), calculated,
     dispatched_goal_threshold: threshold, dispatched_goal_baseline: dispatched?.encoded_baseline ?? null });
-  return parsed.success ? parsed.data : undefined;
+  // The strict canonical fact reader consumes this before persistence too. Keep the same JSON shape as the
+  // writer: optional undefined members must not make a live fact invalid while its cold JSON read succeeds.
+  return parsed.success ? JSON.parse(JSON.stringify(parsed.data)) as RecordedRunQuestion : undefined;
 }
 
 /** Only the selected fact's own revision and dispatched-input digest can bind this descriptive record. */

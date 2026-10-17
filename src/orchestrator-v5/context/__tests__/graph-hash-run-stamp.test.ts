@@ -10,6 +10,7 @@ import { computeAnalysisAffectingGraphHash } from '../graph-hash.js';
 import { deriveAnalysisFreshness } from '../freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../analysis-projection-policy.js';
 import { toSafeTransportEnrichment } from '../../compose.js';
+import { RUN_QUESTION_EVIDENCE_KEY } from '../../tools/handlers/run-input-snapshot.js';
 
 it.each(['absent', 'empty', 'questions', 'gapped'] as const)(
   'real run_analysis stamps every new Run and preserves provider/transport bytes: %s', async carrier => {
@@ -48,6 +49,11 @@ it.each(['absent', 'empty', 'questions', 'gapped'] as const)(
   expect(saved.result.graph_hash_at_run).toBe(computeAnalysisAffectingGraphHash(graph));
   const envelope = { ...saved.result.enrichment };
   delete envelope[RUN_ANALYSIS_PROJECTION_KEY];
+  // The same fact now retains its descriptive question; neither internal key is a provider/public result.
+  expect(envelope[RUN_QUESTION_EVIDENCE_KEY]).toMatchObject({ run_id: saved.result.run_id,
+    graph_hash_at_run: saved.result.graph_hash_at_run, sent_digest: saved.result.input_snapshot?.sent_digest,
+    evaluated_scenario_revision: null, dispatched_goal_threshold: null, dispatched_goal_baseline: null });
+  delete envelope[RUN_QUESTION_EVIDENCE_KEY];
   expect(envelope).toEqual(response);
   expect(response).toEqual(untouchedResponse);
   expect(toSafeTransportEnrichment(saved.result.enrichment)).toEqual(toSafeTransportEnrichment(response));

@@ -55,6 +55,7 @@ describe('the evaluated-question producer survives the actual Run-fact writer an
       asked: { target: 100, baseline: 80, horizon: { months: 6, as_stated: 'by March' } },
       calculated: { baseline: 80, encoded_baseline: 0.16, option_ids: expect.arrayContaining(['add_one_specialist', 'keep_current_staffing']) },
       dispatched_goal_threshold: hasThreshold ? 0.2 : null, dispatched_goal_baseline: 0.16 });
+    expect(retained).toStrictEqual(JSON.parse(JSON.stringify(retained)));
     expect(retained.calculated?.target).toBe(hasThreshold ? 100 : undefined);
     expect(retained.calculated?.encoded_target).toBe(hasThreshold ? 0.2 : undefined);
     // The existing no-graph Run append path: capture the actual RPC payload and hydrate its JSON bytes with a fresh cache.
