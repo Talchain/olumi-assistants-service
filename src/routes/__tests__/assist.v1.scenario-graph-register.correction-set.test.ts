@@ -1160,7 +1160,7 @@ describe('78ca founder: complete current source through the existing correction 
     const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
     const savedGoal = w.graph().nodes.find((n: Rec) => n.id === 'funding_secured');
     expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining(originalSaid));
-    expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: source })]));
+    expect(savedGoal.user_statements.flatMap((r: Rec) => r.statements)).toEqual(expect.arrayContaining([expect.objectContaining({ speaker: 'user', quote: source, source })]));
     expect(read.entities.find((n: Rec) => n.id === 'funding_secured').full_label).toContain('Your source stays yours');
     expect(read.recorded_reasoning.find((n: Rec) => n.id === savedGoal.id).user_statements).toEqual(savedGoal.user_statements);
     expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
