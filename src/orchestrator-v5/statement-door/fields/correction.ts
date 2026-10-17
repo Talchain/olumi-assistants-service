@@ -175,7 +175,7 @@ export function statementCorrectionWords(c: StatementCorrection): string {
       `Earlier source and reading:\n${recordWords(e.expected_record)}`, `Replacement source and reading:\n${recordWords(e.record)}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),
     ]),
-    'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. No requested change is omitted. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',
+    'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records only the listed source corrections. Other changes need their own supported card. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',
   ].join('\n');
 }
 
