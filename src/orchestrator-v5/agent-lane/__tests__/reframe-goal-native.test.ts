@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
 import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
-import { applyQualitativeReframe } from '../runtime/agent-capabilities.js';
+import { applyQualitativeReframe } from '../runtime/correction-workflows.js';
 import { constructionOperationId } from '../runtime/build-model.js';
 import { approvedGraphHeld } from '../runtime/draft-replacement.js';
 
@@ -66,6 +66,20 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     const saved = structuredClone(w.graph()), cold = await w.cold();
     expect(cold.status, JSON.stringify(cold.body)).toBe(200); expect(cold.body.graph).toEqual(saved);
     expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true }); expect(w.writes).toHaveLength(1);
+  });
+
+  it('a reframe card states its limited scope when the same request also asks to remove a factor', async () => {
+    const f = fixture(row), message = `${row.message} Also remove Process coverage.`;
+    const w = await correctionWorld(f.graph, message);
+    const result = await w.offer('propose_goal_target', { reframe: f.request });
+    expect(result).toMatchObject({ ok: true, mutated: false });
+    expect(result.public_label).toContain('This card records only the aim change shown. Other changes need their own supported card.');
+    expect(result.public_label).not.toContain('No requested change is omitted');
+    const pid = String(result.proposal_id);
+    expect((w.proposals.get(pid)!.operations[0]!.value as Rec).qualitative_reframe.source_line).toBe(message);
+    expect(await w.press(pid)).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1);
+    expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === 'factor'))).toEqual(f.graph.nodes.find((n: Rec) => n.id === 'factor'));
   });
 
   it('an unrelated quote with an incidental number does not author a reframe', async () => {
