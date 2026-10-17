@@ -116,6 +116,24 @@ describe('a risk in the user’s own words survives the size retry', () => {
     expect(risks).toEqual([]);
   });
 
+  // The size refusal's own reader (BUDDY-A #3350 B1): a risk Olumi read out of the brief is Olumi's, but it is not what Olumi
+  // added beyond the brief; only the widening is counted there. The pair differs only in the drafter's AI tag.
+  it('⛔ RED → GREEN: a risk Olumi read out of the brief is not counted as "added beyond the brief" in the size refusal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('No provider, engine or DB network'); }));
+    const tooBig = oversized(draft({ provenance: 'inferred', statement: false }));
+    const { result, writes } = await build(tooBig, tooBig);
+    expect(writes, JSON.stringify(result).slice(0, 800)).toHaveLength(0);
+    expect(result).toMatchObject({ ok: false, refusal: 'model_too_large', retried: true, added_beyond_brief: 14 });
+  });
+
+  it('⛔ CONTRAST: a risk Olumi added beyond the brief is counted there, beside its fourteen context factors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('No provider, engine or DB network'); }));
+    const tooBig = oversized(draft({ provenance: 'ai_proposed', statement: false }));
+    const { result, writes } = await build(tooBig, tooBig);
+    expect(writes, JSON.stringify(result).slice(0, 800)).toHaveLength(0);
+    expect(result).toMatchObject({ ok: false, refusal: 'model_too_large', retried: true, added_beyond_brief: 15 });
+  });
+
   // The green core's own rule, unchanged here: a drafter's "explicit" tag with no words of the user's behind it is not the user's.
   it('⛔ CONTRAST: a risk merely tagged "explicit", with no words of the user’s behind it, stays Olumi’s and sheddable', () => {
     const first = oversized(draft({ provenance: 'explicit', statement: false }));
