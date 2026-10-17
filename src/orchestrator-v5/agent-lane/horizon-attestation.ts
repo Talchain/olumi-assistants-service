@@ -187,7 +187,7 @@ export function attestHorizon(
   // ⛔ #3342 R2 (BUDDY-A B1 03:24Z; AIE 6184383302: containment alone never proves a period's role): a RANGE is never the goal's
   // deadline by sitting inside its target sentence ("We want £100k MRR; the Pro feature release is planned in the next 6-12
   // months."). Its whole words always come back `unbound`, so the role is asked first; a single span keeps the existing rule.
-  const range = (d: { readonly months?: number }): boolean => Number.isNaN(d.months);
+  const range = (d: { readonly wording: string; readonly months?: unknown }): boolean => typeof d.months === 'number' && Number.isNaN(d.months);
   const first = [...calendar, ...durations.filter((d) => d.led)].sort((a, b) => a.index - b.index)
     .find((d) => (range(d) ? ((unbound ??= d.wording), false) : governed(d.index, d.wording)));
   if (first !== undefined) return { months: null, wording: first.wording, status: 'unresolved' };
