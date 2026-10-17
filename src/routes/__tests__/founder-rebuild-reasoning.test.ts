@@ -84,6 +84,9 @@ describe('explicit rebuild retains the complete saved reasoning', () => {
     for (const option of saved.nodes.filter((n: Rec) => n.interventions?.[id])) {
       expect(r.candidate!.nodes.find((n: Rec) => n.id === option.id)!.interventions[id]).toEqual(option.interventions[id]);
     }
+    for (const edge of saved.edges.filter((e: Rec) => e.from === id || e.to === id)) {
+      expect(r.candidate!.edges.find((e: Rec) => e.from === edge.from && e.to === edge.to)).toEqual(edge);
+    }
     expect(r.adoption_unknown.some(x => x.includes('Founder time on job specifications'))).toBe(true);
     expect(r.retired).toEqual([]);
   });

@@ -4110,6 +4110,9 @@ export function createAgentCapabilities(
     const savedParts = parts(before.nodes), proposedParts = parts(candidate.nodes as Record<string, unknown>[]);
     const added = [...proposedParts].filter(([k]) => !savedParts.has(k)).map(([, label]) => `“${label}”`);
     const omitted = [...savedParts].filter(([k]) => !proposedParts.has(k)).map(([, label]) => `“${label}”`);
+    const savedNames = new Map(before.nodes.map(n => [n.id, n.label]));
+    const removedRelationships = before.edges.filter(e => !(candidate.edges as Record<string, unknown>[]).some(x => x.from === e.from && x.to === e.to))
+      .map(e => `“${savedNames.get(e.from) ?? e.from}” → “${savedNames.get(e.to) ?? e.to}”`);
     const reportWords = ['not_represented', 'open_questions', 'disclosures'].flatMap(k => Array.isArray(report[k]) ? (report[k] as unknown[]).filter((v): v is string => typeof v === 'string') : []);
 
     const public_label = `From your current message: “${request}”.\n` + 'Replace the saved model with this complete proposed model. The current goal and recorded work are retained. Any earlier unadopted Olumi suggestion left out is listed below; suggestions whose adoption is unclear are kept. Other structure and Olumi assumptions may change. Previous analyses keep their original model; this replacement needs a new analysis.\n'
@@ -4119,10 +4122,11 @@ export function createAgentCapabilities(
       + (added.length ? '\nParts not in your current model that this would add: ' + added.join('; ') : '')
       + (omitted.length && prepared.retired.length === 0 ? '\nParts this would remove: ' + omitted.join('; ') : '')
       + (prepared.retired.length ? '\nEarlier Olumi suggestions left out of this replacement: ' + prepared.retired.join('; ') + '.' : '')
+      + (removedRelationships.length ? '\nSaved relationships left out of this replacement: ' + removedRelationships.join('; ') + '.' : '')
       + (prepared.adoption_unknown.length ? '\nKept: Olumi’s earlier suggestions; Olumi cannot tell whether you adopted them: '
         + prepared.adoption_unknown.join('; ') + '. Their original source and settings stay unchanged.' : '')
       + (prepared.kept.length ? '\nRetained work: ' + prepared.kept.join('; ') : '')
-      + (reportWords.length ? '\nConstruction report: ' + reportWords.join(' ') : '')
+      + (reportWords.length ? '\nConstruction report (before saved work was restored): ' + reportWords.join(' ') : '')
       + (history.warnings.length ? '\nHistory: ' + history.warnings.join(' ') : '')
       + '\nCheck the complete replacement, figures, sources, changed assumptions and construction report shown with this card before approving. Nothing changes until this card is pressed.';
     const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,

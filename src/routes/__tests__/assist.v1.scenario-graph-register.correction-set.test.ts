@@ -900,6 +900,47 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
     expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
   });
+  it.each(['omitted', 'relabelled'])('B1: a %s saved factor preserves readiness through complete carry or safe refusal', async change => {
+    const draft = structuredClone(bakery.draft) as Rec;
+    if (change === 'omitted') {
+      draft.factors = draft.factors.filter((f: Rec) => f.label !== 'Loyalty card running');
+      draft.links = draft.links.filter((l: Rec) => l.from !== 'Loyalty card running');
+      draft.options = draft.options.map((o: Rec) => o.label === 'Loyalty card' ? { ...o, interventions: [] } : o);
+    }
+    const proposed = change === 'relabelled'
+      ? JSON.parse(JSON.stringify(draft).split('Loyalty card running').join('Loyalty card active')) : draft;
+    const w = await bakeryWorld({ provider: async () => ({ text: JSON.stringify(proposed), status: 'completed' }) });
+    const savedLink = w.original.edges.find((e: Rec) => e.from === 'loyalty_card_running' && e.to === 'weekly_loaves_sold');
+    expect(savedLink).toBeDefined(); expect(savedLink.provenance).toMatchObject({ source: 'cee_hypothesis' });
+    expect(assessCanonicalAnalysisReadiness(w.original).safeToAnalyse).toBe(true);
+    const offered = await w.offer();
+    if (change === 'relabelled') {
+      expect(offered, JSON.stringify(offered)).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' });
+      expect(offered.follow_up).toContain('unidentified different quantity');
+      expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0);
+      expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+      expect(assessCanonicalAnalysisReadiness(w.graph()).safeToAnalyse).toBe(true);
+      return;
+    }
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
+    const cold = restoreCard(held, offered, w.ctx), caps = w.caps(cold);
+    expect(await caps.authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    const press = { ...w.ctx, turn_id: randomUUID(), user_turn_text: '', typed_approval_of: pid };
+    expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.sent).toHaveLength(1); expect(w.writes).toHaveLength(1);
+    expect(assessCanonicalAnalysisReadiness(w.graph()).safeToAnalyse).toBe(true);
+    expect(validateGraphStructure(GraphV3.parse(w.graph()), { leaveOutInertRisks: true }).violations.filter(v => v.code === 'NO_PATH_TO_GOAL')).toEqual([]);
+    expect(candidate.edges.find((e: Rec) => e.from === savedLink.from && e.to === savedLink.to)).toEqual(savedLink);
+    const saved = w.graph().edges.find((e: Rec) => e.from === savedLink.from && e.to === savedLink.to);
+    expect(saved).toMatchObject(savedLink); expect(saved.provenance).toEqual(savedLink.provenance);
+    expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
+    expect(offered.public_label).toContain('the saved relationship “Loyalty card running” → “weekly loaves sold” (Olumi’s estimate; adoption not recorded)');
+    expect(offered.public_label).toContain('Construction report (before saved work was restored):');
+    expect(await caps.authoriseChange(press, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+  });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });
     // DL04:00 ACK: the former 'partial' row lives at the actual durable source gate, not a sticky authorship flag.

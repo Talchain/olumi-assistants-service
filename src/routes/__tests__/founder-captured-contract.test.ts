@@ -344,7 +344,10 @@ it.each([false, true])('the production rebuild card carries unknown adoption or 
   const seed = await runPreparingDraftReplacement('seed', () => buildModelFromBrief('seed', bakery.brief, async () => { throw new Error('No construction write'); }, provider as never));
   expect(seed.ok).toBe(true); const graph = structuredClone(seed.prepared_graph) as Rec;
   const node = { id: 'earlier_olumi_option', kind: 'option', label: 'Earlier Olumi option', proposed_by: 'olumi', analysis_participation: 'retained_excluded', interventions: {} };
-  graph.nodes.push(node); const pending: PendingAction[] = [];
+  graph.nodes.push(node);
+  const pendingLink = { from: node.id, to: 'loyalty_card_running', strength: { mean: 1, std: 0.01 },
+    exists_probability: 1, effect_direction: 'positive', provenance: { source: 'cee_hypothesis' } };
+  graph.edges.push(pendingLink); const pending: PendingAction[] = [];
   const message = "I've already agreed with this brief. Generate a new model based on this brief.";
   const w = await world({ graph, brief: bakery.brief, message }, { provider, pending });
   if (proof) {
@@ -359,6 +362,8 @@ it.each([false, true])('the production rebuild card carries unknown adoption or 
   expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);
   const pid = String(out.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
   expect(candidate.nodes.some((n: Rec) => n.id === node.id)).toBe(!proof);
+  expect(candidate.edges.some((e: Rec) => e.from === node.id && e.to === pendingLink.to)).toBe(!proof);
+  if (proof) expect(out.public_label).toContain('Saved relationships left out of this replacement: “Earlier Olumi option” → “Loyalty card running”');
   expect(out.public_label).toContain(proof ? 'Earlier Olumi suggestions left out' : 'Olumi cannot tell whether you adopted');
   if (!proof) expect(candidate.nodes.find((n: Rec) => n.id === node.id)).toEqual(node);
   const cold = restoreCard(held, out, w.ctx);

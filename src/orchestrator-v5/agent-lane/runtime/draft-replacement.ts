@@ -599,6 +599,11 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
   for (const option of oldNodes.filter(n => n.kind === 'option')) {
     const found = matches(option, recs(candidate.nodes));
     if (found.length === 0 && mayLeaveOut(option)) continue;
+    // Restoring a whole saved option must not silently erase the draft's setting on an unidentified different quantity.
+    if (found.length === 1 && Object.keys(mergeInterventionSourceObjects(found[0] as never)).some(id => {
+      const quantity = recs(candidate.nodes).find(n => n.id === id);
+      return quantity === undefined || matches(quantity, oldNodes).length !== 1;
+    })) return missing(`the saved quantity and setting on “${String(option.label)}” without substituting an unidentified different quantity`, 'option_setting');
     if (found.length > 1 || (found.length === 0 && !copyAbsent(option))) return missing(`the identity of saved option “${String(option.label)}”`, 'saved_option');
     if (found.length === 0) kept.push(`the complete saved option “${String(option.label)}”`);
   }
@@ -655,9 +660,22 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
     // A retained suggestion cannot silently become active just because the drafter reproduced it.
     return mayLeaveOut(saved) ? { ...n, analysis_participation: saved.analysis_participation } : structuredClone(saved);
   });
-  const edges = recs(candidate.edges);
-  for (const e of protectedEdges) {
+  const edges = recs(candidate.edges), nodeIds = new Set(recs(candidate.nodes).map(n => n.id));
+  for (const e of recs(before.edges)) {
+    const absent = [e.from, e.to].filter(id => !nodeIds.has(id));
+    if (absent.length > 0) {
+      // Only the positively evidenced retired option may take its own incident links out of this candidate.
+      if (absent.every(id => oldNodes.some(n => n.id === id && mayLeaveOut(n)))) continue;
+      return missing('both ends of a saved relationship', 'recorded_reasoning');
+    }
     const at = edges.findIndex(x => x.from === e.from && x.to === e.to);
+    if (at < 0 || !isDeepStrictEqual(edges[at], e)) {
+      const from = oldNodes.find(n => n.id === e.from), to = oldNodes.find(n => n.id === e.to);
+      const p = provenanceOf({ link: e, context: { fromKind: String(from?.kind ?? '') } });
+      const source = p.origin === 'ai' ? p.accepted ? 'accepted Olumi estimate' : 'Olumi’s estimate; adoption not recorded'
+        : p.origin === 'human' ? 'recorded human source' : 'source not verified';
+      kept.push(`the saved relationship “${String(from?.label)}” → “${String(to?.label)}” (${source})`);
+    }
     if (at < 0) edges.push(structuredClone(e)); else edges[at] = structuredClone(e);
   }
   candidate.edges = edges;
