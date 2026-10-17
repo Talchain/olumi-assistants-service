@@ -4,7 +4,7 @@ import { userStatementOf, verifyStatements, type UserStatement } from '../../age
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { statementBoundTo } from '../read.js';
 import { subjectKey, resolveSubject, type DoorSubject } from '../subject.js';
-import { userStatementFor, userStatementRecord, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statements.js';
+import { userStatementFor, userStatementRecord, userStatementRecordOf, withUserStatement, type UserStatementRecord, type StatementAttest } from '../statements.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -34,21 +34,38 @@ const nodeOf = (graph: Rec, id: string): Rec | undefined => Array.isArray(graph.
 const legacyOf = (node: Rec, field: 'already_true_quote' | 'dependency'): unknown => field === 'already_true_quote'
   ? node.already_true_quote : rec(node.draft_widening) ? node.draft_widening.relies_on : undefined;
 
+/** A source correction cannot silently replace adoption or other held attestation. Carry-forward needs its own contract. */
+function protectedAttestation(record: UserStatementRecord | null | undefined): boolean {
+  return Object.keys(record?.attest ?? {}).some(key => key !== 'recorded_by');
+}
+
+/** Retention describes the correction, never the conditions under which the human statement holds. */
+function correctionAttest(e: CorrectionEditRequest): StatementAttest {
+  const metadata: Record<string, string | number | boolean> = { recorded_by: 'correction', disposition: e.retirement?.disposition,
+    scope: e.retirement?.scope, retained_count: e.retained.length };
+  e.retained.forEach((span, index) => {
+    if (typeof span !== 'string') return;
+    const key = `retained_${index}`;
+    // Existing attestation strings have a 200-character limit; preserve longer spans losslessly in ordered pieces.
+    if (span.length <= 200) metadata[key] = span;
+    else {
+      metadata[`${key}_parts`] = Math.ceil(span.length / 200);
+      for (let start = 0; start < span.length; start += 200) metadata[`${key}_part_${start / 200}`] = span.slice(start, start + 200);
+    }
+    metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
+  });
+  return metadata;
+}
+
 /** Keep complete earlier quotes, never manufacture a new human quotation by splicing a bundled sentence. */
 function replacementStatements(source: UserStatement, e: CorrectionEditRequest): UserStatement[] {
   const current: UserStatement = { ...source, subject: { quantity: subjectKey(e.subject), node_id: e.subject.id,
     ...(e.subject.option_id === undefined ? {} : { option_id: e.subject.option_id }) } };
-  return [{ ...current, qualifier: e.reading_words, qualifier_in_quote: source.quote.includes(e.reading_words),
-    conditions: e.retained.join('; ') }, ...e.retained.map(span => {
+  return [{ ...current, qualifier: e.reading_words, qualifier_in_quote: source.quote.includes(e.reading_words) }, ...e.retained.map(span => {
     const earlier = e.expected_record?.statements.find(s => s.quote.includes(span));
+    if (earlier !== undefined) return { ...earlier };
     // A legacy string with no source record has unknown origin. Only the current verified message is human evidence.
-    const quoted = earlier ?? current;
-    return { ...quoted, form: 'describes' as const, low: undefined, high: undefined,
-      qualifier: span, qualifier_in_quote: quoted.quote.includes(span),
-      conditions: earlier === undefined
-        ? 'Olumi’s reading retains this earlier span; its original source is unverified. The current correction is the human source.'
-        : 'Only the explicitly retained span is current. Other content of this complete earlier quotation is historical or retracted by the correction.',
-      reading: 'olumi' as const };
+    return { ...current, qualifier: span, qualifier_in_quote: current.quote.includes(span) };
   })];
 }
 
@@ -83,6 +100,7 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
 export function applyStatementCorrection(graph: unknown, value: unknown): { candidate?: Rec; refused?: string; unchanged?: true } {
   const approved = statementCorrectionOf(value);
   if (!rec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || approved === undefined) return { refused: 'invalid_statement' };
+  if (approved.edits.some(e => protectedAttestation(e.expected_record))) return { refused: 'correction_attestation_protected' };
   // A complete matching postimage is a retry, never an excuse to ignore a stale preimage on a partial write.
   const held = approved.edits.every(e => {
     const node = nodeOf(graph, e.subject.id);
@@ -105,10 +123,9 @@ export function applyStatementCorrection(graph: unknown, value: unknown): { cand
     }
     if (!oldQuotes.some(q => q.includes(e.retirement.quote))) return { refused: 'retired_source_not_held' };
     if (!e.retained.every(q => oldQuotes.some(old => old.includes(q)))) return { refused: 'retained_source_not_stated' };
-    // The JSON round-trip is the stored representation: omitted bounds are absent, never another numerical reading.
+    // Compare the exact stored representation, including every retained form, figure and condition.
     if (!isDeepStrictEqual(e.record.statements, JSON.parse(JSON.stringify(replacementStatements(approved.source, e))))) return { refused: 'invalid_statement' };
-    if (!isDeepStrictEqual(e.record.attest, { recorded_by: 'correction', disposition: e.retirement.disposition,
-      scope: e.retirement.scope })) return { refused: 'invalid_statement' };
+    if (!isDeepStrictEqual(e.record.attest, correctionAttest(e))) return { refused: 'invalid_statement' };
   }
   let candidate = structuredClone(graph) as Rec & { nodes: unknown[] };
   for (const e of approved.edits) {
@@ -128,10 +145,19 @@ export function applyStatementCorrection(graph: unknown, value: unknown): { cand
 
 /** All changes are existing record/source members. The complete old/new bytes are available before approval. */
 export function statementCorrectionWords(c: StatementCorrection): string {
-  const recordWords = (record: UserStatementRecord | null): string => record === null ? 'No earlier structured record.'
+  const amountWords = (s: UserStatement): string[] => {
+    const unit = s.unit ? ` ${s.unit}` : ' (unit unknown)';
+    if (s.low !== undefined && s.high !== undefined) return [s.low === s.high
+      ? `Recorded amount: ${s.low}${unit}.` : `Recorded range: between ${s.low} and ${s.high}${unit}.`];
+    if (s.low !== undefined) return [`Recorded lower limit: at least ${s.low}${unit}.`];
+    if (s.high !== undefined) return [`Recorded upper limit: at most ${s.high}${unit}.`];
+    return [];
+  };
+  const fieldWords: Record<string, string> = { level: 'current amount', target: 'aim', holds_now: 'current account', occurrence: 'likelihood',
+    lead: 'timing', effect: 'effect', measure: 'meaning', relation: 'explanation' };
+  const recordWords = (record: UserStatementRecord | null): string => record === null ? 'No earlier source was recorded.'
     : record.statements.map(s => [
-      `Human source: “${s.source}”.`, ...(s.quote === s.source ? [] : [`Quoted words: “${s.quote}”.`]),
-      ...(s.low === undefined && s.high === undefined ? [] : [`Recorded figure/bounds: ${s.low ?? 'unknown'} to ${s.high ?? 'unknown'} ${s.unit ?? '(unit unknown)'}.`]),
+      `Your words: “${s.source}”.`, ...(s.quote === s.source ? [] : [`Quoted words: “${s.quote}”.`]), ...amountWords(s),
       ...(s.reference === undefined ? [] : [`Reference: ${s.reference}.`]), ...(s.period === undefined ? [] : [`Period: ${s.period}.`]),
       ...(s.qualifier === undefined ? [] : [`Olumi’s reading of the relevant words: ${s.qualifier}.`]),
       ...(s.conditions === undefined ? [] : [`Scope and conditions: ${s.conditions}.`]),
@@ -139,13 +165,16 @@ export function statementCorrectionWords(c: StatementCorrection): string {
     ].join('\n')).join('\n');
   return [`From your message: “${c.source.quote}”. Olumi proposes this reading of your correction.`,
     ...c.edits.flatMap(e => [
-      `Subject: ${String(e.expected_node.label)}; field: ${e.subject.field}.`,
-      `Retire as ${e.retirement.disposition} (${e.retirement.scope}): “${e.retirement.quote}”.`,
+      `For ${String(e.expected_node.label)}, correct the ${fieldWords[e.subject.field] ?? 'account'}.`,
+      e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
+        : `Keep “${e.retirement.quote}” only as earlier context.`,
       `Keep explicitly: ${e.retained.length ? e.retained.map(q => `“${q}”`).join('; ') : 'nothing from the retired record'}.`,
+      ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
+        .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
       `Earlier source and reading:\n${recordWords(e.expected_record)}`, `Replacement source and reading:\n${recordWords(e.record)}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),
     ]),
-    'Only the explicitly retained spans remain current from the earlier account; its other content is historical or retracted as shown. Omitted changes: none. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records source meaning; it does not calculate a numerical effect. Your quote stays human source; the interpretation remains Olumi’s after approval.',
+    'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. No requested change is omitted. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',
   ].join('\n');
 }
 
@@ -165,9 +194,10 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     source = verified.statements[0]!;
     if (!Array.isArray(e.retained)) return { refused: 'retained_list_required' };
     const expected = e.expected_record === undefined ? userStatementFor(graph, e.subject) ?? null : e.expected_record;
+    if (protectedAttestation(expected)) return { refused: 'correction_attestation_protected' };
     edits.push({ ...e, expected_record: expected, expected_node: structuredClone(node),
       record: userStatementRecord(e.subject, replacementStatements(source, { ...e, expected_record: expected }), at,
-        { recorded_by: 'correction', disposition: e.retirement?.disposition, scope: e.retirement?.scope }) });
+        correctionAttest({ ...e, expected_record: expected })) });
   }
   const correction: StatementCorrection = { source: source!, edits };
   const written = applyStatementCorrection(graph, correction);

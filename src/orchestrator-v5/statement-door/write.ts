@@ -20,7 +20,9 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
   request: StatementCorrectionRequest, proposals: ProposalStore): ToolResult {
   const prepared = prepareStatementCorrection(graph, request, { now: ctx.user_turn_text, conversation: ctx.user_text }, new Date().toISOString());
   if ('refused' in prepared) return { ok: false, mutated: false, refusal: prepared.refused,
-    detail: 'No correction was prepared. Keep the source, intended subject and explicitly retained material together.' };
+    detail: prepared.refused === 'correction_attestation_protected'
+      ? 'This record also holds an approval or other confirmation. A source correction cannot replace it safely yet. No card was created and the record is unchanged.'
+      : 'No correction was prepared. Keep the source, intended subject and explicitly retained material together.' };
   const first = prepared.correction.edits[0]!;
   const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: baseHash,

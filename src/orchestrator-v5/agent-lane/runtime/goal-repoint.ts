@@ -38,7 +38,7 @@ const identityOf = (g: unknown): string => computeGraphIdentityHash(g as never)?
 
 /** A qualitative repoint uses the same old-goal node for history, and introduces no operative number or new store. */
 export function prepareQualitativeReframe(ctx: AgentToolContext, before: ReframeRead, request: QualitativeReframeRequest,
-  at: string): { refused: string } | { candidate: Rec; new_id: string; words: string } {
+  at: string): { refused: string } | { candidate: Rec; new_id: string; words: string; source_line: string } {
   const nodes = Array.isArray(before.raw.nodes) ? before.raw.nodes.filter(rec) : [];
   const old = nodes.find(n => n.id === request?.goal_id && n.kind === 'goal');
   if (!old || nodes.filter(n => n.kind === 'goal').length !== 1 || typeof request.quote !== 'string'
@@ -54,8 +54,7 @@ export function prepareQualitativeReframe(ctx: AgentToolContext, before: Reframe
   if (priorDescription === undefined) return { refused: 'goal_not_readable' };
   const rows = Array.isArray(before.raw.goal_constraints) ? before.raw.goal_constraints.filter(rec) : [];
   const oldRows = rows.filter(r => r.node_id === old.id);
-  const description = priorDescription + (oldRows.length
-    ? `\nComplete earlier bound records (historical, outside active constraints): ${JSON.stringify(oldRows)}` : '');
+  const description = priorDescription;
   const newId = `aim_${createHash('sha256').update(JSON.stringify([ctx.scenario_id, before.graph_identity_hash, request])).digest('hex').slice(0, 24)}`;
   if (nodes.some(n => n.id === newId || String(n.label).trim() === request.label.trim())) return { refused: 'goal_not_resolved' };
   const earlier = { ...structuredClone(old), kind: 'outcome', description, analysis_participation: 'retained_excluded' };
@@ -71,19 +70,14 @@ export function prepareQualitativeReframe(ctx: AgentToolContext, before: Reframe
     qualifier: request.label.trim(), qualifier_in_quote: request.quote.includes(request.label.trim()) }], at);
   const recorded = withUserStatement(candidate as Rec & { nodes: unknown[] }, record, newSubject);
   if (recorded === undefined) return { refused: 'goal_not_prepared' };
-  const oldMeaning = readGoalRecord(before.raw, String(old.id));
-  const retired = [
-    ...(oldMeaning?.target === null || oldMeaning?.target === undefined ? [] : [`Earlier target/measurement: ${JSON.stringify(oldMeaning.target)}.`]),
-    ...rows.filter(r => r.node_id === old.id).map(r => `Remove from active constraints, retain as earlier context: ${JSON.stringify(r)}.`),
-    ...(oldMeaning?.horizon == null ? [] : [`Earlier timing, outside the new aim: ${JSON.stringify(oldMeaning.horizon)}.`]),
-  ];
+  const retired = oldRows.length ? ['Earlier limits no longer apply to the new aim. The limits described below stay as earlier context.'] : [];
   const words = [`From your message: “${request.quote}”.`, `Olumi proposes the qualitative aim “${request.label.trim()}”.`,
     `“${String(old.label)}” becomes an earlier outcome, excluded from analysis, with its complete original source, figures and uncertainty retained.`,
     ...retired, `Earlier aim in the saved model: ${description}`,
     'The new aim has no numeric target, baseline, unit, date, distribution or causal relationships. How the options affect this aim remains unknown.',
-    'Options, settings, links, other constraints and dissent are unchanged. Omitted changes: none. Your quote stays human source; the label and framing remain Olumi’s reading after approval.',
+    'Options, settings, links, other limits and disagreement are unchanged. No requested change is omitted. Your quote stays yours; the reading remains Olumi’s after approval.',
   ].join('\n');
-  return { candidate: recorded, new_id: newId, words };
+  return { candidate: recorded, new_id: newId, words, source_line: verified.statements[0]!.source };
 }
 
 /** Mint the existing repoint_goal operation, with the complete reviewed candidate frozen in its content identity. */
@@ -93,7 +87,7 @@ export function proposeQualitativeReframe(ctx: AgentToolContext, before: Reframe
   if ('refused' in prepared) return { ok: false, mutated: false, refusal: prepared.refused };
   const operationId = constructionOperationId(ctx.scenario_id, `qualitative_reframe:${before.graph_identity_hash}:${identityOf(prepared.candidate)}`);
   const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: before.graph_hash,
-    operations: [{ op: 'repoint_goal', path: prepared.new_id, value: { qualitative_reframe: { request, at }, candidate: prepared.candidate,
+    operations: [{ op: 'repoint_goal', path: prepared.new_id, value: { qualitative_reframe: { request, at, source_line: prepared.source_line }, candidate: prepared.candidate,
       base_identity: before.graph_identity_hash, brief_text: before.brief_text, operation_id: operationId } }],
     provenance: { authored_by: 'model_proposed', basis: request.quote }, validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: prepared.words });
@@ -110,9 +104,10 @@ export async function applyQualitativeReframe(ctx: AgentToolContext, parent: Str
   const bound = rec(v.qualitative_reframe) ? v.qualitative_reframe : {};
   const no = (refusal: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal });
   if (ctx.typed_approval_of !== parent.proposal_id || op?.op !== 'repoint_goal' || !rec(bound.request) || typeof bound.at !== 'string'
+    || typeof bound.source_line !== 'string'
     || before.graph_identity_hash !== v.base_identity || before.brief_text !== v.brief_text) return no('superseded');
   // Recreate only the deterministic native projection from the card's frozen source, never a new AI reading.
-  const sourceContext = { ...ctx, user_turn_text: String(bound.request.quote), user_text: String(bound.request.quote) };
+  const sourceContext = { ...ctx, user_turn_text: bound.source_line, user_text: bound.source_line };
   const prepared = prepareQualitativeReframe(sourceContext, before, bound.request as unknown as QualitativeReframeRequest, bound.at);
   if ('refused' in prepared || !isDeepStrictEqual(prepared.candidate, v.candidate) || op.path !== prepared.new_id
     || parent.public_label !== prepared.words) return no('incomplete_goal_postimage');

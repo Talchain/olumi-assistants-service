@@ -40,7 +40,7 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     expect(proposal.operations.map(o => o.op)).toEqual(['repoint_goal']);
     const chips = w.chips('propose_goal_target', result);
     expect(chips[0]!.id).toBe(`agent-approve-proposal:${pid}`); expect(chips[0]!.detail).toBe(result.public_label);
-    expect(result.public_label).toContain('Remove from active constraints');
+    expect(result.public_label).toContain('Earlier limits no longer apply to the new aim');
     expect(result.public_label).toContain(String(row.value));
     expect(result.public_label).toContain(row.unit);
     expect(result.public_label).toContain('no numeric target, baseline, unit, date, distribution');
@@ -99,5 +99,34 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     const native = await applyQualitativeReframe({ ...w.ctx, typed_approval_of: pid }, tampered as never, before, w.proposals,
       async () => { throw new Error('A refused candidate must not register'); }, async () => before);
     expect(native).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' }); expect(w.writes).toHaveLength(0);
+  });
+
+  it('Lane A B2: a quoted sentence inside a longer typed line keeps that complete source on approval and cold read', async () => {
+    const f = fixture(row), line = `Thanks, that helps. ${row.message} Revenue was £2m as of 2026-09-01.`;
+    const w = await correctionWorld(f.graph, line), result = await w.offer('propose_goal_target', { reframe: f.request });
+    expect(result).toMatchObject({ ok: true, mutated: false });
+    const pid = String(result.proposal_id), proposal = w.proposals.get(pid)!;
+    const restored = w.restoreCard(proposal, result, 'propose_goal_target');
+    expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+    expect((proposal.operations[0]!.value as Rec).qualitative_reframe.source_line).toBe(line);
+    expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
+    const cold = await w.cold(), goal = cold.body.graph.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(userStatementFor(cold.body.graph, { kind: 'goal', id: goal.id, field: 'measure' })!.statements[0])
+      .toMatchObject({ source: line, quote: row.message, speaker: 'user', reading: 'olumi' });
+    expect(goal).not.toHaveProperty('goal_threshold_raw'); expect(goal).not.toHaveProperty('goal_horizon');
+  });
+
+  it('N4 shows plain retirement and source words on the card and in the reopened earlier aim', async () => {
+    const f = fixture(row), w = await correctionWorld(f.graph, row.message), result = await w.offer('propose_goal_target', { reframe: f.request });
+    expect(result.ok).toBe(true);
+    expect(result.public_label).toContain(`Earlier saved bound:`);
+    expect(result.public_label).toContain('Your quote stays yours; the reading remains Olumi’s');
+    expect(result.public_label).not.toMatch(/\{"|constraint_id|node_id|value_frame|retained_excluded|goal_threshold|Earlier target\/measurement|active constraints/u);
+    expect((await w.press(String(result.proposal_id))).ok).toBe(true);
+    const cold = await w.cold(), old = cold.body.graph.nodes.find((n: Rec) => n.id === 'old_goal');
+    expect(old.description).toContain(`Earlier saved bound:`);
+    expect(old.description).toContain(`${row.value} ${row.unit}`);
+    expect(old.description).toContain(f.graph.goal_constraints[0].source_quote);
+    expect(old.description).not.toMatch(/\{"|constraint_id|node_id|value_frame|Complete earlier bound records/u);
   });
 });

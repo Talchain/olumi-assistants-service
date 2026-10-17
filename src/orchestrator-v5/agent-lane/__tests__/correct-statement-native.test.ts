@@ -3,6 +3,7 @@ import { correctionWorld, type Rec } from './corrections-stage2-world.js';
 import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
 import type { StatementCorrectionRequest } from '../../statement-door/fields/correction.js';
+import { rangeLawAdopted, rangeLawSubject } from '../../intervention-range.js';
 
 const cases = [
   { name: 'distribution', factor: 'Dispatch updates', risk: 'Service disruption', retained: 'delayed scans', withdrawn: 'the entire shift has stopped' },
@@ -56,11 +57,12 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
     for (const s of [f.subject, f.other]) {
       const statements = userStatementFor(w.graph(), s)!.statements;
-      expect(userStatementFor(w.graph(), s)!.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'part' });
+      expect(userStatementFor(w.graph(), s)!.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'part',
+        retained_count: 1, retained_0: row.retained, retained_0_origin: 'held_user_statement' });
       expect(statements[0]).toMatchObject({ source: f.message, quote: f.message,
-        speaker: 'user', reading: 'olumi', conditions: row.retained, subject: { node_id: s.id } });
-      expect(statements[1]).toMatchObject({ source: f.graph.nodes[1].user_statements[0].statements[0].source,
-        speaker: 'user', reading: 'olumi', qualifier: row.retained, subject: { node_id: s.id } });
+        speaker: 'user', reading: 'olumi', subject: { node_id: s.id } });
+      expect(statements[0]).not.toHaveProperty('conditions');
+      expect(statements[1]).toEqual(userStatementFor(f.graph, s)!.statements[0]);
     }
     expect(w.graph().nodes.find((n: Rec) => n.id === 'risk')).not.toHaveProperty('already_true_quote');
     for (const id of ['option', 'dissent']) expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === id))).toEqual(f.graph.nodes.find((n: Rec) => n.id === id));
@@ -89,7 +91,8 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     const kept = userStatementFor(w.graph(), f.subject)!.statements[1]!;
     expect(kept.source).toBe(f.graph.nodes[1].user_statements[0].statements[0].source);
     expect(kept.quote).toBe(kept.source);
-    expect(kept.qualifier).toBe(row.retained);
+    expect(kept).toEqual(userStatementFor(f.graph, f.subject)!.statements[0]);
+    expect(userStatementFor(w.graph(), f.subject)!.attest!.retained_0).toBe(row.retained);
   });
 
   it('historical and retracted remain distinguishable on a cold read', async () => {
@@ -102,7 +105,8 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect((await w.press(String(result.proposal_id))).ok).toBe(true);
     const cold = await w.cold(); expect(cold.status).toBe(200);
     for (const s of [f.subject, f.other]) expect(userStatementFor(cold.body.graph, s)!.attest)
-      .toEqual({ recorded_by: 'correction', disposition: 'historical', scope: 'part' });
+      .toEqual({ recorded_by: 'correction', disposition: 'historical', scope: 'part',
+        retained_count: 1, retained_0: row.retained, retained_0_origin: 'held_user_statement' });
     expect(w.writes).toHaveLength(1);
   });
 
@@ -114,7 +118,8 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(result.ok, JSON.stringify(result)).toBe(true); expect((await w.press(String(result.proposal_id))).ok).toBe(true);
     const retained = userStatementFor(w.graph(), f.other)!.statements[1]!;
     expect(retained.source).toBe(f.message); expect(retained.quote).toBe(f.message);
-    expect(retained.conditions).toContain('original source is unverified');
+    expect(retained).not.toHaveProperty('conditions');
+    expect(userStatementFor(w.graph(), f.other)!.attest!.retained_0_origin).toBe('unknown');
     expect(retained).not.toHaveProperty('low'); expect(retained).not.toHaveProperty('high');
   });
 
@@ -166,5 +171,83 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     const result = await w.offer('propose_statement', { correction: f.request, subject: f.subject, statements: [{ quote: f.message }] });
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'mixed_statement_changes' });
     expect(w.writes).toHaveLength(0);
+  });
+
+  it('Lane A B1: an adopted option range refuses before a card and keeps its own adoption', async () => {
+    const f = fixture(row), subject = rangeLawSubject('option', 'report');
+    const source = `Explore process changes would bring ${row.factor} to between 40 and 60 people, mostly on nights.`;
+    const message = `For Explore process changes and ${row.factor}, retract “mostly on nights”; keep “between 40 and 60 people” as it was.`;
+    f.graph.nodes[1].observed_state = { value: 30, raw_value: 30, unit: 'people', source: 'brief_extraction' };
+    f.graph.nodes[1].user_statements = [userStatementRecord(subject, [{ source, quote: source, speaker: 'user', reading: 'olumi',
+      form: 'range', low: 40, high: 60, unit: 'people', subject: { quantity: row.factor, node_id: 'report', option_id: 'option' } }],
+    '2026-08-01T00:00:00Z', { range_law: 'equal_tail', low: 40, high: 60 })];
+    f.graph.nodes[3].interventions.report = { value: 50, raw_value: 50, unit: 'people' };
+    expect(rangeLawAdopted(f.graph, 'option', { factor_id: 'report', low: 40, high: 60 })).toBe(true);
+    const w = await correctionWorld(f.graph, message), result = await w.offer('propose_statement', { correction: { quote: message,
+      edits: [{ subject, retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' }, retained: ['between 40 and 60 people'], reading_words: 'day and night distribution is unknown' }] } });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_attestation_protected' });
+    expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    expect(rangeLawAdopted(w.graph(), 'option', { factor_id: 'report', low: 40, high: 60 })).toBe(true);
+  });
+
+  it.each([{ fingerprint: 'held-approval' }, { retained_flag: false }])('B1 refuses any extra attestation, including %j', async extra => {
+    const f = fixture(row);
+    f.graph.nodes[1].user_statements[0].attest = { recorded_by: 'construction', ...extra };
+    const w = await correctionWorld(f.graph, f.message), result = await w.offer('propose_statement', { correction: f.request });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_attestation_protected' });
+    expect(result).not.toHaveProperty('proposal_id'); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  });
+
+  it.each(['point', 'range'] as const)('N1/N2 keep the complete retained %s statement, with retention outside its conditions', async form => {
+    const f = fixture(row), graph = structuredClone(f.graph), span = form === 'point' ? 'about 40 people' : 'between 40 and 60 people';
+    const source = `${row.factor} has ${span}, mostly on nights.`;
+    const earlier = { source, quote: source, speaker: 'user' as const, reading: 'olumi' as const,
+      form, low: 40, high: form === 'point' ? 40 : 60, unit: 'people', qualifier: 'about', qualifier_in_quote: form === 'point',
+      reference: 'counted staff', period: 'this quarter', subject: { quantity: row.factor, node_id: 'report' } };
+    graph.nodes[1].user_statements = [userStatementRecord(f.subject, [earlier], '2026-08-01T00:00:00Z', { recorded_by: 'construction' })];
+    const message = `For ${row.factor}, retract “mostly on nights”; keep “${span}” as it was.`;
+    const w = await correctionWorld(graph, message), result = await w.offer('propose_statement', { correction: { quote: message,
+      edits: [{ subject: f.subject, retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' }, retained: [span], reading_words: 'work pattern unknown' }] } });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const savedOperation = w.proposals.get(String(result.proposal_id))!.operations[0]!.value as Rec;
+    expect(savedOperation.correction.edits[0].retained).toEqual([span]);
+    expect((await w.press(String(result.proposal_id))).ok).toBe(true);
+    const saved = userStatementFor(w.graph(), f.subject)!;
+    expect(saved.statements[1]).toEqual(earlier);
+    expect(saved.statements[0]).not.toHaveProperty('conditions'); expect(saved.statements[1]).not.toHaveProperty('conditions');
+    expect(saved.attest).toMatchObject({ retained_count: 1, retained_0: span, retained_0_origin: 'held_user_statement' });
+    expect(userStatementFor((await w.cold()).body.graph, f.subject)).toEqual(saved); expect(w.writes).toHaveLength(1);
+  });
+
+  it('N3 records unknown legacy origin structurally through cold reopen, without borrowing another source', async () => {
+    const f = fixture(row), graph = structuredClone(f.graph); delete graph.nodes[2].user_statements;
+    const w = await correctionWorld(graph, f.message), result = await w.offer('propose_statement', { correction: { quote: f.message, edits: [f.request.edits[1]] } });
+    expect(result.ok).toBe(true); expect((await w.press(String(result.proposal_id))).ok).toBe(true);
+    const saved = userStatementFor((await w.cold()).body.graph, f.other)!;
+    expect(saved.attest).toMatchObject({ retained_count: 1, retained_0: row.retained, retained_0_origin: 'unknown' });
+    expect(saved.statements.map(s => ({ source: s.source, quote: s.quote }))).toEqual([
+      { source: f.message, quote: f.message }, { source: f.message, quote: f.message }]);
+    expect(saved.statements.every(s => s.conditions === undefined)).toBe(true);
+  });
+
+  it('N2 keeps the earlier condition as stated rather than substituting the retained words', async () => {
+    const f = fixture(row), earlier = f.graph.nodes[1].user_statements[0].statements[0];
+    earlier.conditions = 'if the shared register is available';
+    const w = await correctionWorld(f.graph, f.message), result = await w.offer('propose_statement', { correction: f.request });
+    expect(result.ok).toBe(true); expect((await w.press(String(result.proposal_id))).ok).toBe(true);
+    const saved = userStatementFor((await w.cold()).body.graph, f.subject)!;
+    expect(saved.statements[0]).not.toHaveProperty('conditions'); expect(saved.statements[1]).toEqual(earlier);
+    expect(saved.attest!.retained_0).toBe(row.retained);
+  });
+
+  it('N4 explains the correction, kept words and authorship without internal field names', async () => {
+    const f = fixture(row), w = await correctionWorld(f.graph, f.message), result = await w.offer('propose_statement', { correction: f.request });
+    expect(result.ok).toBe(true);
+    expect(result.public_label).toContain(`For ${row.factor}`);
+    expect(result.public_label).toContain(`Withdraw “${row.withdrawn}”`);
+    expect(result.public_label).toContain(`Keep explicitly: “${row.retained}”`);
+    expect(result.public_label).toContain('Your quote stays yours; the reading remains Olumi’s');
+    expect(result.public_label).not.toMatch(/Subject:|field:|Retire as|Recorded figure\/bounds|subject_key|recorded_by|\{"/u);
   });
 });
