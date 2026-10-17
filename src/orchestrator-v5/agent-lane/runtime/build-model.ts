@@ -2621,10 +2621,11 @@ export async function buildModelFromBrief(
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
     // words ("… the model doesn't hold it yet"). A drafter question is left out beside it only when its verified concerns are
     // all set-aside links (`withoutSetAsideQuestions`); a question quoting the same amount with no such binding is asked.
+    // ⛔ T1 HOST P11: likewise a link withheld for its unknown direction, asked once by `directionUnknownQuestions` below.
     const setAside = setAsideEstimatesOf(admitted.loss);
     const parkedConcerns = (candidate as { unknown_concerns?: unknown }).unknown_concerns;
-    const openQuestions = withSetAsideFiguresSaid(withoutSetAsideQuestions(userFacingDrafterQuestions(parked), setAside,
-      parkedConcerns, admitted.nodes), setAside, parkedConcerns, admitted.nodes);
+    const openQuestions = withSetAsideFiguresSaid(withoutSetAsideQuestions(userFacingDrafterQuestions(parked),
+      [...setAside, ...directionUnknown(admitted.withheld)], parkedConcerns, admitted.nodes), setAside, parkedConcerns, admitted.nodes);
     // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
     // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
     // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -3147,7 +3148,7 @@ function verifiedConcernsOf(concerns: readonly unknown[]): Map<string, readonly 
  * found the number fallback still deleting "10–20% churn", "400 customers at £20" and the 60-customer campaign). Duplicate
  * entries for one question must bind it alike; any conflicting or malformed entry keeps it asked.
  */
-function withoutSetAsideQuestions(questions: string[], setAside: readonly SetAsideEstimate[], concerns: unknown,
+function withoutSetAsideQuestions(questions: string[], setAside: readonly { readonly from: string; readonly to: string }[], concerns: unknown,
   nodes: readonly { readonly id: string; readonly label?: unknown }[]): string[] {
   if (!Array.isArray(concerns)) return questions;
   // The set-aside link is keyed by its admitted ends; a concern's label names a node only when exactly one has that label.

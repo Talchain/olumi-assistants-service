@@ -210,7 +210,11 @@ describe('⛔ an orphaned goal is NOT repaired with a sign nobody stated (#63 57
     expect(reg.edges.filter((e) => e.to === goal.id)).toEqual([]);
     expect(out.withheld).toContainEqual({ from: outcome.id, to: goal.id, reason: 'no_authored_direction' });
     // The fixture's stated 3-month deadline is asked first (construction-goal-losses-are-said.test.ts).
-    expect(out.open_questions).toEqual(['Does "Productivity change" get there within 3 months? The model holds no deadline yet, so no result answers that.', QUESTION]);
+    // ⛔ CHANGED EXPECTATION (T1 HOST P11): the withheld link is also asked by name, last. This draft binds no question to what it
+    // is about (no `unknown_concerns`), so its own question is kept too (DL ruling 14 Oct 02:0xZ: no binding, no removal); a
+    // question bound only to the link is left out beside the host's ask (`construction-direction-unknown-named.test.ts`).
+    expect(out.open_questions).toEqual(['Does "Productivity change" get there within 3 months? The model holds no deadline yet, so no result answers that.', QUESTION,
+      `Does "${outcome.label}" raise or lower "${goal.label}"? Nobody has said which way, so that link is left out of the model for now.`]);
   });
 
   it('CONTRAST: an outcome -> goal link with a STATED direction still reaches the goal, with that sign', () => {

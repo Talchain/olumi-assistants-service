@@ -147,6 +147,33 @@ describe('a relationship nobody gave a direction is named, asked, and its words 
     expect(Math.min(tally.loop, tally.missing), JSON.stringify(tally)).toBeGreaterThan(1);
   }, 60_000);
 
+  it('⭐ SWEEP (one ask per link): a drafter question bound ONLY to a link withheld for its unknown direction is left out beside the host\'s ask; any other binding, or none, keeps it (the set-aside rule, `withoutSetAsideQuestions`)', async () => {
+    const DRAFTER_Q = 'Do more referrals make sales calls longer or shorter?';
+    const wrong: string[] = [];
+    const bindings = (link: string): Record<string, Rec[] | undefined> => ({
+      'the link only': [{ unknown: DRAFTER_Q, concerns: [link] }],
+      'the link and another subject': [{ unknown: DRAFTER_Q, concerns: [link, COUNT] }],
+      'another subject only': [{ unknown: DRAFTER_Q, concerns: [COUNT] }],
+      'an empty list': [{ unknown: DRAFTER_Q, concerns: [] }],
+      'no binding': undefined,
+    });
+    for (const fate of ['unknown', 'positive', 'loop'] as const) for (const [name, concerns] of Object.entries(bindings(fate === 'loop' ? `${CALL} → ${REF}` : `${REF} → ${CALL}`))) {
+      const base = scenario(fate === 'loop' ? 'positive' : fate, 'relation', 'describes', 'factor').model;
+      // A loop on THIS link (its direction stated): Sales call length → Referrals closes it, and the admission cuts that one.
+      const model = { ...base, unknowns: [DRAFTER_Q], ...(concerns !== undefined ? { unknown_concerns: concerns } : {}),
+        ...(fate === 'loop' ? { links: [...base.links, { ...base.links[0], from: CALL, to: REF }] } : {}) };
+      const { graph, out } = await build(model);
+      if (fate === 'loop' && !(out.withheld ?? []).some((w: Rec) => w.from === nodeOf(graph, CALL).id && w.to === nodeOf(graph, REF).id
+        && w.reason === 'loop_closing_link')) wrong.push(`loop / ${name}: not loop-withheld`);
+      const asked = (out.open_questions ?? []) as string[];
+      const leftOut = fate === 'unknown' && name === 'the link only';
+      if (asked.includes(DRAFTER_Q) === leftOut) wrong.push(`${fate} / ${name}: drafter question ${leftOut ? 'still asked' : 'lost'}`);
+      const hostAsks = asked.some((q) => q.startsWith(`Does "${REF}" raise or lower "${CALL}"?`));
+      if (hostAsks !== (fate === 'unknown')) wrong.push(`${fate} / ${name}: host ask ${hostAsks}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
   it('an outcome source has no door subject (BLOCKED-SCHEMA): its words are kept in the existing not-represented line, and the link is still named and asked', async () => {
     const { graph, out } = await build(draft({ direction: 'unknown', field: 'relation', form: 'describes', sourceKind: 'outcome' }));
     expect(holders(graph, SENTENCES.describes)).toEqual([]);
