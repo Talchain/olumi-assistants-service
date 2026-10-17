@@ -278,7 +278,7 @@ describe('B4 final reply boundary through the real Agent route', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('a legacy recorded answer keeps its exact bytes when the model moves', async () => {
+  it('a stale unlicensed legacy answer is not re-served as current', async () => {
     const id = randomUUID(); lateText = safe;
     const live = await turn(id);
     expect(live.statusCode, live.body).toBe(200);
@@ -287,19 +287,21 @@ describe('B4 final reply boundary through the real Agent route', () => {
     stale = true; licensed = false;
     const replay = await turn(id);
     expect(replay.statusCode, replay.body).toBe(200);
-    expect(replay.json().assistant_text).toBe(legacy);
+    expect(replay.json().assistant_text).toBe('The explanation is unavailable.');
     expect(rows.get(id)?.assistant_message).toBe(legacy);
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('append failure cannot restore a control the final gate withheld', async () => {
-    appendUnavailable = true; unsafeBar = true;
+  it.each([false, true])('a refused final control stays withheld; append unavailable=%s', async unavailable => {
+    appendUnavailable = unavailable; unsafeBar = true;
     const id = randomUUID();
     const response = await turn(id);
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json().assistant_text).toBe('The explanation is unavailable.');
     expect(response.json().action_bar).toBeUndefined();
-    expect(rows.has(id)).toBe(false);
+    expect(rows.has(id)).toBe(!unavailable);
+    if (!unavailable) expect(rows.get(id)?.assistant_message).toBe(response.json().assistant_text);
+    expect(store.append.mock.calls.filter(([, options]) => options?.prepare)).toHaveLength(unavailable ? 1 : 2);
     expect(regenerate).toHaveBeenCalledOnce();
   });
 

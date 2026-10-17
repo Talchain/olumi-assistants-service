@@ -149,8 +149,8 @@ describe('agent route: structural challenge press', () => {
     state.provisionalReceipt = true; // same Run, different deterministic licensed presentation
     const changed = (await post(PRESS)).json();
     expect(changed._agent.replayed).toBe(true);
-    expect(changed.assistant_text).toBe(first.assistant_text);
-    expect(changed.assistant_text).toBe(rows.get(`${SCENARIO}:${turnId}`)!.assistant_message);
+    expect(changed.assistant_text).not.toBe(first.assistant_text);
+    expect(changed.assistant_text).toContain(STRUCTURAL_CHALLENGE_LINES.provisional);
     expect(changed._method_result).toBeUndefined();
     expect(dispatch.calls).toHaveLength(1);
   });

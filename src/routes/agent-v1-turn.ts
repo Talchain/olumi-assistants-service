@@ -1,3 +1,6 @@
+import { findStatedAmounts } from '../cee/provenance/stated-amounts.js';
+import { userStatementsOn, statementBoundTo } from '../orchestrator-v5/statement-door/statements.js';
+import { resolveSubject, subjectKey } from '../orchestrator-v5/statement-door/subject.js';
 import { recordedSentencesOf, recordedSentenceIn } from '../orchestrator-v5/agent-lane/recorded-sentence.js';
 import { DOCTRINE_FATAL_PATTERNS, DOCTRINE_VERDICT_PATTERNS, findSuccessClaimHit } from '../orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 import { STATIC_MODEL_SCOPE_NOTE } from '../orchestrator-v5/goal-target/static-run-evidence.js';
@@ -1873,7 +1876,6 @@ interface ReplyEvidence {
   readonly hasCard: boolean;
   readonly cardTexts?: readonly string[];
   readonly licensedMethodClaims?: readonly string[];
-  readonly explanationCurrent?: boolean;
   readonly recordedText?: string;
 }
 
@@ -1902,10 +1904,41 @@ function renderedReplyProse(body: OlumiResponse): readonly { text: string; actio
 
 function deliveredCardTexts(records: readonly ProposalRecord[], actions: readonly SuggestedAction[]): readonly string[] {
   return records.flatMap(record => {
-    const card = record.approve_action;
-    return typeof card.detail === 'string' && actions.some(action => action.id === card.id && action.detail === card.detail)
-      ? [card.detail] : [];
+    // The host's reserve alternative belongs to the same held limit, before its statement has been approved into the model.
+    const cards = [record.approve_action, ...record.operations.flatMap(operation => {
+      if (operation.op !== 'set_limit' && operation.op !== 'add_limit') return [];
+      const value = operation.value;
+      const reserve = value !== null && typeof value === 'object' && 'reserve' in value ? value.reserve : undefined;
+      return reserve !== null && typeof reserve === 'object' && 'detail' in reserve && typeof reserve.detail === 'string'
+        ? [{ id: `${record.approve_action.id}:reserve`, detail: reserve.detail }] : [];
+    })];
+    return cards.flatMap(card => typeof card.detail === 'string' && actions.some(action => action.id === card.id && action.detail === card.detail)
+      ? [card.detail] : []);
   });
+}
+
+/** Compare only figures, retaining the statement door's graph identity and source units/sign. */
+function verifiedReplyFigures(claim: string, sentence: string, graph: unknown): boolean {
+  const nodes = graph !== null && typeof graph === 'object' && 'nodes' in graph && Array.isArray(graph.nodes) ? graph.nodes : [];
+  const signed = (text: string, at: number, value: number): number => text.slice(0, at).trimEnd().endsWith('-')
+    || text.slice(0, at).trimEnd().endsWith('−') ? -value : value;
+  return findStatedAmounts(claim).every(figure => nodes.some(node => userStatementsOn(node).some(record => {
+    const [kind, id, to_id, option_id] = record.subject_key.split('|');
+    const resolved = resolveSubject(graph, { kind, id, to_id, option_id, field: record.field });
+    if (resolved.kind !== 'resolved' || subjectKey(resolved.subject) !== record.subject_key || (node === null || typeof node !== 'object' || !('id' in node) || node.id !== resolved.subject.id) || statementBoundTo(graph, resolved.subject, sentence) === 'another') return false;
+    return record.statements.some(statement => statement.subject.node_id === resolved.subject.id
+      && statement.subject.option_id === resolved.subject.option_id
+      && findStatedAmounts(statement.quote).some(source => {
+        const value = signed(claim, figure.index, figure.magnitude);
+        const tail = claim.slice(figure.index + figure.matchedText.length).trimStart(), unit = statement.unit;
+        const next = typeof unit === 'string' ? tail[unit.length] : undefined;
+        return figure.magnitude === source.magnitude
+          && (value === statement.low || value === statement.high)
+          && figure.kind === source.kind && figure.currencyCode === source.currencyCode
+          && (figure.kind !== 'plain' || (typeof unit === 'string' && unit !== '' && tail.startsWith(unit)
+            && (next === undefined || (next.toLowerCase() === next.toUpperCase() && (next < '0' || next > '9')))));
+      }));
+  })));
 }
 
 function finalReplyValidation(evidence: ReplyEvidence): FinalReplyValidation {
@@ -1932,6 +1965,7 @@ function finalReplyValidation(evidence: ReplyEvidence): FinalReplyValidation {
     if (checked.assistant_text !== chanceSurface.assistant_text) fail('a', 'chance_or_attribution_changed');
     const leaderChecked = enforceLeaderLicenceAtFinalEgress(inspect as OlumiResponse & Record<string, unknown>, {
       ...leaderGateInputsOf({ analysisState: evidence.analysisState, analysisReady: evidence.analysisReady, graph }),
+      mayNameLeadingOption: state?.leader_claim?.permitted === true,
       requestId: 'final-reply', exitPath: 'agent_final_validation',
     });
     if (leaderChecked.response !== inspect && JSON.stringify(leaderChecked.response) !== JSON.stringify(inspect)) fail('a', 'leader_not_licensed');
@@ -1941,7 +1975,8 @@ function finalReplyValidation(evidence: ReplyEvidence): FinalReplyValidation {
       if (DOCTRINE_FATAL_PATTERNS.some(pattern => pattern.test(sentence)) || DOCTRINE_VERDICT_PATTERNS.some(pattern => pattern.test(sentence))
         || codes.includes('recommend') || codes.includes('best')) fail('f', 'recommendation_wording');
       const attributed = sentence.match(/\byou\s+(?:said|stated|told me)\s*[:,]?\s*(.+)$/iu);
-      if (attributed && /\d/u.test(attributed[1]!) && !protectedSource(attributed[1]!)) fail('b', 'user_source_not_verified');
+      if (attributed && !protectedSource(attributed[1]!) && !evidence.cardTexts?.some(card => card.includes(attributed[0]!))
+        && !verifiedReplyFigures(attributed[1]!, sentence, graph)) fail('b', 'user_source_not_verified');
       const receipt = evidence.receipts.some(line => recordedSentenceIn(line, sentence));
       if (!prose.action && (assertsCompletedWrite(sentence) || findSuccessClaimHit(sentence) !== null) && !receipt) fail('d', 'write_not_receipted');
       if (!prose.action && /\bon the card\b/iu.test(sentence) && !evidence.cardTexts?.some(card => recordedSentenceIn(card, sentence)) && !receipt) fail('d', 'card_not_delivered');
@@ -1956,13 +1991,11 @@ function finalReplyValidation(evidence: ReplyEvidence): FinalReplyValidation {
       if (analytical && !isLicensedChanceLine(sentence, licences, labels.optionLabels ?? [])) fail(current ? 'a' : 'c', 'analytical_chance_not_licensed');
     }
     if (evidence.recordedText !== undefined && candidate.assistant_text !== evidence.recordedText) fail('a', 'recorded_text_changed');
-    if (evidence.explanationCurrent === false && !isUnavailableFinalReply(candidate.assistant_text)) fail('c', 'explanation_not_current');
     return failed;
   } };
 }
 
 const FINAL_REPLY_UNAVAILABLE = 'The explanation is unavailable.';
-const isUnavailableFinalReply = (text: string): boolean => text === FINAL_REPLY_UNAVAILABLE || text === RUN_EXPLANATION_UNAVAILABLE_TEXT;
 
 /** Whole-reply failure never leaves an orphaned figure or scientific qualification. */
 function replaceFinalReplyText<T extends OlumiResponse>(candidate: T, text: string): T {
@@ -2311,14 +2344,16 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
       validateFinalReply(candidate, { scenarioId, runDeltaBoundByCaller: true }, finalReplyValidation(evidence));
     const checkedUnavailableReply = <T extends OlumiResponse>(candidate: T, evidence: ReplyEvidence): T => {
       const unavailable = replaceFinalReplyText(candidate,
-        evidence.recordedText ?? [evidence.explanationCurrent === false ? RUN_EXPLANATION_UNAVAILABLE_TEXT : FINAL_REPLY_UNAVAILABLE, ...evidence.receipts].join('\n\n'));
+        evidence.recordedText ?? [FINAL_REPLY_UNAVAILABLE, ...evidence.receipts].join('\n\n'));
       try { return checkFinalReply(unavailable, evidence); } catch (failure) {
         if (!(failure instanceof ReplyValidationError)) throw failure;
       }
       // Keep complete, independently checked display units, including their qualifications and controls.
-      const { blocks, suggested_actions, guidance, proposal_preview, action_bar, _proposal_fields, _agent, ...rest } = unavailable as T & Record<string, unknown>;
+      const { blocks, suggested_actions, guidance, proposal_preview, action_bar, _proposal_fields, _agent } = unavailable as T & Record<string, unknown>;
       const { provisional_view, ...agent } = (_agent ?? {}) as Record<string, unknown>;
-      let checked = checkFinalReply({ ...rest, blocks: [], suggested_actions: [], _agent: agent } as unknown as T, evidence);
+      const empty = { ...unavailable, blocks: [], suggested_actions: [], _agent: agent };
+      for (const key of ['guidance', 'proposal_preview', 'action_bar', '_proposal_fields']) Reflect.deleteProperty(empty, key);
+      let checked = checkFinalReply(empty, evidence);
       const keep = (patch: Record<string, unknown>): void => {
         try { checked = checkFinalReply({ ...checked, ...patch }, evidence); } catch (failure) {
           if (!(failure instanceof ReplyValidationError)) throw failure;
@@ -2478,8 +2513,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: renameCard.words,
       }));
-      const forwardedCandidate = {
-        ...forwardedBody,
+      const forwardedCandidate = Object.assign(composeDirectAnswerResponse({ assistant_text: narration, stage: 'frame', answerKind: 'substantive' }), forwardedBody, {
         ...(renameProposal !== undefined && renameCard !== undefined ? { suggested_actions: [
           ...(Array.isArray(forwardedBody.suggested_actions) ? forwardedBody.suggested_actions : []),
           ...optionRenameChipsFor(renameProposal.proposal_id, renameCard.words)] } : {}),
@@ -2495,9 +2529,9 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         },
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
-      };
+      });
       return reply.code(forwarded.status).send(forwarded.status === 200
-        ? await repairFinalReply(forwardedCandidate as OlumiResponse, {
+        ? await repairFinalReply(forwardedCandidate, {
           model: forwardedState?.graph, analysisResult: forwardedState?.analysisResult,
           analysisState: forwardedState?.analysisState, analysisReady: forwardedState?.analysisReady,
           sources: typedByUser(body) ? [message] : [], receipts: [narration], hasCard: renameCard !== undefined,
@@ -2663,6 +2697,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
       let replayObligations: FaceObligation[] | undefined;
       /** Accel P24 / SCI-10: remembered typed rows, re-licensed on today's shown Run (below). */
       let replayMethodResult: MethodResultV1 | null = null;
+      let replayLicensedMethodClaims: readonly string[] = [];
       const boundControl: OfferedAction[] = [];
       const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
@@ -2695,8 +2730,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         // still the bound one, else today's coaching. Never measured again here.
         const remembered = turnId !== undefined ? measuredWhatChanges.get(`${scenarioId}:${turnId}`) ?? null : null;
         const answer = whatWouldChangeAnswer(scenarioId, state, remembered, prior.assistant_message);
-        replayText = remembered !== null && runExplanationMatches(remembered.runKey, scenarioId, state)
-          ? prior.assistant_message ?? answer.text : answer.text;
+        replayText = answer.text;
         if (answer.measured !== null && turnId !== undefined) {
           replayMethodResult = whatChangesMethodResult(answer.measured.turn, {
             scenarioId, turnId, run: null, analysisResult: state.analysisResult,
@@ -2711,18 +2745,18 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
           goalScopeClaimInput: goalScopeClaimInput([...currentScope, ...scopeIssues].filter(p => p.scenario_id === scenarioId), state.graph),
         });
         const presented = structuralChallengeReplay(remembered, receipt);
-        // A fresh receipt owns currentness; a changed presentation on that same basis does not replace recorded bytes.
-        // Typed sidecars below still require an identical re-presentation.
-        replayText = remembered !== undefined && (remembered.result?.status !== 'completed' || presented.result?.status === 'completed')
-          ? prior.assistant_message ?? presented.reply : presented.reply;
+        // The existing presenter owns the provisional/refused qualification on resend.
+        replayText = presented.reply;
+        const presentedMethod = turnId === undefined ? null : testLinkMethodResult(presented, { scenarioId, turnId });
+        replayLicensedMethodClaims = presentedMethod?.rows.map(row => row.text) ?? [];
         if (remembered !== undefined && presented.reply === remembered.reply && turnId !== undefined) {
-          replayMethodResult = testLinkMethodResult(presented, { scenarioId, turnId });
+          replayMethodResult = presentedMethod;
         }
         boundControl.push(...presented.actions);
       } else if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
         const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);
         if (!runExplanationMatches(explanationId, scenarioId, state)) {
-          replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+          replayText = prior.assistant_message ?? RUN_EXPLANATION_UNAVAILABLE_TEXT;
           replayNarration = { status: 'stale', run_key: runKey };
         } else if (unavailableExplanation.has(replayText)) {
           if (replayText === RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT) replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
@@ -2965,8 +2999,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         suggested_actions: firstOfEachId(replayActions).map(guidedSizingWireAction),
       });
       const replaySources = typedByUser(body) ? [prior.user_message ?? message] : [];
-      const replayBody = {
-        ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
+      const replayBody = Object.assign(finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }), {
         ...(guidedSizingOnWire(replayGuided, state.graphHash) !== undefined
           ? { guided_sizing: guidedSizingOnWire(replayGuided, state.graphHash) } : {}),
         ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
@@ -2985,15 +3018,18 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
-      };
-      // Structural challenge's typed refusal takes precedence; other surfaces retain recorded words and their own controls.
-      const recordedText = !structuralReplay || replayText === prior.assistant_message ? prior.assistant_message ?? undefined : undefined;
+      });
+      // Existing surface presenters own currentness; only their unchanged presentation preserves the recorded bytes.
+      const recordedText = replayText === prior.assistant_message
+        && ((state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current'
+          || replayNarration?.status === 'stale') ? prior.assistant_message ?? undefined : undefined;
       const replayMethod = methodResultForEgress(replayMethodResult, recordedText ?? replayBody.assistant_text);
-      const delivery = { ...replayBody, assistant_text: recordedText ?? replayBody.assistant_text,
+      const delivery = { ...replayBody, assistant_text: recordedText ?? (replayText === prior.assistant_message ? replayText : replayBody.assistant_text),
         ...(replayMethod === null ? {} : { _method_result: replayMethod }) };
       return repairFinalReply(withShapeOnlyIfItDerives(delivery), { model: state.graph, analysisResult: state.analysisResult,
         analysisState: state.analysisState, analysisReady: state.analysisReady,
         sources: replaySources, receipts: [],
+        licensedMethodClaims: replayLicensedMethodClaims,
         recordedText, hasCard: replayRecords.length > 0, cardTexts: deliveredCardTexts(replayRecords, replayActions),
       }, false);
     };
@@ -6528,7 +6564,7 @@ export async function agentV1TurnRoute(app: FastifyInstance, options: { finalRep
         // Validated session history is published before ownership is rechecked at the persistence door.
         recordUnsavableEffect();
         let replyChecked = false;
-        if (rowTurnId !== undefined) {
+        if (rowTurnId !== undefined && durability !== 'not_recorded') {
           try {
             // Through the SHARED persistence floor, like every turn row: the one
             // `store.append` stays inside it (C8). No graph rides on this row.

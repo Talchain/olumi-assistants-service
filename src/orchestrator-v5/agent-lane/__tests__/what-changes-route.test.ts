@@ -281,40 +281,40 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect(dispatch.calls).toHaveLength(1);
       expect(modelCalls).toBe(0);
     });
-    it('R2: once Run B is current, resend keeps the recorded answer without current measured rows', async () => {
+    it('R2: once Run B is current, the retry is today\'s coaching, never Run A\'s measured words', async () => {
       const turn = randomUUID();
-      const first = await post(PRESS.id, PRESS.message, turn);
+      await post(PRESS.id, PRESS.message, turn);
       served.state = runB();
       const again = await post(PRESS.id, PRESS.message, turn);
-      expect(again.assistant_text).toBe(first.assistant_text);
-      expect(again.assistant_text).toBe(rows.get(`${SCENARIO}:${turn}`)!.assistant_message);
+      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
+      expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
       expect((again as unknown as Rec)._method_result).toBeUndefined();
       expect(dispatch.calls).toHaveLength(1);
     });
-    it('R3: the kill switch does not replace recorded bytes on resend', async () => {
+    it('R3: with the kill switch off, the retry is the coaching too', async () => {
       const turn = randomUUID();
-      const first = await post(PRESS.id, PRESS.message, turn);
+      await post(PRESS.id, PRESS.message, turn);
       const again = await killSwitchOff(() => post(PRESS.id, PRESS.message, turn));
-      expect(again.assistant_text).toBe(first.assistant_text);
+      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
       expect(dispatch.calls).toHaveLength(1);
     });
   });
 
-  describe('recorded answers resend unchanged; current licences still govern new replies and controls', () => {
+  describe('a measured answer is reused on replay only under TODAY\'s leader licence (Codex round 2 P1)', () => {
     it('the served D3 admission is M2 (caveated permission): the measured replay R1 stands under it', () => {
       expect(canonical.analysis_admission).toMatchObject({ structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' });
     });
     for (const [status, { block, said }] of Object.entries(STATUSES)) {
       for (const [how, withhold] of Object.entries(WITHHELD)) {
-        it(`R4 ${status} · ${how}: resend keeps the recorded answer`, async () => {
+        it(`R4 ${status} · ${how}: the retry is today's coaching, never the measured words`, async () => {
           dispatch.block = block;
           const turn = randomUUID();
           const first = await post(PRESS.id, PRESS.message, turn);
           expect(first.assistant_text, first.assistant_text).toMatch(said);
           withhold();
           const again = await post(PRESS.id, PRESS.message, turn);
-          expect(again.assistant_text).toBe(first.assistant_text);
-          expect(again.assistant_text).toBe(rows.get(`${SCENARIO}:${turn}`)!.assistant_message);
+          expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
+          expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
           expect(dispatch.calls).toHaveLength(1);
           expect(modelCalls).toBe(0);
         });
@@ -322,7 +322,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     }
   });
 
-  describe('the UI\'s CHIPLESS retry delivers the same recorded answer', () => {
+  describe('the UI\'s CHIPLESS retry is the same press: the same owner, under today\'s licence (Codex delta P1)', () => {
     for (const chip of ['omitted', 'null'] as const) {
       it(`R5 control · chip ${chip}: licence still permitted (M2), the chipless retry repeats the measured answer, no new measurement`, async () => {
         const turn = randomUUID();
@@ -333,15 +333,14 @@ describe('the real route: "What would change the result?" → measured tipping p
       });
       for (const [status, { block, said }] of Object.entries(STATUSES)) {
         for (const [how, withhold] of Object.entries(WITHHELD)) {
-          it(`R5 chip ${chip} · ${status} · ${how}: chipless resend keeps the recorded answer`, async () => {
+          it(`R5 chip ${chip} · ${status} · ${how}: the chipless retry is today's coaching, never the measured words`, async () => {
             dispatch.block = block;
             const turn = randomUUID();
-            const first = await post(PRESS.id, PRESS.message, turn);
-            expect(first.assistant_text).toMatch(said);
+            expect((await post(PRESS.id, PRESS.message, turn)).assistant_text).toMatch(said);
             withhold();
             const again = await retryChipless(app, turn, chip);
-            expect(again.assistant_text).toBe(first.assistant_text);
-            expect(again.assistant_text).toBe(rows.get(`${SCENARIO}:${turn}`)!.assistant_message);
+            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
+            expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
             expect(dispatch.calls).toHaveLength(1);
           });
         }
@@ -379,7 +378,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect(dispatch.calls).toHaveLength(1);
     }, 30_000);
 
-    it('CW2 claim wait: Run B lands during measurement; the waiter delivers the first recorded reply', async () => {
+    it('CW2 claim wait: Run B lands during the measurement — the waiting retry is today\'s coaching, never Run A\'s words', async () => {
       const turn = randomUUID();
       const release = holdMeasurement();
       dispatch.during = () => { served.state = runB(); };
@@ -390,8 +389,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       release();
       const [first, second] = await Promise.all([firstP, secondP]);
       expect(first.assistant_text.endsWith(RUN_NOT_CURRENT), first.assistant_text).toBe(true);
-      expect(second.assistant_text).toBe(first.assistant_text);
-      expect(second.assistant_text).toBe(rows.get(`${SCENARIO}:${turn}`)!.assistant_message);
+      expect(second.assistant_text, second.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
       expect(second.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
       expect(dispatch.calls).toHaveLength(1);
     }, 30_000);
@@ -413,14 +411,13 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect(again.assistant_text).toBe(first.assistant_text);
     });
 
-    it('AR2 append repair, licence now withheld on the SAME Run: resend delivers the committed answer', async () => {
+    it('AR2 append repair, licence now withheld on the SAME Run: the replay is today\'s coaching, never the measured words', async () => {
       const turn = randomUUID();
-      const first = await post(PRESS.id, PRESS.message, turn);
-      expect(first.assistant_text.endsWith(MEASURED_TAIL)).toBe(true);
+      expect((await post(PRESS.id, PRESS.message, turn)).assistant_text.endsWith(MEASURED_TAIL)).toBe(true);
       WITHHELD['admission exploratory']();
       const again = await appendRepairRetry(turn);
-      expect(again.assistant_text).toBe(first.assistant_text);
-      expect(again.assistant_text).toBe(rows.get(`${SCENARIO}:${turn}`)!.assistant_message);
+      expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
+      expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
     });
 
     // ⭐ Codex P1 #2569: the words take the licence of the read the RESPONSE is composed from, on the SAME Run. The
@@ -460,24 +457,23 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(dispatch.calls).toHaveLength(0);
   });
 
-  describe('COLD: every retry form delivers the durable recorded answer', () => {
+  describe('COLD: after a restart nothing is remembered; every retry form is today\'s coaching under today\'s licence', () => {
     let restarted: FastifyInstance;
     beforeAll(async () => { restarted = await buildApp(); }, 120_000);
     afterAll(async () => { await restarted.close(); });
     for (const form of ['chip', 'omitted', 'null'] as const) {
       for (const [status, { block, said }] of Object.entries(STATUSES)) {
         for (const [how, withhold] of Object.entries(WITHHELD)) {
-          it(`R7 ${form} · ${status} · ${how}: restarted resend keeps the recorded answer`, async () => {
+          it(`R7 ${form} · ${status} · ${how}: the retry on a restarted process never resends the measured words`, async () => {
             dispatch.block = block;
             const turn = randomUUID();
-            const first = await post(PRESS.id, PRESS.message, turn);
-            expect(first.assistant_text).toMatch(said);
+            expect((await post(PRESS.id, PRESS.message, turn)).assistant_text).toMatch(said);
             withhold();
             const again = form === 'chip'
               ? (await restarted.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'chip', chip: { id: PRESS.id }, turn_id: turn } })).json() as { assistant_text: string }
               : await retryChipless(restarted, turn, form);
-            expect(again.assistant_text).toBe(first.assistant_text);
-            expect(again.assistant_text).toBe(rows.get(`${SCENARIO}:${turn}`)!.assistant_message);
+            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
+            expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
             expect(dispatch.calls).toHaveLength(1);
           });
         }
