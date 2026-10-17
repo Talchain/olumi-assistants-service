@@ -496,7 +496,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
     name: 'propose_goal_target',
-    description:
+    description: 'Use reframe alone only when the current request explicitly replaces the governing aim with a qualitative aim, without numeric-mode arguments. Bind the current goal and quote the complete relevant human request verbatim, retaining its qualifications; the proposed label is Olumi’s reading. Show the complete change: the former aim and its original source and values become excluded history, and every old target or bound removed from the active aim is disclosed before approval. This mode does not correct numerical values, preserve an old target as the new aim’s target, add causal links or implement other requested edits. Do not use it for a mere addition of context or assume qualitative reasoning requires removing a numerical goal. If the request needs an unsupported mixed change, identify that boundary without claiming the whole request is prepared or saved. Preserve current independent limits, options, settings and dissent except the exact changes shown. No new number, unit, date, uncertainty law or choice is inferred, and no change is saved before its own approval and applied readback. Otherwise, the following rules apply to numerical targets. ' +
       'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
       + '"keep churn under 5%"). For a quantity already in the model, this prepares one target change and returns its id for '
       + 'authorise_change after the user approves the shown values. A restated quantity is offered as a targeted correction '
@@ -515,7 +515,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'Without governing_outcome, change only the current saved goal’s target. Use governing_outcome only when the saved goal measures a DIFFERENT outcome; if it already measures the named outcome (for example Funding secured), use the ordinary target card, including its measurement reading if needed. When the user changes the governing outcome, identify it and quote the complete verified source in goal_change_quote. Propose ONE card showing that outcome, its bound target, any stated deadline and explicitly requested mechanism removals from THIS turn, including their consequences. Earlier mention, concern, or wording to keep a part is not removal permission. If an optional part cannot be prepared, show the valid goal card and every named omission with its native refusal reason; coach or clarify the omitted part, never claim it will be saved. Keep options/settings except the changes shown. Retain earlier aims in history and any explicitly later ambition with its original values, source and uncertainty; do not turn a rejected aim into an operative or automatically later goal. Show what changes, remains and cannot be represented. Governing-outcome binding is Olumi’s reading until this card’s approval; approval does not rewrite source authorship. No invented figure, comparator, current level or deadline, silent partial change or whole-model rebuild. A new outcome label remains Olumi’s proposal unless supplied by the user. '
       + 'Do not use successive calls to represent additional goals or a full AND objective. '
       + 'Retain every requested goal, condition and source; show exactly which target this card changes and which parts remain unsaved or unsupported.',
-    parameters: obj({
+    parameters: { ...obj({
+      reframe: obj({ goal_id: { type: 'string' }, quote: { type: 'string', description: 'The complete current human request to change this aim, verbatim.' }, label: { type: 'string', description: 'Proposed qualitative aim label; Olumi reading, never a numeric target.' } }, ['goal_id', 'quote', 'label']),
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
@@ -538,13 +539,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         value: { type: 'number', description: 'The goal’s level TODAY, exactly as the user stated it in their units (0 for "we have secured £0 so far").' },
         unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
       }, ['value', 'unit']),
-    }, ['constraint_type', 'value', 'unit', 'rationale']),
+    }, []), anyOf: [{ required: ['reframe'] }, { required: ['constraint_type', 'value', 'unit', 'rationale'] }] },
   },
   {
     // ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (M1). Tool text: AIE 6181498097, exact.
     type: 'function',
     name: 'propose_statement',
-    description: 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
+    description: 'Use correction alone only for an explicit current request to correct or withdraw recorded source material. Bind each exact saved subject and field; quote the complete relevant current request verbatim, list the held spans to retire and the explicitly held spans to retain, and state any supported legacy evidence or dependency change. Never infer the unmentioned remainder. This mode records source and its separate Olumi reading; it does not change operative figures, settings, causal strengths or a range’s uncertainty law. Do not use it as a numerical replacement or a way around an approval or source check. A protected adoption or attestation that this mode cannot preserve safely requires an honest refusal, not copied approval or another route that drops it. A prepared card is not a saved correction; say what actually changed only after the applied readback. ' + 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
       + 'field, and the complete statement with its actual speaker/source, qualifications, negation, conditions, reference and window; reuse '
       + 'a retained applicable statement rather than asking for it again. This door currently supports a risk\u2019s occurrence estimate and '
       + 'its current-condition reading; an option\u2019s forecast of how many people it reaches over the stated window, and the user\u2019s '
@@ -564,7 +565,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'unsupported, retain the original statement and explain that exact gap. This tool prepares one card and changes nothing. Only the '
       + 'bound approval records its complete shown postimage; a successful committed change then follows the existing automatic analysis '
       + 'and contextual SAME-Run coaching flow, with no duplicate Run.',
-    parameters: obj({
+    parameters: { ...obj({
+      correction: obj({ quote: { type: 'string', description: 'The complete verified CURRENT correction message, verbatim.' },
+        edits: { type: 'array', minItems: 1, maxItems: 6, items: obj({
+          subject: obj({ kind: { type: 'string', enum: ['goal', 'factor', 'option', 'risk', 'link'] }, id: { type: 'string' }, to_id: { type: 'string' }, option_id: { type: 'string' }, field: { type: 'string', enum: ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation'] } }, ['kind', 'id', 'field']),
+          retirement: obj({ quote: { type: 'string', description: 'Exact held source span to retire.' }, scope: { type: 'string', enum: ['whole', 'part'] }, disposition: { type: 'string', enum: ['historical', 'retracted'] } }, ['quote', 'scope', 'disposition']),
+          retained: { type: 'array', items: { type: 'string' }, description: 'Explicit held source spans to retain, with their complete earlier source; required, non-empty for a partial retraction.' },
+          reading_words: { type: 'string', description: 'Olumi interpretation of the correction, shown separately from the human quote.' },
+          legacy: obj({ field: { type: 'string', enum: ['already_true_quote', 'dependency'] }, expected: { type: 'string' }, replacement: { type: ['string', 'null'] } }, ['field', 'expected', 'replacement']),
+        }, ['subject', 'retirement', 'retained', 'reading_words']) },
+      }, ['quote', 'edits']),
       subject: obj({
         kind: { type: 'string', enum: ['goal', 'factor', 'option', 'risk', 'link'] },
         label: { type: 'string', description: 'The part\u2019s exact label, as get_canonical_state returned it.' },
@@ -588,7 +598,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         unit: { type: 'string', description: 'Only with form:range: the unit belonging to that effect quantity wherever it occurs in the statement; do not borrow another quantity’s unit or invent a missing one.' },
         negated: { type: 'boolean', description: 'Only with form:range: retain whether the statement denies this effect range; a denied range is not a positive supplied effect range, zero effect or the opposite range.' },
       }, ['quote']) },
-    }, ['subject', 'statements']),
+    }, []), anyOf: [{ required: ['correction'] }, { required: ['subject', 'statements'] }] },
   },
   {
     type: 'function', name: 'propose_team_time',
@@ -1069,7 +1079,8 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
-    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+    reframe?: unknown;
+    constraint_type?: 'at_least' | 'at_most'; value?: number; unit?: string; rationale?: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
     /** What the figure is a figure OF, in the user's words; a restatement corrects the saved goal on its own card. */
@@ -1081,7 +1092,7 @@ export interface AgentCapabilities {
     remove_mechanisms?: readonly { kind: 'factor' | 'risk' | 'link'; id?: string; label?: string; to_id?: string; to_label?: string; quote: string }[];
   }): Promise<ToolResult>;
   /** SYSTEM 1: the user's own statement about ONE subject, read, bound and verified by the ONE door, as ONE card. */
-  proposeStatement?(ctx: AgentToolContext, args: { subject?: unknown; statements?: unknown }): Promise<ToolResult>;
+  proposeStatement?(ctx: AgentToolContext, args: { subject?: unknown; statements?: unknown; correction?: unknown }): Promise<ToolResult>;
   /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { quote?: string; low_months?: number; high_months?: number; statements?: readonly StatementArgs[] }): Promise<ToolResult>;
   /** E5: the user's hiring times per option, quoted, proposed on ONE card for approval. */
