@@ -71,7 +71,8 @@ import {
   countOptionalParams,
   countUnionParams,
 } from "../../src/cee/draft/anthropic-graph-schema.js";
-import { MIN_ITEMS_ALLOWED_VALUES } from "../../src/adapters/llm/anthropic-schema-compliance.js";
+// Test-only API acceptance values; kept grammar assertions are unchanged.
+const MIN_ITEMS_ALLOWED_VALUES = new Set([0, 1]);
 import { normaliseDraftResponse } from "../../src/adapters/llm/normalisation.js";
 import { validateGraph } from "../../src/validators/graph-validator.js";
 

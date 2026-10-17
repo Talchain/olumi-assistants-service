@@ -77,14 +77,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
-import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
 import { WRONG_ENTITY_WRITE_CAPTURE } from './wrong-entity-write-capture.fixture.js';
 
 const CAPTURE = WRONG_ENTITY_WRITE_CAPTURE;
 const {
   option_id: OPTION_ID,
   factor_id: FACTOR_ID,
-  option_label: OPTION_LABEL,
   turn_message: MESSAGE,
 } = CAPTURE.provenance;
 
@@ -115,39 +113,6 @@ describe('a revision to an already-configured option is guarded', () => {
   });
 
   /**
-   * ⭐⭐ THE BEHAVIOUR THIS LANE OWES. The option the user named is resolvable
-   * even though nothing is outstanding, and the verdict says the write did not
-   * land FOR THAT OPTION — by identity (trap 19), never "an op landed".
-   *
-   * `not_honoured_no_copy` rather than `not_honoured`: the recovery copy's
-   * domain still excludes a configured option, and this verdict deliberately
-   * carries no `factorLabels`, so no consumer can compose a sentence from it.
-   * The write is protected; the product says nothing new.
-   */
-  it('reaches a write-protecting verdict for the SAME wrong-entity write', () => {
-    const verdict = evaluateConfigureOptionOutcome({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after: CAPTURE.after,
-    });
-
-    expect(verdict.status).toBe('not_honoured_no_copy');
-    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
-    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionLabel).toBe(OPTION_LABEL);
-    // The copy domain bound is intact, and the verdict says which bound it hit
-    // rather than flattening it (the `option_not_identified` catch-all is the
-    // second defect #1492 pinned).
-    expect(
-      verdict.status === 'not_honoured_no_copy' && verdict.copyDeclineReason,
-    ).toBe('option_already_partially_configured');
-    // No copy material is carried at all, so a consumer cannot accidentally
-    // compose the untrue sentence.
-    expect(Object.keys(verdict).sort()).toEqual(
-      ['copyDeclineReason', 'optionId', 'optionLabel', 'status'],
-    );
-  });
-
-  /**
    * ⭐⭐ THE POINT OF THE LANE, AT THE CONSUMER. `decideOptionInterventionWrite`
    * takes its intent AND its option identity from the verdict above, so a
    * verdict is the whole difference between a guarded revision and an
@@ -173,61 +138,5 @@ describe('a revision to an already-configured option is guarded', () => {
     // effect value did NOT. Without both, the assertion below asserts nothing.
     expect(observedBefore).not.toBe(0.79);
     expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
-  });
-
-  /**
-   * ⭐⭐ NEGATIVE CONTROL 1 — AN AMBIGUOUS SUBJECT IS STILL REFUSED.
-   *
-   * A guard that stops abstaining but also stops discriminating is worse than
-   * abstention: it converts honest refusals into silent wrong-entity writes.
-   * A message naming no option must reach no verdict, exactly as today.
-   */
-  it('names no option ⇒ still no verdict', () => {
-    // ⚠⚠ RE-GROUNDED. This case was written with *"Set the effect to 79%."*,
-    // which the shipped detector does NOT match — so it declined
-    // `not_configure_intent` and never reached option resolution at all. It
-    // asserted `not_applicable` and PASSED while pinning a different thing
-    // than its name claims: a true measurement of an irrelevant state.
-    //
-    // This phrasing is the capture's OWN trigger family (`option_value_set`)
-    // with the option's name removed, so intent matches, resolution IS
-    // attempted, and the decline is the one this case is about.
-    const SUBJECTLESS = "Change the option's Pro Plan Monthly Price to 79%";
-
-    // PRECONDITION — without it this cannot discriminate.
-    expect(
-      detectConfigureOptionIntent(
-        SUBJECTLESS,
-        projectOptionLabels(CAPTURE.before.nodes as never),
-      ).matched,
-    ).toBe(true);
-
-    const verdict = evaluateConfigureOptionOutcome({
-      message: SUBJECTLESS,
-      before: CAPTURE.before,
-      after: CAPTURE.after,
-    });
-    expect(verdict.status).toBe('not_applicable');
-    expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_not_identified');
-  });
-
-  /**
-   * ⭐⭐ NEGATIVE CONTROL 2 — A WRITE THAT DID LAND FOR THE NAMED OPTION IS
-   * NEVER CALLED UNHONOURED. The widening must not manufacture a failure out
-   * of a successful revision: that is the inverse harm, and it is the one the
-   * P1 note in `configure-option-outcome.ts` already records as reachable.
-   */
-  it('a revision that LANDS on the named option is honoured, not withheld', () => {
-    const after = JSON.parse(JSON.stringify(CAPTURE.before)) as Graph;
-    const node = after.nodes.find((n) => n.id === OPTION_ID)!;
-    (node.interventions as Record<string, { value: number }>)[FACTOR_ID] = { value: 0.79 };
-
-    const verdict = evaluateConfigureOptionOutcome({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-    });
-    expect(verdict.status).toBe('honoured');
-    expect(verdict.status === 'honoured' && verdict.optionId).toBe(OPTION_ID);
   });
 });

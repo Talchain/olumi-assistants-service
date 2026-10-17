@@ -31,7 +31,69 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { STAGE_CONTRACT } from "../../src/cee/unified-pipeline/stages/repair/repair.contract.js";
+
+// Test-only field-preservation expectations, formerly in the orphan stage contract.
+const STAGE_CONTRACT = {
+  name: "repair",
+  allowedDrops: {
+    topLevel: [] as string[],
+    node: [
+    ] as string[],
+    edge: [] as string[],
+    option: [] as string[],
+    nodeData: [
+      "value",
+      "factor_type",
+      "uncertainty_drivers",
+      "baseline",
+    ] as string[],
+  },
+  allowedDataClear: {
+    externalFactors: true,
+  },
+  allowedModifications: {
+    topLevel: [] as string[],
+    node: [
+      "category",
+      "kind",
+      "label",
+    ] as string[],
+    edge: [
+      "id",
+      "from",
+      "to",
+      "strength_mean",
+      "strength_std",
+      "belief_exists",
+      "effect_direction",
+      "provenance",
+    ] as string[],
+    option: [] as string[],
+    nodeData: [
+      "value",
+      "factor_type",
+      "uncertainty_drivers",
+      "baseline",
+    ] as string[],
+  },
+  preservationGuarantees: {
+    topLevel: [
+      "version",
+      "default_seed",
+    ] as string[],
+    node: [
+      "id",
+    ] as string[],
+    edge: [] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
+  },
+  allowedRemovals: {
+    nodes: false,
+    edges: true,
+  },
+} as const;
+
 import {
   assertSentinel,
   assertPreservationGuarantees,

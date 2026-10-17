@@ -82,7 +82,6 @@ import {
 } from '../../coaching/readiness-recovery.js';
 import { buildRepairPairChipMessage } from '../../configure-option-chip-text.js';
 import { detectConfigureOptionIntent } from '../../routing/configure-option-intent.js';
-import { shouldInterceptBeforeEditLane } from '../../routing/configure-option-clarify.js';
 import {
   buildOptionEffectRawOperation,
   readCommittedOptionEffect,
@@ -352,14 +351,6 @@ describe('canonical repair loop — ACCEPTANCE 2: the affordance carries identit
       // the shipped predicates over the emitted message (trap 12), never by
       // restating the routing rules here.
       expect(detectConfigureOptionIntent(chip!.message, optionLabels(graph)).matched).toBe(true);
-      const intercept = shouldInterceptBeforeEditLane({
-        message: chip!.message,
-        detection: detectConfigureOptionIntent(chip!.message, optionLabels(graph)),
-        graph,
-      });
-      expect(intercept.matched).toBe(true);
-      // Bound to the RAW head blocker, not to `pair` — same reason as above.
-      expect(intercept.matched && intercept.optionId).toBe(askedBlocker(readiness).option_id);
 
       graph = applyUserAnswer(graph, pair!, USER_VALUE);
     }
@@ -389,22 +380,10 @@ describe('canonical repair loop — ACCEPTANCE 3: never an already-resolved pair
       // resolve to a clean slot ON THE OPTION THE PRODUCT ASKED ABOUT".
       const chip = recoveryChip(graph);
       expect(chip).not.toBeNull();
-      const labels = optionLabels(graph);
-      const resolved = shouldInterceptBeforeEditLane({
-        message: chip!.message,
-        detection: detectConfigureOptionIntent(chip!.message, labels),
-        graph,
-      });
-      expect(resolved.matched).toBe(true);
-      // Independent oracle again (see `askedBlocker`): the raw head blocker,
-      // not the derivation that minted the chip.
-      expect(resolved.matched && resolved.optionId).toBe(
-        askedBlocker(strictRepairReadiness(graph)).option_id,
-      );
       const offered = unresolvedPairs(graph);
-      for (const factorLabel of resolved.matched ? resolved.factorLabels : []) {
+      for (const blocker of [askedBlocker(strictRepairReadiness(graph))]) {
         const slot = offered.find(
-          (p) => p.optionId === pair!.optionId && p.factorLabel === factorLabel,
+          (p) => p.optionId === blocker.option_id && p.factorId === blocker.factor_id,
         );
         // Named, still-unset, and belonging to the asked option — not a slot
         // borrowed from a neighbouring option (the wrong-entity class).

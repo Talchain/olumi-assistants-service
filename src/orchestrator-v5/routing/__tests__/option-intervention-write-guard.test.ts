@@ -19,7 +19,6 @@ import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { applyOptionInterventionEdit, optionInterventionPostimageIsScoped } from '../../system-events/option-intervention-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
 
 const OPTION_ID = 'opt_subcontract';
 const OPTION_LABEL = 'Subcontract inner-city runs to a green courier';
@@ -29,9 +28,6 @@ const OTHER_OPTION_ID = 'opt_electrify';
 /** A factor the named option is NOT wired to — the identity-binding control. */
 const UNLINKED_FACTOR_ID = 'fac_fuel';
 const UNLINKED_FACTOR_LABEL = 'Fuel price';
-
-/** The message shape the witness carried: names the option AND the factor. */
-const NAMES_THE_OPTION = `For the ${OPTION_LABEL} option, set the effect value on ${FACTOR_LABEL} to 0.12 — a share, no unit.`;
 
 function edge(from: string, to: string) {
   return {
@@ -102,52 +98,6 @@ function graph(opts: {
     ],
   } as GraphV3T;
 }
-
-describe('2.1266 — the IDENTITY BINDING (trap 19): a moved baseline must belong to the named option', () => {
-  /**
-   * ⚠ THE FALSE POSITIVE AN ADVERSARIAL REVIEW EXECUTED against the version of
-   * this guard that asked "did ANY node's value move?". The user names the
-   * option only to give context, then asks for something entirely different —
-   * and the applier does exactly as told. The unbound guard threw that edit
-   * away and answered with recovery copy about another factor.
-   *
-   * This is the corpus's whole reason for existing: the original suite had ONE
-   * graph shape and ONE message shape, in which the moved node was ALWAYS the
-   * named option's own factor, so it was structurally incapable of telling the
-   * bound and unbound versions apart. All 20 of its tests stayed green when the
-   * binding was added.
-   */
-  const UNRELATED_REQUEST = `For the ${OPTION_LABEL} option, our ${UNLINKED_FACTOR_LABEL} assumption is stale — change ${UNLINKED_FACTOR_LABEL} to 1.40.`;
-
-  it('PINS ITS OWN PRECONDITION: that message still reaches a not_honoured verdict', () => {
-    // Without this the case above could pass for the wrong reason — an
-    // `outcome_not_unhonoured` allow would look identical from the outside, and
-    // the identity binding would never be exercised (trap 13b).
-    const outcome = evaluateConfigureOptionOutcome({
-      message: UNRELATED_REQUEST,
-      before: graph({ factorBaseline: 0.5, unlinkedFactorBaseline: 1.2 }),
-      after: graph({ factorBaseline: 0.5, unlinkedFactorBaseline: 1.4 }),
-    });
-    expect(outcome.status).toBe('not_honoured');
-  });
-
-  it('the edit CANNOT wire up its own justification: a new edge does not make the write withholdable', () => {
-    // ⚠ THE SELF-JUSTIFYING WITHHOLD. If the neighbourhood were read from the
-    // APPLIED graph, an edit could add `option → fac_fuel` and move that
-    // factor's baseline, and the guard would treat the edge the suspect write
-    // just created as grounds for discarding it. Reading the BEFORE graph — the
-    // persisted authority — makes that impossible.
-    const before = graph({ factorBaseline: 0.5, unlinkedFactorBaseline: 1.2 });
-    const after = graph({ factorBaseline: 0.5, unlinkedFactorBaseline: 1.4 });
-    (after.edges as Array<ReturnType<typeof edge>>).push(edge(OPTION_ID, UNLINKED_FACTOR_ID));
-
-    // Precondition pinned in-test (trap 13b): the verdict must still be
-    // `not_honoured`, or this passes without ever reaching the binding.
-    expect(
-      evaluateConfigureOptionOutcome({ message: NAMES_THE_OPTION, before, after }).status,
-    ).toBe('not_honoured');
-  });
-});
 
 // The retired prose guard has no live caller. These rows exercise its retained write boundary.
 describe('retained scoped writer: approval cannot transfer authorship to another option', () => {

@@ -72,7 +72,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import { detectConfigureOptionIntent, projectOptionLabels } from '../configure-option-intent.js';
-import { evaluateConfigureOptionOutcome } from '../configure-option-outcome.js';
 import { WRONG_ENTITY_WRITE_CAPTURE } from './wrong-entity-write-capture.fixture.js';
 
 const CAPTURE = WRONG_ENTITY_WRITE_CAPTURE;
@@ -84,16 +83,6 @@ const {
 } = CAPTURE.provenance;
 
 type Graph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
-
-/**
- * The SECOND option from the same live draft (commit `a3132acf`'s battery:
- * *"Hold Pro Plan Monthly Price at £49 is `is_baseline: true`; Raise It to £59
- * is not"*). Used only by arm F, so the ambiguity case is a shape the producer
- * really emits rather than one invented here (trap 16 — a fixture you wrote
- * yourself is not evidence about the wire).
- */
-const SECOND_OPTION_ID = 'a1c2e3f4';
-const SECOND_OPTION_LABEL = 'Raise It to £59';
 
 function clone(graph: unknown): Graph {
   return JSON.parse(JSON.stringify(graph)) as Graph;
@@ -146,36 +135,6 @@ function factorBaselineWrite(): Graph {
   return after;
 }
 
-/** F — a two-option graph, so a message naming BOTH is genuinely ambiguous. */
-function twoOptionGraph(): Graph {
-  const graph = clone(CAPTURE.before);
-  graph.nodes.push({
-    id: SECOND_OPTION_ID,
-    kind: 'option',
-    label: SECOND_OPTION_LABEL,
-    interventions: {
-      [FACTOR_ID]: {
-        value: 0.59,
-        raw_value: 59,
-        unit: '£',
-        source: 'brief_extraction',
-        target_match: { node_id: FACTOR_ID, match_type: 'exact_id', confidence: 'high' },
-        value_confidence: 'high',
-      },
-    },
-    provenance: 'ai_inferred',
-  });
-  graph.edges.push({
-    from: SECOND_OPTION_ID,
-    to: FACTOR_ID,
-    strength: { mean: 1, std: 0.01 },
-    exists_probability: 1,
-    effect_direction: 'positive',
-    provenance: { source: 'cee_hypothesis' },
-  });
-  return graph;
-}
-
 // ---------------------------------------------------------------------------
 // PRECONDITIONS. Every arm below is only about a REVISION, and only about a
 // message the edit lane really receives. Pinned in-test so no arm can decay
@@ -211,160 +170,10 @@ describe('the deliberate-edit component — preconditions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// HALF ONE — THE ORDINARY REVISION WORKS.
-// ---------------------------------------------------------------------------
-
-describe('ACCEPTANCE half 1 — an ordinary, clear revision WORKS', () => {
-  it('ARM A: the option’s own effect value is recognised as honoured', () => {
-    const after = revisionLanded();
-
-    // The component recognises it, by identity, as a SUCCESS.
-    const verdict = evaluateConfigureOptionOutcome({
-      message: MESSAGE,
-      before: CAPTURE.before,
-      after,
-    });
-    expect(verdict.status).toBe('honoured');
-    expect(verdict.status === 'honoured' && verdict.optionId).toBe(OPTION_ID);
-
-  });
-});
-
-// ---------------------------------------------------------------------------
-// HALF TWO — THE WRONG-ENTITY COUNTERPARTS CANNOT MUTATE.
-// ---------------------------------------------------------------------------
-
-describe('ACCEPTANCE half 2 — the WITHHELD wrong-entity classes cannot mutate', () => {
-
-  /**
-   * ⭐ AND THE PRODUCT SAYS NOTHING UNTRUE WHILE DOING IT. The verdict that
-   * protects the write is `not_honoured_no_copy`, which carries NO
-   * `factorLabels` — so `edit-graph-dispatch.ts`'s `=== 'not_honoured'` text
-   * replacement cannot fire and no consumer can compose *"this option has no
-   * effect values yet"*, which is false of a revision. The user is told
-   * plainly that nothing was saved, by `formatWithheldWriteNotice`, and
-   * nothing more.
-   */
-  it('the protecting verdict carries no copy material for any wrong-entity arm', () => {
-    for (const [arm, after] of [
-      ['B', CAPTURE.after as unknown],
-      ['C', edgeStrengthWrite()],
-      ['D', factorBaselineWrite()],
-    ] as const) {
-      const verdict = evaluateConfigureOptionOutcome({
-        message: MESSAGE,
-        before: CAPTURE.before,
-        after,
-      });
-      expect(verdict.status, `arm ${arm}`).toBe('not_honoured_no_copy');
-      expect(JSON.stringify(verdict), `arm ${arm}`).not.toContain('factorLabels');
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
 // DISCRIMINATION CONTROLS — the guard must not stop discriminating.
 // ---------------------------------------------------------------------------
 
 describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
-  /**
-   * ARM E — no option named. No option-scoped promise was made, so there is
-   * nothing to betray and nothing to withhold. A guard that fired here would
-   * discard the measured W1 class of correct, explicitly-requested edits.
-   */
-  it('ARM E: names no option, so the outcome reader declines by identity', () => {
-    const after = edgeStrengthWrite();
-    // ⚠⚠ RE-GROUNDED. This arm previously used *"Set the effect to 79%."*,
-    // which the shipped detector does NOT match at all — so the verdict was
-    // `not_configure_intent` and the case never reached option resolution.
-    // **It asserted `not_applicable` and passed while pinning a different
-    // residual than the one its name claims** (a true measurement of an
-    // irrelevant thing). This phrasing is the CAPTURE'S OWN trigger family
-    // (`option_value_set`) with the option's name removed, so intent matches,
-    // resolution IS attempted, and the decline is the one this arm is about.
-    const SUBJECTLESS = "Change the option's Pro Plan Monthly Price to 79%";
-
-    // PRECONDITION: the turn really does reach the component.
-    expect(
-      detectConfigureOptionIntent(
-        SUBJECTLESS,
-        projectOptionLabels(CAPTURE.before.nodes as never),
-      ).matched,
-      'precondition: intent must match, or this measures the detector',
-    ).toBe(true);
-    // PRECONDITION: no option label is present, which is what makes it subjectless.
-    expect(SUBJECTLESS).not.toContain(OPTION_LABEL);
-
-    const verdict = evaluateConfigureOptionOutcome({
-      message: SUBJECTLESS,
-      before: CAPTURE.before,
-      after,
-    });
-    expect(verdict.status).toBe('not_applicable');
-    // THE RESIDUAL, NAMED: resolution was attempted and found no option.
-    expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_not_identified');
-
-  });
-
-  /**
-   * ⭐ THE INTENT-LEVEL CONTROL, kept separately and labelled for what it is.
-   * *"Set the effect to 79%."* is not recognised as configure intent at all, so
-   * it declines one layer EARLIER. Two different facts, two different names —
-   * collapsing them is what made ARM E claim more than it measured.
-   */
-  it('a message that is not configure intent declines earlier, and says so', () => {
-    const verdict = evaluateConfigureOptionOutcome({
-      message: 'Set the effect to 79%.',
-      before: CAPTURE.before,
-      after: edgeStrengthWrite(),
-    });
-    expect(verdict).toEqual({ status: 'not_applicable', reason: 'not_configure_intent' });
-  });
-
-  /**
-   * ARM F — TWO options named. The resolver must decline rather than pick one:
-   * guessing is the confident-wrong-answer this whole component exists to
-   * remove, and picking one would attribute a write to an option the user may
-   * not have meant.
-   */
-  it('ARM F: names TWO options ⇒ declines by AMBIGUITY, never by guessing', () => {
-    const before = twoOptionGraph();
-    const after = clone(before);
-    const edge = after.edges.find((e) => e.from === OPTION_ID && e.to === FACTOR_ID)!;
-    edge.strength = { ...(edge.strength as object), mean: 0.79 };
-
-    const namesBoth = `Change the ${OPTION_LABEL} option's ${SECOND_OPTION_LABEL} effect to 79%`;
-
-    // PRECONDITIONS: both labels really are present, and both options really
-    // exist in the graph — otherwise this asserts nothing about ambiguity.
-    expect(namesBoth).toContain(OPTION_LABEL);
-    expect(namesBoth).toContain(SECOND_OPTION_LABEL);
-    expect(before.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort()).toEqual(
-      [OPTION_ID, SECOND_OPTION_ID].sort(),
-    );
-
-    const verdict = evaluateConfigureOptionOutcome({ message: namesBoth, before, after });
-    expect(verdict.status).toBe('not_applicable');
-    expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_label_ambiguous');
-  });
-
-  /**
-   * ⭐⭐ THE OPPOSITE-DIRECTION TWIN OF ARM F, and it is what proves the
-   * ambiguity decline is a DISCRIMINATION rather than a blanket refusal on
-   * two-option graphs: the SAME graph, a message naming only ONE option,
-   * resolves and protects.
-   */
-  it('ARM F-TWIN: on the SAME two-option graph, naming ONE option still resolves', () => {
-    const before = twoOptionGraph();
-    const after = clone(before);
-    const edge = after.edges.find((e) => e.from === OPTION_ID && e.to === FACTOR_ID)!;
-    edge.strength = { ...(edge.strength as object), mean: 0.79 };
-
-    const verdict = evaluateConfigureOptionOutcome({ message: MESSAGE, before, after });
-    expect(verdict.status).toBe('not_honoured_no_copy');
-    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
-
-  });
 
   /**
    * ⭐⭐ ARM G — THE EDGE ARM'S IDENTITY BINDING, and the half that proves it is
@@ -391,124 +200,6 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(edgeField(after, OPTION_ID, FACTOR_ID, 'strength.mean')).toBe(1);
     expect(edgeField(after, OPTION_ID, FACTOR_ID, 'exists_probability')).toBe(1);
     expect(observedValue(after, FACTOR_ID)).toBe(0.49);
-  });
-
-  /**
-   * ⭐ A NESTED LABEL READING IS ONE READING, NOT TWO CANDIDATES.
-   *
-   * With `readiness.options` read WHOLE, substring matching can make a short
-   * label match inside a longer one. *"Hold Price at £49"* sits inside *"Hold
-   * Price at £49 (Status Quo)"*, so a message naming the longer option matches
-   * both — and a naive count would call that ambiguous and abstain, silently
-   * un-protecting the commonest real graph shape.
-   *
-   * The opposite-direction twin of ARM F: F proves two GENUINELY distinct
-   * labels decline; this proves a nested pair does NOT.
-   */
-  it('a SHORTER label nested inside the named one does not manufacture ambiguity', () => {
-    const before = clone(CAPTURE.before);
-    before.nodes.push({
-      id: 'b2d4f6a8',
-      kind: 'option',
-      label: 'Hold Price at £49',
-      interventions: {
-        [FACTOR_ID]: {
-          value: 0.44,
-          source: 'brief_extraction',
-          target_match: { node_id: FACTOR_ID, match_type: 'exact_id', confidence: 'high' },
-        },
-      },
-      provenance: 'ai_inferred',
-    });
-    before.edges.push({
-      from: 'b2d4f6a8',
-      to: FACTOR_ID,
-      strength: { mean: 1, std: 0.01 },
-      exists_probability: 1,
-      effect_direction: 'positive',
-      provenance: { source: 'cee_hypothesis' },
-    });
-
-    // PRECONDITION: the two labels really are nested, and both really match.
-    expect(OPTION_LABEL.includes('Hold Price at £49')).toBe(true);
-    expect(MESSAGE).toContain('Hold Price at £49');
-
-    const after = clone(before);
-    const edge = after.edges.find((e) => e.from === OPTION_ID && e.to === FACTOR_ID)!;
-    edge.strength = { ...(edge.strength as object), mean: 0.79 };
-
-    const verdict = evaluateConfigureOptionOutcome({ message: MESSAGE, before, after });
-    // The LONGER label is the user's reading, and it is the one that binds.
-    expect(verdict.status).toBe('not_honoured_no_copy');
-    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
-  });
-
-  /**
-   * ⛔⛔ F2/a — A WRONG-**FACTOR** WRITE IS `honoured` AND COMMITS.
-   *
-   * The user names the option AND a factor; the edit writes an effect value on
-   * the SAME option but a DIFFERENT factor. `interventionsWriteLandedFor` is
-   * bound to the OPTION by identity and asks only *"did this option gain or
-   * change any key?"* — so a write to the wrong factor satisfies it, the
-   * verdict is `honoured`, and the mutation commits.
-   *
-   * ⚠ THIS IS NOT COVERED BY THIS LANE AND IS PINNED, NOT FIXED. Closing it
-   * means resolving WHICH FACTOR the user named — a second natural-language
-   * referring-expression predicate, which is precisely the class this estate
-   * has ruled unwinnable by better rules (trap 22f). The exit is to ask, not to
-   * widen.
-   *
-   * Pinned exactly so the suite REDs if the class GROWS or SHRINKS. A gap
-   * recorded in the suite is honest; a gap invisible to it is how the
-   * wrong-entity write survived two guards written against it.
-   */
-  it('RESIDUAL F2/a: the outcome reader calls a wrong-factor write honoured', () => {
-    const after = clone(CAPTURE.before);
-    const node = after.nodes.find((n) => n.id === OPTION_ID)!;
-    // The user asked about FACTOR_ID; the edit writes a different factor key.
-    (node.interventions as Record<string, { value: number }>)['a9f8b0b7'] = { value: 0.79 };
-
-    // PRECONDITIONS: the factor the user NAMED did not move, and a different
-    // one did — without both, this is not the wrong-factor shape.
-    expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
-    expect(optionInterventionValue(after, OPTION_ID, 'a9f8b0b7')).toBe(0.79);
-    expect(MESSAGE).toContain('Pro Plan Monthly Price');
-
-    expect(
-      evaluateConfigureOptionOutcome({ message: MESSAGE, before: CAPTURE.before, after }).status,
-    ).toBe('honoured');
-  });
-
-  /**
-   * ⛔⛔ F2/b — A WRONG-**OPTION** WRITE REACHES A PROTECTING VERDICT AND STILL
-   * COMMITS.
-   *
-   * The outcome verdict is correct — `not_honoured_no_copy` for the option the
-   * user named, which gained nothing. The WRITE guard then allows it, because
-   * `anyInterventionWriteLanded` is true: an effect value landed SOMEWHERE.
-   *
-   * ⚠ PINNED, NOT FIXED, AND THE CONJUNCT IS DELIBERATE. The module header
-   * states why: *"if an interventions write DID land somewhere, the turn
-   * accomplished a real option edit and discarding it would be a new harm."*
-   * Removing it would withhold legitimate multi-option edits wholesale — the
-   * W1 direction, which destroys user work. Changing that conjunct is a
-   * judgement with a blast radius beyond this lane, so it is disclosed.
-   */
-  it('RESIDUAL F2/b: the outcome reader refuses to credit another option’s write', () => {
-    const before = twoOptionGraph();
-    const after = clone(before);
-    const other = after.nodes.find((n) => n.id === SECOND_OPTION_ID)!;
-    (other.interventions as Record<string, { value: number }>)[FACTOR_ID] = { value: 0.79 };
-
-    // PRECONDITIONS: the NAMED option gained nothing; a DIFFERENT option did.
-    expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
-    expect(optionInterventionValue(after, SECOND_OPTION_ID, FACTOR_ID)).toBe(0.79);
-
-    // The verdict is right — it is about the option the user named.
-    const verdict = evaluateConfigureOptionOutcome({ message: MESSAGE, before, after });
-    expect(verdict.status).toBe('not_honoured_no_copy');
-    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
-
   });
 
   /**
