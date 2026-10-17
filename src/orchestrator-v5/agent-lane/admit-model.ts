@@ -5017,6 +5017,13 @@ function admitOnce(
     // conversation" is not located), so retiring it here would demote real user figures.
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
+    // ⭐ G3 a735 (DL-3 GO 17 Oct; CONTRACT A: ONE authorship owner, never the drafter's own flag): a size that is one END of the one
+    // range the AI's own VERIFIED statement gives THIS link is said with that range (A4, as the brief reports it: `range` below).
+    // Served: the drafter sized "would cut leakage by between 3 and 5" at its low end and flagged it `inferred`, so the user's range
+    // was saved as Olumi's estimate with no range. An Olumi size that is no end of this link's verified range stays Olumi's, and a
+    // denied range (`negated`) earns nothing.
+    if (source !== undefined && target !== undefined && typeof brief === 'string' && typeof l.effect_amount === 'number'
+      && (linkEffectRangeEnd(model, brief, source.label, target.label, l.effect_amount) ?? null) !== null) return true;
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
     // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
