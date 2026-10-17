@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ProposalStore } from '../proposal.js';
+import * as native from '../../system-events/option-intervention-edit.js';
+import { readinessViewOf } from '../readiness-view.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/empty-gaps-served-2919.json', import.meta.url), 'utf8'));
 const served = fixture.served;
@@ -21,6 +23,13 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapterWithResolution: () => ({ adapter: { name: 'test', model: 'test-model', chat: llm, chatWithTools: llm },
     resolution: { task: 'narrate', resolved_model: 'test-model', resolution_source: 'task_default' } }), getMaxTokensFromConfig: () => undefined,
 }));
+// This byte-composition fixture deliberately varies noncanonical raw mirrors/empty fields under a fixed captured hash.
+// Keep its original pins; native gap/frame preparation and exact save parity run unmocked in option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', async original => {
+  const actual = await original<typeof import('../../system-events/option-intervention-preoffer.js')>();
+  const { canonicalFixturePreoffer } = await import('./fixtures/canonical-preoffer.js');
+  return { ...actual, preOfferOptionInterventions: canonicalFixturePreoffer(actual.preOfferOptionInterventions) };
+});
 let createAgentCapabilities: typeof import('../runtime/agent-capabilities.js').createAgentCapabilities;
 beforeAll(async () => { ({ createAgentCapabilities } = await import('../runtime/agent-capabilities.js')); });
 afterAll(() => { expect(llm).not.toHaveBeenCalled(); });
@@ -33,8 +42,15 @@ async function propose(levels = exact.interventions, graph: Graph = structuredCl
   const store = new ProposalStore();
   const read = vi.fn(async (path: string) => { expect(path).toContain('/graph'); return { status: 200, json: { ...served, graph } }; });
   const caps = createAgentCapabilities(read as never, store, undefined, 'full');
+  const preparation = starting ? vi.spyOn(native, 'prepareOptionInterventionBatchExecution') : undefined;
   const result = starting ? await caps.proposeStartingPoint(ctx, { option_levels: levels } as never)
     : await caps.proposeOptionInterventions(ctx, { ...exact, interventions: levels } as never);
+  const prepared = await preparation?.mock.results.at(-1)?.value;
+  preparation?.mockRestore();
+  if (starting) {
+    expect(prepared?.kind).toBe('candidate');
+    expect(result.readiness_if_approved, 'one readiness verdict over the actual native postimage').toEqual(readinessViewOf(prepared?.kind === 'candidate' ? prepared.graph : undefined));
+  }
   expect(JSON.stringify({ graph, levels })).toBe(before);
   expect(result.ok, JSON.stringify(result)).toBe(true);
   expect(store.outstanding(ctx.scenario_id, ctx.authenticated_user_id)).toHaveLength(1);
@@ -69,7 +85,7 @@ describe('empty gap declarations on empty carriers and unclaimed empty ranges', 
       expect.objectContaining({ option: 'Trial', stated_by: 'user' }),
     ]);
   });
-  it('E2 / E2b / E3b: non-empty declarations, clears on existing carriers, and claimed-zero disclosure are byte-identical to base', async () => {
+  it('E2 / E2b / E3b: full declarations, source and card pins retain native coordinates/readiness', async () => {
     const controls = [];
     for (const starting of [false, true]) {
       controls.push(await propose(ordinary.map(level => ({ ...level, unmodelled_mechanisms: ['supplier learning'] })), undefined, starting));
@@ -86,6 +102,7 @@ describe('empty gap declarations on empty carriers and unclaimed empty ranges', 
       controls.push(claimed);
     }
     const bytes = JSON.stringify(controls);
+    if (process.env.EMPTY_GAPS_DIFF) writeFileSync(process.env.EMPTY_GAPS_DIFF, bytes + '\n');
     if (process.env.EMPTY_GAPS_CAPTURE_BASE === '1') writeFileSync(base, bytes + '\n');
     expect(bytes).toBe(readFileSync(base, 'utf8').trimEnd());
   });
@@ -102,10 +119,15 @@ describe('empty gap declarations on empty carriers and unclaimed empty ranges', 
     const direct = await propose(ordinary);
     const starting = await propose(exact.interventions, undefined, true);
     noGapOperations(starting.proposal);
-    expect(starting.proposal).toEqual(direct.proposal);
+    expect(starting.proposal.operations).toEqual(direct.proposal.operations);
+    expect(starting.proposal.public_label).toEqual(direct.proposal.public_label);
+    expect(starting.proposal.provenance.authored_by).toEqual(direct.proposal.provenance.authored_by);
+    expect(starting.proposal.provenance.basis).toBe('a starting point — values and what each option sets — for the user to adopt or correct in one approval');
     expect(starting.result).not.toHaveProperty('ranges_not_recorded');
     expect(starting.result).not.toHaveProperty('detail');
-    expect(starting.result.interventions).toEqual(direct.result.interventions);
+    const visible = (rows: unknown) => (rows as Record<string, unknown>[]).map(({ recorded_on_model_scale: _v, model_range: _r, range_taken_from_your_figure: _d, ...words }) => words);
+    expect(visible(starting.result.interventions)).toEqual(visible(direct.result.interventions));
+    expect(starting.result.interventions).toEqual(expect.arrayContaining([expect.objectContaining({ option: 'Trial', value: 0.3, model_range: 100, recorded_on_model_scale: 0.003 })]));
   });
   it.each([false, true])('H4: an unclaimed non-zero likely range is omitted with disclosure and the level proceeds unchanged, starting=%s', async starting => {
     const expected = await propose(ordinary, undefined, starting);

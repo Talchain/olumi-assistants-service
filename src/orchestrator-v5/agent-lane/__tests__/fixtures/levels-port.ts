@@ -6,6 +6,15 @@
  * ⚠ NOT ATOMIC: a refusal part-way leaves the fake's earlier commits in place. The port's all-or-nothing contract is
  * asserted by `whole-request-is-one-commit.test.ts` against a fake that commits the whole scope at once.
  */
+import { vi } from 'vitest';
+// These per-event products retain symbolic revisions. Project their graph/hash, then delegate REAL native preparation.
+// Persistence/CAS proof uses the real store and port in option-intervention-preoffer.test.ts, not this per-event writer.
+vi.mock('../../../system-events/option-intervention-preoffer.js', async original => {
+  const actual = await original<typeof import('../../../system-events/option-intervention-preoffer.js')>();
+  const { canonicalFixturePreoffer } = await import('./canonical-preoffer.js');
+  return { ...actual, preOfferOptionInterventions: canonicalFixturePreoffer(actual.preOfferOptionInterventions) };
+});
+
 import { createAgentCapabilities, receiptSummaryOf, type InternalDispatch } from '../../runtime/agent-capabilities.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../../system-events/dispatch.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../../approved-adoption-context.js';

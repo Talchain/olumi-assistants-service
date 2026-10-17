@@ -4,6 +4,9 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { runAgentTurn, type CallModel, type ModelCallRequest } from '../runtime/agent-loop.js';
 import { ProposalStore } from '../proposal.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 const message = 'Trial takes 0.3 days, my own figure; for Full use your own estimate of 20 days';
 const ctx = { scenario_id: '06fc3b51-0000-4000-8000-000000000000', authenticated_user_id: 'user', request_id: 'cut1', user_text: message, user_turn_text: message };
@@ -157,12 +160,13 @@ describe('cut1 turn refusal budget', () => {
 describe('joined starting-point disclosures', () => {
   it('C14 range: both successful halves preserve omitted level-range details on the ONE joined result', async () => {
     const joinedGraph = { ...graph, nodes: [...graph.nodes, { id: 'baseline', kind: 'factor', label: 'Additional baseline' }],
-      edges: graph.edges.map(edge => ({ ...edge, effect_direction: 'positive' })) };
-    const d: InternalDispatch = async () => ({ status: 200, json: { graph: joinedGraph, graph_hash: 'h0' } });
+      edges: graph.edges.map(edge => ({ ...edge, strength: { ...edge.strength, std: 0.1 }, effect_direction: 'positive' })) };
+    const saved = projectGraphForPersistence(GraphV3.parse(joinedGraph));
+    const d: InternalDispatch = async () => ({ status: 200, json: { graph: saved, graph_hash: computeAnalysisAffectingGraphHash(saved as never) } });
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store);
     const r = await dispatchTool('propose_starting_point', JSON.stringify({
-      assumptions: [{ factor_label: 'Additional baseline', value: 0.4, unit: 'days', basis: 'Starting estimate' }],
+      assumptions: [{ factor_label: 'Additional baseline', value: 4, unit: 'days', basis: 'Starting estimate' }],
       option_levels: entries.map(entry => ({ ...entry, range_meaning: 'likely_range', range_user_stated: true })),
     }), ctx, caps);
     expect(r.ok, JSON.stringify(r)).toBe(true);

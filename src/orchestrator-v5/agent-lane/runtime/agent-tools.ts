@@ -846,7 +846,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'proposals cannot both be applied from one approval, because applying the first changes the model ' +
       'the second was made against. This changes nothing on its own. Every figure you propose is an ' +
       'assumption for the user to adopt or correct, NEVER a measurement — say so; one the result marks `your_figure` or ' +
-      '`stated_by: \'user\'` is the user’s own figure, never called an assumption. Values in the factor’s own units.' + LEVEL_BRINGS_ITS_LINK,
+      '`stated_by: \'user\'` is the user’s own figure, never called an assumption. Values in the factor’s own units. ' +
+      'Give each value in the unit the saved option or factor already holds, as get_canonical_state shows it; never relabel what is counted.' + LEVEL_BRINGS_ITS_LINK,
     parameters: obj({
       assumptions: {
         type: 'array',

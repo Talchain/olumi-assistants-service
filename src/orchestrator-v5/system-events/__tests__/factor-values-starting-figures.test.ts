@@ -10,7 +10,7 @@ import * as writer from '../factor-value-edit.js';
 import { factorValuesPostimageIsScoped } from '../option-intervention-edit.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../dispatch.js';
 import { createAgentCapabilities } from '../../agent-lane/runtime/agent-capabilities.js';
-import { ProposalStore } from '../../agent-lane/proposal.js';
+import { createProposal, ProposalStore } from '../../agent-lane/proposal.js';
 
 type Dict = Record<string, unknown>;
 type Graph = { nodes: (Dict & { id: string; kind: string })[]; edges: Dict[]; options?: Dict[] };
@@ -19,7 +19,7 @@ const PROPOSAL = JSON.parse(readFileSync(new URL('./fixtures/s5-starting-figures
 const SCENARIO_ID = 'e09de419-4d76-405e-b47e-d2fce5568c31';
 const BRIEF = "Should I hire a Tech lead or two developers to increase productivity by at least 10%, while maintaining code quality? We have an urgent launch date in the next three months. We currently have six mid-weight developers, so we're lacking leadership. Our budget is £200,000, but we'd like to spend less.";
 const HLT = { factor_id: 'hiring_lead_time', value: 3, unit: 'months', author: 'model_proposed' as const };
-const TLH = { factor_id: 'tech_lead_hires', value: 0, unit: 'hires', author: 'model_proposed' as const };
+const TLH = { factor_id: 'tech_lead_hires', value: 0, unit: 'tech leads', author: 'model_proposed' as const };
 let persisted: Graph = structuredClone(SERVED);
 const rows = new Map<string, { id: string; write: SessionTurnWrite }>();
 const cold = (): Graph => JSON.parse(JSON.stringify(persisted));
@@ -83,7 +83,7 @@ describe('S5 starting figures: real in-process door, serialized store/readback',
     expect(rows.size).toBe(1);
     const readback = cold();
     checkAdopted(readback, 'hiring_lead_time', 3, 'months');
-    checkAdopted(readback, 'tech_lead_hires', 0, 'hires');
+    checkAdopted(readback, 'tech_lead_hires', 0, 'tech leads');
     const option = factor(readback, 'hire_a_tech_lead');
     const cell = mergeInterventionSourceObjects(option).tech_lead_hires;
     expect(cell).toEqual({ ...(beforeCell as Dict), cap: 10 });
@@ -96,13 +96,18 @@ describe('S5 starting figures: real in-process door, serialized store/readback',
   });
 
   it('stored proposal -> authoriseChange -> real door lands the card once', async () => {
+    // DL16:52: supported replacement card; the captured old relabel is retained in its JSON fixture.
+    const content = structuredClone(PROPOSAL);
+    content.operations.find((op: { path: string }) => op.path === TLH.factor_id).value.unit = TLH.unit;
+    content.public_label = content.public_label.replace('Tech lead hires = 0 hires', 'Tech lead hires = 0 tech leads');
+    const replacement = createProposal(content);
     const proposals = new ProposalStore();
-    proposals.put(structuredClone(PROPOSAL));
+    proposals.put(replacement);
     const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: cold(), graph_hash: hash() } }),
       proposals, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-s5-card') });
     const result = await caps.authoriseChange({ scenario_id: SCENARIO_ID, authenticated_user_id: null,
       request_id: 'req-s5-card', user_text: BRIEF, user_turn_text: 'Yes, use those.' } as never,
-    { proposal_id: PROPOSAL.proposal_id });
+    { proposal_id: replacement.proposal_id });
     expect(result.ok).toBe(true);
     expect(rows.size).toBe(1);
     for (const [id, raw] of [['hiring_lead_time', 3], ['tech_lead_hires', 0]] as const) {

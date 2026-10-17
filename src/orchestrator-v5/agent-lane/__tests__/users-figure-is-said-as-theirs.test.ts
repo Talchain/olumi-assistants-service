@@ -16,6 +16,8 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import type { ToolResult } from '../runtime/agent-tools.js';
 import { createAgentCapabilitiesWithLevelsPort } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const SERVED = 'For the record, our current monthly churn is 3.7%. Please put that in the model.';
@@ -82,7 +84,7 @@ describe('propose_starting_point says a level the user gave as theirs — the re
   const edges = ['hire_two', 'hire_lead'].map((o) => ({ from: o, to: 'team_size', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }));
   const capsSP = () => {
     const d: InternalDispatch = async (path) => {
-      if (path.endsWith('/graph')) return { status: 200, json: { graph: { nodes, edges }, graph_hash: 'h0' } };
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: projectGraphForPersistence({ nodes, edges }), graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence({ nodes, edges }) as never) } };
       throw new Error(`unexpected dispatch ${path}`);
     };
     return createAgentCapabilitiesWithLevelsPort(d, new ProposalStore());

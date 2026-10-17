@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { ProposalStore } from '../proposal.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
@@ -15,15 +17,15 @@ function product(keep = false, held = false, extra = false) {
   const graph = { nodes: [
     { id: 'goal', kind: 'goal', label: 'Revenue' },
     ...(extra ? [{ id: 'cost', kind: 'factor', label: 'Campaign cost', category: 'observable', scale_frame: 1000 }] : []),
-    { id: 'effectiveness', kind: 'factor', label: 'Campaign effectiveness', category: 'observable', scale_frame: 1,
-      ...(keep ? { observed_state: { value: 0.2, unit: 'proportion', source: 'cee_inference', extractionType: 'inferred' } } : {}) },
+    { id: 'effectiveness', kind: 'factor', label: 'Campaign effectiveness', category: 'observable',
+      ...(keep ? { observed_state: { value: 0.2, raw_value: 20, cap: 100, declared_scale: 'unit_interval', unit: 'index points (0-100)', source: 'cee_inference', extractionType: 'inferred' } } : {}) },
     { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 0.49, raw_value: 49, cap: 100, unit: 'GBP' } },
     { id: 'option', kind: 'option', label: 'Continue campaign', ...(held ? { is_baseline: true } : {}) },
   ], edges: [...(extra ? [edge('cost', 'goal')] : []), edge('effectiveness', 'goal'), edge('price', 'goal'),
     { ...edge('option', 'price'), ...(held ? { origin: REPAIR_AUTHORED_ORIGIN,
       provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON } } : {}) }], goal_node_id: 'goal' };
   const before = JSON.stringify(graph);
-  const d: InternalDispatch = async () => ({ status: 200, json: { graph, graph_hash: 'h0' } });
+  const d: InternalDispatch = async () => ({ status: 200, json: { graph: projectGraphForPersistence(graph), graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence(graph) as never) } });
   const store = new ProposalStore();
   const caps = createAgentCapabilities(d, store);
   const chips = (name: string, r: Awaited<ReturnType<typeof caps.proposeAssumptions>>) => approvalChipsFor(
@@ -31,7 +33,7 @@ function product(keep = false, held = false, extra = false) {
     id => ({ proposal: store.get(id), result: r }));
   return { caps, store, chips, unchanged: () => expect(JSON.stringify(graph)).toBe(before) };
 }
-const assumption = (basis: string, user_stated = false) => ({ factor_label: 'Campaign effectiveness', value: 0.2, unit: 'proportion', basis, user_stated });
+const assumption = (basis: string, user_stated = false) => ({ factor_label: 'Campaign effectiveness', value: 20, unit: 'index points (0-100)', basis, user_stated });
 const level = (user_stated: boolean | undefined, value = 55) => ({ option_label: 'Continue campaign', factor_label: 'Pro plan price', value, basis: 'a new trial price',
   ...(user_stated === undefined ? {} : { user_stated }) });
 
@@ -44,16 +46,16 @@ describe('A2i9 B4 bound card basis', () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const p = w.store.get(String(r.proposal_id))!;
     const expected = (combined ? 'Review these 2 starting figures. ' : '')
-      + `Adopt 1 starting assumption: Campaign effectiveness = 0.2 proportion\n${basisLine(basis)}`
+      + `Adopt 1 starting assumption: Campaign effectiveness = 20 index points (0-100)\n${basisLine(basis)}`
       + (combined ? '; Continue campaign sets Pro plan price to £55' : '');
     expect(p.public_label).toBe(expected);
     expect(w.chips(combined ? 'propose_starting_point' : 'propose_assumptions', r)[0].detail).toBe(expected);
-    expect(p.operations[0].value).toMatchObject({ basis, authored_by: 'model_proposed', unit: 'proportion' });
+    expect(p.operations[0].value).toMatchObject({ basis, authored_by: 'model_proposed', unit: 'index points (0-100)' });
     w.unchanged();
   });
   it.each(['value', 'level'])('the heading and chip retain one human %s beside Olumi’s estimate', async human => {
     const w = product();
-    const words = human === 'value' ? 'Campaign effectiveness is 0.2.' : 'Continue campaign sets Pro plan price to £55.';
+    const words = human === 'value' ? 'Campaign effectiveness is 20.' : 'Continue campaign sets Pro plan price to £55.';
     const basis = 'An uncertain response; only if funding holds.';
     const r = await w.caps.proposeStartingPoint({ ...ctx, user_text: words, user_turn_text: words }, {
       assumptions: [assumption(basis, human === 'value')], option_levels: [level(human === 'level')],
@@ -76,16 +78,16 @@ describe('A2i9 B4 bound card basis', () => {
     const r = await w.caps.proposeAssumptions(ctx, { assumptions: [assumption(first),
       { factor_label: 'Campaign cost', value: 100, unit: 'GBP', basis: second, user_stated: false }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    const card = `Adopt 2 starting assumptions: Campaign cost = £100\n${basisLine(second)}; Campaign effectiveness = 0.2 proportion\n${basisLine(first)}`;
+    const card = `Adopt 2 starting assumptions: Campaign cost = £100\n${basisLine(second)}; Campaign effectiveness = 20 index points (0-100)\n${basisLine(first)}`;
     expect(w.chips('propose_assumptions', r)[0].detail).toBe(card);
     expect(w.store.get(String(r.proposal_id))!.public_label).toBe(card);
     w.unchanged();
   });
   it('verified human figure does not acquire an Olumi basis line', async () => {
     const w = product();
-    const r = await w.caps.proposeAssumptions({ ...ctx, user_text: 'Campaign effectiveness is 0.2.' }, { assumptions: [assumption('user supplied this', true)] });
+    const r = await w.caps.proposeAssumptions({ ...ctx, user_text: 'Campaign effectiveness is 20.' }, { assumptions: [assumption('user supplied this', true)] });
     expect(r.ok).toBe(true);
-    expect(w.chips('propose_assumptions', r)[0].detail).toBe('Record 1 figure you gave: Campaign effectiveness = 0.2 proportion');
+    expect(w.chips('propose_assumptions', r)[0].detail).toBe('Record 1 figure you gave: Campaign effectiveness = 20 index points (0-100)');
     expect(w.store.get(String(r.proposal_id))!.operations[0].value).toMatchObject({ authored_by: 'user_stated' });
     w.unchanged();
   });
@@ -93,21 +95,21 @@ describe('A2i9 B4 bound card basis', () => {
     const w = product(true);
     const r = await w.caps.proposeAssumptions(ctx, { assumptions: [{ ...assumption('accept the retained estimate'), keep: true }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(w.chips('propose_assumptions', r)[0].detail).toBe('Accept Olumi’s estimate, unchanged: Campaign effectiveness = 0.2 proportion');
-    expect(w.store.get(String(r.proposal_id))!.operations[0].value).toMatchObject({ value: 0.2, authored_by: 'model_proposed' });
-    expect(r.assumptions).toEqual([{ factor: 'Campaign effectiveness', value: 0.2, unit: 'proportion', basis: 'accept the retained estimate', keeps_olumis_estimate: true }]);
+    expect(w.chips('propose_assumptions', r)[0].detail).toBe('Accept Olumi’s estimate, unchanged: Campaign effectiveness = 20 index points (0-100)');
+    expect(w.store.get(String(r.proposal_id))!.operations[0].value).toMatchObject({ value: 20, authored_by: 'model_proposed' });
+    expect(r.assumptions).toEqual([{ factor: 'Campaign effectiveness', value: 20, unit: 'index points (0-100)', basis: 'accept the retained estimate', keeps_olumis_estimate: true }]);
     w.unchanged();
   });
   it.each([false, true])('earlier-note basis remains verbatim; tier-2 match=%s', async tier2 => {
     const w = product();
-    const basis = 'From your earlier note, campaign effectiveness is 0.2';
-    const r = await w.caps.proposeAssumptions({ ...ctx, ...(tier2 ? { unverified_user_text: 'Campaign effectiveness is 0.2.' } : {}) }, { assumptions: [assumption(basis)] });
+    const basis = 'From your earlier note, campaign effectiveness is 20';
+    const r = await w.caps.proposeAssumptions({ ...ctx, ...(tier2 ? { unverified_user_text: 'Campaign effectiveness is 20.' } : {}) }, { assumptions: [assumption(basis)] });
     if (tier2) {
       expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
       expect(w.store.outstanding(ctx.scenario_id, ctx.authenticated_user_id)).toEqual([]);
     } else {
       expect(r.ok).toBe(true);
-      expect(w.chips('propose_assumptions', r)[0].detail).toBe(`Adopt 1 starting assumption: Campaign effectiveness = 0.2 proportion\n${basisLine(basis)}`);
+      expect(w.chips('propose_assumptions', r)[0].detail).toBe(`Adopt 1 starting assumption: Campaign effectiveness = 20 index points (0-100)\n${basisLine(basis)}`);
       expect(w.store.get(String(r.proposal_id))!.operations[0].value).toMatchObject({ basis, authored_by: 'model_proposed' });
     }
     w.unchanged();

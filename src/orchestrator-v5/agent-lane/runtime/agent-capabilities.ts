@@ -310,7 +310,7 @@ import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandStd, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { edgeStrengthWords } from '../../format/edge-strength-words.js';
-import { runWithApprovedAdoption, runWithApprovedBindings } from '../approved-adoption-context.js';
+import { runWithApprovedAdoption, runWithApprovedBindings, runWithApprovedLevelAdoptions } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from '../unit-conflict.js';
@@ -356,6 +356,7 @@ import { applyCohortForecastEdit, applyStatementRecordEdit, approvedCohortForeca
   SET_COHORT_FORECAST_OP, SET_STATEMENT_RECORD_OP, storedTargetRowsOf, type ApprovedCohortForecast, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import { approvedGraphHeld, draftHistory, prepareRequestedRebuild, revisedDraftBrief } from './draft-replacement.js';
 import { runPreparingDraftReplacement } from './draft-replacement-context.js';
+import { preOfferOptionInterventions } from '../../system-events/option-intervention-preoffer.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import { buildWithDrafterRawRecord } from '../../drafter-raw/index.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -3041,15 +3042,14 @@ export function createAgentCapabilities(
     if (typeof n?.scale_frame === 'number' && n.scale_frame > 0) return n.scale_frame;
     return null;
   };
-  const applyCompound = async (
-    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
-    parent: StructuredProposal,
-    approvedRead: GraphRead,
-  ): Promise<ToolResult> => {
+  /** Exact in-memory value/frame/level preparation shared by the offer and the approved save. */
+  const prepareCompoundChange = async (
+    ctx: AgentToolContext, parent: StructuredProposal, approvedRead: GraphRead,
+  ) => {
     const isLevelLink = (o: ProposalOperation): boolean => o.op === 'add_edge' && (o.value as { link_for_level?: unknown } | undefined)?.link_for_level === true;
     const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op) && !isLevelLink(o));
     if (unsupported.length > 0) {
-      return { ok: false, mutated: false, refusal: 'unsupported_compound', detail: `This proposal mixes changes that cannot be applied together: ${[...new Set(unsupported.map((o) => o.op))].join(', ')}.` };
+      return { ok: false as const, result: { ok: false, mutated: false, refusal: 'unsupported_compound', detail: `This proposal mixes changes that cannot be applied together: ${[...new Set(unsupported.map((o) => o.op))].join(', ')}.` } as ToolResult };
     }
     const notApplied = (reason: string, detail: string, extra: Record<string, unknown> = {}): ToolResult => ({
       ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id,
@@ -3057,7 +3057,7 @@ export function createAgentCapabilities(
     });
     // (1) The carried revision starts at what the user approved.
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
-      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.');
+      return { ok: false as const, result: notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.') };
     }
     const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
     const approvedBindings = valueOps.flatMap(o => {
@@ -3067,13 +3067,13 @@ export function createAgentCapabilities(
     });
     const levelOps = parent.operations.filter((o) => o.op === 'set_option_intervention');
     const gapInput = parseOptionGapsOfLevelOps(levelOps);
-    if (gapInput.kind === 'invalid') return notApplied(gapInput.reason, 'The gap statement could not be read from this proposal. Nothing was written.');
+    if (gapInput.kind === 'invalid') return { ok: false as const, result: notApplied(gapInput.reason, 'The gap statement could not be read from this proposal. Nothing was written.') };
     const optionGaps = gapInput.declarations;
     for (const gap of optionGaps) {
       const op = levelOps.find(o => o.path.split('::')[0] === gap.optionId && Object.hasOwn((o.value ?? {}) as object, 'unmodelled_mechanisms'));
       const operands = (op?.value as { gap_operands?: unknown } | undefined)?.gap_operands;
       if (operands === undefined || !isDeepStrictEqual(operands, optionGapOperands(approvedRead.raw, gap.optionId))) {
-        return notApplied('gap_statement_changed_since_approval', 'The named gaps or questions changed after this was proposed. Nothing was written; prepare a new statement.');
+        return { ok: false as const, result: notApplied('gap_statement_changed_since_approval', 'The named gaps or questions changed after this was proposed. Nothing was written; prepare a new statement.') };
       }
     }
     const linkOps = parent.operations.filter(isLevelLink);
@@ -3090,12 +3090,9 @@ export function createAgentCapabilities(
     const rangeLaws = rangeLawsOfCard(parent, approvedRead.raw);
     // ⛔ THE LINKS AND LEVELS ARE ONE COMMIT OR NONE — so what would stop them is checked BEFORE anything is written.
     if (levelOps.length + linkOps.length + valueOps.length > 0) {
-      if (opts.commitOptionLevels === undefined) {
-        return notApplied('levels_writer_unavailable', 'This change could not be written as one, so nothing was written.');
-      }
       const unstored = levelInputs.find((l) => typeof l.value !== 'number');
       if (unstored !== undefined) {
-        return notApplied('no_level_on_proposal', `No level was stored on the proposal for ${unstored.option_id}::${unstored.factor_id}. Nothing was written.`);
+        return { ok: false as const, result: notApplied('no_level_on_proposal', `No level was stored on the proposal for ${unstored.option_id}::${unstored.factor_id}. Nothing was written.`) };
       }
     }
 
@@ -3104,7 +3101,7 @@ export function createAgentCapabilities(
     for (let i = 0; i < valueOps.length; i += 1) {
       const o = valueOps[i];
       const v = (o.value ?? {}) as { value?: number; unit?: string };
-      if (typeof v.value !== 'number') return notApplied('no_value_on_proposal', `No value was stored on the proposal for ${o.path}. Nothing was written.`);
+      if (typeof v.value !== 'number') return { ok: false as const, result: notApplied('no_value_on_proposal', `No value was stored on the proposal for ${o.path}. Nothing was written.`) };
       /**
        * ⛔ `raw_value` WAS DROPPED HERE (Codex 5810763729 items 3 and 5). The proposal
        * carries the user's NATIVE figure, so on a framed factor (`cap: 100`) the event
@@ -3145,7 +3142,7 @@ export function createAgentCapabilities(
       }));
       if (res.kind !== 'mutated') {
         const label = approvedRead.nodes.find((n) => n.id === o.path)?.label ?? o.path;
-        return notApplied('value_refused', `The value for ${label} could not be recorded (${res.reason}), so nothing was written.`, { refused_factor: label });
+        return { ok: false as const, result: notApplied('value_refused', `The value for ${label} could not be recorded (${res.reason}), so nothing was written.`, { refused_factor: label }) };
       }
       working = res.mutatedGraph;
     }
@@ -3179,10 +3176,10 @@ export function createAgentCapabilities(
       const levelFrame = typeof lv.cap === 'number' && lv.cap > 0 ? lv.cap : null;
       const factorFrame = frameOf(byIdAfterValues.get(factorId));
       if (factorFrame !== null && levelFrame !== null && factorFrame !== levelFrame) {
-        return notApplied('level_frame_changed_by_values', `A level for ${byIdAfterValues.get(factorId)?.label ?? factorId} was proposed on a range this approval's own values would change. Nothing was written — propose again.`);
+        return { ok: false as const, result: notApplied('level_frame_changed_by_values', `A level for ${byIdAfterValues.get(factorId)?.label ?? factorId} was proposed on a range this approval's own values would change. Nothing was written — propose again.`) };
       }
       if (factorFrame !== null && levelFrame === null) {
-        return notApplied('level_frame_changed_by_values', `A level for ${byIdAfterValues.get(factorId)?.label ?? factorId} was proposed before it had a range that this approval would give it. Nothing was written — propose again.`);
+        return { ok: false as const, result: notApplied('level_frame_changed_by_values', `A level for ${byIdAfterValues.get(factorId)?.label ?? factorId} was proposed before it had a range that this approval would give it. Nothing was written — propose again.`) };
       }
     }
     // Derived level frames on factors that hold a value and still have no
@@ -3194,9 +3191,10 @@ export function createAgentCapabilities(
       if (range === null) return n;
       const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
       const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
-      if (typeof raw !== 'number' || range <= 1) return n;
-      framed.push({ factor: n.label, value: raw, range });
+      if (range <= 1) return n;
       frameCaps.set(n.id, range);
+      if (typeof raw !== 'number') return { ...n, scale_frame: range };
+      framed.push({ factor: n.label, value: raw, range });
       return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
     });
     /**
@@ -3224,17 +3222,6 @@ export function createAgentCapabilities(
       return { ...n, observed_state: { ...os, source: ADOPTED_ASSUMPTION_SOURCE } };
     });
 
-    /**
-     * ⭐ THE WHOLE APPROVAL IS ONE COMMIT (Canonical #70 5849037691; the door, CEE #2031). The values were written
-     * through `/graph/register` — their own commit and receipt — and THEN the links and levels through the door, so a
-     * refused level left the values written (`partially_applied`, two receipts). The values (in the user's units) and
-     * the ranges they need now ride the SAME port call as the links and levels: one commit and one receipt, or none.
-     * The in-memory pass above stays: it refuses before anything is sent, and the read-back checks against it.
-     */
-    const receipts: ReceiptSummary[] = [];
-    const reencodedSiblings: ReencodedSibling[] = [];
-    let valuesLanded = false;
-    let carried = parent.base_graph_identity_hash;
     const values = valueOps.map((o) => {
       const v = (o.value ?? {}) as { value?: number; unit?: string };
       return {
@@ -3246,6 +3233,39 @@ export function createAgentCapabilities(
     const frames = [...frameCaps].map(([factor_id, cap]) => ({ factor_id, cap }));
     const expectedValueOf = new Map(workingNodes.filter((n) => valueOps.some((o) => o.path === n.id))
       .map((n) => [n.id, (n.observed_state as { value?: unknown } | undefined)?.value]));
+    const levels = levelInputs.map(l => levelOnFinalFrame({ ...l, value: l.value as number }, frameOf(workingNodes.find(n => n.id === l.factor_id))));
+    const input: CommitOptionLevelsInput = {
+      scenario_id: ctx.scenario_id, base_graph_hash: parent.base_graph_identity_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#levels`), links: linkOps.map(o => pairOf(o.path)), levels,
+      ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
+      ...(values.length > 0 ? { values } : {}), ...(frames.length > 0 ? { frames } : {}),
+      ...(rangeLaws.length > 0 ? { statement_record: rangeLaws } : {}),
+    };
+    return { ok: true as const, input, approvedBindings, valueOps, levelOps, linkOps, workingNodes, framed, frameCaps, values, frames, expectedValueOf, levelInputs, optionGaps };
+  };
+
+  const applyCompound = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const notApplied = (reason: string, detail: string, extra: Record<string, unknown> = {}): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id,
+      refusal: 'not_applied', reason, detail, parts: [], receipts: [], ...extra,
+    });
+    const prepared = await prepareCompoundChange(ctx, parent, approvedRead);
+    if (!prepared.ok) return prepared.result;
+    if (opts.commitOptionLevels === undefined) return notApplied('levels_writer_unavailable', 'This change could not be written as one, so nothing was written.');
+    const { input, approvedBindings, valueOps, levelOps, linkOps, framed, frameCaps, values, frames, expectedValueOf, levelInputs, optionGaps } = prepared;
+    /**
+     * ⭐ THE WHOLE APPROVAL IS ONE COMMIT (Canonical #70 5849037691; the door, CEE #2031). The values were written
+     * through `/graph/register` — their own commit and receipt — and THEN the links and levels through the door, so a
+     * refused level left the values written (`partially_applied`, two receipts). The values (in the user's units) and
+     * the ranges they need now ride the SAME port call as the links and levels: one commit and one receipt, or none.
+     * The in-memory pass above stays: it refuses before anything is sent, and the read-back checks against it.
+     */
+    const receipts: ReceiptSummary[] = [];
+    const reencodedSiblings: ReencodedSibling[] = [];
+    let valuesLanded = false;
+    let carried = parent.base_graph_identity_hash;
 
     // (3) ⭐ THE LINKS AND LEVELS AS ONE COMMIT (Canonical #70 5847348206): the product's N-ary level writer commits the
     // whole approved scope on the revision our values write produced (or the approved one) — any pair refused means
@@ -3259,19 +3279,9 @@ export function createAgentCapabilities(
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const pairWords = (p: { option_id: string; factor_id: string }): string => `${labelOf(p.option_id)} \u2192 ${labelOf(p.factor_id)}`;
     if (levelInputs.length + linkOps.length + values.length + frames.length > 0) {
-      const links = linkOps.map((o) => pairOf(o.path));
-      const levels = levelInputs.map(l => levelOnFinalFrame({ ...l, value: l.value as number }, frameOf(workingNodes.find(n => n.id === l.factor_id))));
-      const res = await runWithApprovedBindings(approvedBindings, () => opts.commitOptionLevels!({
-        scenario_id: ctx.scenario_id,
-        base_graph_hash: carried,
-        turn_id: authorisationTurnId(`${parent.proposal_id}#levels`),
-        links,
-        levels,
-        ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
-        ...(values.length > 0 ? { values } : {}),
-        ...(frames.length > 0 ? { frames } : {}),
-        ...(rangeLaws.length > 0 ? { statement_record: rangeLaws } : {}),
-      }));
+      const links = input.links;
+      const levels = input.levels;
+      const res = await runWithApprovedBindings(approvedBindings, () => opts.commitOptionLevels!(input));
       if (res.status === 'unconfirmed') {
         // ⛔ The commit was attempted and could not be read back: neither saved nor refused (#1995's `not_confirmed`).
         return {
@@ -4821,6 +4831,57 @@ export function createAgentCapabilities(
     return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
       + 'Say so plainly BEFORE asking for approval, and ask the user for what this cannot settle — never invent a difference or a figure.';
   };
+  /** The displayed starting point dry-runs the SAME value/frame input consumed by its atomic approval. */
+  const completeStartingPoint = async (ctx: AgentToolContext, result: ToolResult): Promise<ToolResult> => {
+    const parent = typeof result.proposal_id === 'string' ? proposals.get(result.proposal_id) : undefined;
+    const refuse = (failure: ToolResult): ToolResult => {
+      if (parent !== undefined) proposals.discard(parent.proposal_id);
+      const { proposal_id: _id, public_label: _label, note: _note, readiness_if_approved: _ready, ...extra } = result;
+      const { proposal_id: _failedId, ...why } = failure;
+      return { ...extra, ...why, ok: false, mutated: false };
+    };
+    const before = await readGraph(ctx.scenario_id);
+    if (parent === undefined || before === null) return refuse({ ok: false, mutated: false, refusal: 'not_found' });
+    const prepared = await prepareCompoundChange(ctx, parent, before);
+    if (!prepared.ok) return refuse({ ...prepared.result, refusal: prepared.result.reason ?? prepared.result.refusal });
+    const { input, approvedBindings } = prepared;
+    // Exactly dispatch's model_proposed-only adoption list, bound to the final submitted native level.
+    const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
+      scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+    }));
+    const nativeInput: Parameters<typeof preOfferOptionInterventions>[0] = {
+      scenarioId: input.scenario_id, turnId: input.turn_id, requestId: ctx.request_id,
+      requestHash: `preoffer:${parent.proposal_id}`, expectedGraphHash: input.base_graph_hash,
+      stage: 'frame', freshness: 'none', hasExistingAnalysis: false,
+      targets: input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+        ...(l.raw_value !== undefined || l.cap !== undefined || l.likely_range !== undefined
+          ? { figure: { ...(l.raw_value === undefined ? {} : { raw_value: l.raw_value }), ...(l.cap === undefined ? {} : { cap: l.cap }),
+            ...(l.unit === undefined ? {} : { unit: l.unit }), ...(l.likely_range === undefined ? {} : { likely_range: l.likely_range }) } } : {}) })),
+      values: input.values?.map(v => ({ factorId: v.factor_id, value: v.value, ...(v.unit === undefined ? {} : { unit: v.unit }), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })),
+      frames: input.frames?.map(f => ({ factorId: f.factor_id, cap: f.cap })),
+      expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+      ...(input.option_gaps === undefined ? {} : { optionGaps: input.option_gaps.map(g => ({ optionId: g.option_id, mechanisms: g.mechanisms, operands: g.operands })) }),
+      rangeLaws: Array.isArray(input.statement_record) ? input.statement_record : [],
+    };
+    const native = await runWithApprovedBindings(approvedBindings, () => runWithApprovedLevelAdoptions(adoptions,
+      () => preOfferOptionInterventions(nativeInput, before.raw, { briefText: before.brief_text })));
+    if (!native.offer) return refuse({ ok: false, mutated: false,
+      refusal: native.refusal.kind === 'refused' ? native.refusal.reason : 'nothing_to_set', native_refusal: native.refusal,
+      detail: native.refusal.kind === 'refused' ? `The complete starting figures could not be prepared (${native.refusal.reason}). No card was offered. Use the native item and scope; it may concern more than units.` : native.detail });
+    const readiness = readinessViewOf(native.prepared.graph);
+    const shownLevels = (rows: unknown): unknown => !Array.isArray(rows) ? rows : rows.map(row => {
+      const l = input.levels.find(l => before.nodes.find(n => n.id === l.option_id)?.label === row.option
+        && before.nodes.find(n => n.id === l.factor_id)?.label === row.factor);
+      return l === undefined ? row : { ...row, recorded_on_model_scale: l.value, model_range: l.cap ?? null,
+        ...(row.range_taken_from_your_figure === undefined ? {} : { range_taken_from_your_figure: l.cap }) };
+    });
+    // A refused new candidate must not discard the earlier valid card the user was shown.
+    replaceEarlierStartingPoints(ctx, parent.proposal_id);
+    return { ...result, readiness_if_approved: readiness,
+      ...(result.option_levels === undefined ? {} : { option_levels: shownLevels(result.option_levels) }),
+      ...(result.interventions === undefined ? {} : { interventions: shownLevels(result.interventions) }),
+      note: String(result.note ?? '') + stillBlockedNote(readiness) };
+  };
   const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
     new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
   /**
@@ -4850,10 +4911,10 @@ export function createAgentCapabilities(
    * latest set the user was shown. Only starting points are replaced; an
    * ordinary single proposal is never discarded here.
    */
-  const replaceEarlierStartingPoints = (ctx: AgentToolContext): void => {
+  const replaceEarlierStartingPoints = (ctx: AgentToolContext, retainedProposalId?: string): void => {
     for (const o of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
       const p = proposals.get(o.proposal_id);
-      if (p !== undefined && p.provenance.basis === STARTING_POINT_BASIS) proposals.discard(o.proposal_id);
+      if (p !== undefined && p.proposal_id !== retainedProposalId && p.provenance.basis === STARTING_POINT_BASIS) proposals.discard(o.proposal_id);
     }
   };
 
@@ -7518,12 +7579,12 @@ export function createAgentCapabilities(
         ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
         ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
       };
-      const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
-      if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
       // ⛔ A name that matched two entities travels to the joined result from EITHER half,
       // so the starting point never looks complete at the moment of consent.
       const ambiguousTargets = [a, b].flatMap((r) => (r !== null && Array.isArray(r.ambiguous_targets) ? r.ambiguous_targets : []));
       const ambiguity = ambiguousTargets.length > 0 ? { ambiguous_targets: ambiguousTargets, ambiguous_note: AMBIGUOUS_NOTE } : {};
+      const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
+      if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
       // Only one half could be proposed: it is an ordinary proposal already.
       if (made.length === 1) {
         const only = proposals.get(made[0].proposal_id as string);
@@ -7538,9 +7599,11 @@ export function createAgentCapabilities(
             ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
           });
         }
-        const ifApproved = await readinessIfApplied(ctx, only?.operations ?? []);
-        return { ...made[0], ...ambiguity, ...refused, readiness_if_approved: ifApproved,
-          ...(stillBlockedNote(ifApproved) !== '' ? { note: `${String(made[0].note ?? '')}${stillBlockedNote(ifApproved)}` } : {}) };
+        if (only === undefined) return { ok: false, mutated: false, refusal: 'not_found' };
+        const { proposal_id: _childId, ...held } = only;
+        const single = createProposal({ ...held, provenance: { ...only.provenance, basis: STARTING_POINT_BASIS } });
+        proposals.discard(only.proposal_id); proposals.put(single);
+        return completeStartingPoint(ctx, { ...made[0], proposal_id: single.proposal_id, ...ambiguity, ...refused });
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -7568,12 +7631,9 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `${figureApprovalWords(operations).heading} ${halves[0].public_label}; ${halves[1].public_label}`,
       });
-      replaceEarlierStartingPoints(ctx);
       proposals.put(compound);
       for (const h of halves) proposals.discard(h.proposal_id);
-      const ifApproved = await readinessIfApplied(ctx, compound.operations);
-      return {
-        readiness_if_approved: ifApproved,
+      return completeStartingPoint(ctx, {
         ok: true, mutated: false,
         proposal_id: compound.proposal_id,
         public_label: compound.public_label,
@@ -7598,8 +7658,8 @@ export function createAgentCapabilities(
         ...refused,
         // The same rule as `propose_assumptions`: a level the user gave (`stated_by: 'user'`) or a value marked
         // `your_figure` is said as theirs; the rest are assumptions. With none of the user's, the note is unchanged.
-        note: startingPointNoteFor(usersFiguresIn(a?.assumptions, b?.interventions)) + stillBlockedNote(ifApproved),
-      };
+        note: startingPointNoteFor(usersFiguresIn(a?.assumptions, b?.interventions)),
+      });
     },
 
     async proposeOptionInterventions(ctx, args, internal): Promise<ToolResult> {
@@ -8786,6 +8846,8 @@ export function createAgentCapabilities(
       if (isGoalCurrentLevelProposal(decision.proposal)) {
         return applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, decision.proposal, before);
       }
+
+      if (decision.proposal.provenance.basis === STARTING_POINT_BASIS) return applyCompound(ctx, decision.proposal, before);
 
       if (ops[0]?.op === 'set_option_intervention') {
         /**

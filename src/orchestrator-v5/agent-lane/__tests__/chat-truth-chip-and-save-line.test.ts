@@ -20,6 +20,8 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import type { ToolResult } from '../runtime/agent-tools.js';
 import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { ProposalStore } from '../proposal.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { asSent } from './helpers/as-sent.js';
 
 const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' as const });
@@ -43,7 +45,7 @@ const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'The recruitment fee is £5,000 and the PA salary £45,000; hiring a PA would pay £50,000.' };
 
 function capsOver(graph: { nodes: unknown[]; edges: unknown[] } = PA_GRAPH) {
-  const d: InternalDispatch = async () => ({ status: 200, json: { graph, graph_hash: 'h0' } });
+  const d: InternalDispatch = async () => ({ status: 200, json: { graph: projectGraphForPersistence(graph), graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence(graph) as never) } });
   const store = new ProposalStore();
   return { store, caps: createAgentCapabilities(d, store) };
 }
@@ -438,13 +440,14 @@ describe('the real route: build + proposal in one turn', () => {
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async (req) => {
       const s = scen((req.params as { id: string }).id);
-      return s.registered ? { graph: PA_GRAPH, graph_hash: `rev-${s.revision}` } : { graph: { nodes: [], edges: [] }, graph_hash: 'empty' };
+      const graph = s.registered ? projectGraphForPersistence(PA_GRAPH) : { nodes: [], edges: [] };
+      return { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) };
     });
     app.post('/assist/v1/scenarios/:id/graph/register', async (req) => {
       const s = scen((req.params as { id: string }).id);
       s.registered = true;
       s.revision += 1;
-      return { registered: true, graph_hash: `rev-${s.revision}`, model_version: { version_id: `00000000-0000-4000-8000-00000000000${s.revision}`, version_number: s.revision } };
+      return { registered: true, graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence(PA_GRAPH) as never), model_version: { version_id: `00000000-0000-4000-8000-00000000000${s.revision}`, version_number: s.revision } };
     });
     app.post('/assist/v1/scenarios/:id/versions', async () => ({ versions: [], next_cursor: null }));
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ok', blocks: [], suggested_actions: [], insights: [] }));

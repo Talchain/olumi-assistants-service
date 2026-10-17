@@ -599,6 +599,7 @@ describe('the Agent route runs the first analysis itself, once', () => {
    * approval is never shaped: every figure the user is asked to approve stays on the face.
    */
   it('RED: a build turn whose first analysis ran AND that offers a four-figure starting point for approval → NO `_answer_shape`; every figure on the face, text byte-identical', async () => {
+    knobs.canonicalHash = true;
     const figures = [
       '- Delivery reliability today: 70%',
       '- Hire a tech lead: raises delivery reliability to 85%',
@@ -617,7 +618,14 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(would.bullets, 'the control: shaped, the face would carry only three of the four figures').toHaveLength(3);
     expect(would.detail, 'the control: the fourth figure would go behind "Show more"').toContain(figures[3]);
 
-    const buildAndPropose = () => [
+    const buildAndPropose = () => {
+      // Canonical stored coordinates, not bare numeric intervention aliases on an unframed factor.
+      knobs.graph = Object.assign({}, knobs.graph, { nodes: knobs.graph.nodes.map(n => n.id === 'fac_delivery' && 'observed_state' in n
+        ? { ...n, observed_state: { ...n.observed_state, unit: '%' } }
+        : n.kind === 'option' && 'interventions' in n ? { ...n, interventions: Object.fromEntries(Object.entries(n.interventions ?? {}).map(([id, value]) =>
+          [id, typeof value === 'number' ? { value, raw_value: value * 100, cap: 100, unit: '%', source: 'cee_hypothesis',
+            target_match: { node_id: id, match_type: 'exact_id', confidence: 'high' } } : value])) } : n) });
+      return [
       callTool('build_model_from_brief', { brief: BRIEF }),
       callTool('propose_starting_point', {
         assumptions: [{ user_stated: false, factor_label: 'Delivery reliability', value: 70, unit: '%', basis: 'A typical figure for a team this size.' }],
@@ -627,7 +635,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
         ],
       }),
       say(prose),
-    ];
+      ];
+    };
     // THE UNSHAPED REPLY, measured: the SAME turn on a fresh scenario whose readback carries no result block,
     // which the shape step returns by reference at every head — the reply plus Olumi's own status line.
     knobs.runStateKind = 'complete_stale';

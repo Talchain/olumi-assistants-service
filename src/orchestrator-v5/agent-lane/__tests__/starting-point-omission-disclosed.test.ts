@@ -6,6 +6,13 @@
  * The omission is composed by Olumi from the proposer's own result, whatever the model says.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+// This symbolic-revision composition fixture delegates REAL native preparation on its canonical graph/hash.
+// Actual persisted hash/CAS/save controls run without this adapter in option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', async original => {
+  const actual = await original<typeof import('../../system-events/option-intervention-preoffer.js')>();
+  const { canonicalFixturePreoffer } = await import('./fixtures/canonical-preoffer.js');
+  return { ...actual, preOfferOptionInterventions: canonicalFixturePreoffer(actual.preOfferOptionInterventions) };
+});
 import Fastify, { type FastifyInstance } from 'fastify';
 
 /** Records rows by (scenario, turn), so a turn_id-bearing turn takes the real claim → answer path. */

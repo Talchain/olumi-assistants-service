@@ -11,7 +11,14 @@
  *
  * FIXTURE: that run's own served first-turn `draft_graph`, verbatim.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// This symbolic-revision composition fixture delegates REAL native preparation on its canonical graph/hash.
+// Actual persisted hash/CAS/save controls run without this adapter in option-intervention-preoffer.test.ts.
+vi.mock('../../system-events/option-intervention-preoffer.js', async original => {
+  const actual = await original<typeof import('../../system-events/option-intervention-preoffer.js')>();
+  const { canonicalFixturePreoffer } = await import('./fixtures/canonical-preoffer.js');
+  return { ...actual, preOfferOptionInterventions: canonicalFixturePreoffer(actual.preOfferOptionInterventions) };
+});
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
