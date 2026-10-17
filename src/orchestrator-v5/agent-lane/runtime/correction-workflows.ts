@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { AgentToolContext, ToolResult } from './agent-tools.js';
 import { createProposal, type ProposalStore, type StructuredProposal } from '../proposal.js';
 import { prepareStatementCorrection, statementCorrectionWords, statementBoundTo, userStatementRecord, withUserStatement,
-  type StatementCorrectionRequest } from '../../statement-door/statements.js';
+  type StatementCorrectionRequest, type DoorContext } from '../../statement-door/statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -24,8 +24,8 @@ const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v ===
 
 /** Prepare the existing set_statement_record card. The Founder adapter only supplies the canonical read and store. */
 export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown, baseHash: string,
-  request: StatementCorrectionRequest, proposals: ProposalStore, diagnostic?: Parameters<typeof prepareStatementCorrection>[4]): ToolResult {
-  const prepared = prepareStatementCorrection(graph, request, { now: ctx.user_turn_text, conversation: ctx.user_text }, new Date().toISOString(), diagnostic);
+  request: StatementCorrectionRequest, proposals: ProposalStore, diagnostic?: Parameters<typeof prepareStatementCorrection>[4], context?: DoorContext): ToolResult {
+  const prepared = prepareStatementCorrection(graph, request, { now: ctx.user_turn_text, conversation: ctx.user_text }, new Date().toISOString(), diagnostic, context);
   if ('refused' in prepared) return { ok: false, mutated: false, refusal: prepared.refused,
     detail: prepared.refused === 'correction_attestation_protected'
       ? 'This record also holds an approval or other confirmation. A source correction cannot replace it safely yet. No card was created and the record is unchanged.'
