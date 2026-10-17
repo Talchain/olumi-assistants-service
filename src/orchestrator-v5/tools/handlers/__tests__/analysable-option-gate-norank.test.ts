@@ -68,9 +68,11 @@ import {
 import type { HandlerInvocation } from '../../registry.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { GraphV3 } from '../../../../schemas/cee-v3.js';
 // ⚠ PURE-FUNCTION IMPORT — absent at pristine. The specs that use it are the
 // ones skipped for the RED measurement.
 import {
+  comparisonAfterExclusionsRefusal,
   gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
 } from '../analysable-option-gate.js';
@@ -181,6 +183,23 @@ function makeSnapshot(
 
 function makeReader(snapshot: RunAnalysisScenarioSnapshot): ScenarioReader {
   return vi.fn(() => Promise.resolve(snapshot));
+}
+
+function coherentTwoOptionSnapshot(phantomInterventions: Record<string, number>): RunAnalysisScenarioSnapshot {
+  const options = [CONFIGURED_TECH_LEAD, {
+    id: OPT_PHANTOM, option_id: OPT_PHANTOM, label: LABEL_PHANTOM, interventions: phantomInterventions,
+  }];
+  const graph = {
+    nodes: [
+      ...makeGraph().nodes.filter(node => ['g', 'd', 'fac_speed'].includes(String(node.id))),
+      ...options.map(option => ({ id: option.option_id, kind: 'option', label: option.label, interventions: option.interventions })),
+    ],
+    edges: [{ from: 'fac_speed', to: 'g' }, ...options.flatMap(option => [
+      { from: 'd', to: option.option_id }, { from: option.option_id, to: 'fac_speed' },
+    ])].map(edge => ({ ...edge, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' })),
+  };
+  expect(GraphV3.safeParse(graph).success).toBe(true);
+  return makeSnapshot(options, graph);
 }
 
 /**
@@ -407,46 +426,51 @@ describe('no-rank ruling — an option with no values set is EXCLUDED, never ran
   });
 
   it('refuses honestly when exclusion leaves fewer than two options to compare — BEFORE the wire', async () => {
-    const graph = makeGraph(
-      [{ id: OPT_PHANTOM, kind: 'option', label: LABEL_PHANTOM }],
-      [{ from: OPT_PHANTOM, to: 'fac_speed' }],
-    );
+    const snapshot = coherentTwoOptionSnapshot({});
     const { client, run } = makePlotClient();
     const handler = createRunAnalysisHandler({
       plotClient: client,
-      scenarioReader: makeReader(
-        makeSnapshot([CONFIGURED_TECH_LEAD, emptyOption(OPT_PHANTOM, LABEL_PHANTOM)], graph),
-      ),
-    });
-
-    await expect(handler(makeInvocation())).rejects.toBeInstanceOf(HandlerInvocationFailedError);
-    // Not a 400 dressed up as an engine fault: no request was made at all.
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it('the refusal names the option that needs mapping, prescribes a step that works, and never says "placeholder"', async () => {
-    const graph = makeGraph(
-      [{ id: OPT_PHANTOM, kind: 'option', label: LABEL_PHANTOM }],
-      [{ from: OPT_PHANTOM, to: 'fac_speed' }],
-    );
-    const { client } = makePlotClient();
-    const handler = createRunAnalysisHandler({
-      plotClient: client,
-      scenarioReader: makeReader(
-        makeSnapshot([CONFIGURED_TECH_LEAD, emptyOption(OPT_PHANTOM, LABEL_PHANTOM)], graph),
-      ),
+      scenarioReader: makeReader(snapshot),
     });
 
     const error = await handler(makeInvocation()).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(HandlerInvocationFailedError);
     const failure = error as HandlerInvocationFailedError;
-    // `analysis_not_ready` is already in RECOVERABLE_HANDLER_CAUSES and its
-    // composer renders `details.next_step` VERBATIM — so this is a 200 with an
-    // honest next step, not a 500, and it needs no new cause kind.
     expect(failure.cause_kind).toBe('analysis_not_ready');
     const details = failure.details as Record<string, unknown>;
     expect(details.reason_code).toBe('insufficient_analysable_options');
-    const nextStep = details.next_step as string;
+    expect(details.next_step).toBe('Factor "Delivery speed" is currently 100. What should option "Hire Two Developers Only" set it to?');
+    // Not a 400 dressed up as an engine fault: no request was made at all.
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('a coherent completed comparison reaches Run with both exact configured option maps', async () => {
+    const snapshot = coherentTwoOptionSnapshot({ fac_speed: CONFIGURED_TWO_DEVS.interventions.fac_speed });
+    const { client, run } = makePlotClient();
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshot),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(sentOptions(run).map(option => ({ option_id: option.option_id, interventions: option.interventions }))).toEqual([
+      { option_id: OPT_TECH_LEAD, interventions: { fac_speed: 140 } },
+      { option_id: OPT_PHANTOM, interventions: { fac_speed: 120 } },
+    ]);
+    expect(outcome.assistant_text).toBe('Ran analysis on your current scenario.');
+  });
+
+  it('the refusal names the option that needs mapping, prescribes a step that works, and never says "placeholder"', () => {
+    // DL 17:00: preserve this paragraph at its existing comparison gate; a
+    // complete handler graph runs, while an incomplete one asks for its value first.
+    const snapshot = coherentTwoOptionSnapshot({});
+    const gate = gateAnalysableOptions({ options: snapshot.options, graph: snapshot.graph,
+      rawPersistedGraph: snapshot.rawPersistedGraph, scaleNetEnabled: true });
+    expect(gate.options.map(option => option.option_id)).toEqual([OPT_TECH_LEAD]);
+    expect(gate.excluded).toEqual([{ option_id: OPT_PHANTOM, label: LABEL_PHANTOM, reason: 'no_interventions' }]);
+    const refusal = comparisonAfterExclusionsRefusal(gate, []);
+    expect(refusal).not.toBeNull();
+    const nextStep = refusal!.nextStep;
     expect(nextStep).toContain(LABEL_PHANTOM);
     expect(nextStep).toMatch(/isn't a comparison/);
     expect(nextStep).not.toMatch(/placeholder/i);
