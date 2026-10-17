@@ -13,16 +13,17 @@ import { dispatchTool, type AgentToolContext } from '../../orchestrator-v5/agent
 import { ProposalStore, createProposal, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { approvalChipsFor } from '../../orchestrator-v5/agent-lane/approval-chips.js';
 import { proposalPendingAction, rehydrateProposals } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
-import { parsePendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js';
 import { commitOptionLevelsInProcess } from '../../orchestrator-v5/system-events/dispatch.js';
 import { assessCanonicalAnalysisReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../orchestrator/graph-structure-validator.js';
-import { approvedGraphHeld, prepareRequestedRebuild } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement.js';
-import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { approvedGraphHeld, draftHistory, prepareRequestedRebuild } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement.js';
+import { buildModelFromBrief, constructionOperationId } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { runPreparingDraftReplacement } from '../../orchestrator-v5/agent-lane/runtime/draft-replacement-context.js';
 import { runAgentTurn, type CallModel } from '../../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { log } from '../../utils/telemetry.js';
+import { narrateWriteOutcome } from '../../orchestrator-v5/agent-lane/write-outcome.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../orchestrator-v5/build-turn-context.js';
 import { createRunAnalysisHandler } from '../../orchestrator-v5/tools/handlers/run-analysis.js';
 vi.mock('../../config/index.js', async original => {
@@ -48,7 +49,7 @@ function restoreCard(proposal: StructuredProposal, result: Rec, ctx: AgentToolCo
   return store;
 }
 
-async function world(row: { readonly graph: Rec; readonly brief: string; readonly message: string }, options: { race?: boolean; loseAcknowledgement?: boolean; hideLedger?: boolean; provider?: (...args: any[]) => Promise<any>; ledger?: Rec; objections?: { finding_id: string; analysis_id: string; statement: string }[] } = {}) {
+async function world(row: { readonly graph: Rec; readonly brief: string; readonly message: string }, options: { race?: boolean; loseAcknowledgement?: boolean; hideLedger?: boolean; provider?: (...args: any[]) => Promise<any>; ledger?: Rec; pending?: PendingAction[]; objections?: { finding_id: string; analysis_id: string; statement: string }[] } = {}) {
   let graph = structuredClone(row.graph) as Rec;
   const original = structuredClone(graph);
   const writes: Rec[] = [];
@@ -79,6 +80,7 @@ async function world(row: { readonly graph: Rec; readonly brief: string; readonl
   };
   const proposals = new ProposalStore();
   const caps = (store = proposals) => createAgentCapabilities(dispatch, store, options.provider, 'full', undefined, { turnAuthority: true, commitOptionLevels: input => commitOptionLevelsInProcess(input, "native-captured-unit"),
+    ...(options.pending === undefined ? {} : { readPendingActions: async () => options.pending! }),
     readCommittedTurnLedger: async () => ({ first_user_message: row.brief, user_message_turn_ids: ['first'], ...options.ledger, write_turn_ids: options.hideLedger ? [] : writes.map(w => w.turn_id),
       complete: options.ledger?.complete ?? true }) as never, readStatedObjections: async () => options.objections ?? [] });
   const ctx = { scenario_id: sid, authenticated_user_id: null, request_id: 'native-correction', turn_id: randomUUID(),
@@ -88,6 +90,7 @@ async function world(row: { readonly graph: Rec; readonly brief: string; readonl
 
 
 const captured = JSON.parse(readFileSync(new URL('./fixtures/founder-e625-before-goal-change.json', import.meta.url), 'utf8')) as Rec;
+const rebuildCapture = JSON.parse(readFileSync(new URL('./fixtures/founder-e625-rebuild-read04.json', import.meta.url), 'utf8')) as Rec;
 const source = 'If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.';
 const goalArgs = { constraint_type: 'at_least', value: 250000, unit: '£', rationale: source, governing_outcome: 'Angel funding secured', goal_change_quote: source, later_ambition_quote: captured.brief_text };
 async function goalWorld(change?: (graph: Rec) => void, message = source) {
@@ -245,16 +248,18 @@ describe('all refused builds have one text-free capability observation', () => {
       expect(JSON.stringify(e)).not.toMatch(/Private source|secret-beyond-bound|password/); expect(w.writes).toHaveLength(0);
     } finally { spy.mockRestore(); }
   });
-  it('fixed retention enum gives first missing clause/count without logging labels or adding AI fields', async () => {
+  it('fixed retention enum names an identity collision without logging labels or exposing diagnostic fields', async () => {
     const bakery = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/bakery-prepare-only.json', import.meta.url), 'utf8'));
     const provider = async () => ({ text: JSON.stringify(bakery.draft), status: 'completed' as const });
     const seed = await runPreparingDraftReplacement('seed', () => buildModelFromBrief('seed', bakery.brief, async () => { throw new Error('No write allowed'); }, provider as never));
     expect(seed.ok).toBe(true); const graph = structuredClone(seed.prepared_graph) as Rec;
-    graph.nodes.push({ id: 'kept-private', kind: 'option', label: 'Private saved option, secret-value' });
+    graph.nodes.find((n: Rec) => n.kind === 'option').label = 'Private saved option, secret-value';
     const w = await world({ graph, brief: bakery.brief, message: source }, { provider }), spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
     try {
       const r = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Replacement context only', explicit_rebuild_request: source }), w.ctx, w.caps());
       expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' }); expect(r).not.toHaveProperty('missing_kind');
+      expect(r.follow_up).toContain('Private saved option, secret-value');
+      expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r]).status).toBe(r.follow_up);
       const e = events(spy); expect(e).toHaveLength(1); expect(e[0]).toMatchObject({ missing_kind: 'saved_option', missing_count: 1, argument_length: source.length, argument_sha256: createHash('sha256').update(source).digest('hex') });
       expect(JSON.stringify(e)).not.toMatch(/Private saved option|secret-value|Replacement context/); expect(w.writes).toHaveLength(0);
     } finally { spy.mockRestore(); }
@@ -296,5 +301,69 @@ it('complete approved captured correction reaches the real Run payload probe wit
   expect(sent.goal_node_id).toBe('angel_funding_secured');
   expect(sent.graph.nodes.some((n: Rec) => ['funding_secured', 'larger_fund_secured'].includes(n.id))).toBe(false);
   expect(sent.goal_constraints).toEqual(expect.arrayContaining([expect.objectContaining({ node_id: 'angel_funding_secured', value: 250000, operator: '>=' })]));
+});
+
+it('the prepared captured retention candidate cold-saves through the existing complete writer and reopens with the same sources', async () => {
+  const message = "I've already agreed with this brief. Generate a new model based on this brief.";
+  const w = await world({ graph: rebuildCapture.graph, brief: rebuildCapture.brief_text, message });
+  const draft = structuredClone(w.original);
+  const omitted = ['current_split_reference', 'funding_secured', 'investor_outreach_pipeline_stalls'];
+  draft.nodes = draft.nodes.filter((n: Rec) => !omitted.includes(n.id));
+  draft.edges = draft.edges.filter((e: Rec) => !omitted.includes(e.from) && !omitted.includes(e.to));
+  const prepared = prepareRequestedRebuild(w.original, draft, levelFrameOf);
+  expect(prepared.missing).toEqual([]); expect(prepared.retired).toEqual([]);
+  const ledger = { complete: true, first_user_message: rebuildCapture.brief_text, user_message_turn_ids: ['first'], write_turn_ids: [] };
+  const history = draftHistory(ledger, w.ctx.scenario_id, rebuildCapture.brief_text, w.ctx.turn_id);
+  const base = computeGraphIdentityHash(w.original as never)!.value;
+  // Writer integration only: this declared candidate is not a reconstruction of the historical constructor output.
+  const proposal = createProposal({ scenario_id: w.ctx.scenario_id, user_id: null,
+    base_graph_identity_hash: computeAnalysisAffectingGraphHash(w.original as never)!,
+    operations: [{ op: 'apply_saved_correction', path: w.ctx.scenario_id, value: { candidate: prepared.candidate,
+      base_identity: base, brief_text: rebuildCapture.brief_text, goal_turn_id: w.ctx.turn_id,
+      operation_id: constructionOperationId(w.ctx.scenario_id, 'declared-captured-retention:' + base), explicit_rebuild_request: message,
+      rebuild_history: { bound: history.bound, context: history.context, objections: [], unpressed_adoptions: [] } } }],
+    provenance: { authored_by: 'model_proposed', basis: message }, validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label: 'Declared complete captured retention candidate, sources and unknown adoption preserved.' });
+  const offered = { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label };
+  const cold = restoreCard(proposal, offered, w.ctx), caps = w.caps(cold);
+  expect(await caps.authoriseChange(w.ctx, { proposal_id: proposal.proposal_id })).toMatchObject({ ok: false, mutated: false });
+  expect(w.writes).toHaveLength(0);
+  const press = { ...w.ctx, user_turn_text: '', typed_approval_of: proposal.proposal_id };
+  expect(await caps.authoriseChange(press, { proposal_id: proposal.proposal_id })).toMatchObject({ ok: true, applied: true });
+  expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(prepared.candidate, w.graph())).toBe(true);
+  for (const n of w.original.nodes) expect(w.graph().nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
+  const reopened = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
+  expect(reopened.goal.user_statements).toBeDefined();
+  expect(await caps.authoriseChange(press, { proposal_id: proposal.proposal_id })).toMatchObject({ ok: true, already_applied: true });
+  expect(w.writes).toHaveLength(1);
+});
+
+it.each([false, true])('the production rebuild card carries unknown adoption or uses a real unpressed record (proof: %s)', async proof => {
+  const bakery = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/bakery-prepare-only.json', import.meta.url), 'utf8'));
+  const provider = async () => ({ text: JSON.stringify(bakery.draft), status: 'completed' as const });
+  const seed = await runPreparingDraftReplacement('seed', () => buildModelFromBrief('seed', bakery.brief, async () => { throw new Error('No construction write'); }, provider as never));
+  expect(seed.ok).toBe(true); const graph = structuredClone(seed.prepared_graph) as Rec;
+  const node = { id: 'earlier_olumi_option', kind: 'option', label: 'Earlier Olumi option', proposed_by: 'olumi', analysis_participation: 'retained_excluded', interventions: {} };
+  graph.nodes.push(node); const pending: PendingAction[] = [];
+  const message = "I've already agreed with this brief. Generate a new model based on this brief.";
+  const w = await world({ graph, brief: bakery.brief, message }, { provider, pending });
+  if (proof) {
+    const adoption = createProposal({ scenario_id: w.ctx.scenario_id, user_id: null,
+      base_graph_identity_hash: computeAnalysisAffectingGraphHash(w.original as never)!,
+      operations: [{ op: 'adopt_olumi_option', path: node.id, value: { label: node.label, expected_interventions: {} } }],
+      provenance: { authored_by: 'model_proposed', basis: 'Declared unpressed adoption' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Include the earlier Olumi option' });
+    pending.push(proposalPendingAction(adoption, { id: 'agent-approve-proposal:' + adoption.proposal_id, label: 'Include option', message: 'Include the earlier option.' },
+      { scenario_id: w.ctx.scenario_id, emitted_at_iso: new Date().toISOString() }));
+  }
+  const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Declared replacement context', explicit_rebuild_request: message }), w.ctx, w.caps());
+  expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);
+  const pid = String(out.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
+  expect(candidate.nodes.some((n: Rec) => n.id === node.id)).toBe(!proof);
+  expect(out.public_label).toContain(proof ? 'Earlier Olumi suggestions left out' : 'Olumi cannot tell whether you adopted');
+  if (!proof) expect(candidate.nodes.find((n: Rec) => n.id === node.id)).toEqual(node);
+  const cold = restoreCard(held, out, w.ctx);
+  expect(await w.caps(cold).authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+  expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+  expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
 });
 

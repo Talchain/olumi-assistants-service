@@ -4,7 +4,7 @@ import { GOAL_RECORD_PRECEDENCE, readGoalRecord } from '../../goal-target/goal-r
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from './build-model.js';
 import { edgeReviewedByUser, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
-import { linkDrawnByOf, provenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { linkDrawnByOf, nodeIntroductionOf, provenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { resolveMagnitudeFrame } from '../../../cee/magnitude/link-effect.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
@@ -12,7 +12,9 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from '../model-primitives.js'
 import { isDeepStrictEqual } from 'node:util';
 import { normaliseGraphForIdentity } from '../../context/graph-identity.js';
 import { sameUnitAsEarlier } from '../same-unit.js';
-import { userStatementsOn } from '../../statement-door/statements.js';
+import { userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
+import { factorUnitOf } from '../unit-conflict.js';
+import { mergeInterventionSourceObjects } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 
 type Rec = Record<string, unknown>;
@@ -543,11 +545,15 @@ export type RebuildMissingKind = 'saved_option' | 'option_setting' | 'recorded_r
 
 /** Prepare a complete replacement without discarding the saved goal, options or recorded human work. Pure. */
 export function prepareRequestedRebuild(base: unknown, drafted: unknown,
-  levelFrameOf: (node: Rec | undefined) => number | null): { candidate?: Rec; kept: string[]; missing: string[]; missing_kind?: RebuildMissingKind } {
+  levelFrameOf: (node: Rec | undefined) => number | null, unadoptedOptionIds: readonly string[] = []): {
+    candidate?: Rec; kept: string[]; retired: string[]; adoption_unknown: string[]; missing: string[]; missing_kind?: RebuildMissingKind;
+  } {
   const before = rec(base), draft = rec(drafted);
-  const missing = (why: string, missing_kind: RebuildMissingKind = 'goal_contract') => ({ kept: [], missing: [why], missing_kind });
+  const missing = (why: string, missing_kind: RebuildMissingKind = 'goal_contract') => ({ kept: [], retired: [], adoption_unknown: [], missing: [why], missing_kind });
   if (!before || !draft) return missing('the complete saved model');
   const oldNodes = recs(before.nodes), newNodes = recs(draft.nodes);
+  if ([oldNodes, newNodes].some(nodes => nodes.some(n => typeof n.id !== 'string')
+    || new Set(nodes.map(n => n.id)).size !== nodes.length)) return missing('unambiguous saved and replacement identities', 'recorded_reasoning');
   const oldGoal = oldNodes.filter(n => n.kind === 'goal'), newGoal = newNodes.filter(n => n.kind === 'goal');
   if (oldGoal.length !== 1 || newGoal.length !== 1) return missing('one current governing goal');
   const old = oldGoal[0]!, next = newGoal[0]!;
@@ -564,24 +570,78 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
   // rather than requiring the drafter to recreate a server-owned proof or re-author its human source.
   if (levelFrameOf(old) !== levelFrameOf(next)) return missing('the saved goal’s numerical frame', 'goal_frame');
   const matches = (n: Rec, nodes: Rec[]) => nodes.filter(x => x.kind === n.kind && canonicalLabel(String(x.label)) === canonicalLabel(String(n.label)));
+  let candidate: Rec = { ...structuredClone(before), ...structuredClone(draft) };
+  const kept: string[] = [], retired: string[] = [], adoptionUnknown: string[] = [];
+  const unadopted = new Set(unadoptedOptionIds);
+  const protectedIds = new Set(oldNodes.filter(n => n.kind === 'option' && !unadopted.has(String(n.id))).map(n => String(n.id)));
+  for (const row of recs(before.goal_constraints)) protectedIds.add(String(row.node_id));
+  const protectedEdges = recs(before.edges).filter(e => {
+    const from = oldNodes.find(n => n.id === e.from);
+    const to = oldNodes.find(n => n.id === e.to);
+    const p = provenanceOf({ link: e, context: { fromKind: String(from?.kind ?? '') } });
+    const recorded = ['relation', 'effect'].some(field => userStatementFor(before,
+      { kind: 'link', id: String(e.from), to_id: String(e.to), field: field as 'relation' | 'effect' }) !== undefined);
+    return (from?.kind === 'option' && !unadopted.has(String(from.id))) || (to?.kind === 'option' && !unadopted.has(String(to.id))) || recorded
+      || p.origin !== 'ai' || p.accepted || edgeReviewedByUser(e) || userStatementsOn(e).length > 0;
+  });
+  for (const e of protectedEdges) { protectedIds.add(String(e.from)); protectedIds.add(String(e.to)); }
+  const copyAbsent = (n: Rec): boolean => {
+    if (recs(candidate.nodes).some(x => x.id === n.id)) return false;
+    candidate.nodes = [...recs(candidate.nodes), structuredClone(n)]; return true;
+  };
+  const mayLeaveOut = (n: Rec): boolean => {
+    const introduction = nodeIntroductionOf(n);
+    return unadopted.has(String(n.id)) && n.kind === 'option' && introduction.origin === 'olumi_added'
+      && !introduction.adopted && n.analysis_participation === 'retained_excluded'
+      && !protectedIds.has(String(n.id)) && userStatementsOn(n).length === 0 && n.reviewed_by_user === undefined
+      && Object.keys(mergeInterventionSourceObjects(n as never)).length === 0;
+  };
   for (const option of oldNodes.filter(n => n.kind === 'option')) {
-    if (matches(option, newNodes).length !== 1) return missing(`the saved option “${String(option.label)}”`, 'saved_option');
+    const found = matches(option, recs(candidate.nodes));
+    if (found.length === 0 && mayLeaveOut(option)) continue;
+    if (found.length > 1 || (found.length === 0 && !copyAbsent(option))) return missing(`the identity of saved option “${String(option.label)}”`, 'saved_option');
+    if (found.length === 0) kept.push(`the complete saved option “${String(option.label)}”`);
   }
-  const protectedIds = new Set(oldNodes.filter(n => n.kind === 'option').map(n => String(n.id)));
   for (const option of oldNodes.filter(n => n.kind === 'option')) {
-    for (const id of Object.keys(rec(option.interventions) ?? rec(rec(option.data)?.interventions) ?? {})) {
-      const saved = oldNodes.find(n => n.id === id), found = saved && matches(saved, newNodes);
+    for (const id of Object.keys(mergeInterventionSourceObjects(option as never))) {
+      const saved = oldNodes.find(n => n.id === id);
+      if (saved && matches(saved, recs(candidate.nodes)).length === 0 && !copyAbsent(saved)) return missing(`the identity of the saved quantity on “${String(option.label)}”`, 'option_setting');
+      const found = saved && matches(saved, recs(candidate.nodes));
       if (!saved || !found || found.length !== 1 || levelFrameOf(saved) !== levelFrameOf(found[0])
         || !isDeepStrictEqual(rec(saved.observed_state)?.unit, rec(found[0]!.observed_state)?.unit)) return missing(`the saved quantity and setting on “${String(option.label)}”`, 'option_setting');
       protectedIds.add(id);
     }
   }
-  let candidate: Rec = { ...structuredClone(before), ...structuredClone(draft) };
   // Reuse the existing stable-identity carry; no constructor/store/second writer is introduced.
   for (const n of oldNodes) {
     const found = matches(n, recs(candidate.nodes));
+    if (found.length > 1) return missing(`the unambiguous identity of “${String(n.label)}”`, 'recorded_reasoning');
+    if (found.length === 1 && found[0]!.id !== n.id && recs(candidate.nodes).some(x => x.id === n.id)) {
+      return missing(`the saved identity of “${String(n.label)}” without overwriting another part`, 'recorded_reasoning');
+    }
+    if (found.length === 1 && !mayLeaveOut(n)) {
+      const oldUnit = factorUnitOf(before, n), newUnit = factorUnitOf(candidate, found[0]);
+      if (levelFrameOf(n) !== levelFrameOf(found[0]) || (oldUnit !== undefined && newUnit !== undefined && !sameUnitAsEarlier(oldUnit, newUnit))) {
+        return missing(`the saved numerical frame and measurement for “${String(n.label)}”`, 'human_item');
+      }
+    }
     if (found.length === 1) candidate = asSavedNode(candidate, String(found[0]!.id), n);
-    else if (n.description !== undefined || userStatementsOn(n).length > 0 || n.analysis_participation === 'retained_excluded') return missing(`the recorded reasoning for “${String(n.label)}”`, 'recorded_reasoning');
+    else if (mayLeaveOut(n)) retired.push(String(n.label));
+    else if (!copyAbsent(n)) return missing(`the recorded identity and reasoning for “${String(n.label)}”`, 'recorded_reasoning');
+    else kept.push(`the complete saved reasoning for “${String(n.label)}”`);
+  }
+  for (const option of oldNodes.filter(n => n.kind === 'option')) {
+    if (matches(option, newNodes).length === 0) continue;
+    const aligned = recs(candidate.nodes).find(n => n.id === option.id);
+    for (const [id, oldCell] of Object.entries(mergeInterventionSourceObjects(option as never))) {
+      const saved = oldNodes.find(n => n.id === id), p = provenanceOf({ setting: oldCell, target: saved });
+      const draftCell = mergeInterventionSourceObjects(aligned as never)[id];
+      // An Olumi cell can keep the same source after approval. Unknown adoption is carried, never guessed from origin.
+      if (p.origin === 'ai' && !p.structural && !p.accepted && !nodeIntroductionOf(option).adopted) {
+        adoptionUnknown.push(`the saved setting on “${String(option.label)}” for “${String(saved?.label ?? id)}”`);
+      }
+      if (p.origin === 'unknown' && !isDeepStrictEqual(oldCell, draftCell)) kept.push(`the source-unverified setting on “${String(option.label)}”`);
+    }
   }
   const limits = limitsKeptBy(before, candidate);
   if (limits.conflict) return missing('a saved limit or target', 'limit');
@@ -589,20 +649,26 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
   candidate.nodes = recs(candidate.nodes).map(n => {
     const saved = oldNodes.find(p => p.id === n.id);
     if (!saved) return n;
-    if (n.id === old.id || protectedIds.has(String(n.id))) return structuredClone(saved);
-    return { ...n,
-      ...(saved.description === undefined ? {} : { description: saved.description }),
-      ...(saved.user_statements === undefined ? {} : { user_statements: structuredClone(saved.user_statements) }),
-      ...Object.fromEntries(['option_status', 'analysis_participation', 'proposed_by', 'is_baseline']
-        .filter(k => Object.hasOwn(saved, k)).map(k => [k, structuredClone(saved[k])])),
-    };
+    if (saved.proposed_by === 'olumi' && !nodeIntroductionOf(saved).adopted && !mayLeaveOut(saved)
+      && userStatementsOn(saved).length === 0) adoptionUnknown.push(`“${String(saved.label)}”`);
+    // Whole records retain sources, speakers, qualifications, ranges, evidence and uncertainty without re-authorship.
+    // A retained suggestion cannot silently become active just because the drafter reproduced it.
+    return mayLeaveOut(saved) ? { ...n, analysis_participation: saved.analysis_participation } : structuredClone(saved);
   });
+  const edges = recs(candidate.edges);
+  for (const e of protectedEdges) {
+    const at = edges.findIndex(x => x.from === e.from && x.to === e.to);
+    if (at < 0) edges.push(structuredClone(e)); else edges[at] = structuredClone(e);
+  }
+  candidate.edges = edges;
+  // The draft cannot overwrite existing scenario-level reasoning metadata either.
+  for (const [key, value] of Object.entries(before)) if (!['nodes', 'edges', 'goal_constraints', 'ref_high_water'].includes(key)) candidate[key] = structuredClone(value);
   const items = humanItemsAfterTheDraft(before, true);
-  const unknown = items.filter(i => i.origin !== 'human' || i.carry === undefined).map(i => i.words);
-  if (unknown.length) return { kept: [], missing: unknown, missing_kind: 'human_item' };
+  // Unknown authorship stays unknown on the exact saved record; retaining it is not a human-source claim.
   const carried = carryHumanItems(candidate, items, levelFrameOf);
-  if (carried.missing.length) return { kept: [], missing: carried.missing, missing_kind: 'human_item' };
+  if (carried.missing.length) return { kept: [], retired: [], adoption_unknown: [], missing: carried.missing, missing_kind: 'human_item' };
   candidate = carried.replacement;
   if (!isDeepStrictEqual(readGoalRecord(before, String(old.id)), readGoalRecord(candidate, String(old.id)))) return missing('the complete saved goal contract');
-  return { candidate, kept: [...carried.carried, ...limits.carried.map(r => `the saved bound on ${String(r.node_id)}`)], missing: [] };
+  return { candidate, kept: [...kept, ...carried.carried, ...limits.carried.map(r => `the saved bound on ${String(r.node_id)}`)],
+    retired, adoption_unknown: [...new Set(adoptionUnknown)], missing: [] };
 }

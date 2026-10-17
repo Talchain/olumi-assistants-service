@@ -879,10 +879,26 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
   it.each(['options', 'goal'])('withholds a replacement that loses saved %s', async lost => {
     const bad = structuredClone(bakery.draft);
     if (lost === 'options') bad.options.pop(); else bad.goal.metric = 'Other governing outcome';
-    const w = await bakeryWorld({ provider: async () => ({ text: JSON.stringify(bad), status: 'completed' }) });
+    const w = await bakeryWorld({ provider: async () => ({ text: JSON.stringify(bad), status: 'completed' }) }, g => {
+      if (lost === 'options') g.nodes.find((n: Rec) => n.kind === 'option').label = 'A renamed saved option';
+    });
     const out = await w.offer();
     expect(out, JSON.stringify(out)).toMatchObject({ ok: false, mutated: false, refusal: 'replacement_work_not_held' });
     expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+  it('an omitted option is carried through the complete card, cold own press and exact readback', async () => {
+    const draft = structuredClone(bakery.draft); draft.options.pop();
+    const w = await bakeryWorld({ provider: async () => ({ text: JSON.stringify(draft), status: 'completed' }) });
+    const out = await w.offer(); expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false });
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    const pid = String(out.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
+    expect(candidate.nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
+    const cold = restoreCard(held, out, w.ctx);
+    expect(await w.caps(cold).authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0);
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
+    expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
   });
   it.each([{ complete: false }, { first_user_message: 'A different original statement.' }])('refuses unreadable or mismatched source history before the constructor: %j', async ledger => {
     const w = await bakeryWorld({ ledger });
