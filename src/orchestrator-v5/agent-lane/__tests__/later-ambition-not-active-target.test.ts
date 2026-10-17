@@ -208,16 +208,22 @@ describe('a later ambition stays in the model, outside the current Run', () => {
     expect((tsent?.graph.nodes as Rec[] | undefined)?.some((n) => n.id === tid)).toBe(true);
   }, 60_000);
 
-  it('⛔ CONTRAST: a later ambition on today\'s goal itself never takes the goal out', () => {
-    const d = intoGoal(draft(null));
+  it('⛔ CONTRAST: a later ambition on today\'s goal itself never takes the goal out, even where nothing else reaches it', () => {
+    // Framed so ONLY the goal rule refuses: with no link into the goal, leaving it out would cut nothing off.
+    const d = draft(null);
+    d.links = d.links.filter((l: Rec) => l.to !== 'Angel funding raised');
     d.constraints = [{ ...later('ambition'), metric: 'Angel funding raised' }];
     const out = admitted(d);
     expect(out.loss.some((l) => l.after === 'retained_later_ambition')).toBe(true);
-    expect(out.nodes.every((n) => n.analysis_participation === undefined)).toBe(true);
+    expect(node(out, 'Angel funding raised').analysis_participation).toBeUndefined();
   });
 
   it('⛔ CONTRAST: a later ambition on a quantity an option sets stays in (the Run would refuse to leave it out)', () => {
+    // Framed so ONLY the option rule refuses: the options also set a second factor on the goal, so nothing would be cut off.
     const d = intoGoal(draft(null));
+    d.factors.push({ label: 'Founder hours on investors', role: 'controllable', baseline_known: true, baseline_value: 4, unit: 'hours', provenance: 'inferred', plausible_max: 40 });
+    d.links.push({ ...d.links[0], from: 'Founder hours on investors' });
+    for (const o of d.options as Rec[]) o.interventions.push({ factor_label: 'Founder hours on investors', value: o.is_status_quo ? 4 : 12, value_kind: 'absolute', unit: 'hours', provenance: 'inferred' });
     d.constraints = [{ ...later('ambition'), metric: 'Investor meetings per week', unit: 'meetings', value: 8 }];
     const out = admitted(d);
     expect(out.loss.some((l) => l.after === 'retained_later_ambition')).toBe(true);
