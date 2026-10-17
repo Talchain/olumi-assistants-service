@@ -634,9 +634,8 @@ export function prepareRequestedRebuild(base: unknown, drafted: unknown,
   // Reuse the existing stable-identity carry; no constructor/store/second writer is introduced.
   for (const n of oldNodes) {
     const found = matches(n, recs(candidate.nodes));
-    if (found.length > 1) return missing(`the unambiguous identity of “${String(n.label)}”`, 'recorded_reasoning');
-    if (found.length === 1 && found[0]!.id !== n.id && recs(candidate.nodes).some(x => x.id === n.id)) {
-      return missing(`the saved identity of “${String(n.label)}” without overwriting another part`, 'recorded_reasoning');
+    if (found.length > 1 || (found.length === 1 && found[0]!.id !== n.id && recs(candidate.nodes).some(x => x.id === n.id))) {
+      return missing(`the unambiguous saved identity of “${String(n.label)}” without overwriting another part`, 'recorded_reasoning');
     }
     if (found.length === 1 && !mayLeaveOut(n)) {
       const oldUnit = factorUnitOf(before, n), newUnit = factorUnitOf(candidate, found[0]);

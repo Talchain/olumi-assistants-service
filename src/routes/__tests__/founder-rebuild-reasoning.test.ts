@@ -65,6 +65,9 @@ describe('explicit rebuild retains the complete saved reasoning', () => {
         expect(refused.missing.join(' ')).toContain(added.label);
       }
       expect(saved).toEqual(savedInput); expect(draft).toEqual(draftInput);
+      const duplicate = structuredClone(saved); omit(duplicate, [original.id]);
+      duplicate.nodes.push(...['first_reading', 'second_reading'].map(id => ({ ...structuredClone(original), id })));
+      expect(prepare(saved, duplicate).candidate).toBeUndefined();
       const unchanged = prepare(saved, structuredClone(saved));
       expect(unchanged.missing).toEqual([]);
       expect(unchanged.candidate!.nodes.find((n: Rec) => n.id === original.id)).toEqual(original);
