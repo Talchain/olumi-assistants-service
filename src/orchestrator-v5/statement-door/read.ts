@@ -11,6 +11,7 @@
 import { namesBothEnds } from '../goal-target/input-claim-context.js';
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { verifyStatement, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
+import { figuresWritten } from '../agent-lane/construction-source-map.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 import { doorRowFor } from './role-table.js';
 import { subjectNodeKey, type DoorSubject } from './subject.js';
@@ -31,7 +32,20 @@ export interface DoorContext {
  * One statement as the Agent gives it: the user's exact words, the ask of Olumi's they answer (its exact words), if any, and for a
  * figure-free field its reading in the user's own words (`reading_words`), which the field's reader checks inside the quote.
  */
-export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string };
+export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string } & AiReading;
+
+/**
+ * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z): the AI's own reading of the statement, as the tool gives it, for a row that reads
+ * nothing itself (`RoleRow.aiReads`). The host only verifies the quote writes it.
+ */
+export interface AiReading {
+  readonly form?: unknown;
+  readonly value?: unknown;
+  readonly low?: unknown;
+  readonly high?: unknown;
+  readonly unit?: unknown;
+  readonly negated?: unknown;
+}
 
 export interface DoorReading {
   readonly subject: DoorSubject;
@@ -93,6 +107,23 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
   for (const raw of quotes) {
     const quote = (typeof raw === 'string' ? raw : raw.quote).trim();
     const answering = typeof raw === 'string' ? undefined : raw.answering;
+    if (row.aiReads !== undefined) {
+      // ⭐ ONE BINDER: the AI read it (form, figures, unit, negation) and bound it to this subject; the host reads no figure and
+      // binds nothing by name. It verifies only that the quote writes that reading (`figuresWritten`, the unit written after the
+      // figure), then the row's check of what its field takes. The record is Olumi's reading of the user's words, adopted only by the press.
+      if (typeof raw === 'string') {
+        return { kind: 'refused', refusal: 'statement_malformed', detail: `Give your reading of “${quote}”: its form, figures, unit as written, and whether it says the opposite (negated). Nothing was prepared.` };
+      }
+      const v = verifyStatement({ quote, form: raw.form, value: raw.value, low: raw.low, high: raw.high, unit: raw.unit, negated: raw.negated,
+        ...(answering !== undefined ? { answering } : {}) }, texts,
+      { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
+        unit: row.unit, forms: row.forms, figuresIn: figuresWritten, unitWritten: true, ...(row.allowsZero === true ? { allowsZero: true } : {}) });
+      if (v.kind === 'refused') return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
+      const why = row.aiReads(v.statement, subject, graph);
+      if (why !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${why} Nothing was prepared. ${KEEP}` };
+      statements.push(v.statement);
+      continue;
+    }
     const fig = row.read(quote, subject, graph, typeof raw === 'string' ? undefined : raw.reading_words, answering);
     if ('refused' in fig) return { kind: 'refused', refusal: 'not_this_field', detail: `${fig.refused} Nothing was prepared. ${KEEP}` };
     // Bound by: the row's own whole-model scope (`bindsWhole`), the model's admitted source sentence for it (`sourceOf`), else the
