@@ -72,6 +72,15 @@ const PLOT_RESPONSE = {
   analysis_status: 'completed',
 } as unknown as V2RunResponseEnvelope;
 
+/** R2: keep the original scale specimen unchanged, beside a distinct valid comparator. */
+function withEncodedContrast(snapshot: RunAnalysisScenarioSnapshot): RunAnalysisScenarioSnapshot {
+  const graph = snapshot.graph as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  const contrast = { id: 'opt_contrast', option_id: 'opt_contrast', kind: 'option', label: 'Other encoded setting',
+    interventions: { f_enc: { value: 0, raw_value: 'build', value_type: 'categorical', encoding_map: { build: 0, buy: 1 } } } };
+  const withContrast = { ...graph, nodes: [...graph.nodes, contrast], edges: [...graph.edges, { from: contrast.id, to: 'f_enc' }] };
+  return { ...snapshot, graph: withContrast, rawPersistedGraph: withContrast, options: [...snapshot.options, contrast] };
+}
+
 function makeCapturingPlotClient(): { client: PLoTClient; run: ReturnType<typeof vi.fn> } {
   const run = vi.fn(async () => JSON.parse(JSON.stringify(PLOT_RESPONSE)) as V2RunResponseEnvelope);
   const client = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
@@ -358,7 +367,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
       ],
     };
     const { client, run } = makeCapturingPlotClient();
-    const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: makeReader(snapshot) });
+    const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: makeReader(withEncodedContrast(snapshot)) });
 
     await handler(makeInvocation());
 
@@ -446,7 +455,7 @@ describe('round 4 — scale coherence on the FINAL payload (RED at e649a871)', (
       ],
     };
     const { client, run } = makeCapturingPlotClient();
-    const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: makeReader(snapshot) });
+    const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: makeReader(withEncodedContrast(snapshot)) });
 
     await handler(makeInvocation());
 

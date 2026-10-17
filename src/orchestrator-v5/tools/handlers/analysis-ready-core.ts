@@ -48,12 +48,10 @@ import {
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { draftedTeamPartOf, eventByDateRefusalOf, unsizedEventOptions } from '../../goal-target/event-by-date-model.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
-import { userExcludedOptions } from './user-option-status-filter.js';
 import { limitSinkBranch } from '../../../graph/limit-sink-branch.js';
 import {
   computeScaffoldPlan,
-  gateAnalysableOptions,
-  PLOT_MIN_COMPARISON_OPTIONS,
+  NO_COMPARISON_NEXT_STEP,
   type ScaffoldPlan,
 } from './analysable-option-gate.js';
 
@@ -276,6 +274,7 @@ export function ep2State(result: ReadinessResult): Ep2State {
  * today's refusal — an admission gate must fail toward saying no.
  */
 export interface RunAdmission {
+  readonly submission?: ReturnType<typeof assessCanonicalAnalysisReadiness>['submission'];
   /** The strict, whole-model verdict — unchanged, always computed. */
   readonly strict: ReadinessResult;
   /**
@@ -548,47 +547,8 @@ function isWaivableByComputeDiscard(
  * reachability would be guessing. Settle the reachability first, then close it.
  */
 /** PLoT's intervention identity, shared with the post-gate Olumi option filter. */
-export function interventionFingerprint(interventions: Record<string, unknown>): string {
-  return Object.entries(interventions)
-      .map(([key, raw]) => {
-        const v =
-          raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
-            ? (raw as { value: unknown }).value
-            : raw;
-        return `${key}:${typeof v === 'number' ? Math.round(v / 1e-9) * 1e-9 : String(v)}`;
-      })
-      .sort()
-      .join('|');
-}
+export { interventionFingerprint } from './analysable-option-gate.js';
 
-function comparisonSurvivesDedup(
-  wireOptions: ReadonlyArray<{ interventions?: Record<string, unknown> }>,
-  rawGraph: unknown,
-): boolean {
-  /**
-   * ⭐ THE SET THE RUN WILL SUBMIT, NOT THE OPTIONS AS STORED (Delivery Lead 5842717741; MG 5842710702).
-   * A held status quo keeps no copy of its starting values (#1902), so its stored map is empty BY CONTRACT
-   * and this floor used to drop it — "keep £49 vs raise to £59" could never run unless a third option was
-   * invented. The run's own gate (`gateAnalysableOptions`, the projection `run_analysis` submits) holds that
-   * status quo at the factors' CURRENT observed values, and PLoT compares it. Fingerprinting the gate's
-   * output makes this floor answer about exactly what PLoT will receive: a status quo whose values are not
-   * known is excluded by the gate and stays uncounted, never invented. The handler is untouched, so a run
-   * this floor already admitted submits the same bytes.
-   */
-  const submitted = gateAnalysableOptions({
-    // The Run removes user-excluded options first; they cannot supply a distinct comparator here either.
-    options: userExcludedOptions({ options: wireOptions as ReadonlyArray<Record<string, unknown>>, graph: rawGraph }).options,
-    graph: rawGraph,
-    rawPersistedGraph: rawGraph,
-    scaleNetEnabled: true,
-  }).options as ReadonlyArray<{ interventions?: Record<string, unknown> }>;
-  const distinctValuedMaps = new Set<string>(
-    submitted
-      .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
-      .map((o) => interventionFingerprint(o.interventions ?? {})),
-  );
-  return distinctValuedMaps.size >= PLOT_MIN_COMPARISON_OPTIONS;
-}
 
 /**
  * The next step for a refusal that STRICT READINESS had no complaint about.
@@ -614,8 +574,7 @@ function comparisonSurvivesDedup(
  *
  * ⚠ COACHING, NOT AN APOLOGY, and not an error. It names the user's next move.
  */
-export const NO_COMPARISON_NEXT_STEP =
-  'Name at least two different options you are weighing, then run analysis.';
+export { NO_COMPARISON_NEXT_STEP } from './analysable-option-gate.js';
 
 /**
  * Resolve the two-term admission for a graph. Pure and total.
@@ -668,12 +627,17 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
   }
   const admission = resolveRunAdmissionTerms(admissionGraph);
   const eventRefusal = eventByDateRefusalOf(rawGraph);
+  const submission = admission.assessment.submission;
+  const submissionRefusal = submission?.comparisonRefusal;
+  const submissionBlocked = submission?.eligible === false;
+  const willProceed = admission.willProceed && !submissionBlocked && eventRefusal === null;
   return {
     ...admission,
-    ...(eventRefusal === null ? {} : { willProceed: false }),
-    blockedNextStep: eventRefusal ?? (admission.willProceed
+    submission,
+    willProceed,
+    blockedNextStep: eventRefusal ?? submission?.participationNextStep ?? submission?.scaleNextStep ?? (willProceed
       ? null
-      : admission.strict.nextStep ?? NO_COMPARISON_NEXT_STEP),
+      : admission.strict.nextStep ?? (submissionBlocked && submissionRefusal ? submissionRefusal.nextStep : NO_COMPARISON_NEXT_STEP)),
   };
 }
 
@@ -750,7 +714,7 @@ function resolveRunAdmissionTerms(
     // layer. A local refusal is immediate and explicable. This floor can only
     // convert a false admission into a refusal, and every case it converts is one
     // PLoT refuses anyway — so it cannot cost a run that would have succeeded.
-    if (!comparisonSurvivesDedup(assessment.analysisReady?.options ?? [], rawGraph)) {
+    if (!assessment.submission?.eligible) {
       return {
         strict,
         assessment,
@@ -797,7 +761,7 @@ function resolveRunAdmissionTerms(
       // Matches run_analysis' pinned-true call site (the egress scale net has
       // been unconditional since 2026-07-20, O-7 wave 2).
       scaleNetEnabled: true,
-    });
+    }, assessment.submission?.gate);
     // ⭐ REPAIR MONOTONICITY (founder ruling, 2026-08-25), SCOPED — and the
     // scope is a measured boundary, not a hedge:
     //
@@ -885,7 +849,7 @@ function resolveRunAdmissionTerms(
     // this waiver's population can newly trip is `IDENTICAL_OPTIONS` — and that
     // one is closed by the distinct-map floor below.* The waiver is not a claim
     // that PLoT accepts everything non-empty.
-    // See {@link isWaivableByComputeDiscard} and {@link comparisonSurvivesDedup}.
+    // See {@link isWaivableByComputeDiscard} and the final submission projection.
     const valued = new Set<string>(
       wireOptions
         .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
@@ -909,7 +873,7 @@ function resolveRunAdmissionTerms(
     // ⛔ DIRECTION IS WHY THIS IS THE HONEST SIDE: a false admission here dies as
     // an opaque HTTP 422 a network hop away, at the wrong layer, on the
     // two-option minimum. A local refusal is immediate and explicable.
-    const comparisonSurvives = comparisonSurvivesDedup(wireOptions, rawGraph);
+    const comparisonSurvives = assessment.submission?.eligible === true;
     const blockers = assessment.blockingIssues;
     const touched = new Set<string>(plan.scaffolded_option_ids);
 

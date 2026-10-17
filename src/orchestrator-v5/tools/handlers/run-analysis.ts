@@ -66,8 +66,8 @@ import { withShortHorizonBesideChance, withUntestedHorizonWarning } from '../../
 export { withholdGoalFiguresForUntestedHorizon } from '../../goal-target/goal-horizon-verdict.js';
 import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysis-view.js';
 import { buildAnalysisResultBlock } from '../../compose.js';
-import { withoutPreconditionRisks } from '../../../graph/inert-risk.js';
-import { unsizedOlumiRiskOmissionWarning, withoutUnsizedOlumiRisksRecorded } from '../../agent-lane/unsized-risk.js';
+
+import { unsizedOlumiRiskOmissionWarning } from '../../agent-lane/unsized-risk.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -140,10 +140,10 @@ import { isKnownPlotFailureCode } from '../../compose/handler-failure-responses.
 
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
-import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
-import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
-import { filterOlumiProposedOptions } from './olumi-option-filter.js';
-import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
+
+
+
+import { PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
 import { buildRunInputSnapshot, recordRunQuestion, RUN_QUESTION_EVIDENCE_KEY, runIdFor, sentDigest } from './run-input-snapshot.js';
 import type { RunAnalysisProbe } from './run-analysis-probe.js';
 import {
@@ -181,19 +181,14 @@ import {
 import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-participation-disclosure.js';
 import { buildGoalReadingDisclosure } from '../../coaching/goal-reading-disclosure.js';
 import {
-  gateAnalysableOptions,
-  comparisonAfterExclusionsRefusal,
+  projectRunOptionSubmission,
 } from './analysable-option-gate.js';
 // NOTE the path: `orchestrator-v5/context/`, NOT `orchestrator-v5/coaching/context/`.
 // Preserve the existing public label-control seam after moving its implementation beside the shared floor.
 export { firstUsableExcludedLabel } from './analysable-option-gate.js';
 import {
-  buildFactorScaleMap,
-  projectRequestInterventionsToWireScale,
   summariseConversions,
   summaryIsNoteworthy,
-  findScaleIncoherentBaselineFactorIds,
-  decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
 import { wireInterventionRangePlan } from '../../intervention-range.js';
 import { nodeUnitOf, optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
@@ -432,24 +427,6 @@ function readGraphNodesForCostAsk(
     : [];
 }
 
-/**
- * The LABEL of a node whose exclusion could not be honoured, for the refusal
- * sentence. Reuses the same defensive node reader as the cost-ask path.
- *
- * Returns null for a missing, non-string or blank label so the caller falls
- * back to neutral wording rather than quoting `''` at the user — `NodeV3`
- * accepts `""` and `"   "` and no validator rejects them.
- */
-function participationRefusalLabel(graph: unknown, nodeId: string): string | null {
-  for (const node of readGraphNodesForCostAsk(graph)) {
-    if (node.id !== nodeId) continue;
-    const label = node.label;
-    if (typeof label !== 'string') return null;
-    const trimmed = label.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  }
-  return null;
-}
 
 /**
  * OPTION ENTRIES for the cost-ask decision.
@@ -675,19 +652,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // intervention intent; purely an outbound-projection change (the persisted
     // graph, and therefore graph_hash_at_run / freshness, is untouched).
     // ⭐ MG F1 T6: an option the USER took out (`option_status`) leaves the submission first, and is named below.
-    const userStatus = userExcludedOptions({ options: snapshot.options, graph: snapshot.rawPersistedGraph ?? snapshot.graph });
-    const gate = gateAnalysableOptions({
-      options: userStatus.options,
-      graph: snapshot.graph,
-      rawPersistedGraph: snapshot.rawPersistedGraph,
-      // P1-1 (one scale convention): the egress scale net is UNCONDITIONAL
-      // since 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED
-      // deleted) — the gate routes its hold candidates through the same
-      // always-on RAW-scale projection as the configured siblings.
-      // (`scaleNetEnabled` survives as a pure-function parameter, pinned true
-      // at this, its only production call site.)
-      scaleNetEnabled: true,
-    });
+    const optionSubmission = projectRunOptionSubmission({ options: snapshot.options, graph: snapshot.graph,
+      rawPersistedGraph: snapshot.rawPersistedGraph, scaleNetEnabled: true, goalNodeId: snapshot.goal_node_id,
+      requestId: invocation.requestId, scenarioId: args.scenario_id });
+    const { userStatus, gate } = optionSubmission;
     if (gate.held.length > 0 || gate.excluded.length > 0) {
       emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {
         request_id: invocation.requestId,
@@ -700,24 +668,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       });
     }
 
-    // The readiness assessor consumes this SAME post-exclusion floor and next step.
-    const comparisonRefusal = comparisonAfterExclusionsRefusal(gate, userStatus.excluded);
-    if (comparisonRefusal !== null) {
-      throw new HandlerInvocationFailedError(comparisonRefusal.message, {
-        cause_kind: 'analysis_not_ready', retryable: false,
-        details: { handler_id: 'run_analysis', scenario_id: args.scenario_id,
-          reason_code: 'insufficient_analysable_options', next_step: comparisonRefusal.nextStep },
-      });
-    }
-
-    // Keep an unadopted Olumi suggestion out of an ordinary comparison when
-    // two user options remain. If fewer remain, the comparison is provisional
-    // and cannot license a leading-option claim.
-    const olumiFilter = filterOlumiProposedOptions({
-      submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
-      graph: snapshot.rawPersistedGraph ?? snapshot.graph,
-      unanalysableOptionIds: gate.excluded.map((s) => s.option_id),
-    });
+    const { olumiFilter } = optionSubmission;
     const keptOlumiProvisional = olumiFilter.keptOlumiProvisional;
 
     // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
@@ -731,44 +682,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // below for `graph_hash_at_run` / freshness) are deliberately left
     // untouched — this is a runtime guard, not a migration, and must not
     // perturb freshness.
-    const graphAfterIntercepts = guardAnalysisGraphIntercepts(snapshot.graph, {
-      requestId: invocation.requestId,
-      scenarioId: args.scenario_id,
-    }).graph;
-
-    // --- 2.7. Participation guard (COLLAB Track A) -------------------------
-    // Honours `node.analysis_participation === 'retained_excluded'`: the node
-    // stays in `scenarios.graph` with its label, value and authorship intact
-    // and is simply ABSENT from the wire graph — the same construction the
-    // option gate above uses, one level down. Incident edges go with it
-    // because PLoT's preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for
-    // a dangling endpoint, so leaving them would refuse the whole run.
-    // See `run-analysis-participation-guard.ts` for the full doctrine.
-    const optionsForParticipation = olumiFilter.options;
-    const optionInterventionTargetIds = new Set<string>();
-    const submittedOptionIds = new Set<string>();
-    for (const opt of optionsForParticipation) {
-      const optionId =
-        typeof opt.option_id === 'string' && opt.option_id.length > 0
-          ? opt.option_id
-          : typeof opt.id === 'string' && opt.id.length > 0
-            ? opt.id
-            : null;
-      if (optionId !== null) submittedOptionIds.add(optionId);
-      const interventions = opt.interventions;
-      if (interventions !== null && typeof interventions === 'object') {
-        for (const targetId of Object.keys(interventions as Record<string, unknown>)) {
-          optionInterventionTargetIds.add(targetId);
-        }
-      }
-    }
-    const participation = guardAnalysisParticipation(graphAfterIntercepts, {
-      goalNodeId: snapshot.goal_node_id,
-      optionInterventionTargetIds,
-      submittedOptionIds,
-      requestId: invocation.requestId,
-      scenarioId: args.scenario_id,
-    });
+    const { participation } = optionSubmission;
     // An exclusion that cannot be honoured is REFUSED, never quietly dropped.
     // Computing anyway would produce a number that included a node the field
     // still marks `'retained_excluded'` — so the surface would render
@@ -776,9 +690,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // number that lies, and the conflict is a real inconsistency in the user's
     // own model, which is worth saying out loud on a reasoning tool.
     if (participation.refusals.length > 0) {
-      const refusal = participation.refusals[0];
-      const refusedLabel = participationRefusalLabel(graphAfterIntercepts, refusal.node_id);
-      const named = refusedLabel !== null ? `'${refusedLabel}'` : 'that part of your model';
       throw new HandlerInvocationFailedError(
         'A node excluded from the calculation is required by it',
         {
@@ -788,22 +699,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             handler_id: 'run_analysis',
             scenario_id: args.scenario_id,
             reason_code: 'excluded_node_required_by_analysis',
-            next_step:
-              refusal.reason === 'goal_node'
-                ? `You've kept ${named} out of the calculation, but it's the outcome the ` +
-                  `analysis is measuring — so there's nothing left to compare the options ` +
-                  `against. Put ${named} back into the calculation, or choose a different ` +
-                  `goal, and ask me to run the analysis again.`
-                : refusal.reason === 'submitted_option'
-                  ? `You've kept ${named} out of the calculation, but it's one of the options ` +
-                    `I'd be comparing — so I've stopped rather than rank an option you've ` +
-                    `excluded. Put it back into the calculation or remove it from this ` +
-                    `comparison, then ask me to run the analysis again.`
-                  : `You've kept ${named} out of the calculation, but one of your options ` +
-                    `changes it — so I can't leave it out and still work out what that option ` +
-                    `does. That's worth a second look: either ${named} belongs in the ` +
-                    `calculation after all, or that option shouldn't be changing it. Settle ` +
-                    `which, and ask me to run the analysis again.`,
+            next_step: optionSubmission.participationNextStep!,
           },
         },
       );
@@ -814,52 +710,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // remaining compute readers; the snapshot and persisted graph (including the stamp) are untouched.
     // An unsized Olumi risk is left out the same way, and said once by the host (`unsizedOlumiRiskIds`, readiness's own rule).
     // #3167 fix-forward: exactly the risks this projection removes are recorded with THIS Run (below), never re-derived later.
-    const unsizedProjection = withoutUnsizedOlumiRisksRecorded(withoutPreconditionRisks(participation.graph, snapshot.graph), snapshot.graph);
-    let graphForAnalysis = unsizedProjection.graph;
-
-    // --- 3. ONE request-level scale projection, on the FINAL option set -----
-    // ROUND 4: the projection runs HERE — after the scaffold, immediately
-    // before the payload is built — because it is the LAST transformation of
-    // the options. Round 3 projected and attested inside the snapshot loader,
-    // and the scaffold then mutated the options AFTER the guard (TOCTOU): the
-    // loader attested `allWithinUnitInterval: true` while the wire shipped a
-    // raw-scale neutral beside demoted unit values, corrupting the configured
-    // cost factor 100,000× (round-3 review, executed against real PLoT
-    // b9f6b5a). Options up to this point carry the ORIGINAL merged
-    // intervention OBJECTS (loader) plus the scaffold's neutral candidate
-    // OBJECTS; the wire numbers exist only from here on.
-    const graphNodesForScale = (graphForAnalysis as { nodes?: unknown })?.nodes;
-    const factorScaleById = buildFactorScaleMap(graphNodesForScale);
-    const submittedOptions = olumiFilter.options;
-    const rawObjectsPerOption = submittedOptions.map((opt) =>
-      opt.interventions !== null && typeof opt.interventions === 'object'
-        ? (opt.interventions as Record<string, unknown>)
-        : {},
-    );
-    // ROUND 5 — provenance for the scale decision. `gate.held` already records
-    // exactly which factor ids CEE supplied on which option, so nothing new has
-    // to be derived or remembered: the marker is read off the gate's own
-    // disclosure record. A CEE-supplied value must not establish the scale
-    // reference frame for a value the user authored.
-    const scaffoldedFactorIdsByOptionId = new Map<string, ReadonlySet<string>>();
-    for (const record of gate.held) {
-      scaffoldedFactorIdsByOptionId.set(record.option_id, new Set(record.factor_ids));
-    }
-    const EMPTY_SYNTHESISED: ReadonlySet<string> = new Set<string>();
-    const synthesisedByOption = submittedOptions.map((opt) => {
-      const optionId =
-        typeof opt.option_id === 'string' && opt.option_id.length > 0
-          ? opt.option_id
-          : typeof opt.id === 'string' && opt.id.length > 0
-            ? opt.id
-            : null;
-      return (optionId !== null ? scaffoldedFactorIdsByOptionId.get(optionId) : undefined) ?? EMPTY_SYNTHESISED;
-    });
-    const requestProjection = projectRequestInterventionsToWireScale(
-      rawObjectsPerOption,
-      factorScaleById,
-      synthesisedByOption,
-    );
+    const { unsizedProjection, submittedOptions,
+      rawObjectsPerOption, scaffoldedFactorIdsByOptionId, requestProjection } = optionSubmission;
+    let graphForAnalysis = optionSubmission.graphForAnalysis;
     const conversionSummary = summariseConversions(requestProjection.conversions);
     if (summaryIsNoteworthy(conversionSummary) || requestProjection.demoted) {
       log.info(
@@ -899,26 +752,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // reconciles — R2-2 corruption vs the ratified round-5 astride-1 class);
     // provenance comes from the scaffold's own disclosure record, exactly as
     // the request projection's synthesised-marker does above.
-    const caplessRawBaselineIds = findScaleIncoherentBaselineFactorIds(
-      graphNodesForScale,
-      rawObjectsPerOption,
-      synthesisedByOption,
-    );
-    const scaleBlock = decideAnalysisScaleBlock(requestProjection, caplessRawBaselineIds);
+    const caplessRawBaselineIds = optionSubmission.baselineIds;
+    const scaleBlock = optionSubmission.scaleBlock;
     if (scaleBlock.blocked) {
-      const labelById = new Map<string, string>();
-      if (Array.isArray(graphNodesForScale)) {
-        for (const n of graphNodesForScale) {
-          const node = n as { id?: unknown; label?: unknown };
-          if (typeof node.id === 'string' && typeof node.label === 'string') {
-            labelById.set(node.id, node.label);
-          }
-        }
-      }
-      const factorNames = scaleBlock.unresolvedFactorIds
-        .map((id) => labelById.get(id))
-        .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
-      const named = factorNames.length > 0 ? factorNames.join(', ') : 'some of the factors';
       log.warn(
         {
           event:
@@ -981,9 +817,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             // user strictly worse off. A refusal that prescribes a futile
             // action is worse than one that says plainly it cannot proceed.
             next_step:
-              scaleBlock.reason_code === 'mixed_scale_unresolved'
-                ? `I can't run this analysis safely. The request I assembled carries values for ${named} that the analysis engine would silently rescale, so the numbers it gave back would not be the ones your model states. I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I prepare the analysis, not a verdict on your model. I don't have a step I can promise will clear it, so please don't rewrite your own numbers to try; ask me to run it again after any change and I'll re-check.`
-                : `I can't run this analysis safely. ${named} is recorded as a bare amount with no range for me to measure it against, so I can't tell the analysis engine what it means next to everything else, and the numbers would not be the ones your model states. I've stopped rather than show you a confident wrong answer. Nothing in your model has changed, and this is a limit in how I record and prepare values, not a verdict on your model. Telling me the same amount again won't clear it; ask me to run it again after any change and I'll re-check.`,
+              optionSubmission.scaleNextStep!,
           },
         },
       );
@@ -1036,6 +870,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       if (notForwarded.length > 0 && optionId !== undefined) rangeNotForwarded.push({ optionId, factorIds: notForwarded });
       return { ...opt, interventions, ...(intervention_ranges !== undefined ? { intervention_ranges } : {}) };
     });
+    const comparisonRefusal = optionSubmission.comparisonRefusal;
+    if (comparisonRefusal !== null) {
+      // Strict readiness names existing unsized options before the final-set comparison fallback.
+      const admission = resolveRunAdmission(snapshot.rawPersistedGraph ?? snapshot.graph);
+      throw new HandlerInvocationFailedError(comparisonRefusal.message, {
+        cause_kind: 'analysis_not_ready', retryable: false,
+        details: { handler_id: 'run_analysis', scenario_id: args.scenario_id,
+          reason_code: 'insufficient_analysable_options', next_step: admission.blockedNextStep ?? comparisonRefusal.nextStep },
+      });
+    }
     // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
     // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
     // (`level-limit-baseline.ts`).
