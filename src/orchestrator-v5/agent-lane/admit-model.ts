@@ -3492,7 +3492,7 @@ export interface ConstructionAdmission {
  * the drafter could only type a later aim as `target` (Batch C's several targets) or `limit`. A later ambition is never an active
  * target. The AI reads it (`role: 'ambition'`); admission keeps it out of every constraint reader, and its figure and the user's
  * own sentence for it (the AI's verified target statement, when there is one) are kept, as Olumi's reading, in the loss record.
- * The node it names and its links stay. The host reads no "eventually".
+ * The node it names and its links stay, outside the current Run (`outsideTheCurrentRun`). The host reads no "eventually".
  */
 export function admitCandidateModel(...args: Parameters<typeof admitCandidateModelOnce>): AdmittedModel {
   const [candidate, , brief] = args;
@@ -3511,7 +3511,37 @@ function keepingLaterAmbitions(candidate: CandidateModel, brief: string | undefi
   // read cold as its `full_label`; the same precedent as `priorAimDescription`, goal-repoint.ts), after every match is made.
   const said = (n: AdmittedNode): string[] => ambitions.flatMap((a, i) => (metricNamesLabel(a.metric, n.label) ? [kept[i]!.reason] : []));
   const nodes = admitted.nodes.map((n) => (said(n).length === 0 ? n : { ...n, description: [n.description ?? n.label, ...said(n)].join('\n') }));
-  return { ...admitted, nodes, loss: [...admitted.loss, ...kept] };
+  return { ...admitted, nodes: outsideTheCurrentRun(nodes, admitted.edges, (n) => said(n).length > 0), loss: [...admitted.loss, ...kept] };
+}
+
+/**
+ * ⭐ G1 TURN 01 (DL-3 09:52Z; e2e/VERIFY-8d9ef02e-founder-diagnosis.md): the node a later ambition names stayed on the current goal's
+ * path, so the Run computed today's aim through it. It stays in the model with its words and links, and leaves the calculation
+ * (`retained_excluded`: the Run's participation guard and the placeholder reader drop it and its links, and the Run says so).
+ * Never the goal, a decision, an option or a quantity an option sets (the guard refuses that Run), and never where leaving it out
+ * would cut another part of the model off from the goal: then it stays in, as before.
+ */
+function outsideTheCurrentRun(nodes: readonly AdmittedNode[], edges: readonly AdmittedEdge[], named: (n: AdmittedNode) => boolean): AdmittedNode[] {
+  const setByOption = new Set(nodes.flatMap((n) => (n.kind === 'option' ? Object.keys(n.interventions ?? {}) : [])));
+  const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id);
+  /** Every node with a directed path to a goal, with `out` and its links left out. */
+  const reaching = (out: ReadonlySet<string>): Set<string> => {
+    const into = new Map<string, string[]>();
+    for (const e of edges) if (!out.has(e.from) && !out.has(e.to)) into.set(e.to, [...(into.get(e.to) ?? []), e.from]);
+    const seen = new Set(goals);
+    const queue = [...goals];
+    while (queue.length > 0) for (const from of into.get(queue.pop()!) ?? []) if (!seen.has(from)) { seen.add(from); queue.push(from); }
+    return seen;
+  };
+  const before = reaching(new Set());
+  const out = new Set<string>();
+  for (const n of nodes) {
+    if (!named(n) || n.analysis_participation !== undefined || ['goal', 'decision', 'option'].includes(n.kind) || setByOption.has(n.id)) continue;
+    const trying = new Set([...out, n.id]);
+    const after = reaching(trying);
+    if ([...before].every((id) => trying.has(id) || after.has(id))) out.add(n.id);
+  }
+  return out.size === 0 ? [...nodes] : nodes.map((n) => (out.has(n.id) ? { ...n, analysis_participation: 'retained_excluded' as const } : n));
 }
 
 /** The words of a later ambition, kept: the user's own sentence for its figure (the AI's verified target statement), else none. */

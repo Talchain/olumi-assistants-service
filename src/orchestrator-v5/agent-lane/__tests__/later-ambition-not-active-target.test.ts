@@ -2,14 +2,17 @@
  * ⭐ G1 TURN 01 (TL 00:18Z; PL 00:16Z; e2e/VERIFY-78ca2232-founder.md): "both fast-paced angel and, eventually, a larger fund of at
  * least 1.3 million" was saved as an ACTIVE goal_target on an outcome feeding the goal, because the drafter could type a later aim
  * only as `target` or `limit`. A later ambition is never an active target: the AI reads it (`role: 'ambition'`), and admission
- * keeps it out of every constraint, keeping its figure and the user's sentence as Olumi's reading. The node and its links stay.
+ * keeps it out of every constraint, keeping its figure and the user's sentence as Olumi's reading. The node and its links stay, outside
+ * the current Run (DL-3 09:52Z: it no longer feeds today's goal).
  * SYNTHETIC brief (an analogue of the served founder brief, never the brief itself).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { admitCandidateModel, admitOrdinaryCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We need to raise £200,000 from angels in the next six months.';
@@ -150,4 +153,88 @@ describe('a later ambition is never an active target (G1 turn 01)', () => {
     const cid = (contrast.nodes as Rec[]).find((n) => n.label === 'Larger round raised')?.id;
     expect(((contrast.goal_constraints ?? []) as Rec[]).filter((c) => c.node_id === cid)).toEqual([expect.objectContaining({ role: 'goal_target' })]);
   }, 60_000);
+});
+
+/**
+ * ⭐ G1 TURN 01, second half (DL-3 09:52Z; e2e/VERIFY-8d9ef02e-founder-diagnosis.md): the later ambition was kept, but its outcome still
+ * fed the current goal, so today's aim was computed through it. Its node, words and links stay; it leaves the calculation
+ * (`retained_excluded`, which the Run's participation guard and the placeholder reader honour). SYNTHETIC, as above.
+ */
+describe('a later ambition stays in the model, outside the current Run', () => {
+  /** The served shape: the drafter also links the later outcome into today's goal. */
+  const intoGoal = (d: Rec): Rec => ({ ...d, links: [...d.links, { ...d.links[0], from: 'Larger round raised', to: 'Angel funding raised' }] });
+  const node = (out: { nodes: readonly Rec[] }, label: string): Rec => out.nodes.find((n) => n.label === label)!;
+  /** The real Run's PLoT request (the snapshot loader, then the handler up to the network). */
+  const requestTheRunSends = async (graph: Rec): Promise<Rec | undefined> => {
+    const scenarioId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(scenarioId, 'g1-later-ambition', {
+      loadGraphAndBriefText: async () => ({ graph, briefText: BRIEF }), readMostRecentPendingActions: async () => [],
+    } as never);
+    let request: Rec | undefined;
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: vi.fn(), validatePatch: vi.fn() } as never,
+      probe: async (p: { plotPayload: Rec }) => { request = p.plotPayload; } } as never);
+    await handler({ payload: { scenario_id: scenarioId, turn_id: 'g1-later-ambition', kind: 'message', message: 'Run analysis.' },
+      requestId: 'g1-later-ambition', signal: new AbortController().signal, context: {}, orientationText: '' } as never).catch(() => undefined);
+    return request;
+  };
+
+  it('⛔ RED → GREEN: the later outcome the drafter linked into today\'s goal is kept, with its words and links, outside the calculation', () => {
+    const out = admitted(intoGoal(draft('ambition', true)));
+    const later = node(out, 'Larger round raised');
+    expect(later.analysis_participation).toBe('retained_excluded');
+    expect(later.description).toContain(`Later ambition, as Olumi reads your words: “${LATER}”`);
+    const goalId = node(out, 'Angel funding raised').id;
+    expect(out.edges.some((e) => e.from === later.id && e.to === goalId), 'its link is kept, not deleted').toBe(true);
+    expect(out.edges.some((e) => e.to === later.id)).toBe(true);
+    // Everything else still participates: the goal, the options and the factor they set.
+    expect(out.nodes.filter((n) => n.analysis_participation !== undefined).map((n) => n.label)).toEqual(['Larger round raised']);
+  });
+
+  it('⭐ through the real build, register and the real Run\'s PLoT request: saved outside the Run, and absent from what the engine receives', async () => {
+    const g = await registered(intoGoal(draft('ambition', true)));
+    const later = (g.nodes as Rec[]).find((n) => n.label === 'Larger round raised')!;
+    expect(later.analysis_participation).toBe('retained_excluded');
+    expect(GraphV3.parse(JSON.parse(JSON.stringify(g))).nodes.find((n) => n.id === later.id)?.analysis_participation).toBe('retained_excluded');
+    expect((g.edges as Rec[]).some((e) => e.from === later.id), 'saved with its link').toBe(true);
+    const sent = await requestTheRunSends(g);
+    expect(sent, 'the Run reached the engine boundary').toBeDefined();
+    expect((sent!.graph.nodes as Rec[]).some((n) => n.id === later.id)).toBe(false);
+    expect((sent!.graph.edges as Rec[]).some((e) => e.from === later.id || e.to === later.id)).toBe(false);
+    // CONTRAST: a genuine further target stays in what the engine receives.
+    const target = await registered(intoGoal(draft('target', true)));
+    const tid = (target.nodes as Rec[]).find((n) => n.label === 'Larger round raised')!.id;
+    const tsent = await requestTheRunSends(target);
+    expect((tsent?.graph.nodes as Rec[] | undefined)?.some((n) => n.id === tid)).toBe(true);
+  }, 60_000);
+
+  it('⛔ CONTRAST: a later ambition on today\'s goal itself never takes the goal out', () => {
+    const d = intoGoal(draft(null));
+    d.constraints = [{ ...later('ambition'), metric: 'Angel funding raised' }];
+    const out = admitted(d);
+    expect(out.loss.some((l) => l.after === 'retained_later_ambition')).toBe(true);
+    expect(out.nodes.every((n) => n.analysis_participation === undefined)).toBe(true);
+  });
+
+  it('⛔ CONTRAST: a later ambition on a quantity an option sets stays in (the Run would refuse to leave it out)', () => {
+    const d = intoGoal(draft(null));
+    d.constraints = [{ ...later('ambition'), metric: 'Investor meetings per week', unit: 'meetings', value: 8 }];
+    const out = admitted(d);
+    expect(out.loss.some((l) => l.after === 'retained_later_ambition')).toBe(true);
+    expect(node(out, 'Investor meetings per week').analysis_participation).toBeUndefined();
+  });
+
+  it('⛔ CONTRAST: where leaving it out would cut another part off from the goal, it stays in, as before', () => {
+    const d = intoGoal(draft('ambition', true));
+    d.factors.push({ label: 'Pitch deck quality', role: 'external', baseline_known: true, baseline_value: 5, unit: 'score', provenance: 'inferred', plausible_max: 10 });
+    d.links.push({ ...d.links[0], from: 'Pitch deck quality', to: 'Larger round raised' });
+    const out = admitted(d);
+    expect(node(out, 'Larger round raised').analysis_participation).toBeUndefined();
+    expect(node(out, 'Pitch deck quality').analysis_participation).toBeUndefined();
+  });
+
+  it('⛔ CONTRAST: a genuine further target, and a model with no later aim, keep every node in the calculation', () => {
+    expect(admitted(intoGoal(draft('target', true))).nodes.every((n) => n.analysis_participation === undefined)).toBe(true);
+    expect(admitted(intoGoal(draft(null))).nodes.every((n) => n.analysis_participation === undefined)).toBe(true);
+  });
 });
