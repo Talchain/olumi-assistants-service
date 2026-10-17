@@ -270,8 +270,10 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // from the MODEL'S ORIGIN) gets no new writers.
       frame: { type: 'string', enum: ['level', 'change_abs', 'change_rel'] },
       // ⭐ RECOVERY BATCH C (ruling 15) — PROMPT HUNK, science sign-off required. Optional in the contract.
-      role: { type: 'string', enum: ['limit', 'target'], description:
-        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit".' },
+      // ⭐ G1 turn 01 (TL 00:18Z; PL 00:16Z): an eventual aim had no role but target or limit. AIE wording is advice (DL-3 00:2xZ).
+      role: { type: 'string', enum: ['limit', 'target', 'ambition'], description:
+        '"target" ONLY for one of SEVERAL success targets the user names beside the goal\u2019s own (see the SEVERAL TARGETS rule); a budget, time or other limit is "limit"; '
+        + '"ambition" for a later or eventual aim the user names beside the current one: it is kept with their words and is never a target this model tests.' },
     }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an

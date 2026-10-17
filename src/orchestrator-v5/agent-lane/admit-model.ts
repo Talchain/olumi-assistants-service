@@ -83,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, sourceMapOf, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -3486,7 +3486,43 @@ export interface ConstructionAdmission {
   readonly event_by_date_prompted?: boolean;
 }
 
-export function admitCandidateModel(
+/**
+ * ⭐ G1 TURN 01 (TL 00:18Z; PL 00:16Z; VERIFY-78ca2232-founder): "I urgently need to secure funding: both fast-paced angel and,
+ * eventually, a larger fund of at least 1.3 million." was saved as an ACTIVE goal_target (≥ 1.3) on an outcome feeding the goal:
+ * the drafter could only type a later aim as `target` (Batch C's several targets) or `limit`. A later ambition is never an active
+ * target. The AI reads it (`role: 'ambition'`); admission keeps it out of every constraint reader, and its figure and the user's
+ * own sentence for it (the AI's verified target statement, when there is one) are kept, as Olumi's reading, in the loss record.
+ * The node it names and its links stay. The host reads no "eventually".
+ */
+export function admitCandidateModel(...args: Parameters<typeof admitCandidateModelOnce>): AdmittedModel {
+  const [candidate, , brief] = args;
+  const ambitions = Array.isArray(candidate.constraints) ? candidate.constraints.filter((c) => c?.role === 'ambition') : [];
+  if (ambitions.length === 0) return admitCandidateModelOnce(...args);
+  const rest = candidate.constraints.filter((c) => c?.role !== 'ambition');
+  const admitted = admitCandidateModelOnce({ ...candidate, constraints: rest }, ...(args.slice(1) as DropFirst<typeof args>));
+  return { ...admitted, loss: [...admitted.loss, ...ambitions.map((a) => laterAmbitionLoss(candidate, brief, a))] };
+}
+type DropFirst<T extends readonly unknown[]> = T extends readonly [unknown, ...infer R] ? R : never;
+
+/** The words of a later ambition, kept: the user's own sentence for its figure (the AI's verified target statement), else none. */
+function laterAmbitionLoss(candidate: CandidateModel, brief: string | undefined, a: CandidateConstraint): RepairEntry {
+  // The sentence of the AI's own verified TARGET statement for this aim's subject (its label, whichever kind the AI named: the
+  // drafter has no outcome subject); the host reads no word of it.
+  const label = a.metric.trim().replace(/\s+/g, ' ').toLowerCase();
+  const quote = typeof brief !== 'string' ? undefined : [...sourceMapOf((candidate as { statements?: unknown }).statements, brief).verified]
+    .filter(([key]) => key.split('|')[1] === label && key.endsWith('|target')).flatMap(([, said]) => said)
+    .find((st) => st.negated !== true)?.quote;
+  const figure = `${a.operator === '>=' || a.operator === '>' ? 'at least ' : a.operator === '<=' || a.operator === '<' ? 'at most ' : ''}${a.value}${a.unit ? ` ${a.unit}` : ''}`;
+  return {
+    code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE, layer: 'cee', field_path: `constraints[${slugId(a.metric)}].role`,
+    before: { constraint: a, ...(quote !== undefined ? { quote } : {}) }, after: 'retained_later_ambition',
+    reason: `Later ambition, as Olumi reads your words${quote !== undefined ? `: “${quote}”` : ''} (‘${a.metric}’, ${figure}). Your source stays yours; `
+      + 'the later role is a modelling interpretation, and it does not set a target this model tests.',
+    severity: 'info',
+  };
+}
+
+function admitCandidateModelOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
   /** The user's brief, which the decision node's question must be copied from (`decisionEntityFor`). */
