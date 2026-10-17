@@ -384,6 +384,66 @@ describe('the one record-grounded narrator count check', () => {
     expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text, removed: [] });
   });
 
+  it.each([
+    'Paul said, I supplied 99 links.',
+    'You wrote: I supplied 6 values.',
+    'When you give 3 values, Olumi estimates 2 links.',
+  ])('a reported, echoed or conditional count is not a performed claim about this Run: %s', text => {
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text, removed: [] });
+  });
+
+  it.each([
+    'I supplied 99 links.', 'I supplied 6 values.', 'Olumi estimates 2 links.',
+  ])('the corresponding asserted current-Run claim is still removed: %s', sentence => {
+    expect(narratorCountGuard(sentence, census(1), 'olumi')).toEqual({ text: '', removed: [sentence] });
+  });
+
+  it.each([';', '—', '\n', ',', ':'])(
+    'a second asserted current count still contradicts its record across %s', separator => {
+      const text = `Olumi supplied 1 value${separator} Olumi supplied 99 links.`;
+      expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text: '', removed: [text] });
+    },
+  );
+
+  it.each([',', ':'])('a known user count does not turn a later Olumi assertion into a reported lead: %s', separator => {
+    const text = `You supplied 6 values${separator} I supplied 99 links.`;
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text: '', removed: [text] });
+  });
+
+  it.each([
+    'Paul said, I supplied 99 links.', 'You wrote: I supplied 6 values.',
+    'When you give 3 values, Olumi estimates 2 links.',
+  ])('a matching current clause does not assert a later reported or conditional clause: %s', reported => {
+    const text = `Olumi supplied 1 value; ${reported}`;
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text, removed: [] });
+  });
+
+  it('the canonical matching census label still lets a later false performed claim be checked', () => {
+    const text = "Olumi's estimates: 1, I supplied 99 links.";
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text: '', removed: [text] });
+  });
+
+  it.each([
+    'Paul said, I supplied 99 links and Olumi supplied 6 values.',
+    'You wrote: I supplied 6 values and Olumi supplied 99 links.',
+    'When you give 3 values, Olumi estimates 2 links and I supplied 99 links.',
+  ])('coordination cannot promote a reported or conditional count to a current assertion: %s', text => {
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text, removed: [] });
+  });
+
+  it('an independent false current claim is still checked after a reported clause', () => {
+    const text = 'Paul said, I supplied 8 links; I supplied 99 links.';
+    expect(narratorCountGuard(text, census(1), 'olumi')).toEqual({ text: '', removed: [text] });
+  });
+
+  it('conditional reasoning survives beside a separate false performed claim', () => {
+    const hypothetical = 'When you give 3 values, Olumi estimates 2 links.';
+    const falseCurrent = 'I supplied 99 links.';
+    expect(narratorCountGuard(`${hypothetical} ${falseCurrent}`, census(1), 'olumi')).toEqual({
+      text: hypothetical, removed: [falseCurrent],
+    });
+  });
+
   it('correct and contradicted clauses do not erase an unrelated kept sentence', () => {
     const falseClaim = 'Olumi supplied 8 links!';
     const text = `Olumi estimated the price. Olumi supplied 1 value. ${falseClaim}`;
