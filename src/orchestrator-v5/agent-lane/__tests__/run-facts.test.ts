@@ -12,6 +12,7 @@ import { runFactsOf, RUN_FACTS_USE } from '../run-facts.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { decisionSensitivityOf } from '../decision-sensitivity.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
+import { STATIC_LEVEL_CAPABILITY } from '../../goal-target/run-question-scope.js';
 
 type Rec = Record<string, any>;
 const ctx = { scenario_id: '11111111-1111-1111-1111-111111111111', authenticated_user_id: 'user-a', request_id: 'req-1' };
@@ -39,6 +40,8 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
     expect((facts.withheld as Rec[]).map((w) => [w.code, w.option_ids])).toEqual(recorded.map((w) => [w.code, w.option_ids ?? []]));
     expect(facts.sensitivity.measured).toBe(decisionSensitivityOf(body.analysis_result.enrichment).status === 'measured');
     expect(facts.must_say).toEqual(facts.chances.goal_chance_notes ?? []);
+    expect(facts.capability).toEqual(STATIC_LEVEL_CAPABILITY);
+    expect(facts.input_basis.factor_starting_values.coverage).toBe('material_factor_starting_values_only');
     // Contrast: the packet carries something on each served Run.
     expect(Object.keys(facts.chances).length + facts.withheld.length).toBeGreaterThan(0);
   });
@@ -48,6 +51,7 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
     const stale = runFactsOf(body.analysis_result, body.graph, false);
     expect(stale).toMatchObject({ current: false, chances: {}, withheld: [], sensitivity: { measured: false }, must_say: [] });
     expect(stale.leader).toMatchObject({ option_id: null, goal_chance_leader: null, similar_option_ids: [] });
+    expect(stale).not.toHaveProperty('input_basis');
     // Exactly no chance facts on either served Run when stale; contrast: the same Run, current, carries them.
     let carried = 0;
     for (const [, x] of BRIEFS) {
@@ -78,7 +82,44 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
     const quote = 'We measure capacity as tickets closed per week.';
     goal.user_statements = [{ subject_key: `goal|${goal.id}|||measure`, field: 'measure', recorded_at: '2026-10-15T01:00:00Z',
       statements: [{ speaker: 'user', quote, source: quote, subject: { quantity: 'measure', node_id: goal.id }, form: 'describes', reading: 'olumi' }] }];
-    expect(runFactsOf(body.analysis_result, g, true).user_statements).toEqual([{ node_id: goal.id, field: 'measure', said: [quote] }]);
+    expect(runFactsOf(body.analysis_result, g, true).user_statements).toEqual([{ node_id: goal.id,
+      record: goal.user_statements[0], approval_evidence: { status: 'unknown', missing: 'bound_statement_approval_receipt' } }]);
+  });
+
+  it('keeps the full saved statement, its source and dissent through the actual canonical read, without inventing approval', async () => {
+    const [, original] = BRIEFS[0]!;
+    const body = structuredClone(original);
+    const goal = (body.graph.nodes as Rec[]).find(n => n.kind === 'goal')!;
+    const record = { subject_key: `goal|${goal.id}|||measure`, field: 'measure', recorded_at: '2026-10-15T01:00:00Z',
+      attest: { recorded_by: 'construction', comparison_window_checked: true }, statements: [
+        { speaker: 'user', quote: 'likely 4–7 tickets per week if onboarding finishes',
+          source: 'Our support lead says likely 4–7 tickets per week if onboarding finishes. I remain doubtful.',
+          subject: { quantity: 'measure', node_id: goal.id, option_id: 'a' }, form: 'range', low: 4, high: 7,
+          unit: 'tickets/week', reference: 'current baseline', period: 'six weeks', qualifier: 'likely', qualifier_in_quote: true,
+          conditions: 'if onboarding finishes', answering: 'What range did the support lead give?', reading: 'olumi' },
+        { speaker: 'user', quote: 'I do not agree that onboarding is assured', source: 'I do not agree that onboarding is assured',
+          subject: { quantity: 'measure', node_id: goal.id }, form: 'describes', negated: true, reading: 'olumi' },
+      ] };
+    goal.user_statements = [record];
+    const saved = JSON.parse(JSON.stringify(body));
+    const facts = (await read(saved)).run_facts;
+    expect(facts.user_statements).toContainEqual({ node_id: goal.id, record,
+      approval_evidence: { status: 'unknown', missing: 'bound_statement_approval_receipt' } });
+    // Neither a saved record nor absence of construction's attestation proves a press or adopts an unsupported reading.
+    goal.user_statements = [{ ...record, attest: undefined }];
+    expect(runFactsOf(body.analysis_result, body.graph, true).user_statements.find(r => r.node_id === goal.id)!.approval_evidence.status).toBe('unknown');
+    expect(saved.graph.nodes.find((n: Rec) => n.id === goal.id).user_statements[0]).toEqual(record);
+  });
+
+  it('the producer exposes its source declaration before a Run, without inventing a calculation or permission', () => {
+    const facts = runFactsOf(undefined, { nodes: [], edges: [] }, false);
+    expect(facts.capability).toEqual(STATIC_LEVEL_CAPABILITY);
+    expect(facts.capability.engine_attestation).toBe('unverified');
+    expect(facts).not.toHaveProperty('question');
+    expect(facts).not.toHaveProperty('may_run');
+    expect(facts.chances).toEqual({});
+    expect(facts.leader.option_id).toBeNull();
+    expect(facts).not.toHaveProperty('input_basis');
   });
 
   it.each(BRIEFS)('%s: the AI and the UI read the SAME leader facts (UI Q3): a withheld licence names no leader', async (_n, body) => {

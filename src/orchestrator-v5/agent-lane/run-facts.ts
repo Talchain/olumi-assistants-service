@@ -11,9 +11,11 @@
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { deriveRunQuestion, goalChanceLicenceForAgent, withGoalChanceReadback, type RunQuestion, type SelectedRunEvidence, STATIC_INPUTS_NOT_RECORDED } from '../goal-target/goal-chance-licence.js';
 import { decisionSensitivityOf } from './decision-sensitivity.js';
-import { userStatementsOn } from '../statement-door/statements.js';
+import { userStatementsOn, type UserStatementRecord } from '../statement-door/statements.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+import { STATIC_LEVEL_CAPABILITY, type CeeSourceContractDeclaration } from '../goal-target/run-question-scope.js';
+import { analysedOptionIds, conditionalInputFactsOf, conditionalInputDisclosuresOf, type ConditionalInputFacts } from './conditional-input-basis.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -86,6 +88,8 @@ export const RUN_FACTS_USE = [
 ].join('\n\n');
 
 export interface RunFacts {
+  /** Available before a Run; descriptive source contracts supply no admission, result or claim permission. */
+  readonly capability: CeeSourceContractDeclaration;
   /** What this selected Run actually evaluated; missing historical evidence remains explicit. */
   readonly question?: RunQuestion;
   /** How the AI uses these facts (`RUN_FACTS_USE`), present only with a current Run's facts. */
@@ -107,8 +111,15 @@ export interface RunFacts {
   readonly sensitivity: { readonly measured: boolean; readonly most_sensitive?: string };
   /** How many of THIS Run's inputs on the goal's paths are Olumi's estimates. */
   readonly olumi_inputs?: { readonly links: number; readonly values: number; readonly settings_by_option: Readonly<Record<string, number>> };
-  /** The user's own recorded statements, verbatim, per node. */
-  readonly user_statements: readonly { readonly node_id: string; readonly field: string; readonly said: readonly string[] }[];
+  /** Current saved-model records, not historical evaluated inputs. The quote's human source and Olumi's reading stay distinct. */
+  readonly user_statements: readonly {
+    readonly node_id: string;
+    readonly record: UserStatementRecord;
+    /** No bound press receipt is among this builder's inputs. Neither storage nor missing attestations prove approval. */
+    readonly approval_evidence: { readonly status: 'unknown'; readonly missing: 'bound_statement_approval_receipt' };
+  }[];
+  /** Current comparison's bounded source facts. Qualifications belong beside a finding that uses these inputs. */
+  readonly input_basis?: ConditionalInputFacts & { readonly required_disclosures: readonly string[] };
   /** This Run against the preceding one (see {@link RunComparison}); absent for a first Run. */
   readonly comparison?: RunComparison;
   /** The AIE's exact disclosures that apply to THIS Run: each said once, word for word, where it applies. */
@@ -152,12 +163,18 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
   const enrichment = isRec(analysisResult) ? analysisResult.enrichment : undefined;
   const s = current ? decisionSensitivityOf(enrichment) : { status: 'not_measured' as const };
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
-  const said = nodes.flatMap((n) => (typeof n.id !== 'string' ? [] : userStatementsOn(n).map((r) => ({ node_id: n.id as string, field: r.field,
-    said: r.statements.map((x) => x.quote) }))));
+  const said: RunFacts['user_statements'] = nodes.flatMap((n) => (typeof n.id !== 'string' ? [] : userStatementsOn(n).map((r) => ({
+    node_id: n.id as string, record: structuredClone(r),
+    approval_evidence: { status: 'unknown' as const, missing: 'bound_statement_approval_receipt' as const },
+  }))));
+  const inputBasis = current && analysisResult != null ? conditionalInputFactsOf({ graph,
+    admission: isRec(state.analysisReady) ? state.analysisReady.analysis_admission : undefined,
+    analysedOptionIds: analysedOptionIds(analysisResult) }) : undefined;
   const census = licence?.olumi_estimate_link_count !== undefined || licence?.olumi_estimate_value_count !== undefined
     ? { links: licence.olumi_estimate_link_count ?? 0, values: licence.olumi_estimate_value_count ?? 0,
       settings_by_option: licence.olumi_estimate_settings_by_option ?? {} } : undefined;
   return {
+    capability: STATIC_LEVEL_CAPABILITY,
     ...(question === undefined ? {} : { question }),
     ...(current ? { use: RUN_FACTS_USE } : {}),
     current,
@@ -168,6 +185,7 @@ export function runFactsOf(analysisResult: unknown, graph: unknown, current: boo
     sensitivity: s.status === 'measured' ? { measured: true, most_sensitive: s.most_sensitive.label } : { measured: false },
     ...(census !== undefined ? { olumi_inputs: census } : {}),
     user_statements: said,
+    ...(inputBasis === undefined ? {} : { input_basis: { ...inputBasis, required_disclosures: conditionalInputDisclosuresOf(inputBasis) } }),
     ...(current && typeof state.comparison?.prior_run_id === 'string' && state.comparison.prior_run_id !== ''
       && (state.comparison.run_delta !== undefined || state.comparison.rerun_record !== undefined)
       ? { comparison: { prior_run_id: state.comparison.prior_run_id,
