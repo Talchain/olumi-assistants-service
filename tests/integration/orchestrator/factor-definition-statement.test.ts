@@ -19,6 +19,7 @@ const BUDGET = 'budget';
 const SUBJECT = { kind: 'factor' as const, id: BUDGET, field: 'measure' as const };
 const ASK = 'Does the £400,000 limit on ‘Marketing budget’ cover the agency fees as well as the media spend?';
 type Json = Record<string, any>;
+const PRESS = 'Yes, use this reading.';
 
 function storedGraph(): unknown {
   const parsed = GraphV3.parse({
@@ -113,16 +114,22 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-def'),
     });
   };
-  const ctxOf = (typed: string, preceding?: string) => ({ scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r',
-    user_text: typed, user_turn_text: typed, ...(preceding !== undefined ? { preceding_assistant_text: preceding } : {}) });
-  const propose = (typed: string, statement: Json, preceding?: string, subject: Json = { kind: 'factor', label: 'Marketing budget', id: BUDGET, field: 'measure' }) =>
-    capabilities().proposeStatement!(ctxOf(typed, preceding) as never, { subject, statements: [statement] });
+  /** `typed` is THIS turn's words; `earlier` the user's earlier typed words in the conversation (a chip press types nothing now). */
+  const ctxOf = (typed: string, preceding?: string, earlier: readonly string[] = []) => ({ scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a',
+    request_id: 'r', user_text: [...earlier, typed].filter((t) => t !== '').join('\n'), user_turn_text: typed,
+    ...(preceding !== undefined ? { preceding_assistant_text: preceding } : {}) });
+  const propose = (typed: string, statement: Json, preceding?: string, subject: Json = { kind: 'factor', label: 'Marketing budget', id: BUDGET, field: 'measure' },
+    earlier: readonly string[] = []) => capabilities().proposeStatement!(ctxOf(typed, preceding, earlier) as never, { subject, statements: [statement] });
+  /** The ONE commit's edit fact: what the history says was done, and whether a re-Run is owed. */
+  const factOf = (): Json => (([...rows.values()][0]?.write.handler_facts ?? []) as Json[]).find((f) => f.fact_type === 'edit_graph')!;
 
   async function pressed(typed: string, statement: Json, preceding?: string): Promise<{ card: Json; out: Json }> {
     const caps = capabilities();
     const card = await caps.proposeStatement!(ctxOf(typed, preceding) as never, { subject: { kind: 'factor', label: 'Marketing budget', id: BUDGET, field: 'measure' }, statements: [statement] }) as Json;
     expect(card.ok, JSON.stringify(card)).toBe(true);
-    const out = await caps.authoriseChange(ctxOf('', preceding) as never, { proposal_id: String(card.proposal_id) }) as Json;
+    // The press, as the route binds it: this card's id and its own button words (a reading Olumi derives: "Use this reading").
+    const id = String(card.proposal_id);
+    const out = await caps.authoriseChange({ ...ctxOf(PRESS, preceding), typed_approval_of: id, typed_approval_words: PRESS } as never, { proposal_id: id }) as Json;
     return { card, out };
   }
 
@@ -135,14 +142,19 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
       + 'fees and the media spend. It is kept with ‘Marketing budget’ as your words and Olumi’s reading of them. It changes no figure: the '
       + 'model and its analysis use ‘Marketing budget’ exactly as before. Record this reading?');
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(out.follow_up).toBe('Recorded your words on ‘Marketing budget’, with Olumi’s reading of them: what it covers is both the agency fees '
-      + 'and the media spend. No figure changed: the model and its analysis use it exactly as before.');
+    expect(out.follow_up).toBe('Recorded your words on ‘Marketing budget’, with Olumi’s reading of what it covers. No figure changed: the model '
+      + 'and its analysis use it exactly as before.');
     expect(rows.size, 'ONE commit').toBe(1);
+    // ⛔ BUDDY-A 05:30Z: words, not a figure: never the range-law adoption's receipt, and no re-Run owed.
+    expect(factOf().result).toMatchObject({ rerun_recommended: false,
+      safe_summary: 'Recorded your words and Olumi’s reading of what it covers; no figure changed' });
+    expect(JSON.stringify(factOf())).not.toMatch(/range|approximation/i);
     const cold = GraphV3.parse(JSON.parse(JSON.stringify(persisted)));
     const record = userStatementFor(cold, SUBJECT);
     expect(record).toMatchObject({ field: 'measure', statements: [{ speaker: 'user', quote: typed, form: 'describes', reading: 'olumi' }] });
     // Non-operative: the analysis-affecting hash and every byte outside the records are as before.
-    expect(computeAnalysisAffectingGraphHash(cold as never)).toBe(hash);
+    expect(computeAnalysisAffectingGraphHash(persisted as never)).toBe(hash);
+    expect(computeAnalysisAffectingGraphHash(cold as never)).toBe(computeAnalysisAffectingGraphHash(GraphV3.parse(JSON.parse(JSON.stringify(before))) as never));
     expect(withoutStatements(cold)).toEqual(withoutStatements(GraphV3.parse(JSON.parse(JSON.stringify(before)))));
   }, 60_000);
 
@@ -153,8 +165,12 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
     expect(card.public_label).toContain('Olumi proposes this reading: what ‘Marketing budget’ covers: the agency fees as well as the media spend.');
     expect(card.public_label).toContain(`You said this in answer to Olumi’s question: “${ASK}” The words for what it covers are that question’s, as your answer confirms them.`);
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(userStatementFor(GraphV3.parse(JSON.parse(JSON.stringify(persisted))), SUBJECT))
-      .toMatchObject({ statements: [{ quote: typed, answering: ASK, form: 'describes' }] });
+    expect(rows.size, 'ONE commit').toBe(1);
+    const cold = GraphV3.parse(JSON.parse(JSON.stringify(persisted)));
+    // The answer and the whole question are kept apart: the question is Olumi's, never the user's words (no "£400,000" of theirs).
+    expect(userStatementFor(cold, SUBJECT)).toMatchObject({ statements: [{ speaker: 'user', quote: typed, source: typed, answering: ASK, form: 'describes', reading: 'olumi' }] });
+    expect(withoutStatements(cold)).toEqual(withoutStatements(GraphV3.parse(JSON.parse(JSON.stringify(storedGraph())))));
+    expect(factOf().result).toMatchObject({ rerun_recommended: false });
   }, 60_000);
 
   it.each([
@@ -165,12 +181,31 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
     ['nothing names it and it answers nothing', 'It covers both.', { reading_words: 'covers both' }, undefined, 'not_this_subject', 'is not clearly about'],
     ['the reading words are in neither the quote nor the question', 'Our marketing budget covers both the agency fees and the media spend.',
       { reading_words: 'the events budget too' }, undefined, 'not_this_field', 'Give reading_words'],
+    // BUDDY-A 05:30Z: the AI's choice of one question does not say which factor a bare "both" is about.
+    ['Olumi\'s last reply asks about TWO factors', 'It covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
+      `${ASK} And does ‘Sales headcount’ include the contractors as well as the employees?`, 'not_this_subject', 'does not ask about ‘Marketing budget’ alone'],
+    // Precedence: words that name ANOTHER factor are that factor's, whatever question the AI says they answer.
+    ['the words name another factor', 'Sales headcount covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
+      `Thanks. ${ASK}`, 'not_this_subject', 'is not clearly about'],
   ])('⛔ %s: nothing prepared, nothing written', async (_why, typed, extra, preceding, refusal, detail) => {
     const before = structuredClone(persisted);
     const p = await propose(typed, { quote: typed, ...extra }, preceding) as Json;
     expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal });
     expect(String(p.detail)).toContain(detail);
     expect(persisted).toEqual(before);
+    expect(rows.size).toBe(0);
+  });
+
+  // BUDDY-A 05:30Z: only words typed THIS turn answer Olumi's last question; an earlier "both" never acquires a later question.
+  it.each([
+    ['an earlier typed answer reused against the new question', 'Thanks, that is clear.'],
+    ['a chip press (nothing typed this turn)', ''],
+  ])('⛔ %s: not this turn\'s answer, nothing prepared', async (_why, now) => {
+    const old = 'Yes, it covers both.';
+    const p = await propose(now, { quote: old, answering: ASK, reading_words: 'the agency fees as well as the media spend' }, `Thanks. ${ASK}`,
+      undefined, [old]) as Json;
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal: 'not_answered_now' });
+    expect(String(p.detail)).toContain('is not in what the user typed in this message');
     expect(rows.size).toBe(0);
   });
 

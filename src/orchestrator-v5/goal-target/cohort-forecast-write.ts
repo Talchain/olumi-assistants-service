@@ -271,6 +271,11 @@ function recordable(subject: DoorSubject, record: UserStatementRecord): boolean 
   if (subject.kind === 'link' && subject.field === 'effect' && subject.to_id !== undefined && subject.option_id === undefined) {
     return record.statements.length === 1 && record.statements[0]!.form === 'range' && record.attest === undefined;
   }
+  // DL-3 05:21Z (AIE 6183352754): what a factor's quantity covers, in the user's words (`FACTOR_DEFINITION_ROW`). It changes no
+  // figure, so it carries no attest (no law, no adoption) and is never read as a value, a limit or a size.
+  if (subject.kind === 'factor' && subject.option_id === undefined && subject.to_id === undefined && subject.field === 'measure') {
+    return record.statements.length === 1 && record.statements[0]!.form === 'describes' && record.attest === undefined;
+  }
   return false;
 }
 
@@ -293,7 +298,9 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   const labelOf = (id: unknown): string => String((persistedGraph.nodes as unknown[]).find((n): n is Rec => isRec(n) && n.id === id)?.label ?? id).trim();
   const label = link ? `${labelOf(said.subject.id)} → ${labelOf(said.subject.to_id)}` : String(matches[0]!.label ?? approved.node_id).trim();
   const lead = said.subject.field === 'lead';
-  const rangeLaw = said.subject.kind === 'factor';
+  // ⛔ BUDDY-A 05:30Z: only an option's level range is the range-law adoption; a factor's own definition is words, not a figure.
+  const rangeLaw = said.subject.kind === 'factor' && said.subject.option_id !== undefined && said.subject.field === 'level';
+  const definition = said.subject.kind === 'factor' && said.subject.option_id === undefined && said.subject.field === 'measure';
   const fact = EditGraphHandlerFactSchema.parse({
     fact_type: 'edit_graph', fact_version: 1, noop: false,
     result: { edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
@@ -302,14 +309,16 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
       safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place'
         : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted'
+          : definition ? 'Recorded your words and Olumi’s reading of what it covers; no figure changed'
           : link ? 'Recorded Olumi’s reading of your words for this link; it does not size the link'
             : 'Recorded from your words that both targets count the same people',
-      // A link's range sizes nothing, so nothing the analysis reads has changed: no re-Run is owed for it.
+      // A link's range and a factor's definition size nothing, so nothing the analysis reads has changed: no re-Run is owed for them.
       impact: 'low', rerun_recommended: lead || rangeLaw },
   });
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.`
       : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.`
+        : definition ? `Recorded your words on ‘${label}’, with Olumi’s reading of what it covers. No figure changed: the model and its analysis use it exactly as before.`
         : link ? `Recorded Olumi’s reading of your words for ‘${label}’. It does not size the link.` : sameCohortRecordedWords(graph) };
 }
 

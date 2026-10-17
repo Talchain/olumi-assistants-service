@@ -11,6 +11,7 @@
  * question, `bindsByAnsweredQuestion`, only when the host finds it verbatim in Olumi's last reply). Meaning basis: AIE 6183352754
  * (a safely bound qualitative statement is recorded without a numeric interpretation). Pure.
  */
+import { plainQuoteWords } from '../../agent-lane/quote-confirmation.js';
 import { wordsTheUserWrote } from '../../agent-lane/stated-by-user.js';
 import type { UserStatement } from '../../agent-lane/user-statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
@@ -28,6 +29,8 @@ const factorOf = (subject: DoorSubject, graph: unknown): Rec | undefined => (sub
   || subject.to_id !== undefined || !isRec(graph) || !Array.isArray(graph.nodes) ? undefined
   : graph.nodes.find((n): n is Rec => isRec(n) && n.kind === 'factor' && n.id === subject.id));
 const labelOf = (subject: DoorSubject, graph: unknown, label: string): string => String(factorOf(subject, graph)?.label ?? label).trim();
+/** Words written in Olumi's own question, in one spelling: where the reading came from, never that the user agreed with it. */
+const inWords = (w: string, text: string): boolean => plainQuoteWords(text).toLowerCase().includes(plainQuoteWords(w).toLowerCase());
 const cleaned = (words: unknown): string => (typeof words === 'string' ? words.trim().replace(/[.,;:!?]+$/u, '') : '');
 /** The reading's words come from Olumi's question the quote answers, not from the user's own sentence. */
 const fromQuestion = (s: UserStatement | undefined, words: string | undefined): boolean =>
@@ -49,7 +52,7 @@ export const FACTOR_DEFINITION_ROW: RoleRow = {
     if (factor === undefined) return { refused: 'That factor is not in the model.' };
     const w = cleaned(words);
     const asked = typeof answering === 'string' && answering.trim() !== '' ? answering.trim() : undefined;
-    if (w === '' || w.length > 160 || /[\r\n]/u.test(w) || !(wordsTheUserWrote(w, quote) || (asked !== undefined && wordsTheUserWrote(w, asked)))) {
+    if (w === '' || w.length > 160 || /[\r\n]/u.test(w) || !(wordsTheUserWrote(w, quote) || (asked !== undefined && inWords(w, asked)))) {
       return { refused: `Give reading_words: the words that say what ‘${String(factor.label ?? subject.id).trim()}’ covers, copied from “${quote}”`
         + `${asked !== undefined ? ' or from the question it answers' : ''}.` };
     }
@@ -66,8 +69,10 @@ export const FACTOR_DEFINITION_ROW: RoleRow = {
         + `‘${label}’ exactly as before.`,
     ];
   },
-  recordedWords: (_s, subject, label, graph, words) => `Recorded your words on ‘${labelOf(subject, graph, label)}’, with Olumi’s reading of `
-    + `them: what it covers is ${words ?? ''}. No figure changed: the model and its analysis use it exactly as before.`,
+  // At the press the card carries the words, not Olumi's reading of them: the record keeps the quote, its source and the question
+  // it answers (BUDDY-A 05:30Z), which say what was accepted. The writer's own confirmation says the same.
+  recordedWords: (_s, subject, label, graph) => `Recorded your words on ‘${labelOf(subject, graph, label)}’, with Olumi’s reading of what it `
+    + 'covers. No figure changed: the model and its analysis use it exactly as before.',
   get writer() { return FACTOR_DEFINITION_WRITER; },
 };
 

@@ -8,7 +8,7 @@
  *  - verified as a WHOLE statement of the user's own verified words, with a figure the quote states (`verifyStatement`).
  * The reading and its assumptions are the table's words. Pure.
  */
-import { namesBothEnds } from '../goal-target/input-claim-context.js';
+import { namesBothEnds, wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { verifyStatement, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
 import { figuresWritten } from '../agent-lane/construction-source-map.js';
@@ -94,6 +94,31 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
   return 'unbound';
 }
 
+/**
+ * ⭐ AN ANSWER TO OLUMI'S OWN QUESTION (opt-in `bindsByAnsweredQuestion`; BUDDY-A 05:30Z): a fallback only where the quote binds
+ * nothing by itself ('unbound', never 'another'). It binds when the question the AI says it answers is verbatim in Olumi's last
+ * reply, that whole reply names this subject and no other of its kind, and the user typed the quote in THIS message (never an
+ * earlier answer, never a chip). Containment proves where the question came from, never that the user agreed with it.
+ */
+function answerBinds(graph: unknown, subject: DoorSubject, label: string, quote: string, answering: string | undefined, ctx: DoorContext,
+  texts: StatementTexts): 'bound' | Extract<DoorVerdict, { kind: 'refused' }> | undefined {
+  const asked = typeof answering === 'string' ? answering.trim() : '';
+  if (asked === '') return undefined;
+  const reply = typeof ctx.preceding_ask === 'string' ? ctx.preceding_ask : '';
+  if (!reply.includes(asked)) {
+    return { kind: 'refused', refusal: 'not_this_subject', detail: `“${asked}” is not in Olumi’s last reply, so it does not bind “${quote}”. Nothing was prepared. ${KEEP}` };
+  }
+  if (statementBoundTo(graph, subject, asked) !== 'bound' || statementBoundTo(graph, subject, reply) !== 'bound') {
+    return { kind: 'refused', refusal: 'not_this_subject', detail: `Olumi’s last reply does not ask about ‘${label}’ alone, so “${quote}” is not clearly about it. `
+      + `Nothing was prepared. ${KEEP} Ask only which part it is about.` };
+  }
+  if (!wholeStatementIn(texts.now ?? '', quote)) {
+    return { kind: 'refused', refusal: 'not_answered_now', detail: `“${quote}” is not in what the user typed in this message, so it does not answer Olumi’s last `
+      + `question. Nothing was prepared. ${KEEP}` };
+  }
+  return 'bound';
+}
+
 /** The user's statements about ONE subject, read, bound and verified, with Olumi's reading; or the first refusal, with the words kept. */
 export function readStatement(graph: unknown, subject: DoorSubject, label: string, quotes: readonly DoorQuote[], texts: StatementTexts,
   ctx: DoorContext = {}): DoorVerdict {
@@ -130,16 +155,13 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     // figure's clause (or the quote) by `statementBoundTo`.
     const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
     const source = row.sourceOf?.(subject, graph);
-    // ⭐ (opt-in, `bindsByAnsweredQuestion`): the question the quote answers must be Olumi's own, verbatim in its last reply; then
-    // that question naming this subject binds the answer. An answered question the host cannot find there binds nothing.
-    const asked = row.bindsByAnsweredQuestion === true && typeof answering === 'string' && answering.trim() !== '' ? answering.trim() : undefined;
-    if (asked !== undefined && !(typeof ctx.preceding_ask === 'string' && ctx.preceding_ask.includes(asked))) {
-      return { kind: 'refused', refusal: 'not_this_subject', detail: `“${asked}” is not in Olumi’s last reply, so it does not bind “${quote}”. Nothing was prepared. ${KEEP}` };
-    }
-    const byQuestion = asked !== undefined && statementBoundTo(graph, subject, asked) === 'bound';
-    if (!whole && !byQuestion && !(source !== undefined && source === quote)
-      && statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering, row.answersFor?.(subject, graph) ?? []) !== 'bound') {
-      return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
+    if (!whole && !(source !== undefined && source === quote)) {
+      const bound = statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering, row.answersFor?.(subject, graph) ?? []);
+      const byAnswer = bound === 'unbound' && row.bindsByAnsweredQuestion === true ? answerBinds(graph, subject, label, quote, answering, ctx, texts) : undefined;
+      if (byAnswer !== undefined && byAnswer !== 'bound') return byAnswer;
+      if (bound !== 'bound' && byAnswer !== 'bound') {
+        return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
+      }
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
     const v = verifyStatement({ quote, form: fig.form, ...(fig.qualifier !== undefined ? { qualifier: fig.qualifier } : {}),
