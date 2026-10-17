@@ -60,9 +60,10 @@ export function linkWorkingPointOf(graph: unknown, from: string, to: string): Li
   if (edges.length !== 1 || !isPlaceholderLink(edges[0]) || !linkHoldsStatedRange(graph, from, to)) return undefined;
   const edge = edges[0] as Rec;
   const record = userStatementFor(graph, { kind: 'link', id: from, to_id: to, field: 'effect' });
+  // ONE statement, so `linkHoldsStatedRange` (one un-negated range, construction's) is the whole of what it says.
   const st = record?.statements.length === 1 ? record.statements[0] : undefined;
-  if (st === undefined || st.form !== 'range' || st.negated === true || !finite(st.low) || !finite(st.high)
-    || st.low < 0 || !(st.low < st.high) || typeof st.unit !== 'string' || typeof st.quote !== 'string') return undefined;
+  if (st === undefined || !finite(st.low) || !finite(st.high) || st.low < 0 || !(st.low < st.high)
+    || typeof st.unit !== 'string' || typeof st.quote !== 'string') return undefined;
   const units = linkEffectEndUnits(graph, from, to);
   if (units === null || !units.source.own.includes('switch')) return undefined;
   if (!statedInOneOf(st.unit, [...units.target.own, units.target.adopted])) return undefined;
