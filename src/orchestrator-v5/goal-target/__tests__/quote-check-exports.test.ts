@@ -51,8 +51,7 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     const DOUBLE: readonly (readonly [string, string])[] = [['"', '"'], ['“', '”'], ['«', '»']];
     const SINGLE: readonly (readonly [string, string])[] = [["'", "'"], ['‘', '’']];
     // Attribution with and without a space before the opening mark (BUDDY-A AMEND 7: "Sam:'…'").
-    const COLON_SPEAKERS = ['Sam, site lead: ', 'Sam: ', 'Sam:'];
-    const SPEAKERS = [...COLON_SPEAKERS, 'Sam said '];
+    const SPEAKERS = ['Sam, site lead: ', 'Sam: ', 'Sam:', 'Sam said '];
     const wrong: string[] = [];
     const check = (message: string, quote: string, expected: boolean): void => {
       if (wholeStatementIn(message, quote) !== expected) wrong.push(`${expected ? 'not whole' : 'whole'}: «${quote}» in «${message}»`);
@@ -77,8 +76,9 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
         // A closed fragment with no full stop of its own is never whole.
         check(`${who}${open}parts first${close} and left.`, `${who}${open}parts first${close}`, false);
       }
-      // SINGLE marks after an attribution: nothing from it to the paragraph end is whole; before it, and the next paragraph, are.
-      for (const [open, close] of SINGLE) for (const who of COLON_SPEAKERS) {
+      // SINGLE marks after an attribution (with or without a colon: BUDDY-A R3 A): nothing from it to the paragraph end is whole;
+      // before it, and the next paragraph, are.
+      for (const [open, close] of SINGLE) for (const who of SPEAKERS) {
         const whole = `${who}${open}${first}${t} ${end(second, close)}`;
         const message = `We fit kitchens. ${whole} He agrees.\nWe work weekends.`;
         for (const quote of [whole, 'He agrees.', end(second, close), `${second}${t}`, `${who}${open}${first}${t}`, `${first}${t}`]) check(message, quote, false);
@@ -90,17 +90,19 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     for (const t of TERMINALS) for (const lead of ["The plan starts in '27", "Prices peaked in the '90s", "We fit kitchens in Priya's area", "We don't fit bathrooms"]) {
       check(`${lead}${t} More referrals mean more contracts signed${t}`, `More referrals mean more contracts signed${t}`, true);
     }
-    // Controls: a quoted term in double marks closes before the next sentence; a single-marked term with no attribution is text.
+    // Controls: a quoted term in double marks closes before the next sentence. A unit mark with nothing open is text (BUDDY-A R3 B),
+    // and paired speech after it still binds.
     check('The "fast track" option is cheaper. It saves money.', 'It saves money.', true);
-    check("The 'fast track' option is cheaper. It saves money.", 'It saves money.', true);
-    check("The 'fast track' option is cheaper. It saves money.", "The 'fast track' option is cheaper.", true);
+    check('We use a 12" rack. More referrals mean more contracts signed.', 'More referrals mean more contracts signed.', true);
+    check('We use a 12" rack. More referrals mean more contracts signed.', 'We use a 12" rack.', true);
+    const inch = 'We use a 12" rack. Sam: "Crews start early. Parts arrive on Mondays." He agrees.';
+    check(inch, 'Parts arrive on Mondays.', false);
+    check(inch, 'Sam: "Crews start early. Parts arrive on Mondays."', true);
+    check(inch, 'He agrees.', true);
+    // FAIL-SAFE COST (stated): a single mark that may open speech ("the 'fast track'", "'em") leaves the rest of its paragraph unverified.
+    check("The 'fast track' option is cheaper. It saves money.", 'It saves money.', false);
+    check("We told 'em early. Referrals help.", 'Referrals help.', false);
     expect(wrong).toEqual([]);
-  });
-  it('LIMIT (DL-3 16:14Z: no speaker parser): single marks with no attribution colon ("Sam said \'…\'") mark nothing; a sentence with its closing mark is not whole, a bare one reads as the brief\'s', () => {
-    const message = "We fit kitchens. Sam said 'This is only true if the users' pilot works. We don't start early unless parts arrive.' He agrees.";
-    expect(wholeStatementIn(message, "We don't start early unless parts arrive.'")).toBe(false);
-    expect(wholeStatementIn(message, "Sam said 'This is only true if the users' pilot works. We don't start early unless parts arrive.'")).toBe(false);
-    expect(wholeStatementIn(message, "We don't start early unless parts arrive.")).toBe(true);
   });
   it('words the message never holds, and a non-string quote, are not whole', () => {
     expect(wholeStatementIn('Please size the links.', 'Price has a weak effect on MRR.')).toBe(false);

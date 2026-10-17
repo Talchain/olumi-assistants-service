@@ -91,6 +91,18 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
     }
   });
 
+  it('⛔ #3363 B1 R3 A (BUDDY-A), real path: single-marked speech with NO colon ("Priya said \'…\'") never frees its last sentence as the user\'s', async () => {
+    const said = 'More referrals mean more contracts signed, because the client already trusts us.';
+    const brief = `${AIM} Priya said 'This is only true if the users' pilot works. ${said}' We could hire a second salesperson or start a referral scheme.`;
+    expect(relationRecord(await saved(draft(said), brief)), 'the tail loses Priya and her condition').toBeUndefined();
+  });
+
+  it('⛔ #3363 B1 R3 B (BUDDY-A), real path: a lone inch mark opens no speech; the complete sentence after it is recorded', async () => {
+    const said = 'More referrals mean more contracts signed, because the client already trusts us.';
+    const brief = `${AIM} We use a 12" rack. ${said} We could hire a second salesperson or start a referral scheme.`;
+    expect(relationRecord(await saved(draft(said), brief))?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: said })]);
+  });
+
   it('⛔ #3363 B1 R2 B (BUDDY-A), real path: a year written "\'27" opens no speech; the complete sentence after it is recorded', async () => {
     const said = 'More referrals mean more contracts signed, because the client already trusts us.';
     const brief = `${AIM} The plan starts in '27. ${said} We could hire a second salesperson or start a referral scheme.`;

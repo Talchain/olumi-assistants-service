@@ -247,11 +247,13 @@ const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'"
  * ⛔ T1 HOST P07 (pilot 17 Oct): a full stop may be followed by the double quotation mark that closes a person's words
  * ("Sam, site lead: “Crews start early.”"), at either end of a statement. Without it, every quoted speech was refused as
  * "not a whole statement" and its attribution was lost.
- * ⛔ #3363 B1 (BUDDY-A R1–R2; DL-3 16:14Z: stop parsing apostrophes): a statement never starts or ends inside someone's quoted
- * words, since none of their sentences is whole without the speaker and the rest of what they said. Only double marks (straight,
- * typographic, « ») delimit speech. A single mark is a letter like any other ("'27", "don't", "the users' pilot"), so speech an
- * attribution opens with one ("Priya, sales lead: '…") cannot be bounded: nothing from that attribution to the paragraph's end is
- * whole. Those words stay the brief's, unverified, with no speaker asserted.
+ * ⛔ #3363 B1 (BUDDY-A R1–R3; DL-3 16:14Z ruling, fail-safe core): a statement never starts or ends inside someone's quoted words,
+ * since none of their sentences is whole without the speaker and the rest of what they said. Only PAIRED double marks (straight,
+ * typographic, « ») bound speech: one opens after the start, a space or punctuation and before a non-space; it closes after a
+ * non-space and before the end, a space or punctuation. A closing-shaped mark with nothing open is text (a 12" rack). A single
+ * mark never bounds anything, being also an apostrophe; but speech it may open (after the start, a space or the attribution's
+ * colon, before a letter: never "'27", "don't" or "the users' pilot") cannot be bounded, so nothing from there to the paragraph's
+ * end is whole. Those words stay the brief's, unverified, with no speaker asserted.
  */
 const ENDS = /[.!?;]["»]*$/;
 export function wholeStatementIn(message: string, quote: unknown): boolean {
@@ -259,15 +261,22 @@ export function wholeStatementIn(message: string, quote: unknown): boolean {
   const text = plainQuote(message);
   return said !== '' && quoteSpansIn(text, said).some((at) =>
     /(?:^|[.!?;\n]["»]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
-    && !insideSpeech(text, at) && !insideSpeech(text, at + said.length) && !/:\s*'/u.test(paragraphTo(text, at + said.length)));
+    && !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
+    && !/(?:^|[\s:([\u2014\u2013-])'\p{L}/u.test(paragraphTo(text, at + said.length)));
 }
 /** The text of `at`'s paragraph up to `at`. */
 const paragraphTo = (text: string, at: number): string => text.slice(text.lastIndexOf('\n', at - 1) + 1, at);
-/** `at` lies inside double-marked speech: an odd number of " before it in its paragraph, or a « not yet closed by ». */
-const insideSpeech = (text: string, at: number): boolean => {
-  const before = paragraphTo(text, at);
-  return before.split('"').length % 2 === 0 || before.lastIndexOf('«') > before.lastIndexOf('»');
-};
+/** `at` lies inside paired double-marked speech that opened before it in its paragraph. */
+function insideSpeech(text: string, at: number): boolean {
+  const start = text.lastIndexOf('\n', at - 1) + 1;
+  let open: string | null = null;
+  for (let i = start; i < at; i += 1) {
+    const mark = text[i]!, prev = i === start ? ' ' : text[i - 1]!, next = text[i + 1] ?? '';
+    if (open === null && (mark === '"' || mark === '«') && /[\s([:;,\u2014\u2013-]/u.test(prev) && /\S/u.test(next)) open = mark === '«' ? '»' : '"';
+    else if (open !== null && mark === open && /\S/u.test(prev) && /^(?:$|[\s.,;:!?)\]])/u.test(next)) open = null;
+  }
+  return open !== null;
+}
 
 /** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */
 export function namesBothEnds(text: string, nodes: readonly Entity[], from: string, to: string): boolean {
