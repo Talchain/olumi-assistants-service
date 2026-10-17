@@ -19,6 +19,7 @@ import { OPTION_CAPACITY_ROW } from './fields/option-capacity.js';
 import { OPTION_LEAD_ROW } from './fields/option-lead.js';
 import { RANGE_LAW_ROW } from './fields/range-law.js';
 import { LINK_EFFECT_RANGE_ROW } from './fields/link-effect-range.js';
+import { FACTOR_DEFINITION_ROW } from './fields/factor-definition.js';
 
 /** A field reader's reading of one statement: the form, the figure's ends (absent for a figure-free form) and a qualifier. */
 export interface DoorFigure {
@@ -86,6 +87,12 @@ export interface RoleRow {
   readonly periodOf?: (subject: DoorSubject, graph: unknown) => string | undefined;
   /** True where the written postimage adds an Olumi derivation (its button is "Use this reading", AIE 6181498097). */
   readonly derives?: boolean;
+  /**
+   * ⭐ (opt-in, DL-3 05:21Z): a statement may also be bound by the question it ANSWERS, Olumi's own words: `answering` must stand
+   * verbatim in Olumi's last reply (`DoorContext.preceding_ask`, captured by the host) and name exactly this subject (the existing
+   * name check, run on Olumi's question). "It covers both." names nothing; the question it answers does. Rows without it bind as before.
+   */
+  readonly bindsByAnsweredQuestion?: true;
   /** A stated 0 is a figure of this field, recorded as 0 (a chance of 0%, a level of none), never refused as missing. */
   readonly allowsZero?: boolean;
   /**
@@ -99,8 +106,8 @@ export interface RoleRow {
   readonly signed_by: string;
 }
 
-/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now"; M4 a cohort option's relation and the goal's same-people relation; M5 an option's new share of time; M3c an option's lead; G3 a link's effect stated as a range (kept, never a size). */
-export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW, OPTION_CAPACITY_ROW, OPTION_LEAD_ROW, RANGE_LAW_ROW, LINK_EFFECT_RANGE_ROW];
+/** The table. Each migration adds its signed row(s), one per (field, carrier): M3 a goal's measure and timing; M1 a risk's chance and "holds now"; M4 a cohort option's relation and the goal's same-people relation; M5 an option's new share of time; M3c an option's lead; G3 a link's effect stated as a range (kept, never a size); what a factor's quantity covers, in the user's words (kept, non-operative). */
+export const ROLE_TABLE: RoleRow[] = [MEASURE_ROW, TIMING_ROW, RISK_OCCURRENCE_ROW, RISK_HOLDS_NOW_ROW, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW, OPTION_CAPACITY_ROW, OPTION_LEAD_ROW, RANGE_LAW_ROW, LINK_EFFECT_RANGE_ROW, FACTOR_DEFINITION_ROW];
 export const rowKey = (r: Pick<RoleRow, 'field' | 'carrier'>): string => `${r.field}:${r.carrier}`;
 
 /** The ONE row for this subject: its field, and the one row whose `applies` holds. None, or more than one, is no row. */
