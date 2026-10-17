@@ -385,22 +385,26 @@ function statusQuoReadingOf(a: {
   if (a.zeroChange !== undefined) return typeof p === 'number' && p !== a.zeroChange ? 'moved' : 'assumed';
   const o = isRec(row.outcome) ? row.outcome : undefined;
   if (o === undefined) return 'assumed';
-  // ⭐ D2 EXACT SAME-FRAME EQUALITY (AIE 6129749753 AMEND, PL 6130375396, 12 Oct; the 16ε tolerance is REJECTED): ANY positive
-  // std, ANY deciles apart, and (below) any centre or decile not EXACTLY the reference in the Run's frame, is a reading that
-  // moved. The AIE allows one narrow exception (a tiny std that is the arithmetic residue of a producer shown to give a
-  // constant result); it is not taken here, so the checking reading stays (the 11 Oct row's own mean is one ulp off too).
-  if (finite(o.std) && o.std > 0) return 'moved';
-  if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90) return 'moved';
+  // DL 17 Oct 10:22/11:23: a paired reference is established by the evaluated model above, not inferred from these
+  // statistics. Allow eight machine epsilons on that reference's scale for float arithmetic (the captured 8d9 row has
+  // std 5.55e-17 and mean one ulp above 0.4). This is deliberately far smaller than the suggested 1e-9 allowance.
+  // EVERY recorded centre and std must fit ONE known frame. It earns no exact chance and cannot excuse real spread,
+  // mixed encodings, an unknown frame or the contradictory probability already checked above.
+  const centres = ['p10', 'p50', 'p90', 'mean'];
+  const agreesInFrame = (reference: unknown): boolean => {
+    if (!finite(reference)) return false;
+    const precision = 8 * Number.EPSILON * Math.max(1, Math.abs(reference));
+    return (!finite(o.std) || Math.abs(o.std) <= precision)
+      && centres.every(k => !finite(o[k]) || Math.abs(o[k] - reference) <= precision);
+  };
+  const agrees = a.reference !== 'unknown' && (agreesInFrame(a.reference) || agreesInFrame(a.rawReference));
+  if (finite(o.std) && o.std > 0 && !agrees) return 'moved';
+  if (finite(o.p10) && finite(o.p90) && o.p10 !== o.p90 && !agrees) return 'moved';
   // D2: a reference whose frame is not known is never compared, so the row is neither "moved" nor "no change".
   if (a.reference === 'unknown') return ['p10', 'p50', 'p90', 'mean'].some((k) => finite(o[k])) ? 'unknown' : 'assumed';
   const ref = a.reference;
-  // D2 (PL 6130375396: AIE833 rejected the 1e-9·max(1, |reference|) floor): exact equality in the Run's frame.
   const away = (v: unknown): boolean => finite(v) && ref !== undefined && v !== ref;
-  const centres = ['p10', 'p50', 'p90', 'mean'];
-  // A LEVEL request can retain both encodings of one reference while the result records no scale. Exact agreement of
-  // EVERY recorded centre with its raw reference also agrees; mixed frames, positive spread and true drift never do.
-  const rawAgrees = finite(a.rawReference) && centres.every(k => !finite(o[k]) || o[k] === a.rawReference);
-  return centres.some(k => away(o[k])) && !rawAgrees ? 'moved' : 'assumed';
+  return centres.some(k => away(o[k])) && !agrees ? 'moved' : 'assumed';
 }
 
 /**

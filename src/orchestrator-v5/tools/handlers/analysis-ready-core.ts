@@ -48,6 +48,7 @@ import {
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 import { draftedTeamPartOf, eventByDateRefusalOf, unsizedEventOptions } from '../../goal-target/event-by-date-model.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
+import { userExcludedOptions } from './user-option-status-filter.js';
 import { limitSinkBranch } from '../../../graph/limit-sink-branch.js';
 import {
   computeScaffoldPlan,
@@ -575,7 +576,8 @@ function comparisonSurvivesDedup(
    * this floor already admitted submits the same bytes.
    */
   const submitted = gateAnalysableOptions({
-    options: wireOptions as ReadonlyArray<Record<string, unknown>>,
+    // The Run removes user-excluded options first; they cannot supply a distinct comparator here either.
+    options: userExcludedOptions({ options: wireOptions as ReadonlyArray<Record<string, unknown>>, graph: rawGraph }).options,
     graph: rawGraph,
     rawPersistedGraph: rawGraph,
     scaleNetEnabled: true,
