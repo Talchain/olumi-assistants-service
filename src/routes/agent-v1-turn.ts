@@ -3131,6 +3131,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (typeof store.readStatedObjectionFactsFor !== 'function') throw new Error('stated_objections_reader_unavailable');
           return projectStatedObjections(await store.readStatedObjectionFactsFor(sid, STATED_OBJECTION_FACT_ROWS_READ, STATED_OBJECTIONS_CAP));
         },
+        // Read at rebuild time, after this request's durable history reseed below.
+        readTurnHistory: () => histories.get(sessionId),
         // B restated goal: the committed turn ledger, read only to offer or apply a revised draft (`draft-replacement.ts`).
         // A store without the read leaves it absent, which the gate treats as unknown: no revised draft is offered.
         ...(typeof store.readCommittedTurnLedger === 'function'
