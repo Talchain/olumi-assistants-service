@@ -6762,12 +6762,14 @@ export function createAgentCapabilities(
      * (`readStatement`), and the row's writer prepares its carrier's write. ONE card in the door's template; nothing is written.
      */
     async proposeStatement(ctx, args): Promise<ToolResult> {
+      const diagnostic: NonNullable<Parameters<typeof proposeStatementCorrection>[5]> = {};
+      const result = await (async (): Promise<ToolResult> => {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
       if (args?.correction !== undefined) {
         if (Object.keys(args).some(k => k !== 'correction')) return { ok: false, mutated: false, refusal: 'mixed_statement_changes' };
-        return proposeStatementCorrection(ctx, g.raw, g.graph_hash, args.correction as never, proposals);
+        return proposeStatementCorrection(ctx, g.raw, g.graph_hash, args.correction as never, proposals, diagnostic);
       }
       // Whose words they are is the verifier's ONE check (a whole statement of this turn's or a verified earlier message).
       const resolved = resolveSubject(g.raw, isPlainRecord(args?.subject) ? args.subject : {});
@@ -6785,7 +6787,10 @@ export function createAgentCapabilities(
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text,
         unverified: [ctx.unverified_user_text, g.brief_text].filter((t): t is string => typeof t === 'string').join('\n') };
       const v = readStatement(g.raw, resolved.subject, resolved.label, quotes, texts, doorContextOf(ctx, g.raw));
-      if (v.kind === 'refused') return { ok: false, mutated: false, refusal: v.refusal, detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+      if (v.kind === 'refused') {
+        diagnostic.failed_check = `statement_door.${v.refusal}`;
+        return { ok: false, mutated: false, refusal: v.refusal, detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+      }
       const row = doorRowFor(resolved.subject, g.raw);
       const write = row?.writer.approve(v.reading, g.raw);
       if (row === undefined || write === undefined || 'refused' in write) {
@@ -6804,6 +6809,34 @@ export function createAgentCapabilities(
       return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
         statement: { subject: resolved.label, field: row.field, quotes: v.reading.statements.map((x) => x.quote), your_words: true },
         note: DOOR_PROPOSED_NOTE + stillBlockedNote(preview) };
+      })();
+      if (result.ok === false && typeof result.refusal === 'string') {
+        const { log } = await import('../../../utils/telemetry.js');
+        const correction = isPlainRecord(args?.correction) ? args.correction : {};
+        const statements = Array.isArray(args?.statements) ? args.statements : [];
+        const edits = Array.isArray(correction.edits) ? correction.edits : [];
+        const fields = (value: unknown, keys: readonly string[]) => keys.filter(k => isPlainRecord(value) && Object.hasOwn(value, k));
+        const source = (value: unknown) => {
+          const quote = isPlainRecord(value) && typeof value.quote === 'string' ? value.quote : '';
+          return { quote_present: isPlainRecord(value) && typeof value.quote === 'string', quote_length: quote.length,
+            quote_sha256: createHash('sha256').update(quote).digest('hex'),
+            quote_is_whole_current_statement: wholeStatementIn(ctx.user_turn_text ?? '', quote) };
+        };
+        // Separate from the loop's scalar refusal event, so diagnostics do not count as another refused tool call.
+        log.info({ event: 'v5.agent.tool_refusal_diagnostic', request_id: ctx.request_id, scenario_id: ctx.scenario_id, turn_id: ctx.turn_id,
+          diagnostic_source: 'statement_preparation',
+          tool: 'propose_statement', refusal: result.refusal, failed_checks: [diagnostic.failed_check ?? `propose_statement.${result.refusal}`],
+          ...(diagnostic.binder_result === undefined ? {} : { binder_result: diagnostic.binder_result, failed_edit_index: diagnostic.failed_edit_index }),
+          variant: args?.correction === undefined ? 'statement' : 'correction', agent_mode: mode,
+          fields_present: fields(args, ['correction', 'subject', 'statements']),
+          subject_id_present: isPlainRecord(args?.subject) && typeof args.subject.id === 'string',
+          statement_count: statements.length, statements: statements.slice(0, 6).map(source),
+          correction: { fields_present: fields(correction, ['quote', 'edits']), ...source(correction), edit_count: edits.length,
+            edits: edits.slice(0, 6).map(e => ({ fields_present: fields(e, ['subject', 'expected_record', 'retirement', 'retained', 'reading_words', 'legacy']),
+              subject_id_present: isPlainRecord(e) && isPlainRecord(e.subject) && typeof e.subject.id === 'string' })) } },
+        'Agent statement tool refused');
+      }
+      return result;
     },
 
     /** Propose the current-team duration from the Agent's reading of the user's words; a single time carries Olumi's assumed range. */
