@@ -643,9 +643,21 @@ describe('one native governing-outcome correction', () => {
     expect(w.graph().nodes.filter((n: Rec) => n.kind === 'option')).toEqual(graph.nodes.filter((n: Rec) => n.kind === 'option'));
     const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
     expect(read.entities.find((n: Rec) => n.id === 'large_fund').full_label).toContain(ambition);
-    // No copied or unbound later-ambition claim is offered.
+    // An unbound AI reading cannot acquire human authorship or silently replace another saved aim.
     const unbound = await dispatchTool('propose_goal_target', JSON.stringify({ ...request, later_ambition_quote: 'The later ambition is £9 million.' }), w.ctx, w.caps());
-    expect(unbound).toMatchObject({ ok: false, mutated: false, refusal: 'ambition_not_verified' });
+    expect(unbound).toMatchObject({ ok: true, mutated: false });
+    expect(unbound.public_label).toContain('Olumi’s unverified later-ambition reading');
+    expect(unbound.public_label).toContain('approval does not verify them');
+    expect(w.writes).toHaveLength(1);
+    const unboundPid = String(unbound.proposal_id), unboundCard = w.proposals.get(unboundPid)!;
+    const unboundCold = restoreCard(unboundCard, unbound, w.ctx);
+    expect(await w.caps(unboundCold).authoriseChange(w.ctx, { proposal_id: unboundPid })).toMatchObject({ ok: false, mutated: false });
+    expect(await w.caps(unboundCold).authoriseChange({ ...w.ctx, typed_approval_of: unboundPid }, { proposal_id: unboundPid })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(2);
+    const afterUnbound = w.graph().nodes.find((n: Rec) => n.id === 'large_fund');
+    expect(afterUnbound.description).toContain('Olumi’s unverified reading: “The later ambition is £9 million.”');
+    expect(afterUnbound.user_statements.flatMap((r: Rec) => r.statements).some((s: Rec) => s.quote === 'The later ambition is £9 million.' && s.speaker === 'user')).toBe(false);
+    expect(w.graph().goal_constraints.filter((r: Rec) => r.role === 'goal_target').map((r: Rec) => r.value)).toEqual([250000]);
   });
 
 });
@@ -759,5 +771,68 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     const forged = createProposal({ ...held, operations: [{ ...held.operations[0]!, value }] }); w.proposals.put(forged);
     expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: forged.proposal_id }, { proposal_id: forged.proposal_id })).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_replacement' });
     expect(w.sent).toHaveLength(0); expect(w.writes).toHaveLength(0);
+  });
+});
+
+
+const founder78ca = fixture('founder-78ca-current-request.json');
+describe('78ca founder: complete current source through the existing correction card', () => {
+  it('offers £250k with the later aim on another outcome, flags the unresolved binding and saves exactly the displayed candidate', async () => {
+    const source = founder78ca.typed_turns['10'];
+    const quote = 'I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.';
+    const w = await world({ graph: founder78ca.graph, brief: founder78ca.brief_text, message: source });
+    w.ctx.verified_user_messages = [founder78ca.brief_text, source];
+    // These test arguments are explicit evidence, not a reconstruction of the uncaptured live arguments.
+    const args = { constraint_type: 'at_least', value: 250000, unit: '£', measures: 'Funding secured', rationale: source, later_ambition_quote: quote };
+    const offered = await dispatchTool('propose_goal_target', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(offered.public_label).toContain(source); expect(offered.public_label).toContain(quote);
+    expect(offered.public_label).toContain('Olumi’s unverified later-ambition reading');
+    expect(offered.public_label).toContain('Other saved aims and bounds stay on their existing nodes');
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, candidate = (held.operations[0]!.value as Rec).candidate;
+    expect(w.writes).toHaveLength(0);
+    const other = (g: Rec) => g.nodes.filter((n: Rec) => n.id !== 'funding_secured');
+    expect(other(candidate)).toEqual(other(w.original));
+    expect(candidate.goal_constraints.find((r: Rec) => r.node_id === 'larger_fund_capital_secured')).toEqual(w.original.goal_constraints[0]);
+    expect(candidate.nodes.find((n: Rec) => n.id === 'funding_secured').description).toContain('Olumi’s unverified reading');
+    expect(await w.caps().authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    const cold = restoreCard(held, offered, w.ctx);
+    const saved = await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid });
+    expect(saved, JSON.stringify(saved)).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(candidate, w.graph())).toBe(true);
+    expect(w.graph().nodes.find((n: Rec) => n.id === 'funding_secured').goal_threshold_raw).toBe(250000);
+    expect(other(w.graph())).toEqual(other(w.original));
+    const read = await w.caps(new ProposalStore()).getCanonicalState(w.ctx) as Rec;
+    expect(read.entities.find((n: Rec) => n.id === 'funding_secured').full_label).toContain('unverified');
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+  });
+
+  it.each([
+    ['14', 'create a new model'], ['15', 'Generate a new model based on this brief.'],
+  ])('the complete captured typed turn %s authorises preparation while another card waits', async (turn, excerpt) => {
+    const w = await bakeryWorld();
+    const message = founder78ca.typed_turns[turn];
+    w.ctx.user_turn_text = message; w.ctx.user_text = message; w.ctx.verified_user_messages = [message];
+    const pending = createProposal({ scenario_id: w.ctx.scenario_id, user_id: null,
+      base_graph_identity_hash: computeAnalysisAffectingGraphHash(w.original as never)!,
+      operations: [{ op: 'set_factor_value', path: 'unrelated', value: { value: 60, authored_by: 'model_proposed' } }],
+      provenance: { authored_by: 'model_proposed', basis: 'Olumi’s unrelated starting figure' },
+      validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Use these starting figures' });
+    w.proposals.put(pending);
+    const args = { brief: framing, explicit_rebuild_request: excerpt };
+    const offered = await dispatchTool('build_model_from_brief', JSON.stringify(args), w.ctx, w.caps());
+    expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+    expect(w.proposals.get(pending.proposal_id)).toEqual(pending); expect(w.writes).toHaveLength(0);
+    const pid = String(offered.proposal_id), held = w.proposals.get(pid)!, value = held.operations[0]!.value as Rec;
+    expect(value.explicit_rebuild_request).toBe(message); expect(held.provenance.basis).toBe(message);
+    expect(offered.public_label).toContain(message);
+    expect(JSON.stringify(w.calls)).toContain(message);
+    expect(value.candidate.nodes.filter((n: Rec) => n.kind === 'option')).toEqual(w.original.nodes.filter((n: Rec) => n.kind === 'option'));
+    expect(value.candidate.nodes.find((n: Rec) => n.kind === 'goal')).toEqual(w.original.nodes.find((n: Rec) => n.kind === 'goal'));
+    const cold = restoreCard(held, offered, w.ctx);
+    expect(await w.caps(cold).authoriseChange(w.ctx, { proposal_id: pid })).toMatchObject({ ok: false, mutated: false });
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(approvedGraphHeld(value.candidate, w.graph())).toBe(true);
   });
 });

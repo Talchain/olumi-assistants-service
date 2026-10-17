@@ -1,0 +1,971 @@
+{
+  "graph": {
+    "edges": [
+      {
+        "to": "funding_first_focus",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "balanced_founder_split",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "poc_first_focus",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hiring_setup_first",
+        "from": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_angel_outreach",
+        "from": "funding_first_focus",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_poc_testing",
+        "from": "funding_first_focus",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_job_specifications",
+        "from": "funding_first_focus",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_angel_outreach",
+        "from": "balanced_founder_split",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_poc_testing",
+        "from": "balanced_founder_split",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_job_specifications",
+        "from": "balanced_founder_split",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_angel_outreach",
+        "from": "poc_first_focus",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_poc_testing",
+        "from": "poc_first_focus",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_job_specifications",
+        "from": "poc_first_focus",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_angel_outreach",
+        "from": "hiring_setup_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_poc_testing",
+        "from": "hiring_setup_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "founder_attention_on_job_specifications",
+        "from": "hiring_setup_first",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "investor_readiness",
+        "from": "founder_attention_on_angel_outreach",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_quality",
+        "from": "founder_attention_on_poc_testing",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "brief_extraction",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "hiring_readiness",
+        "from": "founder_attention_on_job_specifications",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_quality",
+        "from": "ai_support_on_poc",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_quality",
+        "from": "hiring_readiness",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "investor_readiness",
+        "from": "poc_quality",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "funding_secured",
+        "from": "investor_readiness",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "larger_fund_capital_secured",
+        "from": "investor_readiness",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "funding_secured",
+        "from": "larger_fund_capital_secured",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "founder_context_switching",
+        "from": "founder_attention_on_angel_outreach",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "founder_context_switching",
+        "from": "founder_attention_on_poc_testing",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "founder_context_switching",
+        "from": "founder_attention_on_job_specifications",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "poc_quality",
+        "from": "founder_context_switching",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      }
+    ],
+    "nodes": [
+      {
+        "id": "i_need_to_determine_what_i_should_prioritise_and_how_i_should_spend_my_time_across_these",
+        "ref": "D1",
+        "kind": "decision",
+        "label": "I need to determine what I should prioritise and how I should spend my time…",
+        "provenance": "from_brief",
+        "description": "I need to determine what I should prioritise and how I should spend my time across these."
+      },
+      {
+        "id": "funding_secured",
+        "ref": "G1",
+        "kind": "goal",
+        "label": "Funding secured",
+        "provenance": "from_brief",
+        "user_statements": [
+          {
+            "field": "target",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "million (currency unspecified)",
+                "quote": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "source": "I urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "goal|funding secured|||target"
+                },
+                "qualifier": "urgently; both fast-paced angel and, eventually",
+                "qualifier_in_quote": false
+              }
+            ],
+            "recorded_at": "2026-10-16T23:55:33.068Z",
+            "subject_key": "goal|funding_secured|||target"
+          }
+        ],
+        "goal_threshold_unit": "million (currency unspecified)",
+        "goal_threshold_frame": "level"
+      },
+      {
+        "id": "funding_first_focus",
+        "ref": "O1",
+        "kind": "option",
+        "label": "Funding-first focus",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "founder_attention_on_poc_testing": {
+            "unit": "% of founder working time",
+            "value": 0.25,
+            "source": "cee_hypothesis",
+            "raw_value": 25,
+            "target_match": {
+              "node_id": "founder_attention_on_poc_testing",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_angel_outreach": {
+            "unit": "% of founder working time",
+            "value": 0.6,
+            "source": "cee_hypothesis",
+            "raw_value": 60,
+            "target_match": {
+              "node_id": "founder_attention_on_angel_outreach",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_job_specifications": {
+            "unit": "% of founder working time",
+            "value": 0.15,
+            "source": "cee_hypothesis",
+            "raw_value": 15,
+            "target_match": {
+              "node_id": "founder_attention_on_job_specifications",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "balanced_founder_split",
+        "ref": "O2",
+        "kind": "option",
+        "label": "Balanced founder split",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "founder_attention_on_poc_testing": {
+            "unit": "% of founder working time",
+            "value": 0.4,
+            "source": "cee_hypothesis",
+            "raw_value": 40,
+            "target_match": {
+              "node_id": "founder_attention_on_poc_testing",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_angel_outreach": {
+            "unit": "% of founder working time",
+            "value": 0.35,
+            "source": "cee_hypothesis",
+            "raw_value": 35,
+            "target_match": {
+              "node_id": "founder_attention_on_angel_outreach",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_job_specifications": {
+            "unit": "% of founder working time",
+            "value": 0.25,
+            "source": "cee_hypothesis",
+            "raw_value": 25,
+            "target_match": {
+              "node_id": "founder_attention_on_job_specifications",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "poc_first_focus",
+        "ref": "O3",
+        "kind": "option",
+        "label": "PoC-first focus",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "founder_attention_on_poc_testing": {
+            "unit": "% of founder working time",
+            "value": 0.65,
+            "source": "cee_hypothesis",
+            "raw_value": 65,
+            "target_match": {
+              "node_id": "founder_attention_on_poc_testing",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_angel_outreach": {
+            "unit": "% of founder working time",
+            "value": 0.2,
+            "source": "cee_hypothesis",
+            "raw_value": 20,
+            "target_match": {
+              "node_id": "founder_attention_on_angel_outreach",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_job_specifications": {
+            "unit": "% of founder working time",
+            "value": 0.15,
+            "source": "cee_hypothesis",
+            "raw_value": 15,
+            "target_match": {
+              "node_id": "founder_attention_on_job_specifications",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "hiring_setup_first",
+        "ref": "O4",
+        "kind": "option",
+        "label": "Hiring setup first",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "founder_attention_on_poc_testing": {
+            "unit": "% of founder working time",
+            "value": 0.3,
+            "source": "cee_hypothesis",
+            "raw_value": 30,
+            "target_match": {
+              "node_id": "founder_attention_on_poc_testing",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_angel_outreach": {
+            "unit": "% of founder working time",
+            "value": 0.25,
+            "source": "cee_hypothesis",
+            "raw_value": 25,
+            "target_match": {
+              "node_id": "founder_attention_on_angel_outreach",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "founder_attention_on_job_specifications": {
+            "unit": "% of founder working time",
+            "value": 0.45,
+            "source": "cee_hypothesis",
+            "raw_value": 45,
+            "target_match": {
+              "node_id": "founder_attention_on_job_specifications",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "founder_attention_on_angel_outreach",
+        "ref": "F1",
+        "kind": "factor",
+        "label": "Founder attention on angel outreach",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder working time",
+          "value": 0.33,
+          "source": "cee_inference",
+          "raw_value": 33,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "founder_attention_on_poc_testing",
+        "ref": "F2",
+        "kind": "factor",
+        "label": "Founder attention on PoC testing",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder working time",
+          "value": 0.34,
+          "source": "cee_inference",
+          "raw_value": 34,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "effect",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "link|founder attention on poc testing|poc quality||effect"
+                },
+                "qualifier": "the more time I spend testing and improving it, the better it is",
+                "conditions": "AI is working on the PoC",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-16T23:55:33.068Z",
+            "subject_key": "link|founder_attention_on_poc_testing|poc_quality||effect"
+          }
+        ]
+      },
+      {
+        "id": "founder_attention_on_job_specifications",
+        "ref": "F3",
+        "kind": "factor",
+        "label": "Founder attention on job specifications",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "% of founder working time",
+          "value": 0.33,
+          "source": "cee_inference",
+          "raw_value": 33,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "relation",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I need to put job specs out for the resource we need.",
+                "source": "I need to put job specs out for the resource we need.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|founder attention on job specifications|||relation"
+                },
+                "conditions": "for the resource we need"
+              }
+            ],
+            "recorded_at": "2026-10-16T23:55:33.068Z",
+            "subject_key": "factor|founder_attention_on_job_specifications|||relation"
+          }
+        ]
+      },
+      {
+        "id": "ai_support_on_poc",
+        "ref": "F4",
+        "kind": "factor",
+        "label": "AI support on PoC",
+        "category": "observable",
+        "provenance": "from_brief",
+        "scale_frame": 100,
+        "user_statements": [
+          {
+            "field": "holds_now",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "holds_now",
+                "unit": "",
+                "quote": "I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|ai support on poc|||holds_now"
+                },
+                "conditions": "on the PoC"
+              }
+            ],
+            "recorded_at": "2026-10-16T23:55:33.068Z",
+            "subject_key": "factor|ai_support_on_poc|||holds_now"
+          }
+        ]
+      },
+      {
+        "id": "poc_quality",
+        "ref": "F5",
+        "kind": "factor",
+        "label": "PoC quality",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "user_statements": [
+          {
+            "field": "measure",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "form": "describes",
+                "unit": "",
+                "quote": "I need to complete the PoC.",
+                "source": "I need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "factor|poc quality|||measure"
+                }
+              }
+            ],
+            "recorded_at": "2026-10-16T23:55:33.068Z",
+            "subject_key": "factor|poc_quality|||measure"
+          }
+        ]
+      },
+      {
+        "id": "investor_readiness",
+        "ref": "F6",
+        "kind": "factor",
+        "label": "Investor readiness",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "hiring_readiness",
+        "ref": "F7",
+        "kind": "factor",
+        "label": "Hiring readiness",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "founder_context_switching",
+        "ref": "R1",
+        "kind": "risk",
+        "label": "Founder context switching",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "investor_decisions_await_poc_proof",
+        "ref": "R2",
+        "kind": "risk",
+        "label": "Investor decisions await PoC proof",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "funding_first_focus",
+            "kind": "option",
+            "label": "Funding-first focus"
+          },
+          "affects": {
+            "id": "funding_secured",
+            "label": "Funding secured",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "founder_attention_on_angel_outreach",
+            "label": "Founder attention on angel outreach",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "funding-first focus converting outreach before PoC proof",
+          "watch_for": "investors request PoC validation",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "ai_work_misses_validation_needs",
+        "ref": "R3",
+        "kind": "risk",
+        "label": "AI work misses validation needs",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "poc_first_focus",
+            "kind": "option",
+            "label": "PoC-first focus"
+          },
+          "affects": {
+            "id": "larger_fund_capital_secured",
+            "label": "Larger fund capital secured",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "founder_attention_on_poc_testing",
+            "label": "Founder attention on PoC testing",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "PoC-first focus receiving testable AI output",
+          "watch_for": "testing reveals repeated rework",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "investor_follow_up_gaps",
+        "ref": "R4",
+        "kind": "risk",
+        "label": "Investor follow-up gaps",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "hiring_setup_first",
+            "kind": "option",
+            "label": "Hiring setup first"
+          },
+          "affects": {
+            "id": "funding_secured",
+            "label": "Funding secured",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "founder_attention_on_angel_outreach",
+            "label": "Founder attention on angel outreach",
+            "direction": "negative"
+          },
+          "mechanism": "drives",
+          "relies_on": "maintaining investor follow-up while defining roles",
+          "watch_for": "unanswered investor conversations",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "larger_fund_capital_secured",
+        "ref": "OC1",
+        "kind": "outcome",
+        "label": "Larger fund capital secured",
+        "provenance": "ai_inferred",
+        "scale_frame": 10
+      }
+    ],
+    "ref_high_water": {
+      "D": 1,
+      "F": 7,
+      "G": 1,
+      "O": 4,
+      "R": 4,
+      "OC": 1
+    },
+    "goal_constraints": [
+      {
+        "role": "goal_target",
+        "unit": "million (currency unspecified)",
+        "label": "Larger fund capital secured",
+        "value": 1.3,
+        "node_id": "larger_fund_capital_secured",
+        "operator": ">=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:larger_fund_capital_secured:>="
+      }
+    ]
+  },
+  "brief_text": "I need to decide how best to split my attention as the main founder working on Olumi at the moment.\nI urgently need to secure funding: both fast-paced angel and, eventually, a larger fund of at least 1.3 million.\nI need to complete the PoC. I have AI working on it, so I don't need to be on it all of the time, but the more time I spend testing and improving it, the better it is.\nI need to put job specs out for the resource we need.\n\nI need to determine what I should prioritise and how I should spend my time across these.",
+  "typed_turns": {
+    "10": "If I could secure angel funding of even £250,000, that would buy me the breathing space to bring in technical resource and allow me to have more time.",
+    "14": "Okay, let's go with that. Send that brief, create a new model, and produce your estimates for me to review.",
+    "15": "I've already agreed with this brief. Generate a new model based on this brief."
+  },
+  "held_offers": [
+    {
+      "turn_id": "f977f1e9-11ee-4054-b080-cbc51369f946",
+      "proposal_id": "prop_1f3e4ea7d5d92631322421a4edef1a7b",
+      "suggested_actions": [
+        {
+          "id": "agent-approve-proposal:prop_1f3e4ea7d5d92631322421a4edef1a7b",
+          "label": "Use these 4 starting figures",
+          "message": "Yes, use those.",
+          "detail": "Adopt 4 starting assumptions: AI support on PoC = 60 0–100 support level\nWhy Olumi suggests this (not checked against a source unless one is shown): “Olumi’s starting estimate: you said AI is working on the PoC, but you still need to test and improve it.”; Hiring readiness = 10 0–100 readiness level\nWhy Olumi suggests this (not checked against a source unless one is shown): “Olumi’s starting estimate: job specifications still need to be put out.”; Investor readiness = 30 0–100 readiness level\nWhy Olumi suggests this (not checked against a source unless one is shown): “Olumi’s starting estimate: funding is urgent, but the brief does not say that materials, proof and follow-up are yet in place.”; PoC quality = 40 0–100 quality level\nWhy Olumi suggests this (not checked against a source unless one is shown): “Olumi’s starting estimate: the PoC is not yet complete and needs founder testing and improvement.”"
+        },
+        {
+          "id": "agent-amend-proposal",
+          "label": "Change something first",
+          "message": "Before you apply it, I want to change some of it."
+        }
+      ]
+    }
+  ],
+  "evidence": "Captured78ca2232; historical tool arguments not recorded. Tests declare their own arguments."
+}
