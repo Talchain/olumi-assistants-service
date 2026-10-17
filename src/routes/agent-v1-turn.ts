@@ -5694,6 +5694,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
 
     }
+    if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
+      // A card promised to the interpreter can be withdrawn by the final read. If the SAME Run is still current,
+      // its complete existing screen words return to chat. A stale/different Run never borrows those earlier figures.
+      if (!cardBound && canonicalViewBasisCurrent && interpretedCardIdentity !== undefined && selectedRunCurrent
+        && compareAnalysisRunFactIdentity(interpretedCardIdentity, { scenario_id: scenarioId,
+          graph_hash_at_run: (analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
+          computed_at: (analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at }).status === 'match') {
+        wireBody = { ...wireBody, assistant_text: withDisclosures(String(wireBody.assistant_text ?? ''), [
+          ...screenLines.flatMap(line => [line.chance, line.depends]),
+          ...goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, true), ...decisionLines,
+        ], { missingSentencesOnly: true }) };
+      }
+    }
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
      * on purpose: a view ranks an option, and the gate — unchanged, the truth boundary for anything presented as the
@@ -5847,17 +5860,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
     if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
-      // A card promised to the interpreter can be withdrawn by the final read. If the SAME Run is still current,
-      // its complete existing screen words return to chat. A stale/different Run never borrows those earlier figures.
-      if (!cardBound && canonicalViewBasisCurrent && interpretedCardIdentity !== undefined && selectedRunCurrent
-        && compareAnalysisRunFactIdentity(interpretedCardIdentity, { scenario_id: scenarioId,
-          graph_hash_at_run: (analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash,
-          computed_at: (analysisState as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at }).status === 'match') {
-        wireBody = { ...wireBody, assistant_text: withDisclosures(String(wireBody.assistant_text ?? ''), [
-          ...screenLines.flatMap(line => [line.chance, line.depends]),
-          ...goalChanceNotesForAgent(analysisResult, readbackGraph ?? null, true), ...decisionLines,
-        ], { missingSentencesOnly: true }) };
-      }
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
         narrator: 'olumi',
