@@ -21,9 +21,9 @@ const PERIODS = ['', ' a day', ' per week'];
 /** The oracle (DL-3 fail-safe core): every part of the complete unit written at the range EQUALS the claim's, present alike. */
 const agrees = (written: string, claimed: string): boolean => {
   const w = readUnitParts(written), c = readUnitParts(claimed);
-  const words = (x: readonly string[] | null): string => (x ?? []).join(' ');
+  // Present alike (BUDDY-A R8): an unnamed denominator ("each", []) is never none (null).
   return w !== null && c !== null && w.kind === c.kind && w.code === c.code && w.period === c.period
-    && (['noun', 'per', 'base', 'qualifiers'] as const).every((k) => words(w[k]) === words(c[k]));
+    && (['noun', 'per', 'base', 'qualifiers'] as const).every((k) => JSON.stringify(w[k]) === JSON.stringify(c[k]));
 };
 const KEY = 'link|pre-order system in use|daily food waste||effect';
 const statement = (quote: string, unit: string, low = 4, high = 6): Rec => ({ quote, subject: { kind: 'link', label: 'Pre-order system in use', to_label: 'Daily food waste', factor_label: null },
@@ -48,8 +48,8 @@ describe('SWEEP: a range is recorded in the AI\'s unit only where the complete u
 
   it('money and denominators (BUDDY-A R6): the complete written rate decides, never a currency alone or a contained denominator', () => {
     const wrong: string[] = [];
-    const MONEY = [['£', ''], ['£', ' a week'], ['£', ' per day'], ['$', ' a day'], ['€', '']] as const;
-    const MONEY_CLAIMS = ['£', 'GBP', '£ per day', '£ per week', '$', 'USD per day', '$ per week', '€', 'EUR per day'];
+    const MONEY = [['£', ''], ['£', ' a week'], ['£', ' per day'], ['£', ' each'], ['$', ' a day'], ['€', '']] as const;
+    const MONEY_CLAIMS = ['£', 'GBP', '£ per day', '£ per week', '£ each', '$', 'USD per day', '$ per week', '€', 'EUR per day'];
     for (const [sym, p] of MONEY) {
       const quote = `Our manager reckons it would save between ${sym}4 and ${sym}6${p}.`;
       for (const c of MONEY_CLAIMS) {
@@ -65,6 +65,8 @@ describe('SWEEP: a range is recorded in the AI\'s unit only where the complete u
     // Not vacuous: each family has a case the AI's unit holds, and one it does not.
     expect(recordedUnit('Our manager reckons it would save between £4 and £6 a week.', '£ per week')).toBe('£ per week');
     expect(recordedUnit('Our manager reckons it would save between £4 and £6 a week.', '£ per day')).toBe('');
+    expect(recordedUnit('Our manager reckons it would save between £4 and £6 each.', '£ each')).toBe('£ each');
+    expect(recordedUnit('Our manager reckons it would save between £4 and £6 each.', '£')).toBe('');
     expect(recordedUnit('Our manager reckons it would cut waste by between 4 and 6 kg per new client.', 'kg per client')).toBe('');
     expect(recordedUnit('Our manager reckons it would cut waste by between 4 and 6 kg per client.', 'kg per client')).toBe('kg per client');
     expect(wrong).toEqual([]);

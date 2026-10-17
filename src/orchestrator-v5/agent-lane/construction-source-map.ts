@@ -181,17 +181,18 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
  * tail reader (`statedTailParts`), money included: the same kind, currency, noun, period, denominator, base and qualifiers, all
  * present on both sides alike (scale belongs to the number). A noun with other words is another population ("non-paying visitors"
  * are never "paying visitors"; DL-3's exit on BUDDY-A R7). So "4 and 6 kg per week" is never kg nor kg per day, "£4 to £6 a week"
- * never £ a day, "kg per new client" never kg per client, "6 crates" never kg, and a unit written anywhere else in the sentence
- * certifies nothing. Otherwise the range is still recorded, whole, with NO unit: never relabelled, never converted.
+ * never £ a day, "kg per new client" never kg per client, "£4 to £6 each" never a total £ (BUDDY-A R8), "6 crates" never kg, and a
+ * unit written anywhere else in the sentence certifies nothing. Otherwise the range is still recorded, whole, with NO unit: never
+ * relabelled, never converted.
  */
 function withOwnRangeUnit(st: UserStatement): UserStatement {
   if (typeof st.low !== 'number' || typeof st.high !== 'number' || st.unit === undefined || st.unit.trim() === '') return st;
   const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === st.low && r.high.magnitude === st.high);
   const written = joined === undefined ? null : statedTailParts(st.quote, joined.high);
   const claimed = readUnitParts(st.unit);
-  const words = (a: readonly string[] | null): string => (a ?? []).join(' ');
-  return written !== null && claimed !== null && written.kind === claimed.kind && written.code === claimed.code
-    && written.period === claimed.period && (['noun', 'per', 'base', 'qualifiers'] as const).every((part) => words(written[part]) === words(claimed[part]))
+  // Each part as the reader typed it, as `sameUnit` compares it: an unnamed denominator ("£4 to £6 each", []) is never none (null).
+  return written !== null && claimed !== null && written.kind === claimed.kind && written.code === claimed.code && written.period === claimed.period
+    && (['noun', 'per', 'base', 'qualifiers'] as const).every((part) => JSON.stringify(written[part]) === JSON.stringify(claimed[part]))
     ? st : { ...st, unit: '' };
 }
 
