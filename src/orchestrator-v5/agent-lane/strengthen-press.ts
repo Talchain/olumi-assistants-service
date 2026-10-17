@@ -16,11 +16,17 @@ import { selectStrengthenPlaceholder, type StrengthenPlaceholderTarget } from '.
 import { renderCopy } from './guidance/render.js';
 import type { GuidanceSignals as LeafSignals } from './guidance/types.js';
 import { linkSizeAsk } from './link-size-ask.js';
+import { linkWorkingPointOf } from './link-working-point.js';
 
 /** The product's own "Strengthen the model" next step (`NEXT_STEP_CHIPS`, agent-v1-turn.ts). */
 export const STRENGTHEN_PRESS_CHIP_ID = 'agent-next-strengthen';
 /** The proposal's basis (provenance, never shown as the user's words). */
 export const STRENGTHEN_CARD_RATIONALE = 'This link has no size yet; ask how much it changes its target.';
+/** ⭐ G3 WORKING POINT: the basis of the card that offers Olumi's working point from the user's brief range. */
+export const WORKING_POINT_CARD_RATIONALE = 'The brief states a range for this link; Olumi proposes a working point from it, as its own estimate.';
+/** What the reply says beside that card (the card itself carries the reading, the convention and its limitation). */
+export const WORKING_POINT_REPLY = 'Your brief gives a range for this link, so rather than asking its size again, Olumi offers a working point '
+  + 'from that range, as its own estimate. The card shows how your range is read and the limits of that reading.';
 
 /**
  * A sized link supplies its STORED band, declared `stored` so the door carries that band's stored origin by identity. An
@@ -28,7 +34,7 @@ export const STRENGTHEN_CARD_RATIONALE = 'This link has no size yet; ask how muc
  */
 export interface LinkStrengthsCardArgs {
   readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength?: StrengthenPlaceholderTarget['band'];
-    readonly origin?: 'stored' }];
+    readonly origin?: 'stored' | 'working_point' }];
   readonly rationale: string;
 }
 
@@ -92,6 +98,13 @@ export function strengthenCardFor(state: StrengthenPressState): StrengthenCard |
     };
     const copy = renderCopy({ policy_id: 'RC-STRENGTHEN-ITEM', variant: 'S1', item: `${target.from_id}->${target.to_id}` }, leafSignals);
     if (copy.title === null || copy.question === null) return null;
+    // ⭐ G3 WORKING POINT (DL-3 04:15Z GO): a placeholder whose brief range Olumi can read on this link gets Olumi's working point
+    // from that range as a card (adopted only by its press), instead of asking a size the user has already given as a range.
+    const working = target.band === undefined ? linkWorkingPointOf(state.graph, target.from_id, target.to_id) : undefined;
+    if (working !== undefined) {
+      return { target, text: `${copy.title}\n\n${WORKING_POINT_REPLY}`, args: { links: [{ from_label: target.from_label,
+        to_label: target.to_label, strength: working.band, origin: 'working_point' }], rationale: WORKING_POINT_CARD_RATIONALE } };
+    }
     const question = linkSizeAsk(state.graph, {
       message: `Tell me about the link from "${target.from_label}" to "${target.to_label}".`,
       restingText: '', awaitingApproval: false,

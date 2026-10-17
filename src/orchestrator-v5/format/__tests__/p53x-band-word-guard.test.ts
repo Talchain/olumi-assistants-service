@@ -26,6 +26,8 @@ const arithmetic = [
   ['src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts', 'proposeLinkStrengths', 'edgeBandFromMagnitude(Math.abs(mean))'],
   // Internal proposal target enum; placeholders are excluded before this calculation.
   ['src/orchestrator-v5/agent-lane/guidance/select-strengthen-placeholder.ts', 'linkTargetOf', 'edgeBandFromMagnitude(Math.abs(mean))'],
+  // ⭐ G3: Olumi's working point is a proposed numeric write; its band is that proposal's enum, never a stored prior's word.
+  ['src/orchestrator-v5/agent-lane/link-working-point.ts', 'linkWorkingPointOf', 'edgeBandFromMagnitude(size)'],
   // Proposed add-edge ghost band enum on the existing wire.
   ['src/orchestrator-v5/agent-lane/turn-context/proposal-preview.ts', 'proposalPreviewFor', 'edgeBandFromMagnitude(Math.abs(magnitude))'],
   // Compare first-pass edge strength to the adjusted estimate for contested metadata.
@@ -155,6 +157,8 @@ const BANDS_IMPORTERS = new Set([
   'src/orchestrator-v5/coaching/run-input-changes.ts', 'src/orchestrator-v5/format/edge-strength-words.ts',
   'src/orchestrator-v5/format/format-graph-for-context.ts', 'src/orchestrator-v5/system-events/edge-strength-edit.ts',
   'src/orchestrator-v5/tools/handlers/adjust-edge-strength.ts', 'src/orchestrator-v5/tools/handlers/run-input-snapshot.ts',
+  // ⭐ G3 (17 Oct): the working point's proposed band (class (b) above), its ONE call; it voices no band word.
+  'src/orchestrator-v5/agent-lane/link-working-point.ts',
 ]);
 
 function converterIndirections(file: string, text: string): string[] {
