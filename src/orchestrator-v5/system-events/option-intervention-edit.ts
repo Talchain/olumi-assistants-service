@@ -105,6 +105,7 @@ import { applyCohortForecastEdit, applyStatementRecordEdit, cohortForecastPostim
 import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { ADJUST_EDGE_STRENGTH_STD_MAX } from '../../cee/magnitude/olumi-spread.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -616,6 +617,11 @@ export interface ApprovedLinkStrength {
    * byte-equal and records `reviewed_by_user` (sizing a placeholder). The band is Olumi's, never the user's: no spread.
    */
   readonly review?: boolean;
+  /**
+   * ⭐ G3 WORKING POINT (BANKED for the Founder; DL-3 04:15Z): the spread of Olumi's adopted estimate, its working point's own
+   * (`link-working-point.ts`). Only with `adopted`; written as the link's std, and still Olumi's spread.
+   */
+  readonly std?: number;
 }
 
 /**
@@ -782,6 +788,8 @@ async function applyApprovedLinkStrengths(
     if (seen.has(key)) return refuse('duplicate_link', i);
     seen.add(key);
     if (!Number.isFinite(l.magnitude) || l.magnitude < 0 || l.magnitude > 1) return refuse('link_strength_invalid', i);
+    // A spread rides ONLY on Olumi's adopted estimate, inside the writer's own bound; any other carries none.
+    if (l.std !== undefined && (!l.adopted || !(Number.isFinite(l.std) && l.std > 0 && l.std <= ADJUST_EDGE_STRENGTH_STD_MAX))) return refuse('link_std_invalid', i);
     // ⛔ B3 (DL CR on #2255): an estimate never goes over a strength that is the user's own AT WRITE TIME. The proposal
     // checked it, but a canvas confirm since then keeps the mean and direction (so expected-before passes) and changes
     // only provenance (outside the analysis hash). Checked on the graph being written, so the whole set refuses.
@@ -805,7 +813,8 @@ async function applyApprovedLinkStrengths(
     // placeholder on review (`sizedByApproval`, L4 c).
     try {
       res = l.adopted
-        ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band }], write)
+        ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band,
+          ...(l.std !== undefined ? { std: l.std } : {}) }], write)
         : l.review === true
           ? await write()
           : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);

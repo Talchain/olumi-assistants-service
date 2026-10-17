@@ -423,7 +423,14 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // std sized for Olumi's mean (A6f, AIQ N1 on #2096) — and is flagged as Olumi's below (`std_defaulted`).
       // Only a newly added drawn link's exact structural postimage may replace its temporary user stamp.
       const drawn = drawnLinkAdoptionFor(invocation.context.session_id, parsed.from, parsed.to, Math.abs(newMean), targetEdge);
-      const statedStd = drawn !== undefined ? edgeBandStd(drawn.band) : bandStd ?? newStd;
+      // ⭐ G3 WORKING POINT (BANKED for the Founder): Olumi's adopted estimate may carry its OWN spread (the working point's), in the
+      // writer's bound; it is written instead of `olumiSpreadForMean` and stays Olumi's (`std_defaulted` below).
+      const adoptedStd = invocation.edgeStrengthAdoptedEstimateAuthority?.std;
+      if (adoptedStd !== undefined && !AdjustEdgeStrengthStdSchema.safeParse(adoptedStd).success) {
+        throw new D1HandlerError('PARAMETER_INVALID', 'adjust_edge_strength: an adopted spread must be a number in (0, 0.5].',
+          { details: { handler_id: 'adjust_edge_strength', received: adoptedStd }, userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE });
+      }
+      const statedStd = drawn !== undefined ? edgeBandStd(drawn.band) : bandStd ?? newStd ?? adoptedStd;
       // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): a NO-CHANGE confirm is byte-equal for every author,
       // through every door — chat words, chip, a restored proposal, the canvas pill's typed band. Naming the band a link
       // already sits in states nothing new about its uncertainty, so its spread is KEPT (it once became the band's own
@@ -600,7 +607,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // band, an explicit std) makes it the user's; an exact figure states none, so the std above is still Olumi's
         // and says so per field, as existence does. Every user write sets the flag's state, so a stale one never
         // survives a later write that changed who chose the spread.
-        if (statedStd === undefined) edge.std_defaulted = true;
+        // An adopted spread is Olumi's working point's, never the user's: it keeps the flag as Olumi's.
+        if (statedStd === undefined || (adoptedStd !== undefined && statedStd === adoptedStd)) edge.std_defaulted = true;
         else delete edge.std_defaulted;
 
         return {

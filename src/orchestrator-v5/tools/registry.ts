@@ -278,7 +278,7 @@ export interface HandlerInvocation {
    * agreement as REVIEW (`provenance.reviewed_by_user`, with Olumi's band) — never the user's stamp. A routing model
    * cannot populate it: it is not a proposal parameter.
    */
-  readonly edgeStrengthAdoptedEstimateAuthority?: { readonly band: import('../format/influence-bands.js').InfluenceBand };
+  readonly edgeStrengthAdoptedEstimateAuthority?: { readonly band: import('../format/influence-bands.js').InfluenceBand; readonly std?: number };
   /**
    * ⭐ F1 (#87 6006627551; d5 6006667946) — the user asked, in their own words, to REPLACE the figure this link holds.
    *

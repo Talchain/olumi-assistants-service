@@ -384,6 +384,8 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes, isAcceptedOlumiSize, linkSizing, sizedByApproval, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { ADJUST_EDGE_STRENGTH_STD_MAX } from '../../../cee/magnitude/olumi-spread.js';
+import { linkWorkingPointOf, linkWorkingPointWords } from '../link-working-point.js';
 import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
@@ -4634,19 +4636,23 @@ export function createAgentCapabilities(
     const links = parent.operations.map((o) => {
       const [from, to] = o.path.split('::');
       const v = (o.value ?? {}) as { magnitude?: unknown; intent?: unknown; expected?: { mean?: unknown; effect_direction?: unknown; reviewed_at?: unknown };
-        band?: unknown; author?: unknown; sizing_after_approval?: unknown };
+        band?: unknown; author?: unknown; sizing_after_approval?: unknown; std?: unknown };
       return { from: from ?? '', to: to ?? '', magnitude: v.magnitude, intent: v.intent, expected: v.expected, band: v.band,
-        author: v.author, sizingAfterApproval: v.sizing_after_approval };
+        author: v.author, sizingAfterApproval: v.sizing_after_approval, std: v.std };
     });
     const readable = links.every((l) => l.from !== '' && l.to !== '' && typeof l.magnitude === 'number' && (l.intent === 'set' || l.intent === 'confirm_current')
       && isInfluenceBand(l.band) && typeof l.expected?.mean === 'number' && (l.expected.effect_direction === 'positive' || l.expected.effect_direction === 'negative')
-      && (l.author === 'user_stated' || l.author === 'model_proposed'));
+      && (l.author === 'user_stated' || l.author === 'model_proposed')
+      // ⭐ G3 WORKING POINT (BANKED for the Founder): a spread rides only on Olumi's own `set`, inside the writer's bound.
+      && (l.std === undefined || (l.author === 'model_proposed' && l.intent === 'set' && typeof l.std === 'number'
+        && Number.isFinite(l.std) && l.std > 0 && l.std <= ADJUST_EDGE_STRENGTH_STD_MAX)));
     if (!readable) return notApplied('unreadable_proposal', 'These links could not be read from the stored proposal, so none of them was recorded. Offer to prepare them again.');
     const sent = links.map((l) => ({
       from: l.from, to: l.to, magnitude: l.magnitude as number, intent: l.intent as 'set' | 'confirm_current',
       expected: { mean: l.expected!.mean as number, effect_direction: l.expected!.effect_direction as 'positive' | 'negative',
         reviewed_at: typeof l.expected!.reviewed_at === 'string' ? l.expected!.reviewed_at : null },
       band: l.band as InfluenceBand, author: l.author === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+      ...(typeof l.std === 'number' ? { std: l.std } : {}),
     }));
     const res = await opts.commitOptionLevels({
       scenario_id: ctx.scenario_id,
@@ -4680,6 +4686,9 @@ export function createAgentCapabilities(
     const holds = check !== null && sent.every((l, index) => {
       const e = check.edges.find((x) => x.from === l.from && x.to === l.to) as { strength?: unknown; provenance?: unknown } | undefined;
       const mean = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
+      // ⭐ G3 WORKING POINT (BANKED): an approved spread reads back exactly, or the save is unconfirmed (never a substituted std).
+      const std = e?.strength !== null && typeof e?.strength === 'object' ? (e.strength as { std?: unknown }).std : undefined;
+      if (l.std !== undefined && std !== l.std) return false;
       const want = l.expected.effect_direction === 'negative' ? -l.magnitude : l.magnitude;
       const prov = (e?.provenance ?? {}) as { source?: unknown; magnitude?: unknown };
       // Whose, as approved: a band the user named that MOVED the link is theirs; a band they named that it already sat in,
@@ -5784,6 +5793,8 @@ export function createAgentCapabilities(
       const thirdParty: LeftOutLink[] = [];
       // ⭐ F1: links left out because they hold the user's own figure, each in the refusal's own words.
       const heldFigures: string[] = [];
+      /** ⭐ G3 WORKING POINT (BANKED): each working point's own words, said once on the card after the links. */
+      const workingPointWords: string[] = [];
       /** The same links as `definitional` and `heldFigures`, by the model's labels, for the card's own naming (#3002). */
       const definitionalPairs: string[] = [];
       const heldFigurePairs: string[] = [];
@@ -5871,6 +5882,23 @@ export function createAgentCapabilities(
         if (heldFigure !== null) {
           heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
           heldFigurePairs.push(pair);
+          continue;
+        }
+        /**
+         * ⭐ G3 WORKING POINT (BANKED for the Founder; DL-3 04:15Z; BUDDY-A 00:12Z / 02:58Z): the host's own card for a placeholder
+         * link whose brief range Olumi can read on this link (`linkWorkingPointOf`; host-only, as `stored` is). Its size and spread
+         * are Olumi's estimate, adopted by the press; the range stays the user's record. Anything else leaves it out, unknown.
+         */
+        if (l.origin === 'working_point') {
+          const wp = linkWorkingPointOf(g.raw, from.id, to.id);
+          if (wp === undefined || wp.band !== band || (wp.mean < 0) !== (direction === 'negative')
+            || (typeof l.from_words === 'string' && l.from_words.trim() !== '')) { unknownOrigin.push(pair); continue; }
+          ops.push({ op: 'set_link_strength', path: key, value: { magnitude: Math.abs(wp.mean), intent: 'set',
+            expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed',
+            sizing_after_approval: sizedBy(wp.mean), std: wp.std } });
+          shown.push({ from: from.label, to: to.label, band, magnitude: Math.abs(wp.mean), yours: false, keeps: false, wasEdge: edge,
+            sizedBefore: linkSizing(edge), sizedAfterApproval: sizedBy(wp.mean) });
+          workingPointWords.push(linkWorkingPointWords(g.raw, wp));
           continue;
         }
         // The selection binds exactly ONE directed link only when nothing else is selected. The model's `user_stated` is not
@@ -6033,7 +6061,8 @@ export function createAgentCapabilities(
             // write says it (the approval's words are the narrator's own).
             : `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x) === 'Olumi\u2019s first estimate for a link nobody had sized'
               ? D1_PENDING_FIRST_ESTIMATE : whose(x)}`).join('; ')
-          + (leftOutSentences.length > 0 ? `. ${leftOutSentences.join(' ')}` : ''),
+          + (leftOutSentences.length > 0 ? `. ${leftOutSentences.join(' ')}` : '')
+          + (workingPointWords.length > 0 ? `. ${workingPointWords.join(' ')}` : ''),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted')).length;
