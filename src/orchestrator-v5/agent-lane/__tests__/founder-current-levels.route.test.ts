@@ -75,7 +75,7 @@ const levelAsks = (g: Rec): string[] => (((buildCanonicalAnalysisReadyFromGraph(
 function world(served: Rec) {
   // Each world is its own scenario: typed words from another test's turns never count as this one's.
   const sid = randomUUID();
-  const body = { ...served, scenario_id: sid };
+  const body: Rec = { ...served, scenario_id: sid };
   let bytes = JSON.stringify(body.graph);
   const graph = (): Rec => JSON.parse(bytes);
   const rows: SessionTurnWithContent[] = [];
