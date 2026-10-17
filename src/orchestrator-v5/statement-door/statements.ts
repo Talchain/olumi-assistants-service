@@ -235,7 +235,7 @@ function correctionAttest(e: CorrectionEditRequest): StatementAttest {
       metadata[`${key}_parts`] = Math.ceil(span.length / 200);
       for (let start = 0; start < span.length; start += 200) metadata[`${key}_part_${start / 200}`] = span.slice(start, start + 200);
     }
-    metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
+    metadata[`${key}_origin`] = e.expected_record?.statements.some(s => s.speaker === 'user' && s.quote.includes(span)) ? 'held_user_statement' : 'unknown';
   });
   return metadata;
 }
@@ -353,7 +353,7 @@ export function statementCorrectionWords(c: StatementCorrection): string {
       e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
         : `Keep “${e.retirement.quote}” only as earlier context.`,
       `Keep explicitly: ${e.retained.length ? e.retained.map(q => `“${q}”`).join('; ') : 'nothing from the retired record'}.`,
-      ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
+      ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.speaker === 'user' && s.quote.includes(span)))
         .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
       `Earlier source and reading:\n${recordWords(e.expected_record)}`, `Replacement source and reading:\n${recordWords(e.record)}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),
