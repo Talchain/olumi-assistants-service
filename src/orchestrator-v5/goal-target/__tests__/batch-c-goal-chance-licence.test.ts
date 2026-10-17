@@ -944,7 +944,7 @@ describe('AIE status-quo disposition — the same-draw reference is decided by t
 
   it.each([
     ['std 3 with p10 = p90 = 75 at the reference 75 (independent check r2 BLOCKING 3)', { mean: 75, std: 3, p10: 75, p50: 75, p90: 75 }],
-    ['any positive std, however small', { mean: 75, std: 1e-12, p10: 75, p50: 75, p90: 75 }],
+    ['std 1e-12, above the paired-reference precision allowance at 75', { mean: 75, std: 1e-12, p10: 75, p50: 75, p90: 75 }],
     ['a decile away from the reference, the centre on it', { mean: 75, std: 0, p10: 74, p50: 75, p90: 75 }],
   ])('RED on 2ecbae5 (re-scope 3): never "no change" from summary statistics — %s is a spread, withheld as reference_moved', (_name, outcome) => {
     const g = capacityGraph();
@@ -1120,6 +1120,70 @@ const pairedWithLimit = (setDirectly: boolean): Rec => {
 };
 const sqWith = (limitP: number, joint: number): Rec => withSqRow(marketingRun(), { probability_of_joint_goal: joint,
   constraint_probabilities: { 'target:new_customers': 0, 'target:conversion_rate': 0, 'limit:annual_spend': limitP } });
+
+describe('N1: a fixed target at today’s level keeps its EXACT probability side before joint projection', () => {
+  const boundary = (subject: 'primary' | 'secondary', operator: string, contradiction: boolean) => {
+    const g = pairedWithLimit(true), nodes = g.nodes as Rec[], rows = g.goal_constraints as Rec[];
+    const goal = nodes.find(n => n.id === 'new_customers')!;
+    Object.assign(goal, { goal_threshold: 0.4, goal_threshold_cap: 50,
+      goal_direction: subject === 'primary' ? operator : '>=' });
+    goal.observed_state = { value: 0.4, baseline: 0.4, raw_value: 20, cap: 50, unit: 'customers', source: 'brief_extraction', extractionType: 'explicit' };
+    nodes.find(n => n.id === 'conversion_rate')!.observed_state = {
+      value: 0.15, raw_value: 15, cap: 100, unit: '%', source: 'brief_extraction', extractionType: 'explicit' };
+    const primary = rows.find(r => r.constraint_id === 'target:new_customers')!;
+    const secondary = rows.find(r => r.constraint_id === 'target:conversion_rate')!;
+    primary.operator = subject === 'primary' ? operator : '>=';
+    secondary.operator = subject === 'secondary' ? operator : '>=';
+    delete secondary.operator_as_stated;
+    const expected = operator === '>=' || operator === '<=' ? 1 : 0;
+    const recorded = contradiction ? 1 - expected : expected;
+    const primaryP = subject === 'primary' ? recorded : 1;
+    const run = withSqRow(marketingRun(), { probability_of_goal: primaryP,
+      probability_of_joint_goal: contradiction || expected === 0 ? 0 : 0.4,
+      constraint_probabilities: { 'target:new_customers': primaryP,
+        'target:conversion_rate': subject === 'secondary' ? recorded : 1, 'limit:annual_spend': 0.4 },
+      // Claude’s native probe: every reported centre is one ulp on the wrong side, inside the residue allowance.
+      outcome: { p10: 0.39999999999999997, p50: 0.39999999999999997, p90: 0.39999999999999997,
+        mean: 0.39999999999999997, std: 0 } });
+    const sentRun = { graph: g, goal_node_id: 'new_customers', goal_threshold: 0.4,
+      goal_direction: goal.goal_direction === '<' || goal.goal_direction === '<=' ? 'minimise' : 'maximise',
+      goal_threshold_strict: goal.goal_direction === '>' || goal.goal_direction === '<',
+      options: nodes.filter(n => n.kind === 'option').map(n => ({ option_id: n.id, ...(n.is_baseline === true ? { is_baseline: true } : {}) })) };
+    const threshold = { field: 'goal_threshold' as const, frame: 'level' as const, value: 0.4,
+      baseline: 0.4, status_quo_option_id: 'carry_on' };
+    const constraints = { storedConstraints: rows, sentConstraints: wireGoalConstraints(rows), sentRun };
+    return { g, run, threshold, constraints,
+      licence: goalChanceLicenceOf(run, g, 'new_customers', () => false, threshold, g, constraints)! };
+  };
+
+  it.each((['primary', 'secondary'] as const).flatMap(subject => ['>=', '>', '<=', '<'].map(operator => ({ subject, operator }))))(
+    '$subject $operator: a contradictory exact 0/1 cannot become the joint’s quoted chance', ({ subject, operator }) => {
+      const { g, run, threshold, constraints, licence: l } = boundary(subject, operator, true);
+      expect(l.targets!.joint.status).toBe('licensed'); // Other options keep their own licensed joint.
+      if (l.targets!.joint.status === 'licensed') expect(l.targets!.joint.pct_by_option).not.toHaveProperty('carry_on');
+      expect(l.pct_by_option).not.toHaveProperty('carry_on');
+      expect(l.withheld_option_ids).toContain('carry_on');
+      expect(l.withheld_reason_by_option?.carry_on).toMatchObject({ reason: 'reference_moved' });
+      const marginal = l.targets!.per_target.find(t => t.constraint_id === (subject === 'primary'
+        ? 'target:new_customers' : 'target:conversion_rate'))!;
+      expect(marginal.pct_by_option).not.toHaveProperty('carry_on');
+      const original = structuredClone(run);
+      const response = withGoalChanceLicence(run, g, 'new_customers', () => false, threshold, g, constraints);
+      const cell = projectCanonicalAnalysisCells({ type: 'analysis_result', enrichment: response } as never, g)
+        .find(row => row.option_id === 'carry_on')!.cell;
+      expect(cell).toMatchObject({ kind: 'withheld', face: 'Chance not shown yet' });
+      expect((cell as Rec).face).not.toMatch(/0%|100%/);
+      expect(run).toEqual(original);
+    });
+
+  it.each(['primary', 'secondary'] as const)('%s: a consistent fixed target leaves the uncertain limit’s recorded joint intact', subject => {
+    const inclusive = boundary(subject, '>=', false).licence;
+    expect(inclusive.pct_by_option.carry_on).toBe(40);
+    expect(inclusive.withheld_option_ids ?? []).not.toContain('carry_on');
+    // Strict > at exact equality fails; its recorded joint 0 is consistent, never changed to the limit’s 40%.
+    expect(boundary(subject, '>', false).licence.pct_by_option.carry_on).toBe(0);
+  });
+});
 
 describe('RE-SCOPE 2 (R5-3): the status quo\'s joint reads every condition the Run sent — targets AND limits', () => {
   it('RED on e58b8dbd (fixed targets + an uncertain budget limit): the status quo keeps its varying joint; no universal "no change"', () => {
