@@ -94,7 +94,10 @@ function pricing(statusQuo: Partial<Node> = {}, opts: { sqEdges?: Edge[]; extraN
 /** The product, faked at the dispatch seam (as `held-status-quo-gets-no-levels.test.ts`). */
 function fakeProduct(nodes0: Node[], edges: Edge[]) {
   const posted: string[] = [];
-  let nodes: Node[] = nodes0.map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
+  // Match the stored shape the real preparation reads; raw ingress defaults are not saved bytes.
+  const saved = JSON.parse(JSON.stringify(GraphV3.parse({ nodes: nodes0, edges }))) as { nodes: Node[]; edges: Edge[] };
+  let nodes = saved.nodes as Node[];
+  edges = saved.edges as Edge[];
   let rev = 0;
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;

@@ -4,12 +4,15 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import type { SessionTurnWrite } from '../../session/store.js';
 import { getSessionStore } from '../../session/index.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { createAgentCapabilities } from '../../agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { runWithApprovedLevelAdoptions } from '../../agent-lane/approved-adoption-context.js';
 import { optionGapsHeld, parseOptionGapsOfLevelOps } from '../../agent-lane/unmodelled-mechanisms.js';
-import { commitOptionLevelsInProcess } from '../dispatch.js';
+import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../dispatch.js';
 import * as native from '../option-intervention-edit.js';
 import { preOfferOptionInterventions } from '../option-intervention-preoffer.js';
 
@@ -69,6 +72,22 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getMaxTokensFromConfig: () => undefined,
 }));
 
+/** The real register boundary: enforce both hashes, serialise canonical storage and count its durable row. */
+const savingDispatch = async (path: string, body?: unknown) => {
+  if (path.endsWith('/graph/register')) {
+    const b = body as { graph: unknown; expected_graph_hash?: string; expected_graph_identity_hash?: string };
+    if ((b.expected_graph_hash !== undefined && b.expected_graph_hash !== hash())
+      || (b.expected_graph_identity_hash !== undefined && b.expected_graph_identity_hash !== computeGraphIdentityHash(persisted as never)?.value)) {
+      return { status: 409, json: { code: 'GRAPH_STALE' } };
+    }
+    persisted = JSON.parse(JSON.stringify(assignEntityRefs(projectGraphForPersistence(GraphStateIngressSchema.parse(b.graph)), persisted).graph)) as Graph;
+    const id = `register-${rows.size + 1}`;
+    rows.set(id, { id, write: { scenario_id: SCENARIO, turn_id: id, handler_facts: [], graph: cold() } as never });
+    return { status: 200, json: { graph_hash: hash(), graph_identity_hash: computeGraphIdentityHash(persisted as never)?.value } };
+  }
+  if (!path.endsWith('/graph')) throw new Error(`Unexpected native-test dispatch: ${path}`);
+  return { status: 200, json: { graph: cold(), graph_hash: hash() } };
+};
 const request = (unit = 'tech leads'): native.OptionInterventionBatchExecutionInput => ({
   scenarioId: SCENARIO, turnId: 'preoffer-card', requestId: 'req-preoffer', requestHash: 'sha256:preoffer',
   expectedGraphHash: hash(), stage: 'frame', freshness: 'none', hasExistingAnalysis: false,
@@ -187,7 +206,7 @@ describe('S5 complete native preparation before an offer', () => {
     persisted.nodes.push({ id: 'trial', kind: 'option', label: 'Trial' });
     persisted.edges.push({ from: 'trial', to: 'staffing', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
     const proposals = new ProposalStore();
-    const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: cold(), graph_hash: hash() } }),
+    const caps = createAgentCapabilities(savingDispatch,
       proposals, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-shared-frame') });
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-shared-frame', user_text: 'Explore staffing.', user_turn_text: 'Explore staffing.' };
     const proposed = await caps.proposeStartingPoint(ctx, { assumptions: [], option_levels: [
@@ -205,9 +224,111 @@ describe('S5 complete native preparation before an offer', () => {
     expect(rows.size).toBe(1);
   });
 
+  it.each([false, true])('different derived frames share one range of100 and one real saved commit (held baseline=%s)', async held => {
+    delete node(persisted, 'staffing').scale_frame;
+    if (held) node(persisted, 'staffing').observed_state = { value: 0, raw_value: 0, unit: 'GBP', source: 'cee_inference', extractionType: 'inferred' };
+    else delete node(persisted, 'staffing').observed_state;
+    node(persisted, 'staffing').label = 'Price';
+    delete node(persisted, 'pilot').interventions;
+    persisted.nodes.push({ id: 'trial', kind: 'option', label: 'Trial' });
+    persisted.edges.push({ from: 'trial', to: 'staffing', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const proposals = new ProposalStore(), prepare = vi.spyOn(native, 'prepareOptionInterventionBatchExecution');
+    const caps = createAgentCapabilities(savingDispatch, proposals, undefined, 'full', undefined,
+      { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-two-ranges') });
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-two-ranges' };
+    const offered = await caps.proposeStartingPoint(ctx, { assumptions: [], option_levels: [
+      { option_label: 'Pilot', factor_label: 'Price', value: 9, user_stated: false, basis: 'Olumi’s pilot assumption' },
+      { option_label: 'Trial', factor_label: 'Price', value: 49, user_stated: false, basis: 'Olumi’s trial assumption' },
+    ] });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true); expect(rows.size).toBe(0);
+    const candidate = await prepare.mock.results[0]!.value;
+    expect(candidate.kind).toBe('candidate');
+    expect(offered.interventions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ option: 'Pilot', value: 9, model_range: 100, recorded_on_model_scale: 0.09 }),
+      expect.objectContaining({ option: 'Trial', value: 49, model_range: 100, recorded_on_model_scale: 0.49 }),
+    ]));
+    const pid = String(offered.proposal_id);
+    expect(await caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(rows.size).toBe(1); expect([...rows.keys()].some(k => k.startsWith('register-'))).toBe(false);
+    expect(cold()).toEqual(candidate.graph);
+    expect(cell(cold())).toMatchObject({ raw_value: 9, cap: 100, source: 'cee_hypothesis' });
+    expect((node(cold(), 'trial').interventions as Dict).staffing).toMatchObject({ raw_value: 49, cap: 100, source: 'cee_hypothesis' });
+    expect(await caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, already_applied: true });
+    expect(rows.size).toBe(1);
+  });
+
+  it('the save’s value-frame conflict is refused before any card: Demand50 with levels200/300', async () => {
+    delete node(persisted, 'staffing').observed_state;
+    delete node(persisted, 'staffing').scale_frame;
+    node(persisted, 'staffing').label = 'Demand';
+    delete node(persisted, 'pilot').interventions;
+    persisted.nodes.push({ id: 'trial', kind: 'option', label: 'Trial' });
+    persisted.edges.push({ from: 'trial', to: 'staffing', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const proposals = new ProposalStore(), before = cold();
+    const caps = createAgentCapabilities(savingDispatch, proposals, undefined, 'full', undefined,
+      { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-conflicting-ranges') });
+    const offered = await caps.proposeStartingPoint({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-conflicting-ranges' }, {
+      assumptions: [{ factor_label: 'Demand', value: 50, unit: 'orders', user_stated: false, basis: 'Olumi’s working demand' }],
+      option_levels: [
+        { option_label: 'Pilot', factor_label: 'Demand', value: 200, user_stated: false, basis: 'Olumi’s pilot level' },
+        { option_label: 'Trial', factor_label: 'Demand', value: 300, user_stated: false, basis: 'Olumi’s trial level' },
+      ],
+    });
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'level_frame_changed_by_values' });
+    expect(offered).not.toHaveProperty('proposal_id'); expect(proposals.outstanding(SCENARIO, null)).toHaveLength(0);
+    expect(rows.size).toBe(0); expect(cold()).toEqual(before);
+  });
+
+  it('a refused replacement keeps the earlier card; only a savable new starting point replaces it', async () => {
+    const proposals = new ProposalStore();
+    const caps = createAgentCapabilities(savingDispatch, proposals, undefined, 'full', undefined,
+      { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-card-lifetime') });
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-card-lifetime' };
+    const args = (unit: string, value: number) => ({
+      assumptions: [{ factor_label: 'Staffing', value: 0, unit, user_stated: false, basis: 'Olumi’s starting assumption' }],
+      option_levels: [{ option_label: 'Pilot', factor_label: 'Staffing', value, user_stated: false, basis: 'Olumi’s pilot assumption' }],
+    });
+    const first = await caps.proposeStartingPoint(ctx, args('tech leads', 2));
+    expect(first.ok, JSON.stringify(first)).toBe(true);
+    const earlier = proposals.get(String(first.proposal_id))!;
+    const refused = await caps.proposeStartingPoint(ctx, args('hires', 2));
+    expect(refused).toMatchObject({ ok: false, mutated: false }); expect(refused).not.toHaveProperty('proposal_id');
+    expect(proposals.get(earlier.proposal_id)).toEqual(earlier);
+    expect(proposals.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([earlier.proposal_id]);
+    expect(rows.size).toBe(0);
+    const next = await caps.proposeStartingPoint(ctx, args('tech leads', 3));
+    expect(next.ok, JSON.stringify(next)).toBe(true);
+    const pid = String(next.proposal_id);
+    expect(pid).not.toBe(earlier.proposal_id); expect(proposals.get(earlier.proposal_id)).toBeUndefined();
+    expect(proposals.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([pid]);
+    expect(rows.size).toBe(0);
+    expect(await caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
+    expect(rows.size).toBe(1); expect(cell(cold())).toMatchObject({ raw_value: 3, source: 'cee_hypothesis' });
+    expect(await caps.authoriseChange({ ...ctx, typed_approval_of: earlier.proposal_id }, { proposal_id: earlier.proposal_id })).toMatchObject({ ok: false, mutated: false });
+    expect(rows.size).toBe(1);
+  });
+
+  it('a native refusal at approval still writes none of the already-offered compound', async () => {
+    delete node(persisted, 'budget').observed_state;
+    const proposals = new ProposalStore(), calls = vi.fn((input: CommitOptionLevelsInput) => commitOptionLevelsInProcess({ ...input,
+      levels: input.levels.map(l => ({ ...l, value: 2 })) }, 'req-approval-refusal'));
+    const caps = createAgentCapabilities(savingDispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: calls });
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-approval-refusal' };
+    const offered = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Budget', value: 50, unit: 'GBP', user_stated: false, basis: 'Olumi’s working budget' }],
+      option_levels: [{ option_label: 'Pilot', factor_label: 'Staffing', value: 2, user_stated: false, basis: 'Olumi’s pilot level' }],
+    });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true); expect(rows.size).toBe(0);
+    const before = cold(), pid = String(offered.proposal_id);
+    const refused = await caps.authoriseChange({ ...ctx, typed_approval_of: pid }, { proposal_id: pid });
+    expect(calls).toHaveBeenCalledTimes(1);
+    expect(refused).toMatchObject({ ok: false, mutated: false }); expect(refused.refusal).not.toBe('partially_applied');
+    expect(rows.size).toBe(0); expect(cold()).toEqual(before);
+  });
+
   it.each(['tech leads', 'hires'])('binds the real %s proposer/card to the same preparation before a native approved save', async unit => {
     const proposals = new ProposalStore();
-    const caps = createAgentCapabilities(async () => ({ status: 200, json: { graph: cold(), graph_hash: hash() } }),
+    const caps = createAgentCapabilities(savingDispatch,
       proposals, undefined, 'full', undefined, { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-real-card') });
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-real-card',
       user_text: 'Explore delivery capacity; the budget is £40.', user_turn_text: 'Explore delivery capacity; the budget is £40.' };

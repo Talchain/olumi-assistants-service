@@ -21,7 +21,7 @@
  * so the fixture is a GraphV3-valid model.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
@@ -300,19 +300,19 @@ describe('propose_starting_point', () => {
     const p = fakeProduct({ base });
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
+    const put = vi.spyOn(store, 'put');
     const r = await caps.proposeStartingPoint(ctx, {
       assumptions: [{ user_stated: false, factor_label: 'Tech leads hired', value: 3, unit: 'FTE', basis: 'three leads across the org today' }],
       option_levels: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' }],
     });
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    const kinds = new Set(store.get(String(r.proposal_id))!.operations.map((o) => o.op));
+    const compound = put.mock.calls.map(([p]) => p).find(p => p.operations.some(o => o.op === 'set_factor_value') && p.operations.some(o => o.op === 'set_option_intervention'));
+    expect(compound, 'the SAME complete bundle is prepared before deciding whether to offer').toBeDefined();
+    const kinds = new Set(compound!.operations.map((o) => o.op));
     expect([...kinds].sort(), 'both halves must be in the ONE proposal for this case to mean anything').toEqual(['set_factor_value', 'set_option_intervention']);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
-    expect(out.ok).toBe(false);
-    expect(out.applied).toBe(false);
-    expect(out.mutated).toBe(false);
-    expect(out.refusal).toBe('not_applied');
-    expect(out.reason).toBe('level_frame_changed_by_values');
+    expect(r).toMatchObject({ ok: false, applied: false, mutated: false,
+      refusal: 'level_frame_changed_by_values', reason: 'level_frame_changed_by_values' });
+    expect(r).not.toHaveProperty('proposal_id');
+    expect(store.outstanding(SCENARIO, USER)).toEqual([]);
     // ZERO writes attempted — refused before the one conditional registration.
     expect(p.posted).toEqual([]);
     const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));

@@ -7,11 +7,13 @@
  * asserted by `whole-request-is-one-commit.test.ts` against a fake that commits the whole scope at once.
  */
 import { vi } from 'vitest';
-// These pre-native per-event fakes use symbolic h0/h1 revisions and intentionally do NOT model canonical preparation.
-// Isolate that boundary here; the real pre-offer -> native door integration is in option-intervention-preoffer.test.ts.
-vi.mock('../../../system-events/option-intervention-preoffer.js', () => ({
-  preOfferOptionInterventions: async () => ({ offer: true }),
-}));
+// These per-event products retain symbolic revisions. Project their graph/hash, then delegate REAL native preparation.
+// Persistence/CAS proof uses the real store and port in option-intervention-preoffer.test.ts, not this per-event writer.
+vi.mock('../../../system-events/option-intervention-preoffer.js', async original => {
+  const actual = await original<typeof import('../../../system-events/option-intervention-preoffer.js')>();
+  const { canonicalFixturePreoffer } = await import('./canonical-preoffer.js');
+  return { ...actual, preOfferOptionInterventions: canonicalFixturePreoffer(actual.preOfferOptionInterventions) };
+});
 
 import { createAgentCapabilities, receiptSummaryOf, type InternalDispatch } from '../../runtime/agent-capabilities.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../../system-events/dispatch.js';
