@@ -580,6 +580,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
         answering: { type: 'string', description: 'Only when the statement answers a question you asked: that question, copied exactly from your reply.' },
         reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place), or for when one option\u2019s effect is fully in place: the user\u2019s own words that say it, copied from the quote.' },
+        // AIE amended semantic guidance; these optional readings do not establish a verified human fact.
+        form: { type: 'string', enum: ['range'], description: 'Use range only for a range of this link’s effect on its target quantity, with the stated reference and conditions; a duration, budget, current level, goal or another quantity is not that effect.' },
+        low: { type: 'number', description: 'Only with form:range: the lower endpoint of that effect range as stated, preserving its sign and scale.' },
+        high: { type: 'number', description: 'Only with form:range: the upper endpoint of that effect range as stated, preserving its sign and scale.' },
+        unit: { type: 'string', description: 'Only with form:range: the unit belonging to that effect quantity wherever it occurs in the statement; do not borrow another quantity’s unit or invent a missing one.' },
+        negated: { type: 'boolean', description: 'Only with form:range: retain whether the statement denies this effect range; a denied range is not a positive supplied effect range, zero effect or the opposite range.' },
       }, ['quote']) },
     }, ['subject', 'statements']),
   },

@@ -6537,7 +6537,10 @@ export function createAgentCapabilities(
       }
       const quotes = (Array.isArray(args?.statements) ? args.statements : []).flatMap((x) => (isPlainRecord(x) && typeof x.quote === 'string'
         ? [{ quote: x.quote, ...(typeof x.answering === 'string' ? { answering: x.answering } : {}),
-          ...(typeof x.reading_words === 'string' ? { reading_words: x.reading_words } : {}) }] : []));
+          ...(typeof x.reading_words === 'string' ? { reading_words: x.reading_words } : {}),
+          // ONE BINDER: pass the source and AI reading unchanged to the existing owner.
+          // This adapter does not interpret the words or verify their meaning.
+          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text,
         unverified: [ctx.unverified_user_text, g.brief_text].filter((t): t is string => typeof t === 'string').join('\n') };
       const v = readStatement(g.raw, resolved.subject, resolved.label, quotes, texts, doorContextOf(ctx, g.raw));
