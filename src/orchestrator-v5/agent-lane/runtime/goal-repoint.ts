@@ -66,7 +66,10 @@ export function repointRetainedBase(before: Rec, removals: unknown, ctx: AgentTo
   return graph;
 }
 
-/** The final card's topology, with original participation: never infer a new causal link or discard a branch. */
+/** The final card's topology, with original participation: never infer a new causal link or discard a branch.
+ * A protected part blocks the ENTIRE optional branch exclusion, not recording the changed goal.
+ * The same empty exclusion set is checked at approval; Run still owns causal readiness.
+ */
 export function laterAimOnlyBranch(candidate: Rec, oldId: string, newId: string, before: Rec): { excluded: string[]; blocked: string[] } {
   const nodes = (Array.isArray(candidate.nodes) ? candidate.nodes : []).filter(rec);
   const prior = (Array.isArray(before.nodes) ? before.nodes : []).filter(rec);
@@ -82,9 +85,10 @@ export function laterAimOnlyBranch(candidate: Rec, oldId: string, newId: string,
   const branch = nodes.filter(n => typeof n.id === 'string' && n.id !== oldId && n.id !== newId
     && prior.find(p => p.id === n.id)?.analysis_participation !== 'retained_excluded'
     && reachesOld.has(n.id) && !reachesNew.has(n.id));
+  const blocked = branch.filter(n => protectedIds.has(String(n.id))).map(n => String(n.id)).sort();
   return {
-    excluded: branch.filter(n => ['factor', 'risk', 'outcome'].includes(String(n.kind)) && !protectedIds.has(String(n.id))).map(n => String(n.id)).sort(),
-    blocked: branch.filter(n => protectedIds.has(String(n.id))).map(n => String(n.id)).sort(),
+    excluded: blocked.length ? [] : branch.filter(n => ['factor', 'risk', 'outcome'].includes(String(n.kind))).map(n => String(n.id)).sort(),
+    blocked,
   };
 }
 
@@ -110,7 +114,7 @@ export function repointRetainsSavedWork(before: Rec, candidate: unknown, oldId: 
   const formerlyOutcome = before.nodes.find((n): n is Rec => rec(n) && n.id === newId);
   if (formerlyOutcome !== undefined && goals[0].description !== promotedOutcome(formerlyOutcome).description) return false;
   const scope = laterAimOnlyBranch(candidate, oldId, newId, before);
-  if (scope.blocked.length || !isDeepStrictEqual(scopeExcluded ?? [], scope.excluded)) return false;
+  if (!isDeepStrictEqual(scopeExcluded ?? [], scope.excluded)) return false;
   const otherNodes = (nodes: unknown[]) => nodes.filter(n => rec(n) && n.id !== oldId && n.id !== newId);
   const scopedBefore = otherNodes(before.nodes).map(n => rec(n) && scope.excluded.includes(String(n.id))
     ? { ...n, analysis_participation: 'retained_excluded' } : n);

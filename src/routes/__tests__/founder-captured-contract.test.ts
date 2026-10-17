@@ -136,7 +136,7 @@ describe('captured G1 whole goal-change scope', () => {
     expect(v.scope_excluded).toEqual([]); expect(v.candidate.nodes.find((n: Rec) => n.id === 'larger_fund_secured').analysis_participation).toBeUndefined();
     expect(noPath(v.candidate).map(i => i.detail)).toEqual([expect.stringContaining('unrelated')]); expect(w.writes).toHaveLength(0);
   });
-  it.each(['option', 'lever target', 'limit'])('refuses scope that would exclude a protected %s', async kind => {
+  it.each(['option', 'lever target', 'limit'])('a protected %s leaves the complete goal card available with no branch excluded', async kind => {
     const w = await goalWorld(g => {
       if (kind === 'limit') g.goal_constraints = [...(g.goal_constraints ?? []), { constraint_id: 'protected', node_id: 'larger_fund_secured', operator: '>=', value: 10, unit: '£', value_frame: 'level', provenance: 'explicit' }];
       else {
@@ -145,8 +145,31 @@ describe('captured G1 whole goal-change scope', () => {
         g.edges.push({ from: id, to: 'funding_secured', strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
       }
     });
-    expect(await offer(w)).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' });
-    expect(w.proposals.outstanding(w.ctx.scenario_id, null)).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    const r = await offer(w); expect(r.ok, JSON.stringify(r)).toBe(true); const v = valueOf(w, r);
+    expect(v.scope_excluded).toEqual([]); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(w.original);
+    for (const n of w.original.nodes.filter((n: Rec) => !['funding_secured', 'angel_funding_secured'].includes(n.id))) {
+      expect(v.candidate.nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
+    }
+    expect(v.candidate.edges).toEqual(w.original.edges);
+    expect(r.public_label).not.toContain('its words and links also stay visible');
+    expect(noPath(v.candidate).length).toBeGreaterThan(0); // Recording a goal does not waive Run readiness.
+    const held = w.proposals.get(String(r.proposal_id))!, operations = structuredClone(held.operations);
+    const forged = operations[0]!.value as Rec;
+    forged.scope_excluded = ['larger_fund_secured'];
+    forged.candidate.nodes.find((n: Rec) => n.id === 'larger_fund_secured').analysis_participation = 'retained_excluded';
+    const broken = createProposal({ scenario_id: held.scenario_id, user_id: held.user_id,
+      base_graph_identity_hash: held.base_graph_identity_hash, operations, provenance: held.provenance,
+      validation: held.validation, public_label: held.public_label });
+    w.proposals.put(broken);
+    expect(await w.caps().authoriseChange({ ...w.ctx, typed_approval_of: broken.proposal_id }, { proposal_id: broken.proposal_id })).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' });
+    expect(w.writes).toHaveLength(0);
+    const cold = restoreCard(held, r, w.ctx);
+    expect(await w.caps(cold).authoriseChange({ ...w.ctx, typed_approval_of: held.proposal_id }, { proposal_id: held.proposal_id })).toMatchObject({ ok: true, applied: true });
+    expect(w.writes).toHaveLength(1); expect(w.graph().edges).toEqual(w.original.edges);
+    for (const n of w.original.nodes.filter((n: Rec) => !['funding_secured', 'angel_funding_secured'].includes(n.id))) {
+      expect(w.graph().nodes.find((x: Rec) => x.id === n.id)).toEqual(n);
+    }
+    expect(noPath(w.graph()).length).toBeGreaterThan(0);
   });
   it('reads FINAL removals and rejects forged scope ids or changed retained reasoning at approval', async () => {
     const quote = 'Remove the link from Larger fund secured to Angel funding secured.';

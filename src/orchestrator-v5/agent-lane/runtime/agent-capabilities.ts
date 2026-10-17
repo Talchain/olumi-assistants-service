@@ -3981,8 +3981,6 @@ export function createAgentCapabilities(
     const retained = repointRetainedBase(before.raw, removals, ctx);
     if (retained === undefined) return invalid('incomplete_goal_postimage', 'The complete saved work could not be checked. Nothing was prepared.');
     const scope = laterAimOnlyBranch(candidate, old.id, newId, retained);
-    if (scope.blocked.length) return invalid('incomplete_goal_postimage',
-      'This goal change would leave an option, a quantity an option changes, or a saved limit only connected to the earlier aim. Nothing was prepared; keep those parts in the analysis and resolve how they relate to the new goal.');
     candidate.nodes = (candidate.nodes as Record<string, unknown>[]).map(n => scope.excluded.includes(String(n.id))
       ? { ...n, analysis_participation: 'retained_excluded' } : n);
     if (!repointRetainsSavedWork(retained, candidate, old.id, newId, priorDescription, ctx.scenario_id, scope.excluded)) return invalid('incomplete_goal_postimage',
