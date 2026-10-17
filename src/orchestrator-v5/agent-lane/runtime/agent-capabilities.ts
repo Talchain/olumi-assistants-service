@@ -1,5 +1,4 @@
 import { applyCorrectedStatement, proposeStatementCorrection, applyQualitativeReframe, proposeQualitativeReframe } from './correction-workflows.js';
-export { applyQualitativeReframe } from './correction-workflows.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 import { laterAimOnlyBranch, omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
@@ -1527,6 +1526,15 @@ export function projectOptionLevels(
   return out;
 }
 
+/** Complete source records and their canonical current-retained projection, shared by model and entity readers. */
+function projectStatementRecords(records: ReturnType<typeof userStatementsOn>): Record<string, unknown> {
+  const current = records.flatMap(r => {
+    const retained = currentStatementRetention(r);
+    return retained === undefined ? [] : [{ field: r.field, ...retained }];
+  });
+  return { user_statements: records, ...(current.length === 0 ? {} : { current_retained: current }) };
+}
+
 /**
  * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
  * EVERY tool that hands the Agent entities.
@@ -1623,6 +1631,13 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
               ? { analysis_participation: n.analysis_participation } : {}),
             // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
             ...(n.kind === 'option' && (n.option_status === 'removed' || n.option_status === 'infeasible') ? { option_status: n.option_status } : {}),
+            // ⭐ THE QUALITATIVE HOME (DL-3 05:21Z; BUDDY-A 05:30Z §3): what a factor's quantity covers, recorded by the user's press,
+            // in their words with the question each answers (Olumi's, kept apart), so this working input and a cold reopen hold it.
+            // Only press-recorded definitions: construction's brief records are not added here (every sent body would change).
+            ...((): Record<string, unknown> => {
+              const said = n.kind === 'factor' ? userStatementsOn(n).filter((r) => r.field === 'measure' && r.attest === undefined) : [];
+              return said.length === 0 ? {} : projectStatementRecords(said);
+            })(),
           };
         }
 
@@ -1806,14 +1821,9 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   const recordedReasoning = (Array.isArray(g.raw.nodes) ? g.raw.nodes : []).filter(isPlainRecord).flatMap(n => {
     const records = userStatementsOn(n);
-    const current = records.flatMap(r => {
-      const retained = currentStatementRetention(r);
-      return retained === undefined ? [] : [{ field: r.field, ...retained }];
-    });
     return records.length === 0 && n.analysis_participation !== 'retained_excluded' ? [] : [{
       id: n.id, kind: n.kind, label: n.label,
-      ...pickKeys(n, ['description', 'provenance', 'analysis_participation']), user_statements: records,
-      ...(current.length === 0 ? {} : { current_retained: current }),
+      ...pickKeys(n, ['description', 'provenance', 'analysis_participation']), ...projectStatementRecords(records),
     }];
   });
   return {
