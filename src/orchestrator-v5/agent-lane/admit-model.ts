@@ -70,7 +70,7 @@ export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unk
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { untargetedGoalLevelAsk } from './untargeted-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
-import { admitGoalTargetBasis, admitGoalTargetBasisAwaitingPeriod, conditionsRefusedBasis, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis, type GoalTargetBasisAwaitingPeriod } from '../goal-target/goal-target-basis.js';
+import { admitGoalTargetBasis, admitGoalTargetBasisAwaitingPeriod, conditionsRefusedBasis, goalConditionCount, goalReadingRefusedWords, goalTargetBasisRefusalWords, type DraftedGoalTargetBasis, type GoalTargetBasis, type GoalTargetBasisAwaitingPeriod } from '../goal-target/goal-target-basis.js';
 import {
   admitCandidateConstraints,
   canonicalProvenance,
@@ -4266,11 +4266,20 @@ function admitOnce(
           targetFrame: 'level', targetRaw: raw, horizonMonths: model.goal.horizon_months,
         } as const;
         const levelBasis = admitGoalTargetBasis(levelBasisArgs);
+        // ⭐ G1 THRESHOLD MINT (DL-3 01:03Z ACK; PL + BUDDY-A 01:06Z): the DL ruling of 14 Oct (as on the change path above) on the
+        // level path too, ONLY where the whole reading is refused today: its period left unstated (and no horizon), with
+        // conditions kept beside the target. Every other member validates (`admitGoalTargetBasisAwaitingPeriod`), so the reading
+        // is kept without its period and with its conditions whole, the threshold is minted, and the period is asked. No chance
+        // is licensed on it until the user's deadline completes it (`readingAwaitsPeriod`, goal-chance-licence.ts). Unchanged:
+        // every other refusal, a missing period with a horizon, and a reading with no conditions.
+        const awaiting = 'refused' in levelBasis && levelBasis.refused === 'period' && goalConditionCount(model.goal.basis) > 0
+          ? admitGoalTargetBasisAwaitingPeriod(levelBasisArgs) : undefined;
         // ⛔ Recovery Batch C re-scope (r2 BLOCKING 2): goal conditions are never silently dropped. A reading refused while
         // the drafter retained conditions beside the target would lose them here (the plain sentence names none), so the
         // whole goal reading is refused instead: no threshold (no chance), and why is said. The user's level is kept.
-        const conditionsRefused = goalReadingRefusedWords(model.goal.metric, levelBasis, model.goal.basis);
+        const conditionsRefused = awaiting === undefined ? goalReadingRefusedWords(model.goal.metric, levelBasis, model.goal.basis) : undefined;
         if (conditionsRefused !== undefined) withheld(conditionsRefused);
+        if (awaiting !== undefined) withheld(goalTargetBasisRefusalWords(model.goal.metric, 'period'));
         // ⛔ RE-SCOPE 2 (R5-5 (a)): the refusal itself persists (the stored reading's `open_question`, `CONDITIONS_NOT_KEPT`).
         const levelRefusal = conditionsRefusedBasis(levelBasisArgs, levelBasis);
         return {
@@ -4287,6 +4296,7 @@ function admitOnce(
           ...(observed_state !== undefined ? { observed_state } : {}),
           ...(observed_state !== undefined && derivedReading !== undefined ? { goal_level_reading: derivedReading } : {}),
           ...('basis' in levelBasis && levelBasis.basis !== null ? { goal_target_basis: levelBasis.basis }
+            : awaiting !== undefined ? { goal_target_basis: awaiting }
             : levelRefusal !== undefined ? { goal_target_basis: levelRefusal } : {}),
         };
       })(),

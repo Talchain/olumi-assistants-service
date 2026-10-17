@@ -474,6 +474,18 @@ function zeroSpreadReasons(
   return out;
 }
 
+/**
+ * ⭐ G1 threshold mint (PL 01:06Z: an awaiting-period mint is not a chance licence; BUDDY-A 01:06Z AMEND 2): whether the goal's
+ * held reading is the one admission kept AWAITING its period (DL ruling 14 Oct). Every member validates as `goalTargetBasisOf`
+ * validates it (target, source, frame, conditions), but no period is stored and none is held. No chance is licensed on it,
+ * so none is shown without its conditions; the user's deadline completes it, and the validated reading then says them.
+ */
+function readingAwaitsPeriod(goal: Rec): boolean {
+  const stored = goal.goal_target_basis;
+  if (!isRec(stored) || stored.period_months !== undefined || goalTargetBasisOf(goal) !== undefined) return false;
+  return goalTargetBasisOf({ ...goal, goal_target_basis: { ...stored, period_months: 1 } }) !== undefined;
+}
+
 /** R5-5 (b): whether the Run sent the threshold of the target the goal states (see the guard in `goalChanceLicenceOf`). */
 function targetSent(graph: Rec, goal: Rec, constraints: GoalChanceConstraintInputs): boolean {
   if (finite(goal.goal_threshold_raw)) return finite(goal.goal_threshold);
@@ -634,7 +646,7 @@ export function goalChanceLicenceOf(
   const conditional = changeFrame !== undefined && basis !== undefined && !basis.effects_at_period_end
     ? periodEndConditionalOf(envelope, graph, goalId, constraints) : undefined;
   if ((changeFrame !== undefined && (basis === undefined || (!basis.effects_at_period_end && conditional === undefined)))
-    || basis?.open_question !== undefined) return null;
+    || basis?.open_question !== undefined || (basis === undefined && readingAwaitsPeriod(goal))) return null;
   // A change carries its direction in its sign; with no comparator held, the run's own sense is the bound ISL scored.
   const held = statedComparatorOf(target.held, changeFrame !== undefined, graph, goalId);
   const comparator = held === undefined ? undefined : COMPARATOR[held];
