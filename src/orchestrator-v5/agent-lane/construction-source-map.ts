@@ -183,19 +183,81 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
 }
 
 /**
- * Positive evidence that a range's claimed unit is not its own (the verifier's `unitWrittenAfter`, a whole word): the unit is written
- * after an unrelated figure equal to the range's high end but not at the range itself, or the word at the range's own high end is a
- * different word the unit begins ("mm" for "m"). A range whose words write no unit at its end ("between 20 and 40 extra visitors";
- * "about 5 points, between 4 and 7") is read as before; a currency is the amounts' own symbol (`figuresWritten` reads it with them).
+ * ⛔ G3 a735 (DL-3 14:28Z: a matcher ships with its generative sweep): the closed vocabulary of the unit families a range is
+ * confusable in — SI length, mass, volume and time with their prefixes, imperial weight and length, percent against percentage
+ * points. A word outside it reads as `undefined`: no evidence either way. Never a conversion: only "the same unit" or "not".
+ */
+const UNIT_WORDS: Readonly<Record<string, string>> = {
+  mm: 'mm', millimetre: 'mm', millimeter: 'mm', cm: 'cm', centimetre: 'cm', centimeter: 'cm', m: 'm', metre: 'm', meter: 'm',
+  km: 'km', kilometre: 'km', kilometer: 'km', inch: 'in', ft: 'ft', foot: 'ft', feet: 'ft', mile: 'mi',
+  mg: 'mg', milligram: 'mg', g: 'g', gram: 'g', kg: 'kg', kilogram: 'kg', kilo: 'kg', tonne: 't', lb: 'lb', pound: 'lb', oz: 'oz', ounce: 'oz',
+  ml: 'ml', millilitre: 'ml', milliliter: 'ml', l: 'l', litre: 'l', liter: 'l',
+  ms: 'ms', millisecond: 'ms', s: 's', sec: 's', second: 's', min: 'min', minute: 'min', h: 'h', hr: 'h', hour: 'h',
+  day: 'day', week: 'week', month: 'month', year: 'year', yr: 'year',
+  '%': '%', percent: '%', pc: '%', point: 'pp', pp: 'pp',
+};
+const unitWord = (w: string): string | undefined => {
+  const x = w.toLowerCase();
+  return UNIT_WORDS[x] ?? (x.endsWith('s') ? UNIT_WORDS[x.slice(0, -1)] : undefined) ?? (x.endsWith('es') ? UNIT_WORDS[x.slice(0, -2)] : undefined);
+};
+/** The unit family words START with, or `undefined` ("percentage points", "per cent" and "%" read whole). */
+function unitLeading(text: string): string | undefined {
+  if (/^\s*%/u.test(text)) return '%';
+  if (/^\s*percentage\s+points?(?![\p{L}])/iu.test(text)) return 'pp';
+  if (/^\s*per\s+cent(?![\p{L}])/iu.test(text)) return '%';
+  const w = /^\s*(\p{L}+)/u.exec(text)?.[1];
+  return w === undefined ? undefined : unitWord(w);
+}
+/** A unit string's family: its first word that names one ("kg a day" → kg; "calendar days" → day; "% of bottles" → %). */
+export function unitFamily(unit: string): string | undefined {
+  const words = unit.trim().split(/[\s/]+/u);
+  for (let i = 0; i < words.length; i += 1) {
+    const f = unitLeading(words.slice(i).join(' '));
+    if (f !== undefined) return f;
+  }
+  return undefined;
+}
+/** The unit the words write at a range's own high end (straight after it, or as its "%"), or `undefined`. */
+function unitAtRange(quote: string, high: { readonly index: number; readonly matchedText: string }): string | undefined {
+  return /%\s*$/u.test(high.matchedText) ? '%' : unitLeading(quote.slice(high.index + high.matchedText.length));
+}
+/** Two units differ: both in the vocabulary and in different families, or (outside it) not `sameUnit`. */
+function unitsDiffer(a: string, b: string): boolean {
+  const fa = unitFamily(a), fb = unitFamily(b);
+  return fa !== undefined && fb !== undefined ? fa !== fb : !sameUnit(a, b);
+}
+
+/**
+ * Positive evidence that a range's claimed unit is not its own: the words write a different unit at the range's own high end
+ * ("between 4 and 6 lb" read as kg; "6 mm" read as m; "6 kg" read as g), or the claimed unit is written only after an unrelated
+ * figure equal to that end ("between 4 and 6 mm … a platform 6 metres high"). A range whose words write no unit at its end
+ * ("between 20 and 40 extra visitors"; "about 5 points, between 4 and 7") is read as before; a currency is the amounts' own
+ * symbol (`figuresWritten` reads it with them).
  */
 function rangeUnitNotItsOwn(st: UserStatement): boolean {
   if (typeof st.low !== 'number' || typeof st.high !== 'number' || st.unit === undefined || st.unit.trim() === '') return false;
   if (readCurrencyUnitWithQualifiers(st.unit).kind === 'currency') return false;
   const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === st.low && r.high.magnitude === st.high);
-  if (joined === undefined || unitWrittenAfter(st.quote, st.high, st.unit, joined.high.index)) return false;
-  if (unitWrittenAfter(st.quote, st.high, st.unit)) return true;
+  if (joined === undefined) return false;
+  const written = unitAtRange(st.quote, joined.high), claimed = unitFamily(st.unit);
+  if (written !== undefined && claimed !== undefined) return written !== claimed;
+  if (unitWrittenAfter(st.quote, st.high, st.unit, joined.high.index)) return false;
+  // Borrowed: another figure equal to this end carries the unit (as written, or a word of its family).
+  const high = st.high, unit = st.unit;
+  if (findStatedAmounts(st.quote).some((x) => x.index !== joined.high.index && Math.abs(x.magnitude) === Math.abs(high)
+    && (unitWrittenAfter(st.quote, high, unit, x.index) || (claimed !== undefined && unitAtRange(st.quote, x) === claimed)))) return true;
   const next = /^\s*(\p{L}+)/u.exec(st.quote.slice(joined.high.index + joined.high.matchedText.length))?.[1]?.toLowerCase();
-  return next !== undefined && next.startsWith(st.unit.trim().toLowerCase());
+  if (next !== undefined && next.startsWith(st.unit.trim().toLowerCase())) return true;
+  return !quoteNamesUnit(st.quote, st.unit);
+}
+
+/** The words name the unit somewhere (whole word, plural-tolerant, or a word of its family): a unit they never write is the AI's alone. */
+function quoteNamesUnit(quote: string, unit: string): boolean {
+  const u = unit.trim().toLowerCase().replace(/\s+/gu, ' ');
+  const whole = new RegExp(`(?<![\\p{L}\\p{N}])${u.replace(/(?:es|s)$/u, '').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/ /gu, '\\s+')}(?:es|s)?(?![\\p{L}\\p{N}])`, 'iu');
+  if (whole.test(quote)) return true;
+  const family = unitFamily(unit);
+  return family !== undefined && [...quote.matchAll(/[\p{L}%]+/gu)].some((w) => unitLeading(quote.slice(w.index)) === family);
 }
 
 /**
@@ -388,14 +450,23 @@ export function linkEffectRangeInOtherUnit(model: unknown, brief: string, from: 
   const map = sourceMapOf(draftStatements(model), brief);
   const ends = (low: unknown, high: unknown) => (typeof low === 'number' && typeof high === 'number'
     ? { low: Math.min(Math.abs(low), Math.abs(high)), high: Math.max(Math.abs(low), Math.abs(high)) } : undefined);
+  // A refused range's unit is the one its words write at its own end, if any.
+  const writtenAt = (quote: string, e: { readonly low: number; readonly high: number }): string | undefined => {
+    const joined = findJoinedRanges(quote).find((r) => r.low.magnitude === e.low && r.high.magnitude === e.high);
+    return joined === undefined ? undefined : unitAtRange(quote, joined.high);
+  };
+  // A verified range's unit agrees with its words (`rangeUnitNotItsOwn`), so the AI's reading of it is the range's unit.
   for (const st of map.verified.get(key) ?? []) {
     const e = ends(st.low, st.high);
     if (st.form === 'range' && st.negated !== true && e !== undefined && typeof st.unit === 'string' && st.unit.trim() !== ''
-      && !sameUnit(st.unit, unit)) return { ...e, quote: st.quote };
+      && unitsDiffer(st.unit, unit)) return { ...e, quote: st.quote };
   }
   for (const r of map.refused) {
     const e = r.key === key && r.refusal === 'unit_not_written' && r.given['negated'] !== true ? ends(r.given['low'], r.given['high']) : undefined;
-    if (e !== undefined && typeof r.quote === 'string') return { ...e, quote: r.quote };
+    if (e === undefined || typeof r.quote !== 'string') continue;
+    // Refused for its claimed unit: an Olumi size from it is set aside unless its own words write this link's unit there.
+    const words = writtenAt(r.quote, e);
+    if (words === undefined || unitsDiffer(words, unit)) return { ...e, quote: r.quote };
   }
   return null;
 }

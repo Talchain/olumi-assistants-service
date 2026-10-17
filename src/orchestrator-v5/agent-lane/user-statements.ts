@@ -117,7 +117,10 @@ const escapeRe = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export function unitWrittenAfter(quote: string, figureStated: number, unit: string, at?: number): boolean {
   const u = unit.trim().toLowerCase().replace(/\s+/gu, ' ');
   if (u === '') return false;
-  const after = new RegExp(`^\\s*${escapeRe(u.replace(/(?:es|s)$/u, '')).replace(/ /gu, '\\s+')}(?:es|s)?(?![\\p{L}\\p{N}])`, 'iu');
+  // ⛔ A unit no longer than its plural ending ("s", seconds) is its own stem: stripping it left an empty pattern that matched ANY
+  // figure followed by a space (the #3356 unit sweep).
+  const stem = u.length > 2 ? u.replace(/(?:es|s)$/u, '') : u;
+  const after = new RegExp(`^\\s*${escapeRe(stem).replace(/ /gu, '\\s+')}(?:es|s)?(?![\\p{L}\\p{N}])`, 'iu');
   return findStatedAmounts(quote).some((a) => (at === undefined || a.index === at) && Math.abs(a.magnitude) === Math.abs(figureStated)
     && (a.matchedText.trim().toLowerCase().endsWith(u) || after.test(quote.slice(a.index + a.matchedText.length))));
 }
