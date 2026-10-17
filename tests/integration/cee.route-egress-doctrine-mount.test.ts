@@ -6,7 +6,7 @@
  * The scanner module (`src/services/doctrine/route-egress-doctrine-scan.ts`) had a
  * thorough unit spec and a 16-mutant kit, and the producers had a fail-loud doctrine
  * spec — but **nothing exercised the two CALL SITES**. Deleting both mounts
- * (`assist.v1.review.ts` and `assist.v1.isl-synthesis.ts`) left the entire suite
+ * (`assist.v1.review.ts`) left the entire suite
  * green: every instrument agreed with every other and none of them touched the seam
  * the change exists to add (CLAUDE.md trap 3b in its general form).
  *
@@ -29,11 +29,6 @@
  * 3. **Each route gets a CLEAN-PAYLOAD control.** A test that only ever sees the
  *    event cannot tell "the mount fired" from "something always fires".
  *
- * The proof obligation is the deletion mutant, and it is a DISCRIMINATING PAIR:
- * deleting the `/assist/v1/isl-synthesis` call site must RED the isl-synthesis test
- * and leave the review test GREEN, and vice versa. A single biting mutant proves
- * sensitivity to something; the pair proves sensitivity to the named mount.
- *
  * Both planted strings are USER-AUTHORED fields (a VoI research note, an option
  * label), which is the realistic shape of a hit and the reason the scanner is
  * detection-only rather than rewriting (see the scanner module header).
@@ -46,7 +41,7 @@ vi.stubEnv("LLM_PROVIDER", "fixtures");
 // One key per test group: the routes are rate-limited per key.
 vi.stubEnv(
   "ASSIST_API_KEYS",
-  "doctrine-mount-isl,doctrine-mount-isl-clean,doctrine-mount-review,doctrine-mount-review-clean",
+  "doctrine-mount-review,doctrine-mount-review-clean",
 );
 
 vi.mock("../../src/services/validateClient.js", () => ({
@@ -116,80 +111,6 @@ describe("route-egress doctrine scan — MOUNT coverage (ROADMAP 2.725 / review 
   });
 
   // ===========================================================================
-  // /assist/v1/isl-synthesis
-  // ===========================================================================
-
-  describe("POST /assist/v1/isl-synthesis", () => {
-    /**
-     * `voi[].recommended_research` is echoed verbatim into `voi_narrative`
-     * (assist.v1.isl-synthesis.ts, VoI branch), so this is a user-authored string
-     * reaching a 200 body — exactly what the scanner is mounted to observe.
-     */
-    const plantedPayload = {
-      goal_label: "Maximise revenue",
-      recommendation_label: "Raise price",
-      voi: [
-        {
-          factor_id: "f_churn",
-          factor_label: "Churn Rate",
-          voi: 12000,
-          recommended_research: "Commission the recommended churn survey.",
-        },
-      ],
-    };
-
-    it("emits cee.route_egress.doctrine_hit naming this mount, this leaf and this request", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/assist/v1/isl-synthesis",
-        headers: { "X-Olumi-Assist-Key": "doctrine-mount-isl" },
-        payload: plantedPayload,
-      });
-
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.body) as { voi_narrative?: string };
-
-      // PRECONDITION PIN — if the producer ever stops carrying the planted term,
-      // this fails here rather than silently becoming a test that proves nothing.
-      expect(body.voi_narrative).toContain("the recommended churn survey");
-
-      const events = doctrineEvents();
-      expect(events).toHaveLength(1);
-
-      const payload = events[0];
-      expect(payload.route).toBe("/assist/v1/isl-synthesis");
-      // Binds the event to THIS request, not to any doctrine hit anywhere.
-      expect(payload.request_id).toBe(res.headers["x-cee-request-id"]);
-      expect(payload.hit_count).toBe(1);
-      expect(byPath(payload.hits)).toEqual([{ path: "voi_narrative", term: "recommended" }]);
-    });
-
-    it("emits NO doctrine event for a clean 200 on the same mount", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/assist/v1/isl-synthesis",
-        headers: { "X-Olumi-Assist-Key": "doctrine-mount-isl-clean" },
-        payload: {
-          goal_label: "Maximise revenue",
-          recommendation_label: "Raise price",
-          voi: [
-            {
-              factor_id: "f_churn",
-              factor_label: "Churn Rate",
-              voi: 12000,
-              recommended_research: "Commission a churn survey.",
-            },
-          ],
-        },
-      });
-
-      expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body).voi_narrative).toContain("Commission a churn survey.");
-      expect(doctrineEvents()).toEqual([]);
-    });
-  });
-
-  // ===========================================================================
   // /assist/v1/review
   // ===========================================================================
 
@@ -239,7 +160,6 @@ describe("route-egress doctrine scan — MOUNT coverage (ROADMAP 2.725 / review 
         robustness_synthesis?: { headline?: string };
       };
 
-      // PRECONDITION PIN — see the isl-synthesis case.
       expect(body.robustness_synthesis?.headline).toContain("The recommended tier");
 
       const events = doctrineEvents();

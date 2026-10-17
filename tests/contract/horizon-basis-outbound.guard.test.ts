@@ -78,7 +78,6 @@ const ALLOWLIST: (Sink & { reason: string })[] = [
   {"file": "src/routes/assist.v1.scenario-graph-register.ts", "symbol": "route", "reason": "Internal invariant and append inputs; stored proof must be retained.", "assignments": ["graph", "graph"]},
   {"file": "src/routes/assist.v1.scenario-graph.ts", "symbol": "readConversationTurns", "reason": "Internal words permission input, no graph in the conversation response.", "assignments": ["graph"]},
   {"file": "src/routes/assist.v1.scenario-versions.ts", "symbol": "route", "reason": "Internal save, restore and analysis inputs; public receipt uses the manifest converter.", "assignments": ["graph", "graph", "graph", "graph"]},
-  {"file": "src/routes/assist.v1.suggest-utility-weights.ts", "symbol": "route", "reason": "Internal utility suggestion input; response has no graph.", "assignments": ["graph"]},
   {"file": "src/routes/assist.v1.team-perspectives.ts", "symbol": "route", "reason": "Internal quality input with graph undefined.", "assignments": ["graph"]},
   {"file": "src/routes/scenario-graph-analysis-read.ts", "symbol": "readScenarioAnalysis", "reason": "Internal permission and analysis-view inputs; the view projects graph-free facts.", "assignments": ["graph", "graph", "graph", "graph", "graph"]},
   {"file": "src/schemas/working-set.ts", "symbol": "<module>", "reason": "Schema declaration, not a graph value.", "assignments": ["graph_snapshot"]},

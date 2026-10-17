@@ -254,7 +254,6 @@
       "src/cee/compound-goal/extractor.ts": 1,
       "src/cee/factor-extraction/goal-label-target.ts": 4,
       "src/cee/graph-readiness/canonical-readiness.ts": 2,
-      "src/cee/preference-elicitation/utility-bridge.ts": 3,
       "src/cee/structure/index.ts": 2,
       "src/cee/transforms/analysis-ready.ts": 10,
       "src/cee/transforms/schema-v2.ts": 1,
@@ -841,7 +840,7 @@
     "goal_horizon": 48,
     "goal_horizon_months": 44,
     "goal_level_reading": 20,
-    "goal_node_id": 291,
+    "goal_node_id": 288,
     "goal_period": 5,
     "goal_scope": 48,
     "goal_sense_reading": 15,
@@ -864,7 +863,7 @@
     "threshold_source": 40,
     "unit_reading": 79
   },
-  "total_references": 2498,
+  "total_references": 2495,
   "controls": {
     "goal_threshold_zzz_absent": 0
   }

@@ -9,7 +9,6 @@ import { describe, it, expect } from "vitest";
 import { Node, NodeKind, Graph } from "../../src/schemas/graph.js";
 import { normaliseNodeKind, NODE_KIND_MAP } from "../../src/adapters/llm/normalisation.js";
 import { detectBiases } from "../../src/cee/bias/index.js";
-import { suggestEdgeFunction } from "../../src/cee/edge-function-suggestions/index.js";
 import { computeGraphStats } from "../../src/cee/graph-readiness/factors.js";
 import type { GraphV1 } from "../../src/contracts/plot/engine.js";
 
@@ -150,56 +149,6 @@ describe("factor node kind", () => {
       const findings = detectBiases(graph);
       // Basic bias detection should still work
       expect(Array.isArray(findings)).toBe(true);
-    });
-  });
-
-  describe("edge-function-suggestions", () => {
-    it("suggests s_curve for factor nodes by default", () => {
-      const result = suggestEdgeFunction({
-        edge_id: "e1",
-        source_node: { id: "f1", label: "Market demand", kind: "factor" },
-        target_node: { id: "out1", label: "Revenue", kind: "outcome" },
-      });
-
-      // Factor nodes should bias toward non-linear functions
-      expect(["s_curve", "threshold", "diminishing_returns"]).toContain(
-        result.suggested_function
-      );
-      expect(result.confidence).toBeDefined();
-      expect(result.provenance).toBe("cee");
-    });
-
-    it("suggests threshold for regulatory factor", () => {
-      const result = suggestEdgeFunction({
-        edge_id: "e1",
-        source_node: { id: "f1", label: "Regulatory compliance", kind: "factor" },
-        target_node: { id: "out1", label: "Market access", kind: "outcome" },
-        relationship_description: "Regulatory threshold must be met",
-      });
-
-      expect(result.suggested_function).toBe("threshold");
-    });
-
-    it("suggests diminishing_returns for market demand factor", () => {
-      const result = suggestEdgeFunction({
-        edge_id: "e1",
-        source_node: { id: "f1", label: "Market demand level", kind: "factor" },
-        target_node: { id: "out1", label: "Sales volume", kind: "outcome" },
-      });
-
-      expect(result.suggested_function).toBe("diminishing_returns");
-    });
-
-    it("suggests noisy_and_not for competitor factor (preventative relationship)", () => {
-      // Competitor activity inhibits/reduces market share - this is a preventative relationship
-      const result = suggestEdgeFunction({
-        edge_id: "e1",
-        source_node: { id: "f1", label: "Competitor activity", kind: "factor" },
-        target_node: { id: "out1", label: "Market share", kind: "outcome" },
-      });
-
-      // "Competitor" matches preventative source pattern → noisy_and_not
-      expect(result.suggested_function).toBe("noisy_and_not");
     });
   });
 
