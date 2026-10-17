@@ -302,7 +302,7 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       graph_hash_after: computeAnalysisAffectingGraphHash(graph as never) || null,
       safe_summary: lead ? 'Recorded from your words when an option’s effect is fully in place'
         : rangeLaw ? 'Recorded your range as stated, with the Olumi approximation you adopted'
-          : link ? 'Recorded your range for this link as stated; it does not size the link'
+          : link ? 'Recorded Olumi’s reading of your words for this link; it does not size the link'
             : 'Recorded from your words that both targets count the same people',
       // A link's range sizes nothing, so nothing the analysis reads has changed: no re-Run is owed for it.
       impact: 'low', rerun_recommended: lead || rangeLaw },
@@ -310,7 +310,7 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
   return { kind: 'mutated', mutatedGraph: graph, handlerFacts: [fact as HandlerFact],
     confirmation: lead ? `Recorded from your words when ‘${label}’ is fully in place.`
       : rangeLaw ? `Recorded your range for ‘${label}’ as stated, with the Olumi approximation you adopted.`
-        : link ? `Recorded your range for ‘${label}’ as you stated it. It does not size the link yet.` : sameCohortRecordedWords(graph) };
+        : link ? `Recorded Olumi’s reading of your words for ‘${label}’. It does not size the link.` : sameCohortRecordedWords(graph) };
 }
 
 /** The labels of the goal's two cohort targets, the rate (a percentage of the people reached) and the count, or `undefined`. */

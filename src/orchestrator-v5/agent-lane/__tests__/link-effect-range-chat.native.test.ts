@@ -147,8 +147,10 @@ afterEach(async () => { while (apps.length) await apps.pop()!.close(); vi.unstub
 // ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3329 B1 + 22:59Z AMEND): the AI reads the range and binds it to this link's
 // effect; the door verifies only that the quote writes those ends in that unit. The card is Olumi's reading of the user's words and
 // IS the ask: nothing is recorded, and no ask is silenced, until the press adopts it.
-describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the user\'s words, recorded only by the press, then never asked again', () => {
-  it('⭐ the press records Olumi\'s reading (the user\'s words and ends, in their unit), sizes nothing, and no asker asks that link\'s size again', async () => {
+// ⛔ #3329 GREEN CORE (DL-3 02:59Z; BUDDY-A B1): a chat-pressed range is Olumi's reading the user chose to use. An AI-omitted negation
+// cannot be told apart from a genuine range, so the press grants NO authority: the link's size is still asked (the accepted cost).
+describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the user\'s words, recorded only by the press, granting no authority', () => {
+  it('⭐ the press records Olumi\'s reading (the user\'s words and ends, in their unit), sizes nothing, and its size is still asked', async () => {
     const g = await builtGraph();
     const said = 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.';
     const option = idOf(g, 'Corporate wellness deal');
@@ -158,8 +160,13 @@ describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the us
     expect(w.card, JSON.stringify({ calls: w.b._agent?.tool_calls, toolResults })).toBeDefined();
     const label = toolResults.map((r) => String(r.public_label ?? '')).join(' ');
     expect(label).toContain('a range of 4 to 7 points');
-    expect(label).toContain('This is Olumi’s reading of your words.');
+    expect(label).toContain('This is Olumi’s reading of your words, quoted above in full.');
+    expect(label).toContain('not as a range you stated');
     expect(label).toContain('does not size this link');
+    expect(label).not.toContain('your range');
+    expect(label).not.toContain('from your words');
+    expect(w.card.label).toBe('Use this reading');
+    const before = placeholderGoalWarning(stored, unsizedLeaderGoalPaths(stored, [option]), GOAL_FIGURES_PLACEHOLDER_PATH);
     // The card is the ask: before the press nothing is written and every asker still asks.
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
     stillAsked(stored, option, from, to);
@@ -174,24 +181,35 @@ describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the us
     expect(record.attest).toBeUndefined();
     expect(record.statements).toEqual([expect.objectContaining({ speaker: 'user', reading: 'olumi', quote: said, form: 'range', low: 4, high: 7, unit: 'points' })]);
     expect(String(approved.json().assistant_text ?? '') + JSON.stringify(approved.json())).toContain('Recorded Olumi’s reading of your words, which you chose to use');
-    expect(linkHoldsStatedRange(cold, from, to)).toBe(true);
     // SIZES NOTHING: the edge is byte-identical (still Olumi's placeholder).
     expect(edgeOf(cold, from, to)).toEqual(edgeOf(g, from, to));
-    // NEVER ASKED AGAIN after the press: the Strengthen card's selector and the Run's withhold (the link-size ask has its own row).
-    expect(selectStrengthenPlaceholder(cold, [option])).toBeNull();
-    const withheld = placeholderGoalWarning(cold, unsizedLeaderGoalPaths(cold, [option]), GOAL_FIGURES_PLACEHOLDER_PATH) as Dict;
-    expect(withheld.first_ask).toBeUndefined();
-    expect(withheld.acceptable_links).toBeUndefined();
+    // ⛔ GRANTS NO AUTHORITY: the Strengthen selector still offers this link and the Run's withhold asks exactly as before the press.
+    stillAsked(cold, option, from, to);
+    expect(placeholderGoalWarning(cold, unsizedLeaderGoalPaths(cold, [option]), GOAL_FIGURES_PLACEHOLDER_PATH)).toEqual(before);
   }, 60_000);
 
-  it('OMITTED NEGATION (BUDDY-A N3, the AI leaves `negated` out): the card shows the whole words as Olumi\'s reading; nothing operative until a press', async () => {
+  it('OMITTED NEGATION (BUDDY-A B1, the AI leaves `negated` out): the whole denial is shown as Olumi\'s reading; even after the press and a cold read it grants nothing', async () => {
     const g = await builtGraph();
     const said = 'The corporate deal will not lift weekday attendance by between 4 and 7 points.';
+    const option = idOf(g, 'Corporate wellness deal');
     const w = await answered(g, said, said);
     expect(w.card).toBeDefined();
-    expect(toolResults.map((r) => String(r.public_label ?? '')).join(' ')).toContain(`“${said}”`);
+    const label = toolResults.map((r) => String(r.public_label ?? '')).join(' ');
+    expect(label).toContain(`“${said}”`);
+    expect(label).not.toContain('your range');
+    expect(w.card.label).toBe('Use this reading');
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
-    stillAsked(stored, idOf(g, 'Corporate wellness deal'), w.from, w.to);
+    stillAsked(stored, option, w.from, w.to);
+    const before = placeholderGoalWarning(stored, unsizedLeaderGoalPaths(stored, [option]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    // Through the press and a cold read: the denial's words are kept as Olumi's reading, and no asker is silenced by them.
+    const approved = await w.turn(w.card.message, w.card); expect(approved.statusCode, approved.body).toBe(200);
+    const read = await w.app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    const cold = clone(read.json().graph);
+    expect(userStatementFor(cold, { kind: 'link', id: w.from, to_id: w.to, field: 'effect' })?.statements)
+      .toEqual([expect.objectContaining({ reading: 'olumi', quote: said })]);
+    expect(edgeOf(cold, w.from, w.to)).toEqual(edgeOf(g, w.from, w.to));
+    stillAsked(cold, option, w.from, w.to);
+    expect(placeholderGoalWarning(cold, unsizedLeaderGoalPaths(cold, [option]), GOAL_FIGURES_PLACEHOLDER_PATH)).toEqual(before);
   }, 60_000);
 
   it.each([

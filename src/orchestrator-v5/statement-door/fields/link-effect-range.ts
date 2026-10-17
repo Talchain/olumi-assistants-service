@@ -3,8 +3,9 @@
  * TL 21:18Z adopting the AIE AMEND: "Chat ranges are stored durably through the existing statement door, separately from sizing,
  * and are never claimed as used by a Run"). The user's complete statement about ONE link, with the ONE range it writes, recorded on
  * the link (`user_statements`, on its `from` node) exactly as construction records a range from the brief, by the press. It sizes
- * nothing: the link keeps whatever size it has (Olumi's placeholder), and the card and receipt say so. Every reader of a stated
- * range (`linkHoldsStatedRange`: no re-ask of that link, the Run's limitation words) then reads it as it reads the brief's. Pure.
+ * nothing: the link keeps whatever size it has (Olumi's placeholder), and the card and receipt say so. ⛔ #3329 GREEN CORE (DL-3 02:59Z):
+ * the press adopts Olumi's READING of the user's words, so it grants no authority: `linkHoldsStatedRange` reads only construction's
+ * record, and the link's size is still asked (an AI-omitted negation cannot be told apart from a genuine range). Pure.
  */
 import { linkEffectEndUnits, statedInOneOf } from '../../system-events/link-effect-edit.js';
 import { figuresWritten } from '../../agent-lane/construction-source-map.js';
@@ -40,6 +41,8 @@ export const LINK_EFFECT_RANGE_ROW: RoleRow = {
   signed_by: LINK_EFFECT_RANGE_SIGNED_BY,
   // "0 to 5 points" is a range of the user's: its low end is a figure, never refused as missing.
   allowsZero: true,
+  // The press adopts Olumi's reading of the user's words, never a record of a range they stated: "Use this reading".
+  derives: true,
   applies: linkHeld,
   // ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z; BUDDY-A #3329 B1): the AI reads the range and binds it to this link's effect; the
   // door verifies the quote writes those ends in that unit. This row only says which readings its field takes: a range, never
@@ -59,14 +62,14 @@ export const LINK_EFFECT_RANGE_ROW: RoleRow = {
   },
   readingWords: (statements, subject, _label, graph) => {
     const s = statements[0];
-    return `the effect of ${ends(subject, graph)} is a range of ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)} ${s?.unit ?? ''}, from your words`.replace(/ {2,}/gu, ' ');
+    return `the effect of ${ends(subject, graph)} is a range of ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)} ${s?.unit ?? ''}`.replace(/ {2,}/gu, ' ');
   },
-  assumptions: () => ['This is Olumi’s reading of your words. It is kept as your range and does not size this link: the analysis does not use it, '
-    + 'and still uses Olumi’s placeholder for this link.'],
+  assumptions: () => ['This is Olumi’s reading of your words, quoted above in full. It is kept as Olumi’s reading, not as a range you stated, '
+    + 'and it does not size this link: the analysis does not use it, still uses Olumi’s placeholder for this link, and can still ask its size.'],
   recordedWords: (statements, subject, _label, graph) => {
     const s = statements[0];
     return `Recorded Olumi’s reading of your words, which you chose to use: a range of ${fmt(s?.low ?? 0)} to ${fmt(s?.high ?? 0)} ${s?.unit ?? ''} `
-      .replace(/ {2,}/gu, ' ') + `for ${ends(subject, graph)}. It does not size the link; the analysis still uses Olumi’s placeholder for it.`;
+      .replace(/ {2,}/gu, ' ') + `for ${ends(subject, graph)}. It does not size the link; the analysis still uses Olumi’s placeholder for it, and its size can still be asked.`;
   },
   get writer() { return LINK_EFFECT_RANGE_WRITER; },
 };

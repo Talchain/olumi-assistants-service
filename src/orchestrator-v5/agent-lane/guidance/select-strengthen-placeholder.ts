@@ -20,7 +20,6 @@ import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../../format/influence-bands.js';
 import { isPlaceholderLink } from '../../../cee/magnitude/link-sizing.js';
 import { placeholderGoalPaths } from '../goal-certainty.js';
-import { linkHoldsStatedRange } from '../../statement-door/statements.js';
 
 export interface LinkTarget {
   readonly from_id: string;
@@ -85,8 +84,6 @@ export function selectStrengthenPlaceholder(
     .sort((a, b) => a.distance - b.distance || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   for (const c of candidates) {
-    // G3 (TL 20:58Z (3)): a link whose effect the user stated as a range is not "a link nobody sized": its size is never asked again.
-    if (linkHoldsStatedRange(graph, c.from, c.to)) continue;
     const target = linkTargetOf(graph, c.from, c.to);
     if (target !== null) return { variant: 'S1', ...target };
   }

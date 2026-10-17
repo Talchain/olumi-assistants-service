@@ -80,12 +80,15 @@ export function userStatementFor(graph: unknown, subject: DoorSubject): UserStat
 }
 
 /**
- * ⭐ THE ONE READ OF "THE USER STATED THIS LINK'S EFFECT AS A RANGE" (G3; from the brief at construction, or pressed from chat,
- * `LINK_EFFECT_RANGE_ROW`): a range statement, not negated, on the link's record. Every asker that would ask the link's size reads it.
+ * ⭐ THE ONE READ OF "THE USER STATED THIS LINK'S EFFECT AS A RANGE": construction's verified record from the brief (its attest),
+ * a range statement, not negated. ⛔ #3329 GREEN CORE (DL-3 02:59Z; BUDDY-A B1): a range pressed from CHAT (`LINK_EFFECT_RANGE_ROW`,
+ * no attest) is Olumi's reading the user chose to use, and an AI-omitted negation cannot be told apart from a genuine range, so it
+ * grants no authority here: its size is still asked. Consent never repairs a possibly wrong reading (the #3325 lesson).
  */
 export function linkHoldsStatedRange(graph: unknown, from: string, to: string): boolean {
-  return userStatementFor(graph, { kind: 'link', id: from, to_id: to, field: 'effect' })
-    ?.statements.some((st) => st.form === 'range' && st.negated !== true) === true;
+  const record = userStatementFor(graph, { kind: 'link', id: from, to_id: to, field: 'effect' });
+  return record?.attest?.recorded_by === CONSTRUCTION_ATTEST.recorded_by
+    && record.statements.some((st) => st.form === 'range' && st.negated !== true);
 }
 
 /** The record ONE press writes. */

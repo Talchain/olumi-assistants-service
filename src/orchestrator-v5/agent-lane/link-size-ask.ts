@@ -20,7 +20,6 @@ import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placehol
 import { unitOf } from '../../cee/magnitude/link-effect.js';
 import { CURRENCY_SYMBOL_TO_CODE, isCurrencyUnit } from '../../utils/currency-alphabet.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
-import { linkHoldsStatedRange } from '../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -134,8 +133,6 @@ export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | n
   if (link === null) return null;
   const { edge, source, target, nodes } = link;
   if (usersOwnLink(edge) || sizedLinkTest(nodes, limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints))(edge)) return null;
-  // G3: the user already stated this link's effect as a range, so its size is never asked again.
-  if (typeof edge.from === 'string' && typeof edge.to === 'string' && linkHoldsStatedRange(graph, edge.from, edge.to)) return null;
   const direction = directionOf(edge);
   if (direction === null) return null;
   const s = labelOf(source); const t = labelOf(target);

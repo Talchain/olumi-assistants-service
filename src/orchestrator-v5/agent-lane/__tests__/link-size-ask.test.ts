@@ -12,7 +12,6 @@ import { readFileSync } from 'node:fs';
 import { linkSizeAsk } from '../link-size-ask.js';
 import { sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
 import { textAtRest } from '../decision-input-ask.js';
-import { userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 
 type Rec = Record<string, unknown>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/served-link-inspect-train-0545Z.json', import.meta.url), 'utf8')) as {
@@ -30,21 +29,6 @@ const withNode = (id: string, patch: (n: Rec) => Rec, g: { nodes: Rec[]; edges: 
   const c = clone(g);
   return { ...c, nodes: c.nodes.map((n) => (n.id === id ? patch(n) : n)) };
 };
-
-describe('G3: a link whose effect the user stated as a range is never asked again (TL 20:58Z (3))', () => {
-  const subject = { kind: 'link', id: 'qualified_angel_investor_conversations', to_id: 'securing_funding', field: 'effect' } as const;
-  const said = 'Each qualified angel conversation could add somewhere between £5,000 and £15,000 to our funding.';
-  const ranged = (negated = false) => withUserStatement(clone(FX.graph) as never, userStatementRecord(subject, [{ speaker: 'user', reading: 'olumi', quote: said,
-    source: said, subject: { quantity: 'effect', node_id: subject.id }, form: 'range', low: 5000, high: 15000, ...(negated ? { negated: true as const } : {}) }],
-  '2026-10-16T22:30:00Z'), subject)!;
-  it('the stated range silences the size ask; the same link with no range is asked as before', () => {
-    expect(linkSizeAsk(FX.graph, at(FX.served_assistant_text))).toBe(ASK);
-    expect(linkSizeAsk(ranged(), at(FX.served_assistant_text))).toBeNull();
-  });
-  it('CONTRAST: a NEGATED range ("not between …") is no stated range: still asked', () => {
-    expect(linkSizeAsk(ranged(true), at(FX.served_assistant_text))).toBe(ASK);
-  });
-});
 
 describe('the served link (R3 train-0545Z step 05)', () => {
   it('PRECONDITION: the served link is a placeholder by the ONE sized-link test; its neighbour (Paul\'s £1-2m deal size) is sized', () => {
