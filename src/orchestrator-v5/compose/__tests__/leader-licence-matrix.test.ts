@@ -26,8 +26,23 @@ const fixture = (name: string): unknown =>
 const m1 = fixture('m1-s1-served-graphs.json') as { cases: { graph: unknown }[] };
 const admissionOf = (ready: unknown) => (ready as { analysis_admission?: { structurally_analysable?: unknown; permitted_analysis_mode?: unknown } }).analysis_admission;
 
+/**
+ * C1 (#2678, founder trace Q4): admission now caps at `quantified_provisional` while `unsizedLeaderGoalPaths` is non-empty,
+ * the same walk the post-Run licence withholds on. The served M1 graph reaches its goal through Olumi-sized links, so the
+ * comparative_leader cell is that SAME served graph with every link user-sized; `M1_unsized` pins the served graph as is.
+ */
+const userSized = (graph: unknown): unknown => {
+  const g = structuredClone(graph) as { edges?: Array<Record<string, unknown>> };
+  for (const e of g.edges ?? []) {
+    const p = (e.provenance !== null && typeof e.provenance === 'object' ? e.provenance : {}) as Record<string, unknown>;
+    e.provenance = { ...p, magnitude: 'user_stated' };
+  }
+  return g;
+};
+
 const CELLS = {
-  M1: buildCanonicalAnalysisReadyFromGraph(m1.cases[0]!.graph),
+  M1: buildCanonicalAnalysisReadyFromGraph(userSized(m1.cases[0]!.graph)),
+  M1_unsized: buildCanonicalAnalysisReadyFromGraph(m1.cases[0]!.graph),
   M2: buildCanonicalAnalysisReadyFromGraph(m1.cases[1]!.graph),
   M3: buildCanonicalAnalysisReadyFromGraph((fixture('served-799d1a5d-cold-s1-graph.json') as { graph: unknown }).graph),
   M4: { status: 'blocked', may_run: false, analysis_admission: { structurally_analysable: false, permitted_analysis_mode: 'exploratory', missing_important_inputs: [], semantic_quality_sufficient: false, reasons: [] } },
@@ -58,6 +73,7 @@ const A_FALSE = [
 describe('PRECONDITION: each cell is the admission it is named for', () => {
   it.each([
     ['M1', true, 'comparative_leader'],
+    ['M1_unsized', true, 'quantified_provisional'],
     ['M2', true, 'quantified_provisional'],
     ['M3', true, 'quantified_provisional'],
     ['M4', false, 'exploratory'],
@@ -69,6 +85,7 @@ describe('PRECONDITION: each cell is the admission it is named for', () => {
 
 const EXPECTED_WHEN_A_TRUE: Record<keyof typeof CELLS, LeaderLicence> = {
   M1: 'permitted',
+  M1_unsized: 'permitted_with_caveat',
   M2: 'permitted_with_caveat',
   M3: 'permitted_with_caveat',
   M4: 'withheld',
