@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -3858,14 +3858,16 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
   return { ...model, nodes, loss: [...model.loss, ...loss] };
 }
 
-/**
- * ⭐ ITEM 3 (AIE 16 Oct range contract, in its own words): the one disclosure for a link whose effect the USER stated as a
- * range while nobody gave it a size. The user's whole attributed sentence is recorded on the link (construction's statement
- * record); the model holds Olumi's provisional size, which that range does not supply. Said once (`not_represented`), never
- * asked: the range is not requested again, and no figure is chosen from it. Always "is not taken from" it, never "conflicts
- * with": ⛔ BUDDY-A #3312 B1, a statement records no source-change basis ("adding 10 support staff … between 40 and 55 points"
- * against Olumi's 5 per 1 staff = 50 per 10, inside it), so no comparison between the two is proven. Pure.
- */
+/** The user's range in another unit than this link's: said as theirs, and why Olumi has not sized the link from it (G3 a735). */
+function statedRangeOtherUnitEntry(l: CandidateLink, range: { readonly low: number; readonly high: number; readonly quote: string },
+  source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
+  const said = range.quote.trim();
+  const reason = `"${source.label}" → "${target.label}": "${said}", as the brief puts it. That range is not written in "${naturalAmountUnitOf(target)}", `
+    + 'the unit this link\'s effect is measured in, so Olumi has not sized the link from it: the link holds Olumi\'s provisional placeholder, not that range.';
+  return { code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE, layer: 'cee', field_path: `edges[${l.from}::${l.to}].stated_range_other_unit`,
+    before: { low: range.low, high: range.high, effect_amount: l.effect_amount ?? null }, after: null, reason, severity: 'warn' } as RepairEntry;
+}
+
 /** The user's range, said as theirs beside the separate approximation Olumi's estimate is (G3 a735 green core). */
 function statedRangeBesideEstimateEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const said = range.reported.trim();
@@ -3875,6 +3877,14 @@ function statedRangeBesideEstimateEntry(l: CandidateLink, range: StatedWholeRang
     before: { low: range.low, high: range.high, text: range.text }, after: sized.natural_effect?.amount ?? null, reason, severity: 'info' } as RepairEntry;
 }
 
+/**
+ * ⭐ ITEM 3 (AIE 16 Oct range contract, in its own words): the one disclosure for a link whose effect the USER stated as a
+ * range while nobody gave it a size. The user's whole attributed sentence is recorded on the link (construction's statement
+ * record); the model holds Olumi's provisional size, which that range does not supply. Said once (`not_represented`), never
+ * asked: the range is not requested again, and no figure is chosen from it. Always "is not taken from" it, never "conflicts
+ * with": ⛔ BUDDY-A #3312 B1, a statement records no source-change basis ("adding 10 support staff … between 40 and 55 points"
+ * against Olumi's 5 per 1 staff = 50 per 10, inside it), so no comparison between the two is proven. Pure.
+ */
 function statedRangeUnsizedEntry(l: CandidateLink, range: StatedWholeRangeOfLink, sized: LinkSizing, source: MagnitudeNode, target: MagnitudeNode): RepairEntry {
   const ne = sized.natural_effect;
   const held = ne === undefined ? undefined
@@ -5191,12 +5201,19 @@ function admitOnce(
     // placeholder (a bare range gives no mean, spread or tails), said once against that range, never asked again.
     const sourceRange = !user_stated && typeof l.effect_amount !== 'number' && typeof brief === 'string'
       ? linkEffectStatedRange(model, brief, source.label, target.label) ?? undefined : undefined;
+    // ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R1–R3): an Olumi size taken from the user's range in ANOTHER unit ("4 to 6 lb" on a
+    // kilogram link; "4 and 6 mm" read as metres) is a figure in the wrong unit: set aside, so the link keeps Olumi's placeholder
+    // and says why. Never converted here, never the user's figure.
+    const otherUnit = !user_stated && typeof signed.amount === 'number' && typeof brief === 'string'
+      ? linkEffectRangeInOtherUnit(model, brief, source.label, target.label, naturalAmountUnitOf(target)) ?? null : null;
+    const wrongUnit = otherUnit !== null && Math.abs(signed.amount as number) >= otherUnit.low && Math.abs(signed.amount as number) <= otherUnit.high;
+    if (wrongUnit) loss.push(statedRangeOtherUnitEntry(l, otherUnit!, source, target));
     const statement = {
       // A corrected estimate sign cannot prove the drafter's original definition.
       definitional: l.definitional === true && !signed.resolved,
       direction: l.direction,
-      effect_amount: signed.amount,
-      effect_per_source_change: signed.per,
+      effect_amount: wrongUnit ? null : signed.amount,
+      effect_per_source_change: wrongUnit ? null : signed.per,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
       ...(sourceRange !== undefined ? { source_range: sourceRange } : {}),

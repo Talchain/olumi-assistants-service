@@ -15,7 +15,7 @@
  * reason, never dropped and never turned into Olumi's estimate. Figures come only from the quote's own words (`figuresIn`),
  * never from the drafter's value. `statements` is optional: a missing or malformed list never fails a draft. Pure.
  */
-import { findJoinedRanges, findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { STATEMENT_FORMS, unitWrittenAfter, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
@@ -70,7 +70,7 @@ export interface SourceMap {
 
 /** How many entries one draft has checked; the rest are retained unchecked (`not_checked`), never dropped. */
 const MAX = 60;
-const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions'] as const;
+const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'negated'] as const;
 const plain = (v: unknown): v is string | number | boolean | null => v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v));
 function givenOf(r: Record<string, unknown>): GivenStatement {
   const out: Record<string, GivenStatement[string]> = {};
@@ -170,9 +170,32 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
       conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}) }],
       { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
+    // ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R2–R3): an EFFECT range is never read in a unit its own words do not give it: one borrowed
+    // from an unrelated equal figure ("between 4 and 6 mm … a platform 6 metres high" is never a range in metres), or a different
+    // word written at the range ("6 mm" is not "m"). It is kept whole as unknown, never recorded as the user's range in that unit.
+    if (field === 'effect' && form === 'range' && v.statements.some(rangeUnitNotItsOwn)) {
+      kept('unit_not_written', `“${quote}” does not write ${text(r['unit'], 60) ?? 'that unit'} at that range, so it is not read in that unit. Nothing was prepared.`, key);
+      return;
+    }
     verified.set(key, [...(verified.get(key) ?? []), ...v.statements]);
   });
   return { verified, refused };
+}
+
+/**
+ * Positive evidence that a range's claimed unit is not its own (the verifier's `unitWrittenAfter`, a whole word): the unit is written
+ * after an unrelated figure equal to the range's high end but not at the range itself, or the word at the range's own high end is a
+ * different word the unit begins ("mm" for "m"). A range whose words write no unit at its end ("between 20 and 40 extra visitors";
+ * "about 5 points, between 4 and 7") is read as before; a currency is the amounts' own symbol (`figuresWritten` reads it with them).
+ */
+function rangeUnitNotItsOwn(st: UserStatement): boolean {
+  if (typeof st.low !== 'number' || typeof st.high !== 'number' || st.unit === undefined || st.unit.trim() === '') return false;
+  if (readCurrencyUnitWithQualifiers(st.unit).kind === 'currency') return false;
+  const joined = findJoinedRanges(st.quote).find((r) => r.low.magnitude === st.low && r.high.magnitude === st.high);
+  if (joined === undefined || unitWrittenAfter(st.quote, st.high, st.unit, joined.high.index)) return false;
+  if (unitWrittenAfter(st.quote, st.high, st.unit)) return true;
+  const next = /^\s*(\p{L}+)/u.exec(st.quote.slice(joined.high.index + joined.high.matchedText.length))?.[1]?.toLowerCase();
+  return next !== undefined && next.startsWith(st.unit.trim().toLowerCase());
 }
 
 /**
@@ -348,6 +371,33 @@ export function linkEffectStatedRange(model: unknown, brief: string, from: strin
   const at = st.quote.indexOf(text);
   const between = at >= 0 && /\bbetween\s+$/iu.test(st.quote.slice(0, at)) ? 'between ' : '';
   return { low, high, text: `${between}${text}`, end: 'whole', reported: st.quote };
+}
+/**
+ * ⛔ G3 a735 (PL 13:22Z; BUDDY-A #3356 R1–R3): the AI's own range reading for THIS link whose figures the words write, but which is
+ * NOT in the edge's operative unit: a different unit written at the range ("4 to 6 lb" on a kilogram link), or the AI's unit not
+ * written there at all (refused `unit_not_written`: "4 and 6 mm … a platform 6 metres high" read as metres). An Olumi size taken
+ * from it is a figure in the wrong unit. Ends as magnitudes; the whole quote. `null`: none; `undefined`: a draft without statements.
+ */
+export function linkEffectRangeInOtherUnit(model: unknown, brief: string, from: string, to: string, unit: string | undefined)
+  : { readonly low: number; readonly high: number; readonly quote: string } | null | undefined {
+  const m = model !== null && typeof model === 'object' ? model as { statements?: unknown } : {};
+  if (!Array.isArray(m.statements)) return undefined;
+  // A link with no unit of its own has no other unit to compare with: nothing is set aside on a guess.
+  if (typeof unit !== 'string' || unit.trim() === '') return null;
+  const key = subjectKey({ kind: 'link', label: from, to_label: to }, 'effect');
+  const map = sourceMapOf(draftStatements(model), brief);
+  const ends = (low: unknown, high: unknown) => (typeof low === 'number' && typeof high === 'number'
+    ? { low: Math.min(Math.abs(low), Math.abs(high)), high: Math.max(Math.abs(low), Math.abs(high)) } : undefined);
+  for (const st of map.verified.get(key) ?? []) {
+    const e = ends(st.low, st.high);
+    if (st.form === 'range' && st.negated !== true && e !== undefined && typeof st.unit === 'string' && st.unit.trim() !== ''
+      && !sameUnit(st.unit, unit)) return { ...e, quote: st.quote };
+  }
+  for (const r of map.refused) {
+    const e = r.key === key && r.refusal === 'unit_not_written' && r.given['negated'] !== true ? ends(r.given['low'], r.given['high']) : undefined;
+    if (e !== undefined && typeof r.quote === 'string') return { ...e, quote: r.quote };
+  }
+  return null;
 }
 /** A link size's stated range, as `natural_effect.stated_range` holds it (A4), with the whole verified sentence that reports it. */
 export type StatedRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high'; readonly reported: string };

@@ -101,6 +101,11 @@ async function registered(model: Rec, brief = BRIEF): Promise<Rec> {
 const BASIS = 'Uses the stated lower end as a provisional planning effect.';
 /** The sentence beside Olumi's estimate: the user's whole words as theirs, the figure used named as Olumi's separate approximation. */
 const beside = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_beside_estimate'));
+/** The sentence for a range in another unit than the link's: theirs, and why the link is not sized from it (PL 13:22Z). */
+const otherUnit = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_other_unit'));
+const otherUnitWords = (quote: string, unit: string): string => `"${PRE}" → "${WASTE}": "${quote}", as the brief puts it. That range is not `
+  + `written in "${unit}", the unit this link's effect is measured in, so Olumi has not sized the link from it: the link holds Olumi's `
+  + 'provisional placeholder, not that range.';
 const recordOn = (graph: Rec): Rec | undefined => {
   const pre = graph.nodes.find((n: Rec) => n.label === PRE);
   const waste = graph.nodes.find((n: Rec) => n.label === WASTE);
@@ -185,31 +190,59 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
     expect(beside(out)?.reason).toContain('lowers "Daily food waste" by 5 kg, not that range.');
   });
 
-  it('⛔ BUDDY-A #3356 R1 contrast, real build → register: a range in POUNDS on a kilogram goal: Olumi\'s estimate, the range kept in lb', async () => {
+  it('⛔ BUDDY-A #3356 R1 contrast, real build → register: a range in POUNDS on a kilogram goal is never sized in kg: Olumi\'s placeholder, the range kept in lb', async () => {
     const out = admitted(draft({ pounds: true }), BRIEF_LB);
-    expect(edgeFrom(out, PRE).provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: BASIS });
-    expect(beside(out)?.reason).toContain(`"${RANGE_LB}", as the brief puts it`);
+    expect(edgeFrom(out, PRE).provenance.magnitude).toBe('olumi_placeholder');
+    expect(edgeFrom(out, PRE).provenance.natural_effect?.amount, 'no −4 kg taken from "4 to 6 lb"').toBeUndefined();
+    expect(otherUnit(out)?.reason).toBe(otherUnitWords(RANGE_LB, 'kg'));
+    expect(beside(out), 'never said as a range of this link\'s unit').toBeUndefined();
     const graph = await registered(draft({ pounds: true }), BRIEF_LB);
-    expect(savedEdge(graph).provenance.magnitude).toBe('olumi_estimate');
+    expect(savedEdge(graph).provenance.magnitude).toBe('olumi_placeholder');
     expect(savedEdge(graph).provenance.natural_effect?.stated_range).toBeUndefined();
+    // The user's words stay theirs, in the unit they wrote.
     expect(recordOn(graph)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: RANGE_LB, form: 'range', low: 4, high: 6, unit: 'lb' })]);
   });
 
-  it('⛔ BUDDY-A #3356 R2 contrast, real build → register: a range written in mm on a metre goal: Olumi\'s estimate, its basis kept', async () => {
-    const graph = await registered(draft({ metres: 'mm' }), inMetres(BRIEF, 'mm'));
-    expect(savedEdge(graph).provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: BASIS });
+  it('⛔ BUDDY-A #3356 R2 contrast, real build → register: a range written in mm on a metre goal is never read in m: Olumi\'s placeholder, no record in m', async () => {
+    const brief = inMetres(BRIEF, 'mm');
+    const out = admitted(draft({ metres: 'mm' }), brief);
+    expect(edgeFrom(out, PRE).provenance.magnitude).toBe('olumi_placeholder');
+    expect(otherUnit(out)?.reason).toBe(otherUnitWords(inMetres(RANGE, 'mm'), 'm'));
+    const key = `link|${PRE.toLowerCase()}|${WASTE.toLowerCase()}||effect`;
+    const map = sourceMapOf(draftStatements(draft({ metres: 'mm' })), brief);
+    expect(map.verified.get(key)).toBeUndefined();
+    expect(map.refused.find((r) => r.key === key)).toMatchObject({ refusal: 'unit_not_written', quote: inMetres(RANGE, 'mm') });
+    const graph = await registered(draft({ metres: 'mm' }), brief);
+    expect(savedEdge(graph).provenance.magnitude).toBe('olumi_placeholder');
     expect(savedEdge(graph).provenance.natural_effect?.stated_range).toBeUndefined();
+    expect(recordOn(graph), 'no verified human range in m').toBeUndefined();
   });
 
-  it('⛔ BUDDY-A #3356 R3 contrast, real build → register: "4 and 6 mm … a platform 6 metres high" on a metre goal: Olumi\'s estimate', async () => {
+  it('⛔ BUDDY-A #3356 R3 + PL 13:22Z, real build → register: "4 and 6 mm … a platform 6 metres high": no human range in metres, no −4 metres size', async () => {
     const brief = inMetres(BRIEF, 'borrowed');
     expect(brief).toContain('between 4 and 6 mm a day while the conveyor platform stands 6 metres high');
+    const out = admitted(draft({ metres: 'borrowed' }), brief);
+    expect(edgeFrom(out, PRE).provenance.magnitude).toBe('olumi_placeholder');
+    expect(edgeFrom(out, PRE).provenance.natural_effect?.amount, 'an unrelated six never supplies the unit').toBeUndefined();
+    expect(otherUnit(out)?.reason).toBe(otherUnitWords(inMetres(RANGE, 'borrowed'), 'metres'));
+    expect(beside(out)).toBeUndefined();
     const graph = await registered(draft({ metres: 'borrowed' }), brief);
-    expect(savedEdge(graph).provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: BASIS });
-    expect(savedEdge(graph).provenance.natural_effect?.stated_range).toBeUndefined();
+    expect(savedEdge(graph).provenance.magnitude).toBe('olumi_placeholder');
+    expect(recordOn(graph), 'no verified human range in metres').toBeUndefined();
+  });
+
+  it('PL 13:22Z, real build → register: a REAL point the user wrote in the link\'s own unit survives, even inside a range they gave in another unit', async () => {
+    const POINT = 'In our trial the pre-order system in use cut daily food waste by 5 kg a day.';
+    const brief = `${BRIEF_LB} ${POINT}`;
+    const d = draft({ pounds: true });
+    const model = { ...d, links: d.links.map((l: Rec) => (l.from === PRE ? { ...l, effect_amount: -5, effect_provenance: 'explicit', basis: null, source_quote: POINT } : l)) };
+    const graph = await registered(model, brief);
+    expect(savedEdge(graph).provenance.magnitude, JSON.stringify(savedEdge(graph).provenance)).toBe('user_stated');
+    expect(savedEdge(graph).provenance.natural_effect).toMatchObject({ amount: -5 });
   });
 
   it('same-unit metres control: Olumi\'s estimate, the user\'s metres range recorded beside it (no unit makes a drafted end the user\'s)', async () => {
+    expect(otherUnit(admitted(draft({ metres: 'metres' }), inMetres(BRIEF, 'metres'))), 'the same unit is never set aside').toBeUndefined();
     const graph = await registered(draft({ metres: 'metres' }), inMetres(BRIEF, 'metres'));
     expect(savedEdge(graph).provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: BASIS });
     expect(recordOn(graph)?.statements).toEqual([expect.objectContaining({ form: 'range', low: 4, high: 6, unit: 'metres' })]);
