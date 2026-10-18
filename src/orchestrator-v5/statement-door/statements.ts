@@ -472,10 +472,13 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
   const quote = line !== undefined && plainQuoteWords(line) === plainQuoteWords(request.quote) ? line : request.quote;
   if (!wholeStatementIn(texts.now ?? '', quote)) {
     // Display only facts from the existing literal/whole-statement and paired-speech readers; no source permission changes.
-    const speech = speechReading(texts.now ?? ''), said = speechReading(request.quote).text;
+    const speech = speechReading(texts.now ?? '', false), said = speechReading(request.quote).text;
     const spans = quoteSpansIn(speech.text, said);
     const reported = spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length));
-    const partial = !reported && spans.length > 0 && line !== undefined && wholeStatementIn(texts.now ?? '', line);
+    // Words inside paired SINGLE marks keep the display they had (speaker unknown): never "reported", never your excerpt.
+    const single = speechReading(texts.now ?? '');
+    const singleMarked = spans.length > 0 && spans.every(at => single.inSpeech(at) || single.inSpeech(at + said.length));
+    const partial = !reported && !singleMarked && spans.length > 0 && line !== undefined && wholeStatementIn(texts.now ?? '', line);
     return refused('correction_not_stated', 'correction.quote_whole_current_turn', statementCorrectionWords({ readings,
       source_state: reported ? 'reported' : partial ? 'partial' : spans.length === 0 && line === undefined ? 'missing' : 'unknown',
       ...(line === undefined ? {} : { source_words: line }), ...(partial ? { excerpt_words: request.quote } : {}) }));

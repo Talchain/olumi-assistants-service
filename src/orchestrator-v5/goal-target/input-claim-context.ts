@@ -255,19 +255,22 @@ const plainQuote = (text: string): string => text.replace(/[\u2018\u2019]/g, "'"
  * colon, before a letter: never "'27", "don't" or "the users' pilot") cannot be bounded, so nothing from there to the paragraph's
  * end is whole. Those words stay the brief's, unverified, with no speaker asserted.
  */
-const ENDS = /[.!?;]["»]*$/;
+const ENDS = /[.!?;]["»']*$/;
 export function wholeStatementIn(message: string, quote: unknown): boolean {
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
   const text = plainQuote(message);
   return said !== '' && quoteSpansIn(text, said).some((at) =>
-    /(?:^|[.!?;\n]["»]*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
+    /(?:^|[.!?;\n]["»']*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
     && !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
-    && !/(?:^|[\s:([\u2014\u2013-])'\p{L}/u.test(paragraphTo(text, at + said.length)));
+    && !insideSingleSpeech(text, at) && !insideSingleSpeech(text, at + said.length));
 }
-/** The existing paired-speech reader, exposed for source-review display; no attribution or write permission is granted. */
-export function speechReading(quote: string): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
+/**
+ * The existing paired-speech reader; no attribution or write permission is granted. Authorship reads paired single marks too
+ * (`insideSingleSpeech`); the source-review DISPLAY keeps its double-mark reading (`single: false`), so its words are unchanged.
+ */
+export function speechReading(quote: string, single = true): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
   const text = plainQuote(quote);
-  return { text, inSpeech: (at) => insideSpeech(text, at) };
+  return { text, inSpeech: (at) => insideSpeech(text, at) || (single && insideSingleSpeech(text, at)) };
 }
 
 /**
@@ -281,7 +284,7 @@ export function usersSpanIn(message: string, quote: unknown): number {
   const text = plainQuote(message);
   if (said === '') return -1;
   return quoteSpansIn(text, said).find((at) => !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
-    && !/(?:^|[\s:([\u2014\u2013-])'\p{L}/u.test(paragraphTo(text, at + said.length))) ?? -1;
+    && !insideSingleSpeech(text, at) && !insideSingleSpeech(text, at + said.length)) ?? -1;
 }
 
 /**
@@ -302,7 +305,29 @@ export function withdrawnLater(later: readonly string[]): boolean {
   return later.some((m) => clausesOf(plainQuote(m)).some(disowns));
 }
 /** The text of `at`'s paragraph up to `at`. */
-const paragraphTo = (text: string, at: number): string => text.slice(text.lastIndexOf('\n', at - 1) + 1, at);
+/**
+ * ⭐ LEAN CORE (dev P01/P11, DL-3 05:0xZ): a SINGLE mark bounds another speaker's words only when PAIRED in its paragraph, as double
+ * marks do. It opens after the start, a space or punctuation (the attribution's colon included) and before a letter; it closes after a
+ * non-space and before the end, a space or punctuation, and the LAST such mark in the paragraph closes it, so an apostrophe inside the
+ * speech ("don't", "the users' pilot") never ends it early. An unpaired opening mark, an in-word apostrophe or a year ("'27") opens
+ * nothing, so the user's whole message stays theirs (was: any opening-shaped single mark made the rest of its paragraph unverifiable).
+ */
+function insideSingleSpeech(text: string, at: number): boolean {
+  const start = text.lastIndexOf('\n', at - 1) + 1;
+  const endAt = text.indexOf('\n', at);
+  const end = endAt < 0 ? text.length : endAt;
+  const opens = (i: number): boolean => text[i] === "'" && (i === start || /[\s:([\u2014\u2013-]/u.test(text[i - 1]!)) && /\p{L}/u.test(text[i + 1] ?? '');
+  const closes = (i: number): boolean => text[i] === "'" && i > start && /\S/u.test(text[i - 1]!) && (i + 1 === end || /[\s.,;:!?)\]]/u.test(text[i + 1]!));
+  for (let o = start; o < end; o += 1) {
+    if (!opens(o)) continue;
+    let c = -1;
+    for (let i = end - 1; i > o; i -= 1) if (closes(i)) { c = i; break; }
+    if (c < 0) return false;
+    if (o < at && at <= c) return true;
+    o = c;
+  }
+  return false;
+}
 /** `at` lies inside paired double-marked speech that opened before it in its paragraph. */
 function insideSpeech(text: string, at: number): boolean {
   const start = text.lastIndexOf('\n', at - 1) + 1;
