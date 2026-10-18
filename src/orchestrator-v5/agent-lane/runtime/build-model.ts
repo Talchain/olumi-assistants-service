@@ -2586,7 +2586,7 @@ export async function buildModelFromBrief(
     // ⭐ A3 D1 (DL-3 ruling 3; Codex #3407 r1): a flagged draft whose event slice failed keeps its ordinary graph. Where that graph
     // cannot reach the goal, the event's EXISTING hold is finalised here, once: on the build's withheld list, on the graph that
     // registers (the Run's admission reads it there, `eventByDateRefusalOf`), and as the build's one ask (below).
-    const held = eventHold !== undefined && draftedTeamPartOf(built) === null && !admittedReachesGoal(built) ? eventHold : undefined;
+    const held = eventHold !== undefined && draftedTeamPartOf(built) === null && !admittedReachesGoal(built as never) ? eventHold : undefined;
     if (held !== undefined && !admitted.withheld.includes(held)) admitted = { ...admitted, withheld: [...admitted.withheld, held] };
     const graph = held === undefined ? built : { ...built, withheld: [held] };
 
