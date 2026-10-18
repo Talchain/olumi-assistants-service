@@ -331,7 +331,8 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
     if (raw.legacy !== undefined && (!isRec(raw.legacy) || !['already_true_quote', 'dependency'].includes(String(raw.legacy.field))
       || typeof raw.legacy.expected !== 'string' || !(raw.legacy.replacement === null || typeof raw.legacy.replacement === 'string'))) return undefined;
   }
-  return { ...value, source, edits, ...(context === undefined ? {} : { binding_context: context }) };
+  // Only correction members cross this read: review display fields cannot select the approval wording.
+  return { source, edits, ...(context === undefined ? {} : { binding_context: context }) };
 }
 
 interface CorrectionDiagnostic {

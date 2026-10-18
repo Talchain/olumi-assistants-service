@@ -77,6 +77,20 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     expect(w.writes).toHaveLength(form === 'legacy' ? 1 : 0);
   });
 
+  it('persisted review-only fields cannot replace complete approval wording', async () => {
+    const f = fixture(row), w = await correctionWorld(f.graph, f.message);
+    const card = await w.offer('propose_statement', { correction: f.request });
+    expect(card).toMatchObject({ ok: true, mutated: false });
+    const original = w.proposals.get(String(card.proposal_id))!, operations = structuredClone(original.operations);
+    const view = { readings: ['an unverified correction'], source_state: 'reported' as const, source_words: f.message };
+    Object.assign((operations[0]!.value as Rec).correction, view);
+    const public_label = statementCorrectionWords(view);
+    const forged = createProposal({ ...original, operations, public_label });
+    const restored = w.restoreCard(forged, { ...card, proposal_id: forged.proposal_id, public_label });
+    expect(await w.press(forged.proposal_id, restored)).toMatchObject({ ok: false, mutated: false, refusal: 'invalid_statement' });
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  });
+
   it.each(['missing', 'partial', 'another speaker', 'unknown speaker'] as const)('%s source shows the reading without inventing human authorship or an approval', async fault => {
     const f = fixture(row), message = fault === 'another speaker' ? `A colleague said: “${f.message}”`
       : fault === 'unknown speaker' ? `'${f.message}'` : f.message;
