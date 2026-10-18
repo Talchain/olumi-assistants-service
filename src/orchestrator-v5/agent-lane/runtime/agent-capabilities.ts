@@ -295,7 +295,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 }
 
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
-import { createProposal, computeProposalId, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
+import { createProposal, computeProposalId, hasCardOnlyOperations, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionRenameInput, CommitOptionRenameResult, CommitOptionStatusInput, CommitOptionStatusResult, CommitStructuralDeleteInput, CommitStructuralDeleteResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
@@ -329,7 +329,7 @@ import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -367,7 +367,7 @@ import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
-import { productHoldRecord } from '../proposal-object/record.js';
+import { agentProposalOf, productHoldRecord } from '../proposal-object/record.js';
 import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
 import { PLAIN_APPROVAL_SUPERSEDED } from '../proposal-object/reply.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
@@ -8377,7 +8377,8 @@ export function createAgentCapabilities(
 
     /**
      * ⛔ A CHANGE THE AGENT DISOWNS IS NEVER LEFT OFFERED (`approval-chips.ts` WITHDRAW_PROPOSAL). The loop admits only
-     * a change THIS turn proposed and still offers. A stored proposal is removed, so it is neither listed as awaiting
+     * a change THIS turn proposed and still offers, or (host-marked) Olumi's own earlier card, checked below against the
+     * held row (DL-3 ruling F). A stored proposal is removed, so it is neither listed as awaiting
      * approval nor carried; a held one (`gmh_`) lives on the product's row, and the route leaves it off this turn's
      * answer row by the same tool call, so the next turn finds nothing to confirm.
      */
@@ -8398,6 +8399,23 @@ export function createAgentCapabilities(
           .find(p => p.chip_id === id && !isPendingActionExpired(p, Date.now()));
         if (held === undefined) return notFound;
         withdrawnHolds.add(id);
+      } else if (isEarlierTurnWithdrawal(args)) {
+        // ⭐ DL-3 RULING F (18 Oct; amends D-08 for this card only). G4: Olumi called its own held card ungrounded, and the
+        // card was offered again for six turns. Olumi may take back ITS OWN earlier card, still offered on this scenario's
+        // latest row and not approved, on the model it was made for. Never one the user authored or asked for (their
+        // figures, an edit, a reading of their words, or a card-only change), never another scenario's or user's, never an
+        // applied one, never a stale one: each of those is not found, so it stays exactly as it was.
+        const held = (await opts.readPendingActions?.(ctx.scenario_id).catch(() => []) ?? [])
+          .find(pa => pa.scenario_id === ctx.scenario_id && agentProposalOf(pa)?.proposal_id === id && !isPendingActionExpired(pa, Date.now()));
+        const p = held === undefined ? undefined : agentProposalOf(held);
+        const olumisOwn = p !== undefined && p.provenance.authored_by === 'model_proposed'
+          && !(p.provenance.basis ?? '').startsWith('edited_from:') && p.interpretation === undefined
+          && !hasCardOnlyOperations(p.operations) && p.operations.every(op => valueOpAuthor(op, p) === 'model_proposed');
+        if (held === undefined || p === undefined || !olumisOwn || p.user_id !== ctx.authenticated_user_id
+          || proposals.isApplied(id) || proposals.partialProgressOf(id) !== undefined) return notFound;
+        const now = await readGraph(ctx.scenario_id).catch(() => null);
+        if (now === null || now.graph_hash !== held.preconditions.graph_hash) return notFound;
+        proposals.discard(id);
       } else {
         const p = proposals.get(id);
         if (p === undefined || p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return notFound;

@@ -22,7 +22,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { composeRecoveredProposalReply } from '../proposal-reply.js';
-import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
+import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN, earlierTurnWithdrawal } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
 import { turnContextItems, runFactsContext, runFactsInstructionItem } from '../turn-context.js';
@@ -779,14 +779,20 @@ export async function runAgentTurn(
         : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
           // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
-          // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
+          // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`). ⭐ Except Olumi's OWN earlier card, still offered and
+          // not approved (DL-3 ruling F, 18 Oct; amends D-08 for this card only): the capability checks that against the held
+          // row, on host-marked arguments (`earlierTurnWithdrawal`); every other earlier card keeps this refusal unchanged.
           : String(call.name) === WITHDRAW_PROPOSAL && !(proposalIdArg(call.arguments) ?? '').startsWith('goal-scope:')
             && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
-            ? {
-                ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
-                detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
-                  + 'a change the user has already seen stays theirs to approve or decline.',
-              }
+            ? await (async (id: string): Promise<ToolResult> => {
+                const own = /^prop_[0-9a-f]{32}$/.test(id) && mode !== 'preview' && caps.withdrawProposal !== undefined
+                  ? await caps.withdrawProposal(input.ctx, earlierTurnWithdrawal(id)) : undefined;
+                return own?.ok === true ? own : {
+                  ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
+                  detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
+                    + 'a change the user has already seen stays theirs to approve or decline.',
+                };
+              })(proposalIdArg(call.arguments) ?? '')
             : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       if (result.ok === false && typeof result.refusal === 'string' && !withheld.has(String(call.name))) {
         // ⭐ AIE-05: identical means the same call (tool + arguments) refused for the same code since the last write, never only
