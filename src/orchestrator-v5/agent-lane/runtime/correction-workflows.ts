@@ -1,6 +1,5 @@
 /** Existing approved-change workflows; the capability owner supplies identity/readback functions as ports. */
 import { createHash } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
 import type { AgentToolContext, ToolResult } from './agent-tools.js';
 import { createProposal, type ProposalStore, type StructuredProposal } from '../proposal.js';
 import { prepareStatementCorrection, statementCorrectionWords, statementBoundTo, userStatementRecord, withUserStatement,
@@ -84,7 +83,7 @@ interface QualitativeReframeRequest {
 const identityOf = (g: unknown): string => computeGraphIdentityHash(g as never)?.value ?? '';
 
 /** A qualitative repoint uses the same old-goal node for history, and introduces no operative number or new store. */
-function prepareQualitativeReframe(ctx: AgentToolContext, before: WorkflowRead, request: Partial<Record<keyof QualitativeReframeRequest, unknown>>,
+export function prepareQualitativeReframe(ctx: AgentToolContext, before: WorkflowRead, request: Partial<Record<keyof QualitativeReframeRequest, unknown>>,
   at: string): { refused: string } | { candidate: Record<string, unknown>; new_id: string; words: string; source_line: string } {
   const nodes = Array.isArray(before.raw.nodes) ? before.raw.nodes.filter(isPlainRecord) : [];
   const old = nodes.find(n => n.id === request?.goal_id && n.kind === 'goal');
@@ -143,34 +142,5 @@ export function proposeQualitativeReframe(ctx: AgentToolContext, before: Workflo
   proposals.put(proposal);
   return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: before.graph_hash,
     note: 'Show the complete qualitative goal card and every retired target before its own approval. No number or date is introduced.' };
-}
-
-/** Apply only this frozen qualitative repoint through the existing complete-candidate CAS register and readback. */
-export async function applyQualitativeReframe(ctx: AgentToolContext, parent: StructuredProposal, before: WorkflowRead,
-  proposals: ProposalStore, dispatch: (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>,
-  read: () => Promise<WorkflowRead | null>, dependencies: WorkflowDependencies): Promise<ToolResult> {
-  const { approvedGraphHeld } = dependencies;
-  const op = parent.operations[0], v = isPlainRecord(op?.value) ? op.value : {};
-  const bound = isPlainRecord(v.qualitative_reframe) ? v.qualitative_reframe : {};
-  const no = (refusal: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal });
-  if (ctx.typed_approval_of !== parent.proposal_id || op?.op !== 'repoint_goal' || !isPlainRecord(bound.request) || typeof bound.at !== 'string'
-    || typeof bound.source_line !== 'string'
-    || before.graph_identity_hash !== v.base_identity || before.brief_text !== v.brief_text) return no('superseded');
-  // Recreate only the deterministic native projection from the card's frozen source, never a new AI reading.
-  const sourceContext = { ...ctx, user_turn_text: bound.source_line, user_text: bound.source_line };
-  const prepared = prepareQualitativeReframe(sourceContext, before, bound.request, bound.at);
-  if ('refused' in prepared || !isDeepStrictEqual(prepared.candidate, v.candidate) || op.path !== prepared.new_id
-    || parent.public_label !== prepared.words) return no('incomplete_goal_postimage');
-  const registered = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, { graph: v.candidate,
-    expected_graph_hash: before.graph_hash, expected_graph_identity_hash: before.graph_identity_hash, operation_id: v.operation_id });
-  if (registered.status >= 400 && registered.status < 500) return no(registered.status === 409 ? 'superseded' : 'not_applied');
-  const after = await read();
-  const acknowledged = isPlainRecord(registered.json.graph_identity_hash) ? registered.json.graph_identity_hash.value : registered.json.graph_identity_hash;
-  if (after === null || typeof acknowledged !== 'string' || acknowledged !== after.graph_identity_hash
-    || identityOf(after.raw) !== acknowledged || !approvedGraphHeld(v.candidate, after.raw)) return {
-      ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed' };
-  proposals.markApplied(parent.proposal_id, []);
-  return { ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts: [],
-    follow_up: 'Recorded the qualitative aim shown on your card. The earlier aim remains historical; the new aim has no numerical target or analysis result.' };
 }
 

@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
 import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
-import { applyQualitativeReframe } from '../runtime/agent-capabilities.js';
-import { constructionOperationId } from '../runtime/build-model.js';
-import { approvedGraphHeld } from '../runtime/draft-replacement.js';
+import { createProposal } from '../proposal.js';
 
 const cases = [
   { name: 'warehousing', goal: 'Average dispatch delay', value: 6, unit: 'days', comparator: '<=',
@@ -94,12 +92,13 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     const f = fixture(row), w = await correctionWorld(f.graph, row.message);
     const result = await w.offer('propose_goal_target', { reframe: f.request });
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    const pid = String(result.proposal_id), tampered = structuredClone(w.proposals.get(pid)!) as Rec;
-    tampered.operations[0].value.candidate.nodes = tampered.operations[0].value.candidate.nodes.filter((n: Rec) => n.id !== 'dissent');
-    const before = { raw: w.graph(), graph_hash: tampered.base_graph_identity_hash, graph_identity_hash: tampered.operations[0].value.base_identity,
-      brief_text: tampered.operations[0].value.brief_text };
-    const native = await applyQualitativeReframe({ ...w.ctx, typed_approval_of: pid }, tampered as never, before, w.proposals,
-      async () => { throw new Error('A refused candidate must not register'); }, async () => before, { constructionOperationId, approvedGraphHeld });
+    const original = w.proposals.get(String(result.proposal_id))!, operations = structuredClone(original.operations);
+    const candidate = (operations[0]!.value as Rec).candidate;
+    candidate.nodes = candidate.nodes.filter((n: Rec) => n.id !== 'dissent');
+    // Re-mint this exact altered card so its own identity and approval pass; the native postimage check must refuse it.
+    const tampered = createProposal({ ...original, operations });
+    w.proposals.put(tampered);
+    const native = await w.press(tampered.proposal_id);
     expect(native).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_goal_postimage' }); expect(w.writes).toHaveLength(0);
   });
 

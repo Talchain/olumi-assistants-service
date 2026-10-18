@@ -1,5 +1,4 @@
-import { applyCorrectedStatement, proposeStatementCorrection, applyQualitativeReframe, proposeQualitativeReframe } from './correction-workflows.js';
-export { applyQualitativeReframe } from './correction-workflows.js';
+import { applyCorrectedStatement, proposeStatementCorrection, prepareQualitativeReframe, proposeQualitativeReframe } from './correction-workflows.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { prepareHorizonBasisForWrite } from '../../goal-target/horizon-basis-provenance.js';
 import { laterAimOnlyBranch, omittedGoalChangeWords, priorAimDescription, promotedOutcome, repointRetainedBase, repointRetainsSavedWork } from './goal-repoint.js';
@@ -4177,70 +4176,82 @@ export function createAgentCapabilities(
   const applySavedCorrection = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
-    if (isPlainRecord(parent.operations[0]?.value) && (parent.operations[0]!.value as Record<string, unknown>).qualitative_reframe !== undefined) return applyQualitativeReframe(ctx, parent, before, proposals, dispatch, () => readGraph(ctx.scenario_id), workflowDependencies);
     const pid = parent.proposal_id;
-    const v = (parent.operations[0]!.value ?? {}) as { candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
+    const v = (parent.operations[0]!.value ?? {}) as { qualitative_reframe?: unknown; candidate?: unknown; base_identity?: unknown; brief_text?: unknown;
       goal_turn_id?: unknown; operation_id?: unknown; previous_goal_id?: unknown; later_ambition_quote?: unknown; later_ambition_binding_unverified?: unknown; later_ambition_source_unverified?: unknown; removals?: unknown; expected_goal?: unknown; confirmation?: unknown; explicit_rebuild_request?: unknown; rebuild_history?: unknown; retained_aim_description?: unknown; scope_excluded?: unknown };
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
-    if (!isPreparedSavedCorrection(parent.operations[0]) || ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
-      || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
-      return notApplied('not_applied', 'These changes are saved only by pressing their own card, so nothing was changed.');
-    }
-    if (before.graph_identity_hash !== v.base_identity) {
-      return notApplied('superseded', 'The model changed after this correction was offered, so nothing was saved. Prepare an updated card.');
-    }
-    // A complete candidate can still have omitted an untouched goal field before the card was minted. Checking only
-    // candidate == readback would confirm that loss. Check the saved goal contract BEFORE the native write as well.
-    const repoint = parent.operations[0]!.op === 'repoint_goal';
-    const retained = repoint ? repointRetainedBase(before.raw, v.removals, ctx) : before.raw;
-    const priorDescription = repoint && typeof v.previous_goal_id === 'string' ? priorAimDescription(before.raw, v.previous_goal_id,
-      typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined) : undefined;
-    if (repoint && (retained === undefined || priorDescription === undefined || typeof v.previous_goal_id !== 'string'
-      || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription, ctx.scenario_id, v.scope_excluded))) {
-      return notApplied('incomplete_goal_postimage', 'The complete earlier aim or an option would be lost by this card. Nothing was saved.');
-    }
-    if (repoint && (!isDeepStrictEqual(readGoalRecord(v.candidate, parent.operations[0]!.path), v.expected_goal)
-      || !isPlainRecord(v.confirmation) || typeof v.confirmation.source !== 'string'
-      || !(isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) && v.candidate.nodes.some(n => isPlainRecord(n)
-        && n.id === parent.operations[0]!.path && userStatementsOn(n).some(r => r.field === 'target'
-          && r.statements.some(s => s.quote === (v.confirmation as Record<string, unknown>).source && s.reading === 'olumi')))))) {
-      return notApplied('incomplete_goal_postimage', 'The new goal or its complete source would be lost by this card. Nothing was saved.');
-    }
-    for (const goal of before.nodes.filter(n => n.kind === 'goal' && !repoint)) {
-      const saved = readGoalRecord(before.raw, goal.id);
-      const proposed = readGoalRecord(v.candidate, goal.id);
-      if (saved === null) return notApplied('goal_not_readable', 'The saved goal could not be read completely. Nothing was saved.');
-      // A row-sourced provenance belongs to the target being replaced; the node’s own provenance must stay unchanged.
-      const withoutTarget = ({ target: _target, provenance: _rowOrNodeSource, ...rest }: NonNullable<typeof saved>) => rest;
-      const candidateNode = isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) ? v.candidate.nodes.find(n => isPlainRecord(n) && n.id === goal.id) : undefined;
-      if (!isPlainRecord(candidateNode) || !isDeepStrictEqual(goal.provenance, candidateNode.provenance)) return notApplied('incomplete_goal_postimage', 'This card would change the saved goal’s source. Nothing was saved.');
-      const changedUntouchedGoal = proposed === null || !isDeepStrictEqual(
-        parent.operations[0]!.op === 'set_goal_target' ? withoutTarget(saved) : saved,
-        parent.operations[0]!.op === 'set_goal_target' ? withoutTarget(proposed) : proposed);
-      const lostDirection = saved.target?.comparator_source === 'goal_direction'
-        && proposed?.target?.comparator_source !== 'goal_direction';
-      const lostDeadline = saved.horizon?.deadline !== undefined && proposed?.horizon?.deadline === undefined;
-      if (changedUntouchedGoal || lostDirection || lostDeadline) {
-        return notApplied('incomplete_goal_postimage', 'This card would lose or change an untouched part of the saved goal, including its direction or deadline. Nothing was saved. Prepare a targeted correction that keeps the rest of the goal.');
+    if (v.qualitative_reframe !== undefined) {
+      const op = parent.operations[0]!, bound = isPlainRecord(v.qualitative_reframe) ? v.qualitative_reframe : {};
+      if (ctx.typed_approval_of !== pid || op.op !== 'repoint_goal' || !isPlainRecord(bound.request) || typeof bound.at !== 'string'
+        || typeof bound.source_line !== 'string' || typeof v.operation_id !== 'string'
+        || before.graph_identity_hash !== v.base_identity || before.brief_text !== v.brief_text) {
+        return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'superseded' };
       }
-    }
-    if (v.retained_aim_description !== undefined) {
-      const expected = retainedTargetAim(before.raw, parent.operations[0]!.path, typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined, v.later_ambition_binding_unverified === true, v.later_ambition_source_unverified === true);
-      const node = isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) ? v.candidate.nodes.find(n => isPlainRecord(n) && n.id === parent.operations[0]!.path) : undefined;
-      if (expected === undefined || v.retained_aim_description !== expected || !isPlainRecord(node) || node.description !== expected) return notApplied('incomplete_goal_postimage', 'This card would lose the earlier aim or its complete source. Nothing was saved.');
-    }
-    if (v.explicit_rebuild_request !== undefined) {
-      const bound = isPlainRecord(v.rebuild_history) && Array.isArray(v.rebuild_history.unpressed_adoptions) ? v.rebuild_history.unpressed_adoptions : [];
-      const retirement = unpressedRebuildOptions(bound, { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id ?? null,
-        graph_hash: before.graph_hash, graph: before.raw });
-      const kept = prepareRequestedRebuild(before.raw, v.candidate, levelFrameOf, retirement.ids);
-      if (!kept.candidate || !approvedGraphHeld(kept.candidate, v.candidate)) return notApplied('incomplete_replacement', 'This replacement would lose recorded work or a saved option. Nothing was saved.');
-      if (!isPlainRecord(v.rebuild_history) || !Array.isArray(v.rebuild_history.bound) || !opts.readCommittedTurnLedger || !opts.readStatedObjections) return notApplied('history_unreadable', 'The retained conversation cannot be checked. Nothing was saved.');
-      const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id).catch(() => null);
-      const objections = await opts.readStatedObjections(ctx.scenario_id, ctx.request_id).catch(() => null);
-      if (!ledger || !objections) return notApplied('history_unreadable', 'The retained conversation cannot be read. Nothing was saved.');
-      const history = draftHistory(ledger, ctx.scenario_id, before.brief_text!, ctx.turn_id, { bound: v.rebuild_history.bound as string[], goalTurnId: v.goal_turn_id });
-      if (history.found.length || !isDeepStrictEqual(history.context, v.rebuild_history.context) || !isDeepStrictEqual(objections, v.rebuild_history.objections)) return notApplied('superseded', 'The retained conversation or objections changed after this card was offered. Nothing was saved; prepare an updated card.');
+      // The same native projection checks the complete frozen card before the shared write.
+      const prepared = prepareQualitativeReframe({ ...ctx, user_turn_text: bound.source_line, user_text: bound.source_line }, before, bound.request, bound.at);
+      if ('refused' in prepared || !isDeepStrictEqual(prepared.candidate, v.candidate) || op.path !== prepared.new_id
+        || parent.public_label !== prepared.words) return { ok: false, mutated: false, applied: false, proposal_id: pid, refusal: 'incomplete_goal_postimage' };
+    } else {
+      if (!isPreparedSavedCorrection(parent.operations[0]) || ctx.typed_approval_of !== pid || v.candidate === null || typeof v.candidate !== 'object' || typeof v.base_identity !== 'string'
+        || typeof v.goal_turn_id !== 'string' || typeof v.operation_id !== 'string' || v.brief_text !== before.brief_text) {
+        return notApplied('not_applied', 'These changes are saved only by pressing their own card, so nothing was changed.');
+      }
+      if (before.graph_identity_hash !== v.base_identity) {
+        return notApplied('superseded', 'The model changed after this correction was offered, so nothing was saved. Prepare an updated card.');
+      }
+      // A complete candidate can still have omitted an untouched goal field before the card was minted. Checking only
+      // candidate == readback would confirm that loss. Check the saved goal contract BEFORE the native write as well.
+      const repoint = parent.operations[0]!.op === 'repoint_goal';
+      const retained = repoint ? repointRetainedBase(before.raw, v.removals, ctx) : before.raw;
+      const priorDescription = repoint && typeof v.previous_goal_id === 'string' ? priorAimDescription(before.raw, v.previous_goal_id,
+        typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined) : undefined;
+      if (repoint && (retained === undefined || priorDescription === undefined || typeof v.previous_goal_id !== 'string'
+        || !repointRetainsSavedWork(retained, v.candidate, v.previous_goal_id, parent.operations[0]!.path, priorDescription, ctx.scenario_id, v.scope_excluded))) {
+        return notApplied('incomplete_goal_postimage', 'The complete earlier aim or an option would be lost by this card. Nothing was saved.');
+      }
+      if (repoint && (!isDeepStrictEqual(readGoalRecord(v.candidate, parent.operations[0]!.path), v.expected_goal)
+        || !isPlainRecord(v.confirmation) || typeof v.confirmation.source !== 'string'
+        || !(isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) && v.candidate.nodes.some(n => isPlainRecord(n)
+          && n.id === parent.operations[0]!.path && userStatementsOn(n).some(r => r.field === 'target'
+            && r.statements.some(s => s.quote === (v.confirmation as Record<string, unknown>).source && s.reading === 'olumi')))))) {
+        return notApplied('incomplete_goal_postimage', 'The new goal or its complete source would be lost by this card. Nothing was saved.');
+      }
+      for (const goal of before.nodes.filter(n => n.kind === 'goal' && !repoint)) {
+        const saved = readGoalRecord(before.raw, goal.id);
+        const proposed = readGoalRecord(v.candidate, goal.id);
+        if (saved === null) return notApplied('goal_not_readable', 'The saved goal could not be read completely. Nothing was saved.');
+        // A row-sourced provenance belongs to the target being replaced; the node’s own provenance must stay unchanged.
+        const withoutTarget = ({ target: _target, provenance: _rowOrNodeSource, ...rest }: NonNullable<typeof saved>) => rest;
+        const candidateNode = isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) ? v.candidate.nodes.find(n => isPlainRecord(n) && n.id === goal.id) : undefined;
+        if (!isPlainRecord(candidateNode) || !isDeepStrictEqual(goal.provenance, candidateNode.provenance)) return notApplied('incomplete_goal_postimage', 'This card would change the saved goal’s source. Nothing was saved.');
+        const changedUntouchedGoal = proposed === null || !isDeepStrictEqual(
+          parent.operations[0]!.op === 'set_goal_target' ? withoutTarget(saved) : saved,
+          parent.operations[0]!.op === 'set_goal_target' ? withoutTarget(proposed) : proposed);
+        const lostDirection = saved.target?.comparator_source === 'goal_direction'
+          && proposed?.target?.comparator_source !== 'goal_direction';
+        const lostDeadline = saved.horizon?.deadline !== undefined && proposed?.horizon?.deadline === undefined;
+        if (changedUntouchedGoal || lostDirection || lostDeadline) {
+          return notApplied('incomplete_goal_postimage', 'This card would lose or change an untouched part of the saved goal, including its direction or deadline. Nothing was saved. Prepare a targeted correction that keeps the rest of the goal.');
+        }
+      }
+      if (v.retained_aim_description !== undefined) {
+        const expected = retainedTargetAim(before.raw, parent.operations[0]!.path, typeof v.later_ambition_quote === 'string' ? v.later_ambition_quote : undefined, v.later_ambition_binding_unverified === true, v.later_ambition_source_unverified === true);
+        const node = isPlainRecord(v.candidate) && Array.isArray(v.candidate.nodes) ? v.candidate.nodes.find(n => isPlainRecord(n) && n.id === parent.operations[0]!.path) : undefined;
+        if (expected === undefined || v.retained_aim_description !== expected || !isPlainRecord(node) || node.description !== expected) return notApplied('incomplete_goal_postimage', 'This card would lose the earlier aim or its complete source. Nothing was saved.');
+      }
+      if (v.explicit_rebuild_request !== undefined) {
+        const bound = isPlainRecord(v.rebuild_history) && Array.isArray(v.rebuild_history.unpressed_adoptions) ? v.rebuild_history.unpressed_adoptions : [];
+        const retirement = unpressedRebuildOptions(bound, { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id ?? null,
+          graph_hash: before.graph_hash, graph: before.raw });
+        const kept = prepareRequestedRebuild(before.raw, v.candidate, levelFrameOf, retirement.ids);
+        if (!kept.candidate || !approvedGraphHeld(kept.candidate, v.candidate)) return notApplied('incomplete_replacement', 'This replacement would lose recorded work or a saved option. Nothing was saved.');
+        if (!isPlainRecord(v.rebuild_history) || !Array.isArray(v.rebuild_history.bound) || !opts.readCommittedTurnLedger || !opts.readStatedObjections) return notApplied('history_unreadable', 'The retained conversation cannot be checked. Nothing was saved.');
+        const ledger = await opts.readCommittedTurnLedger(ctx.scenario_id).catch(() => null);
+        const objections = await opts.readStatedObjections(ctx.scenario_id, ctx.request_id).catch(() => null);
+        if (!ledger || !objections) return notApplied('history_unreadable', 'The retained conversation cannot be read. Nothing was saved.');
+        const history = draftHistory(ledger, ctx.scenario_id, before.brief_text!, ctx.turn_id, { bound: v.rebuild_history.bound as string[], goalTurnId: v.goal_turn_id });
+        if (history.found.length || !isDeepStrictEqual(history.context, v.rebuild_history.context) || !isDeepStrictEqual(objections, v.rebuild_history.objections)) return notApplied('superseded', 'The retained conversation or objections changed after this card was offered. Nothing was saved; prepare an updated card.');
+      }
     }
     // The WHOLE approved graph (every top-level member the candidate carries: options, goal_constraints and all), CAS-gated
     // on both of the base's hashes, like the sibling registers (`frame-write-is-cas-gated.test.ts`).
@@ -4258,7 +4269,7 @@ export function createAgentCapabilities(
      */
     if (reg.status >= 400 && reg.status < 500) {
       const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
-      return /STALE/.test(code)
+      return (v.qualitative_reframe !== undefined && reg.status === 409) || /STALE/.test(code)
         ? notApplied('superseded', 'The model changed just before this correction was written, so nothing was saved. Prepare an updated card.')
         : notApplied('not_applied', 'The correction was refused before anything was written, so the model is unchanged.');
     }
@@ -4272,7 +4283,8 @@ export function createAgentCapabilities(
     const after = await readGraph(ctx.scenario_id);
     // …and the acknowledged graph IS the approved candidate, whole (AIE B34): every component it carries held unchanged.
     const landed = after !== null && acknowledged !== '' && after.graph_identity_hash === acknowledged
-      && approvedGraphHeld(v.candidate, after.raw);
+      && approvedGraphHeld(v.candidate, after.raw)
+      && (v.qualitative_reframe === undefined || identityHashOf(computeGraphIdentityHash(after.raw as never)) === acknowledged);
     if (!landed) {
       return { ok: false, mutated: true, applied: false, proposal_id: pid, refusal: 'not_confirmed',
         detail: 'The correction was sent, but the complete saved change could not be confirmed. Offer to check the model again; do not claim it was saved or that it failed.' };
@@ -4285,7 +4297,8 @@ export function createAgentCapabilities(
       : [];
     proposals.markApplied(pid, receipts);
     return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
-      follow_up: 'The changes on your card are saved together in the model.' };
+      follow_up: v.qualitative_reframe === undefined ? 'The changes on your card are saved together in the model.'
+        : 'Recorded the qualitative aim shown on your card. The earlier aim remains historical; the new aim has no numerical target or analysis result.' };
   };
 
   /** Consume the exact held card through the approved batch, then read back through the door's verdict on its committed bytes. */
