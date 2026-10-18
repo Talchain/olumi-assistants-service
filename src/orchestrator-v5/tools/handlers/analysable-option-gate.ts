@@ -689,6 +689,7 @@ export function projectRunOptionSubmission(
   const unsizedProjection = withoutUnsizedOlumiRisksRecorded(
     withoutPreconditionRisks(participation.graph, snapshot.graph),
     snapshot.graph,
+    participation.excludedNodeIds,
   );
 
   const graphForAnalysis = unsizedProjection.graph;
