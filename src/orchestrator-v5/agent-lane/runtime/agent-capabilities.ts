@@ -10944,7 +10944,7 @@ export function createAgentCapabilities(
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi'; quote?: string };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const lv = doorLevelOf(a.level);
