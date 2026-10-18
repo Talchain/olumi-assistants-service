@@ -215,68 +215,35 @@ describe('STEP 8 Route A — what d5 does not hold as a definition stays exactly
 });
 
 /**
- * ⭐ THE SHAPE THE DRAFTER ACTUALLY WRITES (DL-3 relay of the verifier's local-stack run on #3421 @04c63519, synthetic): one
+ * ⛔ THE SHAPE THE DRAFTER ACTUALLY WRITES (DL-3 relay of the verifier's local-stack run on #3421 @04c63519, synthetic): one
  * "<Option> net effect" factor per option in the goal's unit, 0 today, set only by that option, linked to the goal +1 per 1,
- * flagged definitional, `effect_provenance: explicit`, the drafter's basis "the brief defines this as <Option>'s complete net
- * effect on <goal> relative to today's level"; saved, at 04c63519, as Olumi's estimate at 0.8 (verifier: 53% / <1%).
- * d5's label clause cannot read a quantity in "Option A net effect", so the part's quantity is bound from the user's own
- * words instead (`settingsStateGoalQuantity`): the brief writes each option's own setting as a figure of the goal ("Option A
- * adds exactly 20 widgets per hour"). The same AI labels and basis over "£50,000 of pipeline" never bind "Monthly revenue".
+ * flagged definitional, `effect_provenance: explicit`, with the drafter's basis "the brief defines this as <Option>'s complete
+ * net effect on <goal> relative to today's level". MEASURED: nothing is compiled. d5 (`labelHoldsQuantity`) cannot bind
+ * "Option A net effect" to "Widgets per hour", and no existing authority binds the stated figure's SUBJECT, reference or
+ * timing from the user's sentence (`construction-source-map.ts`: "which subject and role the figure has stays the AI's
+ * reading"). It stays exactly as today (Olumi's estimate at 0.8). Pinned so the limitation is visible, not hidden.
+ * ⛔ Binding the part's quantity from the brief's figure words instead was BUILT AND WITHDRAWN (4340c2dc, Codex head review
+ * round 2 BLOCK): "adds exactly 20 widgets per hour before maintenance losses. Maintenance removes 10 widgets per hour under
+ * Option A" compiled an exact +20 where the complete change is +10, and an unrelated "Last year we made 20 widgets per hour"
+ * bound a figure that never named the goal. A figure's quantity is not the option's COMPLETE effect on the goal.
  */
-type Drafted = { goal: string; unit: string; today: number; target: number; a: number; b: number; level: string; targetWords: string;
-  settingA: string; settingB: string; settingBy?: 'explicit' | 'ai_proposed' };
-const WIDGETS_DRAFTED: Drafted = { goal: 'Widgets per hour', unit: 'widgets/hour', today: 40, target: 60, a: 20, b: 19,
-  level: 'Today we make 40 widgets per hour.', targetWords: 'We need at least 60 widgets per hour.',
-  settingA: 'Option A adds exactly 20 widgets per hour.', settingB: 'Option B adds exactly 19 widgets per hour.' };
-function drafted(d: Drafted): { wire: Rec; brief: string } {
-  const opts = [['Option A', d.a, d.settingA], ['Option B', d.b, d.settingB]] as const;
-  const wire: Rec = candidate({ ...WIDGETS, goal: d.goal, unit: d.unit, today: d.today, target: d.target, a: d.a, b: d.b });
-  wire.factors = opts.map(([o]) => ({ label: `${o} net effect`, role: 'controllable', baseline_known: true, baseline_value: 0, unit: d.unit,
-    provenance: 'explicit', plausible_max: 100 }));
-  wire.options = [...opts.map(([o, v]) => ({ label: o, provenance: 'explicit', is_status_quo: null,
-    interventions: [{ factor_label: `${o} net effect`, value: v, value_kind: 'absolute', unit: d.unit, provenance: d.settingBy ?? 'explicit' }] })),
-  { label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, interventions: [] }];
-  wire.links = opts.map(([o]) => ({ from: `${o} net effect`, to: d.goal, direction: 'positive', provenance: 'explicit', effect_amount: 1,
-    effect_per_source_change: 1, effect_provenance: 'explicit', definitional: true, source_quote: null,
-    basis: `the brief defines this as ${o}'s complete net effect on ${d.goal} relative to today's level` }));
-  return { wire, brief: [d.level, d.targetWords, d.settingA, d.settingB].join(' ') };
-}
-const draftedRequest = async (d: Drafted): Promise<Rec> => { const { wire, brief } = drafted(d); return request(await build(wire, brief)); };
-const goalIdOf = (d: Drafted): string => d.goal.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-
-describe('STEP 8 Route A — the drafted per-option "net effect" shape (real drafter output, no hand-built identity)', () => {
-  for (const [a, b] of [[20, 19], [30, 10]] as const) {
-    it(`RED: +${a} / +${b} on a gap of 20 — the goal is today + each option's own stated change, nothing drawn`, async () => {
-      const d = { ...WIDGETS_DRAFTED, a, b, settingA: `Option A adds exactly ${a} widgets per hour.`, settingB: `Option B adds exactly ${b} widgets per hour.` };
-      const p = await draftedRequest(d);
-      const goal = goalOf(p.graph);
-      expect(goal.nonlinear_identity).toEqual({ operation: 'sum', factor_ids: ['widgets_per_hour_today', 'option_a_net_effect', 'option_b_net_effect'], stated_in_brief: false });
-      expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
-      for (const from of ['widgets_per_hour_today', 'option_a_net_effect', 'option_b_net_effect']) {
-        expect(edge(p.graph, from, goal.id)).toMatchObject({ exists_probability: 1, provenance: { magnitude: 'olumi_estimate', definitional: true } });
-      }
-      expect([setting(p, 'option_a', 'option_a_net_effect'), setting(p, 'option_b', 'option_b_net_effect')]).toEqual([a, b]);
-      expect(40 + a >= 60).toBe(true);
-      expect(40 + b >= 60).toBe(false);
-    });
-  }
-
-  const unchangedDrafted = async (d: Drafted, why: string): Promise<Rec> => {
-    const p = await draftedRequest(d);
-    expect(goalOf(p.graph).nonlinear_identity, why).toBeUndefined();
+describe('STEP 8 Route A — LIMITATION (measured): the drafted per-option "net effect" shape is not compiled', () => {
+  it('"Option A net effect" / "Option B net effect" → "Widgets per hour", flagged definitional with a basis, keeps today\'s numbers', async () => {
+    const wire = candidate({ ...WIDGETS, a: 20, b: 19 });
+    const basis = (o: string) => `the brief defines this as ${o}'s complete net effect on Widgets per hour relative to today's level`;
+    wire.factors = ['Option A', 'Option B'].map((o) => ({ label: `${o} net effect`, role: 'controllable', baseline_known: true, baseline_value: 0,
+      unit: 'widgets/hour', provenance: 'explicit', plausible_max: 50 }));
+    (wire.options as Rec[])[0].interventions[0].factor_label = 'Option A net effect';
+    (wire.options as Rec[])[1].interventions[0].factor_label = 'Option B net effect';
+    wire.links = ['Option A', 'Option B'].map((o) => ({ from: `${o} net effect`, to: 'Widgets per hour', direction: 'positive', provenance: 'explicit',
+      effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'explicit', definitional: true, basis: basis(o), source_quote: null }));
+    const p = await request(await build(wire, WIDGETS.say(20, 19)));
+    expect(goalOf(p.graph).nonlinear_identity).toBeUndefined();
+    expect((p.graph.nodes as Rec[]).some((n) => String(n.label).endsWith(' today'))).toBe(false);
     for (const from of ['option_a_net_effect', 'option_b_net_effect']) {
-      expect(edge(p.graph, from, goalIdOf(d)), why).toMatchObject({ exists_probability: 0.8, defaulted: true });
+      const e = edge(p.graph, from, 'widgets_per_hour');
+      expect(e).toMatchObject({ exists_probability: 0.8, defaulted: true, provenance: { magnitude: 'olumi_estimate', definitional: true } });
     }
-    return p;
-  };
-  it('NEGATIVE (zero-baseline lookalike, same AI labels and basis): the user wrote "£50,000 of pipeline", never monthly revenue', () =>
-    unchangedDrafted({ goal: 'Monthly revenue', unit: '£/month', today: 200000, target: 250000, a: 50000, b: 49999,
-      level: 'Monthly revenue is £200,000 today.', targetWords: 'Monthly revenue must reach at least £250,000.',
-      settingA: 'Option A adds exactly £50,000 of pipeline.', settingB: 'Option B adds exactly £49,999 of pipeline.' }, 'pipeline is not revenue'));
-  it('NEGATIVE: the user\'s words for the settings do not name the goal\'s quantity ("adds exactly 20 per hour")', () =>
-    unchangedDrafted({ ...WIDGETS_DRAFTED, settingA: 'Option A adds exactly 20 per hour.', settingB: 'Option B adds exactly 19 per hour.' }, 'no quantity named'));
-  it('NEGATIVE: the settings are Olumi\'s own proposals, not the person\'s — nothing is bound from them', async () => {
-    await unchangedDrafted({ ...WIDGETS_DRAFTED, settingBy: 'ai_proposed' }, 'not the person\'s settings');
     expect(labelHoldsQuantity('Option A net effect', 'Widgets per hour')).toBe(false);
   });
 });

@@ -182,6 +182,20 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     expect(nodeOf(h.stored(), TODAY)!.observed_state.raw_value).toBe(40);
   });
 
+  it('RED (Codex review round 2): an option setting the today part (50 beside a goal of 40) is refused by the route; nothing is written', async () => {
+    const initial = await constructed(true);
+    const h = await harness(initial);
+    const set = clone(initial);
+    const a = nodeOf(set, 'option_a')!;
+    a.interventions = { ...a.interventions, [TODAY]: { ...nodeOf(set, TODAY)!.observed_state, raw_value: 50, value: 50 / nodeOf(set, TODAY)!.observed_state.cap } };
+    const reg = await h.register(set);
+    expect(reg.status).toBe(409);
+    expect(reg.json).toMatchObject({ details: { code: 'GOAL_TODAY_PART_SERVER_OWNED' } });
+    expect(String((reg.json as Rec).message)).toContain('Change the goal\'s current level and it changes with it. Nothing was written.');
+    expect(h.appends).toHaveLength(0);
+    expect(nodeOf(h.stored(), 'option_a')!.interventions[TODAY]).toBeUndefined();
+  });
+
   it('CONTRAST: an ordinary sum part (not the part construction minted for the goal\'s level today) is never moved', async () => {
     const initial = await constructed(true);
     const ordinary = JSON.parse(JSON.stringify(initial).replaceAll(`"${TODAY}"`, '"line_a_output"')) as Rec;
