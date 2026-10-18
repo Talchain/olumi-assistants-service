@@ -74,6 +74,8 @@ export interface UserStatement {
   /** The host's receipt: the displayed card's proposal id. Authorises the shown operation only (AIE AMEND 13:43Z). */
   readonly approval?: { readonly proposal_id: string };
   readonly checks?: ClaimChecks;
+  /** On a retired claim only: the approval or adoption its record held when it was retired (kept as a historical receipt; Codex §1). */
+  readonly attested?: Readonly<Record<string, string | number | boolean>>;
   /** The user's words, verbatim, as the Agent quoted them. */
   readonly quote: string;
   /** The complete line of the user's typed words that holds the quote. */
@@ -565,7 +567,7 @@ function claimSourceOf(given: StatementArgs | null | undefined): { readonly said
 export const saidByOf = (s: Pick<UserStatement, 'said_by' | 'speaker'>): SaidBy => s.said_by ?? (s.speaker === 'user' ? 'user' : 'unknown');
 
 /** A claim's identity, status, supersession, approval and check labels, each only where stored; `undefined` if any is malformed. */
-function claimFieldsOf(r: Record<string, unknown>): Partial<Pick<UserStatement, 'claim_id' | 'status' | 'supersedes' | 'approval' | 'checks'>> | undefined {
+function claimFieldsOf(r: Record<string, unknown>): Partial<Pick<UserStatement, 'claim_id' | 'status' | 'supersedes' | 'approval' | 'checks' | 'attested'>> | undefined {
   const id = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= 200;
   const status = CLAIM_STATUSES.find((x) => x === r.status);
   const a = r.approval, c = r.checks;
@@ -579,9 +581,13 @@ function claimFieldsOf(r: Record<string, unknown>): Partial<Pick<UserStatement, 
   if ((r.claim_id !== undefined && !id(r.claim_id)) || (r.status !== undefined && status === undefined)
     || (r.supersedes !== undefined && !(Array.isArray(r.supersedes) && r.supersedes.every(id)))
     || (a !== undefined && approval === undefined) || (c !== undefined && checks === undefined)) return undefined;
+  const t = r.attested;
+  const attested = t !== null && typeof t === 'object' && !Array.isArray(t) && Object.values(t).every((x) => typeof x === 'boolean'
+    || (typeof x === 'string' && x.length <= 200) || (typeof x === 'number' && Number.isFinite(x))) ? { ...(t as Record<string, string | number | boolean>) } : undefined;
+  if (t !== undefined && attested === undefined) return undefined;
   return { ...(id(r.claim_id) ? { claim_id: r.claim_id } : {}), ...(status !== undefined ? { status } : {}),
     ...(Array.isArray(r.supersedes) ? { supersedes: [...r.supersedes as string[]] } : {}),
-    ...(approval !== undefined ? { approval } : {}), ...(checks !== undefined ? { checks } : {}) };
+    ...(approval !== undefined ? { approval } : {}), ...(checks !== undefined ? { checks } : {}), ...(attested !== undefined ? { attested } : {}) };
 }
 
 export function userStatementOf(v: unknown): UserStatement | undefined {

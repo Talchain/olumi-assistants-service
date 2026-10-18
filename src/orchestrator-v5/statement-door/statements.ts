@@ -493,7 +493,12 @@ function writtenRecord(e: ApprovedCorrectionEdit): UserStatementRecord {
 function retiredHistory(e: Pick<ApprovedCorrectionEdit, 'expected_record' | 'retained' | 'retirement'>): UserStatement[] {
   const kept = (st: UserStatement): boolean => e.retained.some((span) => st.quote.includes(span));
   const status: ClaimStatus = e.retirement.disposition === 'retracted' ? 'withdrawn' : 'superseded';
-  return [...(e.expected_record?.statements.filter((st) => !kept(st)).map((st) => ({ ...st, status })) ?? []), ...(e.expected_record?.history ?? [])];
+  // An approval or adoption the record held stays with the claims it covered, as a historical receipt; it no longer applies. Then
+  // even a kept claim's earlier version (the one the approval covered) is history: superseded by its corrected record.
+  const approved = protectedAttestation(e.expected_record);
+  const attested = approved ? { attested: { ...e.expected_record!.attest! } } : {};
+  return [...(e.expected_record?.statements.filter((st) => approved || !kept(st))
+    .map((st) => ({ ...st, status: kept(st) ? 'superseded' as const : status, ...attested })) ?? []), ...(e.expected_record?.history ?? [])];
 }
 
 const edgeOf = (graph: unknown, subject: DoorSubject): Rec | undefined => (subject.kind !== 'link' || !isRec(graph) || !Array.isArray(graph.edges)
@@ -579,7 +584,7 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
       ...(e.labels?.binding === 'olumi_reading' ? [`Olumi’s reading: these words concern “${String(e.expected_node.label)}”.${e.labels.bound_label === undefined ? ''
         : ` Olumi’s item reader matched them to “${e.labels.bound_label}” instead; approve only if “${String(e.expected_node.label)}” is the item you mean.`}`] : []),
       ...(e.labels?.unheld === undefined ? [] : [`Olumi could not find ${e.labels.unheld.map(q => `“${q}”`).join(' or ')} in the recorded source; what is withdrawn or kept here is Olumi’s reading.`]),
-      ...(e.labels?.approved === true ? ['This replaces a record you approved on its card; that approval stays in its history.'] : []),
+      ...(e.labels?.approved === true ? ['This replaces a record you approved on its card. That approval stays in its history and no longer applies once this correction is approved.'] : []),
       ...(e.dependent === undefined ? [] : [`The size of the link “${e.dependent.label}” rests on the withdrawn words, so it is withdrawn too: the link becomes unsized, and the analysis cannot use it until it is sized again.`]),
       ...(legacy ? [] : [`Olumi’s reading: ${e.reading_words}. Proposed change to “${String(e.expected_node.label)}” — ${fieldWords[e.subject.field] ?? 'account'}:`]),
       e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
@@ -659,12 +664,25 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
 function correctionSource(request: StatementCorrectionRequest, quote: string, line: string | undefined, texts: { now?: string; conversation?: string },
   subject: DoorSubject): UserStatement {
   const about = { quantity: subjectKey(subject), node_id: subject.id };
+  // ⛔ Quoted-speaker laundering stays impossible (Codex co-design §1): words that sit inside another speaker's paired quotation marks in
+  // this message are THAT speaker's view the user reports — the named party where the AI names one, else unresolved — never the
+  // user's own correction, whatever speaker the AI read. Evidence for the label, not a refusal.
+  const speech = speechReading(texts.now ?? ''), said = speechReading(quote).text;
+  const spans = quoteSpansIn(speech.text, said);
+  if (spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length))) {
+    const party = typeof request.party === 'string' && request.party.trim() !== '' && (request.speaker === 'other' || request.said_by === 'party')
+      ? request.party.trim() : undefined;
+    return { ...(party !== undefined ? { said_by: 'party' as const, party, relayed_by: 'user' as const } : { said_by: 'unknown' as const }),
+      quote, source: line ?? quote, subject: about, form: 'describes', reading: 'olumi' };
+  }
+  // A correction is what the user says NOW: only this turn's typed words can be its source. Words held from earlier (the user's or
+  // retained) are labelled unverified for this correction, never relabelled as a new statement of theirs.
   const verified = verifyStatements([{ quote, form: 'describes', ...(request.speaker !== undefined ? { speaker: request.speaker } : {}),
     ...(request.said_by !== undefined ? { said_by: request.said_by } : {}), ...(request.party !== undefined ? { party: request.party } : {}) }],
-  texts, { subject: about, unit: '', forms: ['describes'], figuresIn: () => [], claims: true });
+  { now: texts.now }, { subject: about, unit: '', forms: ['describes'], figuresIn: () => [], claims: true });
   if (verified.kind === 'verified') return verified.statements[0]!;
   // Words not found as anyone's in the messages: kept as the AI gave them, speaker unresolved, labelled.
-  const found = line !== undefined || quoteSpansIn(speechReading(texts.now ?? '').text, speechReading(quote).text).length > 0;
+  const found = line !== undefined || spans.length > 0;
   return { said_by: 'unknown', quote, source: line ?? quote, subject: about, form: 'describes', reading: 'olumi',
     checks: { words_found: found, figure_found: true, unit_found: true } };
 }
