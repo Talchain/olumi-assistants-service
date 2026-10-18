@@ -51,7 +51,7 @@ import {
   emitHoldLapseTelemetry,
   threadHoldsThroughMutatingCommit,
 } from "../orchestrator-v5/handlers/hold-thread-through.js";
-import { todayPartSetBesideGoal, withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
+import { withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
@@ -786,12 +786,6 @@ export default async function route(app: FastifyInstance) {
           'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',
           { code: 'OPTION_GAP_APPROVAL_REQUIRED' }, requestId));
       }
-
-      // ⭐ STEP 8: no option sets a goal's today part and no link leads into it, whichever writer sent the graph.
-      const todaySetter = todayPartSetBesideGoal(graphToRegister);
-      if (todaySetter !== undefined) return reply.code(409).send(buildErrorV1('BAD_INPUT',
-        `"${todaySetter.part}" is the current level of "${todaySetter.goal}"; only the goal's current level sets it. Change the goal's current level and it changes with it. Nothing was written.`,
-        { code: 'GOAL_TODAY_PART_SERVER_OWNED' }, requestId));
 
       /**
        * The raw read, decided independently of hashability (see the absence assertion below, which reads the same three).

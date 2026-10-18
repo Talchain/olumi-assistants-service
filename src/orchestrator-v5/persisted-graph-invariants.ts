@@ -91,7 +91,9 @@ export type PersistedGraphInvariantCode =
   | 'EDGE_ENDPOINT_MISSING'
   | 'DUPLICATE_NODE_ID'
   | 'DUPLICATE_OPTION_ID'
-  | 'untouched_level_rescaled';
+  | 'untouched_level_rescaled'
+  /** A goal's compiled today part not at that goal's level today, set by an option, or with a link into it (STEP 8). */
+  | 'GOAL_TODAY_PART_NOT_GOAL_LEVEL';
 
 /**
  * Codes that are REPORTED but do NOT refuse. Kept separate on purpose: the

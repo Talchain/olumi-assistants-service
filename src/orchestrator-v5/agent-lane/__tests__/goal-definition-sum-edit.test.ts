@@ -41,6 +41,9 @@ import { createSetFactorValueHandler } from '../../tools/handlers/set-factor-val
 import { buildHandlerInvocation } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import type { ProposalAction } from '../../routing/types.js';
 import { prepareOptionInterventionEdit } from '../../system-events/option-intervention-edit.js';
+import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, commitModelChange } from '../../persist-graph-write.js';
+import { PersistedGraphInvariantError } from '../../persisted-graph-invariants.js';
+import { bindWriteCaller } from '../../ownership/door-ownership.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554408a8';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f18a8';
@@ -183,16 +186,15 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     expect(nodeOf(h.stored(), TODAY)!.observed_state.raw_value).toBe(40);
   });
 
-  it('RED (Codex review round 2): an option setting the today part (50 beside a goal of 40) is refused by the route; nothing is written', async () => {
+  it('RED (Codex review round 2): an option setting the today part (50 beside a goal of 40) is refused by the shared persistence check; nothing is written', async () => {
     const initial = await constructed(true);
     const h = await harness(initial);
     const set = clone(initial);
     const a = nodeOf(set, 'option_a')!;
     a.interventions = { ...a.interventions, [TODAY]: { ...nodeOf(set, TODAY)!.observed_state, raw_value: 50, value: 50 / nodeOf(set, TODAY)!.observed_state.cap } };
     const reg = await h.register(set);
-    expect(reg.status).toBe(409);
-    expect(reg.json).toMatchObject({ details: { code: 'GOAL_TODAY_PART_SERVER_OWNED' } });
-    expect(String((reg.json as Rec).message)).toContain('Change the goal\'s current level and it changes with it. Nothing was written.');
+    expect(reg.status).toBe(422);
+    expect(JSON.stringify(reg.json)).toContain('GOAL_TODAY_PART_NOT_GOAL_LEVEL');
     expect(h.appends).toHaveLength(0);
     expect(nodeOf(h.stored(), 'option_a')!.interventions[TODAY]).toBeUndefined();
   });
@@ -242,5 +244,70 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     const applied = await h.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
     expect(applied.applied, JSON.stringify(applied)).toBe(true);
     expect(nodeOf(h.stored(), GOAL)!.observed_state.raw_value).toBe(50);
+  });
+});
+
+/**
+ * ⭐ ONE SHARED PERSISTENCE CHECK (Codex BLOCK @ff7e6b08: append, save and restore accepted today 41 beside a goal of 40 and an
+ * option's override of 50). Every real caller of `persist-graph-write.ts` — the turn append, version save, version restore and
+ * guest copy — reaches `assertNoIntroducedGraphViolations`, which refuses a compiled today part that is not its goal's level today,
+ * that an option sets, or that a link leads into. Nothing is written in any of them.
+ */
+describe('STEP 8 Route A — the today part is enforced once, at the shared persistence check, on every caller', () => {
+  const OWNER_ID = OWNER;
+  const variants = async (): Promise<Array<[string, Rec]>> => {
+    const g = await constructed(true);
+    const at41 = clone(g);
+    const os = nodeOf(at41, TODAY)!.observed_state;
+    nodeOf(at41, TODAY)!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    const set50 = clone(g);
+    const a = nodeOf(set50, 'option_a')!;
+    a.interventions = { ...a.interventions, [TODAY]: { ...os, raw_value: 50, value: 50 / os.cap } };
+    return [['today 41 beside a goal of 40', at41], ['an option\'s override of 50', set50]];
+  };
+  const refusedFor = (e: unknown): boolean => e instanceof PersistedGraphInvariantError
+    && e.violations.some((v) => v.code === 'GOAL_TODAY_PART_NOT_GOAL_LEVEL' && v.entity_ids.includes(TODAY));
+
+  it('RED: the turn append refuses both, and appends nothing', async () => {
+    for (const [why, graph] of await variants()) {
+      const append = vi.fn();
+      const err = await bindWriteCaller({ userId: OWNER_ID, verified: true }, () => appendCheckedGraphWrite({
+        store: { append, getScenarioOwner: async () => OWNER_ID } as never, writesGraph: true, baseGraphForInvariants: null, source: 'step8_row',
+        write: { scenario_id: SCENARIO, turn_id: 't-step8', turn_class: 'mutate', graph } as never,
+      })).then(() => null, (e: unknown) => e);
+      expect(refusedFor(err), `${why}: ${String(err)}`).toBe(true);
+      expect(append).not.toHaveBeenCalled();
+    }
+  });
+
+  it('RED: version save and restore refuse both, and call no writing RPC', async () => {
+    for (const [why, graph] of await variants()) {
+      const saveVersion = vi.fn(); const restoreVersionAtomic = vi.fn();
+      const store = { getScenarioOwner: async () => OWNER_ID, saveVersion, restoreVersionAtomic } as never;
+      const save = await bindWriteCaller({ userId: OWNER_ID, verified: true }, () => commitModelChange({ operation: 'SAVE_VERSION', store,
+        write: { scenario_id: SCENARIO, graph } as never })).then(() => null, (e: unknown) => e);
+      const restore = await bindWriteCaller({ userId: OWNER_ID, verified: true }, () => commitModelChange({ operation: 'RESTORE_VERSION', store,
+        write: { scenario_id: SCENARIO, version_id: 'v-1', graph, current_graph: clone(graph) } as never, restoreHead: null })).then(() => null, (e: unknown) => e);
+      expect(refusedFor(save), `save, ${why}`).toBe(true);
+      expect(refusedFor(restore), `restore, ${why}`).toBe(true);
+      expect(saveVersion).not.toHaveBeenCalled();
+      expect(restoreVersionAtomic).not.toHaveBeenCalled();
+    }
+  });
+
+  it('RED: a guest copy refuses both, and copies nothing', async () => {
+    for (const [why, graph] of await variants()) {
+      const copyGuestScenarioChecked = vi.fn();
+      const out = await bindWriteCaller({ userId: OWNER_ID, verified: true }, () => commitModelChange({ operation: 'COPY_GUEST_SCENARIO',
+        sourceScenarioId: SCENARIO, userId: OWNER_ID, store: { readGuestCopy: async () => null,
+          readGuestSource: async () => ({ graph, user_id: null, revision: 1 }), copyGuestScenarioChecked } as never }));
+      expect(out, why).toEqual({ kind: 'refused', reason: 'no_model' });
+      expect(copyGuestScenarioChecked).not.toHaveBeenCalled();
+    }
+  });
+
+  it('CONTRAST: the compiled graph as built (today part at the goal\'s level, no option on it) passes the same check', async () => {
+    const g = await constructed(true);
+    expect(() => assertNoIntroducedGraphViolations({ graph: g, writesGraph: true, identity: { scenario_id: SCENARIO }, baseGraphForInvariants: null })).not.toThrow();
   });
 });

@@ -131,17 +131,17 @@ export function withTodayPartsAtGoalLevel<G>(graph: G): G {
 }
 
 /**
- * The today part has no setter of its own (Codex review round 2 of #3421: an option's intervention on it reached the Run as an
- * operand of 50 beside a goal of 40). The part and its goal when any option sets it or any link leads into it, for the
- * persistence route to refuse the write; `undefined` when none does.
+ * The today part IS its goal's level today and has no setter of its own: the ids of every compiled today part that is not at its
+ * goal's level today, that an option sets, or that a link leads into (Codex reviews of #3421: today 41 beside a goal of 40, an
+ * option's override of 50). The one shared persistence assertion refuses any write holding one (`persist-graph-write.ts`).
  */
-export function todayPartSetBesideGoal(graph: unknown): { readonly part: string; readonly goal: string } | undefined {
+export function todayPartsApartFromGoal(graph: unknown): string[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? (graph.edges as EdgeIn[]) : [];
-  for (const goal of nodes.filter((n) => n.kind === 'goal')) {
+  return nodes.filter((n) => n.kind === 'goal').flatMap((goal) => {
     const part = goalSumTodayPart(nodes, goal.id);
-    if (part !== undefined && (nodes.some((o) => o.kind === 'option' && isRec(o.interventions) && part.id in o.interventions)
-      || edges.some((e) => e.to === part.id))) return { part: part.label, goal: goal.label };
-  }
-  return undefined;
+    return part !== undefined && (stableStringify(part.observed_state) !== stableStringify(goal.observed_state)
+      || nodes.some((o) => o.kind === 'option' && isRec(o.interventions) && part.id in o.interventions)
+      || edges.some((e) => e.to === part.id)) ? [part.id] : [];
+  });
 }
