@@ -488,23 +488,28 @@ export const USER_MESSAGE_MARK = '[the user’s message]';
 const secretKey = /^(?:authorization|cookies?|set[_-]?cookie|headers?|password|passphrase|secret|client[_-]?secret|(?:access|refresh|auth|id)?[_-]?token|api[_-]?key|private[_-]?key|credentials?)$/i;
 const secretValue = /\bbearer\s+\S|\bsk-[\w-]{8,}|\bAKIA[0-9A-Z]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
 
-const boundArgument = (v: unknown, depth: number, userMessages: readonly string[]): unknown => {
+/** An id names the item a call aims at, so it is cut last: never below this, whatever the text bound. */
+const TOOL_ARGUMENT_ID_MAX = 120;
+const idKey = /(?:^|_)ids?$/;
+
+const boundArgument = (v: unknown, depth: number, userMessages: readonly string[], max = TOOL_ARGUMENT_STRING_MAX, key = ''): unknown => {
   if (typeof v === 'string') {
     if (secretValue.test(v)) return '[redacted]';
     if (userMessages.some((m) => v.includes(m))) return USER_MESSAGE_MARK;
-    return v.length > TOOL_ARGUMENT_STRING_MAX ? `${v.slice(0, TOOL_ARGUMENT_STRING_MAX)}…(+${v.length - TOOL_ARGUMENT_STRING_MAX})` : v;
+    const cut = idKey.test(key) ? Math.max(max, TOOL_ARGUMENT_ID_MAX) : max;
+    return v.length > cut ? `${v.slice(0, cut)}…(+${v.length - cut})` : v;
   }
   if (typeof v === 'number') return Number.isFinite(v) ? v : String(v);
   if (typeof v === 'boolean' || v === null) return v;
   if (depth >= TOOL_ARGUMENT_DEPTH_MAX) return Array.isArray(v) ? `[list of ${v.length}]` : '[nested]';
   if (Array.isArray(v)) {
-    const kept = v.slice(0, TOOL_ARGUMENT_LIST_MAX).map((x) => boundArgument(x, depth + 1, userMessages));
+    const kept = v.slice(0, TOOL_ARGUMENT_LIST_MAX).map((x) => boundArgument(x, depth + 1, userMessages, max, key));
     return v.length > TOOL_ARGUMENT_LIST_MAX ? [...kept, `…+${v.length - TOOL_ARGUMENT_LIST_MAX} more`] : kept;
   }
   if (typeof v === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      out[k] = secretKey.test(k) ? '[redacted]' : boundArgument(x, depth + 1, userMessages);
+      out[k] = secretKey.test(k) ? '[redacted]' : boundArgument(x, depth + 1, userMessages, max, k);
     }
     return out;
   }
@@ -514,7 +519,8 @@ const boundArgument = (v: unknown, depth: number, userMessages: readonly string[
 /**
  * ⭐ WHAT THE AI SENT, SO A JUDGE CAN SEE WHICH ITEM A CORRECTION WAS AIMED AT (honest scoreboard, step 0, 18 Oct). The served
  * reply kept only name, ok and refusal, so a refused or mis-aimed correction could not be told from the record. The AI's own
- * call arguments are kept, bounded: each string cut to 160 characters, lists to 6 entries, nesting to 6 levels (a correction's
+ * call arguments are kept, bounded: each string cut to 160 characters (then 60, then 24 when the whole would not fit; an
+ * id never below 120), lists to 6 entries, nesting to 6 levels (a correction's
  * `edits[].subject` sits at 4), and the whole to 1,500 characters (top-level keys that do not fit are named in `_omitted`).
  * Secret-named keys and credential-shaped values
  * are redacted; a string carrying the user's whole message is marked, never copied a second time. Not a JSON object → nothing.
@@ -528,14 +534,20 @@ export const toolArgumentsAsSent = (name: string, raw: unknown, userMessages: re
   try { parsed = JSON.parse(raw); } catch { return {}; }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
   const whole = userMessages.map((m) => m.trim()).filter((m) => m.length >= 24);
-  const out: Record<string, unknown> = {};
-  const omitted: string[] = [];
-  for (const [k, x] of Object.entries(parsed as Record<string, unknown>)) {
-    const value = secretKey.test(k) ? '[redacted]'
-      : GATED_PROSE_TOOLS.has(name) && typeof x === 'string' ? `[text, ${x.length} characters]` : boundArgument(x, 1, whole);
-    // Room is kept for the `_omitted` list itself, so the bound holds for the whole field.
-    if (JSON.stringify({ ...out, [k]: value }).length <= TOOL_ARGUMENTS_MAX_CHARS - 200) out[k] = value;
-    else omitted.push(k.slice(0, 40));
+  // Text is cut harder before any key is left out (replay 18 Oct: a long correction lost its `edits[].subject` ids whole).
+  let out: Record<string, unknown> = {};
+  let omitted: string[] = [];
+  for (const max of [TOOL_ARGUMENT_STRING_MAX, 60, 24]) {
+    out = {};
+    omitted = [];
+    for (const [k, x] of Object.entries(parsed as Record<string, unknown>)) {
+      const value = secretKey.test(k) ? '[redacted]'
+        : GATED_PROSE_TOOLS.has(name) && typeof x === 'string' ? `[text, ${x.length} characters]` : boundArgument(x, 1, whole, max, k);
+      // Room is kept for the `_omitted` list itself, so the bound holds for the whole field.
+      if (JSON.stringify({ ...out, [k]: value }).length <= TOOL_ARGUMENTS_MAX_CHARS - 200) out[k] = value;
+      else omitted.push(k.slice(0, 40));
+    }
+    if (omitted.length === 0) break;
   }
   if (omitted.length > 0) out._omitted = omitted.slice(0, 8);
   return { arguments: out };

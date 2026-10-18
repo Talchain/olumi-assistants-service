@@ -86,16 +86,26 @@ describe('the whole-call bound', () => {
     expect(toolArgumentsAsSent('give_provisional_view', JSON.stringify({ view: 'abc', reasoning: 'code_token here' }), []))
       .toEqual({ arguments: { view: '[text, 3 characters]', reasoning: '[text, 15 characters]' } });
   });
-  it('keeps keys in order until the cap, then names the ones left out', () => {
-    const many = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`field_${i}`, `${i} `.repeat(100)]));
+  it('cuts text harder first; past the hardest cut, keeps keys in order and names the ones left out', () => {
+    const many = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`field_${i}`, `${i} `.repeat(100)]));
     const { arguments: a } = toolArgumentsAsSent('propose_statement', JSON.stringify(many), []);
     expect(JSON.stringify(a).length).toBeLessThanOrEqual(TOOL_ARGUMENTS_MAX_CHARS);
-    expect(a!.field_0).toBe(`${'0 '.repeat(100).slice(0, TOOL_ARGUMENT_STRING_MAX)}\u2026(+${200 - TOOL_ARGUMENT_STRING_MAX})`);
+    expect(a!.field_0).toBe(`${'0 '.repeat(100).slice(0, 24)}\u2026(+${200 - 24})`);
     const kept = Object.keys(a!).filter((k) => k !== '_omitted');
     expect(kept).toEqual(Object.keys(many).slice(0, kept.length));
     expect(kept.length).toBeGreaterThan(0);
     // The keys left out are named, in order, up to eight of them.
     expect(a!._omitted).toEqual(Object.keys(many).slice(kept.length, kept.length + 8));
+  });
+  // Replay 18 Oct (R06/R07): one long `correction` was left out whole, ids and all. Text is cut harder first.
+  it('a long correction keeps every subject id: text is cut harder before any key is left out', () => {
+    const edits = Array.from({ length: 4 }, (_, i) => ({ subject: { kind: 'factor', id: `factor_with_a_long_slug_id_number_${i}`, field: 'level' },
+      retirement: { quote: 'old words '.repeat(30), scope: 'whole', disposition: 'historical' }, retained: [], reading_words: 'reading '.repeat(40) }));
+    const { arguments: a } = toolArgumentsAsSent('propose_statement', JSON.stringify({ correction: { quote: 'q', edits } }), []);
+    expect(a!._omitted).toBeUndefined();
+    expect(JSON.stringify(a).length).toBeLessThanOrEqual(TOOL_ARGUMENTS_MAX_CHARS);
+    const kept = (a!.correction as { edits: { subject: unknown }[] }).edits.map((e) => e.subject);
+    expect(kept).toEqual(edits.map((e) => e.subject));
   });
   it.each(['{', 'null', '[]', '42', '"text"'])('records nothing for arguments that are not a JSON object: %s', (raw) => {
     expect(toolArgumentsAsSent('propose_statement', raw, [])).toEqual({});
