@@ -5,6 +5,7 @@ import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
+import { linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -599,8 +600,9 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
   // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
   // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general
-  // rule, no domain example: the countable the size is per becomes a quantity, and a stated range gives its LOW end.
-  'A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as "Deals closed", unit "deals", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` "explicit"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, use its LOW end. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never "explicit", and ask it in `unknowns`.',
+  // rule, no domain example: the countable the size is per becomes a quantity. A stated range is kept whole on its link, never an
+  // end or a middle as the size (AIE A3, prompt/AIE-A3-COMMON-20261017-v1.json, exact).
+  'A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as "Deals closed", unit "deals", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` "explicit"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, retain its complete signed endpoints, unit, reference, period, conditions and source in statements on that directed link. Do not choose an endpoint or calculate a midpoint to fill a missing point size; leave that size null when no separately supported point size is supplied. If the user explicitly supplies a central figure for this same quantity, unit, reference, window and conditions, retain that figure with its stated qualifier and range; it is not automatically an expected mean or a calibrated distribution. Keep any proposed operative Olumi approximation separate from the original range, with its own supported basis, disclosed assumptions and required approval. A plain or likely range does not establish inner quartiles, a Normal law or a hard bound. Do not re-ask a range already supplied. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never "explicit", and ask it in `unknowns`.',
   // ⛔ R-c (AI Quality 5881541947 / 5882087383): a limit is checked only when every link from what an option changes to
   // the limited quantity carries a size in that quantity's own unit, and a risk has no unit. Measured (MG 7×3, 29 Sep):
   // 10 of 12 A/C churn limits reached churn only through a risk, so none of them could be checked. The first wording
@@ -1142,9 +1144,29 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
  * issue for the EXISTING repair retry. The retry is adopted only when it CARRIES more ranges (`carriedRanges`), so a
  * range that is no per-one size (a budget, a target) costs one retry and changes nothing.
  */
-export function carriedRanges(admitted: Pick<AdmittedModel, 'edges'>): Set<string> {
+export function carriedRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted?: CandidateModel, brief?: string): Set<string> {
   const texts = admitted.edges.map((e) => (e.provenance as { natural_effect?: { stated_range?: { text?: unknown } } } | undefined)?.natural_effect?.stated_range?.text);
-  return new Set(texts.filter((t): t is string => typeof t === 'string'));
+  return new Set([...texts.filter((t): t is string => typeof t === 'string'), ...recordedWholeRanges(admitted, drafted, brief)]);
+}
+
+/**
+ * ⭐ A3 (AIE A3 text; Lane A's host change): the producer keeps a written range WHOLE in `statements` on its link, its size null.
+ * A range is CARRIED only where registration will hold it: bound to an ADMITTED link by the statement door's own binding
+ * (`withConstructionStatements`, as registration writes it) and read by the Run's one reader (`linkHoldsStatedRange`), both ends
+ * in the sentence that writes it, so the retry is never asked for what the draft already holds. The retry's ADOPTION is unchanged
+ * (base: `carriedRanges(admitted)` alone; DL-3 fallback on #3401). ⛔ #3401 Codex r1 P1: a statement whose subject resolves to no
+ * admitted link ("Contracts signed TYPO") records nothing at registration, so it carries nothing here.
+ */
+function recordedWholeRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted: CandidateModel | undefined, brief: string | undefined): string[] {
+  if (drafted === undefined || typeof brief !== 'string') return [];
+  // Bound only to read carriage, never saved: the record's time is a valid placeholder (the reader drops a record without one).
+  const bound = withConstructionStatements({ nodes: [...admitted.nodes], edges: [...admitted.edges] }, draftStatements(drafted), brief, new Date(0).toISOString());
+  const recorded = admitted.edges.filter((e) => linkHoldsStatedRange(bound, e.from, e.to))
+    .flatMap((e) => userStatementFor(bound, { kind: 'link', id: e.from, to_id: e.to, field: 'effect' })?.statements ?? [])
+    .filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
+  return findStatedRanges(brief).filter((r) => recorded.some((st) => st.quote.includes(r.text)
+    && Math.min(Math.abs(st.low!), Math.abs(st.high!)) === r.low.magnitude && Math.max(Math.abs(st.low!), Math.abs(st.high!)) === r.high.magnitude))
+    .map((r) => r.text);
 }
 
 /**
@@ -1185,8 +1207,8 @@ function moneyHeldBy(drafted: CandidateModel): { readonly label: string; readonl
  * written about that quantity (`figureTheUserWroteFor`, strict, read `at` that end: the scoped reader #2409's door binds with).
  * Every miss asks the retry, which is adopted only when a link then CARRIES the range: asking costs one call, never a figure.
  */
-export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'edges'>, drafted: CandidateModel): string[] {
-  const carried = carriedRanges(admitted);
+export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted: CandidateModel): string[] {
+  const carried = carriedRanges(admitted, drafted, brief);
   const held = moneyHeldBy(drafted);
   const quantities = [drafted.goal.metric, ...drafted.factors.map((f) => f.label), ...drafted.outcomes.map((o) => o.label), ...drafted.risks.map((r) => r.label)];
   // The written amount AT that end is this quantity's value, in its unit and currency, and written about it.
@@ -1203,9 +1225,7 @@ export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel
 
 /** What the per-one rule asks of ONE written range: the same words for the first construct and the repair retry. */
 function perOneRangeRule(written: string): string {
-  return 'If it is a money size PER ONE of something the brief names '
-    + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
-    + `money goal, and size that link per one at the LOW end of "${written}" (effect_provenance "explicit").`;
+  return `If it is a money size PER ONE of something the brief names (per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the money goal per one (effect_per_source_change 1), and retain "${written}" as the complete stated effect range in statements on that directed link, with its signed endpoints, actual unit, reference, period, conditions and source. Leave the point size null unless a separately supported point size is supplied. Retain any explicitly stated central figure with its qualifier and range, without interpreting it as an expected mean or inferring a distribution. Any operative Olumi approximation stays separate, with its own supported basis, disclosed assumptions and required approval. Do not substitute a chosen endpoint, midpoint, zero or a guessed spread for the source, and do not re-ask a range already supplied.`;
 }
 
 /**
