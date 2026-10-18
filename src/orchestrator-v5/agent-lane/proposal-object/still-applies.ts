@@ -19,6 +19,7 @@
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
  * Any other card keeps the whole-model rule.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import type { StructuredProposal } from '../proposal.js';
 import type { PendingAction } from '../../session/pending-action.js';
@@ -117,6 +118,8 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   if (op.op === 'set_hiring_times') return hiringTimesStillApply(op.value as ApprovedHiringTimes, graph);
   if (op.op === 'set_option_capacity_change') return optionCapacityChangeStillApplies(op.value as ApprovedOptionCapacityChange, graph);
   if (op.op === 'set_goal_deadline') return deadlineSubjectHolds(op, graph) === true;
+  // A limit card: its row still reads the figure it was made against (verifier F1: a same-turn limit card beside a figure card).
+  if (op.op === 'set_limit') return limitRowReadsAsMade(op, graph);
   // A risk occurrence card: its own writer's gate (its goal as bound, its node as shown; #3013).
   if (op.op === SET_RISK_OCCURRENCE_OP) return riskOccurrenceCardHolds(op, graph);
   // A cohort forecast card: its own writer's gate (the option as shown, the two targets as read).
@@ -124,6 +127,15 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   // The goal's same-people card: its own writer's gate (the goal as shown).
   if (op.op === SET_STATEMENT_RECORD_OP) return statementRecordCardHolds(op, graph);
   return false;
+}
+
+/** The limit row a `set_limit` card changes: the same row, on the same node, with its comparator, figure and unit as made. */
+function limitRowReadsAsMade(op: { readonly path?: string; readonly value?: unknown }, graph: unknown): boolean {
+  const v = op.value as { operator?: unknown; unit?: unknown; constraint_id?: unknown; before?: unknown } | undefined;
+  const rows = isRec(graph) && Array.isArray(graph['goal_constraints']) ? (graph['goal_constraints'] as unknown[]).filter(isRec) : [];
+  const row = rows.filter((r) => r['constraint_id'] === v?.constraint_id);
+  return row.length === 1 && row[0]!['node_id'] === op.path && row[0]!['operator'] === v?.operator && row[0]!['value'] === v?.before
+    && (typeof row[0]!['unit'] === 'string' && row[0]!['unit'] !== '' ? row[0]!['unit'] : null) === (v?.unit ?? null);
 }
 
 /**
@@ -159,6 +171,21 @@ export function isHeldAgentCard(pa: PendingAction): boolean {
  * reviewed (the Agent prepares it again on the model as it is now) or set aside. Its pin and digest are unchanged.
  */
 export const AWAITING_REVIEW = 'awaiting_review';
+/**
+ * The card a verified approved write is applying now (PR-2 CI, run4 `after_write`): its OWN write moves its own subject, and that
+ * is never a model change to review. The commit seams that mark a card for review retire THIS card as before PR-2, so a retry
+ * after an interrupted turn still binds its press and is answered "already saved". The same async context as an approved
+ * adoption (`approved-adoption-context.ts`): unreachable from outside the process.
+ */
+const applying = new AsyncLocalStorage<{ readonly scenarioId: string; readonly proposalId: string }>();
+export function runApplyingHeldCard<T>(scenarioId: string, proposalId: string, fn: () => Promise<T>): Promise<T> {
+  return applying.run({ scenarioId, proposalId }, fn);
+}
+export function isHeldCardBeingApplied(pa: PendingAction): boolean {
+  const a = applying.getStore();
+  const p = pa.action.kind === 'apply_proposed_change' ? (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] : undefined;
+  return a !== undefined && pa.scenario_id === a.scenarioId && isRec(p) && p['proposal_id'] === a.proposalId;
+}
 export function heldCardUnderReview(pa: PendingAction): boolean {
   return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.[AWAITING_REVIEW]);
 }

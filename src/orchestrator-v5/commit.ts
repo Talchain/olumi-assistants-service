@@ -1,6 +1,6 @@
 import { assertShareByDatePreserved } from './goal-target/share-by-date-carrier.js';
 import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
-import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard } from './agent-lane/proposal-object/still-applies.js';
+import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard, isHeldCardBeingApplied } from './agent-lane/proposal-object/still-applies.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -664,8 +664,9 @@ export function computeSurvivingPriorPendingsDetailed(
       preconditionHash !== currentGraphHash &&
       heldCardStillAppliesNow?.(pa) !== true
     ) {
-      // ⭐ NO SILENT LAPSE (PR-2): a held Agent card is kept, marked for review (`heldCardForReview`); others drop as before.
-      if (!isHeldAgentCard(pa)) {
+      // ⭐ NO SILENT LAPSE (PR-2): a held Agent card is kept, marked for review (`heldCardForReview`); others drop as before,
+      // and so does the card THIS write applies (`isHeldCardBeingApplied`): its own write is not a change to review.
+      if (!isHeldAgentCard(pa) || isHeldCardBeingApplied(pa)) {
         hashInvalidatedCount += 1;
         continue;
       }

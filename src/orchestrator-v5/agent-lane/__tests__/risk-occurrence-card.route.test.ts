@@ -26,6 +26,8 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { approvalChipIdFor } from '../approval-chips.js';
+import { heldCardUnderReview } from '../proposal-object/still-applies.js';
+import type { PendingAction } from '../../session/pending-action.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -309,10 +311,16 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(riskOf(w.graph())).not.toHaveProperty('event_risk');
     expect(w.graph()).toEqual(shifted);
     expect(JSON.stringify([pressed.assistant_text, w.writes])).not.toContain(JSON.stringify(RECEIPT).slice(1, -1));
-    // Codex r2: the obsolete card is retired and SAID (#3024's rule), never offered again as it stood.
-    expect(String(pressed.assistant_text)).toMatch(LAPSE);
+    // Codex r2, as PR-2 states it (no silent lapse): the obsolete card is never offered again as it stood, and it is SAID:
+    // kept, marked for review, and listed for review only.
+    expect(String(pressed.assistant_text)).toMatch(/Model changed: review this change\./);
+    expect(String(pressed.assistant_text)).not.toMatch(LAPSE);
     expect((pressed.suggested_actions ?? []).some((c: Rec) => c.id === chip!.id)).toBe(false);
-    expect(onLatestRow(w, chip!.id)).toBe(false);
+    const kept = ((w.rows.find((r) => !r.turn_id.endsWith(':claim')) as Rec | undefined)?.pending_actions as PendingAction[] ?? [])
+      .find((h) => h.chip_id === chip!.id);
+    expect(kept !== undefined && heldCardUnderReview(kept), 'kept on the latest row, under review').toBe(true);
+    expect(((pressed._proposal_fields as Rec | undefined)?.proposals as Rec[] ?? []).find((r) => `agent-approve-proposal:${r.proposal_id}` === chip!.id)
+      ?.review_action, 'listed for review, never to approve').toMatchObject({ id: expect.stringMatching(/^agent-review-proposal:/) });
   }, ROUTE_MS);
 
   it('⛔ buddy r3 (equal value, different identity): ANOTHER writer lands the EQUAL block between the press’s read and the door’s → the press is refused: no receipt, no write of its own', async () => {

@@ -5239,6 +5239,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const amendIndex = offeredNow.findIndex(a => a.id === AMEND_CHIP.id);
       offeredNow.splice(amendIndex >= 0 ? amendIndex + 1 : offeredNow.length, 0, offeredRecord.decline_action as OfferedAction);
     }
+    // ⭐ SEVERAL CARDS THIS TURN (a field-scoped limit card beside another, verifier F1 18 Oct): each further card is held on
+    // this row as its own card, with its record and its own "Not now", exactly as a carried card is (`heldCardOffer`).
+    for (const further of offeredNow.filter((a) => a.id !== offeredApprove?.id && typedApprovalOf({ chip: { id: a.id } }) !== undefined)) {
+      const p = proposals.get(typedApprovalOf({ chip: { id: further.id } }) as string);
+      if (p === undefined || liveHolds.some((h) => heldProposalId(h) === p.proposal_id)) continue;
+      const hold = refreshedHold(proposalPendingAction(p, further, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now());
+      liveHolds = [...liveHolds, hold];
+      const r = proposalRecord(hold, readbackGraph);
+      if (r === undefined) continue;
+      heldRecords.push(r);
+      const lastDecline = offeredNow.map((x) => x.id.startsWith('agent-decline-proposal:') || x.id === AMEND_CHIP.id).lastIndexOf(true);
+      if (!offeredNow.some((x) => x.id === r.decline_action.id)) offeredNow.splice(lastDecline + 1, 0, r.decline_action as OfferedAction);
+    }
 
     /**
      * ⛔ THIS ROW MUST CARRY THE PRODUCT'S HELD ADD-OPTION FORWARD (C52). Pending actions are read from the

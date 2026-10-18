@@ -60,7 +60,7 @@
  * commit carry-forward (single decrement site preserved).
  */
 
-import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard } from '../agent-lane/proposal-object/still-applies.js';
+import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard, isHeldCardBeingApplied } from '../agent-lane/proposal-object/still-applies.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
@@ -366,8 +366,9 @@ export function threadHoldsThroughMutatingCommit(
       threaded.push(pa);
       continue;
     }
-    // ⭐ NO SILENT LAPSE (PR-2): an Agent card whose own subject this commit moved is kept, marked for review.
-    if (isHeldAgentCard(pa)) {
+    // ⭐ NO SILENT LAPSE (PR-2): an Agent card whose own subject this commit moved is kept, marked for review; the card THIS
+    // write applies is not (`isHeldCardBeingApplied`: its own write is no change to review) and retires as before.
+    if (isHeldAgentCard(pa) && !isHeldCardBeingApplied(pa)) {
       threaded.push(heldCardForReview(pa, input.graphHashAfterCommit));
       continue;
     }
