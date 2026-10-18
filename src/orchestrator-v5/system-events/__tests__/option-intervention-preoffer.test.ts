@@ -396,6 +396,8 @@ function execute(input: native.OptionInterventionBatchExecutionInput) {
  * its origin unverified, never refused and never "you said". Real tool dispatch → proposal → typed approval → the level writer →
  * the persisted cell, read back cold through the one provenance authority (`settingProvenanceOf`). Synthetic words only.
  */
+/** The AIE's exact Agent note (`prompt/AIE-B0-GUIDANCE-AND-ORIGIN-NOTE-20261018-v1.json`), pinned byte-for-byte. */
+const AIE_ORIGIN_UNVERIFIED_NOTE = 'These entries retain figures found in the user-supplied material, but Olumi could not verify their attribution or binding to the proposed quantities from a cited statement. Their origin remains unverified (`origin_unverified`): do not call them the user’s statements or Olumi’s estimates. Preserve the source, speaker, unit, reference, qualifications and conditions actually available; do not invent missing ones. Distinguish an offered proposal from a saved change using the actual result and readback. Approval authorises only the displayed change and does not verify source credit or scientific support. Reuse supplied figures rather than asking the user to repeat or confirm them; ask only for a genuinely missing or conflicting meaning.';
 describe('G3: an option cost the AI cannot cite is SAVED with its origin unverified — not refused, not credited "you said"', () => {
   const world = (said: string) => {
     delete node(persisted, 'pilot').interventions;
@@ -414,6 +416,7 @@ describe('G3: an option cost the AI cannot cite is SAVED with its origin unverif
     const r = await w.propose({ user_stated: true, basis: 'the user gave the pilot two tech leads' });
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, interventions: [{ option: 'Pilot', factor: 'Staffing', value: 2, stated_by: 'origin_unverified' }],
       origin_unverified: [{ option: 'Pilot', factor: 'Staffing', value: 2 }] });
+    expect(r.origin_unverified_note).toBe(AIE_ORIGIN_UNVERIFIED_NOTE);
     expect(r).not.toHaveProperty('refusal');
     expect(r).not.toHaveProperty('not_the_users_figure');
     expect(JSON.stringify(r)).not.toMatch(/"stated_by":"user"|your_figure/);

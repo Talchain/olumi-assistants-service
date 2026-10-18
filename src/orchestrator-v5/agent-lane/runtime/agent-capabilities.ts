@@ -179,12 +179,15 @@ const NOT_THE_USERS_FIGURE_NOTE =
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
 /**
  * ⭐ G3 (DL-3; unseen 8e9132fc T02): a figure THE ONE RULE could not attribute is recorded with its origin unverified, never refused.
- * ⚠ AIE TEXT PENDING: drafted from the signed LINK_SET_UNKNOWN_AGENT_NOTE wording ("do not call the proposed bands the user's or
- * Olumi's"); replaced by the AIE's exact text before merge.
+ * The AIE's exact text (`prompt/AIE-B0-GUIDANCE-AND-ORIGIN-NOTE-20261018-v1.json`, g3.origin_unverified_note_exact).
  */
 const ORIGIN_UNVERIFIED_NOTE =
-  'Olumi could not verify who gave these figures, so they are proposed with their origin unverified (`origin_unverified`). '
-  + 'Do not call them the user\u2019s or Olumi\u2019s, and do not ask the user to repeat or confirm figures they already supplied.';
+  'These entries retain figures found in the user-supplied material, but Olumi could not verify their attribution or binding to the proposed quantities from a cited statement. '
+  + 'Their origin remains unverified (`origin_unverified`): do not call them the user\u2019s statements or Olumi\u2019s estimates. '
+  + 'Preserve the source, speaker, unit, reference, qualifications and conditions actually available; do not invent missing ones. '
+  + 'Distinguish an offered proposal from a saved change using the actual result and readback. '
+  + 'Approval authorises only the displayed change and does not verify source credit or scientific support. '
+  + 'Reuse supplied figures rather than asking the user to repeat or confirm them; ask only for a genuinely missing or conflicting meaning.';
 
 /** A level in a different unit is left out before its authorship is read. */
 export const UNIT_DIFFERS_FROM_DECLARED_DETAIL = (option: string, declaredUnit: string, sentUnit: string): string =>
