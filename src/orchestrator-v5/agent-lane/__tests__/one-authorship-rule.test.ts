@@ -39,8 +39,15 @@ describe('the one rule: whose value it is', () => {
     // Quoting the report WITH its speaker does not make the speaker's figure the user's (#3389 probe P2)…
     const whole = 'Our ops lead told me: “Returns will drop to 3% once the new labels ship.”';
     expect(userStated({ quote: whole, value: 3 }, quoted, SUBJECT).origin).toBe('unknown');
-    // …though the report itself, as words with no figure of the user's, is theirs to have typed, speaker kept in the quote.
-    expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: whole } });
+    // …nor is the report itself, as words: they END in the speaker's quoted words, so the claim is theirs (AIE: quoting an entire report
+    // does not transfer its embedded claim; C2, #3389's KNOWN BASE DEFECT rows), unless the AI reads it as the user's OWN instruction about them.
+    expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'unknown', refusal: 'statement_not_found' });
+    const instruction = 'Ignore what our ops lead said: “Returns will drop to 3% once the new labels ship.”';
+    expect(userStated({ quote: instruction, form: 'describes', speaker: 'user' }, texts(instruction), SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: instruction } });
+    expect(userStated({ quote: instruction, form: 'describes' }, texts(instruction), SUBJECT).origin).toBe('unknown');
+    // CONTRAST: words of the user's own that only MENTION a quoted phrase mid-sentence are theirs.
+    const own = 'We call it “the slow leak” and it worries me.';
+    expect(userStated({ quote: own, form: 'describes' }, texts(own), SUBJECT).origin).toBe('human');
     // ⭐ P2 (DL-3 18 Oct): an UNMARKED report, read by the AI itself as another speaker's ('other') or unplaced ('unknown'), is never theirs.
     const unmarked = texts('A colleague said: we lose 5% of members a month.');
     for (const speaker of ['other', 'unknown']) {

@@ -218,6 +218,28 @@ function figureOnlyInSpeech(quote: string, figure: number): boolean {
 }
 
 /**
+ * ⭐ LEAN CORE P2 (C2; AIE: "Quoting an entire report does not transfer its embedded claim to the user"): `quote` ENDS inside another
+ * speaker's paired quotation marks (the estate's one speech reader): its last words are someone's quoted words, after a lead-in the host
+ * cannot read as attribution ("A colleague said: …") or as the user's own instruction about them ("Ignore what Sam said: …").
+ */
+function endsInQuotedSpeech(quote: string): boolean {
+  const lastWord = (t: string): number => t.search(/[\p{L}\p{N}][^\p{L}\p{N}]*$/u);
+  // Directional marks (“ ” « ») pair by nesting, so a reported line that itself quotes words is still read whole.
+  if (/[\u201C\u201D\u00AB\u00BB]/u.test(quote)) {
+    const last = lastWord(quote);
+    let depth = 0;
+    for (let i = 0; i < last; i += 1) {
+      if (quote[i] === '\u201C' || quote[i] === '\u00AB') depth += 1;
+      else if ((quote[i] === '\u201D' || quote[i] === '\u00BB') && depth > 0) depth -= 1;
+    }
+    return last >= 0 && depth > 0;
+  }
+  const { text, inSpeech } = speechReading(quote);
+  const last = lastWord(text);
+  return last >= 0 && inSpeech(last);
+}
+
+/**
  * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15: the same
  * figure with the opposite direction word, where the words state a NET flow. With no such words a negative is never the user's.
  * AIE 6187351293 (2a scope): "We lose 15 members a month" can be a gross count of 15 lost, so only a net flow states −15.
@@ -369,6 +391,11 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
       : said === 'not_their_claim'
         ? { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is reported as Olumi’s, disputed, or withdrawn in the user’s own messages, so it is not their statement and nothing was prepared.` }
         : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not in the user's own words, so nothing was prepared. Quote their words, verbatim, from any of their messages.` };
+  }
+  // ⭐ LEAN CORE P2 (C2): words that END in another speaker's quoted words are a report unless the AI's own reading places the claim
+  // with the user (their instruction about the quoted words). That reading is never sufficient: every check here still applies.
+  if (form === 'describes' && given?.speaker !== 'user' && endsInQuotedSpeech(quote)) {
+    return { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” ends in another speaker's quoted words, so it reports their claim, not the user's own statement. Nothing was prepared. Their words stay as said.` };
   }
   const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
   const qualifier = trimmed(given?.qualifier, 80);
