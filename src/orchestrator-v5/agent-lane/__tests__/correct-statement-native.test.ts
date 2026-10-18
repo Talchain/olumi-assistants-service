@@ -85,12 +85,33 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     if (fault === 'partial') correction.quote = f.message.slice(0, f.message.indexOf(','));
     const review = await w.offer('propose_statement', { correction });
     expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'correction_not_stated' });
-    expect(review.public_label).toContain('Review Olumi’s proposed correction');
+    expect(review.public_label).toContain('Review the correction’s source');
     expect(review.public_label).toContain(`Olumi’s reading: ${f.request.edits[0]!.reading_words}`);
-    expect(review.public_label).toContain(fault === 'missing' ? 'Olumi has not identified source words for this reading.' : 'Olumi could not verify the proposed words as a complete statement in the current conversation.');
+    const sourceStateWords = {
+      missing: 'Olumi could not find words of your own stating this correction. This review does not authorise a change.',
+      partial: 'Olumi could not verify this excerpt as the complete applicable statement. This review does not authorise a change.',
+      'another speaker': 'These words report another speaker’s view; they do not establish that you assert the reported correction. This review does not authorise a change.',
+    };
+    expect(review.public_label).toContain(sourceStateWords[fault]);
+    if (fault === 'partial') expect(review.public_label).toContain('Excerpt — your recorded words');
+    if (fault === 'another speaker') expect(review.public_label).toContain('Reported words —');
     if (fault !== 'missing') expect(review.public_label).toContain(message);
     expect(review.public_label).not.toContain('Recorded words — you:');
     expect(review).not.toHaveProperty('proposal_id'); expect(w.chips('propose_statement', review)).toEqual([]);
+    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  });
+
+  it('another-speaker review cannot become a user-source card by requoting the whole reported line', async () => {
+    const f = fixture(row), message = `A colleague said: “${f.message}”`;
+    const w = await correctionWorld(f.graph, message);
+    const review = await w.offer('propose_statement', { correction: f.request });
+    expect(review).toMatchObject({ ok: false, refusal: 'correction_not_stated' });
+    expect(review).not.toHaveProperty('proposal_id');
+    const requote = await w.offer('propose_statement', { correction: { ...f.request, quote: message } });
+    expect(requote).toMatchObject({ ok: false, mutated: false });
+    expect(requote.public_label ?? '').not.toContain('Recorded words — you:');
+    expect(requote).not.toHaveProperty('proposal_id');
+    expect(w.chips('propose_statement', requote)).toEqual([]);
     expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
@@ -282,6 +303,8 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(proposal.operations.map(o => o.op)).toEqual(['set_statement_record']);
     const chips = w.chips('propose_statement', result);
     expect(chips[0]!.id).toBe(`agent-approve-proposal:${pid}`);
+    expect(chips[0]!.label).toBe('Approve Olumi’s reading');
+    expect(chips[0]!.message).toBe('Approve only the displayed correction as Olumi’s reading.');
     expect(chips[0]!.detail).toBe(result.public_label);
     expect(result.public_label).toContain(row.withdrawn);
     expect(result.public_label).toContain(`Keep explicitly: “${row.retained}”`);

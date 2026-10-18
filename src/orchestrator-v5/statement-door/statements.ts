@@ -400,11 +400,11 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
 /** All changes are existing record/source members. The complete old/new bytes are available before approval. */
 export function statementCorrectionWords(c: StatementCorrection | { readonly selected_label: string; readonly bound_label?: string }
   | { readonly readings: readonly string[]; readonly quote_missing: boolean; readonly source_words?: string }, legacy = false): string {
-  if ('readings' in c) return ['Review Olumi’s proposed correction',
+  if ('readings' in c) return ['Review the correction’s source',
     ...[...new Set(c.readings)].map(reading => `Olumi’s reading: ${reading}.`),
-    c.quote_missing ? 'Olumi has not identified source words for this reading.' : 'Olumi could not verify the proposed words as a complete statement in the current conversation.',
+    c.quote_missing ? 'Olumi could not find words of your own stating this correction. This review does not authorise a change.' : 'Olumi could not verify the proposed words as a complete statement in the current conversation.',
     ...(c.source_words === undefined ? [] : [`Source words — speaker/source not verified: “${c.source_words}”.`]),
-    'No change is proposed yet. Which complete words does this correction refer to? The reading remains Olumi’s; it does not become something you said.',
+    ...(c.quote_missing ? [] : ['This review does not authorise a change.']),
   ].join('\n');
   if ('selected_label' in c) return c.bound_label === undefined
     ? 'Olumi could not establish which item these words concern. Which item should this correction concern?'

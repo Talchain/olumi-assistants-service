@@ -31,7 +31,7 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
       ? 'This record also holds an approval or other confirmation. A source correction cannot replace it safely yet. No card was created and the record is unchanged.'
       : prepared.words ?? 'No correction was prepared. Keep the source, intended subject and explicitly retained material together.',
     ...(prepared.words === undefined ? {} : { public_label: prepared.words,
-      note: 'If source or subject remains unresolved, show this review without an approval action. Clarification does not approve a write. Prepare a fresh supported correction on its own complete card once its source and subject are resolved.' }) };
+      note: 'Show this review without an approval action. Keep Olumi’s interpretation separate from recorded source and speaker. Use complete applicable user-asserted words already retained only where their attribution and scope support the requested correction. Do not turn a report or quotation of another speaker into the user’s assertion by quoting the whole line. Preserve other-speaker and unknown-speaker material in its original role, including qualifications, conditions and dissent. If the available words already establish the requested meaning, do not ask again; otherwise ask only for the missing or conflicting meaning. A review is not a proposal or a saved change. Any supported proposal must use its own existing approval, write and readback path.' }) };
   const first = prepared.correction.edits[0]!;
   const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: baseHash,
