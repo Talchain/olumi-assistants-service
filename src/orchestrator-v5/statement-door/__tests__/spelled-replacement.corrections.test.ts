@@ -93,7 +93,7 @@ describe('REPLACEMENT: a corrected figure spelled in words is written exactly as
   it.each([
     ['ordinal', 'Correction: from the forty-fifth week night shifts change, not forty.', 'from the forty-fifth week night shifts change', 45],
     ['pronoun "one"', 'Correction: one of the night shifts was cut, not forty.', 'one of the night shifts was cut', 1],
-    ['no unit word', 'Correction: night shifts are forty-five now, not forty.', 'night shifts are forty-five now', 45],
+    ['counts nothing (no word after it)', 'Correction: night shifts are now forty-five.', 'night shifts are now forty-five', 45],
   ])('NOT THE USER\'S FIGURE OF THE LEVEL (%s): never written as their corrected figure', async (_kind, FIX, span, value) => {
     const { w, card } = await replaced(FIX, 'night shifts change', { value, unit: 'hours per week', span });
     expect(card.public_label).toContain(NOT_FOUND(`${value} hours per week`));
