@@ -6787,7 +6787,7 @@ export function createAgentCapabilities(
           ...(typeof x.reading_words === 'string' ? { reading_words: x.reading_words } : {}),
           // ONE BINDER: pass the source and AI reading unchanged to the existing owner.
           // This adapter does not interpret the words or verify their meaning.
-          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
+          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated', 'speaker'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text,
         unverified: [ctx.unverified_user_text, g.brief_text].filter((t): t is string => typeof t === 'string').join('\n') };
       const v = readStatement(g.raw, resolved.subject, resolved.label, quotes, texts, doorContextOf(ctx, g.raw));
@@ -7490,6 +7490,20 @@ export function createAgentCapabilities(
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
         if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
+        // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
+        if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
+          const claimed = Number(a.value), unit = a?.unit ?? nodeUnit;
+          const v = verifyStatements(a.statements.map((st: unknown) => ({ ...(isPlainRecord(st) ? st : {}), form: 'point', value: claimed })),
+            { now: ctx.user_turn_text, conversation: ctx.user_text,
+              unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
+            { subject: { quantity: 'level_today', node_id: node.id }, unit: String(unit ?? ''), forms: ['point'],
+              figuresIn: (q) => (figureTheUserWrote(claimed, unit, q) ? [{ low: claimed, high: claimed }] : []) });
+          if (v.kind === 'refused') {
+            return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'level_not_stated',
+              detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
+          }
+        }
         if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && origin !== 'human') {
           return { ok: false, mutated: false, refusal: 'figure_not_in_users_words',
             detail: 'That is not the percentage the user wrote in this unit. Use the number in their percentage unit, not the 0–1 model coordinate. Nothing was proposed.' };
