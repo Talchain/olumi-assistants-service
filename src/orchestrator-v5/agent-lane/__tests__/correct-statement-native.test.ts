@@ -527,6 +527,7 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     const first = await w.offer('propose_statement', { correction: { quote: firstMessage, edits: [{ subject,
       retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' }, retained: ['about 40 people'], reading_words: 'about 40; not mostly nights' }] } });
     expect(first.ok, JSON.stringify(first)).toBe(true);
+    const firstOps = JSON.stringify(w.proposals.get(String(first.proposal_id))!.operations);
     const applied = await w.press(String(first.proposal_id));
     expect(applied).toMatchObject({ ok: true, applied: true });
     const message = `For ${row.factor}, retract “about 40 people” too; we do not know the headcount.`;
@@ -534,9 +535,19 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     const card = await second.offer('propose_statement', { correction: { quote: message, edits: [{ subject,
       retirement: { quote: 'about 40 people', scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'headcount unknown' }] } });
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    const cardOps = JSON.stringify(second.proposals.get(String(card.proposal_id))!.operations);
     const result = await second.press(String(card.proposal_id));
     expect(result).toMatchObject({ ok: true, applied: true });
     for (const response of [first, applied, card, result]) expect(JSON.stringify(response)).not.toContain('holds an approval');
+    // ⭐ DISCRIMINATING (Codex BLOCK @94b330bd P2: a mutant treating a correction's own record as protected survived the old-phrase
+    // check): neither card claims an approval in today's words, neither saved operation carries the approval label, and no history
+    // receipt is invented.
+    for (const shown of [first, card]) expect(String(shown.public_label)).not.toContain('This replaces a record you approved on its card');
+    for (const ops of [firstOps, cardOps]) {
+      expect(ops).toContain('"correction"'); // positive control: the saved operation is the correction itself
+      expect(ops).not.toContain('"approved":true');
+    }
+    expect((claimRecordFor(second.graph(), subject)?.history ?? []).some((st) => st.attested !== undefined)).toBe(false);
     const saved = userStatementFor(second.graph(), subject)!;
     expect(saved.statements).toEqual([expect.objectContaining({ source: message, quote: message, speaker: 'user', reading: 'olumi' })]);
     expect(saved.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'whole', retained_count: 0 });
