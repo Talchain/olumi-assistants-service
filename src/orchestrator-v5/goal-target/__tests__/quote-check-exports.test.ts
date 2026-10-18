@@ -60,13 +60,15 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     const check = (message: string, quote: string, expected: boolean): void => {
       if (wholeStatementIn(message, quote) !== expected) wrong.push(`${expected ? 'not whole' : 'whole'}: «${quote}» in «${message}»`);
     };
-    // A contraction and a plural possessive inside the speech (BUDDY-A AMEND 6 + R2 A).
+    // A contraction and a plural possessive inside the speech (BUDDY-A AMEND 6 + R2 A); `clean` has the contraction only.
     const first = "This is only true if the users' pilot works", second = "We don't start early unless parts arrive";
+    const clean = 'This is only true if the pilot works';
     for (const t of TERMINALS) for (const outside of [false, true]) {
       const end = (words: string, close: string): string => (outside ? `${words}${close}${t}` : `${words}${t}${close}`);
-      // PAIRED marks, double or single (dev P01/P11, DL-3 05:0xZ: a single mark bounds speech only when paired, as a double does),
-      // bound the speech: only all of it, with its speaker, is whole; the sentence after it is whole too.
-      for (const [open, close] of [...DOUBLE, ...SINGLE]) for (const who of SPEAKERS) {
+      // PAIRED marks bound the speech: only all of it, with its speaker, is whole; the sentence after it is whole too. Double marks
+      // always pair (by nesting); single marks only as a CLEAN pair (dev P01/P11, DL-3 05:0xZ), so their speech here has no possessive.
+      for (const [open, close, lead] of [...DOUBLE.map(([o, c]) => [o, c, first] as const), ...SINGLE.map(([o, c]) => [o, c, clean] as const)]) for (const who of SPEAKERS) {
+        const first = lead;
         const whole = `${who}${open}${first}${t} ${end(second, close)}`;
         const message = `We fit kitchens. ${whole} He agrees.`;
         check(message, whole, true);
@@ -81,14 +83,14 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
         // A closed fragment with no full stop of its own is never whole.
         check(`${who}${open}parts first${close} and left.`, `${who}${open}parts first${close}`, false);
       }
-      // SINGLE marks (with or without a colon: BUDDY-A R3 A): the speech's own sentences are never whole; before it, after it and the
-      // next paragraph are. An apostrophe inside it ("users'", "don't") never closes it early (BUDDY-A AMEND 6 + R2 A).
+      // ⛔ AMBIGUOUS SINGLE marks keep the fail-safe (Codex #3398 r1 B2; DL-3 16:14Z): a possessive inside the speech ("the users'
+      // pilot") could be its close, so (with or without a colon: BUDDY-A R3 A) nothing from the attribution to the paragraph's end is
+      // whole; before it, and the next paragraph, are.
       for (const [open, close] of SINGLE) for (const who of SPEAKERS) {
         const whole = `${who}${open}${first}${t} ${end(second, close)}`;
         const message = `We fit kitchens. ${whole} He agrees.\nWe work weekends.`;
-        for (const quote of [end(second, close), `${second}${t}`, `${who}${open}${first}${t}`, `${first}${t}`]) check(message, quote, false);
+        for (const quote of [whole, 'He agrees.', end(second, close), `${second}${t}`, `${who}${open}${first}${t}`, `${first}${t}`]) check(message, quote, false);
         check(message, 'We fit kitchens.', true);
-        check(message, 'He agrees.', true);
         check(message, 'We work weekends.', true);
       }
     }

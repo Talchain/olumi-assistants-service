@@ -259,18 +259,31 @@ const ENDS = /[.!?;]["»']*$/;
 export function wholeStatementIn(message: string, quote: unknown): boolean {
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
   const text = plainQuote(message);
+  const inSpeech = speechAt(speechRegions(markedQuote(message)));
   return said !== '' && quoteSpansIn(text, said).some((at) =>
     /(?:^|[.!?;\n]["»']*)\s*$/.test(text.slice(0, at)) && (ENDS.test(said) || /^\s*(?:$|[.!?;\n])/.test(text.slice(at + said.length)))
-    && !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
-    && !insideSingleSpeech(text, at) && !insideSingleSpeech(text, at + said.length));
+    && !inSpeech(at) && !inSpeech(at + said.length));
 }
 /**
- * The existing paired-speech reader; no attribution or write permission is granted. Authorship reads paired single marks too
- * (`insideSingleSpeech`); the source-review DISPLAY keeps its double-mark reading (`single: false`), so its words are unchanged.
+ * The ONE speech reader (`speechRegions`), exposed over `plainQuote(quote)`'s indices; no attribution or write permission is granted.
+ * Authorship reads single marks too; the source-review DISPLAY keeps its double-mark reading (`single: false`), so its words are unchanged.
  */
 export function speechReading(quote: string, single = true): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
-  const text = plainQuote(quote);
-  return { text, inSpeech: (at) => insideSpeech(text, at) || (single && insideSingleSpeech(text, at)) };
+  return { text: plainQuote(quote), inSpeech: speechAt(speechRegions(markedQuote(quote), single)) };
+}
+
+/**
+ * ⭐ LEAN CORE P2 (C2; AIE: "Quoting an entire report does not transfer its embedded claim to the user"): `quote` ENDS inside another
+ * speaker's quoted words that a colon introduces ("A colleague said: “…”"; the typographic form of reported direct speech), read by the
+ * ONE speech reader (`speechRegions`, any mix of marks, nesting and the single-mark fail-safe included). The host cannot read that lead-in
+ * as attribution or as the user's own instruction about the words. Quoted words the user's own sentence merely names ("keep “staff
+ * hours”") are not introduced so.
+ */
+export function endsInQuotedSpeech(quote: string): boolean {
+  const marked = markedQuote(quote);
+  const last = marked.search(/[\p{L}\p{N}][^\p{L}\p{N}]*$/u);
+  const region = last < 0 ? undefined : speechRegions(marked).find((r) => r.open < last && last <= r.close);
+  return region !== undefined && /:\s*$/u.test(marked.slice(0, region.open));
 }
 
 /**
@@ -283,8 +296,8 @@ export function usersSpanIn(message: string, quote: unknown): number {
   const said = typeof quote === 'string' ? plainQuote(quote) : '';
   const text = plainQuote(message);
   if (said === '') return -1;
-  return quoteSpansIn(text, said).find((at) => !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
-    && !insideSingleSpeech(text, at) && !insideSingleSpeech(text, at + said.length)) ?? -1;
+  const inSpeech = speechAt(speechRegions(markedQuote(message)));
+  return quoteSpansIn(text, said).find((at) => !inSpeech(at) && !inSpeech(at + said.length)) ?? -1;
 }
 
 /**
@@ -304,40 +317,64 @@ export function sentenceAroundSpan(message: string, quote: unknown): string | un
 export function withdrawnLater(later: readonly string[]): boolean {
   return later.some((m) => clausesOf(plainQuote(m)).some(disowns));
 }
-/** The text of `at`'s paragraph up to `at`. */
+/** `text` with its marks' direction kept, at the SAME indices as `plainQuote(text)` (which only re-spells marks, one for one). */
+const markedQuote = (text: string): string => text.replace(/[ \t]+/g, ' ').trim();
+/** Whether a boundary `at` lies inside one of `regions` (after its opening mark, up to and including its closing mark). */
+const speechAt = (regions: readonly { open: number; close: number }[]) => (at: number): boolean =>
+  regions.some((r) => r.open < at && at <= r.close);
+
 /**
- * ⭐ LEAN CORE (dev P01/P11, DL-3 05:0xZ): a SINGLE mark bounds another speaker's words only when PAIRED in its paragraph, as double
- * marks do. It opens after the start, a space or punctuation (the attribution's colon included) and before a letter; it closes after a
- * non-space and before the end, a space or punctuation, and the LAST such mark in the paragraph closes it, so an apostrophe inside the
- * speech ("don't", "the users' pilot") never ends it early. An unpaired opening mark, an in-word apostrophe or a year ("'27") opens
- * nothing, so the user's whole message stays theirs (was: any opening-shaped single mark made the rest of its paragraph unverifiable).
+ * ⭐ THE ONE SPEECH READER (#3363 fail-safe core; dev P01/P11; Codex #3398 r1 B2/B3/B5): the regions of `marked` (`markedQuote`) that are
+ * another speaker's quoted words, paragraph by paragraph, each from its opening mark to its closing mark — or to the paragraph's end
+ * when it cannot be bounded (the fail-safe: never whole, never the user's).
+ * - DOUBLE marks (straight, “ ”, « ») pair by NESTING, whatever their mix: “ and « always open, ” and » close their own kind, a straight
+ *   mark opens after the start, a space or punctuation and before a non-space, and closes straight speech after a non-space and before the
+ *   end, a space or punctuation. A closing mark with nothing of its kind open is text (a 12" rack). Unclosed speech: the fail-safe.
+ * - SINGLE marks (straight ' and ‘ ’), also apostrophes, bound speech only as a CLEAN pair: an opening mark (‘, or ' / ’ after the start,
+ *   a space, punctuation or the attribution's colon, before a letter), then the next single mark closes it (after a non-space, before the
+ *   end, a space or punctuation). In-word marks ("don't", "O'Neil") and "'27" are neither. AMBIGUITY keeps the fail-safe: another opening
+ *   mark before the close (an inner term or an elision, "'em"), or a possessive-shaped close ("the drivers' rota": after an s, before a
+ *   word). An opening mark nothing later closes opens nothing (dev P01/P11: the user's own "so 'weekend demand …"), unless the
+ *   attribution's colon introduces it ("Rae said: 'We need help."): unfinished speech, so the fail-safe.
  */
-function insideSingleSpeech(text: string, at: number): boolean {
-  const start = text.lastIndexOf('\n', at - 1) + 1;
-  const endAt = text.indexOf('\n', at);
-  const end = endAt < 0 ? text.length : endAt;
-  const opens = (i: number): boolean => text[i] === "'" && (i === start || /[\s:([\u2014\u2013-]/u.test(text[i - 1]!)) && /\p{L}/u.test(text[i + 1] ?? '');
-  const closes = (i: number): boolean => text[i] === "'" && i > start && /\S/u.test(text[i - 1]!) && (i + 1 === end || /[\s.,;:!?)\]]/u.test(text[i + 1]!));
-  for (let o = start; o < end; o += 1) {
-    if (!opens(o)) continue;
-    let c = -1;
-    for (let i = end - 1; i > o; i -= 1) if (closes(i)) { c = i; break; }
-    if (c < 0) return false;
-    if (o < at && at <= c) return true;
-    o = c;
+function speechRegions(marked: string, single = true): { open: number; close: number }[] {
+  const regions: { open: number; close: number }[] = [];
+  let offset = 0;
+  for (const para of marked.split('\n')) {
+    const end = offset + para.length;
+    const prevOf = (i: number): string => (i === 0 ? ' ' : para[i - 1]!), nextOf = (i: number): string => para[i + 1] ?? '';
+    const closesHere = (i: number): boolean => /\S/u.test(prevOf(i)) && /^(?:$|[\s.,;:!?)\]])/u.test(nextOf(i));
+    // DOUBLE marks: a stack, so an inner term in any mark never closes the outer speech.
+    const stack: { at: number; close: string }[] = [];
+    for (let i = 0; i < para.length; i += 1) {
+      const ch = para[i]!;
+      const top = stack[stack.length - 1];
+      if (ch === '\u201C' || ch === '\u00AB') stack.push({ at: i, close: ch === '\u201C' ? '\u201D' : '\u00BB' });
+      else if ((ch === '\u201D' || ch === '\u00BB') && top?.close === ch) stack.pop();
+      else if (ch === '"' && top?.close === '"' && closesHere(i)) stack.pop();
+      else if (ch === '"' && /[\s([:;,\u2014\u2013-]/u.test(prevOf(i)) && /\S/u.test(nextOf(i))) stack.push({ at: i, close: '"' });
+      else continue;
+      if (stack.length === 0) regions.push({ open: offset + top!.at, close: offset + i });
+    }
+    if (stack.length > 0) regions.push({ open: offset + stack[0]!.at, close: end });
+    if (single) {
+      let open = -1;
+      for (let i = 0; i < para.length; i += 1) {
+        const ch = para[i]!;
+        if (ch !== "'" && ch !== '\u2018' && ch !== '\u2019') continue;
+        const opens = ch === '\u2018' || (/[\s:([\u2014\u2013-]/u.test(prevOf(i)) && /\p{L}/u.test(nextOf(i)));
+        const closes = ch !== '\u2018' && closesHere(i);
+        if (!opens && !closes) continue; // in-word ("don't"), "'27", or not a mark here
+        const possessive = closes && /s/iu.test(prevOf(i)) && /^\s[\p{L}\p{N}]/u.test(para.slice(i + 1));
+        if (open < 0) { if (opens) open = i; continue; } // a closing-shaped mark with nothing open is text ("the users' pilot")
+        if (closes && !possessive) { regions.push({ open: offset + open, close: offset + i }); open = -1; continue; }
+        regions.push({ open: offset + open, close: end }); open = -2; break; // ambiguous: an inner/elided mark or a possessive
+      }
+      if (open >= 0 && /:\s*$/u.test(para.slice(0, open))) regions.push({ open: offset + open, close: end });
+    }
+    offset = end + 1;
   }
-  return false;
-}
-/** `at` lies inside paired double-marked speech that opened before it in its paragraph. */
-function insideSpeech(text: string, at: number): boolean {
-  const start = text.lastIndexOf('\n', at - 1) + 1;
-  let open: string | null = null;
-  for (let i = start; i < at; i += 1) {
-    const mark = text[i]!, prev = i === start ? ' ' : text[i - 1]!, next = text[i + 1] ?? '';
-    if (open === null && (mark === '"' || mark === '«') && /[\s([:;,\u2014\u2013-]/u.test(prev) && /\S/u.test(next)) open = mark === '«' ? '»' : '"';
-    else if (open !== null && mark === open && /\S/u.test(prev) && /^(?:$|[\s.,;:!?)\]])/u.test(next)) open = null;
-  }
-  return open !== null;
+  return regions;
 }
 
 /** T2A5 check (c)'s binding, exported: `text` names BOTH ends of the directed link `from` → `to` (one named end never binds). */

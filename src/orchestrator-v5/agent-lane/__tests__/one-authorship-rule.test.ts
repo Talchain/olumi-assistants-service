@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { userStated, verifyStatement, figuresWritten } from '../user-statements.js';
-import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { usersSpanIn, wholeStatementIn } from '../../goal-target/input-claim-context.js';
 
 const SUBJECT = { quantity: 'level', node_id: 'fac_1' };
 const texts = (...messages: string[]) => ({ now: messages[messages.length - 1], conversation: messages.join('\n'), messages });
@@ -77,6 +77,37 @@ describe('the one rule: whose value it is', () => {
     // An apostrophe inside the quoted words never ends them early ("the users' pilot").
     const nested = "Sam said: 'the users' pilot cut queues by 15%' last week.";
     expect(userStated({ quote: 'pilot cut queues by 15%', value: 15 }, texts(nested), SUBJECT).origin).toBe('unknown');
+  });
+
+  it('3c. AMBIGUOUS single marks keep the fail-safe, and C2 reads any mix of marks (Codex #3398 r1 B2/B3): never the user\'s', () => {
+    // A possessive, an elision or an inner mark before the outer close may be the close: unfinished speech is never released as theirs.
+    for (const [message, last, value] of [
+      ["Rae said: 'We need the contractors' help. Orders reach 18 a day.", 'Orders reach 18 a day.', 18],
+      ["Bo said: 'Tell 'em the drivers' rota changed. Deliveries reach 26 a day.", 'Deliveries reach 26 a day.', 26],
+      ["Mo said: 'She calls it 'fast lane'. It saves 14 hours.", 'It saves 14 hours.', 14],
+      // Unfinished speech an attribution's colon opens, with nothing to close it.
+      ["Rae said: 'We need help. Orders reach 18 a day.", 'Orders reach 18 a day.', 18],
+    ] as const) {
+      expect(wholeStatementIn(message, last), message).toBe(false);
+      expect(usersSpanIn(message, last), message).toBe(-1);
+      expect(userStated({ quote: last, value }, texts(message), SUBJECT).origin, message).toBe('unknown');
+      expect(userStated({ quote: message, value }, texts(message), SUBJECT).origin, message).toBe('unknown');
+    }
+    // C2 over mixed typography: single outer with a curly inner term, and straight-double outer with a curly inner term; label omitted
+    // or an explicit `user` reading alike.
+    for (const message of ['Inez said: \'The “fast lane” improves throughput.\'', 'Inez said: "The “fast lane” improves throughput."']) {
+      expect(userStated({ quote: message, form: 'describes' }, texts(message), SUBJECT).origin, message).toBe('unknown');
+      expect(userStated({ quote: message, form: 'describes', speaker: 'user' }, texts(message), SUBJECT).origin, message).toBe('unknown');
+      expect(usersSpanIn(message, 'improves throughput'), message).toBe(-1);
+    }
+    const figure = 'Inez said: "The “fast lane” saves 14 hours."';
+    expect(userStated({ quote: figure, value: 14 }, texts(figure), SUBJECT).origin).toBe('unknown');
+    // CONTRASTS kept: a CLEAN pair closes before the user's next sentence; an unmatched mark with no attribution opens nothing; the user's
+    // own sentence that names a quoted term is theirs.
+    expect(wholeStatementIn("The 'fast track' option is cheaper. It saves money.", 'It saves money.')).toBe(true);
+    expect(wholeStatementIn("We told 'em early. Referrals help.", 'Referrals help.')).toBe(true);
+    const own = 'We call it “the slow leak” and it costs 14 hours a week.';
+    expect(userStated({ quote: own, value: 14 }, texts(own), SUBJECT).origin).toBe('human');
   });
 
   it('4. a typed range keeps both ends, and its unit only where the span writes it after the figure', () => {

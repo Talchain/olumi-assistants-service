@@ -12,7 +12,7 @@
 import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
-import { quoteIsNotTheUsersClaim, sentenceAroundSpan, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
+import { endsInQuotedSpeech, quoteIsNotTheUsersClaim, sentenceAroundSpan, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 import { comparatorTheUserWroteFor, figureTheUserWroteSpan } from './stated-by-user.js';
 import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -217,32 +217,6 @@ function figureOnlyInSpeech(quote: string, figure: number): boolean {
   return at.length > 0 && at.every(inSpeech);
 }
 
-/**
- * ⭐ LEAN CORE P2 (C2; AIE: "Quoting an entire report does not transfer its embedded claim to the user"): `quote` ENDS inside another
- * speaker's quoted words that a colon introduces ("A colleague said: “…”", the typographic form of reported direct speech). The host
- * cannot read that lead-in as attribution or as the user's own instruction about the words ("Ignore what Sam said: …"). Quoted words
- * the user's own sentence merely names ("keep “staff hours”") are not introduced so. Directional marks (“ ” « ») pair by nesting,
- * so a reported line that itself quotes words is read whole; straight marks by the estate's one speech reader.
- */
-function endsInQuotedSpeech(quote: string): boolean {
-  const lastWord = (t: string): number => t.search(/[\p{L}\p{N}][^\p{L}\p{N}]*$/u);
-  const colonBefore = (t: string, open: number): boolean => /:\s*$/u.test(t.slice(0, open));
-  if (/[\u201C\u201D\u00AB\u00BB]/u.test(quote)) {
-    const last = lastWord(quote);
-    let depth = 0, outer = -1;
-    for (let i = 0; i < last; i += 1) {
-      if (quote[i] === '\u201C' || quote[i] === '\u00AB') { if (depth === 0) outer = i; depth += 1; }
-      else if ((quote[i] === '\u201D' || quote[i] === '\u00BB') && depth > 0) depth -= 1;
-    }
-    return last >= 0 && depth > 0 && colonBefore(quote, outer);
-  }
-  const { text, inSpeech } = speechReading(quote);
-  const last = lastWord(text);
-  if (last < 0 || !inSpeech(last)) return false;
-  let open = last;
-  while (open > 0 && inSpeech(open)) open -= 1;
-  return colonBefore(text, open);
-}
 
 /**
  * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15: the same
