@@ -219,24 +219,29 @@ function figureOnlyInSpeech(quote: string, figure: number): boolean {
 
 /**
  * ⭐ LEAN CORE P2 (C2; AIE: "Quoting an entire report does not transfer its embedded claim to the user"): `quote` ENDS inside another
- * speaker's paired quotation marks (the estate's one speech reader): its last words are someone's quoted words, after a lead-in the host
- * cannot read as attribution ("A colleague said: …") or as the user's own instruction about them ("Ignore what Sam said: …").
+ * speaker's quoted words that a colon introduces ("A colleague said: “…”", the typographic form of reported direct speech). The host
+ * cannot read that lead-in as attribution or as the user's own instruction about the words ("Ignore what Sam said: …"). Quoted words
+ * the user's own sentence merely names ("keep “staff hours”") are not introduced so. Directional marks (“ ” « ») pair by nesting,
+ * so a reported line that itself quotes words is read whole; straight marks by the estate's one speech reader.
  */
 function endsInQuotedSpeech(quote: string): boolean {
   const lastWord = (t: string): number => t.search(/[\p{L}\p{N}][^\p{L}\p{N}]*$/u);
-  // Directional marks (“ ” « ») pair by nesting, so a reported line that itself quotes words is still read whole.
+  const colonBefore = (t: string, open: number): boolean => /:\s*$/u.test(t.slice(0, open));
   if (/[\u201C\u201D\u00AB\u00BB]/u.test(quote)) {
     const last = lastWord(quote);
-    let depth = 0;
+    let depth = 0, outer = -1;
     for (let i = 0; i < last; i += 1) {
-      if (quote[i] === '\u201C' || quote[i] === '\u00AB') depth += 1;
+      if (quote[i] === '\u201C' || quote[i] === '\u00AB') { if (depth === 0) outer = i; depth += 1; }
       else if ((quote[i] === '\u201D' || quote[i] === '\u00BB') && depth > 0) depth -= 1;
     }
-    return last >= 0 && depth > 0;
+    return last >= 0 && depth > 0 && colonBefore(quote, outer);
   }
   const { text, inSpeech } = speechReading(quote);
   const last = lastWord(text);
-  return last >= 0 && inSpeech(last);
+  if (last < 0 || !inSpeech(last)) return false;
+  let open = last;
+  while (open > 0 && inSpeech(open)) open -= 1;
+  return colonBefore(text, open);
 }
 
 /**

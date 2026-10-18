@@ -7,6 +7,7 @@
  * `{low, high, meaning: 'likely_range', source: 'user_specified'}` beside the user's figure; the persisted form's gate
  * (`intervention-range.ts`) and the analysis hash then see it.
  */
+import { quoteOfFigure } from '../../../src/orchestrator-v5/agent-lane/stated-by-user.js';
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
@@ -124,7 +125,9 @@ describe('the user\'s likely range for an option\'s level survives propose → a
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
     });
     const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: text };
-    const levels = [{ option_label: LIFT, factor_label: 'Migration downtime', unit: 'days', basis: 'the user', user_stated: true, ...level }];
+    // ⭐ LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence that writes the level's figure; none where it is unwritten.
+    const cite = typeof level.value === 'number' && level.quote === undefined ? quoteOfFigure(level.value, String(level.unit ?? 'days'), text) : null;
+    const levels = [{ option_label: LIFT, factor_label: 'Migration downtime', unit: 'days', basis: 'the user', user_stated: true, ...(cite !== null ? { quote: cite } : {}), ...level }];
     const before = JSON.stringify(persisted);
     const count = rows.size;
     const proposed = compound
@@ -450,14 +453,13 @@ describe('the user\'s likely range for an option\'s level survives propose → a
 
   it.each([false, true])('false range flag retains ordinary user-figure grounding, compound=%s', async (compound) => {
     const text = 'For Lift-and-shift, migration downtime is 10 days.';
+    // ⛔ PL-0048 (1), #3392 (THE ONE RULE): a figure claimed as the user's that their words never write has no span to cite, so it is
+    // unknown and nothing is prepared (was: relabelled and written as Olumi's). The range flag never changes that grounding.
+    const before = structuredClone(liftCell());
     const omitted = await proposeAndApprove({ value: 30 }, text, compound);
-    expect(omitted.out?.ok, JSON.stringify(omitted)).toBe(true);
-    const expected = structuredClone(liftCell());
-    expect(expected.source).not.toBe('user_specified');
-    persisted = servedGraph();
-    rows.clear();
+    expect(omitted.proposed.ok, JSON.stringify(omitted)).toBe(false);
     const explicitFalse = await proposeAndApprove({ value: 30, range_user_stated: false }, text, compound);
-    expect(explicitFalse.out?.ok, JSON.stringify(explicitFalse)).toBe(true);
-    expect(liftCell()).toEqual(expected);
+    expect(explicitFalse.proposed, JSON.stringify(explicitFalse)).toMatchObject({ ok: false, refusal: omitted.proposed.refusal });
+    expect(liftCell()).toEqual(before);
   });
 });

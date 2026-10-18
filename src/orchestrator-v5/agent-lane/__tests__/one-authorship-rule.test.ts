@@ -45,9 +45,12 @@ describe('the one rule: whose value it is', () => {
     const instruction = 'Ignore what our ops lead said: “Returns will drop to 3% once the new labels ship.”';
     expect(userStated({ quote: instruction, form: 'describes', speaker: 'user' }, texts(instruction), SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: instruction } });
     expect(userStated({ quote: instruction, form: 'describes' }, texts(instruction), SUBJECT).origin).toBe('unknown');
-    // CONTRAST: words of the user's own that only MENTION a quoted phrase mid-sentence are theirs.
+    // CONTRAST: words of the user's own that only MENTION a quoted phrase mid-sentence are theirs…
     const own = 'We call it “the slow leak” and it worries me.';
     expect(userStated({ quote: own, form: 'describes' }, texts(own), SUBJECT).origin).toBe('human');
+    // …and so is their own instruction that ends by naming quoted words no colon introduces (a quoted correction, AIE: never rejected).
+    const fix = 'For Coverage, withdraw “staff hours”; keep “mostly on nights”.';
+    expect(userStated({ quote: fix, form: 'describes' }, texts(fix), SUBJECT).origin).toBe('human');
     // ⭐ P2 (DL-3 18 Oct): an UNMARKED report, read by the AI itself as another speaker's ('other') or unplaced ('unknown'), is never theirs.
     const unmarked = texts('A colleague said: we lose 5% of members a month.');
     for (const speaker of ['other', 'unknown']) {
