@@ -209,6 +209,13 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
   readonly statements: readonly { readonly field: StatementField; readonly statement: UserStatement }[];
   readonly claimed: readonly GivenStatement[];
   readonly holdsNowReading?: string;
+  /**
+   * ⭐ STEP 8c (AIE 19:05:21Z, AMEND 19:13Z): no claim here states the risk operatively: every one is a description, none says it
+   * holds now, states its occurrence or carries a figure, and no receipt is retained. This NEVER says who authored the risk (a human
+   * concern carries no number either); it only says no claim CONTRADICTS the drafter's own semantic reading of who introduced it,
+   * which the caller reads (admission). Absent otherwise.
+   */
+  readonly describesOnly?: true;
 } {
   const entries = draftStatements(model);
   const kept: GivenStatement[] = retained.map((quote) => ({ quote }));
@@ -249,7 +256,11 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
   // figure-free reading is Olumi's. The user's whole words stay human material, unverified; their chance is recorded only by the
   // door's own occurrence card, on their press.
   // Known human words (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
-  return claims.some(c => typeof c.quote === 'string' && usersWords(c.quote)) || keptWords ? unverifiedHuman(claimed) : unknown(claimed);
+  if (keptWords) return unverifiedHuman(claimed);
+  if (!claims.some(c => typeof c.quote === 'string' && usersWords(c.quote))) return unknown(claimed);
+  const describesOnly = claims.every((c) => c.form === 'describes' && c.field !== 'holds_now' && c.field !== 'occurrence'
+    && [c.value, c.low, c.high].every((v) => v === null || v === undefined));
+  return describesOnly ? { ...unverifiedHuman(claimed), describesOnly: true as const } : unverifiedHuman(claimed);
 }
 
 export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {

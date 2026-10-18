@@ -284,3 +284,85 @@ describe('draft source → risk admission → retained participation → readine
       expect([...unsizedOlumiRiskIds(g)]).toEqual([]);
     });
 });
+
+/**
+ * ⭐ STEP 8c (AIE 19:05:21Z; DL-3): the user's words a claim QUOTES are source, not authorship of the risk. A risk the drafter introduced
+ * as its own reading (`ai_proposed`, or `inferred`: the tag admission already honours, T4f / AIE 6177505214 T9), bound to the user's
+ * sentence only by a figure-free description of it, is Olumi's hypothesis: kept in the model, out of the calculation, its omission
+ * recorded, and the user's sentence kept whole as source. Served 9d17caa6 (synthetic P1/P4): such a risk was saved `unverified_brief`
+ * and withheld the whole Run. Unknown, human or adopted operative risks stay protected (#3327 R2 B1 negatives above unchanged).
+ */
+describe('STEP 8c: source words are not authorship of Olumi\'s risk hypothesis', () => {
+  const LIFT = 'Adding a specialist should lift output by about 20 projects per week.';
+  const HOLDS = 'The specialist role is already unfilled, and the team disagrees about its impact.';
+  const WORRY = 'I\'m a bit worried that specialist capacity falls below target.';
+  const describes = (quote: string, changes: Rec = {}) => ({ subject: { kind: 'risk', label: RISK }, field: 'measure', form: 'describes',
+    quote, value: null, low: null, high: null, unit: null, qualifier: 'should; about', conditions: 'the stated lift is uncertain', speaker: 'user', ...changes });
+  const tagged = (introduced: string | undefined, statements: unknown[]): Rec => {
+    const model = draft(statements);
+    if (introduced === undefined) delete model.risks[0].provenance; else model.risks[0].provenance = introduced;
+    return model;
+  };
+
+  it.each([['ai_proposed', 'model_proposed']] as const)(
+    '⭐ RED: a risk the drafter ADDED (%s) whose description quotes the user is Olumi\'s reading, kept out with its omission recorded', (introduced, cls) => {
+      const { graph, risk, out } = admitted(tagged(introduced, [describes(LIFT)]), `${BASE} ${LIFT}`);
+      expect(risk.provenance).toBe('ai_inferred');
+      expect(authorshipOf({ nodeTag: risk.provenance }).origin).toBe('ai');
+      expect(out.inference_classes[risk.id]).toBe(cls);
+      expect(risk.analysis_participation).toBe('retained_excluded');
+      expect(issuesFor(graph, risk.id)).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(true);
+      const cold = JSON.parse(JSON.stringify(graph));
+      expect([...unsizedOlumiRiskIds(cold)]).toEqual([risk.id]);
+      expect(withoutUnsizedOlumiRisksRecorded(cold).omitted).toEqual([{ node_id: risk.id, label: RISK, reason: 'unsized_olumi_risk' }]);
+      // The user's sentence is kept whole as SOURCE (speaker user), never deleted with the authorship.
+      expect(JSON.stringify(risk.user_statements)).toContain(LIFT);
+      expect(JSON.stringify(risk.user_statements)).toContain('"speaker":"user"');
+    });
+
+  it('⛔ the user\'s own worry (drafter: explicit) stays theirs: unverified human material, still asked, the Run withheld', () => {
+    const { graph, risk, out } = admitted(tagged('explicit', [describes(WORRY, { qualifier: 'a bit worried', conditions: null })]), `${BASE} ${WORRY}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    expect(JSON.stringify(out.loss)).toContain(WORRY);
+  });
+
+  // ⛔ Codex STEP8C pair (AMEND): `inferred` ("interprets that material, or its introduction is uncertain", build-model.ts) is a
+  // fallback, not a positive identification: the same quote keeps today's path, and so does the user's own worry the drafter tags so.
+  it.each([['the same quote', LIFT], ['the user\'s own worry', WORRY]] as const)(
+    '⛔ the drafter\'s `inferred` tag is no positive identification (%s): protected, still asked', (_n, quote) => {
+      const { graph, risk } = admitted(tagged('inferred', [describes(quote)]), `${BASE} ${quote}`);
+      expect(risk.provenance).toBe('unverified_brief');
+      expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+
+  it('⛔ an unknown-origin risk (no drafter tag) quoting the user is protected: never Olumi\'s', () => {
+    const { graph, risk } = admitted(tagged(undefined, [describes(LIFT)]), `${BASE} ${LIFT}`);
+    expect(authorshipOf({ nodeTag: risk.provenance }).origin).not.toBe('ai');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+  });
+
+  it.each([
+    ['a holds-now claim', describes(HOLDS, { field: 'holds_now', form: 'holds_now', qualifier: null, conditions: null }), HOLDS],
+    ['a stated occurrence', describes('There is about a 30% chance that specialist capacity falls below target.',
+      { field: 'occurrence', form: 'point', value: 30, unit: '%' }), 'There is about a 30% chance that specialist capacity falls below target.'],
+    ['a described figure', describes(LIFT, { value: 20, unit: 'projects per week' }), LIFT],
+  ] as const)('⛔ an introduced risk whose claim is %s stays protected (unverified human), never Olumi\'s', (_n, st, quote) => {
+    const { graph, risk } = admitted(tagged('ai_proposed', [st]), `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+  });
+
+  it('⛔ a retained receipt (already_true_evidence) keeps an introduced risk human material, its card intact', () => {
+    const model = tagged('ai_proposed', [describes(LIFT)]); model.risks[0].already_true_evidence = { quote: HOLDS };
+    const { risk } = admitted(model, `${BASE} ${LIFT} ${HOLDS}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.already_true_quote).toBe(HOLDS);
+  });
+});
+
