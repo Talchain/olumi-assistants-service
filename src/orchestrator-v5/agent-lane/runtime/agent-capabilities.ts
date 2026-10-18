@@ -340,7 +340,7 @@ import { runExplanationContextFacts, savedRunContextFacts, type SavedRunContextF
 import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
+import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
 import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
@@ -9117,8 +9117,10 @@ export function createAgentCapabilities(
             detail: 'This limit cannot be changed here, so nothing was written. Tell the user plainly.' };
         }
         const operationId = authorisationTurnId(pid);
+        // On the model as read now: the card passed `authorise` on its own base, or on a moved model while its row still reads
+        // as it did (`heldCardStillApplies`, verifier F1); the door's CAS still fences this read against the write.
         const res = await opts.commitLimitEdit({
-          scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: decision.proposal.base_graph_identity_hash,
+          scenario_id: ctx.scenario_id, turn_id: operationId, base_graph_hash: before.graph_hash,
           node_id: op.path, operator: v.operator, raw_value: approvedValue,
           ...(v.stated_operator !== undefined ? { stated_operator: v.stated_operator } : {}),
           ...(v.source_quote !== undefined ? { source_quote: v.source_quote } : {}),
@@ -12229,6 +12231,8 @@ export function createAgentCapabilities(
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_limit', path: node.id, value: { ...(interpretation ?? {}),
           operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
+          // The whole row as this card shows it: its field-scoped rule holds only while the row still reads exactly so.
+          row_as_made: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
           ...(stated !== undefined ? { stated_operator: stated } : {}),
           ...(isTarget ? { role: 'goal_target' } : {}),
         } }],
@@ -12520,7 +12524,12 @@ export function createAgentCapabilities(
       } catch { return undefined; }
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
-    async authoriseChange(ctx, args): Promise<ToolResult> {
+    async authoriseChange(ctxIn, args): Promise<ToolResult> {
+      // ⭐ An explicit typed selection among several DISPLAYED cards (PL amendment, 18 Oct): the id the Agent names binds only
+      // when it is one of the cards the user was shown at the start of this turn, with that card's own button words.
+      const shown = ctxIn.typed_approval_of === undefined && typeof args?.proposal_id === 'string'
+        && Object.hasOwn(ctxIn.typed_assent_cards ?? {}, args.proposal_id) ? ctxIn.typed_assent_cards![args.proposal_id] : undefined;
+      const ctx = shown === undefined ? ctxIn : { ...ctxIn, typed_approval_of: args.proposal_id, typed_approval_words: shown };
       // Run existing validation and card-specific refusals unchanged. The inner writer's
       // consent fence refuses an otherwise executable ordinary proposal before any write.
       if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
@@ -12568,7 +12577,8 @@ export function createAgentCapabilities(
         }
         return { ok: false, mutated: false, refusal: 'not_confirmed', outcome: 'outcome_unknown', proposal_id: args.proposal_id };
       };
-      const execute = () => caps.authoriseChange(ctx, args);
+      // Its own write is never marked as a change to review on its own card (`runApplyingHeldCard`, PR-2).
+      const execute = () => runApplyingHeldCard(ctx.scenario_id, args.proposal_id, () => caps.authoriseChange(ctx, args));
       const r = opts.turnAuthority === true && p !== undefined
         ? await proposals.executeApproved(p, ctx.turn_id ?? ctx.request_id, execute,
             result => result.applied === true && proposals.isApplied(p.proposal_id) ? 'applied'

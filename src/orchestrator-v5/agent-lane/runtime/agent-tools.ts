@@ -147,6 +147,12 @@ export interface AgentToolContext {
    */
   readonly typed_assent?: string;
   /**
+   * ⭐ AN EXPLICIT SELECTION AMONG SEVERAL WAITING CARDS (PL amendment, DL-3 18 Oct 16:28): the cards the user was SHOWN at
+   * the start of this typed turn (id → that card's button words). The id the Agent names when it approves binds only if it is
+   * one of them; Olumi's reading of the words chose it, and the write records them as a typed approval.
+   */
+  readonly typed_assent_cards?: Readonly<Record<string, string>>;
+  /**
    * ⭐ S-D: the values the user set in the change's panel, sent WITH that card's press and bound by the route to it —
    * never model output. Only a held product proposal (`gmh_`) takes them in slice 1.
    */

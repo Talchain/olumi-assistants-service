@@ -489,15 +489,28 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     expect(ids, 'nor a Run offer').not.toContain('agent-run-analysis');
   }, 120_000);
 
-  it('(8) RED: the model moves before the approval → nothing written; and the DOOR refuses a stale base as stale, byte-identical', async () => {
+  it('(8) a limit card is FIELD-SCOPED (verifier F1, 18 Oct): its OWN row moved before the approval → nothing written; an UNRELATED move → its figure lands on the model as it is, the other change kept; the DOOR refuses a stale base as stale, byte-identical', async () => {
+    // An unrelated move (another option's level): the limit's row still reads £20,000, so the card holds and writes £30,000 on
+    // the model as it now is, keeping that other change (never reverting it to the card's base).
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeLimit())!;
     expect(approve).toBeDefined();
     const g = graphNow();
     graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'opt_b' ? { ...x, interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } } : x)) });
-    const moved = bytes();
     const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false }));
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(spendRows()).toEqual([expect.objectContaining({ constraint_id: 'gc-spend-1', operator: '<=', value: 30000, unit: 'GBP' })]);
+    expect((graphNow().nodes.find((x) => x.id === 'opt_b')?.['interventions'] as Record<string, Record<string, unknown>>)?.['fac_price']?.['raw_value']).toBe(60);
+
+    // Its own row moved (another writer set £25,000): the card no longer reads as it was made, so it writes nothing.
+    graphOf.set(SCENARIO, seedGraph());
+    const own = approveChipOf(await proposeLimit({ new_value: 35000 }, 'Our six-month decision spend limit has gone up: it is now £35,000.'))!;
+    expect(own).toBeDefined();
+    const g2 = graphNow();
+    graphOf.set(SCENARIO, { ...g2, goal_constraints: (g2.goal_constraints ?? []).map((c) => (c['constraint_id'] === 'gc-spend-1' ? { ...c, value: 25000 } : c)) });
+    const moved = bytes();
+    const t3 = await turn({ message: own.message, source: 'chip', chip: { id: own.id } });
+    expect(t3._agent.tool_calls[0], JSON.stringify(t3._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false }));
     expect(bytes()).toBe(moved);
 
     const { commitLimitEditInProcess } = await import('../../system-events/dispatch.js');

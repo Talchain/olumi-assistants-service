@@ -327,16 +327,27 @@ describe('a pending approval survives a restart', () => {
     });
   }, 60_000);
 
-  it('(d) RED: once SUPERSEDED (the model moved), no later row carries it — not even after the model moves back', async () => {
+  // ⛔ CHANGED CONTRACT (DL-3 18 Oct, PR-2, no silent lapse): a superseded card used to vanish from every later row. It is now
+  // KEPT for review ("Model changed: review this change"), so the user sees it. What this row still pins: it is never offered
+  // as approvable again, not even after the model moves back, and a stale press of its old button writes nothing.
+  const underReview = (c: Carrier | undefined): boolean =>
+    (c as { action?: { inline_patch?: Record<string, unknown> } } | undefined)?.action?.inline_patch?.['awaiting_review'] !== undefined;
+  it('(d) RED: once SUPERSEDED (the model moved), later rows carry it ONLY for review — never approvable, not even after the model moves back', async () => {
     await inProcess(async (a) => {
       const chip = await offerIn(a);
       expect(carrierIn(latestRow())?.chip_id, 'the control: the offer row carries it').toBe(chip.id);
+      expect(underReview(carrierIn(latestRow())), 'the control: offered, not under review').toBe(false);
       edges = [{ from: 'o1', to: 'f1' }];
       await askIn(a);
-      expect(carrierIn(latestRow()), 'the question row after the model moved').toBeUndefined();
+      expect(underReview(carrierIn(latestRow())), 'the question row after the model moved keeps it for review').toBe(true);
       edges = [];
       await askIn(a, 'And if we undo that?');
-      expect(carrierIn(latestRow()), 'never resurrected by a return to the base').toBeUndefined();
+      expect(underReview(carrierIn(latestRow())), 'a return to the base never makes it approvable again').toBe(true);
+      const writesBefore = writes;
+      const stale = await approveIn(a, chip);
+      expect(writes - writesBefore, 'a stale press of its old button writes nothing').toBe(0);
+      expect(String(stale.assistant_text), 'and it says why: the change waits for review').toMatch(/Model changed: review this change/);
+      expect(edges).toEqual([]);
     });
   }, 60_000);
 

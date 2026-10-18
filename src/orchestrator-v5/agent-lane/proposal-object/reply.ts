@@ -56,6 +56,27 @@ export function heldLapseSentence(name: string | undefined, reason: HeldLapseRea
   }
 }
 
+/** The press that asks the Agent to prepare a card under review again, on the model as it is now (never an approval). */
+const REVIEW_CHIP_PREFIX = 'agent-review-proposal:';
+const REVIEW_THIS_CHANGE = 'Review this change';
+export function reviewedProposalOf(chipId: unknown): string | undefined {
+  return typeof chipId === 'string' && chipId.startsWith(REVIEW_CHIP_PREFIX) ? chipId.slice(REVIEW_CHIP_PREFIX.length) : undefined;
+}
+export function reviewChipFor(proposalId: string, change: string | undefined): { id: string; label: string; message: string; detail?: string } {
+  const what = change?.trim().replace(/\.$/, '');
+  return { id: `${REVIEW_CHIP_PREFIX}${proposalId}`, label: REVIEW_THIS_CHANGE,
+    message: what !== undefined && what !== '' ? `Show me this change again on the model as it is now: "${what}".` : 'Show me this change again on the model as it is now.',
+    ...(what !== undefined && what !== '' ? { detail: what } : {}) };
+}
+
+/**
+ * ⭐ NO SILENT LAPSE (PR-2): a held change whose own subject moved is KEPT for review and said once — never "lapsed". The
+ * user's intent stays visible; nothing is applied until it is prepared again on the model as it is now and approved.
+ */
+export function heldReviewSentence(name: string | undefined): string {
+  return `Model changed: review this change. ${name ?? 'A held change'} was prepared before the model changed, so it waits for your review; nothing was applied.`;
+}
+
 /** The typed decline's receipt. */
 export function heldDeclineSentence(name: string | undefined): string {
   return `Set aside: ${name ?? 'the held change'}. Nothing in the model changed.`;
