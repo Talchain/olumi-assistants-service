@@ -277,13 +277,12 @@ export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['ref
 export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
   opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection } = {}): StatedVerdict {
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
-  // ⛔ K3 (kept, and PL-0048 1): a declared own estimate never relabels a figure the user's words write, typed or retained (reseeded
-  // history, the saved brief): without the AI's citation its source is unknown, never Olumi's. The stated-figure rule reads it, in the
-  // AI's unit. This search never credits the user; only a cited span does.
-  const userWords = [texts.unverified, texts.conversation, texts.now, ...(texts.messages ?? [])].filter((t): t is string => typeof t === 'string' && t !== '').join('\n');
-  const retainedFigure = (): boolean => userWords !== ''
+  // ⛔ K3 (kept): a declared own estimate never relabels a figure the retained words of unknown origin write (reseeded history, the
+  // saved brief): that figure's source is unknown, never Olumi's. The stated-figure rule reads it there, in the AI's unit. This search
+  // never credits the user; only a cited span does.
+  const retainedFigure = (): boolean => typeof texts.unverified === 'string' && texts.unverified !== ''
     && [claim?.value, claim?.low, claim?.high].some((n) => typeof n === 'number' && Number.isFinite(n)
-      && figureTheUserWroteSpan(Math.abs(n), trimmed(claim?.unit, 60), userWords) !== null);
+      && figureTheUserWroteSpan(Math.abs(n), trimmed(claim?.unit, 60), texts.unverified as string) !== null);
   const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
     ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true || retainedFigure() } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
   const quote = trimmed(claim?.quote, QUOTE_MAX);
@@ -295,7 +294,8 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   // The unit's own scale: a money unit's magnitude letter ("£k": ×1000), or a 0–1 share unit, which reads a written PERCENTAGE ("30%" is
   // 0.3 of a proportion; never a plain "30 people").
   // A 0–1 share unit, by the estate's one share-unit rule (`isProportionScaledFactor`: "proportion", "share (0-1)", …).
-  const share = unit !== undefined && (SHARE_UNITS.has(unit.toLowerCase())
+  // No unit at all: a written percentage may be read in the model's 0–1 coordinate ("7%" as 0.07), as the stated-figure rule reads it.
+  const share = unit === undefined || (SHARE_UNITS.has(unit.toLowerCase())
     || isProportionScaledFactor({ unit, cap: undefined, value: typeof claim?.value === 'number' ? claim.value : undefined, raw_value: undefined }));
   const scale = share ? 100 : unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
   const percentAt = (q: string, n: number): boolean => findStatedAmounts(q).some((a) => a.kind === 'percent' && Math.abs(a.magnitude - n) <= 1e-9 * Math.max(1, Math.abs(n)));

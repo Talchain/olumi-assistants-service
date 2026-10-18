@@ -212,7 +212,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
     const { store, caps } = capsOver(graph);
     const r = await caps.proposeAssumptions({ ...ctx, user_text_complete: false },
-      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'original figure', ...(user_stated === undefined ? {} : { user_stated }) }] } as never);
+      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: 'The recruitment fee is £5,000', unit: 'GBP', basis: 'original figure', ...(user_stated === undefined ? {} : { user_stated }) }] } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const proposal = store.get(String(r.proposal_id))!;
     expect(proposal.provenance.authored_by).toBe('user_stated');
@@ -480,7 +480,7 @@ describe('the real route: build + proposal in one turn', () => {
   it('RED: one level proposed after the build → the honest save line, and a chip naming the STORED £50,000 even though the prose says £60,000', async () => {
     script = [
       callTool('build_model_from_brief', { brief: BRIEF }),
-      callTool('propose_option_interventions', { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, basis: 'the figure you gave', user_stated: true }] }),
+      callTool('propose_option_interventions', { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, quote: 'A PA would cost about £50,000', basis: 'the figure you gave', user_stated: true }] }),
       say('These are starting assumptions, not measurements. Shall I save the £60,000 assumption for Hire PA?'),
     ];
     const b = await turn();

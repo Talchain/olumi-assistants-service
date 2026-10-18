@@ -182,7 +182,8 @@ it('the real Run reader and final payload keep human 80% at model 0.8, never 0.8
   const w = await goalWorld(undefined, 'Record those current levels.'); w.ctx.user_text = quote; w.ctx.verified_user_messages.push(quote);
   const assumptions = w.graph().nodes.filter((n: Rec) => n.kind === 'factor').map((n: Rec) => ({ factor_label: n.label,
     value: n.id === 'founder_time_on_poc_testing_and_improvement' ? 80 : 10, unit: '% of founder working time',
-    user_stated: n.id === 'founder_time_on_poc_testing_and_improvement', basis: 'Controlled native reader test, other levels are Olumi assumptions.' }));
+    user_stated: n.id === 'founder_time_on_poc_testing_and_improvement', ...(n.id === 'founder_time_on_poc_testing_and_improvement' ? { quote } : {}),
+    basis: 'Controlled native reader test, other levels are Olumi assumptions.' }));
   const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions, option_levels: [] }), w.ctx, w.caps()), pid = String(r.proposal_id);
   expect(r.ok, JSON.stringify(r)).toBe(true);
   expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
