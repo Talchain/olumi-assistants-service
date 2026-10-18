@@ -144,6 +144,8 @@ export function fixture(variant: Variant): Seed {
     const ready = object(s.current_read.analysis_ready);
     s.current_read = { ...s.current_read, analysis_ready: { ...ready, freshness: 'stale', freshness_reason: 'graph_changed' } };
   }
+  // The fixture's selected execution identity travels on the existing Run-evidence carrier too.
+  s.analysis_run_evidence = { run_id: seed.captured_execution_run_id };
   // Synthetic revision probes now use the product's canonical read carrier.
   // The trusted read still describes this selected captured Run; no DB fact is fabricated.
   s.canonical_analysis_view = { schema: 'canonical_analysis_view.v1',

@@ -188,7 +188,11 @@ export function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, 
     .filter((id): id is string => typeof id === 'string' && id !== ''))];
   const message = scopeReasons === undefined ? STATIC_INPUTS_NOT_RECORDED
     : 'This Run’s recorded evidence does not support showing goal chances.';
-  const gated = missingStaticEvidence ? withholdOptionGoalFigures(candidate, new Set(ids), {
+  // A prior temporal projection already removed the licence; preserve its recorded cause on repeated readback.
+  const horizonWithhold = warnings.find(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+  const prior = horizonWithhold === undefined || !Array.isArray(candidate.inference_warnings) ? candidate
+    : { ...candidate, inference_warnings: candidate.inference_warnings.filter(value => value !== horizonWithhold) };
+  const gated = missingStaticEvidence ? withholdOptionGoalFigures(prior, new Set(ids), recordOf(horizonWithhold) ?? {
     code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', message, say: message,
     option_ids: ids, detail: scopeReasons === undefined ? { reason: 'EVALUATED_STATIC_INPUTS_NOT_RECORDED' }
       : { reason: 'goal_chance_not_licensed', missing_or_conflicting: scopeReasons },
