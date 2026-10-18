@@ -2,8 +2,8 @@
  * ⭐ A (18 Oct; AIE 00:27/00:37, D2): a range Olumi chose for a factor is Olumi's computational reference — never a bound,
  * an encoding or a licence. Admission says so the same way for every such range (the existing `frame_source:
  * 'olumi_convention'`): the drafter's range the brief does not write and the unit does not encode, a defaulted range, and
- * a range widened to cover an option's level or (U3) the user's own limit. A range the brief writes, or a percentage's
- * 100 (its encoding), is not Olumi's and is not marked. A size the user stated in raw units does not depend on Olumi's
+ * a range widened to cover an option's level or (U3) the user's own limit. A bound the user states for the factor (a verified
+ * limit, or the scale it is scored on) or a percentage's 100 (its encoding) is not Olumi's and is not marked; a stated range is no bound. A size the user stated in raw units does not depend on Olumi's
  * reference (P3). Synthetic brief; served through `buildModelFromBrief` → `/graph/register` → GraphV3 cold read →
  * canonical readiness → the prepared Run request, stopped before the engine (no engine or provider call).
  */
@@ -129,11 +129,11 @@ const rawEffect = (g: Rec): number[] => {
 };
 
 describe('A: Olumi\'s range is its reference, said the same way; the user\'s raw-unit size does not depend on it', () => {
-  it('W1/P1: the drafter\'s unwritten range is marked Olumi\'s; a range the brief writes, and a percentage\'s 100, are not', async () => {
+  it('W1/P1: the drafter\'s unwritten range is marked Olumi\'s; the scale the user scores on, and a percentage\'s 100, are not', async () => {
     const g = await build();
     expect(nodeOf(g, PRICE).observed_state).toMatchObject({ cap: 40, frame_source: 'olumi_convention' });
     expect(nodeOf(g, CANCEL).observed_state).toMatchObject({ cap: 160, frame_source: 'olumi_convention' });
-    // "scored out of 10": the user's range. 4%: the unit's encoding. Neither is Olumi's.
+    // "scored out of 10": the scale top in the user's verified statement. 4%: the unit's encoding. Neither is Olumi's.
     expect(nodeOf(g, SCORE).observed_state).toMatchObject({ cap: 10 });
     expect(nodeOf(g, CHURN).observed_state).toMatchObject({ cap: 100 });
     expect(nodeOf(g, SCORE).observed_state).not.toHaveProperty('frame_source');
