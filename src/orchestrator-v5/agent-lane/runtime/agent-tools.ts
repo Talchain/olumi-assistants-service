@@ -290,6 +290,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     parameters: obj({
       brief: { type: 'string', description: 'For initial construction, the user’s brief verbatim. For an explicitly requested replacement, Olumi’s proposed framing; it is context, never human source.' },
       explicit_rebuild_request: { type: 'string', description: 'Only for a saved model: the complete verified current typed request verbatim.' },
+      // TODO-AIE (K6): the AIE's words replace this description before merge.
+      explicit_draft_request: { type: 'string', description: 'Only when there is no saved model and the user’s CURRENT typed message explicitly asks you to draft the model now, with your best guesses, although they have not said what they are aiming for: that request, verbatim.' },
       whole_request: WHOLE_REQUEST,
     }, ['brief']),
   },
@@ -1155,7 +1157,7 @@ export interface AgentCapabilities {
    * `run_analysis` tool never passes it (`runAgentTool` hands over `(ctx, args)` only).
    */
   runAnalysis(ctx: AgentToolContext, args: { reason: string; effects_timing: EffectsTiming | null }, opts?: { readonly afterCommittedChange?: boolean }): Promise<ToolResult>;
-  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string; explicit_rebuild_request?: string }): Promise<ToolResult>;
+  buildModelFromBrief(ctx: AgentToolContext, args: { brief: string; explicit_rebuild_request?: string; explicit_draft_request?: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
     assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; revise?: boolean; keep?: boolean }[];

@@ -3,6 +3,7 @@ export { CURRENT_MODEL_CONTEXT_LEAD, REVISION_LEAD, LATER_MESSAGES_CONTEXT_LEAD,
 import { briefAttestsEventByDate, deliverableWrittenIn, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
@@ -814,6 +815,29 @@ function unattestedEventIssue(u: UnattestedEventGoal, brief: string): string {
 }
 function unattestedEventClarification(u: UnattestedEventGoal, brief: string): string {
   return UNATTESTED_GOAL_CLARIFICATION + retainedWording(u, brief);
+}
+
+/** TODO-AIE (K6): the AIE's words for the open aim replace this label before merge. */
+export const OPEN_AIM_GOAL_LABEL = 'Your aim (not yet stated)';
+/**
+ * ⭐ K6: the labelled provisional draft for a brief with no stated aim. The event the drafter took as the goal is the ACTION
+ * being weighed: it becomes an option (Olumi's) unless the draft already offers a choice. The goal is an open question:
+ * Olumi's reading, no kind, no figure, no deliverable, so the existing readiness ask asks the user for their aim.
+ */
+export function withOpenAim(c: CandidateModel, u: UnattestedEventGoal): CandidateModel {
+  const action = u.event.trim();
+  // The action becomes an option when the draft has no choice of its own to weigh (fewer than two options); options the
+  // drafter already wrote for it are kept as they are, never doubled.
+  const hasAction = c.options.length >= 2 || c.options.some((o) => canonicalLabel(o.label) === canonicalLabel(action));
+  // Links name nodes by label: what led to the event now leads to the open aim.
+  const toAim = (label: string): string => (canonicalLabel(label) === canonicalLabel(c.goal.metric) ? OPEN_AIM_GOAL_LABEL : label);
+  return {
+    ...c,
+    goal: { ...c.goal, metric: OPEN_AIM_GOAL_LABEL, unit: '', kind: null, value: null, target_stated: false, deliverable: null,
+      provenance: 'ai_inferred', basis: null },
+    options: hasAction ? c.options : [...c.options, { label: action, provenance: 'ai_inferred' }],
+    links: c.links.map((l) => ({ ...l, from: toAim(l.from), to: toAim(l.to) })),
+  };
 }
 
 export function retrySchemaPinningGoal(
@@ -1856,6 +1880,12 @@ export async function buildModelFromBrief(
    * Only when widening will run; an observer, so a throw never costs the build.
    */
   onDraftAdmitted?: (graph: unknown) => void,
+  /**
+   * ⭐ K6: the user explicitly asked to draft now (`explicit_draft_request`, verified by the caller as a whole statement of this
+   * turn's typed message). With it, a brief that states no figure gets a labelled provisional draft (`withOpenAim`) instead of
+   * the unattested-goal refusal. Omitted → today's path, byte for byte.
+   */
+  draftNow?: boolean,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = {
@@ -2000,6 +2030,12 @@ export async function buildModelFromBrief(
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
+  // ⭐ K6 (PL amendment 2; DL ack 18 Oct): on the user's explicit "draft it now", a brief that states NO figure (so no attested
+  // aim can lose to it) keeps its draft: the drafted event becomes an option and the aim an open question. A stated figure
+  // keeps the retry-then-ask path below, which protects an attested aim (#3026, the hiring brief).
+  const openAim = draftNow === true && findStatedAmounts(brief).length === 0
+    ? unattestedEventGoal(candidate, brief, construction.event_by_date_prompted === true) : null;
+  if (openAim !== null) candidate = withOpenAim(candidate, openAim);
   const firstCandidate = candidate;
   // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
   const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
