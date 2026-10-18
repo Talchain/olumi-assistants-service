@@ -22,6 +22,7 @@ import { asSent } from './helpers/as-sent.js';
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { shownBy } from './fixtures/displayed.js';
 
 /** One scenario per test: the route's proposal and history state is per scenario, and a shared one made the tests order-dependent. */
 let SCENARIO = randomUUID();
@@ -165,7 +166,8 @@ describe('a chip click that is not the approval or the Run withholds authority f
     const pid = t1._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
     expect(pid).toMatch(/^prop_/);
     script = [call('authorise_change', () => ({ proposal_id: pid })), say('Applied.')];
-    const b = await send({ kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess-c1-${SCENARIO}`, source: 'composer', message: 'Yes, add it.' });
+    // The client sends the cards it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    const b = await send({ kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess-c1-${SCENARIO}`, source: 'composer', message: 'Yes, add it.', displayed_proposals: shownBy(t1) });
     expect(offeredOn(modelBodies.length - 1)).toContain('authorise_change');
     expect(commits).toBe(1);
     expect(b._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));

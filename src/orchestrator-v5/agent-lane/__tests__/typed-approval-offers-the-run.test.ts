@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { shownBy } from './fixtures/displayed.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -75,9 +76,12 @@ describe('K3 at the route — a typed "yes" applies the change, runs nothing, an
   const fnCall = (name: string, args: Record<string, unknown>, id: string) => [{ type: 'function_call', name, call_id: id, arguments: JSON.stringify(args) }];
 
   /** One Agent turn that proposes a link; returns the proposal id from its approve chip. */
+  /** The cards the client shows after the proposing reply: a typed approval binds only to one of them (`shownBy`). */
+  let shown: Record<string, unknown>[] = [];
   async function propose(): Promise<string> {
     script = [fnCall('propose_model_change', { from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'It moves velocity.' }, 'p1')];
     const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.' } });
+    shown = shownBy(t1.json());
     const approve = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'the control: a real proposal was offered').toBeDefined();
     return approve!.id.slice('agent-approve-proposal:'.length);
@@ -86,7 +90,7 @@ describe('K3 at the route — a typed "yes" applies the change, runs nothing, an
   it('typed "yes" → authorise_change then the Agent\'s run_analysis (refused) → the change applies, the route\'s automatic Run runs ONCE, no Run chip', async () => {
     const proposalId = await propose();
     script = [fnCall('authorise_change', { proposal_id: proposalId }, 'a1'), fnCall('run_analysis', { reason: 'after the change' }, 'r1')];
-    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply it.' } });
+    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply it.', displayed_proposals: shown } });
     expect(t2.statusCode).toBe(200);
     expect(edges, 'the typed approval really applied').toHaveLength(1);
     expect(runs, 'ONE Run: the route\'s automatic Run, never the Agent\'s refused one as well').toBe(1);
