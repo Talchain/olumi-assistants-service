@@ -559,6 +559,28 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       }
     },
   );
+  // ⭐ Codex #3409 r1 P1 / DL-3 ruling (A): a robust Run owes no not-robust caveat. When the AI repeats Olumi's own fixed
+  // sentences, they are removed (dedupe of Olumi's exact words); the AI's other lines stay. Bound to the Run's fact.
+  it('W22: a robust Run \u2014 Olumi\u2019s two fixed not-robust sentences written by the AI are removed; the AI\u2019s other lines stay', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    const noFlip = NO_FLIP_SENTENCE;
+    readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
+    narrator = `${NARRATOR} ${sentence}\n- ${NARRATOR_BULLETS[0]}\n${noFlip}`;
+    const b = await press(await run());
+    expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(0);
+    expect(count(b.assistant_text, noFlip), b.assistant_text).toBe(0);
+    expect(count(b.assistant_text, NARRATOR)).toBe(1);
+    expect(count(b.assistant_text, NARRATOR_BULLETS[0]!)).toBe(1);
+  });
+
+  it('W22 contrast: on a fragile Run the same AI text keeps exactly one caveat (the rule follows the Run, not the words)', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    narrator = `${NARRATOR} ${sentence}\n- ${NARRATOR_BULLETS[0]}`;
+    const b = await press(await run());
+    expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, NARRATOR_BULLETS[0]!)).toBe(1);
+  });
+
   it('unavailable narration of a licensed fragile Run carries no caveat', async () => {
     emptyNarration = true;
     const b = await press(await run());

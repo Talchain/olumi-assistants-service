@@ -5336,14 +5336,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const scopedNarrationRaw = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
     // Decide only at assembly, against the final scope-composed, identity-bound authority used by egress.
     const explainEnrichment = (analysisResult as { enrichment?: Record<string, unknown> } | null | undefined)?.enrichment;
-    if (fastPath === 'explain' && narrationStatus === 'ready' && narratorWords !== null
+    const explainRobustness = explainEnrichment == null ? null : readRawRobustnessSignals(explainEnrichment.robustness);
+    const explainOwned = fastPath === 'explain' && narrationStatus === 'ready' && narratorWords !== null
       && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT && text !== RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT
       && text !== interpretationUnavailableText({ ok: true, ran: true }) && text !== explainFallbackText
       && runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })
-      && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld'
-      && explainEnrichment != null && isRawFragile(readRawRobustnessSignals(explainEnrichment.robustness))) {
+      && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld';
+    if (explainOwned && isRawFragile(explainRobustness)) {
       explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
     }
+    // The same Run's fact the other way (Codex #3409 r1 P1; DL-3 ruling A): a Run that is neither fragile nor a near tie
+    // owes no not-robust caveat, so Olumi's own two fixed sentences are removed if the AI repeated them. Dedupe of
+    // Olumi's exact words, never a matcher on the AI's.
+    const explainRobustRun = explainOwned && explainRobustness !== null && !isRawFragile(explainRobustness)
+      && !explainRobustness.near_tie_is_tie;
     // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
     // Display first, while the raw ask is intact. With no IDs the replacement is identical;
     // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
@@ -5358,8 +5364,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
     const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
       && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
-    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, aiRunTurn));
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat !== null
+      ? placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, aiRunTurn)
+      : explainRobustRun ? [NOT_ROBUST_SENTENCE, NOT_ROBUST_NO_FLIP_SENTENCE].reduce((t, s) => withoutSentenceCopies(t, s), scopedNarrationRaw)
+        : scopedNarrationRaw);
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
