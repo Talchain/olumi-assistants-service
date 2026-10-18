@@ -240,7 +240,10 @@ describe('steady horizon: one held card through the existing approved batch door
     const card = cardOf(await run());
     const before = JSON.stringify(jsonbGraph());
     modelTool = { type: 'function_call', name: 'authorise_change', call_id: 'forged_yes', arguments: JSON.stringify({ proposal_id: card.id.split(':')[1] }) };
-    await turn({ message: 'yes' });
+    // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct): with ONE card waiting, the user's TYPED words reach the Agent bound to it and its
+    // reading is the consent (held to account by approval-consent-gate.replay.test.ts; the write quotes the words). What this row
+    // still pins: a model-only approval on words the user did NOT type (a control's words) never writes.
+    await turn({ message: 'yes', source: 'chip_click' });
     expect(horizonSteadyAttested(jsonbGraph())).toBe(false);
     expect(JSON.stringify(jsonbGraph())).toBe(before);
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);

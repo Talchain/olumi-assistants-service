@@ -18,6 +18,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from '../proposal-object/lifecycle.js';
+import { shownBy } from './fixtures/displayed.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -152,10 +153,12 @@ describe('a pending approval survives a restart', () => {
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     return r.json() as Body;
   };
+  let shown: Record<string, unknown>[] = [];
   const offerIn = async (a: FastifyInstance): Promise<Chip> => {
     const t1 = await turn(a, { message: 'Team size strongly drives velocity, so connect them.' });
     const approve = t1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, `the control: a real proposal was offered — ${JSON.stringify({ tools: t1._agent?.tool_calls, text: String(t1.assistant_text ?? '').slice(0, 200), chips: t1.suggested_actions })}`).toBeDefined();
+    shown = shownBy(t1);
     return approve!;
   };
   /**
@@ -441,7 +444,9 @@ describe('a pending approval survives a restart', () => {
   // ── R2 T1 (friction audit row T1): typed "Yes, that is my deadline." — the card's own button words — was refused
   // ("Please use the approval button…" + a false "Not saved: … ask me to try again"). Words typed EXACTLY equal to the ONE
   // waiting card's button words are that press; anything else stays as it was. This harness's model never authorises.
-  const typedIn = (a: FastifyInstance, message: string, turnId: string = randomUUID()): Promise<Body> => turn(a, { message, turn_id: turnId });
+  // The client sends the cards it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set (`offerIn` keeps it).
+  const typedIn = (a: FastifyInstance, message: string, turnId: string = randomUUID()): Promise<Body> =>
+    turn(a, { message, turn_id: turnId, displayed_proposals: shown });
   it('R2 T1: typed words EXACTLY equal to the one waiting card\'s button → applied once on the approval path; a resend writes nothing more', async () => {
     const turnId = randomUUID();
     let words = '';

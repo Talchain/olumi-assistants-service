@@ -9,7 +9,6 @@ import { type DeadlineTurnStart } from '../orchestrator-v5/agent-lane/deadline-c
 import { projectStatedObjections, STATED_OBJECTIONS_CAP } from '../orchestrator-v5/context/stated-objections.js';
 /** Hard cap on dissent facts read per turn; paging stops earlier once STATED_OBJECTIONS_CAP different findings are covered. */
 const STATED_OBJECTION_FACT_ROWS_READ = 200;
-import { isComposerApprovalWords } from '../orchestrator-v5/agent-lane/composer-approval-words.js';
 import { steadyHorizonCard } from '../orchestrator-v5/agent-lane/steady-horizon-card.js';
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -97,7 +96,7 @@ import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analy
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionRenameInProcess, commitOptionStatusInProcess, commitStructuralDeleteInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, declineChipIdFor, displayedProposalsOf, shownAsHeldNow, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { heldCardStillApplies, heldCardSubjectMoved } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
@@ -116,7 +115,7 @@ import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTER
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
-import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { APPROVAL_REQUIRED_WORDS, approvalChoiceWords, narrateWriteOutcome, TYPED_APPROVAL_READ_BY_OLUMI, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, isDecisionInputAsk, risksSaidLeftOutOfTheChance, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
@@ -3320,39 +3319,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? { typed_approval_of: approvedProposal,
         ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
-    // A composer's explicit approval is bound here, before the model sees this turn, to ONE
-    // previously offered structural-link proposal. Card-only readings/holds still need their card.
-    let composerApproval: string | undefined;
-    if (approvedProposal === undefined && typedNow !== null
-      && isComposerApprovalWords(typedNow)) {
-      const waiting = proposals.outstanding(scenarioId, userId);
-      const offered = lastApproveOffer.get(approveKey) ?? carriedProposals.get(approveKey)?.chip;
-      const id = offered === undefined ? undefined : typedApprovalOf({ chip: { id: offered.id } });
-      const proposal = id === undefined ? undefined : proposals.get(id);
-      if (waiting.length === 1 && waiting[0]?.proposal_id === id && proposal !== undefined
-        && proposal.operations.length > 0 && proposal.operations.every(op => op.op === 'add_edge' || op.op === 'update_edge')) {
-        composerApproval = id;
-      }
-    }
     /**
-     * ⭐ R2 T1 (friction audit): words typed into the composer that EXACTLY equal the ONE waiting card's own button words
-     * ("Yes, that is my deadline.") ARE that press: the UI's chip sends the same words (DGAI `sendChip` → `chip.message`).
-     * Bound by card identity, never by reading words: exactly one card held in this conversation (the durable carrier
-     * this turn found) and no other proposal outstanding. A near match, two cards or no card stays refused, and a resend of
-     * the same turn replays its stored answer, so it never writes twice.
+     * ⭐ AN APPROVAL IS ONE ACTION (DL-3 18 Oct; Codex co-design §2; assessment K5 L2: "Yes, I approve the proposed 10%" was
+     * refused while its card waited). The cards held at turn start, in both dialects, joined with this process's outstanding
+     * proposals: a durable union, never one remembered chip.
+     *  · ONLY A CARD THE USER IS SHOWN (Codex BLOCK 18 Oct, P1): the client sends the cards it displays at the revisions it
+     *    rendered (`displayed_proposals`). A card it does not show, or shows at another revision (a replacement whose reply
+     *    was lost), binds nothing, and its own button is offered; so does a turn that sends no displayed set.
+     *  · Words EXACTLY equal to the ONE waiting card's button words ARE its press (R2 T1: the UI's chip sends those words).
+     *  · Otherwise, with exactly ONE card waiting, the user's typed words reach the Agent bound to that card, as its press would
+     *    be: the host picks the card (its id and the button words every per-family gate checks), and the Agent's own reading of
+     *    the words decides — approve (the approve tool on THAT id), amend, decline or discuss. Nothing is written unless it calls
+     *    the approve tool on it, and no other id is bound. A card made during this turn is never in this set.
+     *  · Either way the write keeps the user's exact typed words as its consent (`typed_assent`), quoted in the receipt.
+     *  · Two or more waiting: nothing is bound — never the newest, the oldest or the one the Agent names. The reply offers every
+     *    card with its own button, the one the Agent took the words to mean first (`heldCardOffer`).
      */
-    // The ONE waiting card, from the holds this turn already read (no further read): the only case typed words bind.
-    const onlyCard = heldAtStart.length === 1 ? proposalRecord(heldAtStart[0]!, undefined)?.approve_action : undefined;
-    const onlyCardId = onlyCard === undefined ? undefined : typedApprovalOf({ chip: { id: onlyCard.id } });
-    const exactlyOneCardWaits = onlyCardId !== undefined && proposals.outstanding(scenarioId, userId).every(p => p.proposal_id === onlyCardId);
-    if (approvedProposal === undefined && typedNow !== null && exactlyOneCardWaits && onlyCard!.message === typedNow) {
-      approvedProposal = onlyCardId;
-      pressedApproval = { typed_approval_of: onlyCardId, typed_approval_words: typedNow };
+    const heldCardIds = [...new Map(heldAtStart.flatMap((h) => {
+      const card = proposalRecord(h, undefined)?.approve_action;
+      const id = card === undefined ? undefined : typedApprovalOf({ chip: { id: card.id } });
+      return card === undefined || id === undefined ? [] : [[id, card] as const];
+    })).entries()];
+    const waitingIds = new Set([...heldCardIds.map(([id]) => id), ...proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id)]);
+    const soleId = waitingIds.size === 1 ? [...waitingIds][0]! : undefined;
+    // Its card as the user was shown it: the durable carrier, or this subject's last offer (the store may hold no carrier).
+    const soleCard = soleId === undefined ? undefined : [heldCardIds.find(([id]) => id === soleId)?.[1], lastApproveOffer.get(approveKey),
+      carriedProposals.get(approveKey)?.chip].find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === soleId);
+    const shown = displayedProposalsOf(body['displayed_proposals']);
+    const revisionAtStart = new Map(heldAtStart.flatMap((h) => { const r = proposalRecord(h, undefined); return r === undefined ? [] : [[r.proposal_id, r.revision] as const]; }));
+    if (approvedProposal === undefined && typedNow !== null && soleId !== undefined && soleCard !== undefined
+      && shownAsHeldNow(shown, soleId, revisionAtStart.get(soleId))) {
+      if (soleCard.message === typedNow) approvedProposal = soleId;
+      pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message, typed_assent: typedNow };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
     const authorshipWords = histories.authorshipWords(sessionId);
-    const toolCtx: AgentToolContext = { ...(composerApproval === undefined ? {} : { typed_approval_of: composerApproval }), ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n"), user_text_complete: refusal !== 'unknown_session' && earlierWordsKnown && authorshipWords.complete, ...(precedingAsk === undefined ? {} : { preceding_assistant_text: precedingAsk }) };
+    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, turn_id: turnId ?? String(req.id), user_turn_text: typedNow ?? '', user_text: userWordsOf(authorshipWords.verified, typedNow), verified_user_messages: [...authorshipWords.verified, ...(typedNow === null ? [] : [typedNow])], unverified_user_text: authorshipWords.unknown.join("\n"), user_text_complete: refusal !== 'unknown_session' && earlierWordsKnown && authorshipWords.complete, ...(precedingAsk === undefined ? {} : { preceding_assistant_text: precedingAsk }) };
     // The existing K2-bound press authorises one calculation on this turn, not model writes.
     const runPress = approvedProposal === undefined && typedRunOf(body);
     let runPressConsumed = false;
@@ -3605,7 +3608,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             : editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
-        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }, exactlyOneCardWaits).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x, i, all) => x !== '' && all.indexOf(x) === i).join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -5080,13 +5083,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * turn's own next steps (a proposal held until decided must not take the user's other actions away while it waits).
      * Never on a method's terminal turn, whose controls are the method's own.
      */
-    const heldCard = heldRecords.find(r => r.proposal_id === approvedProposal) ?? heldRecords[0];
+    // ⭐ ONE APPROVAL ACTION: EVERY held card is offered with its own buttons (assessment K5 L2: the reply re-offered only the
+    // oldest, so the user was told to press a button that was not there). The card pressed, or the one the Agent took the
+    // user's words to mean while several waited (its approval refused, never bound), comes first; then oldest first.
+    const meantId = approvedProposal ?? result.tool_calls.find((c) => c.name === 'authorise_change' && c.refusal === 'approval_required'
+      && heldRecords.some((r) => r.proposal_id === c.proposal_id))?.proposal_id;
+    const heldCards = [...heldRecords].sort((a, b) => Number(b.proposal_id === meantId) - Number(a.proposal_id === meantId));
+    // With several cards in one row, each button shows the change it applies (its card's own words), so the user can tell them apart.
+    const approveWithItsChange = (r: (typeof heldRecords)[number]): OfferedAction => {
+      const hold = heldRecords.length > 1 && r.approve_action.detail === undefined ? liveHolds.find((h) => heldProposalId(h) === r.proposal_id) : undefined;
+      const change = hold === undefined ? undefined : heldChangeLabel(hold);
+      return (change === undefined ? r.approve_action : { ...r.approve_action, detail: change }) as OfferedAction;
+    };
     const heldCardOffer: OfferedAction[] = approvals.length === 0 && heldRecords.length > 0
       && fastPath !== 'method' && !decisionReviewRequested
       && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
-      ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
+      ? [...heldCards.map((r) => approveWithItsChange(r)), AMEND_CHIP, ...heldCards.map((r) => r.decline_action as OfferedAction)] : [];
+    const meantHold = waitingIds.size > 1 && meantId !== undefined ? heldAtStart.find((h) => heldProposalId(h) === meantId) : undefined;
+    const approvalWords = waitingIds.size > 1
+      ? approvalChoiceWords(waitingIds.size, meantHold === undefined ? undefined : heldChangeLabel(meantHold)) : APPROVAL_REQUIRED_WORDS;
     // A resolved construction card, whatever it confirms. The complete stored window must attest both the first
     // public user answer and its exact-brief construction registration; neither a later card nor unknown history qualifies.
     const constructionConfirmResolved = await (async (): Promise<boolean> => {
@@ -5218,11 +5235,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         heldLapseLines = [...heldLapseLines, ...otherHolds.slice(holdRoom).map((h) => heldLapseSentence(heldChangeName(h), 'over_cap'))];
         liveHolds = liveHolds.filter(h => h.chip_id === approvalCarrier?.chip_id || otherHolds.slice(0, holdRoom).includes(h));
         heldRecords = heldRecords.filter((r) => liveHolds.some((h) => heldProposalId(h) === r.proposal_id));
-        // The re-offered card belongs to the OLDEST hold; if even that one did not fit, its card goes with it.
-        if (heldCardOffer.length > 0 && !heldRecords.some((r) => r.approve_action.id === heldCardOffer[0]!.id)) {
-          const cardIds = new Set(heldCardOffer.map((c) => c.id));
-          for (let i = offeredNow.length - 1; i >= 0; i -= 1) if (cardIds.has(offeredNow[i]!.id)) offeredNow.splice(i, 1);
-        }
+        // A re-offered card whose hold did not fit goes with it (its approve and its "Not now").
+        const gone = new Set(heldCards.filter((r) => !heldRecords.some((k) => k.proposal_id === r.proposal_id))
+          .flatMap((r) => [r.approve_action.id, r.decline_action.id]));
+        for (let i = offeredNow.length - 1; i >= 0; i -= 1) if (gone.has(offeredNow[i]!.id)) offeredNow.splice(i, 1);
       }
     }
     // Remembered only once the row's capacity is settled, so a card withdrawn above is never remembered as offered.
@@ -5287,15 +5303,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
     // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
     // figure fits." whole (the quote ends `."`, so it was one sentence). The narrator still states what was saved.
+    // ⭐ ONE APPROVAL ACTION: an approval the Agent applied from the user's typed words says the same receipt as its button
+    // (the capability's own follow-up, through the same Agent-direction boundary as the press path above).
+    const withApprovalReceipts = <N extends { status: string | null }>(n: N): N => {
+      const receipts = result.tool_calls.flatMap((c, i) => {
+        const r = result.tool_results[i];
+        return c.name === 'authorise_change' && r?.ok === true && r.mutated === true && typeof r.follow_up === 'string'
+          ? [withoutAgentDirections(r.follow_up).text] : [];
+      }).filter((x) => x.trim() !== '');
+      return receipts.length === 0 ? n : { ...n, status: [n.status, ...receipts].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
+    };
     const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
         ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
-          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }, exactlyOneCardWaits),
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }, approvalWords),
               // A specific partial follow-up is already the narrator's authoritative status.
               text: result.tool_results.some(r => r.mutated === true && r.applied === false
                 && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
-        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus, aiAsks: aiWroteReply }, exactlyOneCardWaits);
+        : withApprovalReceipts(narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus, aiAsks: aiWroteReply }, approvalWords));
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
@@ -6531,6 +6557,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * empty list is reported honestly rather than filled in.
          */
         receipts: collectTurnReceipts(result.tool_results),
+        // ⭐ CONSENT PROVENANCE (DL-3 ruling A): each write made on the user's typed approval, read by Olumi, with their words.
+        ...((): Record<string, unknown> => {
+          const typed = result.tool_calls.flatMap((c, i) => {
+            const a = (result.tool_results[i] as { approval?: { kind?: unknown; words?: unknown } } | undefined)?.approval;
+            return c.name === 'authorise_change' && c.mutated && a?.kind === TYPED_APPROVAL_READ_BY_OLUMI && typeof a.words === 'string'
+              ? [{ proposal_id: c.proposal_id ?? null, approval: TYPED_APPROVAL_READ_BY_OLUMI, words: a.words }] : [];
+          });
+          return typed.length > 0 ? { typed_approvals: typed } : {};
+        })(),
         // ⭐ AX2: the reply shows two of the build's open questions; the whole list, in the producer's order, is here.
         ...(() => {
           const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');

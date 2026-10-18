@@ -45,6 +45,26 @@ const APPROVE_PREFIX = 'agent-approve-proposal:';
 /** ⭐ The typed decline: words alone never set a held proposal aside; this exact press does. */
 export const DECLINE_PREFIX = 'agent-decline-proposal:';
 export const declineChipIdFor = (proposalId: string): string => `${DECLINE_PREFIX}${proposalId}`;
+
+/**
+ * ⭐ WHAT THE CLIENT SHOWS (Codex BLOCK on #3420, 18 Oct, P1: a replacement whose reply was lost inherited the typed
+ * consent given to the card the client still showed). A typed turn carries `displayed_proposals`: the cards the client
+ * displays, each by id and the revision it rendered (`_proposal_fields`). Read loosely, as `proposal_edits` is.
+ */
+export function displayedProposalsOf(raw: unknown): ReadonlyMap<string, string | undefined> {
+  const shown = new Map<string, string | undefined>();
+  if (!Array.isArray(raw)) return shown;
+  for (const entry of raw.slice(0, 16)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const { proposal_id: id, revision } = entry as Record<string, unknown>;
+    if (typeof id === 'string' && id.length > 0 && id.length <= 200) shown.set(id, typeof revision === 'string' && revision !== '' ? revision : undefined);
+  }
+  return shown;
+}
+/** Typed words bind only to a card the client shows AT the revision held now (none held: a `prop_` id is its content). */
+export function shownAsHeldNow(shown: ReadonlyMap<string, string | undefined>, proposalId: string, revisionNow: string | undefined): boolean {
+  return shown.has(proposalId) && (revisionNow === undefined || shown.get(proposalId) === revisionNow);
+}
 const GMH_RE = /^gmh_[0-9a-f]{12}$/;
 const PROP_RE = /^prop_[0-9a-f]{32}$/;
 /** The held proposal a typed decline press names, or undefined. */

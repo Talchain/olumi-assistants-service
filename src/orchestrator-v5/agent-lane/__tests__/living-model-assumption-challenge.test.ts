@@ -449,7 +449,10 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     if (reload) { await app.close(); app = await buildApp(); }
     const turnId = randomUUID();
     script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Nothing changed.')];
-    const refused = await turn({ turn_id: turnId, message: 'Do not add anything.' });
+    // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct): with ONE card waiting, the user's TYPED words reach the Agent bound to it and its
+    // reading is the consent (held to account by approval-consent-gate.replay.test.ts; the write quotes the words). What this row
+    // still pins: a model-only approval on words the user did NOT type (a control's words) never writes.
+    const refused = await turn({ turn_id: turnId, message: 'Do not add anything.', source: 'chip_click' });
     expect(refused._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
       mutated: false, refusal: 'approval_required', proposal_id: ref }));
     const callsBeforeRetry = openAiCalls;
