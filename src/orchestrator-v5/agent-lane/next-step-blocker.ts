@@ -9,7 +9,7 @@
  */
 import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../admission/target-testability.js';
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
-import { chanceGoalBlockerOf, draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
+import { chanceGoalBlockerOf, draftedTeamPartOf, eventByDateRefusalOf } from '../goal-target/event-by-date-model.js';
 import { jointBlockerOf, olumiBaseTargetsOf } from '../goal-target/goal-targets-joint.js';
 import { goalTargetMissingBlockerOf, isChanceGoalModel } from './decision-input-ask.js';
 import { oneNextStep, type PressBlocker } from './press-next-step.js';
@@ -63,8 +63,11 @@ export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null
   const targets = current ? goalChanceLicenceForAgent(read.analysis_result)?.targets : undefined;
   const joint = targets?.joint.status === 'withheld' ? targets.joint : undefined;
   const named = (targets?.conditions ?? []).filter((c) => c.role === 'target');
+  // ⭐ A3 D1 (DL-3 ruling 3; Codex #3407 r1): a saved model whose event is held (`event_goal_unadmitted`, the hold the build
+  // registers and the Run's admission reads) has ONE step, the event's missing piece: the release is what meets its goal.
+  const eventHold = eventByDateRefusalOf(read.raw);
   return oneNextStep([
-    goalTargetMissingBlockerOf(read.raw),
+    eventHold !== null ? { kind: 'missing_input', ask: eventHold } : goalTargetMissingBlockerOf(read.raw),
     // Ahead of every later-stage ask (the first producer of a kind wins): only this figure lets the Run start.
     runWithheldBlockerOf(read.raw, read.analysis_ready),
     staleBlockerOf(read.analysis_state, read.analysis_ready, staleOnlyByRangeReading(read.raw, read.analysis_result)),

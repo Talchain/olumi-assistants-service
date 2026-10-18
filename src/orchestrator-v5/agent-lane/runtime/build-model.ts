@@ -1931,13 +1931,15 @@ export async function buildModelFromBrief(
    */
   // Keep the existing repair route available to an ordinary draft before deciding that a failed event
   // admission must refuse. These intermediate graphs are never registered without the final structural gate.
-  const eventFallbackRefusals = new WeakMap<AdmittedModel, string>();
+  // The event's EXISTING hold (`event_goal_unadmitted`, as admission writes it), carried with the ordinary model it fell back to.
+  const eventHolds = new WeakMap<AdmittedModel, AdmittedModel['withheld'][number]>();
   const admitForBuild = (model: CandidateModel, levelCandidate = model): AdmittedModel => {
     const args = [model, {}, brief, goalLevelTheUserWrote(levelCandidate, brief), writtenAgain,
       (c: CandidateModel) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] as const;
     const result = admitCandidateModel(...args, construction);
     const refusal = eventByDateRefusalOf(result);
-    if (refusal === null) {
+    const hold = result.withheld.find((w) => w.reason === 'event_goal_unadmitted' && w.detail === refusal);
+    if (refusal === null || hold === undefined) {
       // An event construction over the size cap keeps the ordinary model when that reaches the goal: the same rule as a
       // failed slice. The cap is met by Olumi's own option x capacity scaffolding, not the draft (census r3 B3-d2: 36 links).
       if (draftedTeamPartOf(result) === null) return result;
@@ -1953,10 +1955,10 @@ export async function buildModelFromBrief(
     }
     try {
       const ordinary = admitOrdinaryCandidateModel(...args);
-      eventFallbackRefusals.set(ordinary, refusal);
+      eventHolds.set(ordinary, hold);
       return ordinary;
     } catch {
-      eventFallbackRefusals.set(result, refusal);
+      eventHolds.set(result, hold);
       return result;
     }
   };
@@ -2102,7 +2104,7 @@ export async function buildModelFromBrief(
     if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
       try {
         if (checkedConstructionPre(size).ok) {
-          const preview = finalizeGraph(admitted);
+          const preview = finalizeGraph(admitted, eventHolds.get(admitted));
           if (constructionFinalRefusal(preview) === null) onDraftAdmitted(preview.graph);
         }
       } catch { /* an unavailable preview never costs the repair */ }
@@ -2369,15 +2371,8 @@ export async function buildModelFromBrief(
       };
     }
     // ⭐ A3 D1 (DL-3 ruling 3, 18 Oct; reverses B3 086e4624's "unless that graph cannot reach the goal"; Paul 13 Oct: coach,
-    // don't refuse): a flagged draft whose event slice failed ALWAYS keeps its ordinary graph. Where that graph cannot reach the
-    // goal, the missing piece is the build's one ask (`eventAskOf`), and no chance can be run on it until it is answered.
+    // don't refuse): a flagged draft whose event slice failed ALWAYS keeps its ordinary graph; `finalizeGraph` carries the hold.
     return null;
-  }
-
-  /** The event slice's missing piece, asked once, when the ordinary graph that registers cannot reach the goal without it. */
-  function eventAskOf(final: ReturnType<typeof finalizeGraph>, eventFallbackRefusal: string | undefined): string | undefined {
-    return eventFallbackRefusal !== undefined && draftedTeamPartOf(final.graph as never) === null && !admittedReachesGoal(final.graph as never)
-      ? eventFallbackRefusal : undefined;
   }
 
   /**
@@ -2410,7 +2405,7 @@ export async function buildModelFromBrief(
   // which name and why (`REFUSAL_WORDS.option_name_ambiguous`, the Agent reads `detail`).
   // Pure finalization includes event occurrence binding and frame fitting, where additions can affect old entities.
   // The un-widened and every proposed widened admission run the same path before any dispatch.
-  function finalizeGraph(admitted: AdmittedModel) {
+  function finalizeGraph(admitted: AdmittedModel, eventHold?: AdmittedModel['withheld'][number]) {
     // Said where the user always sees it: the carrier the model folded into their goal, with their own arithmetic.
     if (foldedCarrier !== null) {
       const f = foldedCarrier;
@@ -2587,7 +2582,13 @@ export async function buildModelFromBrief(
     }));
     admitted = { ...admitted, loss: admitted.loss.filter((l) => !fittedOlumiFields.has(l.field_path)) };
     // AIE 6183705670 (1): the draft's verified statements are recorded on their subjects, as the door records a press.
-    const graph = withConstructionStatements(clampForPersist(prePersistGraph), draftStatements(candidate), brief, new Date().toISOString());
+    const built = withConstructionStatements(clampForPersist(prePersistGraph), draftStatements(candidate), brief, new Date().toISOString());
+    // ⭐ A3 D1 (DL-3 ruling 3; Codex #3407 r1): a flagged draft whose event slice failed keeps its ordinary graph. Where that graph
+    // cannot reach the goal, the event's EXISTING hold is finalised here, once: on the build's withheld list, on the graph that
+    // registers (the Run's admission reads it there, `eventByDateRefusalOf`), and as the build's one ask (below).
+    const held = eventHold !== undefined && draftedTeamPartOf(built) === null && !admittedReachesGoal(built) ? eventHold : undefined;
+    if (held !== undefined && !admitted.withheld.includes(held)) admitted = { ...admitted, withheld: [...admitted.withheld, held] };
+    const graph = held === undefined ? built : { ...built, withheld: [held] };
 
     const parked = (candidate as { unknowns?: unknown }).unknowns;
     // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
@@ -2658,7 +2659,10 @@ export async function buildModelFromBrief(
     // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
     // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
     // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
-    if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
+    if (held !== undefined && deadlineHeld) {
+      // ⭐ A3 D1 (Codex #3407 r1): the user's deadline words are held on the goal (`goal_deadline_as_stated`) and the event's
+      // missing capacity is the one ask, so no deadline question is asked beside it.
+    } else if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
       openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
     } else if (statedGoal.horizon.status === 'unresolved' && statedGoal.horizon.proposed_months === undefined) {
       const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
@@ -2755,17 +2759,20 @@ export async function buildModelFromBrief(
       && graph.nodes.some((n) => n.id === e.to && n.nonlinear_identity?.operation === 'sum'
         && n.nonlinear_identity.stated_in_brief === true)).map((e) => `nodes[${e.to}].sum_identity`));
     openQuestions.unshift(...admitted.loss.filter((l) => quotedSumPaths.has(l.field_path)).map((l) => l.reason));
+    // The event's hold is why nothing on the model can run yet: its missing piece is said first.
+    if (held?.detail !== undefined) openQuestions.unshift(held.detail);
 
     return { admitted, prePersistGraph, graph, goalNodes, openQuestions, levelAsks, setAside,
       withheldOptions, scopeAsked, untypedScopeWords };
   }
+  // The build's event hold, decided once on the first admission and carried through widening's re-admissions.
+  const eventHold = eventHolds.get(admitted);
   const finals = new Map<AdmittedModel, ReturnType<typeof finalizeGraph>>();
   const finalFor = (admission: AdmittedModel) => {
     let final = finals.get(admission);
-    if (final === undefined) { final = finalizeGraph(admission); finals.set(admission, final); }
+    if (final === undefined) { final = finalizeGraph(admission, eventHold); finals.set(admission, final); }
     return final;
   };
-  const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
   const checked = checkedConstructionPre(size);
   if (!checked.ok) return checked.refusal;
   const admittedOverLinks = checked.admittedOverLinks;
@@ -2794,17 +2801,10 @@ export async function buildModelFromBrief(
   const finalRefusal = constructionFinalRefusal(final);
   if (finalRefusal !== null) return finalRefusal;
   admitted = final.admitted;
-  const { graph, goalNodes, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
-  // ⭐ A3 D1: the event's chance is withheld on the existing carrier (`withheld`, `event_goal_unadmitted`, as admission writes it)
-  // and its missing piece is the one ask; the ordinary model registers. Never counted as a link whose direction is unknown.
-  const eventAsk = eventAskOf(final, eventFallbackRefusal);
-  if (eventAsk !== undefined && !admitted.withheld.some((w) => w.reason === 'event_goal_unadmitted')) {
-    admitted = { ...admitted, withheld: [...admitted.withheld, { from: 'event_decision', to: 'event_goal', reason: 'event_goal_unadmitted', detail: eventAsk }] };
-  }
-  // First: it is why nothing on the model can run yet, so it is said before any other question.
-  const openQuestions = eventAsk === undefined ? final.openQuestions : [eventAsk, ...final.openQuestions.filter((q) => q !== eventAsk)];
+  const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
 
-  // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
+  // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated. The event's hold is
+  // no link whose direction is unknown.
   const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link' && w.reason !== 'event_goal_unadmitted');
 
   // ⭐ What this construction reports about its graph, PREPARED or registered alike (FOUNDER explicit rebuild, DL-3 17:51Z):

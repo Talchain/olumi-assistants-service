@@ -57,11 +57,8 @@ export function goalTargetGapOf(graph: unknown): GoalTargetGap | null {
     || goalKindOf(goal) === 'chance_of_event' || isProvisionalObjective(goal) || goalHasStatedTarget(goal, raw)) return null;
   const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
   const horizon = rec(goal.goal_horizon);
-  // A3 D1: the deadline words the user gave, held verbatim on the goal (`goal_deadline_as_stated`), are a known deadline too:
-  // never asked for again.
   const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
-    || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months)
-    || (typeof goal.goal_deadline_as_stated === 'string' && goal.goal_deadline_as_stated.trim() !== '');
+    || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months);
   return {
     kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,
     question: deadlineKnown

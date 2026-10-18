@@ -13,6 +13,9 @@ import { ProposalStore } from '../proposal.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
+import { eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 
 type Rec = Record<string, any>;
 const SID = 'd1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1';
@@ -46,16 +49,22 @@ async function built(draft: Rec, brief = BRIEF): Promise<{ result: Rec; graphs: 
   return { result, graphs };
 }
 
-/** The registered graph read cold, as the next turn reads it, then a Run asked for, stopped before any engine call. */
-async function reopenAndRun(graph: Rec): Promise<{ state: Rec; run: string; request: Rec | undefined }> {
-  const cold = GraphV3.parse(JSON.parse(JSON.stringify(graph)));
-  const state = await createAgentCapabilities((async () => ({ status: 200, json: { graph: cold, graph_hash: 'cold' } })) as never, new ProposalStore())
+/**
+ * The registered graph read cold, as the next turn reads it: the stored bytes the register route kept (its ingress is
+ * passthrough) and the read route returns, with that route's own readiness (`buildCanonicalAnalysisReadyFromGraph`). Then a Run
+ * is asked for, stopped before any engine call.
+ */
+async function reopenAndRun(graph: Rec, brief = BRIEF): Promise<{ stored: Rec; state: Rec; run: string; request: Rec | undefined }> {
+  const stored = JSON.parse(JSON.stringify(graph)) as Rec;
+  expect(GraphV3.safeParse(stored).success).toBe(true);
+  const state = await createAgentCapabilities((async () => ({ status: 200, json: { graph: stored, graph_hash: 'cold',
+    current_read: { analysis_ready: buildCanonicalAnalysisReadyFromGraph(stored) } } })) as never, new ProposalStore())
     .getCanonicalState({ scenario_id: SID, authenticated_user_id: null, request_id: 'cold', user_text: 'What is known?', user_turn_text: 'What is known?' } as never) as Rec;
   let request: Rec | undefined;
   let engineCalls = 0;
   let run = '';
   try {
-    const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'cold', { loadGraphAndBriefText: async () => ({ graph: cold, briefText: BRIEF }),
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'cold', { loadGraphAndBriefText: async () => ({ graph: stored, briefText: brief }),
       readMostRecentPendingActions: async () => [] } as never);
     const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
       plotClient: { run: async () => { engineCalls++; throw Error('ENGINE'); }, validatePatch: async () => { throw Error('ENGINE'); } },
@@ -64,35 +73,49 @@ async function reopenAndRun(graph: Rec): Promise<{ state: Rec; run: string; requ
       signal: new AbortController().signal, context: {}, orientationText: '' } as never));
   } catch (e) { run = String(e); }
   expect(engineCalls).toBe(0);
-  return { state, run, request };
+  return { stored, state, run, request };
 }
 
+const HOLD = { from: 'event_decision', to: 'event_goal', reason: 'event_goal_unadmitted', detail: ASK };
+
 describe('A3 D1: a deadline brief with no capacity stated gets a model and one ask, never a refusal', () => {
-  it('⭐ RED → GREEN: the ordinary model registers with the deadline; the missing capacity is the one ask; no chance can run', async () => {
+  it('⭐ RED → GREEN: the ordinary model registers with the event hold and the deadline; the missing capacity is the ONLY ask; no chance can run', async () => {
     const { result, graphs } = await built(noCapacityDraft());
     expect(result, JSON.stringify(result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
     expect(graphs).toHaveLength(1);
-    expect(result.open_questions, JSON.stringify(result.open_questions)).toContain(ASK);
-    expect((result.open_questions as string[]).filter((q) => q === ASK)).toHaveLength(1);
+    // The ONE ask: the full list, exactly. No deadline question beside it: the user's words are held on the goal.
+    expect(result.open_questions).toEqual([ASK]);
+    // The event's existing hold, registered on the graph the Run's admission reads, with its detail.
+    expect(graphs[0]!.withheld).toEqual([HOLD]);
     const goal = graphs[0]!.nodes.find((n: Rec) => n.kind === 'goal');
-    // The deadline the user gave is held on the goal (its existing carrier), not discarded with a refusal.
     expect(goal.goal_deadline_as_stated, JSON.stringify(goal)).toBe('four months');
-    // Withheld, never runnable: no option reaches the goal until the capacity is answered.
     expect(admittedReachesGoal(graphs[0] as never)).toBe(false);
-    // The withheld event is never counted as a link whose direction nobody stated: the three are the option links the draft left
-    // without a direction, exactly as the ordinary admission withholds them.
+    // The hold is no link whose direction nobody stated: the three are the option links the draft left without a direction.
     expect(result.not_represented).toContain('3 relationship(s) were left out because nobody has stated which way they run.');
-    // Cold reopen: the model cannot run, the deadline is never asked for again, and a Run prepares no engine request.
-    const { state, run, request } = await reopenAndRun(graphs[0]!);
+    // Cold reopen: the stored graph still carries the hold; the Run's own admission names the capacity; no engine request.
+    const { stored, state, run, request } = await reopenAndRun(graphs[0]!);
+    expect(stored.withheld).toEqual([HOLD]);
+    expect(eventByDateRefusalOf(stored)).toBe(ASK);
+    expect(resolveRunAdmission(stored)).toMatchObject({ willProceed: false, blockedNextStep: ASK });
     expect(state.readiness, JSON.stringify(state.readiness)).toMatchObject({ checked: true, may_run: false });
-    expect(state.next_step_blocker).toEqual({ kind: 'missing_input', cause: 'goal_target_missing',
-      ask: 'One gap: ‘Next app version’ has no target yet. What would count as meeting it?' });
+    // The next turn's ONE step is the same ask: never a target or deadline question for an event the user dated.
+    expect(state.next_step_blocker).toEqual({ kind: 'missing_input', ask: ASK });
     expect(request, run.slice(0, 800)).toBeUndefined();
     expect(run).toContain('not analysis-ready');
-    // Contrast: the same saved model with no deadline held still asks for one.
-    const undated = structuredClone(graphs[0]!);
-    delete undated.nodes.find((n: Rec) => n.kind === 'goal').goal_deadline_as_stated;
-    expect((await reopenAndRun(undated)).state.next_step_blocker).toMatchObject({
+  });
+
+  it('CONTRAST: a genuinely undated, ordinary brief registers no event hold and is still asked its target and deadline', async () => {
+    const UNDATED = 'We need to release the next app version. We are deciding whether to hire a contractor or move two people from support onto it.';
+    const draft = noCapacityDraft();
+    draft.goal = { ...draft.goal, kind: null, deliverable: null, horizon_months: null, deadline_words: null, source_quote: 'We need to release the next app version.' };
+    const { result, graphs } = await built(draft, UNDATED);
+    expect(result, JSON.stringify(result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
+    expect(graphs).toHaveLength(1);
+    expect(graphs[0]!.withheld).toBeUndefined();
+    expect(result.open_questions ?? []).not.toContain(ASK);
+    const { state, request } = await reopenAndRun(graphs[0]!, UNDATED);
+    expect(state.next_step_blocker).toEqual({ kind: 'missing_input', cause: 'goal_target_missing',
       ask: 'One gap: ‘Next app version’ has no target or deadline yet. What would count as meeting it, and by when?' });
+    expect(request).toBeUndefined();
   });
 });

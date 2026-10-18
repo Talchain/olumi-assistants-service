@@ -473,6 +473,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(result, JSON.stringify(result).slice(0, 800)).toMatchObject({ ok: true, mutated: true });
     expect(registrations).toHaveLength(1);
     expect((result.open_questions as string[]).filter((q) => q === expected)).toHaveLength(1);
+    // The existing hold registers with its detail, where the Run's own admission reads it.
+    expect(resolveRunAdmission(registrations[0])).toMatchObject({ willProceed: false, blockedNextStep: expected });
     expect(admittedReachesGoal(registrations[0] as never)).toBe(false);
     expect(JSON.stringify(result)).not.toContain('A part of the model cannot reach the goal');
     expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [result]).status).toContain(expected);
