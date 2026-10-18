@@ -507,7 +507,11 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     const reported = map.refused[0]?.refusal === 'statement_not_found' && form !== undefined
       && (r['speaker'] === 'other' || r['speaker'] === 'unknown' || r['said_by'] === 'party' || r['said_by'] === 'unknown')
       ? verifyEntry(r, form, subjectKey(drafted, field), brief, true) : undefined;
-    const claimed = reported?.kind === 'verified'
+    // ⛔ A LABEL IS FOR A CARD (gate → label, 63f15228): the claim door now labels words or a figure it cannot find instead of refusing
+    // them, for a card the user sees and approves. Construction shows no card, so such a reading falls back exactly as a refusal did:
+    // a party's figure their words do not write is never recorded as theirs.
+    const claimed = reported?.kind === 'verified' && reported.statements.every((st) => st.checks === undefined
+      || (st.checks.words_found && st.checks.figure_found && st.checks.unit_found))
       ? reported.statements.map((st) => (field === 'effect' && form === 'range' ? withOwnRangeUnit(st) : st)) : undefined;
     // ⛔ DL-3 16:14Z (#3363 R3; first loss P07/P09): words the brief writes verbatim, refused ONLY as not a whole statement there, are
     // kept with speaker unknown instead of dropped. Every other refusal still records nothing.
