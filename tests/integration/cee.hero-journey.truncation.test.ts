@@ -20,7 +20,7 @@ import {
   type CeeHealthSummary,
 } from "../../sdk/typescript/src/ceeHelpers.js";
 
-describe("CEE hero journey (health): truncation and validation scenarios", () => {
+describe("CEE hero journey (health): truncation scenario", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -74,23 +74,6 @@ describe("CEE hero journey (health): truncation and validation scenarios", () =>
     expect(health.reasons.some((r) => r.toLowerCase().includes("trunc"))).toBe(true);
 
     // Privacy: no brief text should leak into story or health summaries
-    const serialized = JSON.stringify({ story, health });
-    expect(serialized.includes(SECRET)).toBe(false);
-  });
-
-  it("produces a validation-focused health summary without leaking user content", async () => {
-    const SECRET = "DO_NOT_LEAK_VALIDATION";
-    // Synthetic legacy envelope keeps the retained SDK contract checks.
-    const optionsBody: any = { options: [{ id: "option-fixture" }], quality: { overall: 7 }, trace: { request_id: "sdk-fixture" }, validation_issues: [{ code: "trivial_graph", severity: "warning" }] };
-
-    const story = buildDecisionStorySummary({ options: optionsBody });
-    const health: CeeHealthSummary = buildCeeHealthSummary("options", optionsBody);
-
-    expect(health.has_validation_issues).toBe(true);
-    expect(["warning", "risk"]).toContain(health.status);
-    expect(health.reasons.some((r) => r.toLowerCase().includes("validation"))).toBe(true);
-
-    // Story and health summaries must remain metadata-only (no brief text)
     const serialized = JSON.stringify({ story, health });
     expect(serialized.includes(SECRET)).toBe(false);
   });

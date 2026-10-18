@@ -1,9 +1,9 @@
 /**
  * CEE v1 Golden Journey Telemetry Sanity Test
  *
- * Runs a healthy golden journey through /assist/v1/* endpoints with the fixtures
- * provider and asserts that expected telemetry events are emitted without any
- * free-text or banned substrings.
+ * Runs the draft step of golden journeys through /assist/v1/draft-graph with the
+ * fixtures provider and asserts that expected telemetry events are emitted
+ * without any free-text or banned substrings.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -139,7 +139,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
     expect(all.includes(SECRET.toLowerCase())).toBe(false);
   });
 
-  it("emits truncation telemetry for an evidence-heavy golden journey", async () => {
+  it("emits draft requested + succeeded events for the evidence-heavy golden journey brief", async () => {
     const fixture = await loadCeeGoldenJourney(
       CEE_GOLDEN_JOURNEYS.EVIDENCE_HEAVY_WITH_TRUNCATION,
     );
@@ -163,7 +163,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
 
   });
 
-  it("emits disagreement telemetry for a team-disagreement golden journey", async () => {
+  it("emits draft requested + succeeded events for the team-disagreement golden journey brief", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.TEAM_DISAGREEMENT);
 
     const headers = { "X-Olumi-Assist-Key": "cee-telemetry-golden-journey" } as const;

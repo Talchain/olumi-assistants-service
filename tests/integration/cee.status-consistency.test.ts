@@ -1,13 +1,11 @@
 /**
  * CEE Status Consistency Tests
  *
- * E2E tests to verify that the same graph produces consistent status
- * across both endpoints:
- * - POST /assist/v1/draft-graph
- * - POST /assist/v1/graph-readiness
+ * E2E tests of the option status that POST /assist/v1/draft-graph reports in
+ * analysis_ready (the graph-readiness endpoint was deleted with R2).
  *
  * KEY ACCEPTANCE CRITERIA:
- * - Both endpoints produce identical status for identical graphs
+ * - The ready-or-encodable count never falls below the strict ready count
  * - Label-matched interventions count as resolved
  * - Pricing briefs with extracted values produce "ready" status
  */
@@ -34,7 +32,7 @@ describe("CEE Status Consistency", () => {
   });
 
   describe("Endpoint Consistency", () => {
-    it("draft-graph and graph-readiness produce consistent status for pricing brief", async () => {
+    it("draft-graph's ready-or-encodable count is never below its strict ready count (pricing brief)", async () => {
       const brief = "Should we increase Pro plan price from £49 to £59?";
 
       // Step 1: Call draft-graph to get the graph
