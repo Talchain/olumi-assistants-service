@@ -47,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
+import { userStated, userStatementOf, verifyStatements, type StatementTexts, saidByOf } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -6855,7 +6855,7 @@ export function createAgentCapabilities(
           ...(typeof x.reading_words === 'string' ? { reading_words: x.reading_words } : {}),
           // ONE BINDER: pass the source and AI reading unchanged to the existing owner.
           // This adapter does not interpret the words or verify their meaning.
-          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated', 'speaker'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
+          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated', 'speaker', 'said_by', 'party', 'relayed_by'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text,
         unverified: [ctx.unverified_user_text, g.brief_text].filter((t): t is string => typeof t === 'string').join('\n') };
       const v = readStatement(g.raw, resolved.subject, resolved.label, quotes, texts, doorContextOf(ctx, g.raw));
@@ -6870,7 +6870,8 @@ export function createAgentCapabilities(
       }
       const card: DoorCard = { subject: resolved.subject, label: resolved.label, field: row.field, carrier: row.carrier,
         statements: v.reading.statements, member: write.member, payload: write.payload, ...(write.expected !== undefined ? { expected: write.expected } : {}),
-        ...(row.derives === true ? { derives: true } : {}) };
+        // A claim another party asserts, or an unresolved one, is never "what you said": its press uses the reading's button.
+        ...(row.derives === true || v.reading.statements.some((st) => saidByOf(st) !== 'user') ? { derives: true } : {}) };
       const operations: ProposalOperation[] = [doorOperation(card)];
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
         operations, provenance: { authored_by: 'model_proposed', basis: v.reading.statements[0]!.source },

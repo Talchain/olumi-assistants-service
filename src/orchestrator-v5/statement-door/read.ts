@@ -24,7 +24,9 @@ export { statementBoundTo, type DoorContext } from './statements.js';
  */
 export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string;
   /** The AI's own speaker reading (`QUOTE_SPEAKER`, lean core P2), passed unchanged to the ONE verifier, which only subtracts credit. */
-  readonly speaker?: unknown } & AiReading;
+  readonly speaker?: unknown;
+  /** ⭐ CLAIM RECORD: who the AI reads as asserting the claim, the party's name as written, and the relay; kept on the claim. */
+  readonly said_by?: unknown; readonly party?: unknown; readonly relayed_by?: unknown } & AiReading;
 
 /**
  * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z): the AI's own reading of the statement, as the tool gives it, for a row that reads
@@ -95,7 +97,8 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     const quote = (typeof raw === 'string' ? raw : raw.quote).trim();
     const answering = typeof raw === 'string' ? undefined : raw.answering;
     // ⭐ LEAN CORE P2: the AI's speaker reading reaches every verification of this statement (`verifyStatement` vetoes other/unknown).
-    const speaker = typeof raw === 'string' || raw.speaker === undefined ? {} : { speaker: raw.speaker };
+    const speaker = typeof raw === 'string' ? {} : Object.fromEntries((['speaker', 'said_by', 'party', 'relayed_by'] as const)
+      .filter((k) => raw[k] !== undefined).map((k) => [k, raw[k]]));
     if (row.aiReads !== undefined) {
       // ⭐ ONE BINDER: the AI read it (form, figures, unit, negation) and bound it to this subject; the host reads no figure and
       // binds nothing by name. It verifies only that the quote writes that reading (`figuresWritten`, the unit written after the
@@ -106,7 +109,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
       const v = verifyStatement({ quote, form: raw.form, value: raw.value, low: raw.low, high: raw.high, unit: raw.unit, negated: raw.negated,
         ...(answering !== undefined ? { answering } : {}), ...speaker }, texts,
       { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
-        unit: row.unit, forms: row.forms, figuresIn: figuresWritten, unitWritten: true, ...(row.allowsZero === true ? { allowsZero: true } : {}) });
+        unit: row.unit, forms: row.forms, figuresIn: figuresWritten, unitWritten: true, claims: true, ...(row.allowsZero === true ? { allowsZero: true } : {}) });
       if (v.kind === 'refused') return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
       const why = row.aiReads(v.statement, subject, graph);
       if (why !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${why} Nothing was prepared. ${KEEP}` };

@@ -160,4 +160,24 @@ describe('claim record rows (spec §1–§4, §6): who asserts the figure is sav
       expect(computeGraphIdentityHash(g as never)).toEqual(identity);
     }
   });
+
+  it('CARD: a party\'s card names the reported source and approves only Olumi\'s interpretation; never "From your message", never "Record what you said"', async () => {
+    const w = world();
+    const card = await w.caps.proposeStatement!(ctx(PARTY) as never, reading(PARTY, 'other', { party: 'Our kitchen manager' }) as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true });
+    expect(card.public_label).toContain('Reported source: Our kitchen manager, as relayed by you.');
+    expect(card.public_label).toContain('Approval applies only this displayed model interpretation. The source remains Our kitchen manager, as you reported it.');
+    expect(card.public_label).not.toContain('From your message');
+    expect((w.proposals.get(card.proposal_id)!.operations[0]!.value as Rec).derives).toBe(true);
+  });
+
+  it('CARD: an unresolved source says so; CONTROL: the user\'s own card keeps today\'s words', async () => {
+    const w = world();
+    const unknown = await w.caps.proposeStatement!(ctx(PARTY) as never, reading(PARTY, 'unknown') as never) as Rec;
+    expect(unknown.public_label).toMatch(/^Recorded words — speaker\/source unknown: “/u);
+    expect(unknown.public_label).not.toContain('From your message');
+    const own = await world().caps.proposeStatement!(ctx(OWN) as never, reading(OWN, 'user') as never) as Rec;
+    expect(own.public_label).toMatch(/^From your message: “/u);
+  });
 });
+

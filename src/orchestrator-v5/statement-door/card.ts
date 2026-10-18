@@ -4,6 +4,7 @@
  * interpretation or separate Olumi assumption, its basis and limits}. Record this reading?" Every assumption is on the shown card
  * BEFORE the question. Each field's reading and assumptions are SYSTEM 4's signed table words. Pure.
  */
+import { saidByOf } from '../agent-lane/user-statements.js';
 import type { DoorReading } from './read.js';
 
 /** The button for a FAITHFUL human statement write (AIE 6179240850 item 3; 6181498097). Its words are the press when typed exactly. */
@@ -16,8 +17,21 @@ export function doorCardWords(r: DoorReading): string {
   const assumptions = r.assumptions.map((a) => a.trim()).filter((a) => a !== '');
   // A quoted sentence, or a reading, that ends its own statement takes no second full stop.
   const reading = r.reading.trim();
+  const stop = (w: string): string => (/[.!?…]”?$/.test(w) ? '' : '.');
+  const rest = `${assumptions.length > 0 ? ` ${assumptions.join(' ')}` : ''}`;
+  // ⭐ CLAIM RECORD (AIE 13:10Z exact templates): a party's estimate keeps its source on the card, beside Olumi's interpretation, and the
+  // press approves only that interpretation. An unresolved source says so in the estate's words. The user's own words: unchanged.
+  const party = r.statements.find((s) => saidByOf(s) === 'party');
+  if (party !== undefined) {
+    const relayed = party.relayed_by === 'user';
+    return `Reported source: ${party.party}${relayed ? ', as relayed by you' : ''}. ${said}${stop(said)} Olumi’s interpretation: ${reading}${stop(reading)}${rest}`
+      + ` Approval applies only this displayed model interpretation. The source remains ${party.party}${relayed ? ', as you reported it' : ''}.`;
+  }
+  if (r.statements.some((s) => saidByOf(s) !== 'user')) {
+    return `Recorded words — speaker/source unknown: ${said}${stop(said)} Olumi proposes this reading: ${reading}${stop(reading)}${rest} Use this reading?`;
+  }
   return `From your message: ${said}${/[.!?…]”$/.test(said) ? '' : '.'} Olumi proposes this reading: ${reading}${/[.!?…]$/.test(reading) ? '' : '.'}`
-    + `${assumptions.length > 0 ? ` ${assumptions.join(' ')}` : ''} Record this reading?`;
+    + `${rest} Record this reading?`;
 }
 
 /**
