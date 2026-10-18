@@ -33,7 +33,6 @@ const KNOWN_SCHEMA_SYMBOL_TWINS: Readonly<Record<string, readonly string[]>> = {
   RawInterventionValue: ["analysis-ready.ts", "cee-v3.ts"],
   RawInterventionValueT: ["analysis-ready.ts", "cee-v3.ts"],
   ReadinessFactors: ["assist.ts", "review.ts"],
-  SafeRequestId: ["review.ts", "working-set.ts"],
 };
 
 const SCHEMAS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,9 +84,9 @@ describe("src/schemas symbol twins — pinned to an exact known set", () => {
     // equality assertion below would agree with itself. Two different files
     // must yield different export sets.
     const graph = new Set(exportedNames(readFileSync(join(SCHEMAS_DIR, "graph.ts"), "utf8")));
-    const workingSet = new Set(exportedNames(readFileSync(join(SCHEMAS_DIR, "working-set.ts"), "utf8")));
-    expect(graph).not.toEqual(workingSet);
-    expect([...graph].some((n) => !workingSet.has(n))).toBe(true);
+    const review = new Set(exportedNames(readFileSync(join(SCHEMAS_DIR, "review.ts"), "utf8")));
+    expect(graph).not.toEqual(review);
+    expect([...graph].some((n) => !review.has(n))).toBe(true);
   });
 
   it("carries EXACTLY the known twins — REDs if the set grows OR shrinks", () => {
@@ -98,13 +97,11 @@ describe("src/schemas symbol twins — pinned to an exact known set", () => {
     expect(Object.keys(deriveTwins())).not.toContain("ProvenanceSource");
   });
 
-  it("declares the two renamed concepts exactly once each", () => {
+  // working-set.ts (ResponseAttributionSource) was deleted with /assist/v1/ask (R3), so only graph.ts's renamed concept remains.
+  it("declares the renamed GraphEvidenceSource exactly once", () => {
     const graph = exportedNames(readFileSync(join(SCHEMAS_DIR, "graph.ts"), "utf8"));
-    const workingSet = exportedNames(readFileSync(join(SCHEMAS_DIR, "working-set.ts"), "utf8"));
     expect(graph.filter((n) => n === "GraphEvidenceSource")).toHaveLength(1);
-    expect(workingSet.filter((n) => n === "ResponseAttributionSource")).toHaveLength(1);
-    // opposite-direction twin: the old name must be gone from BOTH, not moved.
+    // opposite-direction twin: the old name must be gone, not moved.
     expect(graph).not.toContain("ProvenanceSource");
-    expect(workingSet).not.toContain("ProvenanceSource");
   });
 });
