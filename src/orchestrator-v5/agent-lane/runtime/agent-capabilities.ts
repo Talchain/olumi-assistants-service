@@ -470,15 +470,51 @@ export { newFactorScopeIn };
 export { linkEffectRefusalWords, linkEffectConsent, linkEffectNoSuchLinkWords };
 
 /**
- * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
- * a "limit" ("change the budget limit to £30,000"), so that word is the limit's own; and a RISK is no quantity a limit's
- * figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
- * "300 Pro paying subscribers" is never a £300 limit on the price.
+ * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): a RISK is no quantity a
+ * limit's figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
+ * "300 Pro paying subscribers" is never a £300 limit on the price. What a user calls a limit ("limit", "constraint") is no
+ * name of ANY one limit: it binds only by `limitFigureNamedHere` (Codex R2 on #3424: "the shelf capacity limit" was the oven's).
  */
 export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
   const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
   const { target, others } = scopeIn(g, limitLabel);
-  return { target: [...target, 'limit'], others: others.filter((l) => !risks.has(l)) };
+  return { target, others: others.filter((l) => !risks.has(l)) };
+}
+
+/** What a user calls a limit itself, never the name of one limit. */
+const LIMIT_WORD = /^(?:limit|constraint|floor|ceiling)s?$/;
+/**
+ * ⭐ A LIMIT NAMED BY WHAT IT IS (verifier P05, 18 Oct: "the remote-village constraint should be at least 85%" was refused, the
+ * nearest label word, "village", being another node's). A word NAMES a quantity when it is in that quantity's label and in no
+ * other's. The figure is THIS limit's when the clause it is written in calls it a limit, names no OTHER limit, and either names
+ * this limit or names no other quantity at all ("change the spend limit to £30,000": "spend" is several siblings' word, so it
+ * names none; DL #2195). A limit word never overrides a rival the user named (Codex R2 on #3424 @d4be73eb: "the shelf capacity
+ * constraint … 2 ovens" is never the oven limit's), and the figure's own unit names no quantity ("2 ovens").
+ */
+export function limitFigureNamedHere(
+  g: { readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown }[] },
+  limitRows: readonly { readonly node_id?: unknown }[], limitNodeId: string, limitLabel: string, value: number, unit: unknown,
+  text: string | null | undefined,
+): boolean {
+  if (typeof text !== 'string') return false;
+  const span = figureTheUserWroteForSpan(value, unit, text, { target: [limitLabel], others: [] });
+  if (span === null) return false;
+  const before = text.slice(0, span.start);
+  const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
+  const endAt = text.slice(span.end).search(/[.!?;,:\n\u2013\u2014]/);
+  const words = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
+  const after = words(text.slice(span.end, endAt < 0 ? text.length : span.end + endAt));
+  const unitTokens = after.findIndex((w) => !unitWords.some((u) => sameWord(u, w)));
+  const clause = [...words(text.slice(clauseStart, span.start)), ...after.slice(unitTokens < 0 ? after.length : unitTokens)];
+  const labelOf = new Map(g.nodes.map((n) => [n.id, typeof n.label === 'string' ? n.label : '']));
+  const otherLimits = limitRows.filter((r) => r.node_id !== limitNodeId).map((r) => labelOf.get(r.node_id) ?? '').filter((l) => l !== '');
+  const quantities = [...new Set([limitLabel, ...limitScopeIn(g, limitLabel).others, ...otherLimits])];
+  const names = (label: string): boolean => wordsOf(label)
+    .filter((w) => !quantities.some((o) => o !== label && wordsOf(o).some((x) => sameWord(x, w))))
+    .some((w) => clause.some((c) => sameWord(c, w)));
+  return clause.some((c) => LIMIT_WORD.test(c)) && !otherLimits.some(names)
+    && (names(limitLabel) || !quantities.some((l) => l !== limitLabel && names(l)));
 }
 
 /** `goal_chance` beside a run's result when the run withheld the goal's chance (PLoT #416); nothing otherwise. */
@@ -12123,7 +12159,8 @@ export function createAgentCapabilities(
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
       if (interpretation === null && (!figureTheUserWrote(value, unit, ctx.user_text)
-        || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label)))) {
+        || (!figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label))
+          && !limitFigureNamedHere(g, rows, node.id, node.label, value, unit, ctx.user_text)))) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
