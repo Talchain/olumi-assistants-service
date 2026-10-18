@@ -478,9 +478,7 @@ export { linkEffectRefusalWords, linkEffectConsent, linkEffectNoSuchLinkWords };
 export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
   const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
   const { target, others } = scopeIn(g, limitLabel);
-  // A limit is named by its label or by what a user calls a limit (verifier P05, 18 Oct: "the remote-village CONSTRAINT should
-  // be at least 85%" lost its figure to the nearest other label word, "village"): limit, constraint, floor, ceiling.
-  return { target: [...target, 'limit', 'constraint', 'floor', 'ceiling'], others: others.filter((l) => !risks.has(l)) };
+  return { target: [...target, 'limit'], others: others.filter((l) => !risks.has(l)) };
 }
 
 /** `goal_chance` beside a run's result when the run withheld the goal's chance (PLoT #416); nothing otherwise. */
