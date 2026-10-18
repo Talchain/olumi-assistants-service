@@ -118,8 +118,8 @@ function produced(envelope = producerEnvelope(), graph = READ.graph): Rec {
 // paths — ‘price_rise’ 0 and ‘new_starter_subscribers’ 0, stamped `cee_inference` with NO extraction type. F1 defers that stamp
 // to the extraction type and read them `unknown`, so e58b8dbd counted nothing for them and said nothing ("zero estimates");
 // `cee_inference` is a recognised AI source (AIE R5 item 1; the UI's `classifyValueProvenance` reads it 'ai'): Olumi's.
-const STARTER_RANGE = '‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
-  + 'using Olumi\'s estimates for 3 starting values, 2 option settings and 2 relationships (see Check estimates).';
+const STARTER_RANGE = '‘Launch starter tier’: the model’s two groups for how strongly ‘Support burden from starter tier’ affects ‘monthly recurring revenue’ give about 95% and 99%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. '
+  + 'Using Olumi\'s estimates for 3 starting values, 2 option settings and 2 relationships (see Check estimates).';
 // DL 12 Oct (LABEL-ONLY, last check BLOCKING 1): this capture's goal level and 'Starter support cost per subscriber' are
 // type-less `brief_extraction` — the person's by their stamp alone — so the result also carries the unverified note, once.
 const AMENDMENT_7 = { olumi_estimate_value_count: 3, olumi_estimate_settings_by_option: { [STARTER]: 2 }, provisional: true,
@@ -267,7 +267,7 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     // Batch C: condition 6 / r1 item 6 (DL, 12 Oct). Starter's range rests on the same Olumi inputs as its point, so it says
     // so in the point's own words. Exactly that clause (and its count field) is added; every other byte stays staging's.
     const lines = structuredClone(STAGING_CONTROL.screen_lines) as Rec[];
-    lines[0] = { ...lines[0], chance: STARTER_RANGE, olumi_estimate_link_count: 2 };
+    lines[0] = { ...lines[0], chance: STARTER_RANGE, depends: 'This link is not sized in the model yet.', olumi_estimate_link_count: 2 };
     expect(JSON.stringify(output.screen_lines)).toBe(JSON.stringify(lines));
     expect(licenceRecord(output.enrichment)!.withheld_reason_by_option).toEqual({ [KEEP]: keepReason });
     const view = structuredClone(STAGING_CONTROL.canonical_view) as Rec;
@@ -290,8 +290,8 @@ describe('B2 d2: zero spread when no option has a licensed point', () => {
     // …and ANOTHER option's setting made Olumi's: never said on Starter's range.
     graph.nodes.find((node: Rec) => node.id === 'raise_prices_10').interventions.price_rise.source = 'cee_hypothesis';
     const range = produced(producerEnvelope(true), graph).screen_lines.find((line: Rec) => line.option_id === STARTER);
-    expect(range.chance).toBe('‘Launch starter tier’: between about 95% and 99% chance of meeting your goal, in this model, '
-      + 'using Olumi\'s estimates for 3 starting values and 2 relationships (see Check estimates).');
+    expect(range.chance).toBe('‘Launch starter tier’: the model’s two groups for how strongly ‘Support burden from starter tier’ affects ‘monthly recurring revenue’ give about 95% and 99%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. '
+      + 'Using Olumi\'s estimates for 3 starting values and 2 relationships (see Check estimates).');
   });
 
   it('no zero-spread option and none licensed: keeps the null/no-new-record control unchanged', () => {
