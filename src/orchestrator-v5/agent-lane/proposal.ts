@@ -369,11 +369,19 @@ export class ProposalStore {
    * and the map is bounded by the same cap as the proposals themselves (oldest proposal's memo evicted first).
    */
   private readonly executions = new Map<string, Map<string, Promise<boolean>>>();
+  /**
+   * ⭐ ONE OPERATION (DL-3 PR-2, A5): the approval of a card already running, on ANY turn (its press, the user's typed
+   * approval, a retry), keyed by the approved content alone. A second approval waits for it, so it reads the first one's
+   * outcome (applied: `already_applied`) instead of racing it to "superseded" and a false "not saved".
+   */
+  private readonly inFlight = new Map<string, Promise<boolean>>();
 
   async executeApproved<T>(
     p: StructuredProposal, turnId: string, execute: () => Promise<T>,
     classify: (result: T) => 'applied' | 'unknown' | 'none', reconcile: () => Promise<T>,
   ): Promise<T> {
+    const running = this.inFlight.get(approvedContentKey(p));
+    if (running !== undefined) await running;
     const key = approvedOperationKey(p, turnId);
     const memo = this.executions.get(p.proposal_id) ?? new Map<string, Promise<boolean>>();
     const prior = memo.get(key);
@@ -382,7 +390,11 @@ export class ProposalStore {
       return execute(); // the existing applied-receipt arm answers without a write
     }
     let close!: (known: boolean) => void;
-    memo.set(key, new Promise<boolean>(resolve => { close = resolve; }));
+    const flight = new Promise<boolean>(resolve => { close = resolve; });
+    memo.set(key, flight);
+    const content = approvedContentKey(p);
+    this.inFlight.set(content, flight);
+    void flight.then(() => { if (this.inFlight.get(content) === flight) this.inFlight.delete(content); });
     // Bounded per proposal as well as in total: the oldest turn's memo goes first.
     if (memo.size > MAX_EXECUTIONS_PER_PROPOSAL) memo.delete(memo.keys().next().value as string);
     if (!this.executions.has(p.proposal_id)) {
@@ -514,6 +526,13 @@ export class ProposalStore {
   size(): number {
     return this.items.size;
   }
+}
+
+/** The approved content alone (no turn): one card's approval, whichever turn and path carries it (`inFlight`). */
+export function approvedContentKey(p: StructuredProposal): string {
+  return createHash('sha256').update(JSON.stringify(sortedKeysDeep([
+    p.scenario_id, p.proposal_id, p.operations, p.base_graph_identity_hash,
+  ]))).digest('hex');
 }
 
 /** The host turn and approved content bind dedupe; provider tool-call ids cannot affect it. */

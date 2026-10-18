@@ -79,7 +79,9 @@ export function world(live: { store: unknown }) {
   /** An edit outside the conversation (as a canvas edit lands): the stored model changes, no row is written. */
   const edit = (change: (g: Rec) => void): void => { const g = read(); change(g); bytes = JSON.stringify(g); };
   const latestPendings = (): Rec[] => structuredClone((latest() as Rec | undefined)?.pending_actions ?? []);
-  return { sid, read, graphWire, versions, onLatestRow, edit, latestPendings };
+  /** The graph writes committed so far (each answer row that carried a model). */
+  const graphWrites = (): number => writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
+  return { sid, read, graphWire, versions, onLatestRow, edit, latestPendings, graphWrites };
 }
 
 /** The open apps, closed by the spec's `afterEach` (`closeApps`). */

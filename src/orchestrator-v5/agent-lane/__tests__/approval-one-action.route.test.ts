@@ -206,6 +206,31 @@ describe('an approval is ONE action: typed words with one card waiting are its p
   }, 120_000);
 });
 
+// ⭐ A5, ONE OPERATION (DL-3 PR-2): the same card approved twice at once — its press and the user's typed approval, sent
+// together — is written ONCE; the second sees it applied and writes nothing.
+describe('one operation: a press and a typed approval of the same card, at once, write once', () => {
+  it('⭐ A5: concurrent press + typed approval → exactly one write of the card; the model holds it once', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions'); const chip = chipFor(first, b);
+    const writesBefore = w.graphWrites();
+    const [pressed, typed] = await Promise.all([
+      turn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: first._agent.session_id }),
+      turn({ message: 'Yes, go ahead with the 15% mixer change.', source: 'composer', agent_session_id: first._agent.session_id },
+        [call('authorise_change', { proposal_id: b }), say('Done.')]),
+    ]);
+    const wrote = [...authorised(pressed), ...authorised(typed)].filter((c) => c.mutated === true);
+    expect(wrote, JSON.stringify([authorised(pressed), authorised(typed)])).toHaveLength(1);
+    expect(mixerSaved(w.read())).toBe(true);
+    expect(w.graphWrites() - writesBefore, 'one graph write').toBe(1);
+    // The other approval reads the first one's outcome: already saved. Never "Not saved" or "review this change" for a
+    // change that WAS saved (before A5: "superseded", then the saved card was put under review).
+    const other = [pressed, typed].find((r) => !authorised(r).some((c) => c.mutated === true))!;
+    expect(authorised(other), JSON.stringify(authorised(other))).toEqual([expect.objectContaining({ ok: true, mutated: false })]);
+    expect(String(other.assistant_text)).not.toMatch(/Not saved|review this change/i);
+  }, 120_000);
+});
+
 // ⭐ THE DISPLAYED-OPERATION CONTRACT (Codex BLOCK on #3420@42e08cdc, 18 Oct: its three CEE probes, adopted as rows). Typed
 // assent binds only to a card the client SHOWS, at the revision it shows, and it always keeps the user's exact words.
 describe('typed assent binds only to what the user was shown, and always keeps their words', () => {
