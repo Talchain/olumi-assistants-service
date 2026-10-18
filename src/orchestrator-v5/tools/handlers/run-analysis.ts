@@ -223,7 +223,6 @@ import { optionPathsOf, perOptionTargetReasons, scopedFailuresFor, scopedTargetS
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
-import { withTodayPartAtGoalLevel } from '../../agent-lane/goal-definition-sum.js';
 import { withAccumulationRateSpread } from '../../agent-lane/accumulation-rate-spread.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
@@ -715,14 +714,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // #3167 fix-forward: exactly the risks this projection removes are recorded with THIS Run (below), never re-derived later.
     const { unsizedProjection, submittedOptions,
       rawObjectsPerOption, scaffoldedFactorIdsByOptionId, requestProjection } = optionSubmission;
-    // ⭐ STEP 8: the goal's level today, on its compiled sum's today part, is the goal's own on every Run, whatever a writer
-    // left on the part (`withTodayPartAtGoalLevel`), BEFORE every wire reader, so PLoT and the claim readers see the same.
-    // Run-local copy only; the stored graph and its hash are untouched.
-    let graphForAnalysis = withTodayPartAtGoalLevel(optionSubmission.graphForAnalysis, snapshot.goal_node_id);
-    if (graphForAnalysis !== optionSubmission.graphForAnalysis) {
-      log.info({ event: 'run_analysis.goal_today_part_at_goal_level', request_id: invocation.requestId, scenario_id: args.scenario_id },
-        'run_analysis sent the sum\'s today part at the goal\'s own level today (run-local copy only; ids only)');
-    }
+    let graphForAnalysis = optionSubmission.graphForAnalysis;
     const conversionSummary = summariseConversions(requestProjection.conversions);
     if (summaryIsNoteworthy(conversionSummary) || requestProjection.demoted) {
       log.info(

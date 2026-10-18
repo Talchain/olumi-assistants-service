@@ -112,7 +112,12 @@ async function harness(initial: Rec, said = 'We now make 50 widgets per hour.', 
   const caps = createAgentCapabilities(dispatch, new ProposalStore());
   const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-step8-edit', user_text: userWordsOf([BRIEF], said) };
   const call = (name: string, args: Record<string, unknown>): Promise<ToolResult> => dispatchTool(name, JSON.stringify(args), ctx, caps);
-  return { appends, call, stored: () => row.graph as Rec };
+  const register = (graph: Rec) => {
+    const g = clone(row.graph) as Rec;
+    return dispatch(`/assist/v1/scenarios/${SCENARIO}/graph/register`, { graph,
+      expected_graph_hash: computeAnalysisAffectingGraphHash(g as never), expected_graph_identity_hash: computeGraphIdentityHash(g as never) });
+  };
+  return { appends, call, register, stored: () => row.graph as Rec };
 }
 
 beforeEach(() => { resolveUserIdentity.mockResolvedValue({ mode: 'verified', userId: OWNER }); });
@@ -163,6 +168,18 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const applied = await h.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
     expect(applied).toMatchObject({ applied: false, refusal: 'not_verified' });
+  });
+
+  it('RED (Codex review of 04c63519): any writer that leaves the today part at 41 through the persistence route stores the goal\'s 40', async () => {
+    const initial = await constructed(true);
+    const h = await harness(initial);
+    const moved = clone(initial);
+    const os = nodeOf(moved, TODAY)!.observed_state;
+    nodeOf(moved, TODAY)!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    const reg = await h.register(moved);
+    expect(reg.status, JSON.stringify(reg.json).slice(0, 300)).toBe(200);
+    expect(nodeOf(h.stored(), TODAY)!.observed_state).toStrictEqual(nodeOf(h.stored(), GOAL)!.observed_state);
+    expect(nodeOf(h.stored(), TODAY)!.observed_state.raw_value).toBe(40);
   });
 
   it('CONTRAST: an ordinary sum part (not the part construction minted for the goal\'s level today) is never moved', async () => {

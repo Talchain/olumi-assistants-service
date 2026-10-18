@@ -102,8 +102,8 @@ export function goalDefinitionSum<N extends NodeIn>(
  * The compiled sum's today part on a stored goal: the one part of the goal's Olumi-read `sum` (`stated_in_brief: false`)
  * whose id construction minted from the goal's own (`<goal id>_today`, `_2`…, never renamed by an edit). It is bound by that
  * identity, never by its figure (Codex review of 04c63519: a part edited away from the goal's level must stay bound), so the
- * one goal-level writer always writes it with the goal (`goal-current-level.ts`) and the Run always sends it at the goal's own
- * level today (`withTodayPartAtGoalLevel`). `undefined` when there is none.
+ * goal-level writer writes it with the goal (`goal-current-level.ts`) and every write through the one persistence route carries
+ * it at the goal's own level today (`withEveryTodayPartAtGoalLevel`). `undefined` when there is none.
  */
 export function goalSumTodayPart<N extends NodeIn>(nodes: readonly N[], goalId: string): N | undefined {
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -116,8 +116,8 @@ export function goalSumTodayPart<N extends NodeIn>(nodes: readonly N[], goalId: 
 
 /**
  * The goal's level today, on the compiled today part, exactly: the part IS that level, so whatever a writer left on it, the
- * Run's wire copy (and the goal-level write) carries the goal's own `observed_state` there. The goal stays the one authority
- * for its level today. The same graph when there is no part or nothing differs. Pure.
+ * goal's own `observed_state` is carried there. The goal stays the one authority for its level today. The same graph when
+ * there is no part or nothing differs. Pure.
  */
 export function withTodayPartAtGoalLevel<G>(graph: G, goalId: string): G {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : undefined;
@@ -125,4 +125,10 @@ export function withTodayPartAtGoalLevel<G>(graph: G, goalId: string): G {
   const level = nodes?.find((n) => n.id === goalId)?.observed_state;
   if (part === undefined || !isRec(level) || stableStringify(part.observed_state) === stableStringify(level)) return graph;
   return { ...graph, nodes: nodes!.map((n) => (n.id === part.id ? { ...n, observed_state: { ...level } } : n)) } as G;
+}
+
+/** Every goal's compiled today part at that goal's level today: what the one persistence route writes, for every writer. */
+export function withEveryTodayPartAtGoalLevel<G>(graph: G): G {
+  const goals = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]).filter((n) => n.kind === 'goal') : [];
+  return goals.reduce((g, goal) => withTodayPartAtGoalLevel(g, goal.id), graph);
 }

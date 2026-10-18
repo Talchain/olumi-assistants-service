@@ -51,6 +51,7 @@ import {
   emitHoldLapseTelemetry,
   threadHoldsThroughMutatingCommit,
 } from "../orchestrator-v5/handlers/hold-thread-through.js";
+import { withEveryTodayPartAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
@@ -770,6 +771,9 @@ export default async function route(app: FastifyInstance) {
         ), baseGraphForInvariants), baseGraphForInvariants);
         // The canvas omits edge provenance; verify the postimage after restoring unchanged held facts.
         assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
+        // ⭐ STEP 8: a goal's compiled today part IS that goal's level today, on every write by every writer (the goal is the one
+        // authority; `set_factor_value` refuses to set the part on its own and says where to change it).
+        graphToRegister = withEveryTodayPartAtGoalLevel(graphToRegister);
       } catch (err) {
         if (err instanceof PreconditionStampApprovalRequiredError) {
           return invalid('PRECONDITION_STAMP_SERVER_OWNED',

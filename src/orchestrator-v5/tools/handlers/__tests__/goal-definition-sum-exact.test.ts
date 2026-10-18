@@ -19,6 +19,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { whoSized } from '../../../agent-lane/strength-authorship-words.js';
+import { labelHoldsQuantity } from '../../../goal-target/held-user-links.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = '5e8e8e8e-0000-4000-8000-0000000000a8';
@@ -143,18 +144,6 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     expectExactSum(await request(await build(candidate(REVENUE), REVENUE.say(REVENUE.a, REVENUE.b))), REVENUE, REVENUE.a, REVENUE.b);
   });
 
-  it('RED (Codex review of 04c63519): a today part another writer left at 41 is sent at the goal\'s own level today (40), never 41', async () => {
-    const stored = await build(candidate(WIDGETS), WIDGETS.say(30, 10));
-    const clean = await request(stored);
-    const moved = structuredClone(stored);
-    const os = node(moved, 'widgets_per_hour_today')!.observed_state;
-    node(moved, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
-    const p = await request(moved);
-    expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
-    expect(node(p.graph, 'widgets_per_hour_today')!.observed_state).toStrictEqual(node(clean.graph, 'widgets_per_hour_today')!.observed_state);
-    expectExactSum(p, WIDGETS, 30, 10);
-  });
-
   it('RED: the definition keeps every authorship tag and reads as a definition; the sum is Olumi\'s reading', async () => {
     const g = await build(candidate(WIDGETS), WIDGETS.say(30, 10));
     const e = edge(g, netId(WIDGETS), 'widgets_per_hour');
@@ -222,5 +211,35 @@ describe('STEP 8 Route A — what d5 does not hold as a definition stays exactly
     expect((p.graph.edges as Rec[]).some((e) => e.from === 'machine_availability' && e.to === netId(WIDGETS)), 'precondition: the parent is admitted').toBe(true);
     expect(goalOf(p.graph).nonlinear_identity).toBeUndefined();
     expect((p.graph.nodes as Rec[]).some((n) => String(n.label).endsWith(' today'))).toBe(false);
+  });
+});
+
+/**
+ * ⛔ THE SHAPE THE DRAFTER ACTUALLY WRITES (DL-3 relay of the verifier's local-stack run on #3421 @04c63519, synthetic): one
+ * "<Option> net effect" factor per option in the goal's unit, 0 today, set only by that option, linked to the goal +1 per 1,
+ * flagged definitional, `effect_provenance: explicit`, with the drafter's basis "the brief defines this as <Option>'s complete
+ * net effect on <goal> relative to today's level". MEASURED: nothing is compiled. d5 (`labelHoldsQuantity`) cannot bind
+ * "Option A net effect" to "Widgets per hour", and no existing authority binds the stated figure's SUBJECT, reference or
+ * timing from the user's sentence (`construction-source-map.ts`: "which subject and role the figure has stays the AI's
+ * reading"). It stays exactly as today (Olumi's estimate at 0.8). Pinned so the limitation is visible, not hidden.
+ */
+describe('STEP 8 Route A — LIMITATION (measured): the drafted per-option "net effect" shape is not compiled', () => {
+  it('"Option A net effect" / "Option B net effect" → "Widgets per hour", flagged definitional with a basis, keeps today\'s numbers', async () => {
+    const wire = candidate({ ...WIDGETS, a: 20, b: 19 });
+    const basis = (o: string) => `the brief defines this as ${o}'s complete net effect on Widgets per hour relative to today's level`;
+    wire.factors = ['Option A', 'Option B'].map((o) => ({ label: `${o} net effect`, role: 'controllable', baseline_known: true, baseline_value: 0,
+      unit: 'widgets/hour', provenance: 'explicit', plausible_max: 50 }));
+    (wire.options as Rec[])[0].interventions[0].factor_label = 'Option A net effect';
+    (wire.options as Rec[])[1].interventions[0].factor_label = 'Option B net effect';
+    wire.links = ['Option A', 'Option B'].map((o) => ({ from: `${o} net effect`, to: 'Widgets per hour', direction: 'positive', provenance: 'explicit',
+      effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'explicit', definitional: true, basis: basis(o), source_quote: null }));
+    const p = await request(await build(wire, WIDGETS.say(20, 19)));
+    expect(goalOf(p.graph).nonlinear_identity).toBeUndefined();
+    expect((p.graph.nodes as Rec[]).some((n) => String(n.label).endsWith(' today'))).toBe(false);
+    for (const from of ['option_a_net_effect', 'option_b_net_effect']) {
+      const e = edge(p.graph, from, 'widgets_per_hour');
+      expect(e).toMatchObject({ exists_probability: 0.8, defaulted: true, provenance: { magnitude: 'olumi_estimate', definitional: true } });
+    }
+    expect(labelHoldsQuantity('Option A net effect', 'Widgets per hour')).toBe(false);
   });
 });

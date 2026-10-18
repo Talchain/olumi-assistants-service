@@ -85,7 +85,7 @@ import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
-import { goalSumTodayPart, withTodayPartAtGoalLevel } from './goal-definition-sum.js';
+import { goalSumTodayPart } from './goal-definition-sum.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -1436,8 +1436,8 @@ export async function applyGoalCurrentLevel(
   const frameAfter = frameOf(retiredOrSame.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
   const rederived = !retired && frameBefore !== undefined && frameAfter !== frameBefore
     ? rederiveGoalInLinksWithSetAside(retiredOrSame, op.path, frameBefore) : { graph: retiredOrSame, setAside: [] };
-  // STEP 8: the sum's today part carries the goal's level today exactly as this write leaves it (frame moves included).
-  const graph = todayPart === undefined ? rederived.graph : withTodayPartAtGoalLevel(rederived.graph, op.path);
+  // STEP 8: the sum's today part is set to the goal's level as written by the one persistence route, and read back below.
+  const graph = rederived.graph;
   const setAside = [...retirement.setAside, ...rederived.setAside];
   const writtenGoal = (graph.nodes as readonly Record<string, unknown>[]).find((n) => n.id === op.path);
   const writtenOs = (writtenGoal?.observed_state ?? os) as { baseline?: unknown };
