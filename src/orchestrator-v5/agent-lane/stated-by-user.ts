@@ -390,15 +390,15 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // the nearest label word gives another quantity is not the goal's; one in a clause naming none ("cut it by 15%") is.
   const isChange = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs';
   // ⭐⭐ LEAN CORE (DL-3 18 Oct; A-plan Batch 1, W28): for a draft with statements the target is the user's iff THE ONE RULE already
-  // verified a {goal, target} statement of theirs that writes this figure (`goalTargetStatements`, the door's own verdict). The
-  // drafter's `explicit` flag and a host re-scan of the sentence no longer override that verdict (its own ruling: "the AI's own labels
-  // decide"). Only a draft recorded before SYSTEM 2 (no statements) keeps its recorded path, byte for byte.
-  const wrote = (value: number): boolean => [brief].some((text) => isChange
+  // verified a {goal, target} statement of theirs that writes this figure (`goalTargetStatements`, the door's own verdict), and the
+  // figure reads, in THAT span only, in the goal's unit and scope (rule points 4–5: "£250,000" is never 250,000 users). The drafter's
+  // `explicit` flag no longer overrides that verdict ("the AI's own labels decide"). Only a draft recorded before SYSTEM 2 (no
+  // statements) keeps its recorded path, byte for byte.
+  const wrote = (value: number): boolean => (targetStatements?.map((s) => s.quote) ?? [brief]).some((text) => isChange
     ? figureTheUserWroteFor(value, written.unit, text, quantityScope(nodes, (node as { readonly label?: unknown }).label))
     : figureTheUserWrote(value, written.unit, text));
-  const target = typeof raw === 'number' && Number.isFinite(raw) && typeof written.figure === 'number' && (targetStatements !== undefined
-    ? targetStatements.length > 0
-    : goal.provenance === 'explicit' && wrote(Math.round(written.figure * 1e9) / 1e9));
+  const target = typeof raw === 'number' && Number.isFinite(raw) && typeof written.figure === 'number'
+    && (targetStatements !== undefined || goal.provenance === 'explicit') && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const typed = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   // ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1)): a held CEILING on a LEVEL target is the run's sense in any

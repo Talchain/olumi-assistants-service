@@ -321,8 +321,9 @@ describe('S2 holds now: the user’s statement that a risk already holds', () =>
   });
   it('never on unverified, partial or other words; a risk that cannot hold it says why; the writer refuses a holds-now block without its statement', async () => {
     const w = world(), before = JSON.stringify(w.graph());
-    // "code quality is already slipping" drops "Honestly, our": not their whole statement (T2A5's one check).
-    expect(await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow('code quality is already slipping.'))).toMatchObject({ ok: false, refusal: 'statement_not_found' });
+    // "code quality is slipping" drops "already": not their literal words. (A literal span, "code quality is already slipping.", is
+    // theirs under the confirmed lean-core widening, with the complete line kept as its source.)
+    expect(await w.caps.proposeStatement!(ctx(SAID) as never, holdsNow('code quality is slipping.'))).toMatchObject({ ok: false, refusal: 'statement_not_found' });
     expect(await w.caps.proposeStatement!(ctx('Please record it.', { user_text: 'Please record it.', unverified_user_text: SAID }) as never, holdsNow(SAID)))
       .toMatchObject({ ok: false, refusal: 'origin_unknown' });
     // AIE 6178729504 + SCIENCE 22:40Z: the blocker is the figure's write, said once; never that it is not true now.

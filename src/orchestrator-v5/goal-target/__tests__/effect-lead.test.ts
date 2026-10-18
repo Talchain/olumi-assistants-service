@@ -47,7 +47,8 @@ describe('the lead from the user’s own words: start + onboarding, on the S2 co
     const within = 'She could start within 2 months.';
     expect(effectLeadFromStatements(now(within), OPTION, [within])).toMatchObject({ kind: 'refused', refusal: 'lead_is_a_bound' });
     expect(effectLeadFromStatements({ now: 'Yes.', unverified: SAID }, OPTION, [SAID])).toMatchObject({ kind: 'refused', refusal: 'origin_unknown' });
-    expect(effectLeadFromStatements(now(SAID), OPTION, ['start in 2 months, and onboarding takes about a month.']))
+    // Not her literal words ("in two months"). A literal span of the sentence is the user's under the confirmed lean-core widening.
+    expect(effectLeadFromStatements(now(SAID), OPTION, ['start in two months, and onboarding takes about a month.']))
       .toMatchObject({ kind: 'refused', refusal: 'lead_not_stated' });
     const two = 'We launch in 6 months, and she starts in 2 months.';
     expect(effectLeadFromStatements(now(two), OPTION, [two])).toMatchObject({ kind: 'refused', refusal: 'lead_unclear' });

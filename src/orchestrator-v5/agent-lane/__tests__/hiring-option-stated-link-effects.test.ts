@@ -98,10 +98,15 @@ describe('CONTRAST: a wrong number or a wrong link stays refused', () => {
     const r = await world().caps.proposeLinkEffect!(world().ctx(), link('Code quality degradation', 8, 'unit')) as Json;
     expect(r.ok).toBe(false);
   });
-  it('⛔ a quote that is not a whole statement of the user\'s words prepares nothing', async () => {
-    const part = 'hiring a Tech lead would raise productivity by about 8% of today’s';
-    const r = await world().caps.proposeLinkEffect!(world().ctx(), link('Tech lead headcount', 8, 'Tech lead', part)) as Json;
+  it('⛔ a quote that is not the user\'s literal words prepares nothing; a literal span of their sentence is theirs (lean core widening)', async () => {
+    // "about" dropped: not their words.
+    const reworded = 'hiring a Tech lead would raise productivity by 8% of today’s';
+    const r = await world().caps.proposeLinkEffect!(world().ctx(), link('Tech lead headcount', 8, 'Tech lead', reworded)) as Json;
     expect(r.ok).toBe(false);
+    // CONTRAST (DL-3/PL-0048 (3), confirmed widening): a literal span inside their sentence is theirs; the complete line stays its source.
+    const part = 'hiring a Tech lead would raise productivity by about 8% of today’s';
+    const p = await world().caps.proposeLinkEffect!(world().ctx(), link('Tech lead headcount', 8, 'Tech lead', part)) as Json;
+    expect(p.ok, JSON.stringify(p)).toBe(true);
   });
   it('⛔ the user asking, or denying, prepares nothing', async () => {
     for (const said of ['Would hiring a Tech lead raise productivity by about 8% of today’s?', 'Hiring a Tech lead would not raise productivity by 8% of today’s.']) {

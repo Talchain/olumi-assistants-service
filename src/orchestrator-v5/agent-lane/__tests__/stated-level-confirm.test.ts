@@ -82,8 +82,9 @@ describe('S2 confirm: a figure the user wrote is confirmed from their own statem
   it('never on other words: a partial quote, another figure, unverified text or Olumi’s own estimate prepares nothing', async () => {
     const p = product();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
-    // "from £49 to £59" drops the rest of his sentence: not his whole statement (T2A5's one check).
-    expect(await caps.proposeAssumptions(ctx('Hi') as never, confirm('from £49 to £59 per month') as never)).toMatchObject({ ok: false, refusal: 'level_not_stated' });
+    // "from £49 to £59 a month" is not his literal words ("per month"). (A literal span of his sentence is his under the confirmed
+    // lean-core widening, with the complete line kept as its source.)
+    expect(await caps.proposeAssumptions(ctx('Hi') as never, confirm('from £49 to £59 a month') as never)).toMatchObject({ ok: false, refusal: 'level_not_stated' });
     // His sentence states £59 too, but the model holds £49: this act confirms only the held figure.
     expect(await caps.proposeAssumptions(ctx('Hi') as never, confirm(SENTENCE, 59) as never)).toMatchObject({ ok: false, refusal: 'not_the_held_figure' });
     // Only retained, unverified words: origin unknown.

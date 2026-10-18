@@ -49,10 +49,19 @@ describe('the one rule: whose value it is', () => {
     const t = texts('Each courier costs between £400 and £650 a week, depending on the route.');
     expect(userStated({ quote: 'between £400 and £650 a week', low: 400, high: 650, unit: '£' }, t, SUBJECT))
       .toMatchObject({ origin: 'human', unitIsUsers: true, statement: { form: 'range', low: 400, high: 650, unit: '£' } });
-    // The AI's unit the span does not write stays Olumi's reading: the figures are still the user's, with no unit of theirs.
-    const kg = userStated({ quote: 'between 4 and 6 lb a day', low: 4, high: 6, unit: 'kg a day' }, texts('Waste is between 4 and 6 lb a day.'), SUBJECT);
-    expect(kg).toMatchObject({ origin: 'human', unitIsUsers: false, statement: { low: 4, high: 6 } });
-    expect(kg.origin === 'human' && kg.statement.unit).toBeUndefined();
+    // ⛔ A figure the span writes in ANOTHER unit is never the user's figure in the AI's unit (#3356 R1 B1: −4 kg from "4 and 6 lb").
+    expect(userStated({ quote: 'between 4 and 6 lb a day', low: 4, high: 6, unit: 'kg a day' }, texts('Waste is between 4 and 6 lb a day.'), SUBJECT))
+      .toMatchObject({ origin: 'unknown', refusal: 'figure_not_in_quote' });
+    expect(userStated({ quote: 'between $400 and $650 a week', low: 400, high: 650, unit: '£' }, texts('Each courier costs between $400 and $650 a week.'), SUBJECT).origin).toBe('unknown');
+    expect(userStated({ quote: 'Churn is 30% a month', value: 30, unit: 'people' }, texts('Churn is 30% a month.'), SUBJECT).origin).toBe('unknown');
+    expect(userStated({ quote: 'funding of even £250,000', value: 250000, unit: 'customers' }, texts('If I could secure funding of even £250,000, I would hire.'), SUBJECT).origin).toBe('unknown');
+    // CONTRAST: the same figures in the AI's unit are theirs, unit included…
+    expect(userStated({ quote: 'between 4 and 6 kg a day', low: 4, high: 6, unit: 'kg a day' }, texts('Waste is between 4 and 6 kg a day.'), SUBJECT))
+      .toMatchObject({ origin: 'human', unitIsUsers: true, statement: { low: 4, high: 6, unit: 'kg a day' } });
+    // …and with NO unit written, the figures are theirs and the AI's unit stays Olumi's reading.
+    const bare = userStated({ quote: 'between 4 and 6 a day', low: 4, high: 6, unit: 'kg a day' }, texts('Waste is between 4 and 6 a day.'), SUBJECT);
+    expect(bare).toMatchObject({ origin: 'human', unitIsUsers: false, statement: { low: 4, high: 6 } });
+    expect(bare.origin === 'human' && bare.statement.unit).toBeUndefined();
     // A money unit's own scale letter reads the written amount: "£54k" is 54 in £k.
     expect(userStated({ quote: 'a budget of £54k', value: 54, unit: '£k' }, texts('We have a budget of £54k this year.'), SUBJECT))
       .toMatchObject({ origin: 'human', unitIsUsers: true, statement: { low: 54, high: 54, unit: '£k' } });
@@ -78,6 +87,14 @@ describe('the one rule: whose value it is', () => {
     expect(userStated({ quote: later, value: 4 }, texts(guess, fix, later), SUBJECT, { current: corrected }).origin).toBe('human');
     // CONTRAST: a span the correction explicitly KEPT stays theirs.
     expect(userStated({ quote: guess, value: 5 }, texts(guess, fix, 'Thanks.'), SUBJECT, { current: { correction: fix, kept: [guess] } }).origin).toBe('human');
+  });
+
+  it('a span cut from inside a line never drops the bound the user wrote on its figure; the bound kept is theirs', () => {
+    const t = texts('Hiring takes at least 7 months here.');
+    expect(userStated({ quote: '7 months', value: 7, form: 'point', unit: 'months' }, t, SUBJECT)).toMatchObject({ origin: 'unknown', refusal: 'statement_not_found' });
+    // CONTRAST: the span with its bound, read as the bound, is theirs; the complete line stays the source.
+    expect(userStated({ quote: 'at least 7 months', value: 7, form: 'lower_bound', unit: 'months' }, t, SUBJECT))
+      .toMatchObject({ origin: 'human', statement: { form: 'lower_bound', low: 7, source: 'Hiring takes at least 7 months here.' } });
   });
 
   it('sign reads from the span: a net loss states its negative; a gross count never does', () => {
