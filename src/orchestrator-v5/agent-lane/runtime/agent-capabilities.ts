@@ -12169,6 +12169,8 @@ export function createAgentCapabilities(
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_limit', path: node.id, value: { ...(interpretation ?? {}),
           operator, raw_value: value, unit, constraint_id: String(row['constraint_id'] ?? ''), before,
+          // The whole row as this card shows it: its field-scoped rule holds only while the row still reads exactly so.
+          row_as_made: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
           ...(stated !== undefined ? { stated_operator: stated } : {}),
           ...(isTarget ? { role: 'goal_target' } : {}),
         } }],

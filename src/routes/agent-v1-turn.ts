@@ -2462,8 +2462,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && heldRecordAppliesAt(p, r, read.graph, read.graphHash) ? [r] : []; })
         .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso))
-        // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record.
-        .map(r => priorRecords.find(old => old.proposal_id === r.proposal_id) ?? r);
+        // A target-keyed handle may now hold a newer value. Replay binds the old displayed card to its own record, with its
+        // LIVE review disposition from the current carrier (Codex BLOCK on #3424 @db2376d0: the old record dropped it).
+        .map(r => { const old = priorRecords.find(o => o.proposal_id === r.proposal_id);
+          return old === undefined ? r : r.review_action !== undefined ? { ...old, review_action: r.review_action } : old; });
       const replayIssuers = await proposalIssuers(replayRecords, [...currentPending, ...(prior.pending_actions ?? [])]);
       const replayFields = proposalFieldsWire(replayRecords, read.graphHash, replayIssuers,
         heldRecordsApplyAt([...currentPending, ...(prior.pending_actions ?? [])], read.graph, read.graphHash));
@@ -2743,6 +2745,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
       if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
+      // ⭐ PR-2 (Codex BLOCK on #3424 @db2376d0): a card kept for review is offered for review on a replay too, never to approve.
+      const replayReview = new Map(replayRecords.flatMap(r => r.review_action !== undefined ? [[r.proposal_id, r.review_action as OfferedAction] as const] : []));
       if (replayLoopRunCurrent) {
         // Preserve the sent controls and their order. Revalidate human approval independently,
         // but never manufacture Explain, sizing, or proposal controls on a verified warm resend.
@@ -2752,6 +2756,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           (typedApprovalOf({ chip: { id: action.id } }) === undefined
             && action.id !== AMEND_CHIP.id && declinedProposalOf(action.id) === undefined)
           || validDecisionIds.has(action.id))));
+      }
+      if (replayReview.size > 0) {
+        const asReview = replayActions.map(a => { const id = typedApprovalOf({ chip: { id: a.id } }); return (id === undefined ? undefined : replayReview.get(id)) ?? a; });
+        const approvable = asReview.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
+        replayActions.splice(0, replayActions.length, ...firstOfEachId(asReview.filter(a => approvable || a.id !== AMEND_CHIP.id)));
       }
       // The ordinary replay shape still requires parity with the stored answer. A withheld Run's current typed finding
       // owns the new face-first contract even when a newer Run replaced that answer; its rebuilt sentences stay intact.

@@ -320,3 +320,25 @@ describe('typed assent binds only to what the user was shown, and always keeps t
     expect(authorised(reply).some((c) => c.mutated)).toBe(false); expect(hash(w.read())).toBe(before);
   }, 120_000);
 });
+
+// ⭐ Codex BLOCK on #3424 @db2376d0 (independent probe, adopted): replaying the turn that offered a card, after a later turn
+// kept it for review, keeps the review control and the review state, whether or not the model is back on the card's base.
+describe('a card kept for review stays under review on a replay', () => {
+  it.each([false, true])('replaying the original offer after review (model back on its base: %s) → review controls only, no write', async (back) => {
+    const w = world(); const turn = await route(w); const original = w.read(); const offerId = randomUUID();
+    const payload = { message: MIXER_WORDS, source: 'composer', turn_id: offerId };
+    const first = await turn(payload, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions');
+    w.edit((g) => { g.edges.push({ from: 'buy_faster_mixer', to: 'prep_time_cut', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }); });
+    const marked = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: first._agent.session_id }, [say('Here is where things stand.')]);
+    expect(chips(marked), 'control: the card really is under review').toContain(`agent-review-proposal:${b}`);
+    expect(chips(marked)).not.toContain(approvalChipIdFor(b));
+    if (back) w.edit((g) => { for (const key of Object.keys(g)) delete g[key]; Object.assign(g, structuredClone(original)); });
+    const writes = w.graphWrites();
+    const replay = await turn(payload);
+    expect(replay._agent.replayed, 'control: this is the durable replay path').toBe(true);
+    expect(w.graphWrites()).toBe(writes);
+    expect((replay._proposal_fields?.proposals ?? []).find((r: Rec) => r.proposal_id === b)?.review_action?.id, 'review state survives replay').toBe(`agent-review-proposal:${b}`);
+    expect(chips(replay), 'a review card is never re-offered as approvable').not.toContain(approvalChipIdFor(b));
+  }, 120_000);
+});

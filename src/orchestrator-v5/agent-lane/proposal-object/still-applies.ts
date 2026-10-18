@@ -129,13 +129,17 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   return false;
 }
 
-/** The limit row a `set_limit` card changes: the same row, on the same node, with its comparator, figure and unit as made. */
+/**
+ * The limit row a `set_limit` card changes, EXACTLY as the card was made against (`row_as_made`, its whole meaning: comparator
+ * as stated, figure, unit, frame, role). Codex BLOCK on #3424 @db2376d0: a strictness edit ("at most 3" → "less than 3") left a
+ * card showing "at most 2" applicable, and its press saved "less than 2". A card made before the snapshot holds only on its base.
+ */
 function limitRowReadsAsMade(op: { readonly path?: string; readonly value?: unknown }, graph: unknown): boolean {
-  const v = op.value as { operator?: unknown; unit?: unknown; constraint_id?: unknown; before?: unknown } | undefined;
+  const v = op.value as { constraint_id?: unknown; row_as_made?: unknown } | undefined;
+  if (!isRec(v?.row_as_made)) return false;
   const rows = isRec(graph) && Array.isArray(graph['goal_constraints']) ? (graph['goal_constraints'] as unknown[]).filter(isRec) : [];
-  const row = rows.filter((r) => r['constraint_id'] === v?.constraint_id);
-  return row.length === 1 && row[0]!['node_id'] === op.path && row[0]!['operator'] === v?.operator && row[0]!['value'] === v?.before
-    && (typeof row[0]!['unit'] === 'string' && row[0]!['unit'] !== '' ? row[0]!['unit'] : null) === (v?.unit ?? null);
+  const row = rows.filter((r) => r['constraint_id'] === v.constraint_id);
+  return row.length === 1 && row[0]!['node_id'] === op.path && isDeepStrictEqual(row[0], v.row_as_made);
 }
 
 /**
@@ -188,6 +192,11 @@ export function isHeldCardBeingApplied(pa: PendingAction): boolean {
 }
 export function heldCardUnderReview(pa: PendingAction): boolean {
   return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.[AWAITING_REVIEW]);
+}
+/** Whether the carrier of `proposalId` among these pendings is kept for review: its approve is never offered (any read). */
+export function heldCardUnderReviewIn(pendings: readonly PendingAction[], proposalId: string): boolean {
+  return pendings.some((pa) => pa.action.kind === 'apply_proposed_change' && heldCardUnderReview(pa)
+    && ((pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] as Rec | undefined)?.['proposal_id'] === proposalId);
 }
 export function heldCardForReview(pa: PendingAction, modelNow: string | null | undefined): PendingAction {
   if (pa.action.kind !== 'apply_proposed_change' || heldCardUnderReview(pa)) return pa;
