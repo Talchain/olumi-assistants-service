@@ -473,10 +473,10 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
     if (r.ok === true && r.mutated === true) {
       // MG sweep (#70 5851155478 b; DL 5851162511 item 3): say what approval changes, true whether a proposed figure is already
       // in the model or not. F3 (DL 5851710093): short. ⛔ ADOPTION ≠ AUTHORSHIP (DL 15 Oct 23:08Z, HIRING's legacy capture turn
-      // 01): an approved estimate stays Olumi's, approved by the user; it never "becomes yours".
-      const approval = pending === null ? '' : pending === 'figures'
-        ? 'Figures you did not give me are Olumi\u2019s estimates; when you approve one, it stays marked as Olumi\u2019s estimate, approved by you.'
-        : 'What I proposed above is not made until you approve it.';
+      // 01): an approved estimate stays Olumi's, approved by the user; it never "becomes yours". A proposed change is said by its
+      // own card, and the AI holds it (its tool result: `mutated: false` with the `proposal_id`), so no reminder is added (PR 4).
+      const approval = pending === 'figures'
+        ? 'Figures you did not give me are Olumi\u2019s estimates; when you approve one, it stays marked as Olumi\u2019s estimate, approved by you.' : '';
       return [approval, leftOutLine(r), contextFactorsLine(r), aiAsks ? '' : openQuestionsLine(r, alreadySaid)]
         .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }

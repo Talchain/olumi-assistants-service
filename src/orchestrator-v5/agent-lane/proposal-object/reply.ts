@@ -49,10 +49,9 @@ export function heldLapseSentence(name: string | undefined, reason: HeldLapseRea
     case 'over_cap':
       return `${what} was set aside because only three changes can wait at once; say the word if you still want it.`;
     case 'gone':
-      return `${what} is no longer waiting; say the word if you still want it.`;
+    // A newer card for the same targets (DL 7 Oct, f48e3e67): said, never silent; never "the same change" (P03: it was not).
     case 'superseded':
-      // DL 7 Oct (f48e3e67): a newer card for the same targets replaces an older held one; recorded and said, never silent.
-      return `${what} was replaced by the newer card for the same change; nothing in the model changed.`;
+      return `${what} is no longer waiting; say the word if you still want it.`;
   }
 }
 

@@ -142,13 +142,15 @@ describe('a link\'s stated effect is recorded only from its card, on the real ro
       return b.suggested_actions.find((c) => c.id === `agent-approve-proposal:${id}`)!;
     };
     const p1 = await offer(SAID, ARGS);
-    expect(lastText, 'control: the first offer replaces nothing').not.toContain('was replaced by the newer card');
+    expect(lastText, 'control: the first offer replaces nothing').not.toContain('is no longer waiting');
     // The user states another figure: P2's card is now the one on offer. P1 is still stored and would execute.
     const p2 = await offer('Actually, every £1 on the Pro price loses us about 40 paying subscribers.',
       { ...ARGS, amount: -40, quote: 'every £1 on the Pro price loses us about 40 paying subscribers' });
     expect(p2.id).not.toBe(p1.id);
-    // DL 7 Oct (f48e3e67): the replaced P1 is SAID, never silently dropped.
-    expect(lastText).toContain('was replaced by the newer card for the same change; nothing in the model changed.');
+    // DL 7 Oct (f48e3e67): the replaced P1 is SAID, never silently dropped; PR 4 (P03): never as "the same change", which only
+    // its targets were (here −50 and −40 are different figures).
+    expect(lastText).toMatch(/ is no longer waiting; say the word if you still want it\./);
+    expect(lastText).not.toContain('the same change');
     const press = async (c: { id: string; message: string }) => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: sid, message: c.message, source: 'chip', chip: { id: c.id },
     } })).json() as { _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string }[] } };
