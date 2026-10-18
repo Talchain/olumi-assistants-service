@@ -2103,7 +2103,7 @@ export async function buildModelFromBrief(
       try {
         if (checkedConstructionPre(size).ok) {
           const preview = finalizeGraph(admitted);
-          if (constructionFinalRefusal(preview, eventFallbackRefusals.get(admitted)) === null) onDraftAdmitted(preview.graph);
+          if (constructionFinalRefusal(preview) === null) onDraftAdmitted(preview.graph);
         }
       } catch { /* an unavailable preview never costs the repair */ }
     }
@@ -2359,7 +2359,6 @@ export async function buildModelFromBrief(
   /** Preview-only before widening; returned as the build's refusal only on the graph that registers. */
   function constructionFinalRefusal(
     final: ReturnType<typeof finalizeGraph>,
-    eventFallbackRefusal: string | undefined,
   ): ToolResult | null {
     // Never persist a graph the product cannot then read.
     const parsed = GraphV3.safeParse(final.graph);
@@ -2369,13 +2368,16 @@ export async function buildModelFromBrief(
         issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
       };
     }
-    // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
-    // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
-    if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
-      return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
-    }
-
+    // ⭐ A3 D1 (DL-3 ruling 3, 18 Oct; reverses B3 086e4624's "unless that graph cannot reach the goal"; Paul 13 Oct: coach,
+    // don't refuse): a flagged draft whose event slice failed ALWAYS keeps its ordinary graph. Where that graph cannot reach the
+    // goal, the missing piece is the build's one ask (`eventAskOf`), and no chance can be run on it until it is answered.
     return null;
+  }
+
+  /** The event slice's missing piece, asked once, when the ordinary graph that registers cannot reach the goal without it. */
+  function eventAskOf(final: ReturnType<typeof finalizeGraph>, eventFallbackRefusal: string | undefined): string | undefined {
+    return eventFallbackRefusal !== undefined && draftedTeamPartOf(final.graph as never) === null && !admittedReachesGoal(final.graph as never)
+      ? eventFallbackRefusal : undefined;
   }
 
   /**
@@ -2776,7 +2778,7 @@ export async function buildModelFromBrief(
   // user's parts are proven unchanged (`existingUnchanged`), and an added risk stays outside the calculation, said so in the reply.
   if (wideningCallStructured !== undefined && onDraftAdmitted !== undefined) {
     const draft = finalFor(admitted);
-    if (constructionFinalRefusal(draft, eventFallbackRefusal) === null) {
+    if (constructionFinalRefusal(draft) === null) {
       try { onDraftAdmitted(draft.graph); } catch { /* an observer never costs the build */ }
     }
   }
@@ -2789,13 +2791,21 @@ export async function buildModelFromBrief(
     size = assessConstructionSize(admitted);
   }
   const final = finalFor(admitted);
-  const finalRefusal = constructionFinalRefusal(final, eventFallbackRefusal);
+  const finalRefusal = constructionFinalRefusal(final);
   if (finalRefusal !== null) return finalRefusal;
   admitted = final.admitted;
-  const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
+  const { graph, goalNodes, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
+  // ⭐ A3 D1: the event's chance is withheld on the existing carrier (`withheld`, `event_goal_unadmitted`, as admission writes it)
+  // and its missing piece is the one ask; the ordinary model registers. Never counted as a link whose direction is unknown.
+  const eventAsk = eventAskOf(final, eventFallbackRefusal);
+  if (eventAsk !== undefined && !admitted.withheld.some((w) => w.reason === 'event_goal_unadmitted')) {
+    admitted = { ...admitted, withheld: [...admitted.withheld, { from: 'event_decision', to: 'event_goal', reason: 'event_goal_unadmitted', detail: eventAsk }] };
+  }
+  // First: it is why nothing on the model can run yet, so it is said before any other question.
+  const openQuestions = eventAsk === undefined ? final.openQuestions : [eventAsk, ...final.openQuestions.filter((q) => q !== eventAsk)];
 
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
-  const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
+  const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link' && w.reason !== 'event_goal_unadmitted');
 
   // ⭐ What this construction reports about its graph, PREPARED or registered alike (FOUNDER explicit rebuild, DL-3 17:51Z):
   // a prepared candidate's card shows the same omissions, asks and disclosures a registered build says.
