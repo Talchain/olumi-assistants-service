@@ -32,7 +32,10 @@ const enrichment = (factor_id: string, sensitivity_rank: number) => ({ factor_id
 // Reflect only factors the real service actually supplies. A canned rank-1 answer would mask its input drop.
 function providerResponse(request: ProviderRequest) {
   const prompt = request.messages.find(m => m.role === 'user')!.content;
-  const [label, ...data] = prompt.split('\n');
+  // AIE 04:07Z: the explicit task line, a blank line, then the quoted reference-data block (label + compact JSON).
+  const [task, blank, label, ...data] = prompt.split('\n');
+  expect(task).toBe('Generate factor enrichments for the following decision model:');
+  expect(blank).toBe('');
   expect(label).toBe(REASONING_CONTEXT_LABEL);
   const input = JSON.parse(data.join('\n')) as ProviderInput;
   providerInputs.push(input);

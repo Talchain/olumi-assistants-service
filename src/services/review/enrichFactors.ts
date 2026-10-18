@@ -435,7 +435,8 @@ export async function enrichFactors(
     const systemPrompt = factorScope === "sensitive"
       ? ENRICH_FACTORS_PROMPT + "\nFor this review, controllable_factors is a legacy field name: it contains sensitivity-listed graph factors, including observable factors. Membership does not imply controllability."
       : ENRICH_FACTORS_PROMPT;
-    const userPrompt = turnContextItems({ scope: "model-only", canonicalState: input }).map(turnContextText).join("\n\n");
+    // AIE 04:07Z (AIE-P9-REQUEST-WORDING-20261018-v1): the explicit task line stays OUTSIDE the quoted reference-data block.
+    const userPrompt = `Generate factor enrichments for the following decision model:\n\n${turnContextItems({ scope: "model-only", canonicalState: input }).map(turnContextText).join("\n\n")}`;
 
     // Call LLM
     const llmResult = await callLLMForExtraction(systemPrompt, userPrompt, {

@@ -715,7 +715,7 @@ describe("the real factor service uses the scoped shared reference frame", () =>
           { factor_id: "fac_price", label: row.price, factor_type: "price", uncertainty_drivers: priceSources },
           { factor_id: "fac_dev_time", label: row.time, factor_type: "time", uncertainty_drivers: timeSources },
         ], factor_sensitivity: [{ factor_id: "fac_price", elasticity: 0.72, rank: 1 }, { factor_id: "fac_dev_time", elasticity: 0.35, rank: 4 }] };
-      expect(call.mock.calls[0]![1]).toBe(`${REASONING_CONTEXT_LABEL}\n${JSON.stringify(expected)}`);
+      expect(call.mock.calls[0]![1]).toBe(`Generate factor enrichments for the following decision model:\n\n${REASONING_CONTEXT_LABEL}\n${JSON.stringify(expected)}`);
       expect(call.mock.calls[0]![0]).toBe(row.factorScope === "sensitive"
         ? ENRICH_FACTORS_PROMPT + "\nFor this review, controllable_factors is a legacy field name: it contains sensitivity-listed graph factors, including observable factors. Membership does not imply controllability."
         : ENRICH_FACTORS_PROMPT);
