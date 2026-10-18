@@ -22,6 +22,8 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { figureTheUserWroteFor } from './stated-by-user.js';
+import { goalTargetIdentity } from './construction-size-gate.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -359,22 +361,106 @@ export type StatedWholeRangeOfLink = { readonly low: number; readonly high: numb
  * The user's sentences the AI bound as the goal's TARGET with `figure` (its `{goal, target}` statements, each verified by the one
  * rule), each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
  * a ceiling's direction from that reading, never from a host word reader.
+ *
+ * ⭐ QUANTITY BINDING CONTRACT (PR-A rows 1/2/11; outbox/QUANTITY-BINDING-CONTRACT-20261018.md v2). A figure binds to the goal only
+ * with its own SIGN, never by absolute value:
+ *  · LEVEL frame: the statement's verified figure, as its words write it (a negative only where they write one), equals `figure`.
+ *  · CHANGE frame (`change_rel`/`change_abs`): the AI's statement carries its SIGNED change ("cut … by 20%" as −20). The verifier
+ *    checks the literal magnitude its span writes; the bind takes the AI's signed reading, in the goal's own comparator
+ *    (`BOUND_FORM`: a floor is a lower bound, a ceiling an upper bound; a point fits either), and it must equal `figure`. "Increase
+ *    … by at least 20%" (+20, a floor) is never a −20 ceiling. The figure's occurrence must also be THIS goal's by the one
+ *    occurrence reader (`figureTheUserWroteFor` with the model's quantities), as the held target already reads it: "cut the
+ *    promotion budget by at least 20%" never gives the 20% to order turnaround.
+ * The bind is the one verdict every reader takes: the target's authorship (`threshold_source`), its direction, its unit reading
+ * and the goal's own provenance at admission.
  */
 export function goalTargetStatements(model: unknown, brief: string, figure: number): readonly UserStatement[] | undefined {
-  const m = model !== null && typeof model === 'object' ? model as { statements?: unknown; goal?: { metric?: unknown } } : {};
+  const m = model !== null && typeof model === 'object'
+    ? model as { statements?: unknown; goal?: { metric?: unknown; frame?: unknown; operator?: unknown; unit?: unknown }; factors?: unknown; outcomes?: unknown; risks?: unknown }
+    : {};
   if (!Array.isArray(m.statements)) return undefined;
   const metric = typeof m.goal?.metric === 'string' ? m.goal.metric : '';
   if (metric.trim() === '' || !Number.isFinite(figure)) return [];
-  const states = (n: number | undefined): boolean => typeof n === 'number' && Math.abs(n) === Math.abs(figure);
   const map = sourceMapOf(m.statements, brief);
   const key = subjectKey({ kind: 'goal', label: metric }, 'target');
   // TL 09:18Z (2), AMENDED 10:49Z: a rival is ONLY another of the AI's own verified statements on the same sentence that gives
   // that figure to another subject or field ("We have a budget of £40,000." as the budget's level and the goal's target). No
   // unit comparison, mention count or text scan (BUDDY-A B1 R1/R2 on #3284): the AI's own labels decide, and the card offers
   // Olumi's reading for one click wherever they compete, so the user's figure is never lost and never mis-authored.
+  // A rival claims the WRITTEN figure (its literal magnitude), whatever sign either reading gives it.
+  const writes = (n: number | undefined): boolean => typeof n === 'number' && Math.abs(n) === Math.abs(figure);
   const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
-    && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
-  return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote));
+    && statements.some((s) => s.quote === quote && (writes(s.low) || writes(s.high))));
+  const frame = m.goal?.frame;
+  if (frame !== 'change_rel' && frame !== 'change_abs') {
+    return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (s.low === figure || s.high === figure) && !rivalled(s.quote));
+  }
+  const comparator = typeof m.goal?.operator === 'string' ? BOUND_FORM[m.goal.operator] : undefined;
+  const unit = m.goal?.unit;
+  const labels = (v: unknown): string[] => (Array.isArray(v) ? v : []).flatMap((q: unknown) => {
+    const l = q !== null && typeof q === 'object' ? (q as { label?: unknown }).label : undefined;
+    return typeof l === 'string' && l.trim() !== '' && norm(l) !== norm(metric) ? [l] : [];
+  });
+  const scope = { target: [metric], others: [...labels(m.factors), ...labels(m.outcomes), ...labels(m.risks)] };
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const out: UserStatement[] = [];
+  for (const entry of m.statements as unknown[]) {
+    const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
+    const subject = subjectOf(r?.['subject']);
+    if (r === undefined || subject === undefined || r['field'] !== 'target' || subjectKey(subject, 'target') !== key || r['negated'] === true) continue;
+    const form = r['form'];
+    // The AI's signed reading of the sentence (a point, one bound's figure, or a range end), and the literal its words must write.
+    if (form === 'range') {
+      if (num(r['low']) !== figure && num(r['high']) !== figure) continue;
+    } else {
+      if (num(r['value']) !== figure) continue;
+      if (form !== 'point' && (comparator === undefined || form !== comparator)) continue;
+    }
+    const ends = writtenEndsOfNegativeRange(r['low'], r['high']);
+    const literal = form === 'range' ? (ends !== undefined ? { ...r, ...ends } : r) : { ...r, value: Math.abs(figure) };
+    const st = (sourceMapOf([r], brief).verified.get(key) ?? sourceMapOf([literal], brief).verified.get(key))?.[0];
+    if (st === undefined || rivalled(st.quote)) continue;
+    if (!figureTheUserWroteFor(Math.abs(figure), unit, st.quote, scope)) continue;
+    out.push(st);
+  }
+  return out;
+}
+
+/**
+ * ⭐ QUANTITY BINDING CONTRACT (PR-A rows 3–4; Codex #3412 r1 SIMPLER-ALTERNATIVE): a retry never changes the user's verified target.
+ * The FIRST draft's verified target is kept WHOLE, by the existing adoption equality (`goalTargetIdentity`: quantity, comparator,
+ * signed figure, unit and frame), and its authorship by the first draft's own statements, which must still bind the retry's goal
+ * (`goalTargetStatements`, the one binder). Where a redraft re-chose the goal and the first draft verified a target for that quantity
+ * only as a statement, the statement's own terms are kept: its signed figure (the binder), comparator (`BOUND_FORM`) and unit
+ * (`sameUnit`); a frame it never stated is not invented. Conditions are kept by `keepsEveryGoalCondition`. `true` where the first
+ * draft verified no target for the retry goal's quantity: nothing of the user's is at stake. Pure.
+ */
+export function keepsTheFirstVerifiedTarget(first: unknown, retry: unknown, brief: string): boolean {
+  type Goal = { metric?: unknown; operator?: unknown; value?: unknown; unit?: unknown; frame?: unknown };
+  const f = first !== null && typeof first === 'object' ? first as { statements?: unknown; goal?: Goal } : {};
+  const r = retry !== null && typeof retry === 'object' ? retry as { goal?: Goal } : {};
+  if (!Array.isArray(f.statements)) return true;
+  const firstMetric = typeof f.goal?.metric === 'string' ? f.goal.metric : '';
+  const metric = typeof r.goal?.metric === 'string' ? r.goal.metric : '';
+  const firstOwn = typeof f.goal?.value === 'number' ? goalTargetStatements(first, brief, f.goal.value) ?? [] : [];
+  // The first goal's own verified target: its full terms, by the one adoption key.
+  if (firstOwn.length > 0 && (r.goal === undefined || goalTargetIdentity({ ...f.goal, metric: firstMetric }) !== goalTargetIdentity({ ...r.goal, metric }))) return false;
+  // The first draft's raw target entries on the retry goal's quantity, each taken as the retry goal's: the user's figure as the AI first
+  // read it (a goal's own target only where it bound; a re-chosen quantity's target where the one rule verified it).
+  const entries = (f.statements as unknown[]).flatMap((entry) => {
+    const e = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
+    const subject = subjectOf(e?.['subject']);
+    if (e === undefined || subject === undefined || e['field'] !== 'target' || e['negated'] === true || norm(subject.label) !== norm(metric)) return [];
+    const magnitude = typeof e['value'] === 'number' ? { ...e, value: Math.abs(e['value']) } : e;
+    if (subject.kind === 'goal' ? firstOwn.length === 0
+      : subject.kind !== 'factor' || (sourceMapOf([e], brief).verified.size === 0 && sourceMapOf([magnitude], brief).verified.size === 0)) return [];
+    return [{ ...e, subject: { kind: 'goal', label: metric, to_label: null, factor_label: null } }];
+  });
+  if (entries.length === 0) return true;
+  const value = r.goal?.value;
+  const comparator = typeof r.goal?.operator === 'string' ? BOUND_FORM[r.goal.operator] : undefined;
+  const bound = typeof value === 'number' ? goalTargetStatements({ ...(retry as object), statements: entries }, brief, value) ?? [] : [];
+  return bound.length > 0 && bound.every((st) => sameUnit(st.unit, r.goal?.unit) && (st.form === 'point' || st.form === comparator));
 }
 
 /**

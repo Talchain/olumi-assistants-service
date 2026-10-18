@@ -178,6 +178,18 @@ const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
 
+/**
+ * ⭐ QBC row 8 (G3): figures the user-supplied material writes that the one rule cannot attribute are RECORDED with their origin
+ * unverified through the writer's existing carrier, never refused, never "you said", never Olumi's. The AIE's exact text
+ * (`prompt/AIE-B0-GUIDANCE-AND-ORIGIN-NOTE-20261018-v1.json`, g3.origin_unverified_note_exact).
+ */
+const ORIGIN_UNVERIFIED_NOTE =
+  'These entries retain figures found in the user-supplied material, but Olumi could not verify their attribution or binding to the proposed quantities from a cited statement. '
+  + 'Their origin remains unverified (`origin_unverified`): do not call them the user\u2019s statements or Olumi\u2019s estimates. '
+  + 'Preserve the source, speaker, unit, reference, qualifications and conditions actually available; do not invent missing ones. '
+  + 'Distinguish an offered proposal from a saved change using the actual result and readback. '
+  + 'Approval authorises only the displayed change and does not verify source credit or scientific support. '
+  + 'Reuse supplied figures rather than asking the user to repeat or confirm them; ask only for a genuinely missing or conflicting meaning.';
 /** A level in a different unit is left out before its authorship is read. */
 export const UNIT_DIFFERS_FROM_DECLARED_DETAIL = (option: string, declaredUnit: string, sentUnit: string): string =>
   `Send ${option}'s figure exactly as the user wrote it, in ${declaredUnit} (the factor's unit); it was sent in ${sentUnit}. Nothing was changed.`;
@@ -11035,7 +11047,7 @@ export function createAgentCapabilities(
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' | 'unverified' };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const lv = doorLevelOf(a.level);
@@ -11073,12 +11085,17 @@ export function createAgentCapabilities(
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
           const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
-          if (statementOrigin(wrote, figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text), ctx.user_text_complete, lvl.estimate !== undefined) === 'unknown') {
+          const retained = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
+            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text);
+          // ⭐ QBC row 8 (G3, W15): a figure only the retained or brief words write is USER MATERIAL of unknown origin: recorded with its
+          // origin unverified (construction's `cee_hypothesis` + `user_material_unverified`), never refused and never Olumi's (K3).
+          // Unknown with no such words (an incomplete history) keeps the existing disclosed refusal.
+          const unverifiedLvl = statementOrigin(wrote, retained, ctx.user_text_complete, lvl.estimate !== undefined) === 'unknown';
+          if (unverifiedLvl && !retained) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          const derived = !wrote && !unverifiedLvl && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
           // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
           if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
@@ -11094,7 +11111,7 @@ export function createAgentCapabilities(
            */
           if (derived !== undefined) lvl.estimate = `${derived.working}, as Olumi read it`;
           const byUser = wrote;
-          if (!byUser && lvl.estimate === undefined) {
+          if (!byUser && !unverifiedLvl && lvl.estimate === undefined) {
             const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
               ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
               : undefined;
@@ -11103,14 +11120,14 @@ export function createAgentCapabilities(
           }
           // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
           // The name rule, then the writer's range: `placeLevel`, the stage the Widen gate calls too.
-          const placed = placeLevel(lvl, factor, factorUnit, plan.label, !byUser && derived === undefined);
+          const placed = placeLevel(lvl, factor, factorUnit, plan.label, !byUser && !unverifiedLvl && derived === undefined);
           if (placed.kind === 'contradicts_name') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          lvl.by = byUser ? 'user' : 'olumi';
-          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
+          lvl.by = byUser ? 'user' : unverifiedLvl ? 'unverified' : 'olumi';
+          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const, ...(unverifiedLvl ? { user_material_unverified: true as const } : {}) };
           if (placed.kind === 'out_of_range') {
             outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: placed.range });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
@@ -11149,8 +11166,8 @@ export function createAgentCapabilities(
          * "switch" and is refused below, never rounded to on.
          */
         /** A1 £59: this option's level on each new GRADED factor with an accepted today level, by the factor's batch key. */
-        const newGradedLevels = new Map<string, { value: number; unit?: string; by: 'user' | 'olumi'; basis?: string;
-          iv: { value: number; raw_value?: number; unit?: string; source?: 'cee_hypothesis' } }>();
+        const newGradedLevels = new Map<string, { value: number; unit?: string; by: 'user' | 'olumi' | 'unverified'; basis?: string;
+          iv: { value: number; raw_value?: number; unit?: string; source?: 'cee_hypothesis'; user_material_unverified?: true } }>();
         for (const a of plan.newActsOn) {
           // ⛔ EVERY entry that names this factor (VERIFIER-S1 on A1 r2): reading only the first let a bare entry followed
           // by `{1, '%'}` through — held, approved, committed with the user's figure dropped — while the reverse was refused.
@@ -11192,11 +11209,14 @@ export function createAgentCapabilities(
           }
           const levelUnit = unit ?? today.unit;
           const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
-          if (statementOrigin(wrote, figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(asked, levelUnit, g.brief_text), ctx.user_text_complete, lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
+          const retained = figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text) || figureTheUserWrote(asked, levelUnit, g.brief_text);
+          // ⭐ QBC row 8 (G3, W15): a figure only the retained or brief words write is recorded with its origin unverified (as above).
+          const unverifiedLv = statementOrigin(wrote, retained, ctx.user_text_complete,
+            lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown';
+          if (unverifiedLv && !retained) { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
-          if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
-          if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
+          if (!wrote && !unverifiedLv && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
+          if (!wrote && !unverifiedLv && contradictsItsName(asked, levelUnit, plan.label)) {
             notSet(`Olumi's estimate of ${asked} for ${a.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.`);
             continue;
           }
@@ -11208,9 +11228,10 @@ export function createAgentCapabilities(
             continue;
           }
           newGradedLevels.set(a.key, {
-            value: asked, ...(levelUnit !== undefined ? { unit: levelUnit } : {}), by: wrote ? 'user' : 'olumi', ...(!wrote ? { basis } : {}),
+            value: asked, ...(levelUnit !== undefined ? { unit: levelUnit } : {}), by: wrote ? 'user' : unverifiedLv ? 'unverified' : 'olumi',
+            ...(!wrote && !unverifiedLv ? { basis } : {}),
             iv: { value: framed, ...(typeof cap === 'number' ? { raw_value: asked } : {}), ...(levelUnit !== undefined ? { unit: levelUnit } : {}),
-              ...(wrote ? {} : { source: 'cee_hypothesis' as const }) },
+              ...(wrote ? {} : { source: 'cee_hypothesis' as const, ...(unverifiedLv ? { user_material_unverified: true as const } : {}) }) },
           });
         }
         /**
@@ -11416,7 +11437,8 @@ export function createAgentCapabilities(
               const option = ops.find((o) => o.op === 'add_node' && o.path === plan.optionId)?.value as { interventions?: Record<string, unknown> } | undefined;
               const iv = (id !== undefined ? option?.interventions?.[id] : undefined) as Record<string, unknown> | undefined;
               return iv !== undefined && iv['value'] === l.iv.value && iv['raw_value'] === l.iv.raw_value && iv['unit'] === l.iv.unit
-                && iv['source'] === (l.iv.source ?? 'user_specified');
+                && iv['source'] === (l.iv.source ?? 'user_specified')
+                && (iv['user_material_unverified'] === true) === (l.iv.user_material_unverified === true);
             }));
         } catch {
           heldBatchOk = false;
@@ -11442,14 +11464,14 @@ export function createAgentCapabilities(
           const lvl = set.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
-              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
+              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : lvl.by === 'unverified' ? { stated_by: 'origin_unverified' } : { stated_by: 'user' }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
         // A1 £59: a new graded factor's level set in this same change, said exactly as an existing factor's is.
         ...plan.newActsOn.flatMap((a) => {
           const l = newGradedLevels.get(a.key);
           return l === undefined ? [] : [{ factor: a.label, value: l.value, ...(l.unit !== undefined ? { unit: l.unit } : {}),
-            ...(l.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: l.basis } : { stated_by: 'user' }) }];
+            ...(l.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: l.basis } : l.by === 'unverified' ? { stated_by: 'origin_unverified' } : { stated_by: 'user' }) }];
         })],
       }));
       return {
@@ -11464,6 +11486,12 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        // QBC row 8 (G3, W15): levels recorded with their origin unverified, said as that (the AIE's note), never as the user's or Olumi's.
+        ...(described.some((d) => d.levels.some((l) => 'stated_by' in l && l.stated_by === 'origin_unverified')) ? {
+          origin_unverified: described.flatMap((d) => d.levels.flatMap((l) => ('stated_by' in l && l.stated_by === 'origin_unverified'
+            ? [{ option: d.label, factor: l.factor, value: l.value }] : []))),
+          origin_unverified_note: ORIGIN_UNVERIFIED_NOTE,
+        } : {}),
         // A placeholder 0 on the only entry naming a new switch was no level: the option turns the switch on.
         ...(switchPlaceholderRead.some((d) => labels.includes(d.option)) ? {
           switch_placeholder_levels_read_as_on: switchPlaceholderRead.filter((d) => labels.includes(d.option)),

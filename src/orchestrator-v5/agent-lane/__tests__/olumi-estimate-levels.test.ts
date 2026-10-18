@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const ctxSaying = (user_text: string) => ({ scenario_id: '550e8400-e29b-41d4-a716-4466554400c7', authenticated_user_id: null, request_id: 'r', user_text });
@@ -83,12 +84,15 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
     expect(priceLevelSent(sent)).toEqual(expect.objectContaining({ raw_value: 64, source: 'cee_hypothesis' }));
   });
 
-  it('A2h unknown-history option level stays unset even with an estimate label and basis', async () => {
+  // QBC PR-A row 8 (DL build order, 18 Oct): an unknown-history level is no longer left unset; it is RECORDED with its origin
+  // unverified through the writer's existing carrier, which reads UNKNOWN. A2h's rule is unchanged: it never becomes Olumi's.
+  it('A2h unknown-history option level never becomes Olumi authored, even with an estimate label and basis (recorded, origin unknown)', async () => {
     const { caps, sent } = setup();
     await caps.proposeNewOption({ ...ctxSaying(ADD_ALL), unverified_user_text: 'Raise Pro plan price to £64.' },
       suggested({ value: 64, unit: '£', estimate: true, basis: 'a step above the £59 option' }) as never);
-    expect(priceLevelSent(sent)?.value).toBeNull();
-    expect(priceLevelSent(sent)).not.toHaveProperty('raw_value');
+    const iv = priceLevelSent(sent);
+    expect(iv, JSON.stringify(sent[0]?.body)).toEqual(expect.objectContaining({ raw_value: 64, source: 'cee_hypothesis', user_material_unverified: true }));
+    expect(settingProvenanceOf(iv).origin).toBe('unknown');
   });
 
   it('A2h unknown-history assumption revision cannot become Olumi authored', async () => {
