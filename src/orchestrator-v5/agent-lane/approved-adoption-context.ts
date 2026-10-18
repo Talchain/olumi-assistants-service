@@ -94,6 +94,8 @@ export interface ApprovedLevelAdoption {
   readonly factorId: string;
   /** The approved level on the model scale — exactly what the write sends. */
   readonly modelValue: number;
+  /** G3: a level whose origin could not be verified: still `cee_hypothesis`, with construction's `user_material_unverified`. */
+  readonly unverified?: true;
 }
 
 /** Olumi's own level, adopted: the contract's model-authored member. */
@@ -112,6 +114,14 @@ export function runWithApprovedLevelAdoption<T>(adoption: ApprovedLevelAdoption,
  */
 export function runWithApprovedLevelAdoptions<T>(adoptions: readonly ApprovedLevelAdoption[], fn: () => Promise<T>): Promise<T> {
   return levelStore.run([...adoptions], fn);
+}
+
+/** G3: THIS level write is an approved level whose origin could not be verified (the same exact match as the stamp). */
+export function approvedLevelUnverifiedFor(scenarioId: string, optionId: string, factorId: string, modelValue: unknown): boolean {
+  const adoptions = levelStore.getStore();
+  if (adoptions === undefined || typeof modelValue !== 'number' || !Number.isFinite(modelValue)) return false;
+  return adoptions.some(a => a.scenarioId === scenarioId && a.optionId === optionId && a.factorId === factorId
+    && a.modelValue === modelValue && a.unverified === true);
 }
 
 /**

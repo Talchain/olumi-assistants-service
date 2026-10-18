@@ -124,7 +124,8 @@ describe('A2i9 B5 host contrasts under incomplete source', () => {
     { name: 'new Olumi false', flag: false, words: ctx.user_text, tier2: '', author: 'model_proposed' },
     { name: 'missing', flag: undefined, words: ctx.user_text, tier2: '', author: undefined },
     { name: 'unverifiable true', flag: true, words: ctx.user_text, tier2: '', author: undefined },
-    { name: 'tier-2 overrides false', flag: false, words: ctx.user_text, tier2: 'Continue campaign sets Pro plan price to £55.', author: undefined },
+    // G3: the £55 is USER MATERIAL (their unverified words write it), so it is recorded with its origin unverified (was: refused).
+    { name: 'tier-2 overrides false', flag: false, words: ctx.user_text, tier2: 'Continue campaign sets Pro plan price to £55.', author: 'unknown' },
   ])('$name', async row => {
     const w = product();
     const r = await w.caps.proposeOptionInterventions({ ...ctx, user_text: row.words, unverified_user_text: row.tier2 }, { interventions: [level(row.flag)] });

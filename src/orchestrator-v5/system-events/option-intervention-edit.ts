@@ -79,7 +79,7 @@ import { interventionKeysFollowInterventions } from '../reindex-intervention-key
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { applyOptionGapDeclarations, optionGapFields, optionGapCardWords, optionGapsHeld,
   optionGapPostimageIsScoped, optionGapOperands, parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
-import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
+import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, approvedLevelUnverifiedFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
 import { factorUnitOf, unitPhraseFamily, unitsConflict } from '../agent-lane/unit-conflict.js';
 import { readUnitParts } from '../agent-lane/same-unit.js';
@@ -126,6 +126,11 @@ export interface OptionInterventionEditInput {
    * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
    */
   readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  /**
+   * G3: with that stamp only, an approved level whose origin could not be verified: the cell also carries construction's
+   * `user_material_unverified`, so the one authority (`settingProvenanceOf`) reads it as unknown, never the user's or Olumi's.
+   */
+  readonly unverified?: true;
   /** Canvas edits may derive display coordinates; explicit approval batches may not. */
   readonly inferFactorFigure?: boolean;
   /**
@@ -153,7 +158,7 @@ export interface OptionInterventionTransactionInput extends OptionInterventionEd
 type OptionInterventionStore = NonNullable<Parameters<typeof commitDirectAnswer>[2]>;
 
 /** One (option, factor) level this commit writes, with the cell's stamp when it is not the user's own. */
-export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'figure'>;
+export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'unverified' | 'figure'>;
 
 /**
  * Compare to the original persisted bytes, not two independently normalised
@@ -199,7 +204,10 @@ export function optionInterventionBatchPostimageIsScoped(
     const newNode = newNodes[0]!;
     const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
     if (!entry.success || entry.data.value !== target.modelValue
-      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
+      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId
+      // G3: the unverified-origin marker is exactly the approved one: present only on a stamped unverified level.
+      || ((entry.data as { user_material_unverified?: unknown }).user_material_unverified === true)
+        !== (target.source !== undefined && target.unverified === true)) return false;
     const approved = target.figure?.likely_range;
     if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
       { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
@@ -276,9 +284,10 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
   | OptionInterventionCandidate
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
-  const { optionId, factorId, modelValue, source, figure, ...rest } = input;
+  const { optionId, factorId, modelValue, source, unverified, figure, ...rest } = input;
   const result = applyOptionInterventionBatch({ ...rest,
-    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}), ...(figure !== undefined ? { figure } : {}) }] });
+    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source, ...(unverified === true ? { unverified } : {}) } : {}),
+      ...(figure !== undefined ? { figure } : {}) }] });
   return result.kind === 'refused' ? { kind: 'refused', reason: result.reason } : result;
 }
 
@@ -302,7 +311,8 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
     const target = input.targets[i]!;
     const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph, inferFactorFigure: input.inferFactorFigure,
       optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
-      expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}),
+      expectedGraphHash: input.expectedGraphHash,
+      ...(target.source !== undefined ? { source: target.source, ...(target.unverified === true ? { unverified: true as const } : {}) } : {}),
       ...(target.figure !== undefined ? { figure: target.figure } : {}) });
     if (prepared.kind === 'refused') return refuse(prepared.reason, i);
     if (prepared.kind === 'unchanged') continue;
@@ -333,10 +343,12 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
       if (operations[i]?.op !== 'add_edge' || operations[i]?.path !== `${t.optionId}::${t.factorId}`) return refuse('operation_invalid');
     }
     // Range is not a generic tunable field. Its authority is THIS dedicated approved target, constructed by
-    // prepareOptionInterventionEdit and checked in the postimage; referee the ordinary level fields only.
+    // prepareOptionInterventionEdit and checked in the postimage; referee the ordinary level fields only. The same holds for the
+    // G3 origin marker (`user_material_unverified`): server-derived from the approved adoption and pinned in the postimage.
     const refereeLevels = parseEditGraphResponse(JSON.stringify({ operations: levelOps.map(op => {
       const value = { ...(op.value as Record<string, unknown>) };
       delete value.range;
+      delete value.user_material_unverified;
       return { ...op, value };
     }), removed_edges: [], warnings: [], coaching: null })).operations;
     const decision = evaluateEditGraphMutations({ mode: 'live', operations: refereeLevels,
@@ -1061,7 +1073,9 @@ export async function prepareOptionInterventionBatchExecution(
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
   let targets: OptionLevelTarget[] = input.targets.map(t => {
     const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
-    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
+    const unverified = source !== undefined && approvedLevelUnverifiedFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
+    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue,
+      ...(source !== undefined ? { source, ...(unverified ? { unverified: true as const } : {}) } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   // Decide value-only no-ops on the original graph, before attaching any range.
@@ -1908,8 +1922,11 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     kind: 'prepared',
     operation: {
       ...operation,
-      value: { ...(operation.value as Record<string, unknown>), source: input.source },
-      rationale: `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
+      value: { ...(operation.value as Record<string, unknown>), source: input.source,
+        ...(input.unverified === true ? { user_material_unverified: true } : {}) },
+      rationale: input.unverified === true
+        ? `Records the level the user approved, whose origin Olumi could not verify, for ${option.label} on ${factor.label}.`
+        : `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
     },
     ...withLink,
   };

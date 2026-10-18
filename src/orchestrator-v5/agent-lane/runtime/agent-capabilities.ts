@@ -177,6 +177,14 @@ const DIRECTION_CONFLICT_NOTE =
 const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
+/**
+ * ⭐ G3 (DL-3; unseen 8e9132fc T02): a figure THE ONE RULE could not attribute is recorded with its origin unverified, never refused.
+ * ⚠ AIE TEXT PENDING: drafted from the signed LINK_SET_UNKNOWN_AGENT_NOTE wording ("do not call the proposed bands the user's or
+ * Olumi's"); replaced by the AIE's exact text before merge.
+ */
+const ORIGIN_UNVERIFIED_NOTE =
+  'Olumi could not verify who gave these figures, so they are proposed with their origin unverified (`origin_unverified`). '
+  + 'Do not call them the user\u2019s or Olumi\u2019s, and do not ask the user to repeat or confirm figures they already supplied.';
 
 /** A level in a different unit is left out before its authorship is read. */
 export const UNIT_DIFFERS_FROM_DECLARED_DETAIL = (option: string, declaredUnit: string, sentUnit: string): string =>
@@ -1053,8 +1061,16 @@ function unverifiedValueBinding(op: ProposalOperation): { source: string; quote:
  * when the user gave it (`user_stated` on the proposal) or the whole proposal is theirs; an op
  * without the field (a carrier stored before it existed) is Olumi's — the narrower claim.
  */
-function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
+function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' | 'unknown' {
+  // ⭐ G3: a level whose origin THE ONE RULE could not verify stays unverified through approval (approval never rewrites origin).
+  if (((op.value ?? {}) as { authored_by?: unknown }).authored_by === 'unknown') return 'unknown';
   return valueOpAuthor(op, proposal);
+}
+
+/** The level writer's author for one approved level (`CommitOptionLevelsInput.levels[].author`). */
+function levelCommitAuthor(op: ProposalOperation, proposal: StructuredProposal): 'user_specified' | 'model_proposed' | 'unverified' {
+  const author = levelOpAuthor(op, proposal);
+  return author === 'user_stated' ? 'user_specified' : author === 'unknown' ? 'unverified' : 'model_proposed';
 }
 
 /**
@@ -2257,6 +2273,14 @@ const correctionOn = (graph: unknown, subject: DoorSubject): { current?: Current
 const chatTexts = (ctx: AgentToolContext, brief?: string | null): StatementTexts => ({ now: ctx.user_turn_text, conversation: ctx.user_text,
   unverified: [ctx.unverified_user_text, brief].filter((t): t is string => typeof t === 'string' && t !== '').join('\n'),
   ...(ctx.verified_user_messages !== undefined && ctx.verified_user_messages.length > 0 ? { messages: ctx.verified_user_messages } : {}) });
+/**
+ * ⭐ G3: the figure is USER MATERIAL — written somewhere in what the user typed or the saved brief, by the estate's stated-figure rule
+ * (`figureTheUserWrote`, never a credit) — so a level the one rule cannot credit is theirs-unverified (`user_material_unverified`),
+ * never an invented figure. A figure nowhere in their words is not user material: it stays left out with its disclosure.
+ */
+const userMaterial = (ctx: AgentToolContext, brief: string | null | undefined, value: number, unit: string | undefined): boolean =>
+  [ctx.user_text, ctx.user_turn_text, ...(ctx.verified_user_messages ?? []), ctx.unverified_user_text, brief]
+    .some((t) => typeof t === 'string' && t !== '' && figureTheUserWrote(value, unit, t));
 
 /**
  * ⭐ HOW A LINK'S BAND IS GROUNDED IN THE USER'S WORDS (slice C3; ruling ChatGPT 5854968869 P3B). Measured on Paul's
@@ -3162,7 +3186,7 @@ export function createAgentCapabilities(
     const levelInputs = levelOps.map((o) => ({
       ...pairOf(o.path),
       value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
-      author: levelOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+      author: levelCommitAuthor(o, parent),
       ...levelFigureOf(o),
     }));
     const rangeLaws = rangeLawsOfCard(parent, approvedRead.raw);
@@ -4988,9 +5012,10 @@ export function createAgentCapabilities(
     const prepared = await prepareCompoundChange(ctx, parent, before);
     if (!prepared.ok) return refuse({ ...prepared.result, refusal: prepared.result.reason ?? prepared.result.refusal });
     const { input, approvedBindings } = prepared;
-    // Exactly dispatch's model_proposed-only adoption list, bound to the final submitted native level.
-    const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
+    // Exactly dispatch's adoption list (Olumi's and unverified levels), bound to the final submitted native level.
+    const adoptions = input.levels.filter(l => l.author === 'model_proposed' || l.author === 'unverified').map(l => ({
       scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+      ...(l.author === 'unverified' ? { unverified: true as const } : {}),
     }));
     const nativeInput: Parameters<typeof preOfferOptionInterventions>[0] = {
       scenarioId: input.scenario_id, turnId: input.turn_id, requestId: ctx.request_id,
@@ -7960,6 +7985,8 @@ export function createAgentCapabilities(
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
+      /** G3: levels whose origin THE ONE RULE could not establish: recorded with their origin unverified, never refused. */
+      const originUnverified: { option: string; factor: string; value: unknown }[] = [];
       const unitDiffers: { option: string; factor: string; value: unknown; declared_unit: string; sent_unit: string; detail: string }[] = [];
       const rangesNotRecorded: { option: string; factor: string; reason: string }[] = [];
       const seen = new Set<string>();
@@ -7969,6 +7996,8 @@ export function createAgentCapabilities(
         derivedFrame: number | null;
         /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
         userStated: boolean;
+        /** G3: neither the user's (no verified span) nor Olumi's (no own-estimate carrier): recorded with its origin unverified. */
+        unverified: boolean;
         // The option is not yet linked to this factor: the link is added in the same change, before the level.
         needsLink: boolean;
         /** The user's likely range for this level, raw units (TEMPORAL). */
@@ -8128,8 +8157,13 @@ export function createAgentCapabilities(
         const boundHere = said.origin === 'human'
           && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         const userWrote = claimedByUser && (likelyRange !== undefined || boundHere);
-        if (!userWrote && said.origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
-        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+        // ⭐ G3 (unseen 8e9132fc T02: option B's cost refused `origin_unknown`): USER MATERIAL the one rule cannot credit or bind here (no
+        // verified span, or a span the binding does not tie to this pair) is RECORDED with its origin unverified, never refused and never
+        // "you said" or Olumi's. A figure nowhere in the user's words, with no own-estimate carrier (PL-0048), stays refused, disclosed.
+        const unverified = !userWrote && said.origin !== 'ai'
+          && (said.origin === 'human' || userMaterial(ctx, g.brief_text, raw, declaredUnit ?? statedUnit));
+        if (!userWrote && !unverified && said.origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        if (claimedByUser && !userWrote && !unverified) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
             option: option.label, factor: factor.label, value: i?.value,
@@ -8228,7 +8262,7 @@ export function createAgentCapabilities(
           const prior = set.find(level => `${level.option.id}::${level.factor.id}` === key)!;
           const unit = typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? '');
           if (prior.raw !== raw || prior.normalised !== normalised || prior.cap !== (cap ?? derivedFrame)
-            || prior.unit !== unit || prior.userStated !== userWrote || prior.needsLink !== needsLink
+            || prior.unit !== unit || prior.userStated !== userWrote || prior.unverified !== unverified || prior.needsLink !== needsLink
             || !isDeepStrictEqual(prior.likelyRange, likelyRange)
             || (declaration.kind === 'valid' && prior.mechanisms !== undefined
               && !isDeepStrictEqual(prior.mechanisms, declaration.mechanisms))) {
@@ -8241,11 +8275,12 @@ export function createAgentCapabilities(
           continue;
         }
         seen.add(key);
+        if (unverified) originUnverified.push({ option: option.label, factor: factor.label, value: i?.value });
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
-          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, unverified, needsLink,
           ...(likelyRange !== undefined && rangeQuote !== undefined ? { likelyRange, rangeQuote } : {}),
           ...(declaration.kind === 'valid' && gapOperands != null ? { mechanisms: declaration.mechanisms, gapOperands } : {}),
         });
@@ -8280,6 +8315,7 @@ export function createAgentCapabilities(
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
           ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
+          ...(originUnverified.length > 0 ? { origin_unverified: originUnverified, origin_unverified_note: ORIGIN_UNVERIFIED_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           ...(rangesNotRecorded.length > 0 ? { ranges_not_recorded: rangesNotRecorded } : {}),
           detail: (unitDiffers.length > 0 ? unitDiffers.map(r => r.detail).join(' ')
@@ -8301,7 +8337,7 @@ export function createAgentCapabilities(
           ...(i.unit !== '' ? { unit: i.unit } : {}),
           ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, ...(i.rangeQuote !== undefined ? { range_quote: i.rangeQuote } : {}) } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
-          authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+          authored_by: i.userStated ? 'user_stated' : i.unverified ? 'unknown' : 'model_proposed',
           ...(i.mechanisms !== undefined ? { unmodelled_mechanisms: i.mechanisms, gap_operands: i.gapOperands } : {}),
         },
       }))];
@@ -8340,7 +8376,7 @@ export function createAgentCapabilities(
           ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, likely_range_law: LIKELY_RANGE_LAW_NOTE } : {}),
           basis: i.basis,
           // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
-          stated_by: i.userStated ? 'user' : 'olumi_estimate',
+          stated_by: i.userStated ? 'user' : i.unverified ? 'origin_unverified' : 'olumi_estimate',
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
         ...(linkOps.length > 0 ? {
@@ -8351,6 +8387,7 @@ export function createAgentCapabilities(
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
         ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
+        ...(originUnverified.length > 0 ? { origin_unverified: originUnverified, origin_unverified_note: ORIGIN_UNVERIFIED_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(rangesNotRecorded.length > 0 ? {
           ranges_not_recorded: rangesNotRecorded,
@@ -9159,7 +9196,7 @@ export function createAgentCapabilities(
           return {
             path: o.path, option_id: option_id ?? '', factor_id: factor_id ?? '',
             value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
-            author: levelOpAuthor(o, decision.proposal) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+            author: levelCommitAuthor(o, decision.proposal),
             figure: levelFigureOf(o),
           };
         });

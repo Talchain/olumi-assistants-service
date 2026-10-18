@@ -169,10 +169,10 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
   const authorOf = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
-  // PENDING G3 (DL-3 05:3xZ ruling 4): the user wrote £59, so £62 is never theirs; with no own-estimate carrier it is never Olumi's
-  // either (PL-0048). Until the level writer carries an unknown author (G3, the PR after #3392) it is left out WITH the existing
-  // disclosure (`origin_unknown`, UNKNOWN_ORIGIN_DETAIL) and nothing is prepared; never silently dropped, never "you said".
-  it('RED (pending G3): the Agent marks £62 as the user\'s, but the user wrote £59 → never theirs: left out with the unknown-origin disclosure', async () => {
+  // The user wrote £59, so £62 is never theirs; with no own-estimate carrier it is never Olumi's either (PL-0048). It is not USER
+  // MATERIAL (written nowhere in their words), so G3 does not record it: it is left out WITH the existing disclosure (`origin_unknown`,
+  // UNKNOWN_ORIGIN_DETAIL) and nothing is prepared; never silently dropped, never "you said".
+  it('RED: the Agent marks £62 as the user\'s, but the user wrote £59 → never theirs, not user material: left out with the unknown-origin disclosure', async () => {
     const { caps, store } = setup();
     const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £59 at release.'), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown; refusal?: unknown; detail?: unknown };
     expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
