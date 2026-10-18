@@ -382,9 +382,10 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
         ? { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is reported as Olumi’s, disputed, or withdrawn in the user’s own messages, so it is not their statement and nothing was prepared.` }
         : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not in the user's own words, so nothing was prepared. Quote their words, verbatim, from any of their messages.` };
   }
-  // ⭐ LEAN CORE P2 (C2): words that END in another speaker's quoted words are a report unless the AI's own reading places the claim
-  // with the user (their instruction about the quoted words). That reading is never sufficient: every check here still applies.
-  if (form === 'describes' && given?.speaker !== 'user' && endsInQuotedSpeech(quote)) {
+  // ⭐ LEAN CORE P2 (C2): words that END in another speaker's quoted words are a report: quoting an entire report does not transfer its
+  // embedded claim (AIE). The AI's speaker reading only ever subtracts credit, so an explicit `user` reading never exempts it (Founder
+  // 05:46 evidence row: an explicit speaker=user requote of a whole reported line became a "your words" card).
+  if (form === 'describes' && endsInQuotedSpeech(quote)) {
     return { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” ends in another speaker's quoted words, so it reports their claim, not the user's own statement. Nothing was prepared. Their words stay as said.` };
   }
   const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;

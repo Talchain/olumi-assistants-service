@@ -134,6 +134,21 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
+  // Founder 05:46 evidence row (DL-3): the AI's EXPLICIT speaker=user reading of the whole reported line never makes it the user's card.
+  it('C2: an EXPLICIT speaker=user requote of the whole reported line still prepares no user-source card', async () => {
+    const f = fixture(row), message = `A colleague said: “${f.message}”`;
+    const w = await correctionWorld(f.graph, message);
+    const requote = await w.offer('propose_statement', { correction: { ...f.request, quote: message, speaker: 'user' } });
+    expect(requote, JSON.stringify(requote)).toMatchObject({ ok: false, mutated: false });
+    expect(requote.public_label ?? '').not.toContain('Recorded words — you:');
+    expect(requote).not.toHaveProperty('proposal_id');
+    expect(w.chips('propose_statement', requote)).toEqual([]);
+    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    // CONTRAST: the user's own complete line, read as theirs, still prepares the card.
+    const own = await correctionWorld(f.graph, f.message);
+    expect(await own.offer('propose_statement', { correction: { ...f.request, speaker: 'user' } })).toMatchObject({ ok: true, mutated: false });
+  });
+
   it('a complete current source line survives quote typography as an explicitly approved Olumi reading', async () => {
     const f = fixture(row), message = f.message.replace('; keep', ' — keep');
     const w = await correctionWorld(f.graph, message);
