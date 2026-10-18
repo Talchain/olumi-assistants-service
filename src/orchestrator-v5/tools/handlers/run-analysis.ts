@@ -2965,12 +2965,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id, runIdentityEvaluations);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
-    const chanceHeadline = runChanceHeadline({ ...response, run_id: runId, input_snapshot: runInputSnapshot }, graphForAnalysis);
+    const chanceHeadline = runChanceHeadline(factCandidate.result, graphForAnalysis);
     // A comparison share remains supporting data. No licensed chance means the truthful completion/caution template.
     const summaryHeadline = chanceHeadline === null ? null
       : chanceHeadline + (samplesReduced || statusOutcome.kind !== 'ok' ? ` ${template}` : '');
     const estimatesOnChance = chanceHeadline !== null && goalChanceScreenLinesForAgent(
-      { ...response, run_id: runId, input_snapshot: runInputSnapshot }, graphForAnalysis, true,
+      factCandidate.result, graphForAnalysis, true,
     ).some(line => line.olumi_estimate_link_count !== undefined);
     const inferredValueDisclosure = buildInferredValueDisclosure(
       estimatesOnChance ? [] : deriveOlumiAuthoredValues(graphForAnalysis, submittedIds),

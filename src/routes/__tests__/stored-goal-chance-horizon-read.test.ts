@@ -27,6 +27,9 @@ import { goalChanceWithheldForAgent } from '../../orchestrator-v5/agent-lane/goa
 import { analysisResultForAgent } from '../../orchestrator-v5/agent-lane/decision-sensitivity.js';
 import { buildAnalysisFromPriorFacts } from '../../orchestrator-v5/context/analysis-fallback.js';
 import { buildAnalysisResultBlock, composeToolCallResponse } from '../../orchestrator-v5/compose.js';
+import rs3 from '../../orchestrator-v5/agent-lane/__tests__/fixtures/rs3-conditional-dependence-8e9132fc.json';
+import { runChanceHeadline } from '../../orchestrator-v5/coaching/run-chance-headline.js';
+import { RUN_QUESTION_EVIDENCE_KEY } from '../../orchestrator-v5/tools/handlers/run-input-snapshot.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
@@ -54,6 +57,66 @@ beforeEach(() => {
   vi.clearAllMocks(); readRecent.mockResolvedValue([]); readFactsFor.mockResolvedValue([]);
   readFactsWithTurnFor.mockResolvedValue([]); readAnalysisInvalidatedAt.mockResolvedValue(null);
   readNewestRunDeliveryFor.mockResolvedValue(null);
+});
+
+const RS3_CONDITIONAL = '‘Buy faster scanners’: for ‘Orders picked per day’ being at least 500 orders per day, '
+  + 'the model’s two groups for whether ‘Faster scanner upgrade’ affects ‘Scanner rollout disruption’ '
+  + 'give less than 1% and 7%, under the recorded assumptions.';
+const CONDITIONAL_QUALIFIER = 'These are conditional model results, not one overall chance or an uncertainty interval.';
+function recordedRs3() {
+  const { type: _type, computed_against_hash: _hash, ...stored } = structuredClone(rs3.result);
+  return RunAnalysisHandlerFactSchema.parse({ fact_type: 'run_analysis', fact_version: 1, noop: false,
+    result: { scenario_id: rs3.scenario_id, ...stored, ...rs3.run,
+      input_snapshot: structuredClone(rs3.evidence.input_snapshot),
+      enrichment: { ...stored.enrichment,
+        [RUN_QUESTION_EVIDENCE_KEY]: structuredClone(rs3.evidence.evaluated_question) } } });
+}
+
+describe('RS3: the same recorded conditional pair keeps its meaning on summary and cold read', () => {
+  it('names the tested target and the two model groups without claiming an overall chance or ordering them', () => {
+    const run = recordedRs3(), source = JSON.stringify(run);
+    const line = goalChanceScreenLinesForAgent(run.result, rs3.graph, true)
+      .find(row => row.option_id === 'buy_faster_scanners');
+    expect(line?.figure).toBe('between less than 1% and 7%');
+    expect(line?.chance).toContain(RS3_CONDITIONAL);
+    expect(line?.chance).toContain(CONDITIONAL_QUALIFIER);
+    expect(line?.chance).not.toMatch(/between .*chance of|depends most|if absent|if present|if low|if high/u);
+    expect(line?.chance).not.toContain('three months');
+    expect(line?.depends).toContain('This relationship is an Olumi assumption.');
+    const summary = runChanceHeadline(run.result, rs3.graph);
+    expect(summary).toContain(RS3_CONDITIONAL);
+    expect(summary).toContain(CONDITIONAL_QUALIFIER);
+    expect(JSON.stringify(run)).toBe(source);
+    // Another entity's quantity/date cannot become this Run's tested target.
+    const withOtherQuantity = { ...structuredClone(rs3.graph), nodes: [
+      { id: 'unrelated_revenue', kind: 'factor', label: 'Revenue £2m as of 2026-09-01',
+        observed_state: { raw_value: 2000000, unit: 'GBP' } }, ...rs3.graph.nodes] };
+    expect(goalChanceScreenLinesForAgent(run.result, withOtherQuantity, true)
+      .find(row => row.option_id === 'buy_faster_scanners')?.chance).toBe(line?.chance);
+  });
+
+  it('the saved summary and cold cell read the same selected Run without borrowing current-goal framing', async () => {
+    const run = recordedRs3();
+    const line = goalChanceScreenLinesForAgent(run.result, rs3.graph, true)
+      .find(row => row.option_id === 'buy_faster_scanners');
+    const summary = runChanceHeadline(run.result, rs3.graph);
+    run.result.summary = summary!;
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [{ fact: run, fact_row_id: 'rs3-stored',
+      fact_created_at: run.result.computed_at, evaluated_scenario_revision: 2 }], total_count: 1 });
+    const read = await readScenarioAnalysis({ scenarioId: rs3.scenario_id, graph: rs3.graph as never,
+      revision: 2, requestId: 'rs3-conditional-cold-read' });
+    expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+    const result = read.analysis_result;
+    expect(result?.type).toBe('analysis_result');
+    if (result?.type !== 'analysis_result') throw new Error('the selected Run result is missing');
+    expect(result.summary).toBe(summary);
+    expect(read.canonical_analysis_view?.question?.calculated).toMatchObject({
+      quantity: { node_id: 'orders_picked_per_day' }, target: 500, comparator: '>=', unit: 'orders per day',
+    });
+    const cell = read.canonical_analysis_view?.options.find(row => row.option_id === 'buy_faster_scanners')?.cell;
+    expect(cell).toMatchObject({ kind: 'range', display: line?.figure, face: line?.chance });
+    expect(read.analysis_state?.leader_claim.permitted).toBe(false);
+  });
 });
 
 describe('stored supported chance re-licensed against the current graph', () => {

@@ -85,7 +85,7 @@ describe('canonical cell faces — moved copy, one existing chance composer', ()
     const input = args([licence, { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', option_ids: ['raise'], message: 'Not shown. The price link is not sized.' }, range]);
     const c = cell(project(input));
     expect(c.kind).toBe('range');
-    expect(c.face).toBe('‘Raise’: between about 23% and 90% chance of meeting your goal, in this model.');
+    expect(c.face).toBe('‘Raise’: the model’s two groups for how strongly ‘Price’ affects ‘Revenue’ give about 23% and 90%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval.');
     expect(c.face).toBe(goalChanceScreenLinesForAgent(input.currentResult, graph, true)[1]?.chance);
     expect(c.face.match(/\d+%/g)).toEqual(c.display.match(/\d+%/g));
   });

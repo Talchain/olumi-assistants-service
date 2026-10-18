@@ -32,21 +32,21 @@ const withoutRange = (body: Json): Json => {
   blockOf(out).enrichment.inference_warnings = blockOf(out).enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE');
   return out;
 };
-// Batch C: condition 6 of a correct chance / r1 item 6 (DL, 12 Oct) — a range rests on the same Olumi inputs as a point and
-// says so in the point's own words. The served UI lines predate that: each is the CAPTURED line with exactly the clause
-// inserted after "in this model" (its count is RC4's census, `goalChanceEstimateCounts`, as for a point). Nothing else moves.
-const withClause = (line: string, words: string): string => {
-  const at = line.indexOf(', in this model.');
-  if (at < 0) throw new Error(`no "in this model" in: ${line}`);
-  return `${line.slice(0, at)}, in this model, using Olumi's estimates for ${words} (see Check estimates).${line.slice(at + ', in this model.'.length)}`;
+// AIE 3694547a + 60cf911e: these legacy captures retain the original independently rounded
+// pair and RC4 source counts; the approved words describe two groups without inventing a tested target.
+const CONDITIONAL_SCREEN: Record<string, string[]> = {
+  'unseen-b4-1': [
+    "‘Fourth Shop in Clifton’: the model’s two groups for how strongly ‘Fourth shop operating status’ affects ‘Fourth shop monthly profit contribution’ give about 4% and 55%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. Using Olumi's estimates for 6 starting values and 6 relationships (see Check estimates). This link is not sized in the model yet.",
+    "‘Wholesale to Offices’: the model’s two groups for how strongly ‘Wholesale sales effort’ affects ‘Wholesale incremental monthly gross profit’ give less than 1% and 5%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. Using Olumi's estimates for 6 starting values and 6 relationships (see Check estimates). This link is not sized in the model yet.",
+  ],
+  'unseen-b4-2': [
+    "‘Fourth Shop in Clifton’: the model’s two groups for how strongly ‘Fourth shop active’ affects ‘Fourth-shop operating profit’ give about 9% and 58%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. Using Olumi's estimates for 6 starting values and 10 relationships (see Check estimates). This link is not sized in the model yet.",
+    "‘Wholesale to Offices’: the model’s two groups for how strongly ‘Wholesale sales active’ affects ‘Wholesale gross profit’ give about 1% and 37%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. Using Olumi's estimates for 6 starting values and 10 relationships (see Check estimates). This link is not sized in the model yet.",
+  ],
+  'unseen-b3-2': [
+    "‘Fourth shop in Clifton’: the model’s two groups for how strongly ‘Fourth shop operating’ affects ‘Fourth-shop monthly operating profit’ give about 5% and 50%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. Using Olumi's estimates for 6 starting values, 2 option settings and 5 relationships (see Check estimates). This link is not sized in the model yet.",
+  ],
 };
-// ⛔ RE-SCOPE 2 (R5-1/R5-2, DL AMEND: three provenance states) — CHANGED EXPECTATION for the two 01a2b27 captures: their six
-// factor levels upstream of the goal are stamped `cee_inference` with NO extraction type. F1 defers that stamp to the extraction
-// type and so read them `unknown`: e58b8dbd counted nothing and said nothing ("zero estimates"). `cee_inference` is a
-// recognised AI source (AIE R5 item 1; the UI's own `classifyValueProvenance` reads it 'ai'): six starting values, Olumi's.
-// b3-2 (`cee_inference` + `inferred`) is unchanged.
-const RANGE_INPUTS: Record<string, string> = { 'unseen-b4-1': '6 starting values and 6 relationships', 'unseen-b4-2': '6 starting values and 10 relationships', 'unseen-b3-2': '6 starting values, 2 option settings and 5 relationships' };
-const servedNow = (capture: string): string[] => screenFor(capture).map((l) => withClause(l, RANGE_INPUTS[capture]!));
 // …and, once the screen carries Olumi's count, RC4's existing rule applies to the range as to a point: narration never
 // supplies k, so the served B4-1 narrator's own count sentence ("16 underlying values …") is taken out (narratorCountGuard).
 const B4_1_NARRATOR_COUNT = 'The analysis ran, but it cannot put an option forward: profit-generating links remain unsized, and 16 underlying values are Olumi’s assumptions, not yours.\n\n';
@@ -78,11 +78,18 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     expect(lines[0]!.depends).toBe('');
     expect(whole(lines[0]!)).not.toMatch(/affects|assumed|best|leader/);
   });
-  it('served ranges (b4-1, b4-2, b3-2 readback): every line equals the line the UI drew', () => {
-    expect(linesOf(B4_RUN1).map(whole)).toEqual(servedNow('unseen-b4-1'));
-    expect(linesOf(B4_RUN2).map(whole)).toEqual(servedNow('unseen-b4-2'));
-    expect(goalChanceScreenLinesForAgent(B3_READ.analysis_result, B3_READ.graph, true).map(whole)).toEqual(servedNow('unseen-b3-2'));
+  it('legacy served pairs (b4-1, b4-2, b3-2 readback): exact conditional words preserve every rounded figure and source count', () => {
+    expect(linesOf(B4_RUN1).map(whole)).toEqual(CONDITIONAL_SCREEN['unseen-b4-1']);
+    expect(linesOf(B4_RUN2).map(whole)).toEqual(CONDITIONAL_SCREEN['unseen-b4-2']);
+    expect(goalChanceScreenLinesForAgent(B3_READ.analysis_result, B3_READ.graph, true).map(whole)).toEqual(CONDITIONAL_SCREEN['unseen-b3-2']);
     expect(screenFor('unseen-b4-1')).toHaveLength(2);
+    for (const [capture, lines] of [
+      ['unseen-b4-1', linesOf(B4_RUN1)], ['unseen-b4-2', linesOf(B4_RUN2)],
+      ['unseen-b3-2', goalChanceScreenLinesForAgent(B3_READ.analysis_result, B3_READ.graph, true)],
+    ] as const) {
+      expect(lines.map(row => row.figure)).toEqual(screenFor(capture).map(row => row.match(/between .*?% and .*?%/u)?.[0]));
+      expect(lines.every(row => !row.chance.includes('for ‘') && !row.chance.includes('chance of meeting your goal'))).toBe(true);
+    }
   });
 
   it('served points: B5 and prod cut-6 stay byte-identical; RC4 excludes the validated arithmetic definition', () => {
@@ -130,7 +137,8 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     const body = clone(B4_RUN1);
     const rec = warning(body, 'GOAL_CHANCE_RANGE');
     rec.range_by_option[rec.option_ids[0]].kind = 'link_existence';
-    expect(linesOf(body)[0]!.depends).toBe('It depends most on whether ‘Fourth shop operating status’ affects ‘Fourth shop monthly profit contribution’ at all, which Olumi assumed.');
+    expect(linesOf(body)[0]!.chance).toBe('‘Fourth Shop in Clifton’: the model’s two groups for whether ‘Fourth shop operating status’ affects ‘Fourth shop monthly profit contribution’ give about 4% and 55%, under the recorded assumptions. These are conditional model results, not one overall chance or an uncertainty interval. Using Olumi\'s estimates for 6 starting values and 6 relationships (see Check estimates).');
+    expect(linesOf(body)[0]!.depends).toBe('This relationship is an Olumi assumption.');
   });
 });
 

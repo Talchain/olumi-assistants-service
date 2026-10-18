@@ -5,7 +5,8 @@ import { olumiAssumedRangeLine, olumiAssumedTeamRange, shareOptionEstimateWords 
 /** Licensed screen facts and the retained count check. The AI owns reply wording. */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { sayDate } from '../goal-target/deadline-date.js';
-import { shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE, STATIC_MODEL_SCOPE_NOTE } from '../goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, shortfallNoteLabel, UNVERIFIED_SOURCES_NOTE, STATIC_MODEL_SCOPE_NOTE, type SelectedRunEvidence } from '../goal-target/goal-chance-licence.js';
+import { targetChanceWords } from '../goal-target/goal-target-basis.js';
 import { foldQuotes } from './quote-normalisation.js';
 import { narratorCountGuard, type EstimateCountRecord } from './olumi-estimates-feeding-result.js';
 import { goalChanceEstimateCounts, goalChanceEstimateLinkCount, olumiEstimateWords, type GoalChanceEstimateCounts } from './goal-chance-estimate-attribution.js';
@@ -43,7 +44,7 @@ function rangeCensusOf(facts: ReturnType<typeof goalChanceFactsForAgent>, graph:
 }
 
 /** Pure extraction of the existing sentence composer; consumers keep their own label/narration gates. */
-function composeGoalChanceLines(result: unknown, graph: unknown, current: boolean): {
+function composeGoalChanceLines(result: unknown, graph: unknown, current: boolean, runEvidence?: SelectedRunEvidence): {
   points: ComposedChanceLine[]; ranges: ComposedChanceLine[]; pointsOwed: boolean;
 } {
   const facts = goalChanceFactsForAgent(result, graph, current);
@@ -127,11 +128,23 @@ function composeGoalChanceLines(result: unknown, graph: unknown, current: boolea
             : `${prefix}${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
         depends: '' }];
     }
-    const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';
-    const link = d.depends_on.kind === 'link_strength'
-      ? `how strongly ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’, which isn’t sized in the model yet.`
-      : `whether ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’ at all, which Olumi assumed.`;
-    return line(id, d.range, `${lead} ${link}`, undefined, undefined, false, rangeInputsOf(id));
+    const calculated = deriveRunQuestion({ storedResult: result, runEvidence }).calculated;
+    const testedTarget = calculated !== null && calculated.quantity.label !== undefined
+      && calculated.target !== undefined && calculated.comparator !== undefined && calculated.unit !== undefined
+      && (calculated.frame === 'level' || calculated.frame === 'change_abs' || calculated.frame === 'change_rel')
+      ? targetChanceWords({ label: calculated.quantity.label, value: calculated.target, comparator: calculated.comparator,
+        unit: calculated.unit, frame: calculated.frame }) : undefined;
+    const label = facts.goal_chance_licence?.option_labels_by_option?.[id] ?? labels.get(id);
+    const prefix = label === undefined ? '' : `‘${label}’: `;
+    const inputs = rangeInputsOf(id), estimates = shareOptionEstimateWords(graph, id);
+    const group = d.depends_on.kind === 'link_strength' ? 'how strongly' : 'whether';
+    return [{ option_id: id, label, figure: d.range,
+      chance: `${prefix}${testedTarget === undefined ? '' : `for ${testedTarget}, `}the model’s two groups for ${group} ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’ give ${d.range.slice('between '.length)}, under the recorded assumptions.`
+        + ' These are conditional model results, not one overall chance or an uncertainty interval.'
+        + (estimates === '' ? '' : ` ${estimates}.`)
+        + (inputs === undefined ? '' : ` Using Olumi's estimates for ${inputs.words} (see Check estimates).`),
+      depends: d.depends_on.kind === 'link_strength' ? 'This link is not sized in the model yet.' : 'This relationship is an Olumi assumption.',
+      ...(inputs === undefined ? {} : { olumi_estimate_link_count: inputs.links }) }];
   });
   const scope = facts.goal_chance_notes?.includes(STATIC_MODEL_SCOPE_NOTE) === true;
   const scoped = (lines: ComposedChanceLine[]): ComposedChanceLine[] => scope
@@ -207,8 +220,8 @@ export function goalChanceNotesForAgent(result: unknown, graph: unknown, current
 }
 
 /** Every licensed cell's SAME sentence, including point forms not owed in narration. */
-export function goalChanceCellFacesForAgent(result: unknown, graph: unknown, current: boolean): ReadonlyMap<string, string> {
-  const { points, ranges } = composeGoalChanceLines(result, graph, current);
+export function goalChanceCellFacesForAgent(result: unknown, graph: unknown, current: boolean, runEvidence?: SelectedRunEvidence): ReadonlyMap<string, string> {
+  const { points, ranges } = composeGoalChanceLines(result, graph, current, runEvidence);
   return new Map([...points, ...ranges].map(line => [line.option_id, line.chance]));
 }
 
