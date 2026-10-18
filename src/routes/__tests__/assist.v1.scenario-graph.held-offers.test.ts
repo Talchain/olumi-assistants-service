@@ -624,3 +624,15 @@ vi.mock('../../utils/supabase-user-jwt.js', async () => ({
   looksLikeJwt: () => true,
   verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
 }));
+
+// ⭐ Codex BLOCK on #3424 @db2376d0 (independent probe, adopted): the graph read gives a review card no approve authority.
+describe('graph read: a card kept for review', () => {
+  it('a review carrier back on the original graph never returns a legacy approve offer', async () => {
+    const { heldCardForReview } = await import('../../orchestrator-v5/agent-lane/proposal-object/still-applies.js');
+    latest = [heldCardForReview(offered, 'a-different-model')];
+    const body = await heldRead();
+    const pid = proposalOf(offered).proposal_id;
+    expect(body.proposal_fields.proposals.find((r: { proposal_id: string }) => r.proposal_id === pid)?.review_action?.id, 'control: the review card is listed').toBe(`agent-review-proposal:${pid}`);
+    expect(body, 'no second approve authority on the same read').not.toHaveProperty('held_proposal_offers');
+  });
+});
