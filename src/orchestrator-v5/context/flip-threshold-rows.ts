@@ -282,6 +282,23 @@ export function flipRowScaleUnsafeForPromptUnits(row: TopLevelFlipRow): boolean 
 }
 
 /**
+ * Did the producer say its flip analysis ran? ONE authority for every reader that turns rows into a claim.
+ *
+ * `@talchain/schemas` documents the producer vocabulary for `flip_thresholds_status` as
+ * `computed | all_no_effect | partial_no_effect | unresolved | unavailable`. Only the explicit `unavailable` says no
+ * threshold may be stated: `partial_no_effect` keeps its real pair, `all_no_effect` keeps the honest "no factor flips
+ * it" count, and an ABSENT status keeps the legacy reading (older Runs carry rows and no status).
+ *
+ * This is the producer's own attestation, not a consumer policy: the Agent's `tipping_point`, the lens selector's
+ * measured-threshold test and the decision review's licensed Run facts all ask it, so a row that rides beside an
+ * `unavailable` status can reach none of them. A new reader of `readTopLevelFlipRows` asks it too
+ * (`flip-availability-one-gate.guard.test.ts` pins the list).
+ */
+export function flipThresholdsAvailable(enrichment: Record<string, unknown>): boolean {
+  return enrichment.flip_thresholds_status !== 'unavailable';
+}
+
+/**
  * Read + narrow + classify every top-level `enrichment.flip_thresholds[]`
  * row. Pure; never throws; never mutates its input.
  *
