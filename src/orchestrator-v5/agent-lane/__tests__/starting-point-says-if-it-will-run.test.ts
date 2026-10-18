@@ -40,10 +40,11 @@ const capsOver = (graph: unknown) => {
  * #2242, when 100 happened to read as 1.0 of a frame of 100: a coincidence, not a switch (served reach 0 of 2,160).
  * The graded 100 shape is pinned on its own below.
  */
+// LEAN CORE (#3392, PL-0048): the Agent's own starting levels (no user words in this turn) carry its own-estimate carrier.
 const levels = (testPrice: number, aiLevel = 1) => [
-  { option_label: '£59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available' },
-  { option_label: 'Test £59 with AI release', factor_label: 'Pro plan price', value: testPrice, basis: 'the test price' },
-  { option_label: 'Test £59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available' },
+  { option_label: '£59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available', user_stated: false },
+  { option_label: 'Test £59 with AI release', factor_label: 'Pro plan price', value: testPrice, basis: 'the test price', user_stated: false },
+  { option_label: 'Test £59 with AI release', factor_label: 'AI feature availability', value: aiLevel, basis: 'the release makes it available', user_stated: false },
 ];
 type View = { checked: boolean; may_run?: boolean; needs_from_user: { message: string }[]; reason?: string };
 type G = { nodes: { id: string; kind: string; observed_state?: { value: number; raw_value: number; source: string; extractionType: string } }[]; edges: { from: string; to: string }[] };

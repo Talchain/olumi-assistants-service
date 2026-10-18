@@ -115,7 +115,7 @@ async function built() {
 }
 
 async function adopt(caps: ReturnType<typeof createAgentCapabilities>, factor_label: string, value: number) {
-  const proposed = await caps.proposeAssumptions({ ...ctx, user_text: `${factor_label} is ${value} FTE.` }, { assumptions: [{ user_stated: true, factor_label, value, unit: 'FTE', basis: 'the user said so' }] });
+  const proposed = await caps.proposeAssumptions({ ...ctx, user_text: `${factor_label} is ${value} FTE.` }, { assumptions: [{ user_stated: true, quote: `${factor_label} is ${value} FTE`, factor_label, value, unit: 'FTE', basis: 'the user said so' }] });
   expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
   return caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
 }
@@ -165,7 +165,7 @@ describe("the Agent's own option-level reader honours the same range", () => {
     const { caps } = await built();
     const r = await caps.proposeOptionInterventions(ctx, {
       // A LINKED pair: the proposer (like the write) refuses a factor the option is not wired to.
-      interventions: [{ option_label: 'Hire Two Developers', factor_label: 'Developer headcount', value: 6, basis: 'one of the two hires starts later' }],
+      interventions: [{ option_label: 'Hire Two Developers', factor_label: 'Developer headcount', value: 6, basis: 'one of the two hires starts later', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const [iv] = r.interventions as { recorded_on_model_scale: number; model_range: number | null; range_taken_from_your_figure?: number }[];

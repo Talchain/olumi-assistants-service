@@ -127,6 +127,11 @@ describe('the one rule: whose value it is', () => {
     const bare = userStated({ quote: 'between 4 and 6 a day', low: 4, high: 6, unit: 'kg a day' }, texts('Waste is between 4 and 6 a day.'), SUBJECT);
     expect(bare).toMatchObject({ origin: 'human', unitIsUsers: false, statement: { low: 4, high: 6 } });
     expect(bare.origin === 'human' && bare.statement.unit).toBeUndefined();
+    // A unit of no known family ("share per month"): a written PERCENTAGE grounds its 0–1 fraction (the estate's figure rule)…
+    expect(userStated({ quote: 'churn falls to 6%', value: 0.06, unit: 'share per month' }, texts('With this, churn falls to 6%.'), SUBJECT))
+      .toMatchObject({ origin: 'human', statement: { low: 0.06, high: 0.06 } });
+    // …never a plain number's fraction.
+    expect(userStated({ quote: 'we add 6 a month', value: 0.06, unit: 'share per month' }, texts('Then we add 6 a month.'), SUBJECT).origin).toBe('unknown');
     // A money unit's own scale letter reads the written amount: "£54k" is 54 in £k.
     expect(userStated({ quote: 'a budget of £54k', value: 54, unit: '£k' }, texts('We have a budget of £54k this year.'), SUBJECT))
       .toMatchObject({ origin: 'human', unitIsUsers: true, statement: { low: 54, high: 54, unit: '£k' } });
@@ -163,6 +168,9 @@ describe('the one rule: whose value it is', () => {
     // CONTRAST: a bound on the SAME figure in another sentence of the line is not this span's bound.
     const line = texts('We need attendance of at least 55% by March. A manager thinks more staff could add between 40 and 55 points.');
     expect(userStated({ quote: 'A manager thinks more staff could add between 40 and 55 points.', low: 40, high: 55 }, line, SUBJECT).origin).toBe('human');
+    // CONTRAST: a comparator on a LATER writing of the same figure in the sentence is that writing's, not this span's.
+    const twice = texts('Set the new price to £59 under “£59 for new customers”.');
+    expect(userStated({ quote: 'to £59 under', value: 59, unit: '£' }, twice, SUBJECT).origin).toBe('human');
   });
 
   it('sign reads from the span: a net loss states its negative; a gross count never does', () => {

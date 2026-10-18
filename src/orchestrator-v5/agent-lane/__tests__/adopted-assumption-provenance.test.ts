@@ -110,8 +110,8 @@ function fakeProduct() {
 
 const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
 const LEVELS = [
-  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires' },
-  { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
+  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', user_stated: false },
+  { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire', user_stated: false },
 ];
 
 async function adoptOlumisStartingPoint() {
@@ -177,7 +177,7 @@ describe('adopting Olumi’s starting point stores its values as the user’s AS
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeStartingPoint(ctx, {
-      assumptions: [...ASSUMPTIONS, { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+      assumptions: [...ASSUMPTIONS, { user_stated: true, factor_label: 'Team size', value: 6, quote: ctx.user_text, unit: 'FTE', basis: 'the user said six', revise: true }],
       option_levels: LEVELS,
     } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
@@ -277,7 +277,7 @@ describe('values-only: a revision the USER named keeps the writer’s path and s
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Team size', value: 6, quote: ctx.user_text, unit: 'FTE', basis: 'the user said six', revise: true }],
     } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(store.get(String(proposed.proposal_id))!.provenance.authored_by).toBe('user_stated');

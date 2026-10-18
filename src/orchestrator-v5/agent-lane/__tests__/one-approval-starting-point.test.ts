@@ -139,8 +139,8 @@ function fakeProduct(opts: {
 
 const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
 const LEVELS = [
-  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires' },
-  { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
+  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', user_stated: false },
+  { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire', user_stated: false },
 ];
 
 /** Propose on a clean model, THEN arm the foreign edit relative to the authorisation. */
@@ -190,8 +190,8 @@ describe('propose_starting_point', () => {
       { user_stated: false, factor_label: 'Capacity support', value: 10, unit: 'index points (0-100)', basis: 'uncertain support' },
       { user_stated: false, factor_label: 'Morale', value: 70, unit: 'index points (0-100)', basis: 'uncertain morale' },
     ], option_levels: [...LEVELS, ...LEVELS.flatMap(level => [
-      { option_label: level.option_label, factor_label: 'Capacity support', value: 10, basis: 'support held unchanged' },
-      { option_label: level.option_label, factor_label: 'Morale', value: 70, basis: 'morale held unchanged' },
+      { option_label: level.option_label, factor_label: 'Capacity support', value: 10, basis: 'support held unchanged', user_stated: false },
+      { option_label: level.option_label, factor_label: 'Morale', value: 70, basis: 'morale held unchanged', user_stated: false },
     ])] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const id = String(r.proposal_id), approved = JSON.stringify(store.get(id)!.operations);
@@ -303,7 +303,7 @@ describe('propose_starting_point', () => {
     const put = vi.spyOn(store, 'put');
     const r = await caps.proposeStartingPoint(ctx, {
       assumptions: [{ user_stated: false, factor_label: 'Tech leads hired', value: 3, unit: 'FTE', basis: 'three leads across the org today' }],
-      option_levels: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' }],
+      option_levels: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire', user_stated: false }],
     });
     const compound = put.mock.calls.map(([p]) => p).find(p => p.operations.some(o => o.op === 'set_factor_value') && p.operations.some(o => o.op === 'set_option_intervention'));
     expect(compound, 'the SAME complete bundle is prepared before deciding whether to offer').toBeDefined();

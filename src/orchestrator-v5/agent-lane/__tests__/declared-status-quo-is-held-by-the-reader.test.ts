@@ -127,10 +127,10 @@ function fakeProduct(nodes0: Node[], edges: Edge[]) {
 }
 
 const ORDINARY_LEVELS = [
-  { option_label: 'Raise Pro to £59', factor_label: 'Pro plan price', value: 59, basis: 'the new price' },
-  { option_label: 'Raise Pro to £59', factor_label: '£59 price exposure', value: 1, basis: 'every customer' },
-  { option_label: 'Grandfather current customers at £49', factor_label: 'Pro plan price', value: 59, basis: 'new customers pay £59' },
-  { option_label: 'Grandfather current customers at £49', factor_label: '£59 price exposure', value: 0.4, basis: 'new customers only' },
+  { option_label: 'Raise Pro to £59', factor_label: 'Pro plan price', value: 59, basis: 'the new price', user_stated: false },
+  { option_label: 'Raise Pro to £59', factor_label: '£59 price exposure', value: 1, basis: 'every customer', user_stated: false },
+  { option_label: 'Grandfather current customers at £49', factor_label: 'Pro plan price', value: 59, basis: 'new customers pay £59', user_stated: false },
+  { option_label: 'Grandfather current customers at £49', factor_label: '£59 price exposure', value: 0.4, basis: 'new customers only', user_stated: false },
 ];
 const ORDINARY_PATHS = [
   `grandfather_at_49::${EXPOSURE}`, `grandfather_at_49::${PRICE}`,
@@ -191,7 +191,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the current price' }],
+      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the current price', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(r.refusal).toBe('nothing_to_set');
@@ -209,7 +209,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the user: it stays at £49', user_stated: true }],
+      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, quote: ctx.user_text, basis: 'the user: it stays at £49', user_stated: true }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(r.refusal).toBe('nothing_to_set');
@@ -227,7 +227,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 45, basis: 'the user: carrying on means a £45 promo', user_stated: true }],
+      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 45, quote: ctx.user_text, basis: 'the user: carrying on means a £45 promo', user_stated: true }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('levels_not_accepted');
@@ -245,8 +245,8 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
       assumptions: [],
       option_levels: [
         ...ORDINARY_LEVELS,
-        { option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the current price' },
-        { option_label: KEEP_LABEL, factor_label: '£59 price exposure', value: 0, basis: 'nobody pays £59' },
+        { option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the current price', user_stated: false },
+        { option_label: KEEP_LABEL, factor_label: '£59 price exposure', value: 0, basis: 'nobody pays £59', user_stated: false },
       ],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -329,7 +329,7 @@ describe('writer → reader: what admission mints for a declared status quo is w
     const p = fakeProduct(g.nodes, g.edges);
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the current price' }],
+      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the current price', user_stated: false }],
     });
     expect(r.refusal, JSON.stringify(r)).toBe('nothing_to_set');
     expect(r.levels_not_accepted).toEqual([expect.objectContaining({ option: KEEP_LABEL, factor: 'Pro plan price', value: 49 })]);
@@ -351,7 +351,7 @@ describe('(2) the idiom path is unchanged — an UNDECLARED idiom-labelled statu
     const sp = await caps.proposeStartingPoint(ctx, { assumptions: [], option_levels: ORDINARY_LEVELS });
     expect(sp.ok, JSON.stringify(sp)).toBe(true);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Maintain current pricing', factor_label: 'Pro plan price', value: 49, basis: 'as now' }],
+      interventions: [{ option_label: 'Maintain current pricing', factor_label: 'Pro plan price', value: 49, basis: 'as now', user_stated: false }],
     });
     expect(r.refusal).toBe('nothing_to_set');
   });
@@ -366,7 +366,7 @@ describe('(3) controls that must stay NOT held', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(fakeProduct(nodes, edges).d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Use contractors', factor_label: 'Pro plan price', value: 55, basis: 'a guess' }],
+      interventions: [{ option_label: 'Use contractors', factor_label: 'Pro plan price', value: 55, basis: 'a guess', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual([`use_contractors::${PRICE}`]);
@@ -390,7 +390,7 @@ describe('(3) controls that must stay NOT held', () => {
       const store = new ProposalStore();
       const caps = createAgentCapabilities(fakeProduct(nodes, edges).d, store);
       const r = await caps.proposeOptionInterventions(ctx, {
-        interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'as now' }],
+        interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'as now', user_stated: false }],
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual([`${KEEP}::${PRICE}`]);
@@ -416,8 +416,8 @@ describe('(3) controls that must stay NOT held', () => {
     // The ordinary pair takes an unflagged level; the repair pair refuses one.
     const r = await caps.proposeOptionInterventions(ctx, {
       interventions: [
-        { option_label: KEEP_LABEL, factor_label: '£59 price exposure', value: 0.1, basis: 'the user: some already pay £59' },
-        { option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'as now' },
+        { option_label: KEEP_LABEL, factor_label: '£59 price exposure', value: 0.1, basis: 'the user: some already pay £59', user_stated: false },
+        { option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'as now', user_stated: false },
       ],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);

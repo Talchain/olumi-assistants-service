@@ -67,7 +67,7 @@ async function approveRevision(graph: typeof served, writerRefuses: boolean | ((
       : writerRefuses ? { status: 'refused', reason: 'canonical_graph_unavailable' } : door(input);
   };
   const caps = createAgentCapabilities(p.d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: port });
-  const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their contacts’ capacity', revise: true }] } as never);
+  const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, quote: ctx.user_text, unit: 'connections/month', basis: 'their contacts’ capacity', revise: true }] } as never);
   expect(r.ok, JSON.stringify(r)).toBe(true);
   const unpressed = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
   expect(unpressed).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
@@ -159,7 +159,7 @@ describe('no "Record your figure" on a base the writer would refuse (DL 59240613
   const propose = async (graph: typeof served) => {
     const p = product(graph);
     const caps = createAgentCapabilities(p.d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: levelsPortOver(p.d) });
-    return caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their contacts’ capacity', revise: true }] } as never);
+    return caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, quote: ctx.user_text, unit: 'connections/month', basis: 'their contacts’ capacity', revise: true }] } as never);
   };
 
   it('RED: the served base (a stored link at mean 1.67) gets no proposal, so no card', async () => {

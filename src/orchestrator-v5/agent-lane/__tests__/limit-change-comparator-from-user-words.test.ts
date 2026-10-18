@@ -12,6 +12,7 @@
  * figure changes (the tool's own words: "Omit it for a new figure alone"). A comparator the user DID write against the
  * limit's direction ("at least £30,000" on an at-most limit) is still refused and asked about.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -30,7 +31,10 @@ async function propose(userText: string, extra: Record<string, unknown>) {
     : { status: 500, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore());
   const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400c6', authenticated_user_id: null, request_id: 'r', user_text: userText, user_turn_text: userText };
-  return (await dispatchTool('propose_limit_change', JSON.stringify({ limit_label: LIMIT.label, operator: '<=', new_value: 30000, unit: 'GBP', rationale: userText, ...extra }), ctx as never, caps)) as Record<string, unknown>;
+  // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+  const quote = quoteOfFigure(30000, 'GBP', userText);
+  return (await dispatchTool('propose_limit_change', JSON.stringify({ limit_label: LIMIT.label, operator: '<=', new_value: 30000, unit: 'GBP', rationale: userText,
+    ...(quote !== null ? { quote } : {}), ...extra }), ctx as never, caps)) as Record<string, unknown>;
 }
 
 describe('⭐ a limit’s comparator changes only when the user’s own words say one', () => {

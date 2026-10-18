@@ -90,8 +90,8 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
-      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
+      { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two', user_stated: false },
+      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one', user_stated: false },
     ] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const ops = store.get(String(r.proposal_id))!.operations.map((o) => `${o.op}:${o.path}`);
@@ -106,8 +106,8 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
-      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
+      { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two', user_stated: false },
+      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one', user_stated: false },
     ] });
     const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
@@ -127,7 +127,7 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
+      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one', user_stated: false },
     ] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
@@ -141,7 +141,7 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
+      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one', user_stated: false },
     ] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
@@ -163,9 +163,9 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     const r = await caps.proposeStartingPoint(ctx, {
       assumptions: [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team' }],
       option_levels: [
-        { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
-        { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
-        { option_label: 'Internal Lead Trial', factor_label: 'Coordination load', value: 30, basis: 'a trial lead eases load' },
+        { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two', user_stated: false },
+        { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one', user_stated: false },
+        { option_label: 'Internal Lead Trial', factor_label: 'Coordination load', value: 30, basis: 'a trial lead eases load', user_stated: false },
       ],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);

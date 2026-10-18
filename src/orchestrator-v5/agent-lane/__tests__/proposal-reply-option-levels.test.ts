@@ -27,9 +27,9 @@ const A06 = {
   base_revision: 'a'.repeat(64),
   interventions: [
     { option: 'Improve trial-to-Pro conversion', factor: 'Pro paying subscribers', value: 1200, unit: 'subscribers', recorded_on_model_scale: 0.24, model_range: 5000,
-      basis: 'Olumi assumption: a 20% increase from the current assumed 1,000 Pro subscribers, representing a material but achievable conversion improvement.', stated_by: 'olumi_estimate' },
+      basis: 'Olumi assumption: a 20% increase from the current assumed 1,000 Pro subscribers, representing a material but achievable conversion improvement.', stated_by: 'olumi_estimate', user_stated: false },
     { option: 'Retention intervention for at-risk accounts', factor: 'Monthly churn', value: 2, unit: '%', recorded_on_model_scale: 0.02, model_range: 100,
-      basis: 'Olumi assumption: reducing the current assumed 3% monthly churn by one percentage point for at-risk-account retention work.', stated_by: 'olumi_estimate' },
+      basis: 'Olumi assumption: reducing the current assumed 3% monthly churn by one percentage point for at-risk-account retention work.', stated_by: 'olumi_estimate', user_stated: false },
   ],
   note: 'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call authorise_change with this proposal_id once they agree.',
 };
@@ -83,7 +83,8 @@ describe('⭐ PJ-C1: an option-levels proposal is answered from its own result',
     const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' });
     const d: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes, edges: [e('opt_cohort', 'fac_price'), e('opt_raise', 'fac_price'), e('fac_price', 'goal_mrr')] }, graph_hash: 'h0' } });
     const args = { whole_request: true, interventions: [
-      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true,
+        quote: 'use £54 per month as its Pro plan monthly price' },
     ] };
     const turn = async (message: string) => {
       const caps = createAgentCapabilities(d, new ProposalStore());
@@ -121,7 +122,7 @@ describe('⭐ PJ-C1: an option-levels proposal is answered from its own result',
     const text = `For "${COHORT}": use £54 per month as its Pro plan monthly price.`;
     const caps = createAgentCapabilities(d, new ProposalStore());
     const r = await caps.proposeOptionInterventions({ scenario_id: 's1', authenticated_user_id: null, request_id: 'r', user_text: text, user_turn_text: text } as never, { interventions: [
-      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, quote: text, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
       { option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, unit: '£ per month', basis: 'Olumi assumption: the raise the decision names', user_stated: false },
     ] });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));

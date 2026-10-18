@@ -171,7 +171,8 @@ describe('the Agent sets the goal\'s success target the user stated, through the
   it('⭐ RED: "300 Pro paying subscribers" is never a £300 limit on the Pro plan price → refused figure_not_stated', async () => {
     const w = world(withSubscribers({ goal_constraints: [PRICE_LIMIT] }));
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf('We have 300 Pro paying subscribers.'),
-      { limit_label: 'Pro plan price', operator: '<=', new_value: 300, unit: '£', rationale: 'x' });
+      // The AI cites the user's whole sentence (USER_QUOTE, #3392): negatives are refused on the cited words themselves.
+      { limit_label: 'Pro plan price', operator: '<=', new_value: 300, unit: '£', quote: 'We have 300 Pro paying subscribers.', rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'figure_not_stated' }));
   });
 
@@ -197,20 +198,23 @@ describe('the Agent sets the goal\'s success target the user stated, through the
   ])('⭐ RED (door): %s → the Release investment limit change is prepared', async (_n, said) => {
     const w = world(withBudget());
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf(said),
-      { limit_label: 'Release investment', operator: '<=', new_value: 30000, unit: 'GBP', rationale: 'x' });
+      // The AI cites the user's whole sentence (USER_QUOTE, #3392): negatives are refused on the cited words themselves.
+      { limit_label: 'Release investment', operator: '<=', new_value: 30000, unit: 'GBP', quote: said, rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
   });
   it('CONTRAST (door): "£30,000 of Advertising spend" is never the Release investment limit → figure_not_stated', async () => {
     const w = world(withBudget());
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf('We put £30,000 of Advertising spend into it.'),
-      { limit_label: 'Release investment', operator: '<=', new_value: 30000, unit: 'GBP', rationale: 'x' });
+      // The AI cites the user's whole sentence (USER_QUOTE, #3392): negatives are refused on the cited words themselves.
+      { limit_label: 'Release investment', operator: '<=', new_value: 30000, unit: 'GBP', quote: 'We put £30,000 of Advertising spend into it.', rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_stated' }));
   });
 
   it('CONTROL: "cap the Pro plan price at £120" → the limit change is prepared', async () => {
     const w = world(withSubscribers({ goal_constraints: [PRICE_LIMIT] }));
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLimitChange!(ctxOf('Cap the Pro plan price at £120.'),
-      { limit_label: 'Pro plan price', operator: '<=', new_value: 120, unit: '£', rationale: 'x' });
+      // The AI cites the user's whole sentence (USER_QUOTE, #3392): negatives are refused on the cited words themselves.
+      { limit_label: 'Pro plan price', operator: '<=', new_value: 120, unit: '£', quote: 'Cap the Pro plan price at £120.', rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
   });
 

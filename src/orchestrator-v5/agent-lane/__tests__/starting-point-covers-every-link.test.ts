@@ -69,11 +69,11 @@ function fakeProduct() {
 
 const VALUES = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'five people, one lead' }];
 const PARTIAL_LEVELS = [
-  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
-  { option_label: 'Stage Hiring After Review', factor_label: 'Team size', value: 5, basis: 'no hires in stage one' },
+  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two', user_stated: false },
+  { option_label: 'Stage Hiring After Review', factor_label: 'Team size', value: 5, basis: 'no hires in stage one', user_stated: false },
 ];
 const FULL_LEVELS = [...PARTIAL_LEVELS,
-  { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 35, basis: 'review lowers load' }];
+  { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 35, basis: 'review lowers load', user_stated: false }];
 
 describe('an incomplete starting point leaves NOTHING approvable', () => {
   it('RED: refuses, names the missing pair, stores no proposal — and a "yes" can write nothing', async () => {
@@ -148,7 +148,7 @@ describe('an incomplete starting point leaves NOTHING approvable', () => {
       assumptions: VALUES,
       option_levels: [...PARTIAL_LEVELS,
         // Coordination load's stored range is 0-100: 150 cannot be recorded on it.
-        { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 150, basis: 'review lowers load' }],
+        { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 150, basis: 'review lowers load', user_stated: false }],
     });
     expect(r.refusal).toBe('incomplete_starting_point');
     expect(r.options_missing_levels).toEqual([{ option: 'Stage Hiring After Review', factor: 'Coordination load' }]);
@@ -167,7 +167,7 @@ describe('an incomplete starting point leaves NOTHING approvable', () => {
     const r = await caps.proposeStartingPoint(ctx, {
       assumptions: VALUES,
       option_levels: [...PARTIAL_LEVELS,
-        { option_label: 'Stage Hiring After Review', factor_label: 'Co-ordination burden', value: 35, basis: 'review lowers load' }],
+        { option_label: 'Stage Hiring After Review', factor_label: 'Co-ordination burden', value: 35, basis: 'review lowers load', user_stated: false }],
     });
     expect(r.refusal).toBe('incomplete_starting_point');
     expect(r.levels_not_accepted).toEqual([
@@ -182,7 +182,7 @@ describe('an incomplete starting point leaves NOTHING approvable', () => {
     const r = await caps.proposeStartingPoint(ctx, {
       assumptions: VALUES,
       option_levels: [...PARTIAL_LEVELS,
-        { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 35, basis: 'review lowers load' }],
+        { option_label: 'Stage Hiring After Review', factor_label: 'Coordination load', value: 35, basis: 'review lowers load', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('levels_not_accepted');

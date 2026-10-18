@@ -4,6 +4,7 @@
  * edit). There the Agent proposed `{25, "%"}` for ‘GCP saving rate’ (a 0–1 `proportion`, Olumi's 0.2): the card read
  * "0.2% → 25%" and the user's press was refused at write.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -17,7 +18,9 @@ async function propose(said: string, value: number, unit: string, edit: (g: Json
   const store = new ProposalStore();
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-446655440c01', authenticated_user_id: null, request_id: 'r', user_text: said } as never,
-    { assumptions: [{ user_stated: true, factor_label: label, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
+    // ⭐ LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence that writes the figure; none where it is unwritten.
+    { assumptions: [{ user_stated: true, factor_label: label, value, unit, basis: "the team's quote", revise: true,
+      ...((q) => (q !== null ? { quote: q } : {}))(quoteOfFigure(value, unit, said)) }] } as never) as Json;
   const op = r.proposal_id ? (store.get(r.proposal_id)!.operations[0] as Json).value : null;
   return { r, op };
 }

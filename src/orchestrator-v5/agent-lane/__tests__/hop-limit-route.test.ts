@@ -39,7 +39,8 @@ describe('RT-7: the hop limit says why nothing changed', () => {
       }
       agentCalls += 1;
       const args = providerRow === 'empty' ? { interventions: [] }
-        : providerRow === 'held' ? { interventions: [{ option_label: 'New option', factor_label: 'Sprint capacity for integration fix', value: 50, unit: '%', user_stated: true }] }
+        // LEAN CORE (#3392, USER_QUOTE): the AI cites the span the user typed for the figure it claims as theirs.
+        : providerRow === 'held' ? { interventions: [{ option_label: 'New option', factor_label: 'Sprint capacity for integration fix', value: 50, unit: '%', user_stated: true, quote: HELD_MESSAGE }] }
         : { interventions: [{ option_label: 'Raise price', factor_label: 'Bread price increase', value: 6, user_stated: true }] };
       return new Response(JSON.stringify({ output: [{
         type: 'function_call', name: 'propose_option_interventions', call_id: `c${agentCalls}`,

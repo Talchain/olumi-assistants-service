@@ -52,8 +52,8 @@ function product(opts: { addOnLinked: boolean }) {
 }
 
 const SERVED_ASK = { interventions: [
-  { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
-  { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 10, unit: '£ per month', basis: 'the user: £10 per month', user_stated: true },
+  { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, quote: 'use £54 per month as its Pro plan price', unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
+  { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 10, quote: 'it sets Paid AI add-on price to £10 per month', unit: '£ per month', basis: 'the user: £10 per month', user_stated: true },
 ] };
 
 async function approve(addOnLinked: boolean, ask: typeof SERVED_ASK | { interventions: Record<string, unknown>[] } = SERVED_ASK) {
@@ -91,8 +91,8 @@ describe('the writer is handed the user\'s figure with each level, in the ONE co
 
   it('RED (U8, served 24df058): Olumi\'s estimate beside the user\'s level — the writer is told whose each is, and the control names both', async () => {
     const { label, level } = await approve(true, { interventions: [
-      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 12, unit: '£ per month', basis: 'a typical add-on price' },
-      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, basis: 'the user: £54 per month', user_stated: true },
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 12, unit: '£ per month', basis: 'a typical add-on price', user_stated: false },
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, quote: 'use £54 per month as its Pro plan price', basis: 'the user: £54 per month', user_stated: true },
     ] });
     expect(level('opt_add_on')).toMatchObject({ author: 'model_proposed', raw_value: 12 });
     // U8 (AI Conversation 5850225237): a mixed batch names both — never "starting" for the user's own figure, never
@@ -102,8 +102,8 @@ describe('the writer is handed the user\'s figure with each level, in the ONE co
 
   it('CONTRAST: a batch of ONLY Olumi\'s estimates keeps its starting-estimate label (nothing in it is the user\'s)', async () => {
     const { label } = await approve(true, { interventions: [
-      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 12, unit: '£ per month', basis: 'a typical add-on price' },
-      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 57, basis: 'the middle of the tested range' },
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 12, unit: '£ per month', basis: 'a typical add-on price', user_stated: false },
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 57, basis: 'the middle of the tested range', user_stated: false },
     ] });
     // Unchanged from staging: Olumi's figures, offered as a starting point.
     expect(label).toBe('Use these 2 starting figures');
@@ -116,7 +116,7 @@ describe('the writer is handed the user\'s figure with each level, in the ONE co
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store, undefined, 'full', undefined, { commitOptionLevels: p.commitOptionLevels });
     const r = await caps.proposeOptionInterventions({ ...ctx, user_text: 'For "Keep £49 and add a paid AI add-on": it lowers Monthly churn rate to 6%.' }, { interventions: [
-      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 6, unit: '% monthly churn rate', basis: 'the user: 6%', user_stated: true },
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 6, quote: 'For "Keep £49 and add a paid AI add-on": it lowers Monthly churn rate to 6%.', unit: '% monthly churn rate', basis: 'the user: 6%', user_stated: true },
     ] } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const op = store.get(String(r.proposal_id))!.operations.find((o) => o.op === 'set_option_intervention')!;
@@ -125,7 +125,8 @@ describe('the writer is handed the user\'s figure with each level, in the ONE co
 
   it('CONTROL: a level already on the model\'s 0–1 scale, with no range, hands the writer no figure (nothing for the door to refuse)', async () => {
     const { level } = await approve(true, { interventions: [
-      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 0.4, basis: 'the user: 0.4', user_stated: true },
+      // The writer's handling of a 0–1 level is under test, not authorship: an uncited 0.4 the user never wrote is Olumi's declared estimate.
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 0.4, basis: 'Olumi: 0.4', user_stated: false },
     ] });
     const l = level('opt_add_on') as Record<string, unknown>;
     expect(l.value).toBe(0.4);

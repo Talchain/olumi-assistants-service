@@ -103,8 +103,8 @@ function fakeProduct(opts: {
 
 const ASK = {
   interventions: [
-    { option_label: 'Phase Pro price increase', factor_label: 'Pro plan price', value: 54, basis: 'the user said a staged rise to £54 first' },
-    { option_label: 'Phase Pro price increase', factor_label: 'Pro feature value', value: 0.8, basis: 'the release lifts perceived value' },
+    { option_label: 'Phase Pro price increase', factor_label: 'Pro plan price', value: 54, basis: 'the user said a staged rise to £54 first', user_stated: false },
+    { option_label: 'Phase Pro price increase', factor_label: 'Pro feature value', value: 0.8, basis: 'the release lifts perceived value', user_stated: false },
   ],
 };
 
@@ -139,7 +139,7 @@ describe('the value is read against the factor’s declared range', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth' }],
+      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.interventions).toEqual([
@@ -161,7 +161,7 @@ describe('the value is read against the factor’s declared range', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Release availability', value: 100, basis: 'released' }],
+      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Release availability', value: 100, basis: 'released', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
@@ -178,7 +178,7 @@ describe('the value is read against the factor’s declared range', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro plan price', value: 5000, basis: 'typo' }],
+      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro plan price', value: 5000, basis: 'typo', user_stated: false }],
     });
     expect(r.refusal).toBe('nothing_to_set');
     expect((r.no_stated_range as { detail: string }[])[0].detail).toMatch(/outside the model's range for this factor \(0 to 200\)/);
@@ -188,7 +188,7 @@ describe('the value is read against the factor’s declared range', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Raise at next release', factor_label: 'Pro plan price', value: 59, basis: 'restated' }],
+      interventions: [{ option_label: 'Raise at next release', factor_label: 'Pro plan price', value: 59, basis: 'restated', user_stated: false }],
     });
     expect(r.refusal).toBe('nothing_to_set');
     expect(r.already_set).toEqual(['Raise at next release already sets Pro plan price to 0.295']);
@@ -406,7 +406,7 @@ describe('authorise_change records the STORED levels', () => {
    */
   describe('a precise figure is compared un-rounded', () => {
     const ARR: Node = { id: 'arr', kind: 'factor', label: 'Annual revenue', observed_state: { value: 0.5, raw_value: 1_000_000, cap: 2_000_000, unit: 'GBP' } };
-    const askArr = (value: number) => ({ interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Annual revenue', value, basis: 'the user\u2019s figure' }] });
+    const askArr = (value: number) => ({ interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Annual revenue', value, basis: 'the user\u2019s figure', user_stated: false }] });
     const renameGoal = (ns: Node[]): Node[] => ns.map((n) => (n.id === 'mrr' ? { ...n, label: 'Monthly recurring revenue (renamed)' } : n));
     it.each([1_234_567, 1_234_567.5])('RED: £%s, then an unrelated write — nothing is reported as changed', async (v) => {
       const p = fakeProduct({ extraNodes: [ARR] });
@@ -634,7 +634,7 @@ describe('a range that could not be attached is reported, not assumed', () => {
     const p = fakeProduct({ registerFails: true });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth' }],
+      interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth', user_stated: false }],
     });
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
     expect(applied.ranges_added_for_analysis).toBeUndefined();

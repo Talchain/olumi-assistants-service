@@ -84,8 +84,8 @@ function product(opts: { refuseLevelOf?: string; trialLinked?: boolean; claimsWi
 
 /** BF5's shape: two levels in ONE proposal; Internal Lead Trial's needs its link. */
 const TWO_LEVELS = { interventions: [
-  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two' },
-  { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
+  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five plus two', user_stated: false },
+  { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one', user_stated: false },
 ] };
 
 describe('the approved scope commits WHOLE or NOT AT ALL, as ONE commit (A complete)', () => {

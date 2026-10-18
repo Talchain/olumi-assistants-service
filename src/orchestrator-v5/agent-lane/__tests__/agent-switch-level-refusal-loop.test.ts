@@ -338,14 +338,14 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
 
   it("R4 ONE HOP (graded): after { 50, '%' } is refused, the graded alternative (kind left out) is sent — no second refusal, no level written", async () => {
     const { caps, sent } = setup();
-    const r = await caps.proposeNewOption(ctx as never, a05([{ level: { value: 50, unit: '%' } }], null) as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, a05([{ level: { value: 50, quote: ctx.user_text, unit: '%' } }], null) as never) as Result;
     expect(r.refusal, JSON.stringify(r)).not.toBe('switch_level_not_on');
     expect(switchLevelSent(sent)?.map((i) => (i as { value?: unknown }).value)).toEqual([null]);
   });
 
   it("R4 RED (one hop, not two): the switch named twice (bare, then { 1, '%' }) → the detail says keep ONE entry with no level; doing so is sent", async () => {
     const { caps } = setup();
-    const r = await caps.proposeNewOption(ctx as never, a05([{}, { level: { value: 1, unit: '%' } }]) as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, a05([{}, { level: { value: 1, quote: ctx.user_text, unit: '%' } }]) as never) as Result;
     expect(r.refusal).toBe('switch_level_not_on');
     expect(r.detail).toContain(`keep ONE acts_on entry for "${SWITCH}" in "${GRANDFATHER}", with no "level"`);
     const next = setup();
@@ -360,8 +360,8 @@ describe('R4 — a refusal is fixable in ONE hop: it names the exact next call, 
     const OPT2 = '£54 for new Pro customers; offer an annual plan';
     const r = await caps.proposeNewOption(ctx as never, {
       options: [
-        { label: GRANDFATHER, acts_on: [{ factor_label: SWITCH, direction: 'positive', level: { value: 50, unit: '%' } }] },
-        { label: OPT2, acts_on: [{ factor_label: ANNUAL, direction: 'positive', level: { value: 12, unit: 'months' } }] },
+        { label: GRANDFATHER, acts_on: [{ factor_label: SWITCH, direction: 'positive', level: { value: 50, quote: ctx.user_text, unit: '%' } }] },
+        { label: OPT2, acts_on: [{ factor_label: ANNUAL, direction: 'positive', level: { value: 12, quote: ctx.user_text, unit: 'months' } }] },
       ],
       new_factors: [
         { label: SWITCH, kind: 'switch', affects: [{ label: 'Monthly churn', direction: 'negative' }] },

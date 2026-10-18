@@ -19,6 +19,7 @@
  * actions from the latest non-claim answer row, JSONB-key-reordered, through the REAL `parsePendingAction`), OpenAI
  * only; route-v2's LLM router throws if touched.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -430,7 +431,9 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
   const spendRows = () => (graphNow().goal_constraints ?? []).filter((c) => c['node_id'] === SPEND);
   const proposeLimit = (args: Record<string, unknown> = {}, message = 'Our six-month decision spend limit has gone up: it is now £30,000.') => {
     script = [
-      () => fnCall('propose_limit_change', { limit_label: 'Six-month decision spend', operator: '<=', new_value: 30000, rationale: 'The user raised it.', ...args }),
+      // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE).
+      () => fnCall('propose_limit_change', { limit_label: 'Six-month decision spend', operator: '<=', new_value: 30000, rationale: 'The user raised it.',
+        ...(quoteOfFigure(30000, 'GBP', message) !== null ? { quote: quoteOfFigure(30000, 'GBP', message)! } : {}), ...args }),
       () => say('I would change the limit on six-month decision spend from £20,000 to £30,000. Shall I?'),
     ];
     return turn({ message });

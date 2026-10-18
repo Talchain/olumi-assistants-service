@@ -82,7 +82,7 @@ describe('(iv) a label shared by two writable factors is AMBIGUOUS, and nothing 
     const p = product();
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: 'Churn', value: 0.08, unit: '', basis: 'the user said 8%' }] });
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ user_stated: true, factor_label: 'Churn', value: 0.08, quote: ctx.user_text, unit: '', basis: 'the user said 8%' }] });
 
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(candidateIds(r)).toEqual([['Churn', ['churn_pricing', 'churn_support']]]);
@@ -101,8 +101,8 @@ describe('(iv) a label shared by two writable factors is AMBIGUOUS, and nothing 
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeAssumptions(ctx, {
       assumptions: [
-        { user_stated: true, factor_label: 'Churn', value: 0.08, unit: '', basis: 'the user said 8%' },
-        { user_stated: true, factor_label: 'Price', value: 0.6, unit: '', basis: 'the user said 0.6' },
+        { user_stated: true, factor_label: 'Churn', value: 0.08, quote: ctx.user_text, unit: '', basis: 'the user said 8%' },
+        { user_stated: true, factor_label: 'Price', value: 0.6, quote: ctx.user_text, unit: '', basis: 'the user said 0.6' },
       ],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -134,7 +134,7 @@ describe('(v) a node id disambiguates, and the write goes to exactly that node',
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeAssumptions(ctx, {
       // `revise` is a tool argument the capability type does not declare yet (see agent-tools.ts).
-      assumptions: [{ user_stated: true, factor_label: 'churn_support', value: 0.07, unit: '', basis: 'the user chose support churn', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'churn_support', value: 0.07, quote: ctx.user_text, unit: '', basis: 'the user chose support churn', revise: true }],
     } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual(['churn_support']);
@@ -149,7 +149,7 @@ describe('the same rule on the level and link proposers', () => {
     const p = product();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Raise price', factor_label: 'Churn', value: 0.2, basis: 'b' }],
+      interventions: [{ option_label: 'Raise price', factor_label: 'Churn', value: 0.2, basis: 'b', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(candidateIds(r)).toEqual([['Churn', ['churn_pricing', 'churn_support']]]);
@@ -164,7 +164,7 @@ describe('the same rule on the level and link proposers', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Raise price', factor_label: 'churn_support', value: 0.2, basis: 'b' }],
+      interventions: [{ option_label: 'Raise price', factor_label: 'churn_support', value: 0.2, basis: 'b', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual(['raise::churn_support']);
