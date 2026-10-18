@@ -251,6 +251,10 @@ type CorrectionResult = { readonly refused: string; readonly words?: string } | 
 const legacyOf = (node: Rec, field: 'already_true_quote' | 'dependency'): unknown => field === 'already_true_quote'
   ? node.already_true_quote : isRec(node.draft_widening) ? node.draft_widening.relies_on : undefined;
 
+/** Untouched context from this subject's existing carrier; never evidence for the correction's source or retained spans. */
+const correctionUnknowns = (node: unknown, subject: DoorSubject): readonly UserStatement[] =>
+  recordsWithUnknownSpeakerOn(node).find(r => r.subject_key === subjectKey(subject))?.statements.filter(s => s.speaker === 'unknown') ?? [];
+
 /** A source correction cannot silently replace adoption or other held attestation. Carry-forward needs its own contract. */
 function protectedAttestation(record: UserStatementRecord | null | undefined): boolean {
   const by = record?.attest?.recorded_by;
@@ -347,6 +351,7 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
   const held = approved.edits.every(e => {
     const node = nodeOf(graph, e.subject.id);
     return node !== undefined && isDeepStrictEqual(userStatementFor(graph, e.subject), e.record)
+      && isDeepStrictEqual(correctionUnknowns(node, e.subject), correctionUnknowns(e.expected_node, e.subject))
       && (e.legacy === undefined || isDeepStrictEqual(legacyOf(node, e.legacy.field), e.legacy.replacement === null ? undefined : e.legacy.replacement));
   });
   if (held) return { candidate: graph, unchanged: true };
@@ -377,7 +382,8 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
   }
   let candidate = structuredClone(graph) as Rec & { nodes: unknown[] };
   for (const e of approved.edits) {
-    const next = withUserStatement(candidate, e.record, e.subject);
+    const next = withUserStatement(candidate, { ...e.record,
+      statements: [...e.record.statements, ...correctionUnknowns(e.expected_node, e.subject)] }, e.subject);
     if (next === undefined) return { refused: 'node_not_found' };
     candidate = next;
     if (e.legacy !== undefined) {
@@ -415,7 +421,8 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
     lead: 'timing', effect: 'effect', measure: 'meaning', relation: 'explanation' };
   const recordWords = (record: UserStatementRecord | null): string => record === null ? 'No earlier source was recorded.'
     : record.statements.map(s => [
-      `Your words: “${s.source}”.`, ...(s.quote === s.source ? [] : [`Quoted words: “${s.quote}”.`]), ...amountWords(s),
+      legacy || s.speaker === 'user' ? `Your words: “${s.source}”.` : `Recorded words — speaker/source unknown: “${s.source}”.`,
+      ...(s.quote === s.source ? [] : [`Quoted words: “${s.quote}”.`]), ...amountWords(s),
       ...(s.reference === undefined ? [] : [`Reference: ${s.reference}.`]), ...(s.period === undefined ? [] : [`Period: ${s.period}.`]),
       ...(s.qualifier === undefined ? [] : [`Olumi’s reading of the relevant words: ${s.qualifier}.`]),
       ...(s.conditions === undefined ? [] : [`Scope and conditions: ${s.conditions}.`]),
@@ -431,7 +438,10 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
       `Keep explicitly: ${e.retained.length ? e.retained.map(q => `“${q}”`).join('; ') : 'nothing from the retired record'}.`,
       ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
         .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
-      `Earlier source and reading:\n${recordWords(e.expected_record)}`, `${legacy ? '' : '→\n'}Replacement source and reading:\n${recordWords(e.record)}`,
+      `Earlier source and reading:\n${recordWords(legacy ? e.expected_record
+        : recordsWithUnknownSpeakerOn(e.expected_node).find(r => r.subject_key === subjectKey(e.subject)) ?? e.expected_record)}`,
+      `${legacy ? '' : '→\n'}Replacement source and reading:\n${recordWords(legacy ? e.record : { ...e.record,
+        statements: [...e.record.statements, ...correctionUnknowns(e.expected_node, e.subject)] })}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),
     ]),
     'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records only the listed source corrections. Other changes need their own supported card. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',

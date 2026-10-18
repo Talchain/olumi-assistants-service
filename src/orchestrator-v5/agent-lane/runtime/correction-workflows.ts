@@ -31,7 +31,7 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
       ? 'This record also holds an approval or other confirmation. A source correction cannot replace it safely yet. No card was created and the record is unchanged.'
       : prepared.words ?? 'No correction was prepared. Keep the source, intended subject and explicitly retained material together.',
     ...(prepared.words === undefined ? {} : { public_label: prepared.words,
-      note: 'Reuse complete applicable source already present before asking the user to repeat it. If source or subject remains unresolved, show this review without an approval action. Clarification does not approve a write. Prepare a fresh supported correction on its own complete card once its source and subject are resolved.' }) };
+      note: 'If source or subject remains unresolved, show this review without an approval action. Clarification does not approve a write. Prepare a fresh supported correction on its own complete card once its source and subject are resolved.' }) };
   const first = prepared.correction.edits[0]!;
   const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: baseHash,

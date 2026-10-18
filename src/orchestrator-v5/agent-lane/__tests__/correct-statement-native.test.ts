@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { log } from '../../../utils/telemetry.js';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
-import { applyStatementCorrection, statementCorrectionWords, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
+import { applyStatementCorrection, recordsWithUnknownSpeakerOn, statementCorrectionWords, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
 import { createProposal } from '../proposal.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
 import { rangeLawAdopted, rangeLawSubject } from '../../intervention-range.js';
@@ -40,6 +40,30 @@ function fixture(row: typeof cases[number]) {
 const withoutRef = ({ ref: _ref, ...node }: Rec) => node;
 
 describe.each(cases)('$name: sourced reading and subject review are separate', row => {
+  it('keeps mixed-record unknown words visible and byte-for-byte unchanged through the checked write and cold read', async () => {
+    const f = fixture(row), unknown = { speaker: 'unknown' as const, quote: 'The night team disputes the explanation.',
+      source: 'The night team disputes the explanation.', form: 'describes' as const, reading: 'olumi' as const,
+      subject: { quantity: 'reported_account', node_id: 'report' }, conditions: 'Only the late shift was observed.' };
+    f.graph.nodes[1].user_statements[0].statements.push(unknown);
+    const w = await correctionWorld(f.graph, f.message);
+    const card = await w.offer('propose_statement', { correction: f.request });
+    expect(card).toMatchObject({ ok: true, mutated: false });
+    expect(card.public_label).toContain(`Recorded words — speaker/source unknown: “${unknown.source}”`);
+    const pid = String(card.proposal_id), proposal = w.proposals.get(pid)!, restored = w.restoreCard(proposal, card);
+    expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+    const node = w.graph().nodes.find((n: Rec) => n.id === 'report');
+    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
+    expect(userStatementFor(w.graph(), f.subject)!.statements.every(s => s.speaker === 'user')).toBe(true);
+    const correction = approvedStatementRecordOf(proposal.operations[0]!)!.correction!;
+    expect(applyStatementCorrection(w.graph(), correction)).toMatchObject({ unchanged: true });
+    const lost = structuredClone(w.graph());
+    lost.nodes.find((n: Rec) => n.id === 'report').user_statements[0].statements = userStatementFor(lost, f.subject)!.statements;
+    expect(applyStatementCorrection(lost, correction)).toEqual({ refused: 'node_changed' });
+    expect((await w.cold()).body.graph).toEqual(w.graph());
+    expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+  });
+
   it.each(['legacy', 'incomplete'] as const)('%s persisted wording still requires the complete own card', async form => {
     const f = fixture(row), w = await correctionWorld(f.graph, f.message);
     const card = await w.offer('propose_statement', { correction: f.request });
