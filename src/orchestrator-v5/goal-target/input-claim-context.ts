@@ -285,16 +285,6 @@ export function usersSpanIn(message: string, quote: unknown): number {
 }
 
 /**
- * ⭐ LEAN CORE (check 3, the #3389 probe P2): `quote` in the one spelling the speech reader uses, with that reader (`insideSpeech`):
- * whether a place in it sits inside another speaker's PAIRED quotation marks. Only marks bound speech; an unmarked report ("A colleague
- * said: …") is not seen by this reader (a named limitation, never a phrase list).
- */
-export function speechReading(quote: string): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
-  const text = plainQuote(quote);
-  return { text, inSpeech: (at) => insideSpeech(text, at) };
-}
-
-/**
  * ⭐ LEAN CORE: the sentence of `message` that holds the user's span `quote` (`usersSpanIn`), in the one spelling: from the last . ! ? ;
  * or line break before it to the first at or after its end. Undefined when the span is not theirs there.
  */
