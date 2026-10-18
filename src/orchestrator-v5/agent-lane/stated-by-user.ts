@@ -40,7 +40,7 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { carrierCompatible, readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { nounUnitsAt, readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { speechReading } from '../goal-target/input-claim-context.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
@@ -66,24 +66,25 @@ function writtenFigures(userText: string | null | undefined): readonly (StatedAm
 }
 
 /**
- * `amountIs`, where a figure in WORDS is the user's only where the words after it state the held unit (Codex SPELLED pair AMEND;
- * AIE bb91dcdd), read by the ONE tail reader (`statedTailParts`) under C3's carrier rule (`carrierCompatible`), so it never reads
- * more broadly than its digits:
- *  · the held unit's own noun comes first: "seventy TICKETS", never "seventy customers", "twenty-first week" or "one of them";
- *  · no period, denominator or kind that conflicts: never "two hours per week" for hours per month, nor money, a percentage or a
- *    share ("two thousand pounds", "two percent");
- *  · never a name ("Two Developers Ltd": a Title-case word after it), nor another speaker's quoted words (`speechReading`).
+ * `amountIs`, for a figure in WORDS too (Codex SPELLED pair AMEND; AIE bb91dcdd; verifier C4). ONE unit check: the digit path's own
+ * (`amountIs` on the same amount as a plain number), so "fifteen bags per ten minutes" reads as "15 bags per ten minutes" does. What
+ * only words need, since a digit is a figure by its form and a word may not be:
+ *  · its unit word right after it: a word of the held unit, or a unit of its kind ("seventy TICKETS", "two HOURS"); never "one of
+ *    them", "twenty-first" or "forty fifth";
+ *  · never money, a percentage or a scaled unit (as `amountIs` already rules for words);
+ *  · never a name (a Title-case word after it: "Two Developers Ltd"), nor another speaker's quoted words (`speechReading`).
  * Presence only, never attestation of WHICH quantity it is. A brief's baseline keeps its own words binding (`baselineTheBriefStates`).
  */
 function writtenIs(a: StatedAmount | ReturnType<typeof countsInWords>[number], value: number, unit: unknown,
   family: ReturnType<typeof unitPhraseFamily>, text: string | undefined): boolean {
   if (a.kind !== 'words') return amountIs(a, value, unit, family, text);
-  const declared = readUnitParts(unit), stated = statedTailParts(text ?? '', a);
-  if (text === undefined || declared === null || stated === null || !carrierCompatible(stated, declared)
-    || !(declared.noun ?? []).every((w, i) => stated.noun?.[i] === w)) return false;
-  const next = text.slice(a.index + a.matchedText.length).trimStart();
+  if (text === undefined || family === 'currency' || family === 'percent' || moneyUnitScale(unit) !== 1
+    || !amountIs({ ...a, kind: 'plain' }, value, unit, family, text)) return false;
+  const tail = text.slice(a.index + a.matchedText.length), word = nounUnitsAt(tail)[0], next = tail.trimStart();
+  const unitWord = word !== undefined && ((typeof unit === 'string' && wordsOf(unit).some((u) => sameWord(u, word)))
+    || (family !== null && unitWordAfter(text, a) === family));
   const name = next.charAt(0) !== next.charAt(0).toLowerCase() && next.charAt(1) === next.charAt(1).toLowerCase();
-  return !name && !speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length) && amountIs(a, value, unit, family, text);
+  return unitWord && !name && !speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length);
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
@@ -283,9 +284,9 @@ const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_F
 function baselineTheBriefStates(value: number, unit: unknown, brief: string, label: unknown): boolean {
   // Digits first, as before; words keep this function's own stricter binding below (Codex SPELLED pair: "hire three engineers"
   // never states three enterprise customers).
-  const family = unitPhraseFamily(unit);
-  if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, family, brief))) return true;
+  if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, unitPhraseFamily(unit), brief))) return true;
   if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
+  const family = unitPhraseFamily(unit);
   if (family === 'currency' || family === 'percent') return false;
   return [...brief.matchAll(CARDINAL_PHRASE)].some((m) => {
     const v = parseCardinalAmount(m[0]);
