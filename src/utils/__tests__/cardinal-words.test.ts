@@ -106,6 +106,9 @@ describe("L67 — the hand-written cardinal corpus", () => {
     ["eighteen", 18],
     ["ninety", 90], // longest-first: "nine" must not shadow it
     ["seventeen", 17], // nor "seven" shadow this
+    // QBC PR-B row 7 (DL-3 lease): a bridging "and" after "hundred" or a scale word compounds.
+    ["one hundred and five", 105],
+    ["two thousand and ten", 2_010],
   ];
   for (const [phrase, value] of CORPUS) {
     it(`"${phrase}" → ${value}`, () => {
@@ -150,5 +153,29 @@ describe("L67 — the parser fails closed", () => {
 
   it("case-folds: 'Two Hundred And Fifty Thousand' reads the same as lowercase", () => {
     expect(parseCardinalAmount("Two Hundred And Fifty Thousand")).toBe(250_000);
+  });
+
+  // ⭐ QBC PR-B row 7 (DL-3 lease 18 Oct): "and" between two numbers under one hundred joins two figures, never one.
+  it.each([
+    ["five and twenty", "two figures (5 and 20), never the archaic 25"],
+    ["ten and twenty", "two figures (10 and 20), never 30"],
+  ])("'%s' → null as ONE amount (%s)", (phrase) => {
+    expect(parseCardinalAmount(phrase)).toBeNull();
+    expect(new RegExp(`^(?:${CARDINAL_AMOUNT_SOURCE})$`, "i").exec(phrase), `the grammar must not span "${phrase}"`).toBeNull();
+  });
+});
+
+describe("QBC PR-B row 7 — the grammar finds each figure of a worded range, and the header's brief whole", () => {
+  const amountsIn = (text: string): number[] => [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, "gi"))]
+    .map((m) => parseCardinalAmount(m[0])).filter((n): n is number => n !== null);
+  it.each([
+    ["my likely range is between five and twenty days", [5, 20]],
+    ["somewhere between ten and twenty", [10, 20]],
+    ["we have one hundred and five staff", [105]],
+    ["from two hundred and fifty thousand", [250_000]],
+    // The header's brief (journey walk runT1b), both amounts whole.
+    ["grow MRR from one hundred and eighty thousand pounds to two hundred and fifty thousand pounds by the end of December 2026", [180_000, 250_000]],
+  ] as const)("%s → %j", (text, expected) => {
+    expect(amountsIn(text)).toEqual(expected);
   });
 });

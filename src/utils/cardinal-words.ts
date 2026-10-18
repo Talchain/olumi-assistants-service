@@ -123,6 +123,11 @@ const TOKEN_ALTERNATION = alternation([
  * tokens joined by whitespace, hyphens, or a bridging "and". The repetition
  * is greedy, so "two hundred and fifty thousand" is consumed whole.
  *
+ * ⭐ A BRIDGING "and" JOINS ONLY AFTER "hundred" OR A SCALE WORD (QBC PR-B row 7, DL-3 lease 18 Oct): "one hundred and five" is 105,
+ * "two hundred and fifty thousand" is 250,000 and "two thousand and ten" is 2,010, but "and" between two numbers under one hundred
+ * joins two figures, never one: "between five and twenty days" is 5 and 20 (it read 25, the archaic compound, so a user's worded
+ * likely range could not be found in their own words), and "ten and twenty" is 10 and 20. The parser re-checks the same rule.
+ *
  * ⚠ CORRECTED CLAIM (adversarial review F1, executed at `42fe683a`) — this
  * comment used to say an out-of-vocabulary continuation "simply ends the
  * phrase … no fragment is ever committed as the amount", AND THAT WAS FALSE
@@ -151,9 +156,12 @@ const TOKEN_ALTERNATION = alternation([
  * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as
  * it does for the magnitude alternation.
  */
+/** The words a bridging "and" may follow: the compounder and every scale word. */
+const AND_BRIDGES_AFTER = alternation([CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)]);
+
 export const CARDINAL_AMOUNT_SOURCE =
   `(?:${SMALL_ALTERNATION})` +
-  `(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*`;
+  `(?:(?<=\\b(?:${AND_BRIDGES_AFTER}))\\s+and\\s+(?:${TOKEN_ALTERNATION})|[\\s-]+(?:${TOKEN_ALTERNATION}))*`;
 
 /**
  * The fraction words whose arrival after a cardinal phrase means the phrase
@@ -204,12 +212,20 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
   const tokens = phrase
     .toLowerCase()
     .split(/[\s-]+/)
-    .filter((token) => token.length > 0 && token !== "and");
-  if (tokens.length === 0) return null;
+    .filter((token) => token.length > 0);
+  if (tokens.every((token) => token === "and")) return null;
 
   let total = 0;
   let group = 0;
+  let previous = "";
   for (const token of tokens) {
+    // A bridging "and" only after "hundred" or a scale word: "five and twenty" is two figures, never 25 (fail closed).
+    if (token === "and") {
+      if (previous !== CARDINAL_HUNDRED_WORD && CARDINAL_SCALE_MULTIPLIERS[previous] === undefined) return null;
+      previous = token;
+      continue;
+    }
+    previous = token;
     const small = CARDINAL_WORD_VALUES[token];
     if (small !== undefined) {
       group += small;
