@@ -50,7 +50,7 @@ function draft(effect: Effect | null, drafted: number | null = null): Rec {
   };
 }
 
-async function built(wire: Rec): Promise<{ edge: Rec; graph: Rec }> {
+async function built(wire: Rec, brief = BRIEF): Promise<{ edge: Rec; graph: Rec }> {
   let registered: { nodes: Rec[]; edges: Rec[] } | null = null;
   const call = (async () => ({ text: JSON.stringify(wire), status: 'completed' })) as unknown as CallStructuredModel;
   const dispatch: InternalDispatch = async (path, body) => {
@@ -60,7 +60,7 @@ async function built(wire: Rec): Promise<{ edge: Rec; graph: Rec }> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('c1a1c1a1-0000-4000-8000-00000000c1a1', BRIEF, dispatch, call) as Rec;
+  const out = await buildModelFromBrief('c1a1c1a1-0000-4000-8000-00000000c1a1', brief, dispatch, call) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 1500)).toBe(true);
   const g = registered!;
   const idOf = (l: string) => g.nodes.find((n) => n.label === l)!.id;
@@ -69,6 +69,12 @@ async function built(wire: Rec): Promise<{ edge: Rec; graph: Rec }> {
 const edgeOf = async (wire: Rec): Promise<Rec> => (await built(wire)).edge;
 
 describe('v6.0 PR-2: a link\'s size is derived from its current claim', () => {
+  it('NEGATIVE (the drafter\'s own central figure, written ELSEWHERE in the brief): only the claim\'s own quote can give it', async () => {
+    const elsewhere = `${BRIEF} Each technician also fixes about 11 faults a week on the old system.`;
+    const { edge } = await built(draft({ ...CLAIM, value: 11 }), elsewhere);
+    expect(edge.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(edge.provenance?.natural_effect).toBeUndefined();
+  });
   it('⭐ G2 shape: the draft leaves the link unsized; the user\'s "about 12, between 8 and 16" per technician sizes it, as the user\'s', async () => {
     const { edge, graph } = await built(draft(CLAIM));
     expect(edge.provenance).toMatchObject({ magnitude: 'user_stated' });
