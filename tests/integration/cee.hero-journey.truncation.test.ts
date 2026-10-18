@@ -20,7 +20,7 @@ import {
   type CeeHealthSummary,
 } from "../../sdk/typescript/src/ceeHelpers.js";
 
-describe("CEE hero journey (health): truncation scenario", () => {
+describe("CEE hero journey (health): truncation and validation scenarios", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -76,5 +76,17 @@ describe("CEE hero journey (health): truncation scenario", () => {
     // Privacy: no brief text should leak into story or health summaries
     const serialized = JSON.stringify({ story, health });
     expect(serialized.includes(SECRET)).toBe(false);
+  });
+
+  it("buildCeeHealthSummary flags validation issues on an options envelope (SDK helper)", async () => {
+    // Synthetic options envelope: the options route was deleted (R2), so this
+    // checks the kept SDK helper only.
+    const optionsBody: any = { options: [{ id: "option-fixture" }], quality: { overall: 7 }, trace: { request_id: "sdk-fixture" }, validation_issues: [{ code: "trivial_graph", severity: "warning" }] };
+
+    const health: CeeHealthSummary = buildCeeHealthSummary("options", optionsBody);
+
+    expect(health.has_validation_issues).toBe(true);
+    expect(["warning", "risk"]).toContain(health.status);
+    expect(health.reasons.some((r) => r.toLowerCase().includes("validation"))).toBe(true);
   });
 });
