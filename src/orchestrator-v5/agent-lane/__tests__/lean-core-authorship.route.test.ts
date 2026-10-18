@@ -6,6 +6,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { userStated } from '../user-statements.js';
+import { currentCorrectionOf } from '../../statement-door/read.js';
+import { prepareStatementCorrection, userStatementFor } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We want to grow weekly bookings to at least 300 within 12 months.';
@@ -65,5 +68,39 @@ describe('W28: the goal\'s target is the user\'s by the door\'s own verdict, nev
     const g = await saved(draft({ statements: [{ quote: 'We want at least 300 weekly bookings.', subject: { kind: 'goal', label: GOAL, to_label: null, factor_label: null },
       field: 'target', form: 'lower_bound', value: 300, low: null, high: null, unit: 'bookings a week', qualifier: null, conditions: null }] }));
     expect(goalOf(g).threshold_source).toBeUndefined();
+  });
+});
+
+describe('PL-0048 (2): a span the user\'s correction retired is never re-credited by a later literal match, cold too', () => {
+  const levelStatement = { quote: TODAY, subject: { kind: 'goal', label: GOAL, to_label: null, factor_label: null }, field: 'level', form: 'point',
+    value: 180, low: null, high: null, unit: 'bookings a week', qualifier: null, conditions: null };
+  const FIX = 'Ignore the weekly bookings figure of 180 I gave, I have no reliable count.';
+  async function corrected(): Promise<{ graph: Rec; subject: Rec }> {
+    const g = await saved(draft({ statements: [...(draft().statements as Rec[]), levelStatement] }));
+    const subject = { kind: 'goal' as const, id: String(goalOf(g).id), field: 'level' as const };
+    expect(userStatementFor(g, subject)?.statements.map((st) => st.quote), 'construction recorded the user\'s level').toEqual([TODAY]);
+    const result = prepareStatementCorrection(g, { quote: FIX, edits: [{ subject, retirement: { quote: TODAY, scope: 'whole', disposition: 'retracted' },
+      retained: [], reading_words: 'The earlier weekly figure is withdrawn.' }] } as never, { now: FIX }, '2026-10-18T01:00:00Z');
+    if ('refused' in result) throw new Error(String(result.refused));
+    // The register route's persistence: the saved bytes, read back cold.
+    return { graph: JSON.parse(JSON.stringify(result.candidate)) as Rec, subject };
+  }
+  const chat = (...messages: string[]) => ({ now: messages[messages.length - 1], conversation: messages.join('\n'), messages });
+
+  it('after the correction, the brief\'s "180 a week" quoted again is not the user\'s (unknown), read from the cold saved record', async () => {
+    const { graph, subject } = await corrected();
+    const current = currentCorrectionOf(graph, subject as never);
+    expect(current).toEqual({ correction: FIX, kept: [] });
+    expect(userStated({ quote: TODAY, value: 180, unit: 'bookings a week' }, chat(BRIEF, FIX, 'Please set today\'s level.'), { quantity: 'goal_level' },
+      { current })).toMatchObject({ origin: 'unknown' });
+  });
+
+  it('CONTRAST: with no correction on record the same quote is theirs; a NEW figure typed after the correction is theirs', async () => {
+    const { graph, subject } = await corrected();
+    expect(userStated({ quote: TODAY, value: 180, unit: 'bookings a week' }, chat(BRIEF, 'Please set today\'s level.'), { quantity: 'goal_level' })
+      .origin).toBe('human');
+    const fresh = 'Bookings are 210 a week now.';
+    expect(userStated({ quote: fresh, value: 210, unit: 'bookings a week' }, chat(BRIEF, FIX, fresh), { quantity: 'goal_level' },
+      { current: currentCorrectionOf(graph, subject as never) }).origin).toBe('human');
   });
 });

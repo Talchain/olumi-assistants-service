@@ -1,6 +1,7 @@
 import { GoalScopeSchema, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { figureTheUserWroteFor } from './stated-by-user.js';
 import { userStated, type StatementTexts } from './user-statements.js';
+import { currentCorrectionOf } from '../statement-door/read.js';
 import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeShareAnswerCanBind, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
 import { proposeGoalCurrentLevel, type GoalLevelRead } from './goal-current-level.js';
 import type { ProposalStore } from './proposal.js';
@@ -64,7 +65,9 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   let current = prior?.current_level;
   if (args.current_level) {
     const c = args.current_level;
-    if (!said(c.quote, c.value, c.unit)) return fail('level_not_stated', 'The current level must be the user’s stated figure in their units. Nothing was recorded.');
+    // A level the user's own correction of this goal's level retired is never theirs again (PL-0048 2, the correction door's record).
+    const corrected = currentCorrectionOf(graph.raw, { kind: 'goal', id: String(goal.id), field: 'level' });
+    if (userStated({ quote: c.quote, value: c.value, unit: c.unit }, texts, { quantity: 'goal_level' }, { ...(corrected !== undefined ? { current: corrected } : {}) }).origin !== 'human') return fail('level_not_stated', 'The current level must be the user’s stated figure in their units. Nothing was recorded.');
     current = { value: c.value, unit: c.unit, source: { quote: c.quote } };
   }
   if (scope.extent === 'total' && !scope.component && (goal.nonlinear_identity as {operation?: string} | undefined)?.operation === 'product') return fail('scope_operand_missing', 'Identify the modelled component’s rate and count before reconciling this total goal. Nothing was prepared.');

@@ -148,20 +148,18 @@ export type StatementVerdict =
  * disown it (`quoteIsNotTheUsersClaim`), and no LATER message withdraws the user's estimates (`withdrawnLater`). `'retained'`: only in
  * retained words of unknown origin. `'not_their_claim'`: written, but not theirs. `'absent'`: not written.
  */
-function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentRecord): 'theirs' | 'retained' | 'not_their_claim' | 'absent' {
+function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentCorrection): 'theirs' | 'retained' | 'not_their_claim' | 'absent' {
   const messages = texts.messages !== undefined && texts.messages.length > 0
     ? texts.messages : [texts.conversation, texts.now].filter((t): t is string => typeof t === 'string' && t !== '');
   // ⛔ PL-0048 (2): the subject's account as the user last CORRECTED it (the correction door's record, read, never re-derived). A span
-  // from a message before that correction is current only inside one of the record's own statements (the kept spans, the correction).
-  const corrected = current?.attest?.recorded_by === 'correction' ? current.statements : undefined;
-  const correctedAt = corrected === undefined ? -1
-    : messages.reduce((at, m, i) => (corrected.some((st) => usersSpanIn(m, st.quote) >= 0) ? i : at), -1);
-  const keptByCorrection = corrected !== undefined && corrected.some((st) => plainQuoteWords(st.quote).includes(plainQuoteWords(quote)));
+  // from a message before that correction is current only inside a span the correction explicitly kept.
+  const correctedAt = current === undefined ? -1 : messages.reduce((at, m, i) => (usersSpanIn(m, current.correction) >= 0 ? i : at), -1);
+  const keptByCorrection = current !== undefined && current.kept.some((k) => plainQuoteWords(k).includes(plainQuoteWords(quote)));
   let found = false;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (usersSpanIn(messages[i]!, quote) < 0) continue;
     found = true;
-    if (corrected !== undefined && i < correctedAt && !keptByCorrection) continue;
+    if (current !== undefined && i < correctedAt && !keptByCorrection) continue;
     if (!quoteIsNotTheUsersClaim(messages[i]!, quote) && !withdrawnLater(messages.slice(i + 1))) return 'theirs';
   }
   if (found) return 'not_their_claim';
@@ -211,10 +209,13 @@ function unitWrittenIn(quote: string, end: number | undefined, unit: string, sca
 /** Units whose figures are 0–1 shares of a whole: a percentage the user writes is that share ×100. */
 const SHARE_UNITS: ReadonlySet<string> = new Set(['proportion', 'share', 'fraction']);
 
-/** The subject's current recorded account (`userStatementFor`, statements.ts), as the rule reads it: never written here. */
-export interface CurrentRecord {
-  readonly statements: readonly Pick<UserStatement, 'quote'>[];
-  readonly attest?: Readonly<Record<string, string | number | boolean>>;
+/**
+ * The subject's current CORRECTION, as the correction door recorded it (`currentCorrectionOf`, statement-door/read.ts, read only): the
+ * correction's own words and the spans it explicitly kept. Never written here.
+ */
+export interface CurrentCorrection {
+  readonly correction: string;
+  readonly kept: readonly string[];
 }
 
 /** What the AI cites for ONE value or statement: its span of the user's words, and its own reading of it. */
@@ -236,12 +237,12 @@ export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['ref
  * directly from that span (`figuresWritten`; a money unit's own scale letter reads "£54k" as 54 £k; the unit only where it is written
  * straight after the figure). Anything else is NOT the user's: its source is unknown, and it is Olumi's only where the writer
  * positively declares Olumi's own estimate (`ownEstimate`; PL-0048). Approval is recorded separately and never rewrites this origin.
- * A span the user's later correction retired (`current`, the subject's correction record) is not theirs again. The form is the AI's reading
+ * A span the user's later correction retired (`current`, the subject's correction as recorded) is not theirs again. The form is the AI's reading
  * (`claim.form`), else the writer's field (`opts.form`), else what the claim gives (two ends: a range; one figure: a point; none: words
  * that describe). Every writer that records a value or statement as the user's calls this, and nothing else. Pure.
  */
 export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
-  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentRecord } = {}): StatedVerdict {
+  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection } = {}): StatedVerdict {
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
   const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
     ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
@@ -272,7 +273,7 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
  * ⭐ ONE statement, verified or refused on its own (SYSTEM 1's door and SYSTEM 2's construction map, PROMPT sys2 §2): a quote
  * must stand as a WHOLE statement in the user's own verified words, and its figure must be one the quote states.
  */
-export function verifyStatement(given: StatementArgs | null | undefined, texts: StatementTexts, rules: StatementRules, current?: CurrentRecord): StatementVerdict {
+export function verifyStatement(given: StatementArgs | null | undefined, texts: StatementTexts, rules: StatementRules, current?: CurrentCorrection): StatementVerdict {
   const malformed = (detail: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_malformed', detail });
   const same = rules.sameFigure ?? ((_q: string, a: number, b: number) => a === b);
   const quote = trimmed(given?.quote, QUOTE_MAX);

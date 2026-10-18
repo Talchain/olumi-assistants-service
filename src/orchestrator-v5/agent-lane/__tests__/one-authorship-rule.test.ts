@@ -67,14 +67,15 @@ describe('the one rule: whose value it is', () => {
 
   it('5b. a span the user\'s CORRECTION retired is not re-credited by a later literal match; a kept span and a later message still count', () => {
     const guess = 'Churn is roughly 5% a month.', fix = 'Ignore the 5% churn I gave, I have no real figure.';
-    const corrected = { attest: { recorded_by: 'correction', disposition: 'retracted', scope: 'whole', retained_count: 0 },
-      statements: [{ quote: fix }] };
+    const corrected = { correction: fix, kept: [] };
     expect(userStated({ quote: guess, value: 5 }, texts(guess, fix, 'Thanks.'), SUBJECT, { current: corrected }).origin).toBe('unknown');
     // CONTRAST: with no correction on the subject, the same words are theirs.
     expect(userStated({ quote: guess, value: 5 }, texts(guess, 'Thanks.'), SUBJECT).origin).toBe('human');
     // CONTRAST: a NEW statement after the correction is theirs.
     const later = 'Actually churn is 4% a month now.';
     expect(userStated({ quote: later, value: 4 }, texts(guess, fix, later), SUBJECT, { current: corrected }).origin).toBe('human');
+    // CONTRAST: a span the correction explicitly KEPT stays theirs.
+    expect(userStated({ quote: guess, value: 5 }, texts(guess, fix, 'Thanks.'), SUBJECT, { current: { correction: fix, kept: [guess] } }).origin).toBe('human');
   });
 
   it('sign reads from the span: a net loss states its negative; a gross count never does', () => {
