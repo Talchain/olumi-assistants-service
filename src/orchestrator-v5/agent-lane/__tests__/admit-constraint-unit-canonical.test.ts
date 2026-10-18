@@ -252,7 +252,7 @@ describe('admitCandidateModel hands each limit its target node', () => {
   ) as CandidateModel;
   function admittedLimit(
     factor: { unit: string; baseline_value: number; plausible_max?: number; baseline_known?: boolean },
-    limit: { value: number; unit: string },
+    limit: { value: number; unit: string; provenance?: string },
   ): AdmittedConstraint {
     const candidate = {
       ...faithful,
@@ -286,13 +286,16 @@ describe('admitCandidateModel hands each limit its target node', () => {
       .toMatchObject({ unit: '%', value: 10 });
   });
 
-  it('U1: the drafter\'s 100 on a UNITLESS factor is not read as a percent — the limit stays verbatim (pair: the row above)', () => {
-    const c = admittedLimit({ unit: '', baseline_value: 7, plausible_max: 100, baseline_known: false }, { value: 10, unit: 'percent per month' });
+  it('U1: the drafter\'s 100 on a UNITLESS factor is not read as a percent — Olumi\'s limit stays verbatim; the user\'s own percent limit supports it', () => {
+    const unitless = { unit: '', baseline_value: 7, plausible_max: 100, baseline_known: false };
+    const c = admittedLimit(unitless, { value: 10, unit: 'percent per month', provenance: 'ai_proposed' });
     expect(c).toMatchObject({ unit: 'percent per month', value: 10 });
     expect(stampKeys(c)).toEqual([]);
+    // CONTRAST: the user stated the limit in percent, so the user's unit, not Olumi's 100, makes it a percent level.
+    expect(admittedLimit(unitless, { value: 10, unit: 'percent per month' })).toMatchObject({ unit: '%', value: 10 });
     // CONTRAST: a level-less factor stores no observed state; its declared "%" still makes the 100 its encoding.
     const levelLess = { unit: '%', baseline_value: null as unknown as number, plausible_max: 100, baseline_known: false };
-    expect(admittedLimit(levelLess, { value: 10, unit: 'percent per month' })).toMatchObject({ unit: '%', value: 10 });
+    expect(admittedLimit(levelLess, { value: 10, unit: 'percent per month', provenance: 'ai_proposed' })).toMatchObject({ unit: '%', value: 10 });
   });
 
   it('a "£" factor turns a "£k" limit into £', () => {
