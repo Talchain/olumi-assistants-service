@@ -48,6 +48,7 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { isRelativeChangePercentUnit, readPercentUnit } from './same-unit.js';
+import { unitWrittenAfter } from './user-statements.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
 import type { LabelHeadReading } from './label-head-unit.js';
@@ -4177,8 +4178,16 @@ function admitOnce(
               before: { value: unscaled.value, unit: unscaled.unit, quote: unscaled.quote }, after: null, reason: unscaled.question,
               severity: 'warn' } as RepairEntry);
           }
+          // ⭐ C5b (DL-3 ruling 18 Oct; T1 dev sizing P01 "experience score", P11 "fairness-score points"): an untargeted goal
+          // keeps a unit ONLY where one of its own verified statements writes that unit after its figure (`unitWrittenAfter`).
+          // A unit the draft named for an aim the user never measured is not saved as the goal's; it would later refuse the
+          // user's own target (`target_unit_mismatch`). The GEN #3 ask above, and the goal's `unit_reading`, are unchanged.
+          const unit = typeof model.goal.unit === 'string' ? model.goal.unit : '';
+          const unitWritten = unit.trim() !== '' && typeof brief === 'string'
+            && subjectSource(model, brief, { kind: 'goal', label: model.goal.metric }).statements.some(({ statement: s }) =>
+              [s.low, s.high].some((figure) => typeof figure === 'number' && unitWrittenAfter(s.quote, figure, unit)));
           return {
-            ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
+            ...(unitWritten ? { goal_threshold_unit: unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
           };
         }
