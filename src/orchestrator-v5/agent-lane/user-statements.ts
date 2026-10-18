@@ -298,14 +298,19 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   const share = unit === undefined || (SHARE_UNITS.has(unit.toLowerCase())
     || isProportionScaledFactor({ unit, cap: undefined, value: typeof claim?.value === 'number' ? claim.value : undefined, raw_value: undefined }));
   const scale = share ? 100 : unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
+  // A unit of no known family (neither a share, a percentage, money, a count nor a time: "share per month"): a written PERCENTAGE grounds
+  // its figure or its 0–1 fraction, exactly as the estate's figure rule reads it (`amountIs`, stated-by-user.ts).
+  const percentEither = scale === 1 && unit !== undefined && !share && unitPhraseFamily(unit) === null;
+  const readScale = scale > 1 ? scale : percentEither ? 100 : 1;
   const percentAt = (q: string, n: number): boolean => findStatedAmounts(q).some((a) => a.kind === 'percent' && Math.abs(a.magnitude - n) <= 1e-9 * Math.max(1, Math.abs(n)));
   const v = verifyStatement({ ...claim, quote, form }, texts, { subject, unit: unit ?? '', forms: STATEMENT_FORMS, figuresIn: figuresWritten,
-    allowsZero: true, sameFigure: (q, a, b) => a === b || (scale > 1 && Math.abs(a * scale - b) <= 1e-9 * Math.max(1, Math.abs(b)) && (!share || percentAt(q, b))) }, opts.current);
+    allowsZero: true, sameFigure: (q, a, b) => a === b || (readScale > 1 && Math.abs(a * readScale - b) <= 1e-9 * Math.max(1, Math.abs(b))
+      && ((!share && !percentEither) || percentAt(q, b))) }, opts.current);
   if (v.kind === 'refused') return notTheirs(v.refusal, v.detail);
   const { unit: _read, ...read } = v.statement;
   // An end read at the unit's own scale ("£54k" for 54 £k) is kept in the AI's unit, the figure the user wrote.
   const claimed = [claim?.value, claim?.low, claim?.high].filter((n): n is number => typeof n === 'number');
-  const inUnit = (n: number | undefined): number | undefined => (n !== undefined && scale > 1 && !claimed.includes(n) && claimed.some((c) => Math.abs(c * scale - n) <= 1e-9 * Math.max(1, Math.abs(n))) ? n / scale : n);
+  const inUnit = (n: number | undefined): number | undefined => (n !== undefined && readScale > 1 && !claimed.includes(n) && claimed.some((c) => Math.abs(c * readScale - n) <= 1e-9 * Math.max(1, Math.abs(n))) ? n / readScale : n);
   const rest = { ...read, ...(read.low !== undefined ? { low: inUnit(read.low)! } : {}), ...(read.high !== undefined ? { high: inUnit(read.high)! } : {}) };
   const unitIsUsers = unit !== undefined && unitWrittenIn(quote, rest.high ?? rest.low, unit, scale);
   if (unit !== undefined && !unitIsUsers && writtenInAnotherUnit(quote, claimed, unit, scale)) {

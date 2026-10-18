@@ -115,7 +115,7 @@ async function built() {
 }
 
 async function adopt(caps: ReturnType<typeof createAgentCapabilities>, factor_label: string, value: number) {
-  const proposed = await caps.proposeAssumptions({ ...ctx, user_text: `${factor_label} is ${value} FTE.` }, { assumptions: [{ user_stated: true, factor_label, value, unit: 'FTE', basis: 'the user said so' }] });
+  const proposed = await caps.proposeAssumptions({ ...ctx, user_text: `${factor_label} is ${value} FTE.` }, { assumptions: [{ user_stated: true, quote: `${factor_label} is ${value} FTE`, factor_label, value, unit: 'FTE', basis: 'the user said so' }] });
   expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
   return caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
 }

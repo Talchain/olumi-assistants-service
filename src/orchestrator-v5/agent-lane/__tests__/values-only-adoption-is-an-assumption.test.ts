@@ -319,7 +319,7 @@ describe('a partial approval: one value lands, one is refused', () => {
 
   it('RED: the refused, unframed factor gets NO range written, and the note does not call it stored', async () => {
     const { p, applied } = await approve('monthly_budget', [
-      { user_stated: true, factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true },
+      { user_stated: true, factor_label: 'Monthly budget', value: 300, quote: 'The monthly budget is 300', basis: 'the user said 300', revise: true },
       { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
     ]);
     // PRECONDITIONS, proven: exactly one value landed, and the refused factor is the unframed >1 kind.
@@ -335,7 +335,7 @@ describe('a partial approval: one value lands, one is refused', () => {
 
   it('RED: the reverse — the user’s revision lands, Olumi’s figure is refused — says each truthfully', async () => {
     const { p, applied } = await approve('coordination_load', [
-      { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+      { user_stated: true, factor_label: 'Team size', value: 6, unit: 'FTE', quote: 'Team size is 6 FTE', basis: 'the user said six', revise: true },
       { user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
     ]);
     expect(p.writes()).toBe(1);

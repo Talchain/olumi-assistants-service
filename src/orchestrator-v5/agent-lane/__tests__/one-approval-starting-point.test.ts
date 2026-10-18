@@ -190,8 +190,8 @@ describe('propose_starting_point', () => {
       { user_stated: false, factor_label: 'Capacity support', value: 10, unit: 'index points (0-100)', basis: 'uncertain support' },
       { user_stated: false, factor_label: 'Morale', value: 70, unit: 'index points (0-100)', basis: 'uncertain morale' },
     ], option_levels: [...LEVELS, ...LEVELS.flatMap(level => [
-      { option_label: level.option_label, factor_label: 'Capacity support', value: 10, basis: 'support held unchanged' },
-      { option_label: level.option_label, factor_label: 'Morale', value: 70, basis: 'morale held unchanged' },
+      { option_label: level.option_label, factor_label: 'Capacity support', value: 10, basis: 'support held unchanged', user_stated: false },
+      { option_label: level.option_label, factor_label: 'Morale', value: 70, basis: 'morale held unchanged', user_stated: false },
     ])] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const id = String(r.proposal_id), approved = JSON.stringify(store.get(id)!.operations);

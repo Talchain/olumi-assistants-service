@@ -83,7 +83,8 @@ describe('⭐ PJ-C1: an option-levels proposal is answered from its own result',
     const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' });
     const d: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes, edges: [e('opt_cohort', 'fac_price'), e('opt_raise', 'fac_price'), e('fac_price', 'goal_mrr')] }, graph_hash: 'h0' } });
     const args = { whole_request: true, interventions: [
-      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true },
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, unit: '£ per month', basis: 'the user: £54 per month', user_stated: true,
+        quote: 'use £54 per month as its Pro plan monthly price' },
     ] };
     const turn = async (message: string) => {
       const caps = createAgentCapabilities(d, new ProposalStore());

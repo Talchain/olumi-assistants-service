@@ -45,7 +45,11 @@ const doorFor = () => {
     async propose(msg: string, unit: string, factors: { label: string; value: number }[]) {
       held = null;
       const ctx = { scenario_id: SID, authenticated_user_id: null, request_id: 'r', user_text: msg, user_turn_text: msg };
-      const args = { factors: factors.map((f) => ({ label: f.label, unit, today: { value: f.value }, affects: TARGET, direction: 'positive' })), rationale: 'probe' };
+      // ⭐ LEAN CORE (#3392): the AI cites the user's sentence that writes the figure (USER_QUOTE); a figure the message never writes
+      // has no span to cite, so it carries none.
+      const cite = (value: number) => quoteOfFigure(value, unit, msg) ?? undefined;
+      const args = { factors: factors.map((f) => ({ label: f.label, unit, today: { value: f.value, ...(cite(f.value) !== undefined ? { quote: cite(f.value) } : {}) },
+        affects: TARGET, direction: 'positive' })), rationale: 'probe' };
       const r = await caps.proposeNewFactor(ctx, args);
       return { r, held: held as Held | null };
     },
@@ -95,7 +99,7 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
     expect(confirmCalls).toBeGreaterThan(30);
   }, 120_000);
 
-  it('the served E04 message: the correct pairing AND the swap are both shown for confirmation — each with the user\'s whole sentence; the £400k it never wrote is labelled Olumi’s', async () => {
+  it('the served E04 message: the correct pairing AND the swap are both shown for confirmation — each with the user\'s whole sentence; the £400k it never wrote is not theirs: unknown, nothing held (PL-0048)', async () => {
     const door = doorFor();
     const e04 = CASES.find((c) => c.id === 'E04')!.msg;
     for (const pair of [[120000, 65000], [65000, 120000]] as const) {
@@ -108,7 +112,9 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
       ]);
     }
     const { r, held } = await door.propose(CASES.find((c) => c.id === 'E04k')!.msg, 'GBP/year per engineer', [{ label: 'Senior engineer salary', value: 400000 }]);
-    expect(r).toMatchObject({ ok: true, factors: [{ current_value: { stated_by: 'olumi_estimate' } }] });
-    expect(held![0]!.basis).toBe('olumi_estimate');
+    // ⛔ PL-0048 (1): a figure the message never writes is not the user's, and this door has no own-estimate carrier, so it is not
+    // Olumi's either: its origin is unknown and nothing is prepared or held (never "you said", never relabelled as Olumi's).
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown', today_not_set: [{ factor: 'Senior engineer salary', value: 400000 }] });
+    expect(held).toBeNull();
   }, 60_000);
 });

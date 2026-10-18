@@ -110,13 +110,17 @@ describe('RED — served A07 (one option): the placeholder 0 on the grandfather 
     ['Runtime\'s ledger shape { 0, "", false, "" }', LEDGER],
     ['the served rejected_levels shape { 0 }', { value: 0 }],
     ['{ 0, unit: "  ", estimate: null }', { value: 0, unit: '  ', estimate: null }],
-  ])('%s → held; the switch is on at 1 under the option; the £59 is still sent; the reading is said', async (_name, level) => {
+  ])('%s → held; the switch is on at 1 under the option; the £59 inside the quotation marks stays unset (unknown); the reading is said', async (_name, level) => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx(A07) as never, a07(level) as never) as Result;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(sent).toHaveLength(1);
     expect(on(sentOption(sent, GRANDFATHER), GF_KEY)).toEqual([{ factor_key: GF_KEY, value: 1 }]);
-    expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(true);
+    // ⭐ LEAN CORE (#3392, THE ONE RULE): the £59 is written ONLY inside the paired quotation marks of A07, which the estate's speech
+    // reader cannot tell from another speaker's quoted words (check 3). So it is not credited as the user's figure and is never Olumi's:
+    // it stays unset and still needed (was: sent as the user's). The switch reading below is unchanged.
+    expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(false);
+    expect(r.levels_not_set).toEqual([expect.objectContaining({ factor: 'Pro plan price', value: 59 })]);
     expect(r.switch_placeholder_levels_read_as_on).toEqual([{ option: GRANDFATHER, factor: GF_SWITCH }]);
     expect(r.switch_placeholder_levels_note).toContain('a placeholder, not a figure');
   });
