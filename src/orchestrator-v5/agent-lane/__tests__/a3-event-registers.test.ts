@@ -8,6 +8,11 @@ import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { admittedReachesGoal } from '../admit-model.js';
+import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 
 type Rec = Record<string, any>;
 const SID = 'd1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1';
@@ -41,6 +46,27 @@ async function built(draft: Rec, brief = BRIEF): Promise<{ result: Rec; graphs: 
   return { result, graphs };
 }
 
+/** The registered graph read cold, as the next turn reads it, then a Run asked for, stopped before any engine call. */
+async function reopenAndRun(graph: Rec): Promise<{ state: Rec; run: string; request: Rec | undefined }> {
+  const cold = GraphV3.parse(JSON.parse(JSON.stringify(graph)));
+  const state = await createAgentCapabilities((async () => ({ status: 200, json: { graph: cold, graph_hash: 'cold' } })) as never, new ProposalStore())
+    .getCanonicalState({ scenario_id: SID, authenticated_user_id: null, request_id: 'cold', user_text: 'What is known?', user_turn_text: 'What is known?' } as never) as Rec;
+  let request: Rec | undefined;
+  let engineCalls = 0;
+  let run = '';
+  try {
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'cold', { loadGraphAndBriefText: async () => ({ graph: cold, briefText: BRIEF }),
+      readMostRecentPendingActions: async () => [] } as never);
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot,
+      plotClient: { run: async () => { engineCalls++; throw Error('ENGINE'); }, validatePatch: async () => { throw Error('ENGINE'); } },
+      probe: async (v: Rec) => { request = v.plotPayload; throw Error('STOP_AFTER_REQUEST'); } } as never);
+    run = JSON.stringify(await handler({ payload: { scenario_id: SID, turn_id: 'cold', kind: 'message', message: 'Run analysis.' }, requestId: 'cold',
+      signal: new AbortController().signal, context: {}, orientationText: '' } as never));
+  } catch (e) { run = String(e); }
+  expect(engineCalls).toBe(0);
+  return { state, run, request };
+}
+
 describe('A3 D1: a deadline brief with no capacity stated gets a model and one ask, never a refusal', () => {
   it('⭐ RED → GREEN: the ordinary model registers with the deadline; the missing capacity is the one ask; no chance can run', async () => {
     const { result, graphs } = await built(noCapacityDraft());
@@ -56,5 +82,17 @@ describe('A3 D1: a deadline brief with no capacity stated gets a model and one a
     // The withheld event is never counted as a link whose direction nobody stated: the three are the option links the draft left
     // without a direction, exactly as the ordinary admission withholds them.
     expect(result.not_represented).toContain('3 relationship(s) were left out because nobody has stated which way they run.');
+    // Cold reopen: the model cannot run, the deadline is never asked for again, and a Run prepares no engine request.
+    const { state, run, request } = await reopenAndRun(graphs[0]!);
+    expect(state.readiness, JSON.stringify(state.readiness)).toMatchObject({ checked: true, may_run: false });
+    expect(state.next_step_blocker).toEqual({ kind: 'missing_input', cause: 'goal_target_missing',
+      ask: 'One gap: ‘Next app version’ has no target yet. What would count as meeting it?' });
+    expect(request, run.slice(0, 800)).toBeUndefined();
+    expect(run).toContain('not analysis-ready');
+    // Contrast: the same saved model with no deadline held still asks for one.
+    const undated = structuredClone(graphs[0]!);
+    delete undated.nodes.find((n: Rec) => n.kind === 'goal').goal_deadline_as_stated;
+    expect((await reopenAndRun(undated)).state.next_step_blocker).toMatchObject({
+      ask: 'One gap: ‘Next app version’ has no target or deadline yet. What would count as meeting it, and by when?' });
   });
 });
