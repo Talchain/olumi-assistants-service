@@ -140,10 +140,22 @@ export const isProposingTool = (name: string): boolean => APPROVE[name] !== unde
  * ⛔ A CHANGE THE AGENT DISOWNS IS NEVER LEFT OFFERED (P2 of the A16 defect, DL #72 5863691992): served `137d3a5` A16
  * prepared a link change, then replied "do not approve that proposal" with its approve button still offered. A reply
  * cannot take a button away, so the Agent withdraws the change by this tool, before it replies. Only a change THIS
- * turn proposed and still offers can be withdrawn (`agent-loop.ts`); what an earlier turn showed the user stays theirs.
+ * turn proposed and still offers can be withdrawn (`agent-loop.ts`); what an earlier turn showed the user stays theirs,
+ * except Olumi's own card that Olumi now disowns (DL-3 ruling F, 18 Oct: {@link earlierTurnWithdrawal}).
  */
 export const WITHDRAW_PROPOSAL = 'withdraw_proposal';
 export const NOT_PROPOSED_THIS_TURN = 'not_proposed_this_turn';
+
+/**
+ * ⭐ DL-3 RULING F (18 Oct; amends D-08 for this card only): the loop's mark that a withdrawal names an EARLIER turn's
+ * card, which the capability then admits only for Olumi's own, still-offered, unapproved card on the current model. A
+ * symbol, so no model-written (JSON) argument can carry it: only the host sets it.
+ */
+const EARLIER_TURN_CARD = Symbol('withdraw_earlier_turn_card');
+export const earlierTurnWithdrawal = (proposal_id: string): { proposal_id: string } =>
+  ({ proposal_id, [EARLIER_TURN_CARD]: true }) as { proposal_id: string };
+export const isEarlierTurnWithdrawal = (args: unknown): boolean =>
+  typeof args === 'object' && args !== null && (args as Record<symbol, unknown>)[EARLIER_TURN_CARD] === true;
 
 /** The ids this turn's own `withdraw_proposal` calls withdrew. A refused call withdrew nothing. */
 export function withdrawnThisTurn(toolCalls: readonly { name: string; ok: boolean; proposal_id?: string }[]): ReadonlySet<string> {

@@ -249,10 +249,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'withdraw_proposal',
     description:
-      'Withdraw a change you proposed earlier in THIS turn that you now think is wrong, before you reply. It is never applied '
-      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered. '
-      + 'An unresolved goal reading (goal-scope: ID) may also be withdrawn, but only when the user writes exactly '
-      + '"Withdraw this unresolved goal reading: <goal_id>". Otherwise retain its question.',
+      'Withdraw an eligible, unapproved change you proposed in this turn that you now judge wrong, before you reply. '
+      + 'You may also withdraw an earlier-turn card only when it is Olumi’s own estimate, still offered on this scenario, unapproved and unapplied, and bound to the model it was made for. '
+      + 'Do not use this to withdraw the user’s own figures, edits or words, or a protected card-only removal, rename, statement or quote confirmation; an unresolved goal reading has only the exact exception below. '
+      + 'Existing ownership, approval, freshness and model-binding checks still apply. '
+      + 'On success the card is set aside without applying it, its buttons are removed and the existing confirmation is shown once. '
+      + 'On refusal the card remains unchanged: explain what you doubt and the actual refusal reason when supplied, without claiming withdrawal or inventing a cause. '
+      + 'Never ask the user not to approve a change you leave offered. '
+      + 'An unresolved goal reading (goal-scope: ID) may also be withdrawn, but only when the user writes exactly "Withdraw this unresolved goal reading: <goal_id>". Otherwise retain its question.',
     parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
   },
   {
