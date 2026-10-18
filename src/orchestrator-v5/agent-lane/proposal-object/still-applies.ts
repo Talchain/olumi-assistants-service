@@ -146,6 +146,28 @@ export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, 
  * (`computeSurvivingPriorPendingsDetailed`, its hash rule). The hold keeps its pin: an Agent card's pin IS its proposal's base
  * (`agentProposalOf`), so re-pinning it would break the card the user sees.
  */
+/** A held Agent card as a stored pending carries it (`inline_patch.agent_proposal`). */
+export function isHeldAgentCard(pa: PendingAction): boolean {
+  return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.['agent_proposal']);
+}
+
+/**
+ * ⭐ NO SILENT LAPSE (DL-3 18 Oct, PR-2; Codex co-design §2: "Overlapping/dependency changes retain it visibly as 'Model
+ * changed — review this change'"): a held Agent card whose own subject moved is KEPT, marked for review, at every seam that
+ * used to drop it — the commit's carry-forward, the mutating commit's referee and the turn's reconcile. A card under review
+ * is never executable (its press is refused by its own base) and never bound by typed words; the reply offers it to be
+ * reviewed (the Agent prepares it again on the model as it is now) or set aside. Its pin and digest are unchanged.
+ */
+export const AWAITING_REVIEW = 'awaiting_review';
+export function heldCardUnderReview(pa: PendingAction): boolean {
+  return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.[AWAITING_REVIEW]);
+}
+export function heldCardForReview(pa: PendingAction, modelNow: string | null | undefined): PendingAction {
+  if (pa.action.kind !== 'apply_proposed_change' || heldCardUnderReview(pa)) return pa;
+  return { ...pa, action: { ...pa.action, inline_patch: { ...pa.action.inline_patch,
+    [AWAITING_REVIEW]: { reason: 'model_changed', ...(typeof modelNow === 'string' && modelNow !== '' ? { model: modelNow } : {}) } } } } as PendingAction;
+}
+
 export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): boolean {
   if (pa.action.kind !== 'apply_proposed_change') return false;
   const proposal = (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'];

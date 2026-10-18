@@ -1,6 +1,6 @@
 import { assertShareByDatePreserved } from './goal-target/share-by-date-carrier.js';
 import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
-import { heldAgentCardStillApplies } from './agent-lane/proposal-object/still-applies.js';
+import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard } from './agent-lane/proposal-object/still-applies.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -655,6 +655,7 @@ export function computeSurvivingPriorPendingsDetailed(
     // not invalidated by a model move (hiring post3009: approving two link strengths dropped the pending deadline card); it
     // keeps its pin, which is its proposal's base, and its press re-checks the same rule.
     const preconditionHash = pa.preconditions.graph_hash;
+    let carried = pa;
     if (
       typeof preconditionHash === 'string' &&
       preconditionHash.length > 0 &&
@@ -663,22 +664,26 @@ export function computeSurvivingPriorPendingsDetailed(
       preconditionHash !== currentGraphHash &&
       heldCardStillAppliesNow?.(pa) !== true
     ) {
-      hashInvalidatedCount += 1;
-      continue;
+      // ⭐ NO SILENT LAPSE (PR-2): a held Agent card is kept, marked for review (`heldCardForReview`); others drop as before.
+      if (!isHeldAgentCard(pa)) {
+        hashInvalidatedCount += 1;
+        continue;
+      }
+      carried = heldCardForReview(pa, currentGraphHash);
     }
     // 5. turn-count TTL — decrement once per carried turn; drop when exhausted.
-    const nextTurnCount = pa.expires_at_turn_count - 1;
+    const nextTurnCount = carried.expires_at_turn_count - 1;
     if (nextTurnCount <= 0) {
       expiredTurnsCount += 1;
       // F-HELD fix 2b: a consent-expecting pending lapsing by turn-TTL is
       // the silent-drop case the lapse notice closes. Turn-TTL drops ONLY —
       // see the field doc on SurvivingPriorPendingsResult.
-      if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind)) {
-        lapsedConfirmationExpecting.push(pa);
+      if (CONFIRMATION_EXPECTING_ACTION_TYPES.has(carried.action.kind)) {
+        lapsedConfirmationExpecting.push(carried);
       }
       continue;
     }
-    survivors.push({ ...pa, expires_at_turn_count: nextTurnCount });
+    survivors.push({ ...carried, expires_at_turn_count: nextTurnCount });
   }
   return {
     survivors,

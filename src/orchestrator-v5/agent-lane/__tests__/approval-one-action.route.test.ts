@@ -21,6 +21,9 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 import { approvalChipIdFor } from '../approval-chips.js';
 import { declineChipIdFor } from '../proposal-object/record.js';
+import { heldAgentCardStillApplies, heldCardUnderReview } from '../proposal-object/still-applies.js';
+import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
+import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
 import { authorised, bothCards, call, chipFor, chips, closeApps, hash, idOf, LAPSE, MIXER, MIXER_WORDS, mixerSaved, node, route as routeOver, say,
   world as worldOver, type Rec } from './fixtures/approval-world.js';
 
@@ -132,6 +135,61 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(authorised(pressedB), JSON.stringify(authorised(pressedB)) + String(pressedB.assistant_text)).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     expect(mixerSaved(w.read())).toBe(true);
   }, 150_000);
+
+  // ⭐ PR-2, NO SILENT LAPSE (A4-negative): an overlapping change keeps the user's card VISIBLE for review, never gone.
+  it('⭐ A4\u2212: the user draws the same link elsewhere → the waiting card is kept for review (said once), not applicable, not bound by typed words; "Review this change" prepares it again', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions'); const session = first._agent.session_id;
+    w.edit((g) => { g.edges.push({ from: 'buy_faster_mixer', to: 'prep_time_cut', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }); });
+    const next = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: session }, [say('Here is where things stand.')]);
+    expect(String(next.assistant_text)).toMatch(/Model changed: review this change\. The held change "Buy a faster mixer[^"]*" was prepared before the model changed/);
+    expect(String(next.assistant_text)).not.toMatch(LAPSE);
+    expect(w.onLatestRow(approvalChipIdFor(b)), 'still held').toBe(true);
+    expect(chips(next), JSON.stringify(chips(next))).toEqual(expect.arrayContaining([`agent-review-proposal:${b}`, declineChipIdFor(b)]));
+    expect(chips(next), 'never approvable as it stands').not.toContain(approvalChipIdFor(b));
+    // Typed words never bind a card under review; nothing is written.
+    const before = hash(w.read());
+    const typed = await turn({ message: 'Yes, apply that.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: b }), say('Applied.')]);
+    expect(authorised(typed)).toEqual([expect.objectContaining({ ok: false, mutated: false })]);
+    expect(hash(w.read())).toBe(before);
+    expect(String(typed.assistant_text), 'said once').not.toMatch(/Model changed: review this change/);
+    // Cold: still visible for review.
+    const cold = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() }, [say('Here is where things stand.')]);
+    expect(chips(cold)).toContain(`agent-review-proposal:${b}`);
+    // "Review this change": the Agent prepares it again on the model as it is now; the reviewed card is replaced by it.
+    const review = (next.suggested_actions as { id: string; message: string }[]).find((c) => c.id === `agent-review-proposal:${b}`)!;
+    const again = await turn({ message: review.message, source: 'chip_click', chip: { id: review.id }, agent_session_id: session },
+      [call('propose_option_interventions', MIXER), say('Here it is on the model as it is now.')]);
+    const c = idOf(again, 'propose_option_interventions');
+    expect(c).not.toBe(b);
+    expect(w.onLatestRow(approvalChipIdFor(b)), 'the reviewed card is replaced').toBe(false);
+    const chipC = chipFor(again, c);
+    const pressed = await turn({ message: chipC.message, source: 'chip_click', chip: { id: chipC.id }, agent_session_id: session });
+    expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: c })]);
+    expect(node(w.read(), 'buy_faster_mixer').interventions?.prep_time_cut).toBeDefined();
+  }, 180_000);
+
+  // PR-2: the SAME keep-for-review rule at the two commit seams that used to drop a moved Agent card (no route needed).
+  it('A4\u2212 commit seams: the carry-forward and the mutating commit keep the moved card for review; a non-Agent pending still drops', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions');
+    const card = w.latestPendings().find((p) => p.chip_id === approvalChipIdFor(b))!;
+    expect(card, 'the card is stored').toBeDefined();
+    w.edit((g) => { g.edges.push({ from: 'buy_faster_mixer', to: 'prep_time_cut', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }); });
+    const moved = w.read(); const movedHash = hash(moved);
+    expect(movedHash).not.toBe(card.preconditions.graph_hash);
+    const other = { ...card, chip_id: 'chip_action_run_analysis', action: { kind: 'run_analysis' } };
+    const carried = computeSurvivingPriorPendingsDetailed([card, other] as never, [], [], movedHash, Date.now(), (pa) => heldAgentCardStillApplies(pa, moved));
+    expect(carried.survivors.map((p) => [p.chip_id, heldCardUnderReview(p)])).toEqual([[approvalChipIdFor(b), true]]);
+    expect(carried.summary.hashInvalidatedCount, 'the non-Agent pending still drops').toBe(1);
+    const thread = threadHoldsThroughMutatingCommit({ priorPendingActions: [card] as never, graphAfterCommit: moved, graphHashAfterCommit: movedHash,
+      appliedOperations: null, nowMs: Date.now(), scenarioId: w.sid, turnId: 't-seam', requestId: 'r-seam' });
+    expect(thread.lapsed).toEqual([]);
+    expect(thread.threaded.map((p) => [p.chip_id, heldCardUnderReview(p)])).toEqual([[approvalChipIdFor(b), true]]);
+  }, 120_000);
 });
 
 // ⭐ THE DISPLAYED-OPERATION CONTRACT (Codex BLOCK on #3420@42e08cdc, 18 Oct: its three CEE probes, adopted as rows). Typed

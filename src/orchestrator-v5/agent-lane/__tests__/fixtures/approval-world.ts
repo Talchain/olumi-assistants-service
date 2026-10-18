@@ -78,7 +78,10 @@ export function world(live: { store: unknown }) {
   /** A card the user was never shown: its carrier is taken off the latest row (the proposal stays in the process's store). */
   const neverShown = (chipId: string): void => { const row = latest() as Rec | undefined;
     if (row !== undefined) row.pending_actions = (row.pending_actions ?? []).filter((p: Rec) => p.chip_id !== chipId); };
-  return { sid, read, graphWire, versions, onLatestRow, neverShown };
+  /** An edit outside the conversation (as a canvas edit lands): the stored model changes, no row is written. */
+  const edit = (change: (g: Rec) => void): void => { const g = read(); change(g); bytes = JSON.stringify(g); };
+  const latestPendings = (): Rec[] => structuredClone((latest() as Rec | undefined)?.pending_actions ?? []);
+  return { sid, read, graphWire, versions, onLatestRow, neverShown, edit, latestPendings };
 }
 
 /** The open apps, closed by the spec's `afterEach` (`closeApps`). */

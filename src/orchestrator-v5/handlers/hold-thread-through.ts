@@ -60,7 +60,7 @@
  * commit carry-forward (single decrement site preserved).
  */
 
-import { heldAgentCardStillApplies } from '../agent-lane/proposal-object/still-applies.js';
+import { heldAgentCardStillApplies, heldCardForReview, isHeldAgentCard } from '../agent-lane/proposal-object/still-applies.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
@@ -364,6 +364,11 @@ export function threadHoldsThroughMutatingCommit(
     // and writes on the CURRENT base.
     if (heldAgentCardStillApplies(pa, input.graphAfterCommit)) {
       threaded.push(pa);
+      continue;
+    }
+    // ⭐ NO SILENT LAPSE (PR-2): an Agent card whose own subject this commit moved is kept, marked for review.
+    if (isHeldAgentCard(pa)) {
+      threaded.push(heldCardForReview(pa, input.graphHashAfterCommit));
       continue;
     }
     // Generic apply proposal, payload-less GM hold (decline posture), or a

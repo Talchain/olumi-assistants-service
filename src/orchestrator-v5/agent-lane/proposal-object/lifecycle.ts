@@ -29,6 +29,7 @@ import { GM_HELD_UNTIL_DECIDED_KEY } from '../../handlers/edit-graph-referee-gat
 import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { heldOperationsOf, isProductHold, isHeldProposal, heldProposalId } from './record.js';
+import { heldCardForReview, heldCardUnderReview } from './still-applies.js';
 import type { HeldLapseReason } from './reply.js';
 
 /** The idle backstop: a held proposal nobody has touched for a day lapses — said, never silent. */
@@ -93,8 +94,10 @@ export interface ReconcileInput {
 }
 
 /** The product holds this answer row carries (latest-row order), and the ones that went without the user (to be said). */
-export function reconcileHeldProposals(input: ReconcileInput): { carried: PendingAction[]; lapsed: HeldLapse[] } {
+export function reconcileHeldProposals(input: ReconcileInput): { carried: PendingAction[]; lapsed: HeldLapse[]; review: PendingAction[] } {
   const lapsed: HeldLapse[] = [];
+  /** Agent cards newly kept for review this turn (said once); a card already under review is carried silently. */
+  const review: PendingAction[] = [];
   const latestHolds = input.latest.filter((pa) => isHeldProposal(pa) && pa.scenario_id === input.scenarioId);
   const live: PendingAction[] = [];
   for (const hold of latestHolds) {
@@ -103,7 +106,9 @@ export function reconcileHeldProposals(input: ReconcileInput): { carried: Pendin
     if (isPendingActionExpired(hold, input.nowMs)) { lapsed.push({ hold, reason: 'idle' }); continue; }
     if (!isProductHold(hold) && input.graphHash !== undefined && (hold.preconditions.graph_hash !== input.graphHash
       ? input.stillApplies?.(hold) !== true : input.subjectMoved?.(hold) === true)) {
-      lapsed.push({ hold, reason: 'model_changed' }); continue;
+      // ⭐ NO SILENT LAPSE (PR-2): kept, marked for review, and said once (`heldReviewSentence`).
+      if (!heldCardUnderReview(hold)) review.push(hold);
+      live.push(heldCardForReview(hold, input.graphHash)); continue;
     }
     live.push(hold);
   }
@@ -122,5 +127,5 @@ export function reconcileHeldProposals(input: ReconcileInput): { carried: Pendin
     lapsed.push({ hold, reason: !isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash
       && input.stillApplies?.(hold) !== true ? 'model_changed' : 'gone' });
   }
-  return { carried: [...thread.threaded, ...live.filter(h => !isProductHold(h))].sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso)).map((h) => refreshedHold(h, input.nowMs)), lapsed };
+  return { carried: [...thread.threaded, ...live.filter(h => !isProductHold(h))].sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso)).map((h) => refreshedHold(h, input.nowMs)), lapsed, review };
 }
