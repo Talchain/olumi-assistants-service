@@ -5083,12 +5083,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const meantId = approvedProposal ?? result.tool_calls.find((c) => c.name === 'authorise_change' && c.refusal === 'approval_required'
       && heldRecords.some((r) => r.proposal_id === c.proposal_id))?.proposal_id;
     const heldCards = [...heldRecords].sort((a, b) => Number(b.proposal_id === meantId) - Number(a.proposal_id === meantId));
+    // With several cards in one row, each button shows the change it applies (its card's own words), so the user can tell them apart.
+    const approveWithItsChange = (r: (typeof heldRecords)[number]): OfferedAction => {
+      const hold = heldRecords.length > 1 && r.approve_action.detail === undefined ? liveHolds.find((h) => heldProposalId(h) === r.proposal_id) : undefined;
+      const change = hold === undefined ? undefined : heldChangeLabel(hold);
+      return (change === undefined ? r.approve_action : { ...r.approve_action, detail: change }) as OfferedAction;
+    };
     const heldCardOffer: OfferedAction[] = approvals.length === 0 && heldRecords.length > 0
       && fastPath !== 'method' && !decisionReviewRequested
       && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
         || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
-      ? [...heldCards.map((r) => r.approve_action as OfferedAction), AMEND_CHIP, ...heldCards.map((r) => r.decline_action as OfferedAction)] : [];
+      ? [...heldCards.map((r) => approveWithItsChange(r)), AMEND_CHIP, ...heldCards.map((r) => r.decline_action as OfferedAction)] : [];
     const meantHold = waitingIds.size > 1 && meantId !== undefined ? heldAtStart.find((h) => heldProposalId(h) === meantId) : undefined;
     const approvalWords = waitingIds.size > 1
       ? approvalChoiceWords(waitingIds.size, meantHold === undefined ? undefined : heldChangeLabel(meantHold)) : APPROVAL_REQUIRED_WORDS;

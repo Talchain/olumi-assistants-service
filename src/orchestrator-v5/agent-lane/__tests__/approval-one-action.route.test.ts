@@ -74,8 +74,10 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(ids.indexOf(approvalChipIdFor(b)), 'the card the words meant comes first').toBeLessThan(ids.indexOf(approvalChipIdFor(a)));
     expect(ids).toEqual(expect.arrayContaining([declineChipIdFor(a), declineChipIdFor(b)]));
     expect(String(typed.assistant_text)).toMatch(/two changes are waiting\. To apply "Buy a faster mixer[^"]*", press its button below\./);
-    // ONE click applies the right one; the other card keeps its button.
+    // ONE click applies the right one; the other card keeps its button. Each button shows the change it applies.
     const chip = chipFor(typed, b);
+    expect(String(chip.detail)).toMatch(/^Buy a faster mixer acts on Prep time cut from mixer/);
+    expect(String(chipFor(typed, a).detail)).toMatch(/Prep time cut from mixer = 0%/);
     const pressed = await turn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: session });
     expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
     expect(mixerSaved(w.read())).toBe(true);
