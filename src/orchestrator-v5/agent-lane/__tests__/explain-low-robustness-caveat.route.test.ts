@@ -531,6 +531,59 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       }
     },
   );
+  // ⭐ MEASURED (base reds triage, 18 Oct): #3291 `22b83b69` removed the one placement of this caveat, so an AI-written
+  // Explain said it 0 or 2 times (W20's counts, masked there by its retired shape assertions). The caveat alone, per variant.
+  it.each(['plain', 'bulleted', 'questions tail', 'exact copy', 'spaced copy', 'caveat bullet', 'two copies'])(
+    'W21: %s narrator \u2014 the robustness caveat is said exactly once, and every narrator line survives',
+    async (variant) => {
+      const sentence = NOT_ROBUST_SENTENCE.trim();
+      const questionTail = 'Questions this model does not answer yet: What baseline should we use?';
+      const cleanNarrator = variant === 'plain' ? NARRATOR
+        : variant === 'questions tail' || variant === 'two copies' ? `${bulletedNarrator(2)}\n\n${questionTail}` : bulletedNarrator(2);
+      // CONTROL: the same narrator on a robust Run carries no caveat.
+      narrator = cleanNarrator;
+      readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
+      const control = await press(await run());
+      expect(countSentenceCopies(control.assistant_text, sentence)).toBe(0);
+      providerCalls = 0;
+      readbackResult.enrichment.robustness = { level: 'low', is_robust: false };
+      narrator = variant === 'exact copy' ? `${sentence} ${cleanNarrator}`
+        : variant === 'spaced copy' ? `${sentence.replace('robust \u2014', 'robust  \u2014')} ${cleanNarrator}`
+          : variant === 'caveat bullet' ? `${NARRATOR}\n- ${sentence}\n${cleanNarrator.slice(NARRATOR.length + 1)}`
+            : variant === 'two copies' ? `${sentence} ${cleanNarrator}\n${sentence}` : cleanNarrator;
+      const b = await press(await run());
+      expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(1);
+      expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
+      for (const line of cleanNarrator.split('\n').filter(line => line.trim() !== '')) {
+        expect(count(b.assistant_text, line.replace(/^\s*[-*\u2022]\s+/, '').trim())).toBe(1);
+      }
+    },
+  );
+  // ⭐ Codex #3409 r1 P1 / DL-3 ruling (A): a robust Run owes no not-robust caveat. When the AI repeats Olumi's own fixed
+  // sentences, they are removed (dedupe of Olumi's exact words); the AI's other lines stay. Bound to the Run's fact.
+  it('W22: a robust Run \u2014 Olumi\u2019s two fixed not-robust sentences written by the AI are removed; the AI\u2019s other lines stay', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    const noFlip = NO_FLIP_SENTENCE;
+    readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
+    narrator = `${NARRATOR} ${sentence}\n- ${NARRATOR_BULLETS[0]}\n${noFlip}`;
+    const b = await press(await run());
+    expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(0);
+    expect(count(b.assistant_text, noFlip), b.assistant_text).toBe(0);
+    expect(count(b.assistant_text, NARRATOR)).toBe(1);
+    expect(count(b.assistant_text, NARRATOR_BULLETS[0]!)).toBe(1);
+  });
+
+  it('W22 contrast: on a fragile Run the IDENTICAL AI text keeps exactly one Olumi caveat (the rule follows the Run, not the words)', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    const noFlip = NO_FLIP_SENTENCE;
+    // Byte-identical to W22's narrator: both of Olumi's fixed sentences (Codex #3409 r2 P1: a fragile Run kept both).
+    narrator = `${NARRATOR} ${sentence}\n- ${NARRATOR_BULLETS[0]}\n${noFlip}`;
+    const b = await press(await run());
+    expect(countSentenceCopies(b.assistant_text, sentence) + count(b.assistant_text, noFlip), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, NARRATOR)).toBe(1);
+    expect(count(b.assistant_text, NARRATOR_BULLETS[0]!)).toBe(1);
+  });
+
   it('unavailable narration of a licensed fragile Run carries no caveat', async () => {
     emptyNarration = true;
     const b = await press(await run());

@@ -227,6 +227,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { withoutSentenceCopies, withSentenceSaidOnce } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestrator-v5/handlers/approve-held-proposal.js';
@@ -1187,6 +1188,12 @@ export function leavesProposalAwaitingApproval(
       const { proposal_id: _hidden, ...rest } = d;
       return rest;
     })).length > 0);
+}
+
+/** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
+function placeExplainCaveat(text: string, caveat: string, keepFirst = false): string {
+  if (keepFirst) return withB3LinesAtRest(withSentenceSaidOnce(text, caveat, true), [caveat]);
+  return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
 }
 
 /**
@@ -5329,14 +5336,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const scopedNarrationRaw = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
     // Decide only at assembly, against the final scope-composed, identity-bound authority used by egress.
     const explainEnrichment = (analysisResult as { enrichment?: Record<string, unknown> } | null | undefined)?.enrichment;
-    if (fastPath === 'explain' && narrationStatus === 'ready' && narratorWords !== null
+    const explainRobustness = explainEnrichment == null ? null : readRawRobustnessSignals(explainEnrichment.robustness);
+    const explainOwned = fastPath === 'explain' && narrationStatus === 'ready' && narratorWords !== null
       && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT && text !== RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT
       && text !== interpretationUnavailableText({ ok: true, ran: true }) && text !== explainFallbackText
       && runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })
-      && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld'
-      && explainEnrichment != null && isRawFragile(readRawRobustnessSignals(explainEnrichment.robustness))) {
+      && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld';
+    if (explainOwned && isRawFragile(explainRobustness)) {
       explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
     }
+    // The same Run's fact the other way (Codex #3409 r1 P1; DL-3 ruling A): a Run that is neither fragile nor a near tie
+    // owes no not-robust caveat, so Olumi's own two fixed sentences are removed if the AI repeated them. Dedupe of
+    // Olumi's exact words, never a matcher on the AI's.
+    const explainRobustRun = explainOwned && explainRobustness !== null && !isRawFragile(explainRobustness)
+      && !explainRobustness.near_tie_is_tie;
     // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
     // Display first, while the raw ask is intact. With no IDs the replacement is identical;
     // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
@@ -5351,7 +5364,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
     const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
       && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
-    const scopedNarration = noDirectLink ?? scopedNarrationRaw;
+    // Olumi's two fixed variants: the Run's fact selects at most one (Codex #3409 r2: a fragile Run kept both). Every
+    // other copy of Olumi's own words goes; the AI's other narration stays.
+    const ownedNarration = [NOT_ROBUST_SENTENCE, NOT_ROBUST_NO_FLIP_SENTENCE].map((x) => x.trim())
+      .filter((x) => (explainRobustnessCaveat !== null ? x !== explainRobustnessCaveat.trim() : explainRobustRun))
+      .reduce((t, x) => withoutSentenceCopies(t, x), scopedNarrationRaw);
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? ownedNarration
+      : placeExplainCaveat(withDecisionInputAskDisplay(ownedNarration, readbackGraph), explainRobustnessCaveat, aiRunTurn));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
