@@ -28,7 +28,7 @@ describe('row 12 (#3400 RES1): an item is named only by words outside another it
     const w = await correctionWorld(g, said);
     const card = await w.offer('propose_statement', { correction: { quote: said, edits: [{ subject: train,
       retirement: { quote: trainWords, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'the earlier account is withdrawn' }] } }) as Rec;
-    if (typeof card.proposal_id === 'string') await w.press(card.proposal_id, w.restoreCard(w.proposals.get(card.proposal_id)!, card));
+    if (typeof card.proposal_id === 'string') await w.press(card.proposal_id, w.restoreCard(w.proposals.get(card.proposal_id)!, card as never));
     expect(card.ok, JSON.stringify(card).slice(0, 600)).not.toBe(true);
     expect(w.writes, 'nothing is written').toHaveLength(0);
     expect(JSON.stringify(w.graph().nodes[1].user_statements)).toBe(JSON.stringify(g.nodes[1].user_statements));
