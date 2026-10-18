@@ -59,7 +59,8 @@ describe('B2: an assumption claimed as the user\'s figure WITH its statement is 
     const r = await dispatchTool('propose_assumptions', JSON.stringify({ assumptions: [{
       factor_label: 'Team effort', value: 40, unit: 'hours a week', basis: 'the user gave 40 hours', user_stated: true, revise: true,
       statements: [{ quote: REPORT, speaker, form: 'point', value: 40 }] }] }), ctx(REPORT) as never, caps) as Rec;
-    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'level_not_stated' });
+    // #3392: W04 decides by THE ONE RULE (`userStated`), so a vetoed figure is unknown (the existing origin_unknown refusal).
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
     expect(r).not.toHaveProperty('proposal_id');
     expect(store.outstanding(SCENARIO, null)).toEqual([]);
   });

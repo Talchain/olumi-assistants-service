@@ -14,6 +14,8 @@
  *
  * FIXTURE: the served stored graphs before the edit, and what the served approval stored (`_provenance`).
  */
+// LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence for a figure it claims as theirs (none where unwritten).
+import { citeUserSpans } from './helpers/cite-user-span.js';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -33,7 +35,7 @@ const setup = (graph: Json) => {
     throw new Error(`unexpected dispatch ${path}`);
   };
   const store = new ProposalStore();
-  return { caps: createAgentCapabilities(d, store), store };
+  return { caps: citeUserSpans(createAgentCapabilities(d, store)), store };
 };
 type R = ToolResult & { proposal_id: string; note: string; public_label: string; assumptions: { factor: string; your_figure?: boolean }[] };
 const ASSUMPTION_WORDS = /assumptions? to adopt or correct|NOT measurements?/i;

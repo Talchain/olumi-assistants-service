@@ -9,10 +9,13 @@
  * FIXTURE: Paul's own stored graph (`cbd15f83`): Pro plan price in "GBP per month" on a 200 range, Monthly churn at 7
  * "percent per month"; "Raise to £59 at Release" acts on the price.
  */
+// LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence for a figure it claims as theirs (none where unwritten).
+import { citeUserSpans } from './helpers/cite-user-span.js';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { figureTheUserWrote, typedByUser, userWordsOf } from '../stated-by-user.js';
 
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
@@ -28,7 +31,7 @@ const setup = () => {
     return { status: 500, json: {} };
   };
   const store = new ProposalStore();
-  return { caps: createAgentCapabilities(d, store), sent, store };
+  return { caps: citeUserSpans(createAgentCapabilities(d, store)), sent, store };
 };
 type Sent = { chip?: { parameters?: { interventions?: { factor_id: string; value: unknown; raw_value?: unknown }[] } } };
 const levelSent = (sent: { body: unknown }[], factorId: string) =>
@@ -166,12 +169,15 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
   const authorOf = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
-  it('RED: the Agent marks £62 as the user\'s, but the user wrote £59 → recorded as Olumi\'s, and said', async () => {
+  // PENDING G3 (DL-3 05:3xZ ruling 4): the user wrote £59, so £62 is never theirs; with no own-estimate carrier it is never Olumi's
+  // either (PL-0048). Until the level writer carries an unknown author (G3, the PR after #3392) it is left out WITH the existing
+  // disclosure (`origin_unknown`, UNKNOWN_ORIGIN_DETAIL) and nothing is prepared; never silently dropped, never "you said".
+  it('RED (pending G3): the Agent marks £62 as the user\'s, but the user wrote £59 → never theirs: left out with the unknown-origin disclosure', async () => {
     const { caps, store } = setup();
-    const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £59 at release.'), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[] };
-    expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(authorOf(store, r.proposal_id)).toBe('model_proposed');
-    expect(r.not_the_users_figure).toEqual([{ option: 'Raise to £59 at Release', factor: 'Pro plan price', value: 62 }]);
+    const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £59 at release.'), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown; refusal?: unknown; detail?: unknown };
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(r).not.toHaveProperty('proposal_id');
+    expect(store.outstanding('550e8400-e29b-41d4-a716-4466554400c7', null)).toEqual([]);
   });
 
   it('RED (B2): "Yes, let\'s make that one £62, it\'s what we\'ll charge." → the user\'s', async () => {

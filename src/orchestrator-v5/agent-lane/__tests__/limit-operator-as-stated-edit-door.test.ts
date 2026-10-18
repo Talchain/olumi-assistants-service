@@ -14,6 +14,7 @@
  * REAL `proposeLimitChange` / `authoriseChange`; only the in-process commit port is a stub, and it records what it is
  * asked to write.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
@@ -185,7 +186,12 @@ function agentWith(row: Rec) {
   };
   const caps = createAgentCapabilities(dispatch, new ProposalStore(), undefined, 'full', undefined, { commitLimitEdit });
   const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r-a2-agent', user_text: 'Our churn limit is now 5%.', user_turn_text: 'Our churn limit is now 5%.' };
-  return { caps, ctx, commits };
+  // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+  const cited = { ...caps, proposeLimitChange: (c: typeof ctx, a: Rec) => {
+    const quote = a.quote === undefined ? quoteOfFigure(Number(a.new_value), String(a.unit ?? ''), String(c.user_turn_text ?? '')) : null;
+    return caps.proposeLimitChange!(c as never, (quote !== null ? { ...a, quote } : a) as never);
+  } } as typeof caps;
+  return { caps: cited, ctx, commits };
 }
 
 describe('THE AGENT — propose_limit_change says the limit as the user stated it, and relays a stated comparator', () => {

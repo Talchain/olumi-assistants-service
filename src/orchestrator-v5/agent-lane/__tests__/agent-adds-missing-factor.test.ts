@@ -466,10 +466,13 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
     };
     return { caps: createAgentCapabilities(d, new ProposalStore()), sent, carried };
   };
+  // The AI's citation (lean core USER_QUOTE): the user's £5 today cites their words; any other figure cites nothing.
+  const citeToday = (t: unknown): unknown => (t !== null && typeof t === 'object' && (t as { value?: unknown }).value === 5 && !('quote' in t)
+    ? { ...t, quote: 'at £5 a month' } : t);
   const call = (today?: unknown, kind?: 'switch') => ({
     label: 'Keep £49 and add a paid AI add-on',
     acts_on: [{ factor_label: 'AI add-on price', direction: 'positive', ...(kind === 'switch' ? { level: { value: 1 } } : {}) }],
-    new_factors: [{ ...ADDON, ...(kind !== undefined ? { kind } : {}), ...(today !== undefined ? { today } : {}) }],
+    new_factors: [{ ...ADDON, ...(kind !== undefined ? { kind } : {}), ...(today !== undefined ? { today: citeToday(today) } : {}) }],
     rationale: 'the user asked for it',
   });
   const paramsOf = (sent: { body: unknown }[]) =>
@@ -524,7 +527,7 @@ describe('PJ-A1 £49 — propose_new_option carries a new graded factor\'s today
 
   it('[A1-59] RED: the user wrote today £5 and the option\'s £12 → ONE sent change carries the option\'s 12 on today\'s frame (0–100), the user\'s', async () => {
     const { caps, sent, carried } = setup();
-    await caps.proposeNewOption({ ...ctx, user_text: `${SAID} The add-on would be £12 a month under this option.` }, withLevel({ value: 12, unit: 'GBP/month' }) as never);
+    await caps.proposeNewOption({ ...ctx, user_text: `${SAID} The add-on would be £12 a month under this option.` }, withLevel({ value: 12, unit: 'GBP/month', quote: 'The add-on would be £12 a month' }) as never);
     expect(carried).toEqual([[{ label: 'AI add-on price', observed_state: TODAY_5_ON_100 }]]);
     expect(ivsOf(sent)).toEqual([{ factor_key: 'ai_add_on_price', value: 0.12, raw_value: 12, unit: 'GBP/month' }]);
   });

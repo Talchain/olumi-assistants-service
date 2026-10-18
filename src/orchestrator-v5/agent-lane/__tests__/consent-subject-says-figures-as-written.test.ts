@@ -16,6 +16,7 @@
  * The producer rows run the REAL capabilities on the SERVED graphs, with the user's words verbatim; the two served
  * unit spellings ("GBP …" and "£ …") are each a row.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { sayFigure, sayFigureExactly, sayFigureRead } from '../say-figure.js';
@@ -40,7 +41,9 @@ async function produce(s: Served, tool: string, args: Record<string, unknown>, m
     : { status: 500, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore());
   const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: message, user_turn_text: message };
-  return (await dispatchTool(tool, JSON.stringify(args), ctx as never, caps)) as Record<string, unknown>;
+  // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+  const quote = tool === 'propose_limit_change' && args.quote === undefined ? quoteOfFigure(Number(args.new_value), String(args.unit ?? ''), message) : null;
+  return (await dispatchTool(tool, JSON.stringify(quote !== null ? { ...args, quote } : args), ctx as never, caps)) as Record<string, unknown>;
 }
 
 /** The served graph with every use of one unit spelled another way (served run 1 spelled "GBP" as "£"). */
@@ -114,8 +117,8 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     const msg = 'Put £15,000 into advertising, and assume 1,200 Pro subscribers under that option.';
     const r = await produce(C05, 'propose_option_interventions', {
       interventions: [
-        { option_label: 'Additional advertising', factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg },
-        { option_label: 'Additional advertising', factor_label: 'Pro paying subscribers', value: 1200, unit: 'subscribers', basis: msg },
+        { option_label: 'Additional advertising', factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg, user_stated: false },
+        { option_label: 'Additional advertising', factor_label: 'Pro paying subscribers', value: 1200, unit: 'subscribers', basis: msg, user_stated: false },
       ],
     }, msg);
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
@@ -123,10 +126,10 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
     expect(String(r.public_label)).toContain('to 1,200 subscribers');
     expect(String(r.public_label)).not.toMatch(RAW);
     // Olumi's estimate, said by the one-call template's own line.
-    const estimated = { ok: true, mutated: false, proposal_id: r.proposal_id, public_label: r.public_label, base_revision: r.base_revision, interventions: [{ option: 'Additional advertising', factor: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: 'a planning figure', stated_by: 'olumi_estimate' }] };
+    const estimated = { ok: true, mutated: false, proposal_id: r.proposal_id, public_label: r.public_label, base_revision: r.base_revision, interventions: [{ option: 'Additional advertising', factor: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: 'a planning figure', stated_by: 'olumi_estimate', user_stated: false }] };
     const reply = composeProposalReply('propose_option_interventions', { interventions: [
-      { option_label: 'Additional advertising', factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg },
-      { option_label: 'Additional advertising', factor_label: 'Pro paying subscribers', value: 1200, unit: 'subscribers', basis: msg },
+      { option_label: 'Additional advertising', factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg, user_stated: false },
+      { option_label: 'Additional advertising', factor_label: 'Pro paying subscribers', value: 1200, unit: 'subscribers', basis: msg, user_stated: false },
     ], whole_request: true }, estimated, msg);
     expect(reply).toContain('‘Advertising spend’ under ‘Additional advertising’ is set to £15,000 over 6 months, Olumi’s estimate');
     expect(reply).not.toMatch(RAW);
@@ -145,7 +148,7 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
   it('RED (DL #2227 follow-up A, served C05): a replaced figure the approval does not write is said "about", rounded', async () => {
     const msg = 'We actually have 1,500 Pro subscribers.';
     const r = await produce(C05, 'propose_assumptions', {
-      assumptions: [{ factor_label: 'Pro paying subscribers', value: 1500, unit: 'subscribers', basis: msg, revise: true }],
+      assumptions: [{ factor_label: 'Pro paying subscribers', value: 1500, unit: 'subscribers', basis: msg, revise: true, user_stated: false }],
     }, msg);
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
     expect(String(r.public_label)).toContain('Pro paying subscribers: about 1,469 subscribers → 1,500 subscribers');
@@ -157,7 +160,7 @@ describe('⭐ a consent subject says a figure as the user writes it', () => {
   it('RED (a revised starting value): both figures said as written', async () => {
     const msg = 'Advertising spend is now £15,000 over the six months.';
     const r = await produce(C05, 'propose_assumptions', {
-      assumptions: [{ factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg, revise: true }],
+      assumptions: [{ factor_label: 'Advertising spend', value: 15000, unit: 'GBP over 6 months', basis: msg, revise: true, user_stated: false }],
     }, msg);
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
     expect(String(r.public_label)).toMatch(/Advertising spend: £[\d,]+ over 6 months → £15,000 over 6 months/);

@@ -6,6 +6,7 @@
  * back holds the figure AND is still one of the goal's targets (a dropped role would withhold the joint for a false
  * reason). A real limit's words are unchanged.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
@@ -46,7 +47,9 @@ function harness(door: (input: CommitLimitEditInput) => CommitLimitEditResult, a
   });
   const run = async (said: string, args: Rec) => {
     const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: said, user_turn_text: said };
-    const card = (await dispatchTool('propose_limit_change', JSON.stringify(args), ctx as never, caps)) as Rec;
+    // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+    const quote = args.quote === undefined ? quoteOfFigure(Number(args.new_value), String(args.unit ?? ''), said) : null;
+    const card = (await dispatchTool('propose_limit_change', JSON.stringify(quote !== null ? { ...args, quote } : args), ctx as never, caps)) as Rec;
     expect(card, JSON.stringify(card)).toEqual(expect.objectContaining({ ok: true }));
     return (await dispatchTool('authorise_change', JSON.stringify({ proposal_id: card.proposal_id }), { ...ctx, typed_approval_of: card.proposal_id } as never, caps)) as Rec;
   };

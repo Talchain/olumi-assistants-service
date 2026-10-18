@@ -10,7 +10,7 @@ import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
-import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
 import { deadlineCardToIssue, deadlineOfferOpen, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
@@ -26,9 +26,9 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
 import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
 import { optionCapacityRecordedWords } from '../../statement-door/fields/option-capacity.js';
 import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
-import { readStatement, statementBoundTo, type DoorContext } from '../../statement-door/read.js';
+import { currentCorrectionOf, readStatement, statementBoundTo, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
-import { resolveSubject } from '../../statement-door/subject.js';
+import { resolveSubject, type DoorSubject } from '../../statement-door/subject.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
@@ -47,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
+import { userStated, userStatementOf, verifyStatements, type CurrentCorrection, type StatementTexts } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -327,7 +327,7 @@ import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../sel
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies } from '../proposal-object/still-applies.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1493,14 +1493,15 @@ export function levelFrameOf(factor: { observed_state?: Record<string, unknown>;
  * - `placeLevel`: the name rule (Olumi's figure only), then the writer's range (`levelFrameOf`) → the stored cell.
  * - `estimateLevelPersists`: both, in the door's order, for a level that is Olumi's estimate.
  */
-export interface DoorLevel { readonly value: number; readonly unit?: string }
+export interface DoorLevel { readonly value: number; readonly unit?: string; readonly quote?: string }
 type LevelFactor = { readonly id?: unknown; observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined;
 
 export function doorLevelOf(level: unknown): DoorLevel | undefined {
-  const l = level as { value?: unknown; unit?: unknown } | null | undefined;
+  const l = level as { value?: unknown; unit?: unknown; quote?: unknown } | null | undefined;
   const v = l?.value;
   if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
-  return { value: v, ...(typeof l?.unit === 'string' && l.unit.trim() !== '' ? { unit: l.unit.trim() } : {}) };
+  return { value: v, ...(typeof l?.unit === 'string' && l.unit.trim() !== '' ? { unit: l.unit.trim() } : {}),
+    ...(typeof l?.quote === 'string' && l.quote.trim() !== '' ? { quote: l.quote } : {}) };
 }
 
 export function factorUnitConflict(lvl: DoorLevel, factor: LevelFactor, rawGraph: unknown): { readonly factorUnit: string | undefined; readonly conflict: boolean } {
@@ -2248,6 +2249,11 @@ const readingNote = (i: ProposalInterpretation): string =>
  * ⭐ LEAN CORE: the texts THE ONE AUTHORSHIP RULE (`userStated`) reads in chat: this turn's typed words, the verified conversation and
  * its messages in order, and retained words of unknown origin (reseeded history and the saved brief), which never verify anything.
  */
+/** The subject's current correction, as THE ONE RULE reads it (`currentCorrectionOf`); spread into `userStated`'s options. */
+const correctionOn = (graph: unknown, subject: DoorSubject): { current?: CurrentCorrection } => {
+  const current = currentCorrectionOf(graph, subject);
+  return current === undefined ? {} : { current };
+};
 const chatTexts = (ctx: AgentToolContext, brief?: string | null): StatementTexts => ({ now: ctx.user_turn_text, conversation: ctx.user_text,
   unverified: [ctx.unverified_user_text, brief].filter((t): t is string => typeof t === 'string' && t !== '').join('\n'),
   ...(ctx.verified_user_messages !== undefined && ctx.verified_user_messages.length > 0 ? { messages: ctx.verified_user_messages } : {}) });
@@ -2335,20 +2341,6 @@ function resolveLinkEffectEnds(g: GraphRead, ctx: AgentToolContext, fromName: st
 type AmbiguousTarget = { readonly requested: string; readonly candidates: readonly Record<string, unknown>[] };
 
 /** One ambiguous request, with what tells its candidates apart — the SAME projection as every other tool. */
-/**
- * Recovery Batch B (SYS3 TRACE L6): the ONE sentence of the user's own words that states BOTH ends of a range ("currently
- * they spend between 20% and 30% of their time on non-development tasks …"), whole and trimmed, or `null`. Sentences end
- * where `quoteOfFigure`'s do (. ! ? before a space, or a new line); each end must be a figure `quoteOfFigure` finds in
- * that sentence, in the figure's unit. Longer than a hold quote may be: `null` (asked, never cut).
- */
-function sentenceStatingBoth(low: number, high: number, unit: string, userText: string): string | null {
-  for (const raw of userText.split(/(?<=[.!?])(?=\s)|\n/)) {
-    const sentence = raw.trim();
-    if (sentence === '' || sentence.length > USER_TODAY_QUOTE_MAX) continue;
-    if (quoteOfFigure(low, unit, sentence) !== null && quoteOfFigure(high, unit, sentence) !== null) return sentence;
-  }
-  return null;
-}
 
 function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: string, candidates: GraphRead['nodes']): AmbiguousTarget {
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label]));
@@ -6059,7 +6051,9 @@ export function createAgentCapabilities(
         const origin = declared === 'user'
           ? (nonBlank(l.from_words) && source.verified ? 'human' : 'unknown')
           : declared === 'olumi' && !nonBlank(l.from_words) && nonBlank(l.basis)
-            ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
+            // Olumi's declared new estimate (the existing positive carrier): Olumi's, unless the conversation already reads this band
+            // for this link (copied or unknown material, never relabelled as Olumi's).
+            ? (source.copied ? 'unknown' : 'ai')
             : storedOlumis ? 'ai' : 'unknown';
         // An UNKNOWN band is left out and named, never written; the links whose origin IS known are still offered (Paul's
         // served set: his named links are his, "all other listed effects to moderate" names no link, so those stay unknown).
@@ -7539,33 +7533,25 @@ export function createAgentCapabilities(
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
         // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
-        const explicitEstimate = a.user_stated === false && a.revise !== true;
-        const writtenFigure = figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text);
-        const origin = statementOrigin(writtenFigure,
-          figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
-        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
-        // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
-        // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
-        if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
-          const claimed = Number(a.value), unit = a?.unit ?? nodeUnit;
-          const v = verifyStatements(a.statements.map((st: unknown) => ({ ...(isPlainRecord(st) ? st : {}), form: 'point', value: claimed })),
-            { now: ctx.user_turn_text, conversation: ctx.user_text,
-              unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
-            { subject: { quantity: 'level_today', node_id: node.id }, unit: String(unit ?? ''), forms: ['point'],
-              figuresIn: (q) => (figureTheUserWrote(claimed, unit, q) ? [{ low: claimed, high: claimed }] : []) });
-          if (v.kind === 'refused') {
-            return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'level_not_stated',
-              detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
-          }
-        }
-        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && origin !== 'human') {
+        // ⭐ LEAN CORE: whose the figure is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words (`quote`, or
+        // a point statement), with the figure read from it. Not cited or not theirs: unknown, Olumi's only as an explicit estimate.
+        const point = Array.isArray(a?.statements) && a.statements[0]?.form === 'point' ? a.statements[0] : undefined;
+        // ⭐ P2 (Codex B2 on #3395): the AI's own speaker reading of the statement it gives reaches the ONE verifier (other/unknown: vetoed).
+        const reading = Array.isArray(a?.statements) && isPlainRecord(a.statements[0]) ? a.statements[0] : undefined;
+        const said = userStated({ quote: typeof a?.quote === 'string' ? a.quote : point?.quote, value: Number(a.value), unit: a?.unit ?? nodeUnit,
+          ...(reading?.speaker !== undefined ? { speaker: reading.speaker } : {}) },
+          chatTexts(ctx, g.brief_text), { quantity: 'level_today', node_id: node.id },
+          // Positive evidence of Olumi's own figure: the AI's declared `user_stated: false` (K3: never a revise on incomplete source).
+          { form: 'point', ownEstimate: a.user_stated === false && (a.revise !== true || ctx.user_text_complete !== false),
+            ...correctionOn(g.raw, { kind: 'factor', id: node.id, field: 'level' }) });
+        const origin = said.origin;
+        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && said.origin !== 'human' && ctx.user_text_complete !== false) {
           return { ok: false, mutated: false, refusal: 'figure_not_in_users_words',
             detail: 'That is not the percentage the user wrote in this unit. Use the number in their percentage unit, not the 0–1 model coordinate. Nothing was proposed.' };
         }
-        // Keep the base's strict field check on this typed turn; it never decides the figure's source.
-        const source = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
-          .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? '';
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        // The complete line the user's figure stands in (the rule's record), for the binding disclosure below.
+        const source = said.origin === 'human' ? said.statement.source : ctx.user_text ?? '';
         // Near-only pairs a point for display; it cannot attest its speaker or original field role.
         const bound = writtenAbout && isFactorNamedByUser(node.label, bindingWords ?? '')
           && !quoteIsNotTheUsersClaim(source, source)
@@ -8132,12 +8118,17 @@ export function createAgentCapabilities(
         }
 
         // A rejected range has no bearing on the ordinary level or its authorship.
-        const userWrote = claimedByUser && (likelyRange !== undefined
-          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
-        if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
-          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
-        }
+        // ⭐ LEAN CORE: whose the level is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words, the figure read
+        // from it. Not cited or not theirs: unknown (nothing is prepared), and Olumi's only as its declared own estimate.
+        const said = userStated({ quote: i?.quote, value: raw, unit: declaredUnit ?? statedUnit }, chatTexts(ctx, g.brief_text),
+          { quantity: 'level', node_id: factor.id, option_id: option.id },
+          { form: 'point', ownEstimate: i.user_stated === false, ...correctionOn(g.raw, { kind: 'factor', id: factor.id, option_id: option.id, field: 'level' }) });
+        // The binding half (Olumi's reading, never authorship), unchanged: the credited figure is THIS factor's only where the user's words
+        // do not give it to another quantity of the model (`figureTheUserWroteFor` with this pair's scope, as before).
+        const boundHere = said.origin === 'human'
+          && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
+        const userWrote = claimedByUser && (likelyRange !== undefined || boundHere);
+        if (!userWrote && said.origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
@@ -10739,7 +10730,7 @@ export function createAgentCapabilities(
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
-      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown } | null };
+      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown; quote?: unknown } | null };
       const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
       /**
        * ⭐ SEVERAL OPTIONS, ONE CHANGE (F4; Canonical's typed transaction #1940, contract #70 5841655730). "Add A
@@ -11007,7 +10998,7 @@ export function createAgentCapabilities(
         const req = requestedNew.find((r) => norm((r as { label?: unknown } | null)?.label) === norm(f.label)) as { today?: unknown } | undefined;
         const today = req?.today;
         if (today === undefined || today === null) continue;
-        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown };
+        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown; quote?: unknown };
         const unit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : undefined;
         const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)}${unit !== undefined ? ` ${unit}` : ''}`;
         if (f.kind === 'switch') {
@@ -11022,7 +11013,8 @@ export function createAgentCapabilities(
         }
         // Not bound to the factor (unlike the goal target and limit doors): journey A's accepted A1 row grounds the NEW price
         // factor's today with the brief's "£49", written about the existing "Pro plan price" (#2132; DL #72 5862394804).
-        if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
+        // ⭐ LEAN CORE: by THE ONE RULE (`userStated`): the user's cited words write that figure.
+        if (userStated({ quote: t.quote, value: t.value, unit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'point' }).origin !== 'human') {
           todayNotSet.push({ factor: f.label, value: t.value,
             reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
           continue;
@@ -11035,7 +11027,7 @@ export function createAgentCapabilities(
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi'; quote?: string };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const lv = doorLevelOf(a.level);
@@ -11072,13 +11064,15 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
-          if (statementOrigin(wrote, figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text), ctx.user_text_complete, lvl.estimate !== undefined) === 'unknown') {
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
-            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
-          }
-          const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
+          // Positive evidence of Olumi's own figure: the AI's declared estimate, or the host's own derivation of the user's split.
+          const derivedPart = split.kind === 'derived' && split.factor_ids.includes(f.id);
+          const lvlSaid = userStated({ quote: lvl.quote, value: lvl.value, unit: lvl.unit ?? factorUnit }, chatTexts(ctx, g.brief_text),
+            { quantity: 'level', node_id: f.id }, { form: 'point', ownEstimate: lvl.estimate !== undefined || derivedPart });
+          // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
+          const wrote = lvlSaid.origin === 'human'
+            && figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const derived = !wrote && derivedPart && split.kind === 'derived' ? split : undefined;
           // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
           if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
@@ -11094,11 +11088,12 @@ export function createAgentCapabilities(
            */
           if (derived !== undefined) lvl.estimate = `${derived.working}, as Olumi read it`;
           const byUser = wrote;
-          if (!byUser && lvl.estimate === undefined) {
+          if (!byUser && (lvl.estimate === undefined || lvlSaid.origin === 'unknown')) {
             const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
               ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
               : undefined;
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: ask ?? notWrittenReason(lvl.value, f.label) });
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+              reason: ask ?? (lvlSaid.origin === 'unknown' ? UNKNOWN_ORIGIN_DETAIL : notWrittenReason(lvl.value, f.label)) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
@@ -11191,9 +11186,12 @@ export function createAgentCapabilities(
             continue;
           }
           const levelUnit = unit ?? today.unit;
-          const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
-          if (statementOrigin(wrote, figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(asked, levelUnit, g.brief_text), ctx.user_text_complete, lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
+          // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
+          const lvSaid = userStated({ quote: lv.quote, value: asked, unit: levelUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level' },
+            { form: 'point', ownEstimate: lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' });
+          // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
+          const wrote = lvSaid.origin === 'human' && figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          if (lvSaid.origin === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
           if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
           if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
@@ -11742,7 +11740,6 @@ export function createAgentCapabilities(
       // The route's retained typed-word records exclude chips, assistant text and source-unknown restored rows.
       // Reusing a verified earlier figure does not change its author. Multiple figures still need pairing approval.
       const turnText = ctx.user_turn_text ?? '';
-      const sourceMessages = ctx.verified_user_messages ?? [ctx.user_text ?? turnText];
       const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
       // Existing held quantity records retain their independently verified figure/range source across turns.
       const retained = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).flatMap(hold => {
@@ -11815,19 +11812,18 @@ export function createAgentCapabilities(
             reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
           continue;
         }
-        // Read each verified message separately: a figure in a different message cannot lend its subject to this one.
-        const source = [turnText, ...sourceMessages.slice().reverse()].find(text =>
-          quoteOfFigure(t.value as number, todayUnit, text) !== null
-          && (confirmPairing || figureTheUserWroteFor(t.value as number, todayUnit, text, newFactorScopeIn(g, label, todayUnit, inCall))));
+        // ⭐ LEAN CORE: whose today's figure is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words, the
+        // figure read from it. A held, independently verified record keeps its source. Anything else is unknown (never Olumi's).
+        const tSaid = userStated({ quote: t.quote, value: t.value, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'point' });
+        // The binding half (Olumi's reading): on the cited line, the figure is about THIS new factor, unless the card pairs it explicitly.
+        const source = tSaid.origin === 'human' && (confirmPairing
+          || figureTheUserWroteFor(t.value, todayUnit, tSaid.statement.source, newFactorScopeIn(g, label, todayUnit, inCall))) ? tSaid.statement.source : undefined;
         const prior = retained.find(r => norm(r.label) === norm(label)
           && (r.os.raw_value ?? r.os.value) === t.value && unitComparisonKey(String(r.os.unit ?? '')) === unitComparisonKey(todayUnit));
         const priorHuman = prior?.member !== undefined && prior.member.basis !== 'olumi_estimate'
           && provenanceOf({ value: prior.os }).origin === 'human';
-        const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
-        const origin = statementOrigin(source !== undefined || priorHuman,
-          (prior !== undefined && prior.member === undefined)
-          || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
-          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
+        const quote = source !== undefined && tSaid.origin === 'human' ? tSaid.statement.quote : priorHuman ? prior!.member!.quote ?? null : null;
+        const origin = source !== undefined || priorHuman ? 'human' : 'unknown';
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
           originUnknown = true;
@@ -11850,7 +11846,13 @@ export function createAgentCapabilities(
           ? { low: (heldRange as { low: number }).low, high: (heldRange as { high: number }).high, quote: (heldRange as { source_quote: string }).source_quote } : undefined;
         if (t.range_low !== undefined || t.range_high !== undefined) {
           const lo = t.range_low, hi = t.range_high;
-          const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
+          // Both ends from ONE cited span, by THE ONE RULE (`userStated`, a range keeps both ends): the range's own citation
+          // (`range_quote`, when the user gave it in another sentence than the figure they chose), else the figure's.
+          const rangeSaid = typeof lo === 'number' && typeof hi === 'number'
+            ? userStated({ quote: t.range_quote ?? t.quote, low: lo, high: hi, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'range' }) : undefined;
+          // Stored with the complete line the cited span stands in (the rule's `source`), so its conditions are never dropped.
+          const sentence = rangeSaid?.origin !== 'human' ? null
+            : [rangeSaid.statement.source, rangeSaid.statement.quote].find((w) => w.length <= USER_TODAY_QUOTE_MAX) ?? null;
           const stored = sentence === null ? undefined
             : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
           if (!ownsIt || stored === undefined || !isStatedLevelRange(stored, framed)) {
@@ -12086,10 +12088,20 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
           detail: `The limit on "${node.label}" is in ${String(unit)}, and the figure given is a different kind of figure, so nothing was prepared. Ask the user for the limit in its own units.` };
       }
-      // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
-      // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (interpretation === null && (!figureTheUserWrote(value, unit, ctx.user_text)
-        || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label)))) {
+      // ⭐ LEAN CORE (#3392, W19; proof-1 dev P05): recorded as the user's own figure, so it is theirs only by THE ONE RULE
+      // (`userStated`): the AI's cited span of the user's words, the figure, unit and bound read from it ("300 Pro paying
+      // subscribers" is never £300: the unit check). WHICH limit it is stays the AI's reading of a limit the model holds (checked
+      // by identity above), never a host match of the user's words against the limit's label (P05: "the remote-village
+      // constraint should be at least 85%" was refused against "Remote requests served within 30 days").
+      const limitSaid = interpretation !== null ? undefined : userStated({ quote: args?.quote, value, unit: unit ?? undefined }, chatTexts(ctx, g.brief_text),
+        { quantity: 'limit', node_id: node.id }, { form: operator === '>=' ? 'lower_bound' : 'upper_bound' });
+      // The binding stays the AI's reading; the cited words only must not give the figure to ANOTHER quantity of the model instead of this
+      // limit (DL #72: "£30,000 of Advertising spend" is never the decision budget's figure). Naming this limit too is enough.
+      const limitScope = limitScopeIn(g, node.label);
+      const namedIn = (q: string, label: string, rest: readonly string[]): boolean => factorTheUserNamed(label, q, { options: [], others: rest });
+      const givenToAnother = limitSaid?.origin === 'human' && !namedIn(limitSaid.statement.quote, node.label, limitScope.others)
+        && limitScope.others.some((o) => namedIn(limitSaid.statement.quote, o, [node.label, ...limitScope.others.filter((x) => x !== o)]));
+      if (limitSaid !== undefined && (limitSaid.origin !== 'human' || givenToAnother)) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

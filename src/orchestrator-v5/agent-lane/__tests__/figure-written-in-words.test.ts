@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { figureTheUserWroteFor } from '../stated-by-user.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { citeUserSpans } from './helpers/cite-user-span.js';
 import { ProposalStore } from '../proposal.js';
 
 // The served journey-E quantities (the E07 draft graph) and the option the Agent proposed.
@@ -91,7 +92,8 @@ describe('propose_new_option on the served E07 turn: the user\'s 1 and 2 ride th
       sent.push({ path, body });
       return { status: 500, json: {} };
     };
-    return { caps: createAgentCapabilities(d, new ProposalStore()), sent };
+    // LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence for the levels it reads from their words.
+    return { caps: citeUserSpans(createAgentCapabilities(d, new ProposalStore())), sent };
   };
   type Iv = { factor_id: string; value: unknown; raw_value?: unknown; source?: unknown };
   const sentLevel = (sent: { body: unknown }[], id: string): Iv | undefined =>

@@ -25,6 +25,7 @@
  * ⛔ SOURCE. The ruling's `user_specified` is not a legal `ObservedStateV3.source` (see `add-factor-transaction.test.ts`
  * S0); the door stamps `USER_EDIT_SOURCE`, the product's literal for a figure the user typed in chat.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -222,9 +223,17 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     { label: 'Junior engineer salary', unit: UNIT, today: { value: 65000 }, affects: target, direction: 'positive', ...(over[1] ?? {}) },
   ];
   /** The Agent's call, then (when it is not composed) its reply; `seen` receives the tool output it was handed. */
+  // ⭐ LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence that writes each figure; a figure the message never writes has
+  // no span to cite, so it carries none (it is then unknown, never "you said").
+  const cited = (factors: unknown, message: string): unknown => (Array.isArray(factors) ? factors.map((f: Record<string, any>) => {
+    const t = f?.today;
+    if (t === null || typeof t !== 'object' || typeof t.value !== 'number' || t.quote !== undefined) return f;
+    const quote = quoteOfFigure(t.value, String(t.unit ?? f.unit ?? ''), message);
+    return quote === null ? f : { ...f, today: { ...t, quote } };
+  }) : factors);
   const propose = (factors: unknown, message = FIG_MSG, seen?: (out: Record<string, unknown>) => void) => {
     script = [
-      () => fnCall('propose_new_factor', { factors, rationale: 'The user stated both salaries.' }),
+      () => fnCall('propose_new_factor', { factors: cited(factors, message), rationale: 'The user stated both salaries.' }),
       (body) => { seen?.(toolOutputIn(body)); return say('I would add both salaries as factors, as you gave them. Shall I?'); },
     ];
     return turn({ message });
@@ -358,7 +367,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   it('(h) C1: with whole_request the reply is composed from the result — ONE model call — and shows each pairing with the user\'s own words for them to confirm', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const calls = openAiCalls;
-    script = [() => fnCall('propose_new_factor', { factors: factorArgs(), rationale: 'The user stated both salaries.', whole_request: true })];
+    script = [() => fnCall('propose_new_factor', { factors: cited(factorArgs(), FIG_MSG), rationale: 'The user stated both salaries.', whole_request: true })];
     const t1 = await turn({ message: FIG_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(openAiCalls - calls, 'one model call, no narrating call').toBe(1);
@@ -375,7 +384,8 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     graphOf.set(SCENARIO, seedGraph());
     await turn({ message: FIG_MSG });
     const before = bytes();
-    const t2 = await propose(factorArgs(), 'Add those two to the model.');
+    // The AI cites the earlier typed message that writes each figure (USER_QUOTE).
+    const t2 = await propose(cited(factorArgs(), FIG_MSG), 'Add those two to the model.');
     expect(callOf(t2)).toMatchObject({ ok: true, mutated: false });
     const held = await heldOnLatestRow();
     expect((held[0]!.action.inline_patch![GM_HELD_USER_TODAY] as { basis: string }[]).every(m => m.basis === 'confirmed_by_approval')).toBe(true);
@@ -432,7 +442,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   it('A2h multiline verified figure retains its subject across a line break', async () => {
     graphOf.set(SCENARIO, seedGraph());
     await turn({ message: 'Senior engineer salary\ncosts £120k a year each.' });
-    const result = await propose([factorArgs()[0]], 'Add that salary.');
+    const result = await propose(cited([factorArgs()[0]], 'Senior engineer salary\ncosts £120k a year each.'), 'Add that salary.');
     expect(callOf(result)).toMatchObject({ ok: true });
     const held = await heldOnLatestRow();
     expect(held[0]!.action.inline_patch![GM_HELD_USER_TODAY]).toMatchObject([
@@ -458,7 +468,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   it('restart continuity: cold-session salaries the user TYPED stay theirs (proven by the row\'s own request hash)', async () => {
     graphOf.set(SCENARIO, seedGraph());
     await turn({ message: FIG_MSG });
-    script = [() => fnCall('propose_new_factor', { factors: factorArgs(), rationale: '' }), () => say('Check the card.')];
+    script = [() => fnCall('propose_new_factor', { factors: cited(factorArgs(), FIG_MSG), rationale: '' }), () => say('Check the card.')];
     const result = await turn({ message: 'Add those two to the model.', agent_session_id: randomUUID() });
     expect(callOf(result)).toMatchObject({ ok: true, mutated: false });
     const held = await heldOnLatestRow();
@@ -915,7 +925,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
 
   it('(q‴) Batch B: what Paul is shown — the ONE-call composed card names the factor, his 25 % and that it affects productivity', async () => {
     graphOf.set(SCENARIO, hiringGraph());
-    script = [() => fnCall('propose_new_factor', { factors: capacityArgs('productivity'), rationale: 'The user chose 25%.', whole_request: true })];
+    script = [() => fnCall('propose_new_factor', { factors: cited(capacityArgs('productivity'), HIRING_MSG), rationale: 'The user chose 25%.', whole_request: true })];
     const t1 = await turn({ message: HIRING_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, and affects productivity \(lowers it\)\./);
@@ -956,7 +966,10 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
    * lies inside; a range with no chosen figure is still asked; no midpoint is ever invented.
    */
   const RANGE_MSG = "If we think of our development team's monthly capacity, currently they spend between 20% and 30% of their time on non-development tasks (e.g., meetings, admin, and other distractions that are not writing code).";
-  const rangedArgs = (over: Record<string, unknown> = {}) => [{ label: 'Non-development time', unit: '%', today: { value: 25, range_low: 20, range_high: 30, ...over },
+  // ⭐ LEAN CORE (#3392): the AI cites the sentence of his that writes BOTH ends of the range (`range_quote`, USER_QUOTE), apart from the
+  // sentence that writes the figure he chose (cited by the harness as `quote`).
+  const RANGE_WORDS = 'currently they spend between 20% and 30% of their time on non-development tasks';
+  const rangedArgs = (over: Record<string, unknown> = {}) => [{ label: 'Non-development time', unit: '%', today: { value: 25, range_low: 20, range_high: 30, range_quote: RANGE_WORDS, ...over },
     affects: 'productivity', direction: 'negative' }];
   /** Paul's turn 11 first (the Agent answers without a tool, as served), so his range is in the conversation. */
   const sayRangeFirst = async (): Promise<void> => {
@@ -1049,7 +1062,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   it('(r′) Paul is shown his range on the card, in his words, beside the figure he chose', async () => {
     graphOf.set(SCENARIO, hiringGraph());
     await sayRangeFirst();
-    script = [() => fnCall('propose_new_factor', { factors: rangedArgs(), rationale: 'The user chose 25% within 20-30%.', whole_request: true })];
+    script = [() => fnCall('propose_new_factor', { factors: cited(rangedArgs(), HIRING_MSG), rationale: 'The user chose 25% within 20-30%.', whole_request: true })];
     const t1 = await turn({ message: HIRING_MSG });
     expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(t1.assistant_text, t1.assistant_text).toMatch(/‘Non-development time’ is 25 ?%, the figure you gave, within your range of 20 ?% to 30 ?% \(“[^”]*between 20% and 30%[^”]*”\), and affects productivity \(lowers it\)\./);

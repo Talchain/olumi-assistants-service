@@ -61,7 +61,7 @@ const turn = (caps: AgentCapabilities, calls: readonly { name: string; args: Rec
   runAgentTurn({ instructions: 'i', message: 'Link B, and set the level to 54.', history: [], ctx, maxHops: 6, maxOutputTokens: 100 } as never, caps, scripted(calls, perHop));
 
 const LINK = { name: 'propose_model_change', args: { from_label: 'B', to_label: 'goal', direction: 'positive', rationale: 'r' } };
-const LEVEL = { name: 'propose_option_interventions', args: { interventions: [{ option_label: 'X', factor_label: 'F', value: 54, basis: 'the user' }] } };
+const LEVEL = { name: 'propose_option_interventions', args: { interventions: [{ option_label: 'X', factor_label: 'F', value: 54, basis: 'the user', user_stated: false }] } };
 
 describe('a turn ends with at most ONE proposal awaiting approval, so it always has its control', () => {
   it('RED (DL bf-20260926T113645Z turns[3] shape): a link, then a level → the level is refused, nothing stored, and the one proposal keeps its chip', async () => {

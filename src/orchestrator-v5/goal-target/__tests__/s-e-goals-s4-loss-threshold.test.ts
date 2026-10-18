@@ -447,8 +447,9 @@ describe('S4 loss threshold: inclusive ceiling from this message, subject to app
       unit: '%', value_frame: 'level', provenance: 'explicit', label: 'Churn' }];
     const text = 'Keep churn at most 6%. The costs are above £300.';
     const w = world(g);
+    // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE).
     const r = await dispatchTool('propose_limit_change', JSON.stringify({ limit_label: 'Churn', operator: '<=',
-      new_value: 6, unit: '%', rationale: text }), ctx(text), w.caps);
+      new_value: 6, unit: '%', quote: 'Keep churn at most 6%.', rationale: text }), ctx(text), w.caps);
     expect(r).toMatchObject({ ok: true, mutated: false });
     const op = w.proposals.get(r.proposal_id as string)?.operations[0];
     expect(op).toMatchObject({ op: 'set_limit', path: CHURN, value: { operator: '<=', raw_value: 6 } });

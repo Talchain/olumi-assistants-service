@@ -33,9 +33,11 @@ function product(keep = false, held = false, extra = false) {
     id => ({ proposal: store.get(id), result: r }));
   return { caps, store, chips, unchanged: () => expect(JSON.stringify(graph)).toBe(before) };
 }
-const assumption = (basis: string, user_stated = false) => ({ factor_label: 'Campaign effectiveness', value: 20, unit: 'index points (0-100)', basis, user_stated });
+// The AI's citation (lean core USER_QUOTE): a claimed human figure cites the user's sentence that writes it; the host verifies it.
+const assumption = (basis: string, user_stated = false) => ({ factor_label: 'Campaign effectiveness', value: 20, unit: 'index points (0-100)', basis, user_stated,
+  ...(user_stated ? { quote: 'Campaign effectiveness is 20.' } : {}) });
 const level = (user_stated: boolean | undefined, value = 55) => ({ option_label: 'Continue campaign', factor_label: 'Pro plan price', value, basis: 'a new trial price',
-  ...(user_stated === undefined ? {} : { user_stated }) });
+  ...(user_stated === undefined ? {} : { user_stated }), ...(user_stated === true ? { quote: `Continue campaign sets Pro plan price to £${value}.` } : {}) });
 
 describe('A2i9 B4 bound card basis', () => {
   it.each([false, true])('exact card before consent, combined=%s', async combined => {
