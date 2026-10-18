@@ -40,7 +40,8 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { carrierCompatible, readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { speechReading } from '../goal-target/input-claim-context.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
@@ -65,24 +66,32 @@ function writtenFigures(userText: string | null | undefined): readonly (StatedAm
 }
 
 /**
- * `amountIs`, where a figure in WORDS is written only WITH its unit word, of the held unit's kind ("seventy tickets", "two hours"),
- * so it is never read more broadly than the same digits followed by that word (Codex SPELLED pair):
- *  · no unit word right after it, no figure: "one of them", "the one who", "twenty-first", "Two" ending a name;
- *  · never money, a percentage, a share or a scaled money unit (`amountIs`'s family rule, the share classifier, the unit's scale),
- *    nor a word of those kinds after it ("two percent" is never two people).
- * Presence only, never attestation of WHICH quantity it is (that stays `figureTheUserWroteFor`'s binding and the card's).
+ * `amountIs`, where a figure in WORDS is the user's figure only where the words after it state the held unit, by the ONE
+ * source-located tail reader (`statedTailParts`) and C3's carrier rule (`carrierCompatible`): the held unit's own noun ("seventy
+ * TICKETS" in tickets per week, "two HOURS" in hours per week), and no period, denominator or share base that conflicts with it
+ * ("two hours per WEEK" is never hours per month). So a word form never reads more broadly than the same digits, and never
+ * attests what the digits' own guards protect (Codex SPELLED pair AMEND; AIE bb91dcdd):
+ *  · never money, a percentage, a share or a scaled unit: "two thousand pounds", "two percent", "half of them" (the unit's
+ *    scale, the share classifier, `amountIs`'s family rule, and the tail's kind);
+ *  · never another quantity: "seventy customers" for tickets, "two developers" for minutes, "one of them" (no unit after it);
+ *  · never an ordinal: the scanner refuses "twenty-first" whole (`CARDINAL_ORDINAL_CONTINUATION`);
+ *  · never a name: a capitalised figure inside a sentence, or one whose noun is capitalised too ("Two Developers Ltd");
+ *  · never another speaker's quoted words (the ONE speech reader, `speechReading`).
+ * Presence only, never attestation of WHICH quantity it is (that stays `figureTheUserWroteFor`'s binding and the card's). A
+ * brief's baseline keeps its own stricter words binding (`baselineTheBriefStates`).
  */
 function writtenIs(a: StatedAmount | ReturnType<typeof countsInWords>[number], value: number, unit: unknown,
   family: ReturnType<typeof unitPhraseFamily>, text: string | undefined): boolean {
   if (a.kind !== 'words') return amountIs(a, value, unit, family, text);
   if (text === undefined || moneyUnitScale(unit) !== 1 || isProportionScaledFactor({ unit, cap: undefined, value: undefined, raw_value: undefined })) return false;
-  const word = /^\s*([A-Za-z][A-Za-z-]*)/.exec(text.slice(a.index + a.matchedText.length))?.[1];
-  if (word === undefined) return false;
-  const writtenAs = unitWordAfter(text, a);
-  if (writtenAs === 'currency' || writtenAs === 'percent') return false;
-  // Its unit word: a word of the held unit itself ("seventy TICKETS" in tickets per week), or a unit of the held unit's own kind.
-  const ownWord = typeof unit === 'string' && wordsOf(unit).some((u) => sameWord(u, word.toLowerCase()));
-  return (ownWord || (family !== null && writtenAs === family)) && amountIs(a, value, unit, family, text);
+  const declared = readUnitParts(unit), stated = statedTailParts(text, a);
+  if (declared === null || stated === null || !carrierCompatible(stated, declared)) return false;
+  const before = text.slice(0, a.index), noun = /^\s*(\p{L}+)/u.exec(text.slice(a.index + a.matchedText.length))?.[1] ?? '';
+  const capital = (w: string): boolean => /^\p{Lu}/u.test(w);
+  if (capital(a.matchedText) && (capital(noun) || !/(?:^|[.!?:;\n])["'\u201C\u2018\u00AB(\s]*$/u.test(before))) return false;
+  // The speech reader's indices are its normalised text's (runs of spaces as one, trimmed).
+  if (speechReading(text).inSpeech(before.replace(/[ \t]+/g, ' ').replace(/^\s+/u, '').length)) return false;
+  return amountIs(a, value, unit, family, text);
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
@@ -268,7 +277,16 @@ export function moneyUnitScale(unit: unknown): number {
 }
 
 /** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction refuses. */
-const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}\\b`, 'gi');
+/**
+ * The ORDINAL a cardinal's words begin ("twenty-FIRST", "forty FIFTH", "a hundred and FIRST", "one HUNDREDTH"), consumed with
+ * the phrase so `parseCardinalAmount` refuses the whole capture, exactly as the fraction tail does (`CARDINAL_FRACTION_CONTINUATION`):
+ * "twenty-first" is never 20 (Codex SPELLED pair). A unit ordinal joins a tens word, or follows a hyphen or "and"; a scale ordinal
+ * follows any cardinal. "two first-time buyers" stays two.
+ */
+const ORDINAL_UNIT = 'first|second|third|fourth|fifth|sixth|seventh|eighth|ninth';
+const CARDINAL_ORDINAL_CONTINUATION = `(?:(?:-|\\s+and\\s+|(?<=(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety))\\s+)(?:${ORDINAL_UNIT})`
+  + '|[\\s-]+(?:hundredth|thousandth|millionth|billionth))?';
+const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}${CARDINAL_ORDINAL_CONTINUATION}\\b`, 'gi');
 
 /**
  * Whether the brief states `value` as today's level: `figureTheUserWrote`, else a number written in words or "zero"
