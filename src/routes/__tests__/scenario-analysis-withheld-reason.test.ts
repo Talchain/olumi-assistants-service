@@ -17,7 +17,7 @@
  *   CONTROL: user-requested, permitted, separated → permitted, no reason
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { RunAnalysisHandlerFactSchema, RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 
 const readRecent = vi.fn();
 const readFactsFor = vi.fn();
@@ -75,7 +75,8 @@ function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicabl
   });
 }
 
-async function reloadWith(fact: ReturnType<typeof runFact> | readonly ReturnType<typeof runFact>[], id: string) {
+async function reloadWith(fact: ReturnType<typeof runFact> | readonly ReturnType<typeof runFact>[], id: string,
+  graph: GraphStateIngress = GRAPH) {
   const facts = Array.isArray(fact) ? fact : [fact];
   readScenarioRunAnalysisFactsFor.mockResolvedValue({
     facts: facts.map((item, index) => ({ fact: item, fact_row_id: `${RUN_ROW}-${index}`, fact_created_at: item.result.computed_at })),
@@ -84,7 +85,7 @@ async function reloadWith(fact: ReturnType<typeof runFact> | readonly ReturnType
   readRecent.mockResolvedValue([]);
   readFactsFor.mockResolvedValue([]);
   readFactsWithTurnFor.mockResolvedValue([]);
-  return readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: id });
+  return readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: id });
 }
 
 beforeEach(() => {
@@ -160,4 +161,68 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     expect(result.analysis_state?.leader_claim.permitted).toBe(true);
     expect(result.analysis_state?.leader_claim.withheld_reason).toBeUndefined();
   });
+});
+
+// Synthetic stored Run/engine-echo fixtures: this tests the served comparison seam, not a probability oracle.
+describe('C6: the cold read keeps recorded inputs and licensed chances beside automatic Runs', () => {
+  for (const [brief, factor, unit, target] of [
+    ['capacity', 'Additional specialists', 'specialists', 100],
+    ['hiring', 'Additional engineers', 'engineers', 8],
+  ] as const) {
+    for (const automatic of ['prior', 'current'] as const) {
+      for (const deniedChance of [false, true]) {
+        it(`RED: ${brief}, automatic ${automatic}, denied chance=${deniedChance}: a bound input pair survives without that Run’s leader or win shares`, async () => {
+          const graph: GraphStateIngress = { nodes: [
+            { id: 'goal', kind: 'goal', label: `${brief} goal`, goal_threshold: 0.7 },
+            { id: 'option-a', kind: 'option', label: `Add ${factor.toLowerCase()}` },
+            { id: 'option-b', kind: 'option', label: 'Hold current setting' },
+            { id: 'setting', kind: 'factor', label: factor },
+          ], edges: [] };
+          const make = (side: 'prior' | 'current') => {
+            const raw = side === 'prior' ? 1 : 2;
+            const base = runFact({ mayName: true, auto: side === automatic,
+              at: side === 'prior' ? '2026-09-24T16:00:00.000Z' : RUN_AT });
+            const snapshot = RunInputSnapshotSchema.parse({ snapshot_version: 1, sent_digest: 'a'.repeat(64),
+              residual_digest: 'b'.repeat(64), goal: { node_id: 'goal', label: `${brief} goal`, target_raw: target },
+              options: [{ option_id: 'option-a', settings: [{ factor_id: 'setting', label: factor, raw, encoded: raw, unit }] },
+                { option_id: 'option-b', is_baseline: true, settings: [{ factor_id: 'setting', label: factor, raw: 0, encoded: 0, unit, held: true }] }],
+              options_not_sent: [], factors: [{ factor_id: 'goal' }], constraints: [], links: [] });
+            return RunAnalysisHandlerFactSchema.parse({ ...base, result: { ...base.result,
+              summary: 'The recorded conditional findings are ready.', run_id: `${brief}-${side}`,
+              graph_hash_at_run: computeAnalysisAffectingGraphHash(graph), input_snapshot: snapshot,
+              enrichment: { ...base.result.enrichment, meta: { seed_used: side === 'prior' ? '17' : '18', n_samples: 10000 },
+                option_comparison: [{ option_id: 'option-a', option_label: `Add ${factor.toLowerCase()}`, win_probability: 0.65 },
+                  { option_id: 'option-b', option_label: 'Hold current setting', win_probability: 0.35 }],
+                inference_warnings: deniedChance && side === automatic
+                  // A missing point licence alone does not invalidate a conditional pair (AIE A); record an independent hold.
+                  ? [{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', severity: 'warning', option_ids: ['option-a'],
+                    message: 'This Run could not evaluate this option’s goal test.' },
+                  { code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stored range without its selected-Run licence.',
+                    option_ids: ['option-a'], range_by_option: { 'option-a': { low_pct: 0, high_pct: 7,
+                      low_rounding: 'whole', high_rounding: 'whole', kind: 'link_existence', from: 'setting', to: 'goal', among: 'all' } } }]
+                  : [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
+                    option_ids: ['option-a', 'option-b'], pct_by_option: { 'option-a': side === 'prior' ? 35 : 59, 'option-b': 20 } }] },
+            } });
+          };
+          const prior = make('prior'), current = make('current');
+          const source = JSON.stringify([prior, current]);
+          const result = await reloadWith([current, prior], `c6-${brief}-${automatic}`, graph);
+          expect(result.analysis_state?.run_state.kind).toBe('complete_current');
+          const delta = result.current_read.run_delta;
+          expect(delta).toBeDefined();
+          expect(delta?.endpoints).toEqual({ prior: { run_id: `${brief}-prior`, computed_at: prior.result.computed_at },
+            current: { run_id: `${brief}-current`, computed_at: current.result.computed_at } });
+          expect(delta?.input_changes).toEqual([{ entity_kind: 'option_setting', entity_id: 'setting', option_id: 'option-a',
+            field: 'value', label_before: factor, label_after: factor, before: { raw: 1, unit }, after: { raw: 2, unit }, change: 'changed' }]);
+          expect(delta?.win_probabilities).toEqual([]);
+          expect(delta?.leader).not.toHaveProperty(automatic === 'prior' ? 'prior_leading_option_id' : 'current_leading_option_id');
+          expect(delta?.goal_chances?.find(row => row.option_id === 'option-a')).toEqual({ option_id: 'option-a',
+            prior: deniedChance && automatic === 'prior' ? { kind: 'withheld' } : { kind: 'point', pct: 35, rounding: 'whole' },
+            current: deniedChance && automatic === 'current' ? { kind: 'withheld' } : { kind: 'point', pct: 59, rounding: 'whole' } });
+          expect(JSON.stringify(delta?.goal_chances)).not.toContain('low_pct');
+          expect(JSON.stringify([prior, current])).toBe(source);
+        });
+      }
+    }
+  }
 });
