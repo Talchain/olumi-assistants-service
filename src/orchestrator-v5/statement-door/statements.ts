@@ -9,7 +9,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { linkSizing } from '../../cee/provenance/provenance-of.js';
-import { namesBothEnds, speechReading, wholeStatementIn } from '../goal-target/input-claim-context.js';
+import { namesBothEnds, speechReading } from '../goal-target/input-claim-context.js';
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 

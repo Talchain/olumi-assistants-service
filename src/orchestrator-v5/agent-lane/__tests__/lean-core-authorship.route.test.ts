@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { userStated } from '../user-statements.js';
+import { saidByOf, userStated } from '../user-statements.js';
 import { currentCorrectionOf } from '../../statement-door/read.js';
 import { prepareStatementCorrection, claimRecordsOn, userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
@@ -177,14 +177,20 @@ describe('PL-0048 (2): a span the user\'s correction retired is never re-credite
 
   // ⭐ P2 at the correction door (DL-3 18 Oct, integration hunk in statements.ts): the AI's own speaker reading of the correction's
   // words reaches the ONE correction check (`verifyStatements`). The label only takes credit away; "user" still needs the literal span.
-  it('P2 correction door: a correction the AI reads as another speaker\'s ("other") or cannot place ("unknown") prepares nothing; "user" prepares', async () => {
+  it('P2 correction door: a correction the AI reads as another speaker\'s ("other") or cannot place ("unknown") is a card whose source is NEVER the user\'s; "user" is theirs', async () => {
     const g = await saved(draft({ statements: [...(draft().statements as Rec[]), levelStatement] }));
     const subject = { kind: 'goal' as const, id: String(goalOf(g).id), field: 'level' as const };
     const ask = (quote: string, speaker: string) => prepareStatementCorrection(g, { quote, speaker, edits: [{ subject,
       retirement: { quote: TODAY, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'The earlier weekly figure is withdrawn.' }] } as never,
     { now: quote }, '2026-10-18T01:00:00Z');
     const reported = 'My manager says we should ignore the weekly bookings figure of 180, there is no reliable count.';
-    for (const speaker of ['other', 'unknown']) expect(ask(reported, speaker), speaker).toMatchObject({ refused: 'statement_not_found' });
+    // ⭐ GATE → LABEL: the AI's reading only subtracts credit — the card's source is unresolved, never the user's, and says so.
+    for (const speaker of ['other', 'unknown']) {
+      const r = ask(reported, speaker) as Rec;
+      expect(r, speaker).toHaveProperty('candidate');
+      expect(saidByOf(r.correction.source), speaker).toBe('unknown');
+      expect(r.words, speaker).not.toContain('Recorded words — you:');
+    }
     // CONTRAST: the user's own correction, read as theirs, prepares the card.
     expect(ask(FIX, 'user')).toHaveProperty('candidate');
   });

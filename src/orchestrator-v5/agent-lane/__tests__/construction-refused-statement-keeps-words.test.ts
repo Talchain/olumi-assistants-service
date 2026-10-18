@@ -159,7 +159,12 @@ describe('#3376 ruling 3: every reader sees exactly what it saw before, the user
     expect(userStatementsOn(g.nodes[0])).toEqual([]);
     expect(recordedMeasureOf(g.nodes[0])).toBe(recordedMeasureOf(base.nodes[0]));
     // Unknown words may identify the old bytes a NEW typed correction addresses; they never become human source.
-    expect(correct(base)).toMatchObject({ refused: 'retired_source_not_held' });
+    // ⭐ GATE → LABEL: nothing held to retire is a LABEL on the card, never a refusal; the kept words gain no human source.
+    const unheld = correct(base);
+    if (!('correction' in unheld)) throw new Error(JSON.stringify(unheld));
+    expect(unheld.correction.edits[0]!.labels?.unheld).toEqual(['mostly on nights', 'staff hours']);
+    expect(unheld.words).toContain('Olumi could not find “mostly on nights” or “staff hours” in the recorded source');
+    expect(recordedMeasureOf((unheld.candidate.nodes as Rec[])[0]!)).toBe(recordedMeasureOf(base.nodes[0]));
     const fixed = correct(g);
     if (!('candidate' in fixed)) throw new Error(JSON.stringify(fixed));
     const node = (fixed.candidate.nodes as Rec[])[0]!;
