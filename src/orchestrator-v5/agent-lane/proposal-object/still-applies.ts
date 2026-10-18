@@ -174,7 +174,7 @@ export function isHeldAgentCard(pa: PendingAction): boolean {
  * is never executable (its press is refused by its own base) and never bound by typed words; the reply offers it to be
  * reviewed (the Agent prepares it again on the model as it is now) or set aside. Its pin and digest are unchanged.
  */
-export const AWAITING_REVIEW = 'awaiting_review';
+const AWAITING_REVIEW = 'awaiting_review';
 /**
  * The card a verified approved write is applying now (PR-2 CI, run4 `after_write`): its OWN write moves its own subject, and that
  * is never a model change to review. The commit seams that mark a card for review retire THIS card as before PR-2, so a retry

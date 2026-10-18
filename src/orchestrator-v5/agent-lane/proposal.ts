@@ -529,7 +529,7 @@ export class ProposalStore {
 }
 
 /** The approved content alone (no turn): one card's approval, whichever turn and path carries it (`inFlight`). */
-export function approvedContentKey(p: StructuredProposal): string {
+function approvedContentKey(p: StructuredProposal): string {
   return createHash('sha256').update(JSON.stringify(sortedKeysDeep([
     p.scenario_id, p.proposal_id, p.operations, p.base_graph_identity_hash,
   ]))).digest('hex');

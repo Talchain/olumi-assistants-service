@@ -57,8 +57,8 @@ export function heldLapseSentence(name: string | undefined, reason: HeldLapseRea
 }
 
 /** The press that asks the Agent to prepare a card under review again, on the model as it is now (never an approval). */
-export const REVIEW_CHIP_PREFIX = 'agent-review-proposal:';
-export const REVIEW_THIS_CHANGE = 'Review this change';
+const REVIEW_CHIP_PREFIX = 'agent-review-proposal:';
+const REVIEW_THIS_CHANGE = 'Review this change';
 export function reviewedProposalOf(chipId: unknown): string | undefined {
   return typeof chipId === 'string' && chipId.startsWith(REVIEW_CHIP_PREFIX) ? chipId.slice(REVIEW_CHIP_PREFIX.length) : undefined;
 }
