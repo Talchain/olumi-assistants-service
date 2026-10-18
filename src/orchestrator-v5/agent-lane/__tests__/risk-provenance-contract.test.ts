@@ -5,6 +5,9 @@ import { authorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { unsizedOlumiRiskIds, withoutUnsizedOlumiRisksRecorded, unsizedOlumiRiskLine } from '../unsized-risk.js';
+import { claimRecordsOn, userStatementsOn } from '../../statement-door/statements.js';
+import { projectModelContext } from '../runtime/agent-capabilities.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
 const { outbound } = vi.hoisted(() => {
@@ -320,6 +323,46 @@ describe('STEP 8c: source words are not authorship of Olumi\'s risk hypothesis',
       expect(JSON.stringify(risk.user_statements)).toContain(LIFT);
       expect(JSON.stringify(risk.user_statements)).toContain('"speaker":"user"');
     });
+
+  /**
+   * ⭐ READER AGREEMENT (DL-3; AIE 19:05Z "the same saved/AI/UI/reopen meaning must agree"): ONE node, read through the "you said" list,
+   * the claim reader, the AI's model context and a cold readback through the store's own contract, carries ONE authorship: Olumi's
+   * hypothesis, with the user's words kept whole as source bound only by Olumi's reading (`subject_bound: false`), never as the
+   * user's statement of the risk. The contrast is the user's own worry, read as theirs by every reader.
+   */
+  const readers = (graph: Rec, id: string) => {
+    const node = graph.nodes.find((n: Rec) => n.id === id);
+    const ai = (projectModelContext({ nodes: graph.nodes, edges: graph.edges, raw: graph, analysis_state: null, analysis_ready: null } as never)
+      .recorded_reasoning as Rec[] | undefined)?.find((r) => r.id === id);
+    return { node, youSaid: userStatementsOn(node), claims: claimRecordsOn(node), ai };
+  };
+  it('⭐ RED (reader agreement): Olumi\'s risk reads as Olumi\'s in the statement list, the AI context and a cold readback', () => {
+    const { graph, risk } = admitted(tagged('ai_proposed', [describes(LIFT)]), `${BASE} ${LIFT}`);
+    const cold = JSON.parse(JSON.stringify(GraphV3.parse(graph)));
+    for (const [where, g] of [['saved', graph], ['cold readback', cold]] as const) {
+      const r = readers(g, risk.id);
+      expect(r.node.provenance, where).toBe('ai_inferred');
+      expect(r.youSaid, `${where}: no "you said" record of the user's words on Olumi's risk`).toEqual([]);
+      const words = r.claims.flatMap((c) => c.statements);
+      expect(words.map((w) => w.quote), `${where}: the user's words kept whole as source`).toEqual([LIFT]);
+      expect(words[0]).toMatchObject({ speaker: 'user', checks: { subject_bound: false } });
+      expect(r.ai, `${where}: the AI sees the node`).toMatchObject({ provenance: 'ai_inferred', analysis_participation: 'retained_excluded' });
+      expect(r.ai?.current_retained, `${where}: the AI is handed no retained user statement of this risk`).toBeUndefined();
+      expect(JSON.stringify(r.ai?.user_statements)).toContain('"subject_bound":false');
+    }
+  });
+  it('⛔ CONTRAST (reader agreement): the user\'s own worry reads as theirs in every reader', () => {
+    const { graph, risk } = admitted(tagged('explicit', [describes(WORRY, { qualifier: 'a bit worried', conditions: null })]), `${BASE} ${WORRY}`);
+    const cold = JSON.parse(JSON.stringify(GraphV3.parse(graph)));
+    for (const g of [graph, cold]) {
+      const r = readers(g, risk.id);
+      expect(r.node.provenance).toBe('unverified_brief');
+      expect(r.youSaid.flatMap((c) => c.statements).map((w) => w.quote)).toEqual([WORRY]);
+      expect(r.ai?.provenance).toBe('unverified_brief');
+      expect(JSON.stringify(r.ai?.user_statements)).toContain(WORRY);
+      expect(JSON.stringify(r.ai?.user_statements)).not.toContain('subject_bound');
+    }
+  });
 
   it('⛔ the user\'s own worry (drafter: explicit) stays theirs: unverified human material, still asked, the Run withheld', () => {
     const { graph, risk, out } = admitted(tagged('explicit', [describes(WORRY, { qualifier: 'a bit worried', conditions: null })]), `${BASE} ${WORRY}`);

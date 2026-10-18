@@ -537,7 +537,13 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     if (resolved.kind !== 'resolved') continue;
     const key = doorSubjectKey(resolved.subject);
     const group = groups.get(key) ?? { subject: resolved.subject, statements: [] };
-    group.statements.push(...said);
+    // ⭐ STEP 8c (AIE 19:05Z; DL-3 reader agreement): on a risk admission made OLUMI'S hypothesis, the user's words are the SOURCE of
+    // Olumi's reading, never a statement of that risk. They are kept whole (speaker user), bound only by Olumi's reading (the existing
+    // `subject_bound: false`), so no "you said" reader, the AI's retained statements or the Run's facts read them as the user's assertion.
+    const olumis = drafted.kind === 'risk' && authorshipOf({ nodeTag: (graph.nodes as unknown[]).find((n): n is Record<string, unknown> =>
+      n !== null && typeof n === 'object' && (n as Record<string, unknown>).id === resolved.subject.id)?.provenance }).origin === 'ai';
+    group.statements.push(...(olumis
+      ? said.map((st) => ({ ...st, checks: { words_found: true, figure_found: true, unit_found: true, subject_bound: false } })) : said));
     groups.set(key, group);
   }
   let out = graph as G & Record<string, unknown>;
