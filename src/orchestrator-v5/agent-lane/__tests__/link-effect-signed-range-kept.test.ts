@@ -99,6 +99,15 @@ async function registered(model: Rec, brief = BRIEF): Promise<Rec> {
   return graph!;
 }
 
+/** What the build SAYS once on its turn (`not_represented`), through the real build and register. */
+async function said(model: Rec, brief = BRIEF): Promise<string[]> {
+  const r = await buildModelFromBrief('5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a', brief, (async (path: string) => (path.endsWith('/graph/register')
+    ? { status: 200, json: { registered: true, model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } })) as never,
+    (async () => ({ text: JSON.stringify(model), status: 'completed' })) as never) as Rec;
+  expect(r.ok, JSON.stringify(r).slice(0, 1200)).toBe(true);
+  return r.not_represented as string[];
+}
+
 const BASIS = 'Uses the stated lower end as a provisional planning effect.';
 /** The sentence beside Olumi's estimate: the user's whole words as theirs, the figure used named as Olumi's separate approximation. */
 const beside = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_beside_estimate'));
@@ -286,5 +295,26 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
     const graph = await registered(draft({ metres: 'metres' }), inMetres(BRIEF, 'metres'));
     expect(savedEdge(graph).provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: BASIS });
     expect(recordOn(graph)?.statements).toEqual([expect.objectContaining({ form: 'range', low: 4, high: 6, unit: 'metres' })]);
+  });
+
+  /**
+   * ⭐ A3 (T01, G3 unseen 8e9132fc: "the engineers' 6–10 saving held at its low end as Olumi's; the user was never told"). The
+   * sentences above were computed at admission and never said: the build's one list of what it says (`not_represented`) left out
+   * both codes. The build now says them, once, in the AIE's words.
+   */
+  /** Every sentence the build says about THIS link's range, beside or set aside (exact, so a repeat shows). */
+  const aboutPre = (lines: readonly string[]): string[] => lines.filter((x) => x.startsWith(`"${PRE}" → "${WASTE}": `));
+  it('⭐ A3: the build SAYS the user\'s range beside Olumi\'s estimate, once, and why an estimate in another unit was set aside, once', async () => {
+    expect(aboutPre(await said(draft()))).toEqual([beside(admitted(draft()))!.reason]);
+    expect(aboutPre(await said(draft({ pounds: true }), BRIEF_LB))).toEqual([otherUnitWords(RANGE_LB, 'kg')]);
+  });
+
+  it('A3 CONTRAST: the user\'s own point, a denied range, and a range stated for another link say nothing beside this link', async () => {
+    const POINT = 'In our trial the pre-order system in use cut daily food waste by 5 kg a day.';
+    const d = draft();
+    const own = { ...d, links: d.links.map((l: Rec) => (l.from === PRE ? { ...l, effect_amount: -5, effect_provenance: 'explicit', basis: null, source_quote: POINT } : l)) };
+    expect(aboutPre(await said(own, `${BRIEF} ${POINT}`))).toEqual([]);
+    expect(aboutPre(await said(draft({ negated: true })))).toEqual([]);
+    expect(aboutPre(await said(draft({ on: DEL })))).toEqual([]);
   });
 });
