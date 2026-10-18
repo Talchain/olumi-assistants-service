@@ -111,12 +111,12 @@ function provider(id: string, card: { id?: string }): { respond: Respond; left: 
     // Before the digest: the replay substitutes this world's card id for the recorded one, so the request carries it.
     const request = requestDigest(req);
     if (!RECORD) {
-      const hit = queue.shift();
+      const hit = queue[0];
       if (hit === undefined) throw new Error(`${id}: the replay diverged — no recorded reply left for a "${name}" request`);
       if (hit.name !== name || hit.request !== request) {
         throw new Error(`${id}: the replay diverged at reply ${used + 1}: sent "${name}" ${request}, recorded "${hit.name}" ${hit.request}`);
       }
-      used += 1;
+      queue.shift(); used += 1;
       const recordedCard = cardAtRecord[id];
       const body = recordedCard !== undefined && card.id !== undefined ? hit.body.split(recordedCard).join(card.id) : hit.body;
       return new Response(body, { status: hit.status });
