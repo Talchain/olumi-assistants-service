@@ -744,6 +744,14 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
       'The source gives 70 hours per week for “Day shift hours”, so this card will not use it for “Night shift hours”.'],
     ['an unnamed figure among several', 'Correction: 45 hours per week, and 12 hours per week of agency cover.', '45 hours per week', 45, true,
       'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    // 8b builder → DL-3 (R3, in-subject wrong-author path): a figure inside ANOTHER speaker's quotation is that speaker's, never the
+    // user's replacement; the claim verifier's own speech reading of the whole line decides (no new matcher).
+    ['another speaker’s quoted words (digits, typographic marks)', 'Correction: our matron said “night shifts take 45 hours per week”, not 40.',
+      'night shifts take 45 hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['another speaker’s quoted words (digits, straight marks)', 'Correction: our matron said "night shifts take 45 hours per week", not 40.',
+      'night shifts take 45 hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['another speaker’s quoted words (a count in words)', 'Correction: our matron said “night shifts take forty-five hours per week”, not 40.',
+      'night shifts take forty-five hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['a denied figure', 'Night shifts do not take 45 hours per week.', 'Night shifts do not take 45 hours per week', 45, true,
       'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['a bound, not a point', 'Night shifts take at least 45 hours per week.', 'Night shifts take at least 45 hours per week', 45, true,
