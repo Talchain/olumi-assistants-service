@@ -426,10 +426,11 @@ describe('S-D slice 2 Agent proposals', () => {
   }, 120_000);
   it('P53 prop stale same-target card RED: its own empty binding cannot approve the newer held value', async () => {
     seed();
+    // Olumi's own estimates: the user's words state no figure (a spelled "twenty hours" is the user's figure, as "20 hours" is; #3429).
     script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 10, unit: 'hours', basis: 'First estimate' }] }), () => say('Use ten hours?')];
-    const first = await turn({ message: 'Suggest ten hours as a starting estimate.' }); const old = shown(first);
+    const first = await turn({ message: 'Suggest a starting estimate for the hours.' }); const old = shown(first);
     script = [() => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 20, unit: 'hours', basis: 'Second estimate' }] }), () => say('Use twenty hours?')];
-    const second = await turn({ message: 'Suggest twenty hours instead.' }); const newer = shown(second);
+    const second = await turn({ message: 'Suggest a different estimate instead.' }); const newer = shown(second);
     expect(newer.proposal_id).not.toBe(old.proposal_id);
     expect(second._proposal_fields!.proposals.map(p => p.proposal_id)).toEqual([newer.proposal_id]);
     const before = bytes(); const r = await submit(first, []);
