@@ -61,23 +61,35 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(hash(w.read())).toBe(before);
   }, 90_000);
 
-  it('⭐ A2 (the live T3 shape): two cards waiting, typed yes naming one → nothing written, both buttons shown, that card first; one press applies it', async () => {
+  // ⭐ PL amendment (DL-3 18 Oct 16:28): with several cards waiting, an EXPLICIT selection is honoured — the card the Agent
+  // names binds only if it is one the user was shown, and the write quotes their words. Only an ambiguous yes re-offers.
+  it('⭐ A2 (the live T3 shape): two cards waiting, a typed yes that names one → exactly that card is saved, as a typed approval; the other keeps its button', async () => {
+    const w = world(); const turn = await route(w);
+    const { a, b, session } = await bothCards(w, turn);
+    const typed = await turn({ message: 'Yes, I approve the 15% mixer setting.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: b }), say('Saved the 15% mixer setting.')]);
+    expect(authorised(typed), JSON.stringify(authorised(typed))).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
+    expect(mixerSaved(w.read())).toBe(true);
+    expect(node(w.read(), 'prep_time_cut').observed_state, 'card A (Olumi\u2019s 0%) was not written').toBeUndefined();
+    expect(typed._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: 'Yes, I approve the 15% mixer setting.' }]);
+    expect(String(typed.assistant_text)).toContain('Saved on your typed approval: \u201cYes, I approve the 15% mixer setting.\u201d');
+    // Card A (Olumi's starting value) was made on the model before B's write, so it does not survive silently: it is SAID.
+    expect(String(typed.assistant_text)).toMatch(LAPSE);
+    expect(w.onLatestRow(approvalChipIdFor(a))).toBe(false);
+  }, 120_000);
+
+  it('A2 ambiguous: two cards waiting, a bare "yes" the Agent asks about → nothing written; every card offered with the change it applies; one press applies the chosen one', async () => {
     const w = world(); const turn = await route(w);
     const { a, b, session } = await bothCards(w, turn);
     const before = hash(w.read());
-    const typed = await turn({ message: 'Yes, I approve the 15% mixer setting.', source: 'composer', agent_session_id: session },
-      [call('authorise_change', { proposal_id: b }), say('You approved the 15% mixer setting.')]);
-    expect(authorised(typed), JSON.stringify(authorised(typed))).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
-    expect(hash(w.read()), 'nothing written').toBe(before);
+    const typed = await turn({ message: 'yes', source: 'composer', agent_session_id: session }, [say('Which change do you mean?')]);
+    expect(authorised(typed)).toEqual([]);
+    expect(hash(w.read())).toBe(before);
     const ids = chips(typed);
-    expect(ids, 'a button for EVERY waiting card').toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b)]));
-    expect(ids.indexOf(approvalChipIdFor(b)), 'the card the words meant comes first').toBeLessThan(ids.indexOf(approvalChipIdFor(a)));
-    expect(ids).toEqual(expect.arrayContaining([declineChipIdFor(a), declineChipIdFor(b)]));
-    expect(String(typed.assistant_text)).toMatch(/two changes are waiting\. To apply "Buy a faster mixer[^"]*", press its button below\./);
-    // ONE click applies the right one; the other card keeps its button. Each button shows the change it applies.
-    const chip = chipFor(typed, b);
-    expect(String(chip.detail)).toMatch(/^Buy a faster mixer acts on Prep time cut from mixer/);
+    expect(ids, 'a button for EVERY waiting card').toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b), declineChipIdFor(a), declineChipIdFor(b)]));
+    expect(String(chipFor(typed, b).detail)).toMatch(/^Buy a faster mixer acts on Prep time cut from mixer/);
     expect(String(chipFor(typed, a).detail)).toMatch(/Prep time cut from mixer = 0%/);
+    const chip = chipFor(typed, b);
     const pressed = await turn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: session });
     expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
     expect(mixerSaved(w.read())).toBe(true);
@@ -87,16 +99,19 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(w.onLatestRow(approvalChipIdFor(a))).toBe(false);
   }, 120_000);
 
-  it('A2 ambiguous: two cards waiting, a bare typed "yes" → never bound (even when the Agent picks one), both buttons offered', async () => {
+  it('A2 host check: with several waiting, a card the user was never SHOWN is not bound by typed words (a shown one is), and the refusal names the choice', async () => {
     const w = world(); const turn = await route(w);
     const { a, b, session } = await bothCards(w, turn);
+    w.neverShown(approvalChipIdFor(b));
     const before = hash(w.read());
-    const typed = await turn({ message: 'yes', source: 'composer', agent_session_id: session },
-      [call('authorise_change', { proposal_id: a }), say('Which change do you mean?')]);
-    expect(authorised(typed)).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
-    expect(hash(w.read())).toBe(before);
-    expect(chips(typed)).toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b)]));
-    expect(String(typed.assistant_text)).toMatch(/two changes are waiting/);
+    const unseen = await turn({ message: 'Yes, apply that.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: b }), say('Applied.')]);
+    expect(authorised(unseen), JSON.stringify(authorised(unseen))).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
+    expect(hash(w.read()), 'nothing written for the unseen card').toBe(before);
+    expect(String(unseen.assistant_text)).toMatch(/two changes are waiting\. Press the button on the one you mean\./);
+    const shown = await turn({ message: 'Yes, use the starting value.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: a }), say('Saved.')]);
+    expect(authorised(shown), JSON.stringify(authorised(shown))).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: a })]);
   }, 120_000);
 
   it('⭐ A4: approving Olumi’s starting value never lapses the user’s new-link card on the same factor; it stays pressable, then saves', async () => {

@@ -75,7 +75,10 @@ export function world(live: { store: unknown }) {
   const versions = () => ({ versions: [{ version_id: 'draft-r1', sequence: 1, created_at: STAMP,
     creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, BRIEF)) } }] });
   const onLatestRow = (chipId: string): boolean => ((latest() as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
-  return { sid, read, graphWire, versions, onLatestRow };
+  /** A card the user was never shown: its carrier is taken off the latest row (the proposal stays in the process's store). */
+  const neverShown = (chipId: string): void => { const row = latest() as Rec | undefined;
+    if (row !== undefined) row.pending_actions = (row.pending_actions ?? []).filter((p: Rec) => p.chip_id !== chipId); };
+  return { sid, read, graphWire, versions, onLatestRow, neverShown };
 }
 
 /** The open apps, closed by the spec's `afterEach` (`closeApps`). */

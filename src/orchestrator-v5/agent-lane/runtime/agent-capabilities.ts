@@ -12456,7 +12456,12 @@ export function createAgentCapabilities(
       } catch { return undefined; }
     },
     // The approval guard's writer: every return path of `authoriseChange`, one place.
-    async authoriseChange(ctx, args): Promise<ToolResult> {
+    async authoriseChange(ctxIn, args): Promise<ToolResult> {
+      // ⭐ An explicit typed selection among several DISPLAYED cards (PL amendment, 18 Oct): the id the Agent names binds only
+      // when it is one of the cards the user was shown at the start of this turn, with that card's own button words.
+      const shown = ctxIn.typed_approval_of === undefined && typeof args?.proposal_id === 'string'
+        && Object.hasOwn(ctxIn.typed_assent_cards ?? {}, args.proposal_id) ? ctxIn.typed_assent_cards![args.proposal_id] : undefined;
+      const ctx = shown === undefined ? ctxIn : { ...ctxIn, typed_approval_of: args.proposal_id, typed_approval_words: shown };
       // Run existing validation and card-specific refusals unchanged. The inner writer's
       // consent fence refuses an otherwise executable ordinary proposal before any write.
       if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {

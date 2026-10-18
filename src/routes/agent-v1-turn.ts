@@ -3351,6 +3351,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && shownAsHeldNow(shown, soleId, revisionAtStart.get(soleId))) {
       if (soleCard.message === typedNow) approvedProposal = soleId;
       pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message, typed_assent: typedNow };
+    } else if (approvedProposal === undefined && typedNow !== null && waitingIds.size > 1) {
+      // ⭐ Several cards waiting (PL amendment, 18 Oct): an explicit selection is honoured. Nothing is bound now; the card the
+      // Agent names when it approves binds only if it is one the client SHOWS at the revision held now (`typed_assent_cards`).
+      // An ambiguous yes is the Agent's to ask about, and the reply re-offers every card.
+      const shownCards = heldCardIds.filter(([id]) => shownAsHeldNow(shown, id, revisionAtStart.get(id)));
+      if (shownCards.length > 0) pressedApproval = { typed_assent: typedNow, typed_assent_cards: Object.fromEntries(shownCards.map(([id, card]) => [id, card.message])) };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.

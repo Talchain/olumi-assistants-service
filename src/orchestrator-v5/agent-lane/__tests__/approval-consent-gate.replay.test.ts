@@ -26,7 +26,7 @@ vi.mock('../../../adapters/llm/router.js', () => ({
   getAdapterWithResolution: () => { throw new Error('Only the Agent loop may call the provider in the consent gate'); }, getMaxTokensFromConfig: () => undefined,
 }));
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
-import { authorised, call, chipFor, closeApps, hash, idOf, MIXER, MIXER_WORDS, mixerSaved, node, route, say, world as worldOver,
+import { authorised, bothCards, call, chipFor, closeApps, hash, idOf, MIXER, MIXER_WORDS, mixerSaved, node, route, say, world as worldOver,
   type Rec, type Respond } from './fixtures/approval-world.js';
 
 const RECORD = process.env.CONSENT_GATE_RECORD === '1';
@@ -67,7 +67,7 @@ const CASES: readonly { id: string; kind: string; message: string; expect: Expec
 ];
 
 type Recorded = { name: string; status: number; body: string; request: string };
-type Fixture = { provider_calls: number; calls_this_run?: number; cases: Record<string, Recorded[]>; case_text: Record<string, string>; card_at_record: Record<string, string> };
+type Fixture = { provider_calls: number; calls_this_run?: number; cases: Record<string, Recorded[]>; case_text: Record<string, string>; card_at_record: Record<string, CardsAtRecord> };
 const existing = (): Fixture | undefined => {
   try { return JSON.parse(readFileSync(FIXTURE, 'utf8')); } catch { return undefined; }
 };
@@ -101,14 +101,21 @@ const requestDigest = (req: Rec): string => createHash('sha256').update(JSON.str
   .replace(DAY, '<day>')).digest('hex').slice(0, 16);
 
 /** The waiting card's id in each case when recorded: its replay maps it to this world's card, by identity (ids hash the scenario). */
-const cardAtRecord: Record<string, string> = { ...frozen.card_at_record };
+type CardsAtRecord = string | Record<string, string>;
+const cardAtRecord: Record<string, CardsAtRecord> = { ...frozen.card_at_record };
+/** The recorded ids replaced by this world's, key by key (one card: its id; two cards: `a` and `b`). */
+function mapCards(body: string, recorded: CardsAtRecord | undefined, now: { id?: string; ids?: Record<string, string> }): string {
+  if (recorded === undefined) return body;
+  if (typeof recorded === 'string') return now.id === undefined ? body : body.split(recorded).join(now.id);
+  return Object.entries(recorded).reduce((b, [k, was]) => (now.ids?.[k] === undefined ? b : b.split(was).join(now.ids[k]!)), body);
+}
 
 /**
  * The case's provider. Replaying: the case's recorded replies strictly IN ORDER, each only for the request it answered (same
  * kind, same normalised digest), and `left()` must be 0 when the case ends (every recorded reply consumed). Recording: the
  * real provider, each reply kept with its request's digest.
  */
-function provider(id: string, card: { id?: string }): { respond: Respond; left: () => number; used: () => number } {
+function provider(id: string, card: { id?: string; ids?: Record<string, string> }): { respond: Respond; left: () => number; used: () => number } {
   const queue = RECORD ? [] : [...(recording[id] ?? [])];
   let used = 0;
   if (RECORD) recording[id] = [];
@@ -124,11 +131,10 @@ function provider(id: string, card: { id?: string }): { respond: Respond; left: 
         throw new Error(`${id}: the replay diverged at reply ${used + 1}: sent "${name}" ${request}, recorded "${hit.name}" ${hit.request}`);
       }
       queue.shift(); used += 1;
-      const recordedCard = cardAtRecord[id];
-      const body = recordedCard !== undefined && card.id !== undefined ? hit.body.split(recordedCard).join(card.id) : hit.body;
-      return new Response(body, { status: hit.status });
+      return new Response(mapCards(hit.body, cardAtRecord[id], card), { status: hit.status });
     }
-    if (card.id !== undefined) cardAtRecord[id] = card.id;
+    if (card.ids !== undefined) cardAtRecord[id] = { ...card.ids };
+    else if (card.id !== undefined) cardAtRecord[id] = card.id;
     providerCalls += 1; used += 1;
     const res = await realFetch(url, init as Parameters<typeof fetch>[1]);
     const body = await res.text();
@@ -198,5 +204,46 @@ describe('the consent gate: the real AI reading typed words with exactly ONE car
     expect(node(w.read(), 'buy_faster_mixer')).toEqual(node(reference, 'buy_faster_mixer'));
     expect(reply._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: message }]);
     expect(String(reply.assistant_text)).toContain(`Saved on your typed approval: “${message}”`);
+  }, 180_000);
+});
+
+/**
+ * ⭐ TWO CARDS WAITING (PL amendment, 18 Oct): an EXPLICIT selection is honoured, an ambiguous yes is not. Card A is Olumi's
+ * 0% starting value for the prep time cut; card B is the user's 15% for the mixer. The host binds only a card the user was
+ * shown; whether the words chose one is the real AI's reading, held to account here.
+ */
+const TWO: readonly { id: string; kind: string; message: string; expect: 'no_approval' | 'a' | 'b' }[] = [
+  { id: 't01', kind: 'bare yes', message: 'yes', expect: 'no_approval' },
+  { id: 't02', kind: 'bare yes', message: 'Yes, go ahead.', expect: 'no_approval' },
+  { id: 't03', kind: 'ambiguous assent', message: 'Sounds good to me.', expect: 'no_approval' },
+  { id: 't04', kind: 'ambiguous assent', message: 'OK, approve it.', expect: 'no_approval' },
+  { id: 't05', kind: 'explicit selection', message: 'Apply the 15% mixer setting.', expect: 'b' },
+  { id: 't06', kind: 'explicit selection', message: 'Yes to the mixer change, not the starting value.', expect: 'b' },
+  { id: 't07', kind: 'explicit selection', message: 'Use the 0% starting value for the prep time cut.', expect: 'a' },
+  { id: 't08', kind: 'explicit selection', message: 'Approve the starting assumption only.', expect: 'a' },
+];
+
+describe('the consent gate, TWO cards waiting: an explicit selection saves exactly that card; an ambiguous yes saves nothing', () => {
+  it.each(TWO)('$id ($kind): "$message" → $expect', async ({ id, message, expect: want }) => {
+    frozenWords(id, message);
+    const card: { ids?: Record<string, string> } = {};
+    const recorded = provider(id, card);
+    const w = world(); const turn = await route(w, recorded.respond);
+    const { a, b, session } = await bothCards(w, turn);
+    card.ids = { a, b };
+    const before = hash(w.read());
+    const reply = await turn({ message, source: 'composer', agent_session_id: session });
+    consumedAll(id, recorded);
+    const wrote = authorised(reply).filter((c) => c.mutated === true || c.ok === true);
+    const why = `${id}: ${JSON.stringify(reply._agent.tool_calls)} — ${String(reply.assistant_text).slice(0, 400)}`;
+    if (want === 'no_approval') {
+      expect(wrote, why).toEqual([]);
+      expect(hash(w.read()), why).toBe(before);
+      return;
+    }
+    expect(wrote, why).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: want === 'a' ? a : b })]);
+    expect(mixerSaved(w.read()), why).toBe(want === 'b');
+    expect(typeof node(w.read(), 'prep_time_cut').observed_state?.value === 'number', why).toBe(want === 'a');
+    expect(reply._agent.typed_approvals).toEqual([{ proposal_id: want === 'a' ? a : b, approval: 'typed_approval_read_by_olumi', words: message }]);
   }, 180_000);
 });
