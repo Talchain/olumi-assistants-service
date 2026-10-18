@@ -300,3 +300,16 @@ describe('BUDDY-A #3396: widening Olumi\'s reference keeps every stated size (B1
   });
 });
 
+/** AIE `unit_unresolved_bound` (prompt/AIE-T1-PRODUCER-AND-WITHDRAWAL-TEXT-20261018-v1.json), exact. */
+const UNIT_UNRESOLVED_BOUND = 'A bare figure with unresolved meaning, unit or encoding does not establish plausible_max, a 0–100 scale or a unit interval. Preserve the original figure, complete source, speaker, qualifiers and unresolved meaning; do not divide by 100 or invent a unit, cap or calibration. Use null for an unsupported bound under the common nullable contract. A genuinely defined dimensionless quantity may still have a supported domain: preserve its actual definition and encoding rather than treating every unitless figure as invalid. A percentage encoding alone does not establish a hard maximum of 100, and an ordinary uncertain range endpoint is not a hard domain bound. Reuse a supplied applicable definition before asking only for the missing meaning. Retain useful qualitative reasoning and independently supported calculations while withholding only unsupported dependent numerical use.';
+describe('A: the producer is told a bare figure establishes no bound, on the same nullable contract (AIE, exact)', () => {
+  it('the drafter\'s instructions carry the AIE clause once, beside W3\'s bound rule (no competing rule)', async () => {
+    const instructions: string[] = [];
+    const d: InternalDispatch = async (path) => (path.endsWith('/graph/register') ? { status: 200, json: { model_version: { version_number: 1 } } }
+      : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } });
+    await buildModelFromBrief(SID, BRIEF, d, (async (body: { instructions: string }) => { instructions.push(body.instructions); return { text: JSON.stringify(wire()) }; }) as unknown as CallStructuredModel);
+    expect(instructions[0]!.split(UNIT_UNRESOLVED_BOUND)).toHaveLength(2);
+    expect(instructions[0]).toContain('GIVE `plausible_max` ONLY FOR A SUPPORTED UPPER DOMAIN BOUND');
+  });
+});
+
