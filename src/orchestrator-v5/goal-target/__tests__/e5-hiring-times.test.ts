@@ -130,6 +130,13 @@ describe('Paul\'s sentence → each start, with whose figure it is (AIE S8 rule 
     }])).toEqual({ refusal: 'hiring_bound_conflict', quote: text, bound, value, source: 'user_stated' });
   });
 
+  // AIE bound science (moved here from the door row by LEAN CORE: a fresh model-origin bound no longer reaches the door, PL-0048 1):
+  // a bound that is not the user's cannot clamp the held earliest start to a point.
+  it('a model-origin bound cannot clamp a start to a point', () => {
+    expect(planStarts(['within 1 month'], { lead_low: 2, lead_high: 4, monthly_share: 12 }, 1, [{ stated: false }]))
+      .toEqual({ refusal: 'hiring_bound_conflict', quote: 'within 1 month', bound: 'upper', value: 1, source: 'model_proposed' });
+  });
+
   it.each(['soon', 'at least 3 months, within 5 months', 'a while', '3 months then 5 months'])('unreadable: %s', q => expect(readHiringStart(q)).toBeNull());
 
   it.each([NaN, Infinity, -Infinity, -1, 61])('W13 rejects non-finite or out-of-bounds typed months %s', months => {
