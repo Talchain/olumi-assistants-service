@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { log } from '../../../utils/telemetry.js';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../rolling-summary/capture.js', () => ({ maintainRollingSummaryForCommit: vi.fn(async () => undefined) }));
-import { admitCandidateModel, slugId, type CandidateModel } from '../../agent-lane/admit-model.js';
+import { admitCandidateModel, admittedReachesGoal, slugId, type CandidateModel } from '../../agent-lane/admit-model.js';
 import { unresolvedEventOptionIds } from '../event-by-date-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
 import type { ToolResult } from '../../agent-lane/runtime/agent-tools.js';
@@ -456,7 +456,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     ['no added_capacity', 'it needs how much capacity each option adds', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => ({ ...o, added_capacity: null })) })],
     ['invalid added_capacity', 'it needs how much capacity each option adds', (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => o.is_status_quo ? o : { ...o, added_capacity: { monthly_share_pct: 10, lead_months_low: 5, lead_months_high: 3 } }) })],
     ['zero capacity change', "the options don't change the team's capacity", (c: CandidateModel): CandidateModel => ({ ...c, options: c.options.map(o => o.is_status_quo ? o : { ...o, added_capacity: { monthly_share_pct: 0, lead_months_low: 2, lead_months_high: 4 } }) })],
-  ] as const)('flagged %s uses the existing refusal carrier and never ordinary fallback', async (_name, piece, change) => {
+  ] as const)('flagged %s uses the existing refusal carrier; the build registers the ordinary model and asks the missing piece once (A3 D1)', async (_name, piece, change) => {
     const c = change(b3()), expected = refusal(piece), admitted = flagged(c);
     expect(admitted.withheld).toContainEqual(expect.objectContaining({ reason: 'event_goal_unadmitted', detail: expected }));
     expect(admitted.edges.some(e => e.from === 'senior_engineers_hired')).toBe(false);
@@ -467,11 +467,17 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(runAdmission.blockedNextStep).toBe(expected);
     expect(firstAnalysisSentence({ ran: false, reason: 'not_admissible', nextStep: detail }))
       .toBe(`The first analysis could not run yet: ${expected}`);
+    // ⭐ A3 D1 (DL-3 ruling 3, 18 Oct; reverses B3 086e4624's build refusal here; Paul 13 Oct: coach, don't refuse): the ordinary
+    // model registers, the missing piece is its one ask, and nothing on it can reach the goal until that is answered.
     const { result, registrations } = await built(c);
-    expect(result).toMatchObject({ ok: false, mutated: false, detail: expected });
-    expect(registrations).toEqual([]);
+    expect(result, JSON.stringify(result).slice(0, 800)).toMatchObject({ ok: true, mutated: true });
+    expect(registrations).toHaveLength(1);
+    expect((result.open_questions as string[]).filter((q) => q === expected)).toHaveLength(1);
+    // The existing hold registers with its detail, where the Run's own admission reads it.
+    expect(resolveRunAdmission(registrations[0])).toMatchObject({ willProceed: false, blockedNextStep: expected });
+    expect(admittedReachesGoal(registrations[0] as never)).toBe(false);
     expect(JSON.stringify(result)).not.toContain('A part of the model cannot reach the goal');
-    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [result]).status).toBe(expected);
+    expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [result]).status).toContain(expected);
   });
 
   it('unflagged non-event admission is byte-identical to base 81b77b9f', () => {
