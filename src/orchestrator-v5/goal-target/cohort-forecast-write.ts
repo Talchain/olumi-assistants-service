@@ -25,7 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
-import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, claimRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
@@ -191,7 +191,7 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
   // The user's words go with the forecast their reading sets, on THIS option, as the door recorded them.
   const said = approved.user_statement;
   if (said !== undefined && (said.subject.kind !== 'option' || said.subject.id !== approved.option_id
-    || said.record.subject_key !== subjectKey(said.subject) || userStatementRecordOf(said.record) === undefined)) {
+    || said.record.subject_key !== subjectKey(said.subject) || claimRecordOf(said.record) === undefined)) {
     return { kind: 'refused', reason: 'invalid_forecast' };
   }
   // The option as the write leaves it: the card's forecast, and the door's record of the words when there is one.
@@ -305,7 +305,7 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.' };
   }
   const said = approved.user_statement;
-  const record = userStatementRecordOf(said.record);
+  const record = claimRecordOf(said.record);
   if (said.subject.id !== approved.node_id || said.record.subject_key !== subjectKey(said.subject) || record === undefined
     || !recordable(said.subject, record)) return { kind: 'refused', reason: 'invalid_statement' };
   // A link's record lives on its `from` node (`withUserStatement`), and only while the link itself is in the graph.
@@ -396,7 +396,7 @@ function userStatementCarriedBy(v: Rec): ApprovedStatementRecord['user_statement
   if (v.user_statement === undefined) return undefined;
   const u = isRec(v.user_statement) ? v.user_statement : {};
   const subject = isRec(u.subject) ? u.subject : undefined;
-  const record = userStatementRecordOf(u.record);
+  const record = claimRecordOf(u.record);
   if (subject === undefined || typeof subject.id !== 'string' || !(SUBJECT_KINDS as readonly unknown[]).includes(subject.kind)
     || !isStatementField(subject.field) || record === undefined) return null;
   // An option's setting of a factor (`RANGE_LAW_ROW`) is keyed by its option too: the subject keeps it, or the key never matches.

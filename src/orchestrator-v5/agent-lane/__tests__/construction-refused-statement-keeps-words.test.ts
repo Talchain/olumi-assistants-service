@@ -5,7 +5,7 @@
  * brief writes verbatim, refused ONLY as not a whole statement, are now kept on their subject with speaker unknown: never the user's,
  * never operative (no figure, unit or sign). SYNTHETIC brief (never a pilot brief). Real path: `buildModelFromBrief` (scripted
  * drafter) → `/graph/register` → the saved record → its readers. #3376 ruling 3: every reader sees the user's statements only (what it
- * saw before), so the kept words flip no base behaviour; only `recordsWithUnknownSpeakerOn` returns them.
+ * saw before), so the kept words flip no base behaviour; only `claimRecordsOn` returns them.
  */
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
@@ -15,7 +15,7 @@ import { linkWorkingPointOf } from '../link-working-point.js';
 import { userStatementOf } from '../user-statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { subjectKey } from '../../statement-door/subject.js';
-import { currentStatementRetention, prepareStatementCorrection, recordsWithUnknownSpeakerOn, userStatementFor, userStatementRecord, userStatementsOn,
+import { currentStatementRetention, prepareStatementCorrection, claimRecordsOn, userStatementFor, userStatementRecord, userStatementsOn,
   withUserStatement } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
@@ -92,7 +92,7 @@ describe('words the quote check cannot bound as whole are kept with speaker unkn
     // Never the user's: every reader's record holds none of them; only the named accessor returns them.
     expect(userStatementsOn(nodeOf(g, SCORE)), 'level: readers see none').toEqual([]);
     expect(userStatementsOn(nodeOf(g, PARTS)), 'speech: readers see none').toEqual([]);
-    expect(recordsWithUnknownSpeakerOn(nodeOf(g, SCORE))).toEqual([levelRecord(g)]);
+    expect(claimRecordsOn(nodeOf(g, SCORE))).toEqual([levelRecord(g)]);
     // Same build, same line set: the goal's whole sentence is still the user's.
     expect(recordOf(g, GOAL, `goal|${nodeOf(g, GOAL).id}|||target`)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: AIM, low: 900 })]);
   });
@@ -165,9 +165,9 @@ describe('#3376 ruling 3: every reader sees exactly what it saw before, the user
     const node = (fixed.candidate.nodes as Rec[])[0]!;
     expect(currentStatementRetention(userStatementFor(fixed.candidate, subject)!)?.spans).toEqual([{ text: 'staff hours', origin: 'unknown' }]);
     expect(recordedMeasureOf(node)).toBe(recordedMeasureOf(base.nodes[0]));
-    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown'))
-      .toEqual(recordsWithUnknownSpeakerOn(g.nodes[0])[0]!.statements);
-    expect(recordsWithUnknownSpeakerOn(g.nodes[0])).toEqual([expect.objectContaining({ subject_key: subjectKey(subject),
+    expect(claimRecordsOn(node)[0]!.statements.filter(s => s.speaker === 'unknown'))
+      .toEqual(claimRecordsOn(g.nodes[0])[0]!.statements);
+    expect(claimRecordsOn(g.nodes[0])).toEqual([expect.objectContaining({ subject_key: subjectKey(subject),
       statements: [expect.objectContaining({ speaker: 'unknown', quote: old })] })]);
   });
 });

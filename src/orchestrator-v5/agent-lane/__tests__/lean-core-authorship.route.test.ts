@@ -8,7 +8,7 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { userStated } from '../user-statements.js';
 import { currentCorrectionOf } from '../../statement-door/read.js';
-import { prepareStatementCorrection, recordsWithUnknownSpeakerOn, userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
+import { prepareStatementCorrection, claimRecordsOn, userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
 import { ProposalStore } from '../proposal.js';
 
@@ -208,7 +208,7 @@ describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words 
     const { model, brief } = withLoss(line, line);
     const g = await saved(model, brief);
     expect(userStatementsOn(lossNode(g)), 'never the user\'s figure').toEqual([]);
-    expect(recordsWithUnknownSpeakerOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
+    expect(claimRecordsOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
   });
 
   it('CONTRAST: the user\'s own "we lose 5% of members a month" IS credited to them', async () => {
@@ -225,7 +225,7 @@ describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words 
     const { model, brief } = withLoss(line, line, 'other');
     const g = await saved(model, brief);
     expect(userStatementsOn(lossNode(g)), 'never the user\'s figure').toEqual([]);
-    expect(recordsWithUnknownSpeakerOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
+    expect(claimRecordsOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
   });
 
   it('CONTRAST: the user\'s own words, read as theirs ("user"), are credited; an AI-read "user" still needs the literal span', async () => {

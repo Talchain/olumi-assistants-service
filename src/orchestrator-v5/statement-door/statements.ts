@@ -11,7 +11,7 @@ import { namesBothEnds, speechReading, wholeStatementIn } from '../goal-target/i
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
-import { userStatementOf, verifyStatements, type UserStatement } from '../agent-lane/user-statements.js';
+import { saidByOf, userStatementOf, verifyStatements, type ClaimStatus, type UserStatement } from '../agent-lane/user-statements.js';
 import { plainQuoteWords, verbatimSourceLine } from '../agent-lane/quote-confirmation.js';
 import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { isStatementField, subjectKey, subjectNodeKey, resolveSubject, SUBJECT_KINDS, type DoorSubject, type StatementField } from './subject.js';
@@ -49,7 +49,7 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
       const labelled = same.filter(n => isFactorNamedByUser(String(n.label), outside));
       const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
       const holders = cited ? nodes.filter(n => [
-        ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
+        ...claimRecordsOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
       ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
       named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : []
@@ -98,6 +98,8 @@ export interface UserStatementRecord {
   readonly field: StatementField;
   readonly statements: readonly UserStatement[];
   readonly recorded_at: string;
+  /** Claims an explicit correction retired (superseded or withdrawn), whole, newest first: kept, never read as current. */
+  readonly history?: readonly UserStatement[];
   readonly attest?: StatementAttest;
 }
 
@@ -138,16 +140,24 @@ const attestOf = (v: unknown): StatementAttest | undefined | null => {
     ? v as StatementAttest : null;
 };
 
-/** A stored record whole, or `undefined` if any part is malformed; `unknownSpeaker` keeps the brief's speaker-unknown words too. */
-function recordOf(v: unknown, unknownSpeaker: boolean): UserStatementRecord | undefined {
+/**
+ * ⭐ CLAIM RECORD (spec v2 §4): a claim reads as "you said" only where the user asserts it (`said_by`), it is current, and its word
+ * checks passed or the user pressed the card that showed them failing. A party's, an unresolved or an Olumi claim never does.
+ */
+const youSaid = (s: UserStatement): boolean => saidByOf(s) === 'user' && s.status !== 'superseded' && s.status !== 'withdrawn'
+  && (s.checks === undefined || (s.checks.words_found && s.checks.figure_found && s.checks.unit_found) || s.approval !== undefined);
+
+/** A stored record whole, or `undefined` if any part is malformed; `every` keeps every claim (each with its `said_by`), else "you said" only. */
+function recordOf(v: unknown, every: boolean): UserStatementRecord | undefined {
   if (!isRec(v) || !text(v.subject_key, 400) || !isStatementField(v.field) || !text(v.recorded_at, 40) || !Array.isArray(v.statements)
-    || v.statements.length === 0) return undefined;
+    || v.statements.length === 0 || (v.history !== undefined && !Array.isArray(v.history))) return undefined;
   const parsed = v.statements.map(userStatementOf);
+  const history = Array.isArray(v.history) ? v.history.map(userStatementOf) : [];
   const attest = attestOf(v.attest);
-  if (parsed.some((s) => s === undefined) || attest === null) return undefined;
-  const statements = (parsed as UserStatement[]).filter((s) => unknownSpeaker || s.speaker === 'user');
+  if (parsed.some((s) => s === undefined) || history.some((s) => s === undefined) || attest === null) return undefined;
+  const statements = (parsed as UserStatement[]).filter((s) => every || youSaid(s));
   return statements.length === 0 ? undefined : { subject_key: v.subject_key, field: v.field, statements, recorded_at: v.recorded_at,
-    ...(attest !== undefined ? { attest } : {}) };
+    ...(attest !== undefined ? { attest } : {}), ...(every && history.length > 0 ? { history: history as UserStatement[] } : {}) };
 }
 
 /**
@@ -156,6 +166,19 @@ function recordOf(v: unknown, unknownSpeaker: boolean): UserStatementRecord | un
  */
 export function userStatementRecordOf(v: unknown): UserStatementRecord | undefined {
   return recordOf(v, false);
+}
+
+/** A well-formed record with EVERY claim, whoever asserts it (spec v2 §4): the writers' parse and the read-back's. */
+export function claimRecordOf(v: unknown): UserStatementRecord | undefined {
+  return recordOf(v, true);
+}
+
+/**
+ * A claim's status as stored; a legacy claim (none stored) is `proposed` where construction wrote it and otherwise UNKNOWN
+ * (`undefined`): never presented as confirmed, and no receipt is inferred (AIE LEGACY, 14:00Z). Derived on read; nothing is rewritten.
+ */
+export function claimStatusOf(s: UserStatement, record: Pick<UserStatementRecord, 'attest'>): ClaimStatus | undefined {
+  return s.status ?? (record.attest?.recorded_by === 'construction' ? 'proposed' : undefined);
 }
 
 /**
@@ -181,11 +204,16 @@ export function userStatementsOn(node: unknown): UserStatementRecord[] {
 }
 
 /**
- * ⛔ The ONE read of the brief's speaker-unknown words (`UserStatement.speaker`), beside the user's own, for the code that shows
- * them: the AI's context and the not-represented list. Never the user's; every other reader takes `userStatementsOn`.
+ * ⭐ THE ONE CLAIM READER (spec v2 §4; was `recordsWithUnknownSpeakerOn`): every current claim on a node, each with its `said_by`, for
+ * the read-back, the AI's context, sizing and the Run's "claims used". "You said" readers take `userStatementsOn` instead.
  */
-export function recordsWithUnknownSpeakerOn(node: unknown): UserStatementRecord[] {
-  return heldOn(node).map((r) => recordOf(r, true)).filter((r): r is UserStatementRecord => r !== undefined);
+export function claimRecordsOn(node: unknown): UserStatementRecord[] {
+  return heldOn(node).map(claimRecordOf).filter((r): r is UserStatementRecord => r !== undefined);
+}
+
+/** The subject's record with every claim, or `undefined`. */
+export function claimRecordFor(graph: unknown, subject: DoorSubject): UserStatementRecord | undefined {
+  return claimRecordsOn(nodeOf(graph, nodeIdOf(subject))).find((r) => r.subject_key === subjectKey(subject));
 }
 
 /** The subject's record on its node, or `undefined`. */
@@ -235,8 +263,9 @@ export function withUserStatement(graph: Rec & { nodes: unknown[] }, record: Use
 
 /** Whether the graph holds exactly this record for the subject: the read-back's half. */
 export function holdsUserStatement(graph: unknown, record: UserStatementRecord, subject: DoorSubject): boolean {
-  const held = userStatementFor(graph, subject);
-  return held !== undefined && isDeepStrictEqual(held, userStatementRecordOf(JSON.parse(JSON.stringify(record))));
+  // The read-back reads EVERY claim (spec v2 §4): a party's or an unresolved claim is held exactly as written, never read as absent.
+  const held = claimRecordFor(graph, subject);
+  return held !== undefined && isDeepStrictEqual(held, claimRecordOf(JSON.parse(JSON.stringify(record))));
 }
 
 /** Scoped source correction stays with the canonical record owner; no second store or text-to-retraction matcher. */
@@ -268,7 +297,7 @@ const legacyOf = (node: Rec, field: 'already_true_quote' | 'dependency'): unknow
 
 /** Untouched context from this subject's existing carrier; never evidence for the correction's source or retained spans. */
 const correctionUnknowns = (node: unknown, subject: DoorSubject): readonly UserStatement[] =>
-  recordsWithUnknownSpeakerOn(node).find(r => r.subject_key === subjectKey(subject))?.statements.filter(s => s.speaker === 'unknown') ?? [];
+  claimRecordsOn(node).find(r => r.subject_key === subjectKey(subject))?.statements.filter(s => saidByOf(s) === 'unknown') ?? [];
 
 /** A source correction cannot silently replace adoption or other held attestation. Carry-forward needs its own contract. */
 function protectedAttestation(record: UserStatementRecord | null | undefined): boolean {
@@ -464,7 +493,7 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
       ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
         .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
       `Earlier source and reading:\n${recordWords(legacy ? e.expected_record
-        : recordsWithUnknownSpeakerOn(e.expected_node).find(r => r.subject_key === subjectKey(e.subject)) ?? e.expected_record)}`,
+        : claimRecordsOn(e.expected_node).find(r => r.subject_key === subjectKey(e.subject)) ?? e.expected_record)}`,
       `${legacy ? '' : '→\n'}Replacement source and reading:\n${recordWords(legacy ? e.record : { ...e.record,
         statements: [...e.record.statements, ...correctionUnknowns(e.expected_node, e.subject)] })}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),

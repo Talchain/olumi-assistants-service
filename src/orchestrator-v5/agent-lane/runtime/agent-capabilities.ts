@@ -17,7 +17,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { currentStatementRetention, userStatementsOn, recordsWithUnknownSpeakerOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { currentStatementRetention, userStatementsOn, claimRecordsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
@@ -1866,7 +1866,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
   const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   const recordedReasoning = (Array.isArray(g.raw.nodes) ? g.raw.nodes : []).filter(isPlainRecord).flatMap(n => {
-    const records = recordsWithUnknownSpeakerOn(n);
+    const records = claimRecordsOn(n);
     const current = userStatementsOn(n).flatMap(r => {
       const retained = currentStatementRetention(r);
       return retained === undefined ? [] : [{ field: r.field, ...retained }];
@@ -4549,7 +4549,8 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
     const card = doorCardOf(parent.operations[0]!);
-    const memberOp = asMemberOp(parent.operations[0]!);
+    // The press confirms the card's new claims with its own receipt (claim record spec v2): the write and its read-back hold them.
+    const memberOp = asMemberOp(parent.operations[0]!, { proposal_id: parent.proposal_id });
     const row = card === undefined ? undefined : doorRowOf(card);
     if (card === undefined || memberOp === undefined || row === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' };

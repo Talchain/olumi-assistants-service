@@ -22,7 +22,7 @@ import {
 } from '../../goal-target/goal-reading-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { currentStatementRetention, holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf } from '../statements.js';
+import { currentStatementRetention, holdsUserStatement, userStatementOnNode, userStatementRecord, claimRecordOf } from '../statements.js';
 import { subjectKey, type DoorSubject } from '../subject.js';
 import type { FieldWriter } from '../write.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -151,7 +151,7 @@ export const MEASURE_WRITER: FieldWriter = {
     const payload = write.payload;
     if (!isRec(payload) || typeof payload.goal_id !== 'string' || !isRec(payload.expected_basis) || !isRec(payload.user_statement)
       || !isRec(payload.expected_goal)) return false;
-    const record = userStatementRecordOf(payload.user_statement.record);
+    const record = claimRecordOf(payload.user_statement.record);
     const s = isRec(payload.user_statement.subject) ? payload.user_statement.subject : undefined;
     if (record === undefined || s === undefined || typeof s.id !== 'string' || s.field !== 'measure') return false;
     const subject: DoorSubject = { kind: 'goal', id: s.id, field: 'measure' };

@@ -63,9 +63,11 @@ export const doorRowOf = (card: Pick<DoorCard, 'field' | 'carrier'>): RoleRow | 
  * The card's write as its member's OWN operation (the operation that member's press, preview and held-card rule already read),
  * or `undefined` for a member the door does not carry yet.
  */
-export function asMemberOp(op: { readonly op: string; readonly value?: unknown }): ProposalOperation | undefined {
-  const card = doorCardOf(op);
-  if (card === undefined || !isRec(card.payload)) return undefined;
+export function asMemberOp(op: { readonly op: string; readonly value?: unknown }, pressed?: { readonly proposal_id: string }): ProposalOperation | undefined {
+  const found = doorCardOf(op);
+  if (found === undefined || !isRec(found.payload)) return undefined;
+  const card = pressed === undefined ? found : { ...found, payload: confirmedBy(found.payload, pressed.proposal_id) };
+  if (!isRec(card.payload)) return undefined;
   if (card.member === 'risk_occurrence' && typeof card.payload.risk_id === 'string') {
     return { op: SET_RISK_OCCURRENCE_OP, path: card.payload.risk_id, value: card.payload };
   }
@@ -81,6 +83,20 @@ export function asMemberOp(op: { readonly op: string; readonly value?: unknown }
     return { op: SET_OPTION_CAPACITY_CHANGE_OP, path: card.payload.option_id, value: card.payload };
   }
   return undefined;
+}
+
+/**
+ * ⭐ CLAIM RECORD (spec v2 §1, rule 5): the press confirms the card's NEW claims, each with the host's receipt (the displayed card's
+ * proposal id). Claims the payload carries with a status already (another speaker's, kept beside it) are untouched; `said_by` never
+ * moves. Applied to the member's payload before its write and its read-back, so both hold the same claims.
+ */
+function confirmedBy(payload: Rec, proposalId: string): Rec {
+  const said = isRec(payload.user_statement) ? payload.user_statement : undefined;
+  const record = said !== undefined && isRec(said.record) ? said.record : undefined;
+  if (record === undefined || !Array.isArray(record.statements)) return payload;
+  const statements = record.statements.map((st: unknown) => (isRec(st) && st.status === undefined
+    ? { ...st, status: 'confirmed', approval: { proposal_id: proposalId } } : st));
+  return { ...payload, user_statement: { ...said, record: { ...record, statements } } };
 }
 
 /** The door's operation for a card: ONE `record_statement`, keyed by its subject. */

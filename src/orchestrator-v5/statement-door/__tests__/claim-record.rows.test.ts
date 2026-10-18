@@ -18,8 +18,9 @@ import type { SessionTurnWrite } from '../../session/store.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import * as statements from '../statements.js';
+import { claimStatusOf } from '../statements.js';
 import { userStatementFor } from '../statements.js';
-import { userStatementOf } from '../../agent-lane/user-statements.js';
+import { saidByOf, userStatementOf } from '../../agent-lane/user-statements.js';
 
 type Rec = Record<string, any>;
 const SID = 'c1a1c1a1-0000-4000-8000-00000000c1a1';
@@ -102,17 +103,19 @@ async function pressed(said: string, speaker: string, extra: Rec = {}) {
 describe('claim record rows (spec §1–§4, §6): who asserts the figure is saved, and only the user\'s reads as "you said"', () => {
   it('OWN: the user\'s words → said_by user, confirmed, the approval bound to the displayed card; "you said" reads it', async () => {
     const { w, card, record } = await pressed(OWN, 'user');
-    expect(record.statements[0]).toMatchObject({ said_by: 'user', speaker: 'user', low: 4, high: 6, unit: 'kg', quote: OWN });
-    expect(record).toMatchObject({ status: 'confirmed', approval: { proposal_id: card.proposal_id } });
+    // The user's own claim keeps today's bytes (`speaker: 'user'`, `said_by` derived), plus its status and the host's receipt.
+    expect(record.statements[0]).toMatchObject({ speaker: 'user', low: 4, high: 6, unit: 'kg', quote: OWN,
+      status: 'confirmed', approval: { proposal_id: card.proposal_id } });
+    expect(saidByOf(record.statements[0])).toBe('user');
     expect(userStatementFor(w.graph(), SUBJECT)?.statements[0]).toMatchObject({ low: 4, high: 6 });
-    expect(claimRecordsOn(fromNode(w.graph()))).toEqual([expect.objectContaining({ subject_key: record.subject_key, status: 'confirmed' })]);
+    expect(claimRecordsOn(fromNode(w.graph()))).toEqual([expect.objectContaining({ subject_key: record.subject_key })]);
   });
 
   it('PARTY: a named party relayed by the user → said_by party, the name verbatim, relayed_by user; NEVER "you said"', async () => {
     const { w, record } = await pressed(PARTY, 'other', { party: 'Our kitchen manager' });
     expect(record.statements[0]).toMatchObject({ said_by: 'party', party: 'Our kitchen manager', relayed_by: 'user', low: 4, high: 6, unit: 'kg' });
     expect(record.statements[0]).not.toHaveProperty('speaker');
-    expect(record.status).toBe('confirmed');
+    expect(record.statements[0].status).toBe('confirmed');
     expect(userStatementFor(w.graph(), SUBJECT)).toBeUndefined();
     expect(claimRecordsOn(fromNode(w.graph()))[0]?.statements[0]).toMatchObject({ said_by: 'party', low: 4, high: 6 });
   });
@@ -128,7 +131,8 @@ describe('claim record rows (spec §1–§4, §6): who asserts the figure is sav
     const { w, record } = await pressed(PARTY, 'other', { party: 'Our kitchen manager' });
     const cold = JSON.parse(JSON.stringify(w.graph()));
     expect(claimRecordsOn(fromNode(cold))).toEqual(claimRecordsOn(fromNode(w.graph())));
-    expect(claimRecordsOn(fromNode(cold))[0]).toMatchObject({ status: record.status, approval: record.approval });
+    expect(claimRecordsOn(fromNode(cold))[0]?.statements[0]).toMatchObject({ said_by: 'party', status: 'confirmed',
+      approval: record.statements[0].approval, party: 'Our kitchen manager', relayed_by: 'user' });
   });
 
   it('PARSER (spec §2): a party statement with figures parses; a said_by that disagrees with speaker is nobody\'s', () => {
@@ -139,19 +143,21 @@ describe('claim record rows (spec §1–§4, §6): who asserts the figure is sav
     expect(userStatementOf({ ...base, said_by: 'party', party: 'Our kitchen manager', relayed_by: 'user', speaker: 'user' })).toBeUndefined();
   });
 
-  it('LEGACY (spec §0, §2): an old record reads with derived said_by/status and NO rewrite; both hashes unchanged by reading', () => {
+  it('LEGACY (spec v2 rule 3): an old record reads with derived said_by, construction → proposed, else status UNKNOWN (never confirmed); NO rewrite; both hashes unchanged', () => {
     const legacy = (attest?: Rec): Rec => ({ subject_key: 'link|pre_order|daily_waste||effect', field: 'effect', recorded_at: '2026-10-10T10:00:00.000Z',
       statements: [{ speaker: 'user', quote: OWN, source: OWN, form: 'range', reading: 'olumi', subject: { quantity: 'effect', node_id: 'pre_order' }, low: 4, high: 6, unit: 'kg' }],
       ...(attest !== undefined ? { attest } : {}) });
-    for (const [attest, status] of [[undefined, 'confirmed'], [{ recorded_by: 'construction' }, 'proposed']] as const) {
+    for (const [attest, status] of [[undefined, undefined], [{ recorded_by: 'construction' }, 'proposed']] as const) {
       const g = START();
       g.nodes.find((n: Rec) => n.id === 'pre_order').user_statements = [legacy(attest as Rec | undefined)];
       const bytes = JSON.stringify(g), analysis = computeAnalysisAffectingGraphHash(g as never), identity = computeGraphIdentityHash(g as never);
-      expect(claimRecordsOn(fromNode(g))[0]).toMatchObject({ status, statements: [expect.objectContaining({ said_by: 'user' })] });
+      const held = claimRecordsOn(fromNode(g))[0]!;
+      expect(saidByOf(held.statements[0]!)).toBe('user');
+      expect(claimStatusOf(held.statements[0]!, held)).toBe(status);
       expect(userStatementFor(g, SUBJECT)?.statements[0]).toMatchObject({ low: 4, high: 6 });
       expect(JSON.stringify(g)).toBe(bytes);
-      expect(computeAnalysisAffectingGraphHash(g as never)).toBe(analysis);
-      expect(computeGraphIdentityHash(g as never)).toBe(identity);
+      expect(computeAnalysisAffectingGraphHash(g as never)).toEqual(analysis);
+      expect(computeGraphIdentityHash(g as never)).toEqual(identity);
     }
   });
 });

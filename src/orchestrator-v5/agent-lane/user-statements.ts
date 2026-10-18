@@ -35,12 +35,39 @@ export interface StatementSubject {
   readonly option_id?: string;
 }
 
+/**
+ * ⭐ CLAIM RECORD (plan v6.0 S1a; outbox/CLAIM-RECORD-SPEC.md v2; AIE 13:10Z + 14:00Z): each statement is one CLAIM, and `said_by` is
+ * who asserts its figure: the user's own assertion, a party the words name (`party`, verbatim; `relayed_by`: whether the message
+ * context establishes that the user supplied the report), an unresolved source, or an estimate Olumi itself introduced. `reading`
+ * stays Olumi's interpretation and approval stays the host's receipt: neither moves authorship. Absent on a stored claim: derived
+ * from `speaker` (`saidByOf`), so the user's own claims keep today's bytes.
+ */
+export type SaidBy = 'user' | 'party' | 'unknown' | 'olumi';
+export const SAID_BY: readonly SaidBy[] = ['user', 'party', 'unknown', 'olumi'];
+export type ClaimStatus = 'proposed' | 'confirmed' | 'superseded' | 'withdrawn';
+export const CLAIM_STATUSES: readonly ClaimStatus[] = ['proposed', 'confirmed', 'superseded', 'withdrawn'];
+/** The literal word checks, as labels the card shows: never a gate, never a reason to change `said_by` (AIE ORIGIN). */
+export interface ClaimChecks { readonly words_found: boolean; readonly figure_found: boolean; readonly unit_found: boolean }
+
 export interface UserStatement {
   /**
    * `'unknown'` (the estate's speaker-unknown label, DL-3 16:14Z on #3363): words the brief writes verbatim that the quote check cannot
-   * bound as one whole statement, kept exactly as written. Never the user's, and never operative: `describes`, with no figure, unit or sign.
+   * bound as one whole statement, kept exactly as written: `describes`, with no figure, unit or sign. Written only beside the two
+   * legacy-legal claims (`said_by` user, or unknown words with no figure); every other claim carries `said_by` and no `speaker`, so a
+   * build that predates the claim record reads it as nobody's, never the user's.
    */
-  readonly speaker: 'user' | 'unknown';
+  readonly speaker?: 'user' | 'unknown';
+  readonly said_by?: SaidBy;
+  readonly party?: string;
+  readonly relayed_by?: 'user' | 'unknown';
+  /** A range's EXPLICIT central figure, kept only where the words write it (C5 for G2's sizing): never a midpoint or a mean. */
+  readonly value?: number;
+  readonly claim_id?: string;
+  readonly status?: ClaimStatus;
+  readonly supersedes?: readonly string[];
+  /** The host's receipt: the displayed card's proposal id. Authorises the shown operation only (AIE AMEND 13:43Z). */
+  readonly approval?: { readonly proposal_id: string };
+  readonly checks?: ClaimChecks;
   /** The user's words, verbatim, as the Agent quoted them. */
   readonly quote: string;
   /** The complete line of the user's typed words that holds the quote. */
@@ -491,6 +518,27 @@ export function combineStatementEnds(statements: readonly UserStatement[]): Comb
  * A statement as stored (a card's operation, a carrier's `statements`), read back as the contract's type, or `undefined` if it is
  * not one. The ONE reader, so no caller double-casts stored bytes into a statement (the forbidden-boundary gate).
  */
+/** Who asserts a claim's figure: its own `said_by`, else its legacy `speaker` (the user's, or unresolved). */
+export const saidByOf = (s: Pick<UserStatement, 'said_by' | 'speaker'>): SaidBy => s.said_by ?? (s.speaker === 'user' ? 'user' : 'unknown');
+
+/** A claim's identity, status, supersession, approval and check labels, each only where stored; `undefined` if any is malformed. */
+function claimFieldsOf(r: Record<string, unknown>): Partial<Pick<UserStatement, 'claim_id' | 'status' | 'supersedes' | 'approval' | 'checks'>> | undefined {
+  const id = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= 200;
+  const status = CLAIM_STATUSES.find((x) => x === r.status);
+  const a = r.approval, c = r.checks;
+  const approval = a !== null && typeof a === 'object' && !Array.isArray(a) && id((a as Record<string, unknown>).proposal_id)
+    ? { proposal_id: (a as Record<string, unknown>).proposal_id as string } : undefined;
+  const checks = c !== null && typeof c === 'object' && !Array.isArray(c)
+    && (['words_found', 'figure_found', 'unit_found'] as const).every((k) => typeof (c as Record<string, unknown>)[k] === 'boolean')
+    ? { words_found: (c as ClaimChecks).words_found, figure_found: (c as ClaimChecks).figure_found, unit_found: (c as ClaimChecks).unit_found } : undefined;
+  if ((r.claim_id !== undefined && !id(r.claim_id)) || (r.status !== undefined && status === undefined)
+    || (r.supersedes !== undefined && !(Array.isArray(r.supersedes) && r.supersedes.every(id)))
+    || (a !== undefined && approval === undefined) || (c !== undefined && checks === undefined)) return undefined;
+  return { ...(id(r.claim_id) ? { claim_id: r.claim_id } : {}), ...(status !== undefined ? { status } : {}),
+    ...(Array.isArray(r.supersedes) ? { supersedes: [...r.supersedes as string[]] } : {}),
+    ...(approval !== undefined ? { approval } : {}), ...(checks !== undefined ? { checks } : {}) };
+}
+
 export function userStatementOf(v: unknown): UserStatement | undefined {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const r = v as Record<string, unknown>;
@@ -499,10 +547,24 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
   const optional = (k: string): string | undefined => (typeof r[k] === 'string' ? r[k] as string : undefined);
   const end = (k: string): number | undefined => (typeof r[k] === 'number' && Number.isFinite(r[k]) ? r[k] as number : undefined);
   const unknownWords = r.speaker === 'unknown' && form === 'describes' && [r.low, r.high, r.unit, r.negated].every((x) => x === undefined);
-  if ((r.speaker !== 'user' && !unknownWords) || r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
+  // The two legacy-legal speakers; any other `speaker` is malformed. A stored `said_by` must agree with the speaker beside it.
+  const legacy: 'user' | 'unknown' | undefined = r.speaker === 'user' ? 'user' : unknownWords ? 'unknown' : undefined;
+  const saidBy = SAID_BY.find((x) => x === r.said_by);
+  const by = saidBy ?? legacy;
+  if ((r.speaker !== undefined && legacy === undefined) || (r.said_by !== undefined && saidBy === undefined) || by === undefined
+    || (legacy !== undefined && saidBy !== undefined && legacy !== saidBy)) return undefined;
+  const party = trimmed(r.party, 200);
+  const relayedBy = r.relayed_by === 'user' || r.relayed_by === 'unknown' ? r.relayed_by : undefined;
+  if (by === 'party' ? party === undefined || relayedBy === undefined : r.party !== undefined || r.relayed_by !== undefined) return undefined;
+  if (r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
     || subject === undefined || typeof subject.quantity !== 'string') return undefined;
+  const claim = claimFieldsOf(r);
+  if (claim === undefined) return undefined;
   const low = end('low'), high = end('high'), qualifier = optional('qualifier'), conditions = optional('conditions');
-  return { speaker: unknownWords ? 'unknown' : 'user', quote: r.quote, source: r.source, form, reading: 'olumi',
+  return { ...(legacy !== undefined ? { speaker: legacy } : {}), ...(saidBy !== undefined ? { said_by: saidBy } : {}),
+    ...(party !== undefined ? { party } : {}), ...(relayedBy !== undefined ? { relayed_by: relayedBy } : {}),
+    ...(end('value') !== undefined ? { value: end('value') } : {}), ...claim,
+    quote: r.quote, source: r.source, form, reading: 'olumi',
     subject: { quantity: subject.quantity, ...(typeof subject.node_id === 'string' ? { node_id: subject.node_id } : {}),
       ...(typeof subject.option_id === 'string' ? { option_id: subject.option_id } : {}) },
     ...(low !== undefined ? { low } : {}), ...(high !== undefined ? { high } : {}),

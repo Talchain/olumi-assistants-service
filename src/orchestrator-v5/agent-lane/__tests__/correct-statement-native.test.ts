@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { log } from '../../../utils/telemetry.js';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
-import { applyStatementCorrection, recordsWithUnknownSpeakerOn, statementCorrectionWords, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
+import { applyStatementCorrection, claimRecordsOn, statementCorrectionWords, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
 import { createProposal } from '../proposal.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
 import { rangeLawAdopted, rangeLawSubject } from '../../intervention-range.js';
@@ -52,7 +52,7 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     const pid = String(card.proposal_id), proposal = w.proposals.get(pid)!, restored = w.restoreCard(proposal, card);
     expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
     const node = w.graph().nodes.find((n: Rec) => n.id === 'report');
-    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
+    expect(claimRecordsOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
     expect(userStatementFor(w.graph(), f.subject)!.statements.every(s => s.speaker === 'user')).toBe(true);
     const correction = approvedStatementRecordOf(proposal.operations[0]!)!.correction!;
     expect(applyStatementCorrection(w.graph(), correction)).toMatchObject({ unchanged: true });
@@ -662,7 +662,7 @@ describe.each(cases)('$name: complete correction source and held identity', row 
       expect(current.statements[0]).toMatchObject({ speaker: 'user', source: message, quote: message, reading: 'olumi' });
       if (unknown !== undefined) {
         expect(current.statements.every(s => s.speaker === 'user')).toBe(true);
-        expect(recordsWithUnknownSpeakerOn(w.graph().nodes[1])[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
+        expect(claimRecordsOn(w.graph().nodes[1])[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
         expect(current.attest).toMatchObject({ recorded_by: 'correction', retained_0_origin: 'unknown' });
       }
       const saved = structuredClone(w.graph());
@@ -770,7 +770,7 @@ it.each(['warehouse', 'laboratory'].flatMap(domain => [
   expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
   for (const [i, subject] of [first, second].entries()) {
     const node = w.graph().nodes.find((n: Rec) => n.id === subject.id);
-    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual(graph.nodes[i + 1].user_statements[0].statements);
+    expect(claimRecordsOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual(graph.nodes[i + 1].user_statements[0].statements);
     expect(userStatementFor(w.graph(), subject)!.statements[0]).toMatchObject({ speaker: 'user', quote: message, source: message, reading: 'olumi' });
   }
   expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === 'third'))).toEqual(graph.nodes[3]);
