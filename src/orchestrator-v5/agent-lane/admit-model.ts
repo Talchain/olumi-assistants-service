@@ -87,7 +87,7 @@ import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
-import { goalDefinitionSum } from './goal-definition-sum.js';
+import { goalDefinitionSum, settingsStateGoalQuantity } from './goal-definition-sum.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -6015,7 +6015,11 @@ function admitOnce(
   // Olumi-read sum and checked by the same `checkDeclaredSums`, in its own call so every drafter declaration is judged exactly as
   // before. Only an accepted sum stages its today part and link; a refused one writes and says nothing.
   const definitionSum = goalForReach === undefined || carriers.has(goalForReach.id) ? null
-    : goalDefinitionSum(levers.nodes, finalEdges, goalForReach.id, Array.isArray(model.identities) ? model.identities : [], frameOfNode);
+    : goalDefinitionSum(levers.nodes, finalEdges, goalForReach.id, Array.isArray(model.identities) ? model.identities : [], frameOfNode,
+      (partId) => {
+        const unit = nodeUnitOf(levers.nodes)(goalForReach.id);
+        return unit !== undefined && settingsStateGoalQuantity(levers.nodes, brief, goalForReach.id, unit, partId);
+      });
   if (definitionSum !== null) {
     const { part, link, declaration } = definitionSum;
     const compiled = checkDeclaredSums([declaration],

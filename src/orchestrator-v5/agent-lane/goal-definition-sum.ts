@@ -12,24 +12,28 @@
  * This compiles that shape into ONE Olumi-read declaration for `checkDeclaredSums`: the goal = its level today + every validated
  * definitional part. Nothing here admits anything: it proposes; `checkDeclaredSums` checks it whole (one +1 definition per part,
  * no undeclared definitional input, frames, levels today within ISL's reconciliation). Fail-closed, nothing is compiled when:
- *  · any definitional link into the goal is not `validatedDefinition`-held (the d5 causal negative and the zero-baseline
- *    pure-delta lookalike stay as drafted: a drafter's flag or a ±1 alone never makes a definition);
+ *  · any definitional link into the goal is not `validatedDefinition`-held, its label clause read from the model's label or,
+ *    where that label names no quantity ("Option A net effect"), from the user's own words: every option's setting of the part
+ *    is the person's and the brief writes it as a figure of the goal (`settingsStateGoalQuantity`). The d5 causal negative and
+ *    the zero-baseline pure-delta lookalike stay as drafted: a drafter's flag, basis or ±1 alone never makes a definition;
  *  · the goal's level today is not the person's own figure (`isPersonsOwnValue`): no Olumi-estimated or provisional baseline;
  *  · a part is not a lever only the options move, 0 today (the conditions under which the Run's result is the stated level today
  *    plus each option's change: PLoT holds such a lever exact where the status quo keeps it at 0);
  *  · the goal is not a level goal, already carries an identity, or the drafter declared one on it.
- * ⚠ d5 binds the goal's quantity by the model's labels and units, never reference or timing from the user's words: a label it
- * cannot bind ("Net effect" → "Widget output") is left exactly as today, and that boundary is the AIE's (2500d66f), not this slice's.
+ * ⚠ Quantity is bound by the model's label or the user's figure words; reference (the goal's level today) and timing (the goal's
+ * own) are Olumi's disclosed reading, never verified from the user's words. A goal the user's words never name ("Widget output"
+ * beside "widgets per hour") is left exactly as today; that boundary is the AIE's (2500d66f) to rule on.
  * The today part is the goal's OWN level today (its `observed_state`, copied: the same figure, frame and stamp, never a new
  * one). The parts' levels today enter only the reconciliation; the Run's result is the stated level today plus each option's
  * change of the parts. Pure.
  */
 import { endsOfGraph, validatedDefinition } from '../goal-target/held-user-links.js';
-import { isPersonsOwnValue } from '../../cee/provenance/provenance-of.js';
+import { isPersonsOwnSetting, isPersonsOwnValue } from '../../cee/provenance/provenance-of.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { canonicalLabel } from './model-primitives.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { figureTheUserWroteForSpan } from './stated-by-user.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -37,7 +41,7 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 
 interface NodeIn {
   readonly id: string; readonly kind: string; readonly label: string; readonly category?: unknown;
-  readonly observed_state?: Rec; readonly nonlinear_identity?: unknown; readonly goal_threshold_frame?: unknown;
+  readonly observed_state?: Rec; readonly nonlinear_identity?: unknown; readonly goal_threshold_frame?: unknown; readonly interventions?: unknown;
 }
 interface EdgeIn { readonly from: string; readonly to: string; readonly provenance?: unknown }
 
@@ -60,6 +64,8 @@ export function goalDefinitionSum<N extends NodeIn>(
   goalId: string,
   declared: readonly { readonly outcome?: unknown }[],
   frameOf: (id: string) => number | undefined,
+  /** The user's own words state each option's setting of this part as a figure of the goal's quantity (`settingsStateGoalQuantity`). */
+  statedAsGoalQuantity: (partId: string) => boolean = () => false,
 ): GoalDefinitionSum<NonNullable<N['observed_state']>> | null {
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined || goal.nonlinear_identity !== undefined || goal.goal_threshold_frame !== 'level') return null;
@@ -72,7 +78,11 @@ export function goalDefinitionSum<N extends NodeIn>(
   const into = edges.filter((e) => e.to === goal.id && isRec(e.provenance) && e.provenance.definitional === true);
   if (into.length === 0) return null;
   const ends = endsOfGraph({ nodes, edges });
-  if (!into.every((e) => validatedDefinition(e, ends(e)) !== undefined)) return null;
+  // d5 whole, its label clause read from the model's label OR, where the AI's label names no quantity ("Option A net effect"),
+  // from the user's own verified words for every option's setting of the part (the quantity bound from the explicit source).
+  // Its current-carrier and same-unit clauses always apply. A drafter's flag or a ±1 alone never makes a definition.
+  if (!into.every((e) => validatedDefinition(e, ends(e)) !== undefined
+    || (statedAsGoalQuantity(e.from) && validatedDefinition(e, { ...ends(e), fromLabel: goal.label }) !== undefined))) return null;
   // The conditions under which "today + the option's change" IS the engine's arithmetic (Codex PAIR3 3; never semantic proof):
   // each part is a lever nothing but the options moves, 0 today, so the status quo holds it exact (PLoT `pinnedLeverIds`).
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
@@ -131,4 +141,25 @@ export function withTodayPartAtGoalLevel<G>(graph: G, goalId: string): G {
 export function withEveryTodayPartAtGoalLevel<G>(graph: G): G {
   const goals = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]).filter((n) => n.kind === 'goal') : [];
   return goals.reduce((g, goal) => withTodayPartAtGoalLevel(g, goal.id), graph);
+}
+
+/**
+ * The quantity of a definitional part, bound from the user's own words rather than the AI's label (d5's label clause reads
+ * nothing in "Option A net effect"): EVERY option's non-zero setting of the part is the person's own (`isPersonsOwnSetting`,
+ * as admission's one authorship owner stamped it), and the user's brief writes that very figure as a quantity of the goal
+ * (`figureTheUserWroteForSpan`, the estate's entity-scoped figure reader, scoped to the goal: its words named at the figure, no
+ * other modelled quantity's). "Option A adds exactly 20 widgets per hour" binds "Widgets per hour"; "Option A adds exactly
+ * £50,000 of pipeline" never binds "Monthly revenue". Which option the figure belongs to stays the AI's reading, as for every
+ * setting; reference (the goal's level today) and timing (the goal's own) are Olumi's disclosed reading (`declaredSumSentence`).
+ */
+export function settingsStateGoalQuantity<N extends NodeIn>(nodes: readonly N[], brief: string | undefined, goalId: string, goalUnit: string, partId: string): boolean {
+  const goal = nodes.find((n) => n.id === goalId);
+  if (typeof brief !== 'string' || goal === undefined) return false;
+  const cells = nodes.filter((n) => n.kind === 'option').flatMap((o) => {
+    const c = isRec(o.interventions) ? o.interventions[partId] : undefined;
+    return isRec(c) && c.raw_value !== 0 ? [c] : [];
+  });
+  const others = nodes.filter((n) => n.id !== goalId && n.id !== partId && n.kind !== 'option' && n.kind !== 'decision').map((n) => n.label);
+  return cells.length > 0 && cells.every((c) => isPersonsOwnSetting(c) && finite(c.raw_value)
+    && figureTheUserWroteForSpan(c.raw_value, goalUnit, brief, { target: [goal.label], others, requireNamed: true }) !== null);
 }
