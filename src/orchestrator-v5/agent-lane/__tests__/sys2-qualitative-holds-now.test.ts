@@ -44,11 +44,15 @@ describe('AIE H0/H1: a qualitative current condition is a holds_now statement wi
       expect(map.verified.get(subjectKey({ kind: 'risk', label: c.label }, 'holds_now'))?.map((s) => [s.quote, s.form, s.low, s.high]))
         .toEqual([[c.sentence, 'holds_now', undefined, undefined]]);
     });
-    it(`${c.label}: CONTROL: a shortened quote is REFUSED and kept whole with its reason, never verified`, () => {
+    it(`${c.label}: ⭐ LEAN CORE (DL-3 18 Oct, PL-0048 3): a literal span of the sentence is the user's, recorded with the COMPLETE line as its source; words they never wrote stay refused and kept`, () => {
       const short = c.sentence.split(',').at(-1)!.trim();
       const map = sourceMapOf([holdsNow(c.label, short)], c.brief);
-      expect(map.verified.size).toBe(0);
-      expect(map.refused.map((r) => [r.refusal, r.given.quote])).toEqual([['statement_not_found', short]]);
+      expect(map.verified.get(subjectKey({ kind: 'risk', label: c.label }, 'holds_now'))?.map((s) => [s.quote, s.form, s.source.includes(c.sentence)]))
+        .toEqual([[short, 'holds_now', true]]);
+      const unwritten = `${short.replace(/\.$/u, '')} at all.`;
+      const refused = sourceMapOf([holdsNow(c.label, unwritten)], c.brief);
+      expect(refused.verified.size).toBe(0);
+      expect(refused.refused.map((r) => [r.refusal, r.given.quote])).toEqual([['statement_not_found', unwritten]]);
     });
   }
 });

@@ -366,7 +366,6 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
    */
   targetStatements?: readonly { readonly quote: string; readonly form: string }[],
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
-  const targetSentences = targetStatements?.map((s) => s.quote);
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
   const goals = nodes.filter((n) => n.kind === 'goal');
   // The deadline's attestation, whatever it finds: held below only when `attested`; otherwise returned, never stored.
@@ -390,13 +389,16 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // "support volume grew 15%" is not the cloud bill's "cut by 15%". Read as a chat goal target is (`scopeIn`): a figure
   // the nearest label word gives another quantity is not the goal's; one in a clause naming none ("cut it by 15%") is.
   const isChange = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs';
-  // ⭐ S2 C4 (TL 6208664188 rule 1): the user's target only inside a sentence the AI bound as THIS goal's target. A budget,
-  // headcount or other figure written elsewhere in the brief stays the user's statement about its own subject.
-  const wrote = (value: number): boolean => (targetSentences ?? [brief]).some((text) => isChange
+  // ⭐⭐ LEAN CORE (DL-3 18 Oct; A-plan Batch 1, W28): for a draft with statements the target is the user's iff THE ONE RULE already
+  // verified a {goal, target} statement of theirs that writes this figure (`goalTargetStatements`, the door's own verdict), and the
+  // figure reads, in THAT span only, in the goal's unit and scope (rule points 4–5: "£250,000" is never 250,000 users). The drafter's
+  // `explicit` flag no longer overrides that verdict ("the AI's own labels decide"). Only a draft recorded before SYSTEM 2 (no
+  // statements) keeps its recorded path, byte for byte.
+  const wrote = (value: number): boolean => (targetStatements?.map((s) => s.quote) ?? [brief]).some((text) => isChange
     ? figureTheUserWroteFor(value, written.unit, text, quantityScope(nodes, (node as { readonly label?: unknown }).label))
     : figureTheUserWrote(value, written.unit, text));
-  const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
-    && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
+  const target = typeof raw === 'number' && Number.isFinite(raw) && typeof written.figure === 'number'
+    && (targetStatements !== undefined || goal.provenance === 'explicit') && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
   const typed = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
   // ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1)): a held CEILING on a LEVEL target is the run's sense in any

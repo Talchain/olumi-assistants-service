@@ -23,6 +23,16 @@ describe('goalUnitReading', () => {
     expect(goalUnitReading({ unit: 'GBP/month', value: 85000, target_stated: true }, MRR)?.source).toBe('olumi_reading');
   });
 
+  it('⭐ LEAN CORE (W32): with the verified target statements, the unit is the user\'s only where one of THEM writes the target in it, quoted whole', () => {
+    const aim = 'Monthly churn must stay below 5%, and we want MRR above £85k within a year.';
+    expect(goalUnitReading({ unit: 'GBP/month', value: 85000, target_stated: true }, MRR, true, [{ quote: aim }]))
+      .toEqual({ unit: 'GBP', source: 'user_stated', source_quote: aim });
+    // The brief writes £85k, but no verified target statement does (the AI bound none): Olumi's reading, never a host search.
+    expect(goalUnitReading({ unit: 'GBP/month', value: 85000, target_stated: true }, MRR, true, [])?.source).toBe('olumi_reading');
+    expect(goalUnitReading({ unit: 'GBP/month', value: 85000, target_stated: true }, MRR, true,
+      [{ quote: 'We have 1,500 paying subscribers and £75k MRR.' }])?.source).toBe('olumi_reading');
+  });
+
   it('nothing when the unit is not money, when the brief writes no amount in that currency, or when there is no unit', () => {
     expect(goalUnitReading({ unit: 'hours/week', value: 30, target_stated: true }, 'We spend 30 hours a week.')).toBeUndefined();
     expect(goalUnitReading({ unit: 'EUR', value: null, target_stated: false }, MRR)).toBeUndefined();

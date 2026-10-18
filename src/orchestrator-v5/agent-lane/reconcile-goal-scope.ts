@@ -1,5 +1,7 @@
 import { GoalScopeSchema, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
-import { figureTheUserWrote, figureTheUserWroteFor } from './stated-by-user.js';
+import { figureTheUserWroteFor } from './stated-by-user.js';
+import { userStated, type StatementTexts } from './user-statements.js';
+import { currentCorrectionOf } from '../statement-door/read.js';
 import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeShareAnswerCanBind, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
 import { proposeGoalCurrentLevel, type GoalLevelRead } from './goal-current-level.js';
 import type { ProposalStore } from './proposal.js';
@@ -26,13 +28,18 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   const previous = pendings.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.goal_id === goal.id);
   const prior = previous?.action.kind === 'reconcile_goal_scope' ? previous.action : undefined;
   const words = ctx.user_turn_text ?? ctx.user_text ?? '';
+  // ⭐ LEAN CORE: the texts THE ONE RULE reads (`userStated`): the user's typed words, never a host search for a figure.
+  const texts: StatementTexts = { now: ctx.user_turn_text, conversation: ctx.user_text,
+    ...(ctx.verified_user_messages !== undefined && ctx.verified_user_messages.length > 0 ? { messages: ctx.verified_user_messages } : {}) };
+  const said = (quote: string | undefined, value?: number, unit?: string): boolean => userStated({ quote, ...(value !== undefined ? { value, unit } : {}) },
+    texts, { quantity: 'scope' }).origin === 'human';
   let scope: GoalScope | undefined = args.scope === undefined ? prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope) : scopeOf(args.scope);
   if (!scope) return fail('scope_unresolved', prior?.question ?? 'State whether this goal covers the whole metric or a component. Nothing was recorded.');
   if (args.component_share !== undefined || args.component_basis !== undefined || args.count_basis !== undefined) {
-    if (!scope.component || !args.source_quote || !words.includes(args.source_quote)) return fail('source_not_stated', 'Use the user’s exact words for this component. Nothing was recorded.');
+    if (!scope.component || !args.source_quote || !said(args.source_quote)) return fail('source_not_stated', 'Use the user’s exact words for this component. Nothing was recorded.');
     const explicitlyNamed = figureTheUserWroteFor(args.component_share ?? 0, 'proportion', args.source_quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
     if (args.component_share !== undefined && (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)
-      || !figureTheUserWrote(args.component_share, 'proportion', args.source_quote))) {
+      || !said(args.source_quote, args.component_share, 'proportion'))) {
       if (!prior) return fail('share_not_bound', 'Name the component this share describes.');
       const action = { ...prior, expected: 'component_share' as const, question: `What share of the current ${goal.label} comes from ${scope.component.label}?` };
       return { ok: true, mutated: false, refusal: 'share_not_bound', pending_action: reconciliationPending(ctx.scenario_id, action), reconciliation: action, detail: action.question };
@@ -44,7 +51,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
       ...(args.component_share !== undefined ? { source: { quote: args.source_quote } } : {}),
       ...(args.component_basis !== undefined || args.count_basis !== undefined ? { basis_source: { quote: args.source_quote } } : {}) } };
   }
-  if (!GoalScopeSchema.safeParse(scope).success || !scopeSourcesAreUserWords(scope, words, prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))) {
+  if (!GoalScopeSchema.safeParse(scope).success || !scopeSourcesAreUserWords(scope, texts, prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))) {
     return fail('scope_not_grounded', 'The scope or share is not bound to the user’s own words. Nothing was recorded.');
   }
   if (scope.component?.share !== undefined && scope.component.share !== (prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))?.component?.share && args.component_share === undefined) {
@@ -58,7 +65,9 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   let current = prior?.current_level;
   if (args.current_level) {
     const c = args.current_level;
-    if (!words.includes(c.quote) || !figureTheUserWrote(c.value, c.unit, c.quote)) return fail('level_not_stated', 'The current level must be the user’s stated figure in their units. Nothing was recorded.');
+    // A level the user's own correction of this goal's level retired is never theirs again (PL-0048 2, the correction door's record).
+    const corrected = currentCorrectionOf(graph.raw, { kind: 'goal', id: String(goal.id), field: 'level' });
+    if (userStated({ quote: c.quote, value: c.value, unit: c.unit }, texts, { quantity: 'goal_level' }, { ...(corrected !== undefined ? { current: corrected } : {}) }).origin !== 'human') return fail('level_not_stated', 'The current level must be the user’s stated figure in their units. Nothing was recorded.');
     current = { value: c.value, unit: c.unit, source: { quote: c.quote } };
   }
   if (scope.extent === 'total' && !scope.component && (goal.nonlinear_identity as {operation?: string} | undefined)?.operation === 'product') return fail('scope_operand_missing', 'Identify the modelled component’s rate and count before reconciling this total goal. Nothing was prepared.');

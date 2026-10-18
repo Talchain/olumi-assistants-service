@@ -74,7 +74,8 @@ describe('S2 describes: the user’s words about a factor are kept as theirs; it
   it('never on other words: a partial quote, or retained unverified words, prepares nothing', async () => {
     const p = product();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
-    expect(await caps.proposeAssumptions(ctx() as never, estimate('not that experienced with marketing') as never)).toMatchObject({ ok: false, refusal: 'description_not_stated' });
+    // Not his literal words ("in marketing"). A literal span of his sentence is his under the confirmed lean-core widening.
+    expect(await caps.proposeAssumptions(ctx() as never, estimate('not that experienced in marketing') as never)).toMatchObject({ ok: false, refusal: 'description_not_stated' });
     expect(await caps.proposeAssumptions(ctx({ user_text: 'Hi', user_turn_text: 'Hi', unverified_user_text: BODY.brief_text }) as never, estimate(SENTENCE) as never))
       .toMatchObject({ ok: false, refusal: 'origin_unknown' });
     expect(p.node().observed_state ?? null).toBeNull();

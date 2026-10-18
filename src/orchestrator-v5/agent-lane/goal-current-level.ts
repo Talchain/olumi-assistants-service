@@ -931,7 +931,7 @@ export async function proposeGoalCurrentLevel(
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
   const scope = args.goal_scope === undefined ? undefined : scopeOf(args.goal_scope);
-  if (args.goal_scope !== undefined && (!scope || !scopeSourcesAreUserWords(scope, ctx.user_text ?? '', scopeOf((goal as Record<string, unknown>).goal_scope)))) {
+  if (args.goal_scope !== undefined && (!scope || !scopeSourcesAreUserWords(scope, { now: ctx.user_turn_text, conversation: ctx.user_text }, scopeOf((goal as Record<string, unknown>).goal_scope)))) {
     return refuse('scope_not_grounded', 'The scope is not bound to the user’s stated words. Nothing was prepared.');
   }
   if (scope && !scopeCanRecord(scope, goalScopeCheck(g.raw, goal.id, scope, { value: raw, unit: goalUnit ?? '', source: scope.source }))) return refuse('goal_scope_unresolved', 'Resolve the goal scope and its factor references before approving this reading. Nothing was prepared.');

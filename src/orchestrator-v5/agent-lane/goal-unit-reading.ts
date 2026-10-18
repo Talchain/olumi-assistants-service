@@ -45,6 +45,13 @@ export function goalUnitReading(
   brief: string,
   /** `held.target` from `holdStatedGoalAttributes`: the node holds its target as the user's. Absent ⇒ not (fail closed). */
   heldTarget = false,
+  /**
+   * ⭐ LEAN CORE (DL-3 18 Oct; A-plan Batch 1, W32): the goal's verified {goal, target} statements (`goalTargetStatements`, THE ONE
+   * RULE's verdict). With them, the unit is the user's only where one of those statements itself writes the target in that currency,
+   * and its quote is that statement's; the host no longer searches the brief for the figure. Absent only for a draft recorded before
+   * SYSTEM 2, which keeps its recorded path.
+   */
+  targetStatements?: readonly { readonly quote: string }[],
 ): GoalUnitReading | undefined {
   const unit = typeof goal?.unit === 'string' ? goal.unit.trim() : '';
   if (unit === '') return undefined;
@@ -53,10 +60,16 @@ export function goalUnitReading(
   const code = read.currencyCode;
   const written = findStatedAmounts(brief).filter((a) => a.kind === 'currency' && a.currencyCode === code && a.matchedText.trim() !== '');
   if (written.length === 0) return undefined;
-  const target = heldTarget && goal?.target_stated === true && typeof goal.value === 'number' && Number.isFinite(goal.value)
-    ? written.find((a) => same(a.magnitude, (goal.value as number) * (read.multiplier ?? 1)))
-    : undefined;
   const quote = (a: (typeof written)[number]): string => sentenceAround(brief, a.index, a.matchedText.length);
+  const value = heldTarget && goal?.target_stated === true && typeof goal.value === 'number' && Number.isFinite(goal.value)
+    ? (goal.value as number) * (read.multiplier ?? 1) : undefined;
+  const writesTarget = (text: string) => findStatedAmounts(text).some((a) => a.kind === 'currency' && a.currencyCode === code && value !== undefined && same(a.magnitude, value));
+  if (targetStatements !== undefined) {
+    const stated = targetStatements.find((st) => writesTarget(st.quote));
+    return stated !== undefined ? { unit: code, source: 'user_stated', source_quote: stated.quote }
+      : { unit: code, source: 'olumi_reading', source_quote: quote(written[0]!) };
+  }
+  const target = value === undefined ? undefined : written.find((a) => same(a.magnitude, value));
   return target !== undefined
     ? { unit: code, source: 'user_stated', source_quote: quote(target) }
     : { unit: code, source: 'olumi_reading', source_quote: quote(written[0]!) };

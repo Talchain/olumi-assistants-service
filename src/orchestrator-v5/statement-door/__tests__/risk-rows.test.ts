@@ -183,7 +183,11 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     const w = world(), before = JSON.stringify(w.graph());
     expect(await w.caps.proposeStatement!(ctx('Please record it.', { user_text: 'Please record it.', unverified_user_text: SAID }) as never, door(SAID)))
       .toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    // ⭐ LEAN CORE (DL-3 18 Oct, PL-0048 3 confirmed): a literal span of the user's own sentence is theirs; its card keeps the COMPLETE
+    // line ("I’d say there’s about …"), so the hedge is never dropped. Words they never typed stay refused.
     expect(await w.caps.proposeStatement!(ctx(SAID) as never, door('a 30% chance it slips within the next 3 months.')))
+      .toMatchObject({ ok: true, mutated: false });
+    expect(await w.caps.proposeStatement!(ctx(SAID) as never, door('a 30% chance it slipped within the next 3 months.')))
       .toMatchObject({ ok: false, refusal: 'statement_not_found' });
     const olumis = await w.caps.proposeAssumptions(ctx(SAID) as never, { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: 'Launch pressure.',
       user_stated: false, occurrence_range: { low_percent: 20, high_percent: 40 } }] } as never) as Rec;

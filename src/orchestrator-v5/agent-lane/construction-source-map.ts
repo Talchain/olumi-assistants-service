@@ -15,9 +15,8 @@
  * reason, never dropped and never turned into Olumi's estimate. Figures come only from the quote's own words (`figuresIn`),
  * never from the drafter's value. `statements` is optional: a missing or malformed list never fails a draft. Pure.
  */
-import { findJoinedRanges, findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
-import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import { STATEMENT_FORMS, unitWrittenAfter, unknownSpeakerWords, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
+import { findJoinedRanges } from '../../cee/provenance/stated-amounts.js';
+import { figuresWritten, STATEMENT_FORMS, unitWrittenAfter, unknownSpeakerWords, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
@@ -101,37 +100,8 @@ function subjectOf(v: unknown): DraftedSubject | undefined {
   return { kind, label, ...(kind === 'link' ? { to_label: to } : {}), ...(kind === 'option' && factor !== undefined ? { factor_label: factor } : {}) };
 }
 
-/**
- * The figures a sentence writes: every single figure, in digits or spelled ("six mid-weight developers", by the one cardinal
- * parser), and every range it writes as one (`findJoinedRanges`: two figures JOINED as a range, low below high).
- * ⭐ G3 (TL 11:18Z; supersedes AIE 6180604131's "unknown until step 2" for construction): that join is a provenance check of
- * the quote, not a meaning reader. "Cut legacy 25% to 15%" is high to low and "six developers and 25% legacy" is not joined,
- * so neither is a range; whether a joined pair is a range or a change is the AI's own `form`. Unjoined figures never pair.
- */
-export function figuresWritten(quote: string): readonly { readonly low: number; readonly high: number }[] {
-  const spelled = [...quote.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) => {
-    const magnitude = parseCardinalAmount(m[0]);
-    return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
-  });
-  const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
-  return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
-    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
-    ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
-}
-
-/**
- * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z, unseen brief R4): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15:
- * the same figure with the opposite direction word, where the words state a NET flow. The drafter's −15 was refused as no figure of the quote, so the user's own
- * net loss was admitted as Olumi's unverified, unscaled guess and blocked every Run. A figure written straight after a loss
- * direction is also stated as its negative; with no such words a negative stays refused, as before. Which reading a subject
- * takes (a net change at −15, or a count of losses at 15) is the binder's, never this list's.
- */
-// AIE 6187351293 (2a scope): the loss words are literal source support for a NET reading only. "We lose 15 members a month"
-// can be a gross count of 15 lost (positive, with a negative effect downstream), so only a net flow states −15.
-const LOSS_BEFORE = /\b(?:(?:losing|lose|loses|lost) (?:a )?net|(?:a )?net (?:loss|outflow|decline|drop) of|(?:a )?deficit of)(?: (?:about|around|roughly|nearly|almost|some|over))?\s*$/iu;
-export function statesLossBefore(quote: string, index: number): boolean {
-  return LOSS_BEFORE.test(quote.slice(0, index));
-}
+/** The one figure reader of a span, now the authorship rule's own (`user-statements.ts`); re-exported for its existing readers. */
+export { figuresWritten, statesLossBefore } from './user-statements.js';
 
 /** Two negative ends as the magnitudes they stand for (−6 to −4 → 4 to 6); anything else is no such range. */
 function writtenEndsOfNegativeRange(low: unknown, high: unknown): { readonly low: number; readonly high: number } | undefined {
@@ -194,16 +164,6 @@ function withOwnRangeUnit(st: UserStatement): UserStatement {
   return written !== null && claimed !== null && written.kind === claimed.kind && written.code === claimed.code && written.period === claimed.period
     && (['noun', 'per', 'base', 'qualifiers'] as const).every((part) => JSON.stringify(written[part]) === JSON.stringify(claimed[part]))
     ? st : { ...st, unit: '' };
-}
-
-/**
- * ⭐ S2 C4 (TL 6208664188 rule 1; DL-3 09:05Z DRASTIC CUT): the user's sentences the AI itself bound as the goal's TARGET with
- * `figure` (its `{goal, target}` statements, each verified here as a whole sentence of the brief that writes that figure). A
- * figure found elsewhere in the brief is the user's statement about its own subject, never this goal's target by membership.
- * `undefined` only for a draft recorded before SYSTEM 2 (no `statements`; the sent schema requires them), which keeps its bytes.
- */
-export function goalTargetSentences(model: unknown, brief: string, figure: number): readonly string[] | undefined {
-  return goalTargetStatements(model, brief, figure)?.map((s) => s.quote);
 }
 
 /**
@@ -396,7 +356,8 @@ export type StatedRangeOfLink = { readonly low: number; readonly high: number; r
 export type StatedWholeRangeOfLink = { readonly low: number; readonly high: number; readonly text: string; readonly end: 'whole'; readonly reported: string };
 
 /**
- * The statements behind `goalTargetSentences`, each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
+ * The user's sentences the AI bound as the goal's TARGET with `figure` (its `{goal, target}` statements, each verified by the one
+ * rule), each with the AI's own reading of its sentence (`form`): G3 (TL 10:49Z) holds
  * a ceiling's direction from that reading, never from a host word reader.
  */
 export function goalTargetStatements(model: unknown, brief: string, figure: number): readonly UserStatement[] | undefined {

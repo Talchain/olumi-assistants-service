@@ -110,8 +110,8 @@ describe('Paul 2 October: conversation to canonical goal meaning', () => {
     expect(computeGraphIdentityHash(g as never)).not.toEqual(before);
   });
   it('S7: old quotation cannot license a changed scope or a changed basis', () => {
-    expect(scopeSourcesAreUserWords({ ...scope, extent: 'component' }, '', scope)).toBe(false);
-    expect(scopeSourcesAreUserWords({ ...scope, component: { ...scope.component!, basis: 'different' } }, '', scope)).toBe(false);
+    expect(scopeSourcesAreUserWords({ ...scope, extent: 'component' }, { now: '' }, scope)).toBe(false);
+    expect(scopeSourcesAreUserWords({ ...scope, component: { ...scope.component!, basis: 'different' } }, { now: '' }, scope)).toBe(false);
   });
   it('S7: shared write and identity confirmation reject a component product on a total goal', () => {
     const g = graph(); g.nodes.find(n => n.id === 'mrr')!.goal_scope = scope;

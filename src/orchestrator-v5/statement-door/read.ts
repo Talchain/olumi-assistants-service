@@ -10,10 +10,11 @@
  */
 import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { verifyStatement, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
-import { figuresWritten } from '../agent-lane/construction-source-map.js';
+import { figuresWritten } from '../agent-lane/user-statements.js';
 import { doorRowFor } from './role-table.js';
 import type { DoorSubject } from './subject.js';
-import { statementBoundTo, type DoorContext } from './statements.js';
+import { currentStatementRetention, statementBoundTo, userStatementFor, type DoorContext } from './statements.js';
+import type { CurrentCorrection } from '../agent-lane/user-statements.js';
 export { statementBoundTo, type DoorContext } from './statements.js';
 
 
@@ -145,4 +146,16 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
   if (missing !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${missing} Nothing was prepared. ${KEEP}` };
   return { kind: 'read', reading: { subject, label, statements, reading: row.readingWords(statements, subject, label, graph, words),
     assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}) } };
+}
+
+/**
+ * ⭐ LEAN CORE (PL-0048 2): the subject's current correction, read from the correction door's own record (`userStatementFor`,
+ * `currentStatementRetention`), as THE ONE RULE consumes it (`userStated` opts.current): the correction's words and the spans it
+ * explicitly kept. An unreadable retention keeps nothing (fail closed). `undefined`: the subject's account was never corrected.
+ */
+export function currentCorrectionOf(graph: unknown, subject: DoorSubject): CurrentCorrection | undefined {
+  const record = userStatementFor(graph, subject);
+  if (record?.attest?.recorded_by !== 'correction' || record.statements.length === 0) return undefined;
+  const retention = currentStatementRetention(record);
+  return { correction: record.statements[0]!.quote, kept: retention?.complete === true ? retention.spans.map((s) => s.text) : [] };
 }

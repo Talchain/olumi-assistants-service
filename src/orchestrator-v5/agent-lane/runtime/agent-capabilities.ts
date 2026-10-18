@@ -9,7 +9,6 @@ import { carriesQuoteConfirmation, plainQuoteWords, verbatimSourceLine } from '.
 import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
-import { plainWords } from '../../goal-target/hiring-times.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
@@ -48,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStatementOf, verifyStatements } from '../user-statements.js';
+import { userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -63,7 +62,7 @@ const NOT_THE_USERS_CLAIM = 'Nothing was prepared: these words report, dispute o
 import type { EventRiskV1T } from '../../../schemas/event-risk.js';
 import { CONFIRM_GOAL_READING_OP, heldChangeTargetAnswer, savedGoalMeaningOf } from '../../goal-target/held-change-target.js';
 import { heldTeamTimeStatements, quotedTeamTime, readTeamTime, teamTimeArgumentsMatch, teamTimeFromStatements, teamTimeCard, teamTimeConfirmationCard, teamTimeIsHeld, teamTimeReadDigest, teamSharePostimageIsScoped, withAssumedTeamRange, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
-import { deliverableWrittenIn, draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
+import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 import { capacityPartsOf, heldStatementsOf, hiringTimesCard, hiringTimesHeld, hiringTimesStillApply, hiringTimesSummaryOf, HIRING_TIMES_USE, olumiEstimateOf,
   planStarts, quoteStatedFor, withHiringTimes, type ApprovedHiringTimes, type PlannedOption } from '../../goal-target/hiring-times.js';
 import { optionCapacityChangeHeld, optionCapacityChangeStillApplies, withOptionCapacityChange, SET_OPTION_CAPACITY_CHANGE_OP,
@@ -304,7 +303,7 @@ import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '.
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, isUserStatedRange, levelRangePointBasis, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
-import { isAmountStatedInBrief, findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -2194,6 +2193,14 @@ const readingNote = (i: ProposalInterpretation): string =>
   + `("I\u2019ve read your \u201c${i.from_words}\u201d as ${linkBandWord(i.reading as InfluenceBand)}"), so that approving it approves that reading. `;
 
 /**
+ * ⭐ LEAN CORE: the texts THE ONE AUTHORSHIP RULE (`userStated`) reads in chat: this turn's typed words, the verified conversation and
+ * its messages in order, and retained words of unknown origin (reseeded history and the saved brief), which never verify anything.
+ */
+const chatTexts = (ctx: AgentToolContext, brief?: string | null): StatementTexts => ({ now: ctx.user_turn_text, conversation: ctx.user_text,
+  unverified: [ctx.unverified_user_text, brief].filter((t): t is string => typeof t === 'string' && t !== '').join('\n'),
+  ...(ctx.verified_user_messages !== undefined && ctx.verified_user_messages.length > 0 ? { messages: ctx.verified_user_messages } : {}) });
+
+/**
  * ⭐ HOW A LINK'S BAND IS GROUNDED IN THE USER'S WORDS (slice C3; ruling ChatGPT 5854968869 P3B). Measured on Paul's
  * served transcript (27 Sep): "price sensitivity is very high" was refused `strength_not_stated` twice, and recording
  * "very strong" took four turns for one action.
@@ -3865,11 +3872,12 @@ export function createAgentCapabilities(
     args: Parameters<NonNullable<AgentCapabilities['proposeGoalTarget']>>[1] & { value: number; unit: string }, before: GraphRead,
     direction: TargetDirection, inclusive: 'at_least' | 'at_most'): Promise<ToolResult> => {
     const invalid = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
-    const verified = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
+    // ⭐ LEAN CORE: the change's source and its figure are the user's by THE ONE RULE (`userStated`): their own typed words, the figure
+    // read from that span. A later ambition's source likewise.
     const ownSource = (quote: unknown): quote is string => typeof quote === 'string' && quote.trim() !== ''
-      && verified.some(m => wholeStatementIn(m, quote)) && !quoteIsNotTheUsersClaim(quote, quote);
+      && userStated({ quote }, chatTexts(ctx), { quantity: 'goal_change' }, { form: 'describes' }).origin === 'human';
     const source = args.goal_change_quote;
-    if (!ownSource(source) || !figureTheUserWrote(args.value, args.unit, source) || !isAmountStatedInBrief(args.value, args.unit, source)) return invalid('target_not_stated',
+    if (!ownSource(source) || userStated({ quote: source, value: args.value, unit: args.unit }, chatTexts(ctx), { quantity: 'target' }).origin !== 'human') return invalid('target_not_stated',
       'The goal change needs the complete verified human source and its figure/unit. Nothing was prepared.');
     if (args.later_ambition_quote !== undefined && !ownSource(args.later_ambition_quote)) return invalid('ambition_not_stated',
       'The earlier aim can be kept as history, but a later ambition needs its verified source. Nothing was prepared.');
@@ -6540,12 +6548,12 @@ export function createAgentCapabilities(
       if (args.later_ambition_quote !== undefined) {
         const quote = args.later_ambition_quote;
         const held = readGoalRecord(g.raw, goal.id)?.target;
-        const messages = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
-        laterAmbitionSource = messages.find(m => wholeStatementIn(m, quote));
+        // ⭐ LEAN CORE: the words, and the held figure in them, are the user's by THE ONE RULE (`userStated`).
+        const words = userStated({ quote }, chatTexts(ctx), { quantity: 'later_ambition' }, { form: 'describes' });
+        laterAmbitionSource = words.origin === 'human' ? words.statement.source : undefined;
         laterAmbitionSourceUnverified = laterAmbitionSource === undefined;
-        laterAmbitionUnverified = ctx.user_text_complete === false || laterAmbitionSourceUnverified
-          || typeof held?.raw !== 'number' || !figureTheUserWrote(held.raw, held.unit ?? '', quote)
-          || quoteIsNotTheUsersClaim(quote, quote);
+        laterAmbitionUnverified = ctx.user_text_complete === false || laterAmbitionSourceUnverified || typeof held?.raw !== 'number'
+          || userStated({ quote, value: held.raw, unit: held.unit ?? '' }, chatTexts(ctx), { quantity: 'later_ambition' }).origin !== 'human';
         // An uncertain later-role reading does not veto the valid current target. Keep it visibly Olumi's,
         // with the complete saved aims untouched; approval cannot establish the quote's source or binding.
         retainedAim = retainedTargetAim(g.raw, goal.id, quote, laterAmbitionUnverified, laterAmbitionSourceUnverified);
@@ -6936,9 +6944,11 @@ export function createAgentCapabilities(
         return proposal?.provenance.authored_by === 'user_stated' && proposal.operations.some(op =>
           op.op === 'set_goal_deadline' && writes(plainOf(String((op.value as { words?: unknown })?.words ?? ''))));
       });
-      const origin = statementOrigin(writes(typed) || writes(plainOf(ctx.user_text ?? '')) || heldHumanWords,
-        writes(plainOf(ctx.unverified_user_text ?? '')) || writes(plainOf(g.brief_text ?? '')), ctx.user_text_complete);
-      if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+      // ⭐ LEAN CORE: whose the deadline words are, by THE ONE RULE (`userStated`): the user's own typed words, or words a held card
+      // already carries as theirs. Anything else is unknown source (never Olumi's by default, PL-0048): nothing is prepared.
+      const said = userStated({ quote: words }, chatTexts(ctx, g.brief_text), { quantity: 'deadline' }, { form: 'describes' });
+      const origin = heldHumanWords ? 'human' : said.origin;
+      if (origin !== 'human') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
       /**
        * ⭐ GEN #5 (Paul's funding test, 13 Oct: "how these options change our ability to deliver a high-quality MVP within 6
        * months" on a draft of "Development speed"): a deadline for a deliverable that is not the model's goal cannot land on that
@@ -6947,8 +6957,9 @@ export function createAgentCapabilities(
        */
       const deliverable = typeof args?.deliverable === 'string' ? args.deliverable.trim() : '';
       const goals = g.nodes.filter((n) => n.kind === 'goal');
-      // (a) The AI's deliverable is the user's only where its words stand VERBATIM in this message (no verb list, no word match).
-      if (deliverable !== '' && deliverableWrittenIn(ctx.user_turn_text, deliverable) && writes(typed) && goals.length === 1
+      // (a) The AI's deliverable is the user's only where THE ONE RULE finds it in this message's own words (no verb list, no word match).
+      if (deliverable !== '' && userStated({ quote: deliverable }, { now: ctx.user_turn_text }, { quantity: 'deliverable' }).origin === 'human'
+        && writes(typed) && goals.length === 1
         && draftedTeamPartOf(g.raw) === null && !isEventShareForecast(g.raw)) {
         return { ok: false, mutated: false, refusal: 'unsupported_goal_change',
           detail: 'This saved model does not represent that deliverable yet. No deadline or replacement was saved. Retain the complete request and its conditions; use supported targeted edits where they fit, and explain any remaining modelling limitation while continuing useful qualitative reasoning.' };
@@ -7047,10 +7058,15 @@ export function createAgentCapabilities(
         const quotes = (Array.isArray(o.starts) ? o.starts : []).map((st: { quote?: unknown }) => typeof st?.quote === 'string' ? st.quote.trim() : '');
         const heldQuotes = heldStatementsOf(held);
         const starts = o.starts as readonly { months?: unknown }[];
-        const pairings = quotes.map(quote => {
-          const source = verbatimSourceLine(texts, quote);
-          if (source !== undefined && quoteStatedFor(texts, quote, label) === 'not_for_option') {
-            return { original_source: { text: source, authored_by: 'user_stated' as const },
+        // ⭐ LEAN CORE: whose each quoted start is, by THE ONE RULE (`userStated`): the user's own typed words, or not theirs.
+        const said = quotes.map((quote, i) => userStated({ quote }, chatTexts(ctx, g.brief_text), { quantity: 'hiring_start', option_id: id },
+          // Positive evidence of Olumi's own estimate (K3): typed months with NO claimed user quote. A claimed quote must verify.
+          { form: 'describes', ownEstimate: quote === '' && typeof starts[i]?.months === 'number' }));
+        const pairings = quotes.map((quote, i) => {
+          // Their words, read by Olumi as THIS option's start where their sentence names another (the binding is Olumi's reading).
+          const v = said[i]!;
+          if (v.origin === 'human' && quoteStatedFor(texts, quote, label) === 'not_for_option') {
+            return { original_source: { text: v.statement.source, authored_by: 'user_stated' as const },
               pairing: { option_id: id, authored_by: 'model_proposed' as const } };
           }
           const retained = heldQuotes.includes(quote)
@@ -7060,15 +7076,14 @@ export function createAgentCapabilities(
             && retained.pairing.authored_by === 'model_proposed'
             ? { original_source: retained.original_source, pairing: retained.pairing } : undefined;
         });
+        // A statement the model already holds as verified human words stays theirs; one it holds as Olumi's stays Olumi's.
         const origins = quotes.map((quote, i) => {
           const retained = heldQuotes.includes(quote)
             ? held.find(n => n.observed_state.extra_share_by_date.statement?.quote === quote)?.observed_state.extra_share_by_date.statement
             : undefined;
           const heldOlumi = retained?.source === 'model_proposed' || retained?.pairing?.authored_by === 'model_proposed';
-          return statementOrigin(pairings[i] !== undefined || quoteStatedFor(texts, quote, label) === 'ok' || (retained !== undefined && !heldOlumi),
-            !heldOlumi && (quoteSpansIn(plainWords(ctx.unverified_user_text ?? ''), plainWords(quote)).length > 0
-              || quoteSpansIn(plainWords(g.brief_text ?? ''), plainWords(quote)).length > 0), ctx.user_text_complete,
-            heldOlumi || (quote === '' && typeof starts[i]?.months === 'number'));
+          if (heldOlumi) return 'ai';
+          return retained !== undefined ? 'human' : said[i]!.origin;
         });
         if (origins.includes('unknown')) return refuse('origin_unknown', UNKNOWN_ORIGIN_DETAIL);
         // An empty source plus explicit months is a NEW Olumi estimate, never an old quote relabelled.

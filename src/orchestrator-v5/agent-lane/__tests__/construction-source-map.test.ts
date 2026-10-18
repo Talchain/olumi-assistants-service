@@ -69,26 +69,37 @@ describe('SYSTEM 2 step 1: the drafter cites the brief once, and the host verifi
     expect(map.refused.map((r) => [r.index, r.refusal])).toEqual([[1, 'figure_not_in_quote']]);
   });
 
-  it('CONTRASTS: a figure the sentence does not write, a shortened sentence and words not in the brief are UNKNOWN, retained with quote and reason; never the user\'s, never Olumi\'s', () => {
+  it('CONTRASTS: a figure the sentence does not write and words not in the brief are UNKNOWN, retained with quote and reason; never the user\'s, never Olumi\'s', () => {
     const map = sourceMapOf([
       legacyLevel({ value: 15 }), // NUMBER: the drafter's figure, not the user's
-      legacyLevel({ quote: '25% of their time on fixing legacy code.' }), // not a whole statement
+      legacyLevel({ quote: '25% of their time on fixing legacy code.' }), // ⭐ LEAN CORE (DL-3 18 Oct, PL-0048 3): a literal span of the line
       legacyLevel({ quote: 'Our developers spend 25% of their time on legacy code.' }), // Olumi's paraphrase
       { quote: LEGACY, field: 'level', form: 'point', value: 25 }, // no subject
       legacyLevel(),
     ], SERVED.brief);
     // Each is retained WHOLE as the drafter gave it (AIE 6180604131), never shortened.
     expect(map.refused[0]!.given).toEqual({ ...legacyLevel({ value: 15 }), subject: { kind: 'factor', label: 'Time on legacy fixes', to_label: null, factor_label: null } });
-    expect(map.refused[3]!.given).toEqual({ quote: LEGACY, field: 'level', form: 'point', value: 25 });
+    expect(map.refused[2]!.given).toEqual({ quote: LEGACY, field: 'level', form: 'point', value: 25 });
     expect(map.refused.map((r) => [r.index, r.refusal, r.quote, r.key])).toEqual([
       [0, 'figure_not_in_quote', LEGACY, KEY],
-      [1, 'statement_not_found', '25% of their time on fixing legacy code.', KEY],
       [2, 'statement_not_found', 'Our developers spend 25% of their time on legacy code.', KEY],
       [3, 'statement_malformed', LEGACY, undefined],
     ]);
     expect(map.refused.every((r) => r.detail.length > 0)).toBe(true);
-    // Only the one verified statement is the user's; the refused ones never join it.
-    expect(map.verified.get(KEY)).toEqual([expect.objectContaining({ low: 25, high: 25 })]);
+    // ⭐ LEAN CORE (the one rule: a literal span of the user's own words; DL-3 confirmed with PL-0048 3): the span is the user's 25%,
+    // and its record keeps the COMPLETE line as its source, so the sentence's "but … urgent launch date" is never dropped.
+    expect(map.verified.get(KEY)).toEqual([
+      expect.objectContaining({ quote: '25% of their time on fixing legacy code.', source: expect.stringContaining(LEGACY), qualifier: 'on average', low: 25, high: 25 }),
+      expect.objectContaining({ quote: LEGACY, source: expect.stringContaining(LEGACY), low: 25, high: 25 })]);
+  });
+
+  it('⛔ PL-0048 3 NEGATIVE: a conditional sentence\'s span is never stored as an unconditional claim: the record keeps the whole line, condition included', () => {
+    const brief = 'If the pilot succeeds, the warehouse would ship 30% more orders.';
+    const span = { quote: 'the warehouse would ship 30% more orders.', subject: { kind: 'factor', label: 'Orders shipped' }, field: 'level', form: 'point', value: 30 };
+    const [st] = sourceMapOf([span], brief).verified.get(subjectKey({ kind: 'factor', label: 'Orders shipped' }, 'level')) ?? [];
+    expect(st, 'the span is the user\'s figure').toMatchObject({ speaker: 'user', low: 30, high: 30 });
+    expect(st!.source, 'its condition stays on the record').toBe(brief);
+    expect(st!.source).not.toBe(st!.quote);
   });
 
   it('the map is RECORDED, nothing else moves: the graphs are equal but for the verified statement now held on its node (AIE 6183705670)', async () => {
