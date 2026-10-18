@@ -35,8 +35,8 @@ import { deriveDecisionContextGraphHash } from '../build-turn-context.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
-/** AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1 (`after_confirmed_saved_readback`, sha256 ab6a2d6f…), byte for byte. */
-export const OPEN_AIM_SAVED_LINE = 'Saved a provisional model. Its aim is still unconfirmed, and Olumi’s additions remain suggestions. What would you like this work to achieve?';
+/** AIE packet AIE-ORIGIN-REFUSAL-AND-CORRECTION-AMENDMENT-20261018-v1 (`K6_reply_line`, sha256 bb91dcdd…), byte for byte; said only after a confirmed save. */
+export const OPEN_AIM_SAVED_LINE = 'I have saved a provisional Living Model using the assumptions shown. Your aim still needs defining, so this is a starting point for reasoning rather than a calculated forecast.';
 
 const CLAIM_OPENER =
   /^(?:[-•*>#\s]*)(?:\*\*)?(?:Applied|Added|Updated|Saved|Recorded|Adopted|Linked)(?:\*\*)?(?:\s*:|\s+(?:(?:the|all|a|an|your|this|that|these|those|both|every|each|proposal|assumptions?|levels?|values?|it|them)\b|\*\*|`|\d))/i;

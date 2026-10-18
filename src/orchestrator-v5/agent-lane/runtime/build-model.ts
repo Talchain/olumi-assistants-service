@@ -817,8 +817,8 @@ function unattestedEventClarification(u: UnattestedEventGoal, brief: string): st
   return UNATTESTED_GOAL_CLARIFICATION + retainedWording(u, brief);
 }
 
-/** The open aim's label (AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1 `open_aim_label`, sha256 ab6a2d6f…). */
-export const OPEN_AIM_GOAL_LABEL = 'Aim to confirm';
+/** The open aim's persisted label (AIE packet AIE-ORIGIN-REFUSAL-AND-CORRECTION-AMENDMENT-20261018-v1 `K6_persisted_label`, sha256 bb91dcdd…). */
+export const OPEN_AIM_GOAL_LABEL = 'Olumi’s provisional framing — aim still to clarify';
 /**
  * ⭐ K6: the labelled provisional draft for a brief with no stated aim. The event the drafter took as the goal is the ACTION
  * being weighed: it becomes an option (Olumi's) unless the draft already offers a choice. The goal is an open question:
