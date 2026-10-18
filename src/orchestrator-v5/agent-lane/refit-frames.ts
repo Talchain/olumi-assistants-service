@@ -200,11 +200,28 @@ function reframed(graph: Rec, id: string, F: number): Rec {
    * implicit frame is fixed, so the link scales exactly as a framed one does. Only decision/option scaffolding (no causal
    * size) and a dangling end are left as they are. A placeholder keeps its tag: only its coordinates move.
    */
-  const kinds = new Map((g.nodes as Rec[]).map((n) => [n.id, n.kind]));
-  for (const e of g.edges as Rec[]) {
-    const scale = e.from === id ? F / Fold : e.to === id ? Fold / F : 1;
+  carryLinkSizes(g.edges as Rec[], new Map((g.nodes as Rec[]).map((n) => [n.id, n.kind])), id, Fold, F);
+  return g;
+}
+
+/** The causal links touching `id` (an option/decision end is scaffolding, a dangling end has no size to carry). */
+export function causalLinksOf(edges: readonly Rec[], kinds: ReadonlyMap<unknown, unknown>, id: string): Rec[] {
+  return edges.filter((e) => {
+    if (e.from !== id && e.to !== id) return false;
     const other = kinds.get(e.from === id ? e.to : e.from);
-    if (scale === 1 || other === undefined || STRUCTURAL_KINDS.has(other)) continue; // structural edge
+    return other !== undefined && !STRUCTURAL_KINDS.has(other);
+  });
+}
+
+/**
+ * Every causal link touching `id` keeps its natural size when `id`'s frame moves from `Fold` to `F` (β·F_from/F_to; see
+ * the header): its mean and spread, a stated natural size's β and a pending estimate move together. Mutates `edges` in
+ * place. The one transition `reframed` and a writer's frame move (`preserveSiblingQuantities`, BUDDY-A #3396 B1) share.
+ */
+export function carryLinkSizes(edges: readonly Rec[], kinds: ReadonlyMap<unknown, unknown>, id: string, Fold: number, F: number): void {
+  for (const e of causalLinksOf(edges, kinds, id)) {
+    const scale = e.from === id ? F / Fold : Fold / F;
+    if (scale === 1) continue;
     if (num(e.strength?.mean)) e.strength.mean *= scale;
     if (num(e.strength?.std)) e.strength.std *= scale;
     const ne = e.provenance?.natural_effect;
@@ -217,7 +234,6 @@ function reframed(graph: Rec, id: string, F: number): Rec {
       if (num(candidate.natural_effect?.strength_mean)) candidate.natural_effect.strength_mean *= scale;
     }
   }
-  return g;
 }
 
 /**

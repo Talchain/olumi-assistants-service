@@ -734,6 +734,29 @@ export function briefAttributedLevelRange(factor: Factor, brief: string | undefi
   return undefined;
 }
 
+/** "… scored out of 10": the amount is the top of the scale the sentence scores on. */
+const SCALE_TOP = /\bout\s+of\s*$/iu;
+/**
+ * ⭐ BUDDY-A #3396 B2: the brief states `bound` as THIS factor's bound, so the range ending there is the user's, not Olumi's
+ * reference. Scoped to the factor: the top of a range stated for it (the user's own beside their figure, a third party's
+ * with its attribution, or one in a sentence naming it: the readers above), or the top of the scale a sentence naming it
+ * scores it on ("scored out of 10"). The same figure written for another quantity ("a marketing budget of £40") or as a
+ * point (today's level, an option's setting) bounds nothing.
+ */
+export function briefStatesFactorBound(factor: Factor, brief: string | undefined, bound: number): boolean {
+  if (briefStatedLevelRange(factor, brief)?.high === bound || briefAttributedLevelRange(factor, brief)?.high === bound) return true;
+  try {
+    if (typeof brief !== 'string') return false;
+    const named = words(factor.label).filter(w => !grammar(w));
+    return assertions(brief).some(a => a.text.length <= MAX_ASSERTION && directContext(brief, a)
+      && words(a.text).some(w => named.some(n => sameName(n, w)))
+      && (statedRangePair(a.text, factor.unit)?.high === bound
+        || findLinkEffectAmounts(a.text).some(x => x.magnitude === bound && SCALE_TOP.test(a.text.slice(0, x.index)))));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * ⭐ Recovery Batch B (DL 12 Oct 13:3xZ): the GOAL's stated current level, through V2's verification, positive
  * attestation only and no new parser. Admission wrote it as `brief_extraction` with no extractionType and no user-text

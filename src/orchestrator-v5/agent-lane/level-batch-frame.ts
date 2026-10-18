@@ -3,6 +3,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { defaultFrameFor } from './admit-model.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../tools/plot-intervention-scale.js';
+import { linkSizing } from '../../cee/provenance/provenance-of.js';
+import { carryLinkSizes, causalLinksOf, frameOf as linkFrameOf } from './refit-frames.js';
 
 /** Resolve derived ranges over the complete native cohort, never its first/last member. */
 export function proposedFrameForLevels(levels: readonly { raw_value?: number; cap?: number }[]): number | null {
@@ -136,7 +138,45 @@ export function preserveSiblingQuantities<T>(before: unknown, after: T,
       }
     }
   }
+  if (!carryUntouchedLinkSizes(prior, result, [...planned.keys()])) return { kind: 'refused', reason: 'untouched_level_rescaled' };
   return { kind: 'preserved', graph: result, reencoded: [...reencoded.values()] };
+}
+
+/**
+ * ⭐ BUDDY-A #3396 B1: A FRAME MOVE KEEPS EVERY LINK'S NATURAL SIZE (the transition is complete, not options only). A link
+ * stores β = b·F_from/F_to, so moving a factor's frame (Olumi's reference widened to hold the user's £60) while β stays
+ * put re-sizes what the user said: "2 per £1" read as 1.07 per £1 at the next Run. Every causal link the writer left as
+ * it was is carried by the refit's own transition (`carryLinkSizes`), so its raw effect, spread, words and author stay.
+ * Olumi's placeholder (nobody sized it) is left to the magnitude contract (`frameDefaultedLinks`). Where the carried size
+ * cannot be held, nothing is written (false): a size past the contract (|β| > 1, or a stored clamp), or a stated size on
+ * a frame that cannot be read before or after the move. Mutates `result`'s edges only.
+ */
+function carryUntouchedLinkSizes(prior: { nodes?: Dict[]; edges?: unknown }, result: { nodes?: Dict[]; edges?: unknown },
+  factorIds: readonly string[]): boolean {
+  const was = records(prior.edges);
+  const untouched = records(result.edges).filter(e => linkSizing(e) !== 'placeholder'
+    && was.some(p => p.from === e.from && p.to === e.to && isDeepStrictEqual(p, e)));
+  if (untouched.length === 0) return true;
+  const kinds = new Map(records(result.nodes).map(n => [n.id, n.kind]));
+  const carried = new Set<Dict>();
+  for (const id of factorIds) {
+    const Fold = linkFrameOf(records(prior.nodes).find(n => n.id === id));
+    const F = linkFrameOf(records(result.nodes).find(n => n.id === id));
+    if (Fold === F) continue;
+    const links = causalLinksOf(untouched, kinds, id);
+    if (links.length === 0) continue;
+    if (Fold === undefined || F === undefined) {
+      if (links.some(e => (e.provenance as Dict | undefined)?.natural_effect !== undefined)) return false;
+      continue;
+    }
+    if (links.some(e => (e.provenance as Dict | undefined)?.clamped_from !== undefined)) return false;
+    carryLinkSizes(links, kinds, id, Fold, F);
+    for (const e of links) carried.add(e);
+  }
+  return [...carried].every(e => {
+    const mean = (e.strength as Dict | undefined)?.mean;
+    return typeof mean !== 'number' || Math.abs(mean) <= 1 + 1e-9;
+  });
 }
 
 /** Identify only stored coordinate changes proven to preserve PLoT quantities. */

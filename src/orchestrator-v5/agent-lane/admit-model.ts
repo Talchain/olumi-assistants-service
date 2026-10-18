@@ -85,7 +85,7 @@ import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
-import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefStatesFactorBound, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
@@ -4048,8 +4048,8 @@ function admitOnce(
     }
   }
   // ⭐ A U3 (18 Oct): a level limit in the factor's own unit above Olumi's range widens the range the same way, so the
-  // user's limit is never read outside it. A range the brief writes is the user's, and a percentage's 100 is its
-  // encoding: both are left alone.
+  // user's limit is never read outside it. A bound the brief states for THIS factor is the user's (`briefStatesFactorBound`,
+  // BUDDY-A B2: another quantity's figure is none), and a percentage's 100 is its encoding: both are left alone.
   const limitWidened = new Set<string>();
   for (const c of model.constraints) {
     const f = model.factors.find((x) => canonicalLabel(x.label) === canonicalLabel(c.metric));
@@ -4057,7 +4057,7 @@ function admitOnce(
     if (f === undefined || stated === undefined || (c.frame !== undefined && c.frame !== 'level') || !Number.isFinite(c.value)
       || percentScaleUnit(f.unit ?? undefined)
       || c.value <= stated || (c.unit ?? '').trim().toLowerCase() !== (f.unit ?? '').trim().toLowerCase()
-      || briefWritesFigure(brief, stated, conventionClassOf(f.label, f.unit, f.baseline_value), f.unit)) continue;
+      || briefStatesFactorBound(f, brief, stated)) continue;
     capByLabel.set(f.label, defaultFrameFor(c.value));
     limitWidened.add(f.label);
   }
@@ -4591,10 +4591,11 @@ function admitOnce(
 
   // #2842 follow-up: a factor framed by Olumi's rescue convention says so on its own record, so a surface can disclose it.
   // ⭐ A (18 Oct, D2): every frame Olumi chose says so the same way — a defaulted or widened frame, and the drafter's range
-  // that the brief does not write and the unit does not encode. Disclosure only: never a bound, an encoding or a licence.
+  // that the brief does not state as this factor's bound (`briefStatesFactorBound`, BUDDY-A B2) and the unit does not
+  // encode. Disclosure only: never a bound, an encoding or a licence.
   const draftedReference = (f: CandidateModel['factors'][number]): boolean => typeof f.plausible_max === 'number'
     && capByLabel.get(f.label) === f.plausible_max && !(f.plausible_max === 100 && percentScaleUnit(f.unit ?? undefined))
-    && !briefWritesFigure(brief, f.plausible_max, conventionClassOf(f.label, f.unit, f.baseline_value), f.unit);
+    && !briefStatesFactorBound(f, brief, f.plausible_max);
   const olumiFrameLabels = new Set([...conventionFrames.map((c) => c.label), ...defaultedFrames.map((d) => d.label),
     ...widenedFrames.map((w) => w.label), ...limitWidened, ...model.factors.filter(draftedReference).map((f) => f.label)]);
   for (const label of olumiFrameLabels) {

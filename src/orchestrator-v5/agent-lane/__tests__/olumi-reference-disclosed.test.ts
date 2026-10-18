@@ -16,6 +16,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { levelDomain } from '../../../cee/magnitude/link-effect.js';
+import { createSetFactorValueHandler } from '../../tools/handlers/set-factor-value.js';
 
 type Rec = Record<string, any>;
 const SID = '41414141-4141-4141-8141-414141414141';
@@ -71,25 +72,26 @@ function wire(r: Ranges = BASE): Rec {
 }
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
-async function build(r: Ranges = BASE): Promise<Rec> {
+async function build(r: Ranges = BASE, brief = BRIEF, patch?: (w: Rec) => void): Promise<Rec> {
   const draft = wire(r);
+  patch?.(draft);
   expect(strict(draft), JSON.stringify(strict.errors)).toBe(true);
   let graph: Rec | undefined;
   const d: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: Rec }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief(SID, BRIEF, d, (async () => ({ text: JSON.stringify(draft) })) as unknown as CallStructuredModel) as Rec;
+  const out = await buildModelFromBrief(SID, brief, d, (async () => ({ text: JSON.stringify(draft) })) as unknown as CallStructuredModel) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 2000)).toBe(true);
   return graph!;
 }
 
 /** The saved graph read cold, as the Run prepares its request, stopped before the engine. */
-async function prepared(graph: Rec): Promise<Rec | undefined> {
+async function prepared(graph: Rec, brief = BRIEF): Promise<Rec | undefined> {
   const cold = GraphV3.parse(JSON.parse(JSON.stringify(graph)));
   await createAgentCapabilities((async () => ({ status: 200, json: { graph: cold, graph_hash: 'cold' } })) as never, new ProposalStore())
     .getCanonicalState({ scenario_id: SID, authenticated_user_id: null, request_id: 'cold', user_text: 'What is known?', user_turn_text: 'What is known?' } as never);
-  const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'cold', { loadGraphAndBriefText: async () => ({ graph: cold, briefText: BRIEF }),
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'cold', { loadGraphAndBriefText: async () => ({ graph: cold, briefText: brief }),
     readMostRecentPendingActions: async () => [] } as never);
   let request: Rec | undefined;
   let engineCalls = 0;
@@ -175,3 +177,101 @@ describe('A: Olumi\'s range is its reference, said the same way; the user\'s raw
     }
   });
 });
+
+/** The user's own figure for the price, through the chat writer, on the saved graph (it never mutates its input). */
+async function setPrice(g: Rec, brief: string, value: number): Promise<Rec> {
+  const price = nodeOf(g, PRICE);
+  const out = await createSetFactorValueHandler()({
+    context: { session_id: SID, stage: 'frame', request_id: 'edit', prior_turns: [], prior_facts: [], scenarioBriefText: brief, persistedGraph: null },
+    payload: { kind: 'message', scenario_id: SID, turn_id: 'edit', stage: 'frame', message: `Monthly price is £${value} per month.` },
+    requestId: 'edit', signal: new AbortController().signal, orientationText: '',
+    proposal: { handler_id: 'set_factor_value', entity: { id: price.id, kind: 'node', resolution_status: 'resolved', resolution_method: 'id_match' },
+      parameters: [{ name: 'value', value: { value, unit: '£ per month' }, source: 'user_explicit' }], cited_context_fields: [] },
+    graphForTurn: structuredClone(g),
+  } as never) as Rec;
+  return out.mutated_graph as Rec;
+}
+const edgeOf = (g: Rec, from: string, to: string): Rec => g.edges.find((e: Rec) => e.from === idOf(g, from) && e.to === idOf(g, to));
+/** A link's size and spread as the engine reads them, in the target's raw unit per the source's raw unit. */
+const rawSize = (g: Rec, from: string, to: string): number[] => {
+  const k = nodeOf(g, to).observed_state.cap / nodeOf(g, from).observed_state.cap;
+  return [edgeOf(g, from, to).strength.mean * k, edgeOf(g, from, to).strength.std * k];
+};
+/** Who sized a link and the words they used: everything on it but the reference-relative β of its natural size. */
+const said = (g: Rec, from: string, to: string): Rec => {
+  const { natural_effect: { strength_mean: _beta, ...words }, ...author } = edgeOf(g, from, to).provenance;
+  return { author, words };
+};
+
+// A second stated size, INTO the price, so the carry is proven at both ends of the factor whose reference moves.
+const SUPPLY = 'Supplier cost';
+const PASS = 'Every £1 of supplier cost is passed on as about £1 on the monthly price.';
+const B1_BRIEF = `${BRIEF} Our supplier cost is £8 a month. ${PASS}`;
+const withSupplier = (w: Rec): void => {
+  w.factors.push({ label: SUPPLY, role: 'observable', baseline_known: true, baseline_value: 8, unit: '£ per month', provenance: 'explicit', plausible_max: 20 });
+  w.links.push({ from: SUPPLY, to: PRICE, direction: 'positive', provenance: 'explicit', effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'explicit', source_quote: PASS });
+  w.statements.push(s(PASS, { kind: 'link', label: SUPPLY, to_label: PRICE }, 'effect', 1, '£ per month'),
+    s('Our supplier cost is £8 a month.', { kind: 'factor', label: SUPPLY }, 'level', 8, '£ per month'));
+};
+
+describe('BUDDY-A #3396: widening Olumi\'s reference keeps every stated size (B1); only this factor\'s stated bound is the user\'s (B2)', () => {
+  it('B1: the user\'s £60 widens Olumi\'s £40 reference and both stated sizes keep their raw effect and spread, saved, read cold and in the prepared Run', async () => {
+    const g = await build(BASE, B1_BRIEF, withSupplier);
+    const out = rawSize(g, PRICE, CANCEL);
+    const into = rawSize(g, SUPPLY, PRICE);
+    expect(out[0]).toBeCloseTo(2, 12);
+    expect(into[0]).toBeCloseTo(1, 12);
+    expect([edgeOf(g, PRICE, CANCEL), edgeOf(g, SUPPLY, PRICE)].map((e) => e.provenance.magnitude)).toEqual(['user_stated', 'user_stated']);
+    const after = await setPrice(g, B1_BRIEF, 60);
+    expect(nodeOf(after, PRICE).observed_state).toMatchObject({ raw_value: 60, cap: 75, frame_source: 'olumi_convention' });
+    // The coordinates moved (β 0.5 → 0.9375 out of the price, 0.5 → 0.2667 into it) …
+    expect(edgeOf(after, PRICE, CANCEL).strength.mean).toBeCloseTo(0.9375, 12);
+    expect(edgeOf(after, SUPPLY, PRICE).strength.mean).toBeCloseTo(0.5 * 40 / 75, 12);
+    // … and what the user said did not: author and words byte-equal, raw size and spread equal, saved and as the Run sends it.
+    for (const [from, to] of [[PRICE, CANCEL], [SUPPLY, PRICE]] as const) expect(said(after, from, to)).toEqual(said(g, from, to));
+    const request = (await prepared(after, B1_BRIEF))!;
+    for (const graph of [after, request.graph as Rec]) {
+      for (const [i, v] of rawSize(graph, PRICE, CANCEL).entries()) expect(v).toBeCloseTo(out[i]!, 12);
+      for (const [i, v] of rawSize(graph, SUPPLY, PRICE).entries()) expect(v).toBeCloseTo(into[i]!, 12);
+    }
+  });
+
+  it('B1 hold: where a stated size cannot be carried (£150 puts "2 per £1" past the contract on the widened reference), nothing is written', async () => {
+    const g = await build(BASE, B1_BRIEF, withSupplier);
+    const before = structuredClone(g);
+    await expect(setPrice(g, B1_BRIEF, 150)).rejects.toMatchObject({ details: { d1_code: 'GRAPH_INVARIANT_VIOLATED', reason: 'untouched_level_rescaled' } });
+    expect(g).toEqual(before);
+  });
+
+  it('B2: another quantity\'s £40 is no bound on the price; the reference stays Olumi\'s and the user\'s £60 widens it', async () => {
+    const brief = `${BRIEF} Our marketing budget is £40 per month.`;
+    const g = await build(BASE, brief);
+    expect(nodeOf(g, PRICE).observed_state).toMatchObject({ cap: 40, frame_source: 'olumi_convention' });
+    expect(nodeOf(await setPrice(g, brief, 60), PRICE).observed_state).toMatchObject({ raw_value: 60, cap: 75, frame_source: 'olumi_convention' });
+  });
+
+  it('B2 contrast: a range the brief states for the price ends at its bound, so it is the user\'s: not marked, and £60 above it is asked about', async () => {
+    const brief = `${BRIEF} Our monthly price has ranged between £10 and £40 a month.`;
+    const g = await build(BASE, brief);
+    expect(nodeOf(g, PRICE).observed_state).toMatchObject({ cap: 40 });
+    expect(nodeOf(g, PRICE).observed_state).not.toHaveProperty('frame_source');
+    await expect(setPrice(g, brief, 60)).rejects.toMatchObject({ details: { rejection_reason: 'value_exceeds_cap' } });
+  });
+
+  it('B2 contrast: today\'s price written at the drafted range\'s end is a point, not a bound: the range stays Olumi\'s', async () => {
+    const brief = BRIEF.replace('raise our monthly price from £20 to £25', 'cut our monthly price from £40 to £35');
+    const g = await build(BASE, brief, (w) => {
+      Object.assign(w.factors.find((f: Rec) => f.label === PRICE), { baseline_value: 40 });
+      w.options = [{ label: 'Keep £40', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] },
+        { label: 'Cut to £35', provenance: 'explicit', is_status_quo: null, changes: [],
+          interventions: [{ factor_label: PRICE, value: 35, value_kind: 'absolute', unit: '£ per month', provenance: 'explicit' }] }];
+    });
+    expect(nodeOf(g, PRICE).observed_state).toMatchObject({ raw_value: 40, cap: 40, frame_source: 'olumi_convention' });
+  });
+
+  it('B2 at U3: another quantity\'s 15 does not stop the user\'s limit of 30 widening Olumi\'s 15', async () => {
+    const g = await build({ ...BASE, cancellations: 15 }, `${BRIEF} We ship 15 parcels a week.`);
+    expect(nodeOf(g, CANCEL).observed_state).toMatchObject({ cap: 100, raw_value: 6, frame_source: 'olumi_convention' });
+  });
+});
+

@@ -454,7 +454,14 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
   if (restored.edges.length !== before.edges.length) return false;
   let rederived: unknown = { ...structuredClone(after), edges: structuredClone(before.edges) };
   for (const id of factorIds) rederived = frameDefaultedLinks(rederived, id).graph;
-  const resized = (rederived as EditableGraph).edges;
+  // ⭐ BUDDY-A #3396 B1: then every other link carried to the new frames by the shared plan, in the writer's own order
+  // (options held at the trusted base, so only the links are read here). A carry the plan refuses was never written.
+  const derived = rederived as EditableGraph;
+  const carried = preserveSiblingQuantities(before, { ...derived,
+    nodes: derived.nodes.map((node, i) => node.kind === 'option' ? structuredClone(before.nodes[i] ?? node) : node),
+    ...(Object.hasOwn(before, 'options') ? { options: structuredClone(before.options) } : {}) }, []);
+  if (carried.kind === 'refused') return false;
+  const resized = carried.graph.edges;
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]!;
     const was = before.edges[i]!;
