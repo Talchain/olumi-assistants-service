@@ -11,7 +11,7 @@ import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpret
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { plainWords } from '../../goal-target/hiring-times.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
-import { UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
 import { deadlineCardToIssue, deadlineOfferOpen, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
@@ -304,7 +304,7 @@ import { readReliesOnRisk, reliesOnRefereeOperations, reliesOnRiskLine } from '.
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import { preconditionRiskIds } from '../../../graph/inert-risk.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, isStatedLevelRange, isUserStatedRange, levelRangePointBasis, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_QUOTE_MAX, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
-import { isAmountStatedInBrief, findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -3873,11 +3873,12 @@ export function createAgentCapabilities(
     args: Parameters<NonNullable<AgentCapabilities['proposeGoalTarget']>>[1] & { value: number; unit: string }, before: GraphRead,
     direction: TargetDirection, inclusive: 'at_least' | 'at_most'): Promise<ToolResult> => {
     const invalid = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
-    const verified = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
+    // ⭐ LEAN CORE: the change's source and its figure are the user's by THE ONE RULE (`userStated`): their own typed words, the figure
+    // read from that span. A later ambition's source likewise.
     const ownSource = (quote: unknown): quote is string => typeof quote === 'string' && quote.trim() !== ''
-      && verified.some(m => wholeStatementIn(m, quote)) && !quoteIsNotTheUsersClaim(quote, quote);
+      && userStated({ quote }, chatTexts(ctx), { quantity: 'goal_change' }, { form: 'describes' }).origin === 'human';
     const source = args.goal_change_quote;
-    if (!ownSource(source) || !figureTheUserWrote(args.value, args.unit, source) || !isAmountStatedInBrief(args.value, args.unit, source)) return invalid('target_not_stated',
+    if (!ownSource(source) || userStated({ quote: source, value: args.value, unit: args.unit }, chatTexts(ctx), { quantity: 'target' }).origin !== 'human') return invalid('target_not_stated',
       'The goal change needs the complete verified human source and its figure/unit. Nothing was prepared.');
     if (args.later_ambition_quote !== undefined && !ownSource(args.later_ambition_quote)) return invalid('ambition_not_stated',
       'The earlier aim can be kept as history, but a later ambition needs its verified source. Nothing was prepared.');
@@ -6548,12 +6549,12 @@ export function createAgentCapabilities(
       if (args.later_ambition_quote !== undefined) {
         const quote = args.later_ambition_quote;
         const held = readGoalRecord(g.raw, goal.id)?.target;
-        const messages = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
-        laterAmbitionSource = messages.find(m => wholeStatementIn(m, quote));
+        // ⭐ LEAN CORE: the words, and the held figure in them, are the user's by THE ONE RULE (`userStated`).
+        const words = userStated({ quote }, chatTexts(ctx), { quantity: 'later_ambition' }, { form: 'describes' });
+        laterAmbitionSource = words.origin === 'human' ? words.statement.source : undefined;
         laterAmbitionSourceUnverified = laterAmbitionSource === undefined;
-        laterAmbitionUnverified = ctx.user_text_complete === false || laterAmbitionSourceUnverified
-          || typeof held?.raw !== 'number' || !figureTheUserWrote(held.raw, held.unit ?? '', quote)
-          || quoteIsNotTheUsersClaim(quote, quote);
+        laterAmbitionUnverified = ctx.user_text_complete === false || laterAmbitionSourceUnverified || typeof held?.raw !== 'number'
+          || userStated({ quote, value: held.raw, unit: held.unit ?? '' }, chatTexts(ctx), { quantity: 'later_ambition' }).origin !== 'human';
         // An uncertain later-role reading does not veto the valid current target. Keep it visibly Olumi's,
         // with the complete saved aims untouched; approval cannot establish the quote's source or binding.
         retainedAim = retainedTargetAim(g.raw, goal.id, quote, laterAmbitionUnverified, laterAmbitionSourceUnverified);

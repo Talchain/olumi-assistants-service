@@ -117,6 +117,8 @@ export type StatementsVerdict =
   | { readonly kind: 'refused'; readonly refusal: 'statement_not_found' | 'origin_unknown' | 'statement_malformed' | 'figure_not_in_quote' | 'different_conditions'; readonly detail: string };
 
 const MAX_STATEMENTS = 6;
+/** A quote may be the user's complete message (a goal change's whole source, a brief), never cut to fit. */
+const QUOTE_MAX = 4000;
 const trimmed = (v: unknown, max: number): string | undefined =>
   typeof v === 'string' && v.trim() !== '' && v.trim().length <= max ? v.trim() : undefined;
 const figure = (v: unknown, zero = false): number | undefined => (typeof v === 'number' && Number.isFinite(v) && (v > 0 || (zero && v === 0)) ? v : undefined);
@@ -243,7 +245,7 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
   const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
     ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
-  const quote = trimmed(claim?.quote, 400);
+  const quote = trimmed(claim?.quote, QUOTE_MAX);
   if (quote === undefined) return notTheirs('no_quote', 'No words of the user were quoted for this, so its source is not verified.');
   const given = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
   const form = STATEMENT_FORMS.find((f) => f === claim?.form) ?? opts.form
@@ -273,7 +275,7 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
 export function verifyStatement(given: StatementArgs | null | undefined, texts: StatementTexts, rules: StatementRules, current?: CurrentRecord): StatementVerdict {
   const malformed = (detail: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_malformed', detail });
   const same = rules.sameFigure ?? ((_q: string, a: number, b: number) => a === b);
-  const quote = trimmed(given?.quote, 400);
+  const quote = trimmed(given?.quote, QUOTE_MAX);
   const form = STATEMENT_FORMS.find((f) => f === given?.form && rules.forms.includes(f));
   if (quote === undefined || form === undefined) {
     return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
