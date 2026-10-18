@@ -92,6 +92,13 @@ describe('a limit named by what it is: the figure is its own only when the words
     expect(limitRows(w.read())).toEqual([expect.objectContaining({ constraint_id: 'gc-ovens-1', value: 2 })]);
   }, 120_000);
 
+  it('CONTROL: two limits in one sentence, each its own phrase ("… oven capacity limit to 2 ovens and the shelf capacity limit to 3 ovens") → the oven card for 2', async () => {
+    const { made } = await ovenLimitTurn('Raise the oven capacity limit to 2 ovens and the shelf capacity limit to 3 ovens.', (g) => {
+      g.nodes.push(structuredClone(SHELF_NODE)); g.goal_constraints = [structuredClone(OVENS), structuredClone(SHELVES)];
+    });
+    expect(made, JSON.stringify(made)).toEqual(expect.objectContaining({ ok: true }));
+  }, 120_000);
+
   it('CONTROL: the limit named by its own label needs no limit word (the ordinary attribution, unchanged)', async () => {
     const { made } = await ovenLimitTurn('Our oven capacity is at most 2 ovens now, not 3.');
     expect(made, JSON.stringify(made)).toEqual(expect.objectContaining({ ok: true }));
