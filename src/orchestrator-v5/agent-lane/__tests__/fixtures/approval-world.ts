@@ -12,6 +12,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { constructionOperationId } from '../../runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import type { SessionTurnWithContent } from '../../../session/conversation-content.js';
+import { shownBy } from './displayed.js';
 
 export type Rec = Record<string, any>;
 export const STAMP = '2026-10-18T09:00:00.000Z';
@@ -107,7 +108,8 @@ export async function route(w: ReturnType<typeof world>, fallback?: Respond): Pr
   let shown: Rec[] = [];
   return async ({ lost, ...over }: Rec, steps: Rec[] = []): Promise<Rec> => {
     script = [...steps];
-    const displayed = over.source === 'composer' && !('displayed_proposals' in over) ? { displayed_proposals: shown } : {};
+    const typed = (over.source === undefined || over.source === 'composer') && over.chip == null;
+    const displayed = typed && !('displayed_proposals' in over) ? { displayed_proposals: shown } : {};
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', turn_id: randomUUID(), scenario_id: w.sid, ...displayed, ...over } });
     expect(r.statusCode, r.body.slice(0, 2000)).toBe(200);
     const body = r.json() as Rec;
@@ -115,13 +117,7 @@ export async function route(w: ReturnType<typeof world>, fallback?: Respond): Pr
     return body;
   };
 }
-/** What the client shows after a reply (DGAI `displayedProposals`): each listed card at its revision, and any other approve button. */
-export const shownBy = (body: Rec): Rec[] => {
-  const listed = ((body._proposal_fields?.proposals ?? []) as Rec[]).map((p) => ({ proposal_id: p.proposal_id, revision: p.revision }));
-  const buttons = chips(body).filter((id) => id.startsWith('agent-approve-proposal:')).map((id) => id.slice('agent-approve-proposal:'.length))
-    .filter((id) => !listed.some((p) => p.proposal_id === id)).map((id) => ({ proposal_id: id }));
-  return [...listed, ...buttons];
-};
+export { shownBy };
 export const idOf = (body: Rec, tool: string): string => {
   const made = (body._agent.tool_calls as Rec[]).filter((c) => c.name === tool);
   expect(made, JSON.stringify(body._agent.tool_calls)).toEqual([expect.objectContaining({ ok: true })]);

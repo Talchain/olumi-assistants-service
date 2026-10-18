@@ -9,7 +9,11 @@
  * turn 2 is the case's typed message, answered by the REAL provider's replies, recorded once on this branch
  * (`CONSENT_GATE_RECORD=1`, `tests/fixtures/approval-consent-gate/`) and replayed here (0 provider calls). A replay whose
  * requests diverge from the recording fails loudly; it is never re-recorded to turn a failure green. SYNTHETIC wording.
+ * ⭐ BOUND TO WHAT WAS RECORDED (Codex BLOCK on #3420, 18 Oct, P1: altered input and bypassed negatives both passed 19/19):
+ * each recorded reply carries the normalised digest of the request it answered; a replay must send that same request, in
+ * the recorded order, for the case's frozen words, and must consume EVERY recorded reply of the case.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type {} from '../../../plugins/scenario-ownership.js';
 import type {} from '@fastify/rate-limit';
@@ -56,59 +60,98 @@ const CASES: readonly { id: string; kind: string; message: string; expect: Expec
   { id: 'p06', kind: 'genuine approval', message: 'Looks good, go for it.', expect: 'approves' },
 ];
 
-type Recorded = { name: string; status: number; body: string };
-const existing = (): { provider_calls: number; cases: Record<string, Recorded[]> } | undefined => {
+type Recorded = { name: string; status: number; body: string; request: string };
+type Fixture = { provider_calls: number; recorded_replies?: number; cases: Record<string, Recorded[]>; case_text: Record<string, string>; card_at_record: Record<string, string> };
+const existing = (): Fixture | undefined => {
   try { return JSON.parse(readFileSync(FIXTURE, 'utf8')); } catch { return undefined; }
 };
 // Replaying, the recording must exist (a missing one fails here). Recording, the cases not re-run this time are kept.
-const recording: Record<string, Recorded[]> = RECORD ? { ...(existing()?.cases ?? {}) } : JSON.parse(readFileSync(FIXTURE, 'utf8')).cases;
-let providerCalls = RECORD ? existing()?.provider_calls ?? 0 : 0;
+const frozen: Fixture = RECORD ? { provider_calls: 0, cases: {}, case_text: {}, card_at_record: {}, ...(existing() ?? {}) } : JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const recording: Record<string, Recorded[]> = { ...frozen.cases };
+const caseText: Record<string, string> = { ...frozen.case_text };
+/** Recording: this run's real provider calls (a case not re-run keeps its replies but adds no calls). */
+let providerCalls = 0;
 afterAll(() => {
   if (!RECORD) return;
   mkdirSync(FIXTURE_DIR, { recursive: true });
   writeFileSync(FIXTURE, `${JSON.stringify({ recorded_at: new Date().toISOString(), provider_calls: providerCalls,
-    note: 'Real provider replies for the consent gate, recorded once on wip/c5-approval-one-action. Never re-record to turn a failure green.',
-    cases: recording, card_at_record: cardAtRecord }, null, 1)}\n`);
+    recorded_replies: Object.values(recording).reduce((n, r) => n + r.length, 0),
+    note: 'Real provider replies for the consent gate, each with the normalised digest of the request it answered. Never re-record to turn a failure green.',
+    cases: recording, case_text: caseText, card_at_record: cardAtRecord }, null, 1)}\n`);
 });
 
-/** The waiting card's id in each case when recorded: its replay maps it to this world's card, by identity (ids hash the scenario). */
-const cardAtRecord: Record<string, string> = RECORD ? { ...(existingCards() ?? {}) } : JSON.parse(readFileSync(FIXTURE, 'utf8')).card_at_record ?? {};
-function existingCards(): Record<string, string> | undefined {
-  try { return JSON.parse(readFileSync(FIXTURE, 'utf8')).card_at_record; } catch { return undefined; }
-}
+/**
+ * The request's identity, without what differs on every run: ids minted from the scenario or a clock (uuid, prop_/gmh_,
+ * session, response and call ids) and the date and time. Everything the Agent reads besides stays in: the prompt, the tools,
+ * the user's words, the card. Hex digest (sha-256, 16).
+ */
+const DAY = /\b(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,? )?\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4}\b/g;
+const requestDigest = (req: Rec): string => createHash('sha256').update(JSON.stringify(req)
+  .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
+  .replace(/\b(prop|gmh|sess|resp|call|fc|msg|rs)_[0-9A-Za-z_-]{6,}/g, '<$1>')
+  .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?/g, '<time>')
+  .replace(/\d{4}-\d{2}-\d{2}/g, '<date>')
+  .replace(DAY, '<day>')).digest('hex').slice(0, 16);
 
-/** The case's provider: the recorded replies in order by request kind, or (recording) the real provider, kept. */
-function provider(id: string, card: { id?: string }): Respond {
+/** The waiting card's id in each case when recorded: its replay maps it to this world's card, by identity (ids hash the scenario). */
+const cardAtRecord: Record<string, string> = { ...frozen.card_at_record };
+
+/**
+ * The case's provider. Replaying: the case's recorded replies strictly IN ORDER, each only for the request it answered (same
+ * kind, same normalised digest), and `left()` must be 0 when the case ends (every recorded reply consumed). Recording: the
+ * real provider, each reply kept with its request's digest.
+ */
+function provider(id: string, card: { id?: string }): { respond: Respond; left: () => number; used: () => number } {
   const queue = RECORD ? [] : [...(recording[id] ?? [])];
+  let used = 0;
   if (RECORD) recording[id] = [];
   const nameOf = (req: Rec): string => String(req.text?.format?.name ?? 'turn');
-  return async (req, url, init) => {
+  const respond: Respond = async (req, url, init) => {
     const name = nameOf(req);
+    // Before the digest: the replay substitutes this world's card id for the recorded one, so the request carries it.
+    const request = requestDigest(req);
     if (!RECORD) {
-      const at = queue.findIndex((r) => r.name === name);
-      if (at < 0) throw new Error(`${id}: the replay diverged — no recorded "${name}" reply left`);
-      const [hit] = queue.splice(at, 1);
+      const hit = queue.shift();
+      if (hit === undefined) throw new Error(`${id}: the replay diverged — no recorded reply left for a "${name}" request`);
+      if (hit.name !== name || hit.request !== request) {
+        throw new Error(`${id}: the replay diverged at reply ${used + 1}: sent "${name}" ${request}, recorded "${hit.name}" ${hit.request}`);
+      }
+      used += 1;
       const recordedCard = cardAtRecord[id];
-      const body = recordedCard !== undefined && card.id !== undefined ? hit!.body.split(recordedCard).join(card.id) : hit!.body;
-      return new Response(body, { status: hit!.status });
+      const body = recordedCard !== undefined && card.id !== undefined ? hit.body.split(recordedCard).join(card.id) : hit.body;
+      return new Response(body, { status: hit.status });
     }
     if (card.id !== undefined) cardAtRecord[id] = card.id;
-    providerCalls += 1;
+    providerCalls += 1; used += 1;
     const res = await realFetch(url, init as Parameters<typeof fetch>[1]);
     const body = await res.text();
     if (res.status === 429) throw new Error(`${id}: provider 429 — the recording run aborts on the first one`);
-    (recording[id] ??= []).push({ name, status: res.status, body });
+    (recording[id] ??= []).push({ name, status: res.status, body, request });
     return new Response(body, { status: res.status });
   };
+  return { respond, left: () => queue.length, used: () => used };
+}
+
+/** The case's words as recorded: replaying, the case must send exactly these. */
+function frozenWords(id: string, message: string): void {
+  if (RECORD) { caseText[id] = message; return; }
+  expect(message, `${id}: the case's words are not the recorded ones`).toBe(caseText[id]);
+}
+/** Every recorded reply of the case was consumed by the case's own requests (a scripted or skipped case consumes none). */
+function consumedAll(id: string, p: { left: () => number; used: () => number }): void {
+  if (RECORD) return;
+  expect(p.left(), `${id}: recorded replies left unconsumed`).toBe(0);
+  expect(p.used(), `${id}: no recorded reply was consumed`).toBeGreaterThan(0);
 }
 
 /** The card the user sees: their 15% for the mixer, a new link with its level, scripted (no provider call). */
 async function oneCardWaiting(id: string) {
   const card: { id?: string } = {};
-  const w = world(); const turn = await route(w, provider(id, card));
+  const recorded = provider(id, card);
+  const w = world(); const turn = await route(w, recorded.respond);
   const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change for you to approve.')]);
   card.id = idOf(first, 'propose_option_interventions');
-  return { w, turn, b: card.id, first, session: first._agent.session_id as string };
+  return { w, turn, b: card.id, first, session: first._agent.session_id as string, recorded };
 }
 
 /** What the card's own button saves (no AI): the reference every genuine typed approval must equal. */
@@ -123,9 +166,11 @@ async function pressedReference() {
 // Never skipped: a missing recording fails the load above (a gate that runs nothing is no gate).
 describe('the consent gate: the real AI reading typed words with exactly ONE card waiting', () => {
   it.each(CASES.filter((c) => c.expect === 'no_approval'))('$id ($kind): "$message" → no approval, nothing written', async ({ id, message }) => {
-    const { w, turn, b, session } = await oneCardWaiting(id);
+    frozenWords(id, message);
+    const { w, turn, b, session, recorded } = await oneCardWaiting(id);
     const before = hash(w.read());
     const reply = await turn({ message, source: 'composer', agent_session_id: session });
+    consumedAll(id, recorded);
     const approvals = authorised(reply).filter((c) => c.mutated === true || c.ok === true);
     expect(approvals, `${id}: ${JSON.stringify(reply._agent.tool_calls)} — ${String(reply.assistant_text).slice(0, 400)}`).toEqual([]);
     expect(hash(w.read()), `${id}: the model moved`).toBe(before);
@@ -135,9 +180,11 @@ describe('the consent gate: the real AI reading typed words with exactly ONE car
   }, 180_000);
 
   it.each(CASES.filter((c) => c.expect === 'approves'))('$id ($kind): "$message" → saves exactly what the button saves, as a typed approval', async ({ id, message }) => {
+    frozenWords(id, message);
     const reference = await pressedReference();
-    const { w, turn, b, session } = await oneCardWaiting(id);
+    const { w, turn, b, session, recorded } = await oneCardWaiting(id);
     const reply = await turn({ message, source: 'composer', agent_session_id: session });
+    consumedAll(id, recorded);
     expect(authorised(reply), `${id}: ${JSON.stringify(reply._agent.tool_calls)} — ${String(reply.assistant_text).slice(0, 400)}`)
       .toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
     expect(w.read().edges).toEqual(reference.edges);

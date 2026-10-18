@@ -26,6 +26,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 import { asSent } from './helpers/as-sent.js';
+import { shownBy } from './fixtures/displayed.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -817,7 +818,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     // "model yes cannot write"): with only this card waiting, the user's typed yes, read by the Agent as approval of THIS
     // card, is its press — the same adoption and receipt. Two cards waiting bind nothing (approval-one-action.route.test.ts).
     script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('Included the suggestion; run analysis to compare all three options.')];
-    const plainYes = await turn({ message: 'yes' });
+    // The client sends the card it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    const plainYes = await turn({ message: 'yes', displayed_proposals: shownBy(turnResult) });
     expect(plainYes._agent.tool_calls.find((call) => call.name === 'authorise_change'))
       .toMatchObject({ ok: true, mutated: true });
     // Plain words (#3038, Paul's principle review): the receipt no longer tells the user to run what runs automatically.

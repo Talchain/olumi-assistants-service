@@ -177,6 +177,22 @@ describe('typed assent binds only to what the user was shown, and always keeps t
     expect(chips(reply)).toContain(approvalChipIdFor(b));
   }, 120_000);
 
+  it('a card shown at ANOTHER revision binds nothing; the same card at the revision held now does', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions');
+    const held = ((first._proposal_fields?.proposals ?? []) as Rec[]).find((p) => p.proposal_id === b);
+    expect(typeof held?.revision, 'the control: the card is listed with its revision').toBe('string');
+    const before = hash(w.read());
+    const stale = await turn({ message: 'Approved.', source: 'composer', agent_session_id: first._agent.session_id,
+      displayed_proposals: [{ proposal_id: b, revision: `${String(held!.revision)}-earlier` }] }, [call('authorise_change', { proposal_id: b }), say('Done.')]);
+    expect(authorised(stale).some((c) => c.mutated === true)).toBe(false);
+    expect(hash(w.read())).toBe(before);
+    const now = await turn({ message: 'Approved.', source: 'composer', agent_session_id: first._agent.session_id,
+      displayed_proposals: [{ proposal_id: b, revision: held!.revision }] }, [call('authorise_change', { proposal_id: b }), say('Done.')]);
+    expect(authorised(now)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
+  }, 120_000);
+
   it('a same-turn proposal cannot approve itself', async () => {
     const w = world(); let attempts = 0; let attemptedId: string | undefined;
     const turn = await routeOver(w, (req) => {

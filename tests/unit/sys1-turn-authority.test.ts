@@ -22,6 +22,7 @@ import { budgetFor, callEffortFor, type CallBudget } from '../../src/orchestrato
 import type { CallModel } from '../../src/orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { conversationPromptAlias } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { pairProviderInput } from '../../src/orchestrator-v5/agent-lane/provider-input-pairing.js';
+import { shownBy } from '../../src/orchestrator-v5/agent-lane/__tests__/fixtures/displayed.js';
 const sha = (v: string) => createHash('sha256').update(v).digest('hex');
 const jsonSha = (v: unknown) => sha(JSON.stringify(v));
 // Golden baselines captured before the production edit (SYS1-RUN1); evidence dumps write only when SYS1_EVIDENCE is set.
@@ -289,7 +290,9 @@ describe('SYS1 ordinary Responses transport', () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, message: ctx.user_turn_text } });
     expect(res.statusCode).toBe(200); expect(routeWrites).toBe(0);
     script = [call('authorise_change', { proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28' }, 'provider-changed-id')];
-    const next = await turn();
+    // The client sends the card it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
+      message: 'Explain the current model.', displayed_proposals: shownBy(res.json()) } });
     expect(next.statusCode).toBe(200);
     const body = next.json();
     expect(body._agent.tool_calls.find((c: { name: string }) => c.name === 'authorise_change'), JSON.stringify(body._agent.tool_calls) + body.assistant_text).toMatchObject({ mutated: true });
