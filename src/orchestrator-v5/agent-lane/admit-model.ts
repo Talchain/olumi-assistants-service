@@ -82,7 +82,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectKey, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -4691,13 +4691,10 @@ function admitOnce(
     const id = ids.get(f.label);
     if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
   }
-  const definitions = typeof brief === 'string' ? sourceMapOf((model as { statements?: unknown }).statements, brief).verified : undefined;
   for (const f of model.factors.filter((x) => unscaled.has(x.label))) {
-    // The user's verified definition is reused: only the scale is then asked.
-    const defined = definitions?.has(subjectKey({ kind: 'factor', label: f.label }, 'measure')) === true;
     loss.push({ field_path: `nodes[${ids.get(f.label) ?? f.label}].observed_state.magnitude_question`, before: { value: f.baseline_value, unit: null },
       after: null, severity: 'warn', reason: `Olumi holds ${sayFigureWithoutRounding(f.baseline_value as number, '')} for \u201c${f.label}\u201d, with its `
-        + (defined ? 'scale unresolved. What scale, if any, does it use?' : 'meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?') } as RepairEntry);
+        + 'meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?' } as RepairEntry);
   }
   for (const d of defaultedFrames.filter((x) => !unscaled.has(x.label))) {
     // "Your own figures" only when a figure the user stated fed the frame; when

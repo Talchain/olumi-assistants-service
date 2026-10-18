@@ -26,7 +26,6 @@ const PERCENT = 'Our queue strain index is 45%.';
 const DEFINED = 'The queue strain index is the share of next week\'s appointment slots already booked.';
 const SETTING = 'Evening appointments would bring the queue strain index to 70 points.';
 const QUESTION = 'Olumi holds 45 for “Queue strain index”, with its meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?';
-const SCALE_ONLY = 'Olumi holds 45 for “Queue strain index”, with its scale unresolved. What scale, if any, does it use?';
 const ID = 'queue_strain_index';
 const statement = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null): Rec =>
   ({ quote, subject: { kind: 'factor', to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null });
@@ -150,11 +149,11 @@ describe('W27: a user figure with no unit or encoding stays unresolved, out of e
     expect(evening?.interventions?.[ID]).toBe(70);
   });
 
-  it('RED at 9ddf9676 (BUDDY-A B2): a definition alone gives the meaning, not the encoding — unresolved, and only the scale is asked', async () => {
+  it('RED at 9ddf9676 (BUDDY-A B2): a definition alone gives the meaning, not the encoding — unresolved, and the signed question is asked', async () => {
     const { graph, out, brief } = await build({ definition: true });
     expect(node(graph).observed_state).toEqual({ value: 45, user_material_unverified: true });
     expect(node(graph).scale_frame).toBeUndefined();
-    expect(asked(out)).toEqual([SCALE_ONLY]);
+    expect(asked(out)).toEqual([QUESTION]);
     const run = await prepared(graph, brief);
     expect(run.mayRun).toBe(false);
     expect(run.request).toBeUndefined();
