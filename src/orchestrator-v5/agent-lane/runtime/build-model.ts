@@ -185,10 +185,11 @@ export function strictForTheDrafter(schema: Record<string, unknown>, { providerB
 
 export function buildCandidateSchema(): Record<string, unknown> {
   const provenance = { type: 'string', enum: ['explicit', 'inferred', 'ai_proposed'] };
-  // ⭐ THE INTRODUCTION CLAIM (AIE packet 6e52e896 `introduction.description`, byte for byte; DL 14 Oct): who introduced an
+  // ⭐ THE INTRODUCTION CLAIM (AIE candidate cbb6db4e `replace_one_existing_field_description`, byte for byte, replacing packet
+  // 6e52e896's text; DL-3 18 Oct: a new item stays ai_proposed even when its size is unknown): who introduced an
   // option, factor, risk or outcome, never who supplied a value (`baseline_provenance`, `effect_provenance` keep the bare enum).
-  // The drafter's claim only: it is not carried to the graph (the AIE's consumer condition: no wider `proposed_by` yet).
-  const introducedBy = { ...provenance, description: "Who introduced this item, independently of who supplied its values. \u201cexplicit\u201d: it is stated in the retained user or source material. \u201cinferred\u201d: it interprets that material, or its introduction is uncertain. \u201cai_proposed\u201d: a genuinely new item you are adding beyond that material. Reformulating a supplied purpose, condition or concern is not a new AI addition. Use \u201cai_proposed\u201d only for your own additions after reading the relevant source; absence of a label or figure is not evidence. If source is missing, unread or ambiguous, use \u201cinferred\u201d and preserve that uncertainty. Label your own additions as Olumi\u2019s suggestions; approval does not change their origin or approve their numbers." };
+  // Read by admission as explicit-vs-not for factors and risks; for options, ai_proposed marks the option Olumi's (olumi-option-marker.ts).
+  const introducedBy = { ...provenance, description: "Identify who introduced this item, separately from confidence in it or the source of its numerical values. Use explicit for an item directly supplied in retained source; inferred for an interpretation or reformulation of a supplied item, or genuinely unresolved introduction; ai_proposed for a new alternative, factor, mechanism or risk you introduce beyond that source. A new hypothesis remains ai_proposed even when its plausibility, likelihood or size is unknown. Preserve supplied conditions, concerns and dissent as their source\u2019s material; rephrasing them does not make them your addition. Read the relevant source before classifying: missing, unread, conflicting or ambiguous source remains inferred, never ai_proposed by default. Keep Olumi additions visibly provisional; approval changes neither authorship nor numerical support." };
   const obj = (properties: Record<string, unknown>, required: string[]) => ({
     type: 'object', additionalProperties: false, properties, required,
   });
