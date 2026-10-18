@@ -167,7 +167,7 @@ export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, af
  * A goal target's FULL identity, as adoption compares it: the quantity (read as every identity key reads it), comparator, signed
  * figure, unit and frame. The one key a retry is held to (`keepsEveryUserStatedIdentityWhenGoalRechosen`, `keepsTheFirstVerifiedTarget`).
  */
-export function goalTargetIdentity(target: { readonly metric: unknown; readonly operator: unknown; readonly value: unknown; readonly unit?: unknown; readonly frame?: unknown }): string {
+export function goalTargetIdentity(target: { readonly metric?: unknown; readonly operator?: unknown; readonly value?: unknown; readonly unit?: unknown; readonly frame?: unknown }): string {
   return [keyLabel(target.metric), target.operator, target.value, target.unit ?? '', target.frame ?? ''].join('|');
 }
 
