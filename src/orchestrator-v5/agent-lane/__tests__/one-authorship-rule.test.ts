@@ -95,6 +95,9 @@ describe('the one rule: whose value it is', () => {
     // CONTRAST: the span with its bound, read as the bound, is theirs; the complete line stays the source.
     expect(userStated({ quote: 'at least 7 months', value: 7, form: 'lower_bound', unit: 'months' }, t, SUBJECT))
       .toMatchObject({ origin: 'human', statement: { form: 'lower_bound', low: 7, source: 'Hiring takes at least 7 months here.' } });
+    // CONTRAST: a bound on the SAME figure in another sentence of the line is not this span's bound.
+    const line = texts('We need attendance of at least 55% by March. A manager thinks more staff could add between 40 and 55 points.');
+    expect(userStated({ quote: 'A manager thinks more staff could add between 40 and 55 points.', low: 40, high: 55 }, line, SUBJECT).origin).toBe('human');
   });
 
   it('sign reads from the span: a net loss states its negative; a gross count never does', () => {

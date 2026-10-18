@@ -294,6 +294,19 @@ export function speechReading(quote: string): { readonly text: string; readonly 
   return { text, inSpeech: (at) => insideSpeech(text, at) };
 }
 
+/**
+ * ⭐ LEAN CORE: the sentence of `message` that holds the user's span `quote` (`usersSpanIn`), in the one spelling: from the last . ! ? ;
+ * or line break before it to the first at or after its end. Undefined when the span is not theirs there.
+ */
+export function sentenceAroundSpan(message: string, quote: unknown): string | undefined {
+  const at = usersSpanIn(message, quote);
+  if (at < 0 || typeof quote !== 'string') return undefined;
+  const text = plainQuote(message), end = at + plainQuote(quote).length;
+  const start = Math.max(...['.', '!', '?', ';', '\n'].map((m) => text.lastIndexOf(m, at - 1))) + 1;
+  const stop = text.slice(Math.max(at, end - 1)).search(/[.!?;\n]/u);
+  return text.slice(start, stop < 0 ? text.length : Math.max(at, end - 1) + stop + 1).trim();
+}
+
 /** ⭐ LEAN CORE: the user's own words `later` (each a later message) withdraw or disown their estimates, so an earlier span is not current. */
 export function withdrawnLater(later: readonly string[]): boolean {
   return later.some((m) => clausesOf(plainQuote(m)).some(disowns));

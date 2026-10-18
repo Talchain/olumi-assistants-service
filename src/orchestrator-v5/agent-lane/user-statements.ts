@@ -12,7 +12,7 @@
 import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
-import { quoteIsNotTheUsersClaim, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
+import { quoteIsNotTheUsersClaim, sentenceAroundSpan, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 import { comparatorTheUserWroteFor, figureTheUserWroteSpan } from './stated-by-user.js';
 import { unitPhraseFamily, unitPhraseHead } from './unit-conflict.js';
@@ -347,7 +347,9 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     detail: `In “${quote}”, ${figureWords} is in another speaker's quoted words, so it is not the user's own figure. Nothing was prepared.` });
   // ⛔ A span cut from inside a line never drops the bound the user wrote on its own figure (the confirmed widening's limit; ebd S2 row):
   // "7 months" out of "At least 7 months" is not their point. The estate's one comparator reader reads the line and the span alike.
-  const dropsBound = (figure: number): boolean => source !== quote && comparatorTheUserWroteFor(source, Math.abs(figure)) !== null
+  // Read in the span's own sentence of its line only: the same figure elsewhere on the line ("at least 55%" in another sentence) is not its bound.
+  const spanSentence = sentenceAroundSpan(source, quote);
+  const dropsBound = (figure: number): boolean => spanSentence !== undefined && comparatorTheUserWroteFor(spanSentence, Math.abs(figure)) !== null
     && comparatorTheUserWroteFor(quote, Math.abs(figure)) === null;
   const boundDropped = (figureWords: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_not_found',
     detail: `“${quote}” leaves out the bound the user wrote on ${figureWords} (“${source}”), so it is not their statement. Quote their words with it. Nothing was prepared.` });
