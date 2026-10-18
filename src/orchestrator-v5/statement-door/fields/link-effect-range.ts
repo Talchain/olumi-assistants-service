@@ -8,7 +8,7 @@
  * record, and the link's size is still asked (an AI-omitted negation cannot be told apart from a genuine range). Pure.
  */
 import { linkEffectEndUnits, statedInOneOf } from '../../system-events/link-effect-edit.js';
-import { figuresWritten } from '../../agent-lane/construction-source-map.js';
+import { figuresWritten } from '../../agent-lane/user-statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';

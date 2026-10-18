@@ -270,6 +270,24 @@ export function speechReading(quote: string): { readonly text: string; readonly 
   return { text, inSpeech: (at) => insideSpeech(text, at) };
 }
 
+/**
+ * ⭐ LEAN CORE, THE ONE AUTHORSHIP RULE's span check (DL-3 18 Oct; `userStated`, user-statements.ts): `quote` occurs literally, as
+ * whole words, in `message`, and is the user's own words there: neither end sits inside paired quotation marks (another speaker's
+ * words), and no speech a single mark may open precedes its end in its paragraph (#3363's fail-safe, kept). A whole statement
+ * (`wholeStatementIn`) is the case where the span is its own sentence. The first such span's index in `plainQuote(message)`, or -1.
+ */
+export function usersSpanIn(message: string, quote: unknown): number {
+  const said = typeof quote === 'string' ? plainQuote(quote) : '';
+  const text = plainQuote(message);
+  if (said === '') return -1;
+  return quoteSpansIn(text, said).find((at) => !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
+    && !/(?:^|[\s:([\u2014\u2013-])'\p{L}/u.test(paragraphTo(text, at + said.length))) ?? -1;
+}
+
+/** ⭐ LEAN CORE: the user's own words `later` (each a later message) withdraw or disown their estimates, so an earlier span is not current. */
+export function withdrawnLater(later: readonly string[]): boolean {
+  return later.some((m) => clausesOf(plainQuote(m)).some(disowns));
+}
 /** The text of `at`'s paragraph up to `at`. */
 const paragraphTo = (text: string, at: number): string => text.slice(text.lastIndexOf('\n', at - 1) + 1, at);
 /** `at` lies inside paired double-marked speech that opened before it in its paragraph. */

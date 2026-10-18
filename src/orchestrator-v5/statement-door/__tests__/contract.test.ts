@@ -48,7 +48,10 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
     const one = verifyStatement({ quote: SAID, form: 'point', value: 30 }, { now: SAID }, rules);
     expect(one).toMatchObject({ kind: 'verified', statement: { quote: SAID, low: 30, high: 30, speaker: 'user', reading: 'olumi' } });
     expect(verifyStatements([{ quote: SAID, form: 'point', value: 30 }], { now: SAID }, rules)).toEqual({ kind: 'verified', statements: [(one as Rec).statement] });
-    expect(verifyStatement({ quote: 'a 30% chance it slips', form: 'point', value: 30 }, { now: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'statement_not_found' });
+    // ⭐ LEAN CORE (DL-3 18 Oct, PL-0048 3): a literal span of the user's sentence is theirs, kept with the COMPLETE line as its source.
+    expect(verifyStatement({ quote: 'a 30% chance it slips', form: 'point', value: 30 }, { now: SAID }, rules))
+      .toMatchObject({ kind: 'verified', statement: { quote: 'a 30% chance it slips', source: SAID } });
+    expect(verifyStatement({ quote: 'a 30% chance it slipped', form: 'point', value: 30 }, { now: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'statement_not_found' });
     expect(verifyStatement({ quote: SAID, form: 'point', value: 30 }, { now: 'Yes.', unverified: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'origin_unknown' });
     expect(verifyStatement({ quote: SAID, form: 'point', value: 40 }, { now: SAID }, rules)).toMatchObject({ kind: 'refused', refusal: 'figure_not_in_quote' });
   });

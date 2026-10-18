@@ -10,7 +10,7 @@
  */
 import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { verifyStatement, type StatementTexts, type UserStatement } from '../agent-lane/user-statements.js';
-import { figuresWritten } from '../agent-lane/construction-source-map.js';
+import { figuresWritten } from '../agent-lane/user-statements.js';
 import { doorRowFor } from './role-table.js';
 import type { DoorSubject } from './subject.js';
 import { statementBoundTo, type DoorContext } from './statements.js';

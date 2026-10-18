@@ -9,8 +9,10 @@
  * approval never makes the reading human-authored. Statements about the same quantity under the same conditions combine
  * only by their ends: a bound is never turned into a point, and Olumi adds no spread beside a user's bound. Pure.
  */
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
-import { wholeStatementIn } from '../goal-target/input-claim-context.js';
+import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { authorshipOf } from '../../cee/provenance/provenance-of.js';
+import { quoteIsNotTheUsersClaim, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 
 /**
@@ -81,6 +83,11 @@ export interface StatementTexts {
   readonly conversation?: string | null;
   /** Retained words whose origin is not verified (reseeded history): never a source. */
   readonly unverified?: string | null;
+  /**
+   * The verified typed messages in order, this turn's last (the route's `verified_user_messages`), when the caller has them: a span is
+   * read in the message that holds it, and a LATER message that withdraws the user's estimates makes it no longer theirs.
+   */
+  readonly messages?: readonly string[];
 }
 
 export interface StatementRules {
@@ -134,10 +141,129 @@ export type StatementVerdict =
   | Extract<StatementsVerdict, { kind: 'refused' }>;
 
 /**
+ * ⭐ THE ONE RULE's source check (lean core): `'theirs'` when `quote` is literally the user's own words in a verified typed message
+ * (`usersSpanIn`: never cut from another speaker's quotation marks), that message does not report it as Olumi's claim, dispute it or
+ * disown it (`quoteIsNotTheUsersClaim`), and no LATER message withdraws the user's estimates (`withdrawnLater`). `'retained'`: only in
+ * retained words of unknown origin. `'not_their_claim'`: written, but not theirs. `'absent'`: not written.
+ */
+function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentRecord): 'theirs' | 'retained' | 'not_their_claim' | 'absent' {
+  const messages = texts.messages !== undefined && texts.messages.length > 0
+    ? texts.messages : [texts.conversation, texts.now].filter((t): t is string => typeof t === 'string' && t !== '');
+  // ⛔ PL-0048 (2): the subject's account as the user last CORRECTED it (the correction door's record, read, never re-derived). A span
+  // from a message before that correction is current only inside one of the record's own statements (the kept spans, the correction).
+  const corrected = current?.attest?.recorded_by === 'correction' ? current.statements : undefined;
+  const correctedAt = corrected === undefined ? -1
+    : messages.reduce((at, m, i) => (corrected.some((st) => usersSpanIn(m, st.quote) >= 0) ? i : at), -1);
+  const keptByCorrection = corrected !== undefined && corrected.some((st) => plainQuoteWords(st.quote).includes(plainQuoteWords(quote)));
+  let found = false;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (usersSpanIn(messages[i]!, quote) < 0) continue;
+    found = true;
+    if (corrected !== undefined && i < correctedAt && !keptByCorrection) continue;
+    if (!quoteIsNotTheUsersClaim(messages[i]!, quote) && !withdrawnLater(messages.slice(i + 1))) return 'theirs';
+  }
+  if (found) return 'not_their_claim';
+  return typeof texts.unverified === 'string' && usersSpanIn(texts.unverified, quote) >= 0 ? 'retained' : 'absent';
+}
+
+/**
+ * The figures a span writes: every single figure, in digits or spelled ("six mid-weight developers", by the one cardinal parser),
+ * and every range it writes as one (`findJoinedRanges`: two figures JOINED as a range, low below high).
+ * ⭐ G3 (TL 11:18Z): that join is a provenance check of the quote, not a meaning reader. "Cut legacy 25% to 15%" is high to low
+ * and "six developers and 25% legacy" is not joined, so neither is a range; whether a joined pair is a range or a change is the
+ * AI's own `form`. Unjoined figures never pair.
+ */
+export function figuresWritten(quote: string): readonly { readonly low: number; readonly high: number }[] {
+  const spelled = [...quote.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) => {
+    const magnitude = parseCardinalAmount(m[0]);
+    return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
+  });
+  const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
+  return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
+    ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
+    ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
+}
+
+/**
+ * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15: the same
+ * figure with the opposite direction word, where the words state a NET flow. With no such words a negative is never the user's.
+ * AIE 6187351293 (2a scope): "We lose 15 members a month" can be a gross count of 15 lost, so only a net flow states −15.
+ */
+const LOSS_BEFORE = /\b(?:(?:losing|lose|loses|lost) (?:a )?net|(?:a )?net (?:loss|outflow|decline|drop) of|(?:a )?deficit of)(?: (?:about|around|roughly|nearly|almost|some|over))?\s*$/iu;
+export function statesLossBefore(quote: string, index: number): boolean {
+  return LOSS_BEFORE.test(quote.slice(0, index));
+}
+
+/**
+ * The span writes `unit` for its figure: straight after it (`unitWrittenAfter`), or, for money, the same currency on that amount
+ * ("£54k" is £ and £k). A statement with no figure writes its unit only as words after nothing, so never.
+ */
+function unitWrittenIn(quote: string, end: number | undefined, unit: string, scale: number): boolean {
+  if (end === undefined) return false;
+  if (unitWrittenAfter(quote, end, unit)) return true;
+  const code = readCurrencyUnitWithQualifiers(unit).currencyCode;
+  return typeof code === 'string' && findStatedAmounts(quote).some((a) => a.kind === 'currency' && a.currencyCode === code
+    && (Math.abs(a.magnitude) === Math.abs(end) || Math.abs(a.magnitude) === Math.abs(end * scale)));
+}
+
+/** The subject's current recorded account (`userStatementFor`, statements.ts), as the rule reads it: never written here. */
+export interface CurrentRecord {
+  readonly statements: readonly Pick<UserStatement, 'quote'>[];
+  readonly attest?: Readonly<Record<string, string | number | boolean>>;
+}
+
+/** What the AI cites for ONE value or statement: its span of the user's words, and its own reading of it. */
+export type StatedClaim = StatementArgs;
+export type StatedVerdict =
+  /** The user's: their words, figure and sign. `unitIsUsers`: the span writes the AI's unit straight after the figure. */
+  | { readonly origin: 'human'; readonly statement: UserStatement; readonly unitIsUsers: boolean }
+  /**
+   * ⛔ PL-0048 (1): a missing citation is NOT Olumi's authorship. No span, a span that is not the user's current claim, or a figure the
+   * span does not write: `unknown` (source not verified). `ai` ONLY with positive evidence of Olumi's generation, through the writer's
+   * existing carrier (`opts.ownEstimate`: the tool's own-estimate flag, or an Olumi-proposed record). Never relabelled either way.
+   */
+  | { readonly origin: 'ai' | 'unknown'; readonly refusal: StatedRefusal; readonly detail: string };
+export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['refusal'] | 'no_quote';
+
+/**
+ * ⭐⭐ THE ONE AUTHORSHIP RULE (lean core, DL-3 18 Oct 2026; Paul's binding rule 2: no per-field matcher). A value or statement is the
+ * USER'S only when the AI cites a span that is literally the user's own typed words (`usersOwnSpan`) and the value, unit and sign read
+ * directly from that span (`figuresWritten`; a money unit's own scale letter reads "£54k" as 54 £k; the unit only where it is written
+ * straight after the figure). Anything else is NOT the user's: its source is unknown, and it is Olumi's only where the writer
+ * positively declares Olumi's own estimate (`ownEstimate`; PL-0048). Approval is recorded separately and never rewrites this origin.
+ * A span the user's later correction retired (`current`, the subject's correction record) is not theirs again. The form is the AI's reading
+ * (`claim.form`), else the writer's field (`opts.form`), else what the claim gives (two ends: a range; one figure: a point; none: words
+ * that describe). Every writer that records a value or statement as the user's calls this, and nothing else. Pure.
+ */
+export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
+  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentRecord } = {}): StatedVerdict {
+  // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
+  const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
+    ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
+  const quote = trimmed(claim?.quote, 400);
+  if (quote === undefined) return notTheirs('no_quote', 'No words of the user were quoted for this, so its source is not verified.');
+  const given = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
+  const form = STATEMENT_FORMS.find((f) => f === claim?.form) ?? opts.form
+    ?? (given(claim?.low) && given(claim?.high) ? 'range' : given(claim?.value) ? 'point' : 'describes');
+  const unit = trimmed(claim?.unit, 60);
+  const scale = unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
+  const v = verifyStatement({ ...claim, quote, form }, texts, { subject, unit: unit ?? '', forms: STATEMENT_FORMS, figuresIn: figuresWritten,
+    allowsZero: true, sameFigure: (_q, a, b) => a === b || (scale > 1 && Math.abs(a * scale - b) <= 1e-9 * Math.max(1, Math.abs(b))) }, opts.current);
+  if (v.kind === 'refused') return notTheirs(v.refusal, v.detail);
+  const { unit: _read, ...read } = v.statement;
+  // An end read at the unit's own scale ("£54k" for 54 £k) is kept in the AI's unit, the figure the user wrote.
+  const claimed = [claim?.value, claim?.low, claim?.high].filter((n): n is number => typeof n === 'number');
+  const inUnit = (n: number | undefined): number | undefined => (n !== undefined && scale > 1 && !claimed.includes(n) && claimed.some((c) => Math.abs(c * scale - n) <= 1e-9 * Math.max(1, Math.abs(n))) ? n / scale : n);
+  const rest = { ...read, ...(read.low !== undefined ? { low: inUnit(read.low)! } : {}), ...(read.high !== undefined ? { high: inUnit(read.high)! } : {}) };
+  const unitIsUsers = unit !== undefined && unitWrittenIn(quote, rest.high ?? rest.low, unit, scale);
+  return { origin: 'human', statement: unitIsUsers ? { ...rest, unit } : rest, unitIsUsers };
+}
+
+/**
  * ⭐ ONE statement, verified or refused on its own (SYSTEM 1's door and SYSTEM 2's construction map, PROMPT sys2 §2): a quote
  * must stand as a WHOLE statement in the user's own verified words, and its figure must be one the quote states.
  */
-export function verifyStatement(given: StatementArgs | null | undefined, texts: StatementTexts, rules: StatementRules): StatementVerdict {
+export function verifyStatement(given: StatementArgs | null | undefined, texts: StatementTexts, rules: StatementRules, current?: CurrentRecord): StatementVerdict {
   const malformed = (detail: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_malformed', detail });
   const same = rules.sameFigure ?? ((_q: string, a: number, b: number) => a === b);
   const quote = trimmed(given?.quote, 400);
@@ -145,12 +271,14 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (quote === undefined || form === undefined) {
     return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
   }
-  // T2A5's one quote check (`wholeStatementIn`): a WHOLE statement of a verified message, this one or an earlier one.
-  const whole = (t: string | null | undefined): boolean => typeof t === 'string' && wholeStatementIn(t, quote);
-  if (!whole(texts.now) && !whole(texts.conversation)) {
-    return whole(texts.unverified)
+  // ⭐ THE ONE AUTHORSHIP RULE (lean core, DL-3 18 Oct): the span is the user's own words, literally, in a verified message.
+  const said = usersOwnSpan(texts, quote, current);
+  if (said !== 'theirs') {
+    return said === 'retained'
       ? { kind: 'refused', refusal: 'origin_unknown', detail: `The words “${quote}” are retained, but their origin is not verified, so nothing was prepared. Ask the user to confirm that figure in their own words.` }
-      : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not a whole statement in the user's own messages, so nothing was prepared. Quote their complete statement, verbatim, from any of their messages.` };
+      : said === 'not_their_claim'
+        ? { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is reported as Olumi’s, disputed, or withdrawn in the user’s own messages, so it is not their statement and nothing was prepared.` }
+        : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not in the user's own words, so nothing was prepared. Quote their words, verbatim, from any of their messages.` };
   }
   const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
   const qualifier = trimmed(given?.qualifier, 80);
