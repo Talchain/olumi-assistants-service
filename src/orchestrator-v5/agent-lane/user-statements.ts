@@ -86,10 +86,10 @@ export interface StatementArgs {
 }
 
 /**
- * ⭐ LEAN CORE P2 (DL-3 18 Oct 2026; AIE sign-off pending): ONE schema fragment, the AI's own reading of whose claim a quote is, for every
+ * ⭐ LEAN CORE P2 (DL-3 18 Oct 2026; AIE text signed exactly, AIE-SPEAKER-AND-USER-QUOTE-TEXT-20261018-v1): ONE schema fragment, the AI's own reading of whose claim a quote is, for every
  * statement the AI cites (construction's draft statements, the statement door, team time, assumptions). Read by `verifyStatement`.
  */
-export const QUOTE_SPEAKER_WORDS = 'Whose claim these words are, as you read them: "user" for the user\u2019s own; "other" when the user reports someone else\u2019s words or view, with or without quotation marks (for example "A colleague said: we lose 5% a month"); "unknown" when you cannot tell. Only the user\u2019s own words are recorded as theirs; reported words stay with their speaker.';
+export const QUOTE_SPEAKER_WORDS = "Identify who asserts the particular claim being recorded, not merely who sent the message: \"user\" for the user\u2019s own assertion; \"other\" for another speaker\u2019s assertion reported by the user, with or without quotation marks; \"unknown\" when attribution cannot be established. Quoting an entire report does not transfer its embedded claim to the user. A user\u2019s instruction to correct or withdraw quoted material is their instruction; the embedded claim keeps its own speaker and stance. Preserve the source, qualifications, conditions and uncertainty. This field is Olumi\u2019s interpretation of attribution, not proof of user authorship or authority to write.";
 export const QUOTE_SPEAKER = { type: 'string', enum: ['user', 'other', 'unknown'], description: QUOTE_SPEAKER_WORDS } as const;
 
 export interface StatementTexts {
