@@ -302,13 +302,19 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
    * sentences above were computed at admission and never said: the build's one list of what it says (`not_represented`) left out
    * both codes. The build now says them, once, in the AIE's words.
    */
-  it('⭐ A3: the build SAYS the user\'s range beside Olumi\'s estimate, and why an estimate in another unit was set aside', async () => {
-    expect(await said(draft())).toContain(beside(admitted(draft()))!.reason);
-    expect(await said(draft({ pounds: true }), BRIEF_LB)).toContain(otherUnitWords(RANGE_LB, 'kg'));
+  /** Every sentence the build says about THIS link's range, beside or set aside (exact, so a repeat shows). */
+  const aboutPre = (lines: readonly string[]): string[] => lines.filter((x) => x.startsWith(`"${PRE}" → "${WASTE}": `));
+  it('⭐ A3: the build SAYS the user\'s range beside Olumi\'s estimate, once, and why an estimate in another unit was set aside, once', async () => {
+    expect(aboutPre(await said(draft()))).toEqual([beside(admitted(draft()))!.reason]);
+    expect(aboutPre(await said(draft({ pounds: true }), BRIEF_LB))).toEqual([otherUnitWords(RANGE_LB, 'kg')]);
   });
 
-  it('A3 CONTRAST: a denied range, and a range stated for another link, say nothing beside this estimate', async () => {
-    expect((await said(draft({ negated: true }))).filter((x) => x.includes(`"${PRE}" → "${WASTE}"`) && x.includes('as the brief puts it'))).toEqual([]);
-    expect((await said(draft({ on: DEL }))).filter((x) => x.includes(`"${PRE}" → "${WASTE}"`) && x.includes('as the brief puts it'))).toEqual([]);
+  it('A3 CONTRAST: the user\'s own point, a denied range, and a range stated for another link say nothing beside this link', async () => {
+    const POINT = 'In our trial the pre-order system in use cut daily food waste by 5 kg a day.';
+    const d = draft();
+    const own = { ...d, links: d.links.map((l: Rec) => (l.from === PRE ? { ...l, effect_amount: -5, effect_provenance: 'explicit', basis: null, source_quote: POINT } : l)) };
+    expect(aboutPre(await said(own, `${BRIEF} ${POINT}`))).toEqual([]);
+    expect(aboutPre(await said(draft({ negated: true })))).toEqual([]);
+    expect(aboutPre(await said(draft({ on: DEL })))).toEqual([]);
   });
 });

@@ -2463,7 +2463,7 @@ export async function buildModelFromBrief(
     // ⭐ The goal's own verified target statements (the one statement contract, `construction-source-map.ts`): with no deadline
     // claimed, a period is the goal's deadline only inside one of them (AIE 6184383302).
     const goalMetric = typeof candidate.goal?.metric === 'string' ? candidate.goal.metric : '';
-    const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf(draftStatements(candidate), brief)
+    const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf((candidate as { statements?: unknown }).statements, brief)
       .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
     const goalValue = candidate.goal?.value;
     let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, goalTargetQuotes,
