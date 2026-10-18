@@ -226,12 +226,16 @@ describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words 
 
   // ⭐ P2 (DL-3 18 Oct): an UNMARKED report has no quotation marks for the host to read, so the AI's OWN speaker reading decides
   // (`QUOTE_SPEAKER`, the drafter's statement field). Never a host word list.
-  it('an unmarked report the AI reads as another speaker\'s ("A colleague said: we lose 5% of members a month"): not the user\'s figure; the words are kept, speaker unknown', async () => {
+  it('an unmarked report the AI reads as another speaker\'s ("A colleague said: we lose 5% of members a month"): not the user\'s figure; the claim is kept WITH its figure, speaker unresolved', async () => {
     const line = 'A colleague said: we lose 5% of members a month.';
     const { model, brief } = withLoss(line, line, 'other');
     const g = await saved(model, brief);
     expect(userStatementsOn(lossNode(g)), 'never the user\'s figure').toEqual([]);
-    expect(claimRecordsOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
+    // ⭐ CLAIM RECORD at construction (plan converged step 2): a relayed claim keeps its bounds; with no party named its owner stays
+    // unresolved — never the user's, never flattened to words without the figure.
+    const kept = claimRecordsOn(lossNode(g)).flatMap((r) => r.statements);
+    expect(kept).toEqual([expect.objectContaining({ said_by: 'unknown', quote: line, source: line, low: 5, high: 5 })]);
+    expect(kept[0]).not.toHaveProperty('speaker');
   });
 
   it('CONTRAST: the user\'s own words, read as theirs ("user"), are credited; an AI-read "user" still needs the literal span', async () => {

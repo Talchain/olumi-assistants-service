@@ -119,19 +119,9 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'correction_not_stated' });
     expect(review.public_label).toContain('Review the correction’s source');
     expect(review.public_label).toContain(`Olumi’s reading: ${f.request.edits[0]!.reading_words}`);
-    const sourceStateWords = {
-      missing: 'Olumi could not find words of your own stating this correction. This review does not authorise a change.',
-      partial: 'Olumi could not verify this excerpt as the complete applicable statement. This review does not authorise a change.',
-      'another speaker': 'These words report another speaker’s view; they do not establish that you assert the reported correction. This review does not authorise a change.',
-      'unknown speaker': 'Olumi could not establish who asserted these words. This review does not authorise a change.',
-    };
-    expect(review.public_label).toContain(sourceStateWords[fault]);
-    if (fault === 'partial') expect(review.public_label).toContain('Excerpt — your recorded words');
-    if (fault === 'another speaker') expect(review.public_label).toContain('Reported words —');
-    if (fault === 'unknown speaker') expect(review.public_label).toContain('Words — speaker unknown:');
-    if (fault !== 'missing') expect(review.public_label).toContain(message);
-    if (fault === 'partial') expect(review.public_label).toContain(`Recorded words — you: “${message}”`);
-    else expect(review.public_label).not.toContain('Recorded words — you:');
+    // Missing words are structure, not a reading: still a non-authorising review with no card.
+    expect(review.public_label).toContain('Olumi could not find words of your own stating this correction. This review does not authorise a change.');
+    expect(review.public_label).not.toContain('Recorded words — you:');
     expect(review).not.toHaveProperty('proposal_id'); expect(w.chips('propose_statement', review)).toEqual([]);
     expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
