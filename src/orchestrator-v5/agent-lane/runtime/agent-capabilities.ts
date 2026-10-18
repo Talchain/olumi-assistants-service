@@ -10987,16 +10987,14 @@ export function createAgentCapabilities(
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
           // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
+          // Positive evidence of Olumi's own figure: the AI's declared estimate, or the host's own derivation of the user's split.
+          const derivedPart = split.kind === 'derived' && split.factor_ids.includes(f.id);
           const lvlSaid = userStated({ quote: lvl.quote, value: lvl.value, unit: lvl.unit ?? factorUnit }, chatTexts(ctx, g.brief_text),
-            { quantity: 'level', node_id: f.id }, { form: 'point', ownEstimate: lvl.estimate !== undefined });
+            { quantity: 'level', node_id: f.id }, { form: 'point', ownEstimate: lvl.estimate !== undefined || derivedPart });
           // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
           const wrote = lvlSaid.origin === 'human'
             && figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
-          if (lvlSaid.origin === 'unknown') {
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
-            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
-          }
-          const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          const derived = !wrote && derivedPart && split.kind === 'derived' ? split : undefined;
           // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
           if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
@@ -11012,11 +11010,12 @@ export function createAgentCapabilities(
            */
           if (derived !== undefined) lvl.estimate = `${derived.working}, as Olumi read it`;
           const byUser = wrote;
-          if (!byUser && lvl.estimate === undefined) {
+          if (!byUser && (lvl.estimate === undefined || lvlSaid.origin === 'unknown')) {
             const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
               ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
               : undefined;
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: ask ?? notWrittenReason(lvl.value, f.label) });
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+              reason: ask ?? (lvlSaid.origin === 'unknown' ? UNKNOWN_ORIGIN_DETAIL : notWrittenReason(lvl.value, f.label)) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
