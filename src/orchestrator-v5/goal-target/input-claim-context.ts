@@ -264,6 +264,12 @@ export function wholeStatementIn(message: string, quote: unknown): boolean {
     && !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
     && !/(?:^|[\s:([\u2014\u2013-])'\p{L}/u.test(paragraphTo(text, at + said.length)));
 }
+/** The existing paired-speech reader, exposed for source-review display; no attribution or write permission is granted. */
+export function speechReading(quote: string): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
+  const text = plainQuote(quote);
+  return { text, inSpeech: (at) => insideSpeech(text, at) };
+}
+
 /** The text of `at`'s paragraph up to `at`. */
 const paragraphTo = (text: string, at: number): string => text.slice(text.lastIndexOf('\n', at - 1) + 1, at);
 /** `at` lies inside paired double-marked speech that opened before it in its paragraph. */
