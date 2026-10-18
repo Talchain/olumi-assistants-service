@@ -76,6 +76,7 @@
 
 import { classifyEncodedInterventionAdmissibility } from '../../orchestrator/shared/encoded-intervention-admissibility.js';
 import { checkPairCoherence, recoverScaleFrame } from './handlers/d1-shared/scale-frame.js';
+import { isUnverifiedUserMaterial } from '../../cee/provenance/provenance-of.js';
 
 /**
  * Factor scale descriptor extracted from a factor node's `observed_state`.
@@ -900,7 +901,10 @@ export function findScaleIncoherentBaselineFactorIds(
       const v = extractNumericInterventionValue(rawObjects[id]);
       return v !== null && (v < 0 || v > 1);
     });
-    if (!selfFramed) out.push(id);
+    // ⭐ AIE W27 (17 Oct 23:45Z): the user's figure with no unit has no established scale (admission keeps it unresolved,
+    // `admit-model.ts`), and nothing an option sets on it — a value above 1, an Olumi setting, a source flag — establishes one.
+    const unresolved = isUnverifiedUserMaterial(observed) && !(typeof observed?.unit === 'string' && observed.unit.trim() !== '');
+    if (unresolved || !selfFramed) out.push(id);
   }
   return out;
 }
