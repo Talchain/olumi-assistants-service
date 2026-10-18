@@ -35,6 +35,25 @@ const WORDS = 'The faster mixer cuts prep time by 15%. And our oven capacity is 
 const LIMIT = { limit_label: 'Oven capacity', operator: '<=', new_value: 2, unit: 'ovens', rationale: WORDS };
 const limitRows = (g: Rec): Rec[] => (g.goal_constraints ?? []) as Rec[];
 
+// ⛔ Verifier P05 (18 Oct, REAL-AI-REPLAY-94b330bd): "the remote-village constraint should be at least 85%" was refused
+// `figure_not_stated`. The limit's scope named it only by its label and "limit", so the nearest label word before the figure
+// ("village", another node's) took the figure. SYNTHETIC wording below, same shape.
+describe('a limit figure the user wrote in digits gives its card, by the words a user calls a limit', () => {
+  const limitTurn = async (words: string) => {
+    const w = world(); const turn = await route(w);
+    w.edit((g) => { g.goal_constraints = [structuredClone(LIMIT_ROW)]; });
+    const r = await turn({ message: words, source: 'composer' },
+      [call('propose_limit_change', { ...LIMIT, rationale: words }), say('Here is that change for you to approve.')]);
+    return (r._agent.tool_calls as Rec[]).find((c) => c.name === 'propose_limit_change');
+  };
+  it('⭐ RED→GREEN: "the oven-mixer constraint should be at most 2 ovens" → the limit card (the nearest label word is another node\'s)', async () => {
+    expect(await limitTurn('The oven-mixer constraint should be at most 2 ovens now, not 3.')).toEqual(expect.objectContaining({ ok: true }));
+  }, 120_000);
+  it('CONTRAST: the same figure written about another node is still not the limit\'s', async () => {
+    expect(await limitTurn('The faster mixer is worth 2 ovens, not 3.')).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_stated' }));
+  }, 120_000);
+});
+
 describe('a figure AND a limit in one turn: each its own card, and no stale limit after both are approved', () => {
   it('⭐ RED→GREEN: the limit card is offered beside the figure card, survives its approval, and its approval leaves no stale limit', async () => {
     const w = world(); const turn = await route(w);
