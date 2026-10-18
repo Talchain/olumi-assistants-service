@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { assertsCompletedWrite, narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
+import { approvalChoiceWords, assertsCompletedWrite, narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
 
 // Served success claims (each must be caught when nothing landed).
 const CLAIMS = [
@@ -49,18 +49,22 @@ describe('the write-status line is composed from the tool results', () => {
   // R2 T1 (friction audit row T1): typed "Yes, that is my deadline." met "Not saved: the change could not be made this time —
   // ask me to try again", which was false: the change was waiting for its card, not failed.
   it('R2 T1: approval_required says the change waits for its card (AIE AMENDED 6128697025: the button only), never "try again"', () => {
-    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, true);
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {});
     expect(n.status).toBe('Not saved yet: press the approval button on the card.');
     expect(n.status).not.toContain('type its words');
     expect(n.status).not.toContain('could not be made this time');
   });
-  // Independent check, non-blocking (recovery/bR2/check): typed words bind only when exactly ONE card waits.
-  it.each([['more than one card waits', false], ['the count is not known', undefined]] as const)(
-    'R2 T1: when %s, approval_required names the button only, never "or type its words"', (_name, one) => {
-      const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, one);
-      expect(n.status).toBe('Not saved yet: press the approval button on the card.');
-      expect(n.status).not.toContain('type its words');
-    });
+  // ⭐ ONE APPROVAL ACTION (DL-3 18 Oct): with several cards waiting, typed words bind none; the line says which to press.
+  it.each([
+    ['two cards wait and the words seemed to mean one', approvalChoiceWords(2, 'Buy a faster mixer acts on Prep time cut from mixer and sets it to 15%.'),
+      'Not saved yet: two changes are waiting. To apply "Buy a faster mixer acts on Prep time cut from mixer and sets it to 15%", press its button below.'],
+    ['three cards wait and the words named none', approvalChoiceWords(3), 'Not saved yet: three changes are waiting. Press the button on the one you mean.'],
+  ] as const)('when %s, approval_required says which button, never "or type its words"', (_name, words, said) => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, words);
+    expect(n.status).toBe(said);
+    expect(n.status).not.toContain('type its words');
+    expect(n.status).not.toContain('could not be made this time');
+  });
   it('R2 T1 CONTRAST: an unworded refusal keeps the generic line', () => {
     const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'some_new_code' }]);
     expect(n.status).toBe('Not saved: the change could not be made this time — ask me to try again.');
