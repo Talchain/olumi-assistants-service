@@ -1,0 +1,1167 @@
+{
+  "provenance": {
+    "source": "/Users/paulslee/olumi-work/recovery/pilot/runs-rs/20261018T041452Z-proof1/RS3-coaching/01-t1-brief.json",
+    "sha256": "e77579c8c33de72f88b303d3dce0d83dfdb5744eb36ecea50a026807b006bb27",
+    "scope": "Selected saved graph/result/evidence bytes; readable RS3, no held-out material or engine oracle"
+  },
+  "scenario_id": "0d5cf74e-0fee-40f1-b96c-31ded363f8d7",
+  "graph": {
+    "edges": [
+      {
+        "to": "carry_on_as_now",
+        "from": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "add_evening_shift",
+        "from": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "buy_faster_scanners",
+        "from": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "additional_evening_shifts",
+        "from": "add_evening_shift",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "faster_scanner_upgrade",
+        "from": "buy_faster_scanners",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "additional_evening_shifts",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "faster_scanner_upgrade",
+        "from": "carry_on_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "orders_picked_per_day",
+        "from": "additional_evening_shifts",
+        "strength": {
+          "std": 0.28800000000000003,
+          "mean": 0.5760000000000001
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "brief_extraction",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 120,
+            "amount_unit": "orders per day",
+            "strength_mean": 0.5760000000000001,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "shifts"
+          }
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "orders_picked_per_day",
+        "from": "faster_scanner_upgrade",
+        "strength": {
+          "std": 0.048,
+          "mean": 0.096
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "brief_extraction",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 60,
+            "amount_unit": "orders per day",
+            "strength_mean": 0.096,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "switch"
+          }
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "scanner_rollout_disruption",
+        "from": "faster_scanner_upgrade",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "orders_picked_per_day",
+        "from": "scanner_rollout_disruption",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder",
+          "mean_projected": true
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      }
+    ],
+    "nodes": [
+      {
+        "id": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+        "ref": "D1",
+        "kind": "decision",
+        "label": "We need to reach at least 500 orders a day within three months.",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "orders_picked_per_day",
+        "ref": "G1",
+        "kind": "goal",
+        "label": "Orders picked per day",
+        "provenance": "from_brief",
+        "goal_direction": ">=",
+        "goal_threshold": 0.8,
+        "observed_state": {
+          "cap": 625,
+          "unit": "orders per day",
+          "value": 0.64,
+          "source": "brief_extraction",
+          "baseline": 0.64,
+          "raw_value": 400
+        },
+        "user_statements": [
+          {
+            "field": "level",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "low": 400,
+                "form": "point",
+                "high": 400,
+                "unit": "orders per day",
+                "quote": "Synthetic test: our warehouse currently picks 400 orders a day.",
+                "source": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "goal|orders picked per day|||level"
+                },
+                "qualifier": "currently",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-18T04:15:31.036Z",
+            "subject_key": "goal|orders_picked_per_day|||level"
+          },
+          {
+            "field": "target",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "low": 500,
+                "form": "lower_bound",
+                "unit": "orders per day",
+                "quote": "We need to reach at least 500 orders a day within three months.",
+                "source": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "goal|orders picked per day|||target"
+                },
+                "qualifier": "at least",
+                "conditions": "within three months",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-18T04:15:31.036Z",
+            "subject_key": "goal|orders_picked_per_day|||target"
+          }
+        ],
+        "threshold_source": "brief_extraction",
+        "goal_target_basis": {
+          "source": "olumi_reading",
+          "reference": "today",
+          "target_raw": 500,
+          "effect_unit": "orders per day",
+          "period_kind": "at_end",
+          "target_frame": "level",
+          "open_question": "Do the stated daily additions apply once each option is fully operational within the three-month window, and when would that be?",
+          "period_months": 3,
+          "quantity_frame": "level",
+          "effects_at_period_end": false
+        },
+        "goal_threshold_cap": 625,
+        "goal_threshold_raw": 500,
+        "goal_threshold_unit": "orders per day",
+        "goal_threshold_frame": "level",
+        "goal_deadline_as_stated": "three months",
+        "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+        "id": "carry_on_as_now",
+        "ref": "O1",
+        "kind": "option",
+        "label": "Carry on as now",
+        "provenance": "from_brief",
+        "is_baseline": true
+      },
+      {
+        "id": "add_evening_shift",
+        "ref": "O2",
+        "kind": "option",
+        "label": "Add evening shift",
+        "provenance": "from_brief",
+        "interventions": {
+          "additional_evening_shifts": {
+            "unit": "shifts",
+            "value": 0.3333333333333333,
+            "source": "brief_extraction",
+            "raw_value": 1,
+            "target_match": {
+              "node_id": "additional_evening_shifts",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "buy_faster_scanners",
+        "ref": "O3",
+        "kind": "option",
+        "label": "Buy faster scanners",
+        "provenance": "from_brief",
+        "interventions": {
+          "faster_scanner_upgrade": {
+            "value": 1,
+            "source": "cee_hypothesis",
+            "target_match": {
+              "node_id": "faster_scanner_upgrade",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "additional_evening_shifts",
+        "ref": "F1",
+        "kind": "factor",
+        "label": "Additional evening shifts",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 3,
+        "observed_state": {
+          "unit": "shifts",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "level",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "low": 1,
+                "form": "point",
+                "high": 1,
+                "unit": "shifts",
+                "quote": "Option one is adding a second evening shift, which adds 120 orders a day.",
+                "source": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "option|add evening shift||additional evening shifts|level"
+                },
+                "qualifier": "a second",
+                "qualifier_in_quote": true
+              }
+            ],
+            "recorded_at": "2026-10-18T04:15:31.036Z",
+            "subject_key": "factor|additional_evening_shifts||add_evening_shift|level"
+          },
+          {
+            "field": "effect",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "low": 120,
+                "form": "point",
+                "high": 120,
+                "unit": "orders per day",
+                "quote": "Option one is adding a second evening shift, which adds 120 orders a day.",
+                "source": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "link|additional evening shifts|orders picked per day||effect"
+                }
+              }
+            ],
+            "recorded_at": "2026-10-18T04:15:31.036Z",
+            "subject_key": "link|additional_evening_shifts|orders_picked_per_day||effect"
+          }
+        ]
+      },
+      {
+        "id": "faster_scanner_upgrade",
+        "ref": "F2",
+        "kind": "factor",
+        "label": "Faster scanner upgrade",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "observed_state": {
+          "unit": "upgrade",
+          "value": 0,
+          "source": "cee_inference",
+          "extractionType": "inferred"
+        },
+        "user_statements": [
+          {
+            "field": "effect",
+            "attest": {
+              "recorded_by": "construction"
+            },
+            "statements": [
+              {
+                "low": 60,
+                "form": "point",
+                "high": 60,
+                "unit": "orders per day",
+                "quote": "Option two is buying faster handheld scanners, which adds 60 orders a day.",
+                "source": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline.",
+                "reading": "olumi",
+                "speaker": "user",
+                "subject": {
+                  "quantity": "link|faster scanner upgrade|orders picked per day||effect"
+                }
+              }
+            ],
+            "recorded_at": "2026-10-18T04:15:31.036Z",
+            "subject_key": "link|faster_scanner_upgrade|orders_picked_per_day||effect"
+          }
+        ]
+      },
+      {
+        "id": "scanner_rollout_disruption",
+        "ref": "R1",
+        "kind": "risk",
+        "label": "Scanner rollout disruption",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "evening_shift_staffing_gap",
+        "ref": "R2",
+        "kind": "risk",
+        "label": "Evening shift staffing gap",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "add_evening_shift",
+            "kind": "option",
+            "label": "Add evening shift"
+          },
+          "affects": {
+            "id": "orders_picked_per_day",
+            "label": "Orders picked per day",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "additional_evening_shifts",
+            "label": "Additional evening shifts",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "Staffing the evening shift",
+          "watch_for": "Open evening roles remain unfilled",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      },
+      {
+        "id": "scanner_supply_delay",
+        "ref": "R3",
+        "kind": "risk",
+        "label": "Scanner supply delay",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "draft_widening": {
+          "hits": {
+            "id": "buy_faster_scanners",
+            "kind": "option",
+            "label": "Buy faster scanners"
+          },
+          "affects": {
+            "id": "orders_picked_per_day",
+            "label": "Orders picked per day",
+            "direction": "negative"
+          },
+          "through": {
+            "id": "faster_scanner_upgrade",
+            "label": "Faster scanner upgrade",
+            "direction": "negative"
+          },
+          "mechanism": "relies_on",
+          "relies_on": "Receiving scanners before the deadline",
+          "watch_for": "Supplier delivery date slips",
+          "provenance": "ai_suggested_widen"
+        },
+        "analysis_participation": "retained_excluded"
+      }
+    ],
+    "ref_high_water": {
+      "D": 1,
+      "F": 2,
+      "G": 1,
+      "O": 3,
+      "R": 3
+    }
+  },
+  "result": {
+    "type": "analysis_result",
+    "summary": "‘Buy faster scanners’: between less than 1% and 7% chance of meeting your goal, in this model, using Olumi's estimates for 2 starting values, 1 option setting and 2 relationships (see Check estimates). 'Carry on as now' was analysed as no change — the factors it compares against were held at the values your model records today. This analysis ran on a reduced model: 2 parts of your model are kept out of the calculation.",
+    "leading_option_id": null,
+    "computed_against_hash": "29e908c12fab3a5f",
+    "enrichment": {
+      "option_comparison": [
+        {
+          "id": "carry_on_as_now",
+          "label": "Carry on as now",
+          "status": "computed",
+          "outcome": {
+            "p10": 0.64,
+            "p50": 0.64,
+            "p90": 0.64,
+            "std": 0,
+            "mean": 0.64,
+            "n_samples": 10000,
+            "validity_ratio": 1,
+            "n_valid_samples": 10000,
+            "percentiles_source": "samples"
+          },
+          "option_id": "carry_on_as_now",
+          "option_label": "Carry on as now"
+        },
+        {
+          "id": "add_evening_shift",
+          "label": "Add evening shift",
+          "status": "computed",
+          "outcome": {
+            "p10": 0.64,
+            "p50": 0.801436754767314,
+            "p90": 0.9391362462222654,
+            "std": 0.11418833297487842,
+            "mean": 0.7934480098010943,
+            "n_samples": 10000,
+            "validity_ratio": 1,
+            "n_valid_samples": 10000,
+            "percentiles_source": "samples"
+          },
+          "option_id": "add_evening_shift",
+          "option_label": "Add evening shift"
+        },
+        {
+          "id": "buy_faster_scanners",
+          "label": "Buy faster scanners",
+          "status": "computed",
+          "outcome": {
+            "n_samples": 10000,
+            "validity_ratio": 1,
+            "n_valid_samples": 10000,
+            "percentiles_source": "samples"
+          },
+          "option_id": "buy_faster_scanners",
+          "option_label": "Buy faster scanners"
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "source": "graph",
+          "direction": "positive",
+          "factor_id": "additional_evening_shifts",
+          "confidence": 0.3,
+          "elasticity": 0,
+          "zero_reason": "intervention_override",
+          "driver_label": "biggest",
+          "factor_label": "Additional evening shifts",
+          "value_source": "cee_inference",
+          "influence_rank": 1,
+          "rank_flip_rate": 0,
+          "importance_rank": 1,
+          "influence_basis": "isl_structural",
+          "influence_score": 1,
+          "importance_basis": "isl_structural",
+          "confidence_source": "plot_unified_from_isl_bootstrap",
+          "sensitivity_score": 0,
+          "flip_risk_category": "negligible",
+          "value_of_information": 0,
+          "attribution_stability": "negligible",
+          "confidence_components": {
+            "sampling_stability": 0,
+            "structural_certainty": 0.5
+          },
+          "confidence_provenance": {
+            "input_quality": "standard",
+            "is_provisional": true,
+            "formula_version": "plot_unified_v3",
+            "calibration_status": "provisional_pending_pilot_calibration",
+            "computation_source": "plot_unified_from_isl_bootstrap"
+          },
+          "value_extraction_type": "inferred",
+          "range_derivation_source": "default"
+        },
+        {
+          "source": "graph",
+          "direction": "negative",
+          "factor_id": "faster_scanner_upgrade",
+          "confidence": 0.3,
+          "elasticity": 0,
+          "zero_reason": "intervention_override",
+          "driver_label": "moderate",
+          "factor_label": "Faster scanner upgrade",
+          "value_source": "cee_inference",
+          "influence_rank": 2,
+          "rank_flip_rate": 0,
+          "importance_rank": 2,
+          "influence_basis": "isl_structural",
+          "influence_score": 0.26736111111111105,
+          "importance_basis": "isl_structural",
+          "confidence_source": "plot_unified_from_isl_bootstrap",
+          "sensitivity_score": 0,
+          "flip_risk_category": "negligible",
+          "value_of_information": 0,
+          "attribution_stability": "negligible",
+          "confidence_components": {
+            "sampling_stability": 0,
+            "structural_certainty": 0.5
+          },
+          "confidence_provenance": {
+            "input_quality": "standard",
+            "is_provisional": true,
+            "formula_version": "plot_unified_v3",
+            "calibration_status": "provisional_pending_pilot_calibration",
+            "computation_source": "plot_unified_from_isl_bootstrap"
+          },
+          "value_extraction_type": "inferred",
+          "range_derivation_source": "default"
+        }
+      ],
+      "robustness": {
+        "robust_edges": [],
+        "fragile_edges": []
+      },
+      "option_comparison_status": "computed",
+      "edge_e_values": [
+        {
+          "to_id": "orders_picked_per_day",
+          "e_value": 1,
+          "edge_id": "additional_evening_shifts::orders_picked_per_day",
+          "from_id": "additional_evening_shifts",
+          "to_label": "Orders picked per day",
+          "flip_mean": 0,
+          "stability": {
+            "n_seeds": 10,
+            "band_max": 0.46218,
+            "band_min": 0,
+            "band_width": 0.46218,
+            "band_median": 0,
+            "n_seeds_flipped": 10,
+            "seed_flip_means": [
+              0,
+              0.287442,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0.46218,
+              0
+            ]
+          },
+          "from_label": "Additional evening shifts",
+          "current_mean": 0.5760000000000001,
+          "flip_direction": "decrease"
+        },
+        {
+          "to_id": "orders_picked_per_day",
+          "e_value": 4.6042,
+          "edge_id": "faster_scanner_upgrade::orders_picked_per_day",
+          "from_id": "faster_scanner_upgrade",
+          "to_label": "Orders picked per day",
+          "flip_mean": 0.442,
+          "stability": {
+            "n_seeds": 10,
+            "band_max": 0.776275,
+            "band_min": -1e-06,
+            "band_width": 0.776276,
+            "band_median": 0.486174,
+            "n_seeds_flipped": 10,
+            "seed_flip_means": [
+              0.393222,
+              0.424086,
+              0.505194,
+              0.325992,
+              0.776275,
+              0.671989,
+              0.580108,
+              0.710753,
+              -1e-06,
+              0.467153
+            ]
+          },
+          "from_label": "Faster scanner upgrade",
+          "current_mean": 0.096,
+          "flip_direction": "increase"
+        },
+        {
+          "to_id": "scanner_rollout_disruption",
+          "e_value": 1,
+          "edge_id": "faster_scanner_upgrade::scanner_rollout_disruption",
+          "from_id": "faster_scanner_upgrade",
+          "to_label": "Scanner rollout disruption",
+          "flip_mean": -0.192001,
+          "stability": {
+            "n_seeds": 10,
+            "band_max": 0.709852,
+            "band_min": -0.609159,
+            "band_width": 1.319011,
+            "band_median": -0.201865,
+            "n_seeds_flipped": 9,
+            "seed_flip_means": [
+              -1e-06,
+              null,
+              -0.037303,
+              -0.18922,
+              -0.604355,
+              -0.506129,
+              -0.201865,
+              -0.609159,
+              0.709852,
+              -0.571513
+            ]
+          },
+          "from_label": "Faster scanner upgrade",
+          "current_mean": 0.5,
+          "flip_direction": "decrease"
+        },
+        {
+          "to_id": "orders_picked_per_day",
+          "e_value": 1,
+          "edge_id": "scanner_rollout_disruption::orders_picked_per_day",
+          "from_id": "scanner_rollout_disruption",
+          "to_label": "Orders picked per day",
+          "flip_mean": 0.192001,
+          "stability": {
+            "n_seeds": 10,
+            "band_max": 0.626792,
+            "band_min": 1e-06,
+            "band_width": 0.626791,
+            "band_median": 0.270775,
+            "n_seeds_flipped": 8,
+            "seed_flip_means": [
+              1e-06,
+              null,
+              0.035539,
+              0.129734,
+              0.344997,
+              0.510263,
+              0.196552,
+              0.484408,
+              null,
+              0.626792
+            ]
+          },
+          "from_label": "Scanner rollout disruption",
+          "current_mean": -0.5,
+          "flip_direction": "increase"
+        }
+      ],
+      "inference_warnings": [
+        {
+          "code": "FACTOR_EVPPI_NOT_COMPUTED",
+          "field": "factor_evppi",
+          "message": "Value-of-information ran but produced no rows. The reason is not known at this layer and has deliberately not been inferred.",
+          "severity": "info"
+        },
+        {
+          "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+          "links": [
+            {
+              "to": "orders_picked_per_day",
+              "from": "scanner_rollout_disruption"
+            },
+            {
+              "to": "scanner_rollout_disruption",
+              "from": "faster_scanner_upgrade"
+            }
+          ],
+          "message": "This comparison turns on the links from ‘Scanner rollout disruption’ to ‘Orders picked per day’ and from ‘Faster scanner upgrade’ to ‘Scanner rollout disruption’, whose strengths aren't sized in the model yet. Set them to see how much they matter.",
+          "node_ids": [
+            "faster_scanner_upgrade",
+            "scanner_rollout_disruption",
+            "orders_picked_per_day"
+          ],
+          "severity": "warning",
+          "option_ids": [
+            "buy_faster_scanners"
+          ],
+          "win_shares_withheld": true
+        },
+        {
+          "code": "GOAL_CHANCE_RANGE",
+          "message": "Some options' chances are shown as a range: a link on the way to your goal isn't sized in the model yet.",
+          "severity": "info",
+          "option_ids": [
+            "buy_faster_scanners"
+          ],
+          "horizon_line": "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.",
+          "range_by_option": {
+            "buy_faster_scanners": {
+              "to": "scanner_rollout_disruption",
+              "from": "faster_scanner_upgrade",
+              "kind": "link_existence",
+              "among": "all",
+              "low_pct": 0,
+              "high_pct": 7,
+              "low_rounding": "whole",
+              "high_rounding": "whole"
+            }
+          },
+          "horizon_untested": true
+        },
+        {
+          "code": "GOAL_HORIZON_NOT_TESTED",
+          "message": "This chance uses the model's numbers as they are today; the model doesn't project how they change over time yet.",
+          "node_ids": [
+            "orders_picked_per_day"
+          ],
+          "severity": "info"
+        }
+      ],
+      "confidence_tier": "strong",
+      "decision_brief": {
+        "options": [
+          {
+            "label": "Add evening shift",
+            "option_id": "add_evening_shift"
+          },
+          {
+            "label": "Buy faster scanners",
+            "option_id": "buy_faster_scanners"
+          },
+          {
+            "label": "Carry on as now",
+            "option_id": "carry_on_as_now"
+          }
+        ],
+        "version": "1",
+        "brief_id": "65672a14-405b-4e2d-9462-08c6688e5c76",
+        "warnings": [
+          {
+            "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+            "message": "Option 'Carry on as now' has zero variance — intervention may have no causal path to goal",
+            "severity": "warning"
+          },
+          {
+            "code": "M2_UNAVAILABLE",
+            "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+            "severity": "warning"
+          }
+        ],
+        "created_at": "2026-10-18T04:15:43.123Z",
+        "top_drivers": [],
+        "warning_codes": [],
+        "key_assumptions": [],
+        "defaulted_assumptions": []
+      },
+      "critiques": [
+        {
+          "id": "critique_70824b40e1df",
+          "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+          "severity": "warning",
+          "source": "isl",
+          "blocks_analysis": false,
+          "user_message": "One of your options produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them."
+        }
+      ],
+      "run_provenance": {
+        "provisional": true,
+        "initiated_by": "auto_post_construction",
+        "construction_turn_id": "graph_registration:650f29c4-2afd-49dd-9e19-06805867b5e0"
+      },
+      "dominant_factor": {
+        "factor_id": "additional_evening_shifts",
+        "factor_label": "Additional evening shifts"
+      },
+      "flip_thresholds_status": "unavailable"
+    }
+  },
+  "evidence": {
+    "run_id": "e64f0919df3c9f9dd765c54bd43830010d1b622417ecb7b14c89e575e3433e6e",
+    "input_snapshot": {
+      "snapshot_version": 1,
+      "sent_digest": "e1bb6584c361bb0a29eca0caaa29f963678a42ca66e6edee33574d653f0afb4a",
+      "residual_digest": "59f13a99cb5fca22b3b023fe104be3bfe4ba34e52a10b3e0693bf8cc26593250",
+      "goal": {
+        "node_id": "orders_picked_per_day",
+        "label": "Orders picked per day",
+        "target_raw": 500,
+        "unit": "orders per day",
+        "operator": ">=",
+        "frame": "level"
+      },
+      "options": [
+        {
+          "option_id": "carry_on_as_now",
+          "label": "Carry on as now",
+          "is_baseline": true,
+          "settings": [
+            {
+              "factor_id": "additional_evening_shifts",
+              "label": "Additional evening shifts",
+              "encoded": 0,
+              "held": true
+            },
+            {
+              "factor_id": "faster_scanner_upgrade",
+              "label": "Faster scanner upgrade",
+              "encoded": 0,
+              "held": true
+            }
+          ]
+        },
+        {
+          "option_id": "add_evening_shift",
+          "label": "Add evening shift",
+          "settings": [
+            {
+              "factor_id": "additional_evening_shifts",
+              "label": "Additional evening shifts",
+              "raw": 1,
+              "unit": "shifts",
+              "encoded": 0.3333333333333333
+            }
+          ]
+        },
+        {
+          "option_id": "buy_faster_scanners",
+          "label": "Buy faster scanners",
+          "settings": [
+            {
+              "factor_id": "faster_scanner_upgrade",
+              "label": "Faster scanner upgrade",
+              "encoded": 1
+            }
+          ]
+        }
+      ],
+      "options_not_sent": [],
+      "factors": [
+        {
+          "factor_id": "orders_picked_per_day",
+          "label": "Orders picked per day",
+          "raw": 400,
+          "unit": "orders per day",
+          "encoded": 0.64,
+          "source": "brief_extraction",
+          "authorship_digest": "8b68306de1726bbc83ef219020861a0356e3788027bcfab8df85749aec703490"
+        },
+        {
+          "factor_id": "additional_evening_shifts",
+          "label": "Additional evening shifts",
+          "raw": 0,
+          "unit": "shifts",
+          "encoded": 0,
+          "source": "cee_inference",
+          "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+        },
+        {
+          "factor_id": "faster_scanner_upgrade",
+          "label": "Faster scanner upgrade",
+          "unit": "upgrade",
+          "encoded": 0,
+          "source": "cee_inference",
+          "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+        }
+      ],
+      "constraints": [],
+      "links": [
+        {
+          "from": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+          "to": "carry_on_as_now",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+        },
+        {
+          "from": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+          "to": "add_evening_shift",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+        },
+        {
+          "from": "we_need_to_reach_at_least_500_orders_a_day_within_three_months",
+          "to": "buy_faster_scanners",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+        },
+        {
+          "from": "add_evening_shift",
+          "to": "additional_evening_shifts",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+        },
+        {
+          "from": "buy_faster_scanners",
+          "to": "faster_scanner_upgrade",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "additional_evening_shifts",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "faster_scanner_upgrade",
+          "mean": 1,
+          "std": 0.01,
+          "exists_probability": 1,
+          "band": "very_strong",
+          "sizing": "unmarked",
+          "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+        },
+        {
+          "from": "additional_evening_shifts",
+          "to": "orders_picked_per_day",
+          "mean": 0.5760000000000001,
+          "std": 0.28800000000000003,
+          "exists_probability": 0.8,
+          "band": "strong",
+          "sizing": "olumi_estimate",
+          "authorship_digest": "42c495569e5a77ff7f9b9ab8e86a2436e533dfe11da97f1e3946f18045503342"
+        },
+        {
+          "from": "faster_scanner_upgrade",
+          "to": "orders_picked_per_day",
+          "mean": 0.096,
+          "std": 0.048,
+          "exists_probability": 0.8,
+          "band": "slight",
+          "sizing": "olumi_estimate",
+          "authorship_digest": "af9a4aa9e5bbcdf6af409212befe9a869f2427aab9a207d1729a42183998374d"
+        },
+        {
+          "from": "faster_scanner_upgrade",
+          "to": "scanner_rollout_disruption",
+          "mean": 0.5,
+          "std": 0.125,
+          "exists_probability": 0.8,
+          "band": "strong",
+          "sizing": "placeholder",
+          "authorship_digest": "52b779d3fd4b4ce316854620193a4e920433f3b5fdb3f3018bce18f73fc9c9da"
+        },
+        {
+          "from": "scanner_rollout_disruption",
+          "to": "orders_picked_per_day",
+          "mean": -0.5,
+          "std": 0.125,
+          "exists_probability": 1,
+          "band": "strong",
+          "sizing": "placeholder",
+          "authorship_digest": "52b779d3fd4b4ce316854620193a4e920433f3b5fdb3f3018bce18f73fc9c9da"
+        }
+      ]
+    },
+    "evaluated_question": {
+      "asked": {
+        "unit": "orders per day",
+        "frame": "level",
+        "target": 500,
+        "horizon": {
+          "as_stated": "three months"
+        },
+        "baseline": 400,
+        "quantity": {
+          "label": "Orders picked per day",
+          "node_id": "orders_picked_per_day"
+        },
+        "reference": "today",
+        "comparator": ">=",
+        "option_ids": [
+          "carry_on_as_now",
+          "add_evening_shift",
+          "buy_faster_scanners"
+        ]
+      },
+      "run_id": "e64f0919df3c9f9dd765c54bd43830010d1b622417ecb7b14c89e575e3433e6e",
+      "calculated": {
+        "unit": "orders per day",
+        "frame": "level",
+        "target": 500,
+        "baseline": 400,
+        "quantity": {
+          "label": "Orders picked per day",
+          "node_id": "orders_picked_per_day"
+        },
+        "comparator": ">=",
+        "option_ids": [
+          "carry_on_as_now",
+          "add_evening_shift",
+          "buy_faster_scanners"
+        ],
+        "encoded_target": 0.8,
+        "encoded_baseline": 0.64
+      },
+      "sent_digest": "e1bb6584c361bb0a29eca0caaa29f963678a42ca66e6edee33574d653f0afb4a",
+      "graph_hash_at_run": "29e908c12fab3a5f",
+      "dispatched_goal_baseline": 0.64,
+      "dispatched_goal_threshold": 0.8,
+      "evaluated_scenario_revision": 2
+    },
+    "occurrence": {
+      "fact_row_id": "53932ae3-47ed-4825-8fe7-1550f62e0b6e",
+      "evaluated_scenario_revision": 2
+    }
+  },
+  "run": {
+    "run_id": "e64f0919df3c9f9dd765c54bd43830010d1b622417ecb7b14c89e575e3433e6e",
+    "graph_hash_at_run": "29e908c12fab3a5f",
+    "computed_at": "2026-10-18T04:15:35.183Z"
+  },
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-10-18T04:15:35.183Z"
+    },
+    "readiness": {
+      "status": "ready",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "unrequested_analysis_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "brief": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline."
+}

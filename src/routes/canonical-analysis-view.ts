@@ -10,7 +10,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import { isAnalysisRefusalFact } from '../orchestrator-v5/context/analysis-refusal-continuity.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../orchestrator-v5/compose/leader-licence.js';
-import { deriveRunQuestion, goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED, STATIC_MODEL_SCOPE_NOTE, type RunQuestion } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
+import { deriveRunQuestion, goalChanceDriverAvailabilityForAgent, goalChanceLicenceForAgent, PERIOD_END_EFFECTS_UNSTATED, STATIC_MODEL_SCOPE_NOTE, type RunQuestion, type SelectedRunEvidence } from '../orchestrator-v5/goal-target/goal-chance-licence.js';
 import { goalChanceCellFacesForAgent } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { readStoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import {
@@ -169,11 +169,12 @@ export function projectCanonicalAnalysisCells(
   currentResult: OlumiResponse['blocks'][number] | null | undefined,
   graph: unknown,
   goalCertainty?: unknown,
+  runEvidence?: SelectedRunEvidence,
 ): readonly { readonly option_id: string; readonly cell: CanonicalAnalysisCell }[] {
   const current = currentResult?.type === 'analysis_result';
   const result = current ? currentResult : null;
   const facts = goalChanceFactsForAgent(result, graph, current);
-  const faces = goalChanceCellFacesForAgent(result, graph, current);
+  const faces = goalChanceCellFacesForAgent(result, graph, current, runEvidence);
   const certainty = new Map((current ? readStoredGoalCertainty(goalCertainty) : undefined)
     ?.filter(decision => decision.earned === false).map(decision => [decision.option_id, decision.say]) ?? []);
   const licence = goalChanceLicenceForAgent(result);
@@ -268,7 +269,8 @@ export function projectCanonicalAnalysisView(input: CanonicalAnalysisViewInput):
   const drivers = new Map(goalChanceDriversForAgent(result, input.graph).map(row => [row.option_id, row.driver]));
   const availability = goalChanceDriverAvailabilityForAgent(result);
   const driverStatus = new Map(availability?.options.map(row => [row.option_id, row]) ?? []);
-  const cells = projectCanonicalAnalysisCells(result, input.graph, fact?.result.goal_certainty);
+  const cells = projectCanonicalAnalysisCells(result, input.graph, fact?.result.goal_certainty,
+    fact === null ? undefined : readRunEvidence(runEvidenceWireOf(fact)));
   const summary = (result as { summary?: unknown } | null)?.summary;
   const goalChance = canonicalGoalChanceDetail(facts, [
     ...(typeof summary === 'string' ? [summary] : []),
