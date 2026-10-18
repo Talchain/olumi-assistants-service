@@ -499,6 +499,9 @@ export function targetNounOf(graph: unknown, goalId: unknown): 'your target' | '
   return isOlumiSourceStamp(source) ? 'the target' : 'your target';
 }
 
+/** The AIE's words (16 Oct, 6219775036) after a link whose effect the user stated as a range: no question, the next step. */
+export const STATED_RANGE_NEXT_STEP = 'We can also continue comparing the mechanisms and conditions qualitatively.';
+
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
   if (verdict.kind !== 'not_testable' || !isRec(graph) || !Array.isArray(graph.nodes)) return null;
   const goal = graph.nodes.filter(isRec).find((n) => n.id === verdict.goal_id);
@@ -527,18 +530,27 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const link = failedLinks.length > 0
     ? `a size for the ${linkList(failedLinks.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), Math.min(namedLinkCount, 3, failedLinks.length), false)}`
     : `a size for the link from ${lever ?? 'what the options change'} to ${failingLink?.link_to ?? name}`;
+  // ⭐ ITEM 3 (AIE 16 Oct range contract: a range already supplied is never asked for again): the question asks the first failing
+  // link whose effect the USER did not state as a range (the statement door's one reader, as the sizer and the Run's withhold read
+  // it); the need above still names every link. None left (`null`): the AIE's next step stands where the question was. Served C2 G2
+  // turn 05 @1253187a asked the held link beside a reply saying it was supplied.
+  const heldRange = (l: { readonly from: string; readonly to: string }): boolean => linkHoldsStatedRange(graph, l.from, l.to);
+  const askLink = failingLink?.link !== undefined && heldRange(failingLink.link) ? failedLinks.find((l) => !heldRange(l)) ?? null : failingLink?.link;
+  const asksAnother = askLink !== failingLink?.link;
+  const askLever = !asksAnother ? lever : askLink == null ? undefined : labelOf(askLink.from);
+  const askTo = !asksAnother ? failingLink?.link_to : askLink == null ? undefined : labelOf(askLink.to);
   // The (c) question sizes the SAME link the clause names (Science d5, #2606): a link into the goal keeps AIQ's words, in
   // the goal's unit; an upstream link is asked in its own ends' units (the RT-6 sizing route's reader), never as the
   // lever's whole effect on the goal, which recorded on that link double-counts any non-definitional link after it.
-  const upstream = failingLink?.link !== undefined && failingLink.link.to !== verdict.goal_id ? failingLink.link : undefined;
+  const upstream = askLink != null && askLink.to !== verdict.goal_id ? askLink : undefined;
   const linkQuestion = (): string => {
-    if (upstream === undefined) return `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${lever} bring?`;
+    if (upstream === undefined) return `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${askLever} bring?`;
     const ends = linkEffectEndUnits(graph, upstream.from, upstream.to);
     const [fromUnit, toUnit] = [ends?.source.own[0], ends?.target.own[0]];
-    const to = failingLink?.link_to ?? upstream.to;
+    const to = askTo ?? upstream.to;
     return fromUnit !== undefined && toUnit !== undefined
-      ? `Roughly how much does ${to} change, in ${toUnit}, ${sourceChangeWords(lever ?? 'what the options change', fromUnit, isTwoStateSource(Array.isArray((graph as { nodes?: unknown })?.nodes) ? (graph as { nodes: unknown[] }).nodes : [], upstream.from, fromUnit)).when}?`
-      : `Roughly how much does ${to} change when ${lever} changes?`;
+      ? `Roughly how much does ${to} change, in ${toUnit}, ${sourceChangeWords(askLever ?? 'what the options change', fromUnit, isTwoStateSource(Array.isArray((graph as { nodes?: unknown })?.nodes) ? (graph as { nodes: unknown[] }).nodes : [], upstream.from, fromUnit)).when}?`
+      : `Roughly how much does ${to} change when ${askLever} changes?`;
   };
   /**
    * ⭐ MC D1 (e) (DL 6 Oct; Acceptance rehearsal 15 on CEE 3ee87d3): the user had set this link as a BAND ("moderate",
@@ -546,11 +558,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
    * unit (strength-as-size stays banned), so it is still asked — after saying what they set (DL's words).
    */
   // The link the question itself asks for (`linkQuestion`: the failing case's own link, else the first one it names).
-  const asked = failingLink?.link ?? failedLinks[0];
-  // ⭐ ITEM 3 (AIE 16 Oct range contract: a range already supplied is never asked for again): the link whose effect the USER
-  // stated as a range keeps its need said but gets no question, as the sizer (`link-effect.ts`) and the Run's withhold read it,
-  // through the statement door's one reader. Served C2 G2 turn 05 @1253187a asked it beside a reply saying it was supplied.
-  const askedRangeHeld = asked !== undefined && linkHoldsStatedRange(graph, asked.from, asked.to);
+  const asked = askLink === null ? undefined : askLink ?? failedLinks[0];
   const bandTheUserSet = ((): string | null => {
     if (asked === undefined || !Array.isArray(graph.edges)) return null;
     const edge = graph.edges.filter(isRec).find((e) => e.from === asked.from && e.to === asked.to);
@@ -586,7 +594,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
       : [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
-      identityCase || lever === undefined || askedRangeHeld ? null : askedAfterTheBand(linkQuestion())]
+      identityCase ? null : askLink === null ? STATED_RANGE_NEXT_STEP : askLever === undefined ? null : askedAfterTheBand(linkQuestion())]
     : c === 'b' ? [`it can't yet test a '${comparatorTarget}' target on ${name}`, null, null]
     : [`${targetNounOf(graph, verdict.goal_id)} is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
@@ -602,8 +610,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     untestableComparator: cases.includes('b') ? `'${comparatorTarget}'` : null,
     untestableComparatorUnlock: !cases.includes('b') ? null : (stated.frame ?? 'level') === 'level' ? 'target_write' : 'unbuilt',
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
-    asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
-    askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
+    asked: askingCase === 'c' && askLink != null ? { from: askLink.from, to: askLink.to } : null,
+    askedIn: askingCase !== 'c' || askLink === null ? null : upstream === undefined ? (unit !== '' ? unit : null)
       // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
       : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
     // Unbuilt only where no cohort route exists (one target): with two, the answers build the chance.

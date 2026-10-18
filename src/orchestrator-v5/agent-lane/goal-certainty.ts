@@ -26,7 +26,7 @@ import { compactWordLabel } from './reply/labels.js';
  * No engine run and no new carrier: everything is on CEE's own graph and the run's per-option P(goal). Pure.
  */
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
-import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
+import { goalOrderedLinks, reachedGoalPaths, STATED_RANGE_NEXT_STEP } from '../admission/target-testability.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
@@ -538,8 +538,8 @@ export type PlaceholderFirstAsk =
   | { readonly kind: 'gauge'; readonly from: string; readonly through: string; readonly to: string }
   | { readonly kind: 'link'; readonly from: string; readonly to: string };
 
-/** The AIE's words (16 Oct, 6219775036) after a link whose effect the user stated as a range: no question, the next step. */
-export const STATED_RANGE_NEXT_STEP = 'We can also continue comparing the mechanisms and conditions qualitatively.';
+// The AIE's next step after a link whose effect the user stated as a range: ONE owner, the target reader's (no import cycle).
+export { STATED_RANGE_NEXT_STEP };
 
 /** A link whose effect the USER stated as a range: its record (construction's, or a chat press), never a word reader (`linkHoldsStatedRange`). */
 export function userStatedRangeOn(graph: unknown, l: { readonly from: string; readonly to: string }): boolean {
