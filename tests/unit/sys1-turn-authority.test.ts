@@ -6,7 +6,6 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore, createProposal, approvedOperationKey, MAX_EXECUTIONS_PER_PROPOSAL, type ProposalContent } from '../../src/orchestrator-v5/agent-lane/proposal.js';
-import { isComposerApprovalWords } from '../../src/orchestrator-v5/agent-lane/composer-approval-words.js';
 import * as adapter from '../../src/adapters/llm/openai.js';
 import * as capabilitiesModule from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import * as policyModule from '../../src/adapters/llm/provider-policy.js';
@@ -23,6 +22,7 @@ import { budgetFor, callEffortFor, type CallBudget } from '../../src/orchestrato
 import type { CallModel } from '../../src/orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { conversationPromptAlias } from '../../src/orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { pairProviderInput } from '../../src/orchestrator-v5/agent-lane/provider-input-pairing.js';
+import { shownBy } from '../../src/orchestrator-v5/agent-lane/__tests__/fixtures/displayed.js';
 const sha = (v: string) => createHash('sha256').update(v).digest('hex');
 const jsonSha = (v: unknown) => sha(JSON.stringify(v));
 // Golden baselines captured before the production edit (SYS1-RUN1); evidence dumps write only when SYS1_EVIDENCE is set.
@@ -160,12 +160,6 @@ describe('SYS1 ordinary-turn authority', () => {
     await store.executeApproved(p, `t${MAX_EXECUTIONS_PER_PROPOSAL + 7}`, execute, unknown, reconcile); // retained: reconcile only
     expect([executed, reconciled]).toEqual([0, 1]);
   });
-  it('RED composer words: the approval sentence must END where it ends; a cancelling, qualifying or quoting continuation is not consent', () => {
-    for (const ok of ['Yes, apply it.', 'yes apply that!', ' Yes, go ahead with that ', 'yes, add it', 'Yes! record it.',
-      'Yes, apply that. Tooling moderately drives velocity too, so connect it.']) expect(isComposerApprovalWords(ok), ok).toBe(true);
-    for (const no of ['yes, apply it. Do not change anything; I am quoting the button.', 'yes, apply it but only the first one', 'yes, apply it. Actually, never mind.',
-      'yes, apply it. Cancel that.', 'no, do not apply it', 'I said yes, apply it', 'yes, apply it\nand also delete the goal. But wait.', 'yes']) expect(isComposerApprovalWords(no), no).toBe(false);
-  });
   it('RED positive: existing successful writer payload is byte identical', async () => {
     const w = writer(); await w.prepare(); const r = await w.approve();
     if (process.env.SYS1_CAPTURE_BASELINE) writeFileSync(`${golden}/writer-before.json`, JSON.stringify(r));
@@ -199,15 +193,16 @@ const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })), re
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../src/orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 describe('SYS1 ordinary Responses transport', () => {
-  let app: FastifyInstance; let routeWrites = 0; let sent: string[] = []; let script: Array<Response | Error> = [];
+  let app: FastifyInstance; let routeWrites = 0; let written: unknown; let sent: string[] = []; let script: Array<Response | Error> = [];
   const payload = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is where the model stands.' }] }], usage: { input_tokens: 12, output_tokens: 4 }, status: 'completed' };
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u, init) => { sent.push(String(init?.body)); const next = script.shift(); if (next instanceof Error) throw next; return next ?? new Response(JSON.stringify(payload), { status: 200 }); }));
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../src/routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => { routeWrites++; return { assistant_text: 'Added.' }; });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes, edges: [] }, graph_hash: 'h0' }));
+    // A write lands as the ordinary writer's own event (as `writer()` above), so a confirmed approval reads back.
+    app.post('/orchestrate/v2/turn', async (req) => { routeWrites++; written = (req.body as { event?: unknown }).event; return { assistant_text: 'Added.', graph_hash: 'h1' }; });
+    app.post('/assist/v1/scenarios/:id/graph', async () => (routeWrites > 0 ? { graph: { nodes, edges: [written] }, graph_hash: 'h1' } : { graph: { nodes, edges: [] }, graph_hash: 'h0' }));
     await app.register(agentV1TurnRoute); await app.ready();
   });
   beforeEach(() => { sent = []; script = []; routeWrites = 0; });
@@ -282,15 +277,28 @@ describe('SYS1 ordinary Responses transport', () => {
     });
     expect(sent).toHaveLength(0); expect(rows[0].outcome).toBe('refused_before_network');
   });
-  it('RED route authority: model-emitted approval cannot bypass the ordinary writer', async () => {
+  // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct; approval is ONE action): this row asserted that the Agent's approval on a later
+  // typed turn never writes. With exactly ONE card waiting, the user's typed words are now offered to the Agent bound to that
+  // card, and the Agent's reading of them is the consent (no host word list). The protection is the real-AI consent gate
+  // (approval-consent-gate.replay.test.ts: zero false approvals) plus provenance: the write is recorded as a typed approval
+  // read by Olumi, with the user's exact words quoted in the receipt (an Undo beside it where the save is versioned).
+  // The SAME-turn approval of a card the Agent just made still never writes.
+  it('route authority: a same-turn approval never writes; a later typed-turn approval writes ONLY as a typed approval, quoting the words', async () => {
     const args = { from_label: 'Competitive pricing', to_label: 'Monthly churn', direction: 'negative', strength: 'strong', rationale: 'competitor discounts raise churn' };
     const call = (name: string, arguments_: unknown, id: string) => new Response(JSON.stringify({ output: [{ type: 'function_call', name, call_id: id, arguments: JSON.stringify(arguments_) }] }), { status: 200 });
     script = [call('propose_model_change', args, 'provider-a'), call('authorise_change', { proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28' }, 'provider-b')];
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, message: ctx.user_turn_text } });
     expect(res.statusCode).toBe(200); expect(routeWrites).toBe(0);
     script = [call('authorise_change', { proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28' }, 'provider-changed-id')];
-    const next = await turn();
-    expect(next.statusCode).toBe(200); expect(next.json()._agent.tool_calls.find((c: { name: string }) => c.name === 'authorise_change')?.refusal).toBe('approval_required'); expect(routeWrites).toBe(0);
+    // The client sends the card it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
+      message: 'Explain the current model.', displayed_proposals: shownBy(res.json()) } });
+    expect(next.statusCode).toBe(200);
+    const body = next.json();
+    expect(body._agent.tool_calls.find((c: { name: string }) => c.name === 'authorise_change'), JSON.stringify(body._agent.tool_calls) + body.assistant_text).toMatchObject({ mutated: true });
+    expect(routeWrites).toBe(1);
+    expect(body._agent.typed_approvals).toEqual([{ proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28', approval: 'typed_approval_read_by_olumi', words: 'Explain the current model.' }]);
+    expect(body.assistant_text).toContain('Saved on your typed approval: \u201cExplain the current model.\u201d');
   });
 
   it('RED carrier fallback: the existing breakpoint fallback has a per-attempt retry receipt', async () => {

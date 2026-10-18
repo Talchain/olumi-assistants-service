@@ -15,6 +15,7 @@
  *    lapses it (conservative) and an unrelated link edit does not. The rule is strict: a retry after the card's own write
  *    is continued by the press and the writer from that proposal's own write identity, never from an equal date. A card made
  *    before its subject was recorded keeps the whole-model rule.
+ *  · a new link with its level: the link is still absent and the option still sets nothing on that factor (`newLinkLevelsStillApply`);
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
  * Any other card keeps the whole-model rule.
  */
@@ -81,8 +82,35 @@ export function deadlineGoalStillBound(graph: unknown, goalId: string, expectedD
   return (goalDeadlineFromRecord(graph, goalId) ?? null) === expectedDeadline && isDeepStrictEqual(now, expectedGoal);
 }
 
+/**
+ * ⭐ A NEW LINK WITH ITS LEVEL reads only its own subject (assessment 18 Oct K5 T4: approving Olumi's starting value for the
+ * factor lapsed the user's pending "acts on … (a new link) and sets it to 10%" card). Every level op has its link op on the
+ * same `option::factor` path, so the card still applies while each option and factor exists, the link is still absent and
+ * the option still sets nothing on that factor. A write elsewhere (that factor's own starting value included) never stales
+ * it; one that adds the link or a level on that path does. `undefined`: not this shape (the caller's other rules decide).
+ */
+function newLinkLevelsStillApply(ops: StructuredProposal['operations'], graph: unknown): boolean | undefined {
+  const levels = ops.filter((o) => o.op === 'set_option_intervention');
+  const links = ops.filter((o) => o.op === 'add_edge');
+  if (levels.length === 0 || levels.length + links.length !== ops.length || links.length !== levels.length
+    || !levels.every((l) => links.some((e) => e.path === l.path && isRec(e.value) && e.value['link_for_level'] === true))) return undefined;
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return false;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = graph.edges.filter(isRec);
+  return levels.every((l) => {
+    const [optionId, factorId] = l.path.split('::');
+    const option = nodes.filter((n) => n.id === optionId);
+    if (option.length !== 1 || option[0]!.kind !== 'option' || nodes.filter((n) => n.id === factorId).length !== 1) return false;
+    if (edges.some((e) => e.from === optionId && e.to === factorId)) return false;
+    const carriers = [option[0]!.interventions, isRec(option[0]!.data) ? option[0]!.data.interventions : undefined].filter(isRec);
+    return !carriers.some((c) => Object.hasOwn(c, factorId!)) && !Object.hasOwn(option[0]!, `data/interventions/${factorId}`);
+  });
+}
+
 export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
   if (teamTimeReadHolds(p, graph)) return true;
+  const newLink = newLinkLevelsStillApply(p.operations, graph);
+  if (newLink !== undefined) return newLink;
   if (p.operations.length !== 1) return false;
   // A card through the ONE statement door is judged by its carrier member's own rule (`asMemberOp`).
   const op = asMemberOp(p.operations[0]!) ?? p.operations[0]!;
