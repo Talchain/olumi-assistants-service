@@ -290,8 +290,9 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       || !isDeepStrictEqual(approved.expected_node, first.expected_node)
       || !isDeepStrictEqual(approved.user_statement, { subject: first.subject, record: first.record })) return { kind: 'refused', reason: 'invalid_statement' };
     const written = applyStatementCorrection(persistedGraph, correction);
+    const unsized = correction!.edits.flatMap((e) => (e.dependent !== undefined ? [e.dependent.label] : []));
     if (written.refused !== undefined || written.candidate === undefined) return { kind: 'refused',
-      reason: written.refused === 'node_changed' ? 'node_changed' : 'invalid_statement' };
+      reason: written.refused === 'node_changed' || written.refused === 'node_not_found' ? written.refused : 'invalid_statement' };
     if (written.unchanged) return { kind: 'unchanged' };
     const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false,
       result: { edit_kind: 'parameter_update', status: 'applied', operations_count: correction!.edits.length,
@@ -300,9 +301,11 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
         graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
         graph_hash_after: computeAnalysisAffectingGraphHash(written.candidate as never) || null,
         safe_summary: 'Recorded your source correction and explicitly retained material',
-        impact: 'low', rerun_recommended: false } });
+        // A correction that withdrew a size the analysis used changes what any earlier Run rested on (GATE → LABEL, one commit).
+        impact: unsized.length > 0 ? 'high' : 'low', rerun_recommended: unsized.length > 0 } });
     return { kind: 'mutated', mutatedGraph: written.candidate, handlerFacts: [fact as HandlerFact],
-      confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.' };
+      confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.'
+        + unsized.map((label) => ` The link “${label}” is now unsized: the analysis cannot use its size until it is sized again.`).join('') };
   }
   const said = approved.user_statement;
   const record = claimRecordOf(said.record);
