@@ -268,9 +268,9 @@ export function moneyUnitScale(unit: unknown): number {
 }
 
 /**
- * An ORDINAL ending a cardinal's words ("one hundred FIRST", "a hundred and FIRST", "twenty-SECOND", "forty FIFTH", "one HUNDREDTH") is
- * consumed with them, so `parseCardinalAmount` refuses the whole capture, as the fraction tail does (Codex #3429 BLOCK: "one hundred
- * first ticket" saved 100). Never "twenty seconds" or "two second-hand cars".
+ * An ORDINAL ending a cardinal's words ("twenty-FIRST", "forty FIFTH", "... and FIRST", a scale word + "th") is consumed with them,
+ * so `parseCardinalAmount` refuses the whole capture, as the fraction tail does (Codex #3429 BLOCK: an ordinal compound saved its
+ * cardinal part as a capacity). Never "twenty seconds" or "two second-hand cars".
  */
 const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth',
   ...['thir', 'four', 'fif', 'six', 'seven', 'eigh', 'nine'].map((w) => `${w}teenth`), ...['twen', 'thir', 'for', 'fif', 'six', 'seven', 'eigh', 'nine'].map((w) => `${w}tieth`),
