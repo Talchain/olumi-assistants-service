@@ -80,6 +80,19 @@ describe('row 1 (#3399 D4): a target figure never binds by magnitude alone', () 
   });
 });
 
+describe('row 1b: the AI\'s own reading of the sentence decides the bound, never the goal\'s comparator alone', () => {
+  // GUARD (green at 4dd7c21b only because every negative was refused): a floor on the change (≥ −20, "cut at most 20%") is not
+  // the goal's ceiling (≤ −20). Contradicting readings never bind; the user's 20% stays said as unbound, never credited.
+  it('GUARD (comparator): a lower_bound −20 reading never binds a "<=" −20 goal', async () => {
+    const said = 'We want to cut order turnaround by at least 20%.';
+    const { graph } = await construct([changeDraft(said, { form: 'lower_bound', value: -20 })], brief(said));
+    const goal = goalOf(graph);
+    expect(goal, 'PRECONDITION: the model registers').toBeDefined();
+    expect(goal!.threshold_source, JSON.stringify(goal)).not.toBe('brief_extraction');
+    expect(goal!.provenance, JSON.stringify(goal)).not.toBe('from_brief');
+  });
+});
+
 describe('row 2 (#3399 D2): an inferred goal becomes the user\'s target only where its statement binds', () => {
   it('RED: "cut order turnaround by at least 20%" binds −20 change_rel % → the target is the user\'s (explicit), minimise', async () => {
     const said = 'We want to cut order turnaround by at least 20%.';
