@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { issueContextPacket, assessContextFreshness, type CanonicalContextPacket } from '../runtime/request-assembly.js';
 import { runAgentTurn, type ModelCallRequest } from '../runtime/agent-loop.js';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
 import { CURRENT_MODEL_STATE_PREFIX } from '../turn-context.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
@@ -17,7 +18,7 @@ const issue = (over = {}) => issueContextPacket({ scenario_id: SCENARIO, authent
 async function build(context?: CanonicalContextPacket | null, claimedFreshness?: unknown) {
   const requests: ModelCallRequest[] = [];
   let dispatches = 0;
-  const caps = createAgentCapabilities(async () => { dispatches++; throw new Error('no external dispatch belongs to this input-boundary witness'); });
+  const caps = createAgentCapabilities(async () => { dispatches++; throw new Error('no external dispatch belongs to this input-boundary witness'); }, new ProposalStore());
   const canonicalContext = { packet: context ?? null, expectation, freshness: claimedFreshness };
   await runAgentTurn({ ctx: { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'context-admission' },
     history: [], message: 'Review the retained model.', instructions: 'Retain the source of every statement.', maxOutputTokens: 256,
