@@ -32,7 +32,7 @@ const BRIEF = 'We are deciding whether to raise our monthly price from Â£20 to Â
   + 'Our satisfaction score is 7, scored out of 10. Monthly churn rate is 4%.';
 
 const s = (quote: string, subject: Rec, field: string, value: number | null, unit: string | null): Rec =>
-  ({ quote, subject: { to_label: null, factor_label: null, ...subject }, field, form: 'point', value, low: null, high: null, unit, qualifier: null, conditions: null });
+  ({ quote, subject: { to_label: null, factor_label: null, ...subject }, field, form: 'point', value, low: null, high: null, unit, qualifier: null, conditions: null, speaker: 'user' });
 
 /** The drafter's ranges for price and cancellations, neither written in the brief nor fixed by the unit. */
 type Ranges = { price: number; cancellations: number };
