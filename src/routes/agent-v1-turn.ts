@@ -3337,11 +3337,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return card === undefined || id === undefined ? [] : [[id, card] as const];
     })).entries()];
     const waitingIds = new Set([...heldCardIds.map(([id]) => id), ...proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id)]);
-    const soleCard = heldCardIds.length === 1 && waitingIds.size === 1 ? heldCardIds[0] : undefined;
-    if (approvedProposal === undefined && typedNow !== null && soleCard !== undefined) {
-      const [soleId, card] = soleCard;
-      if (card.message === typedNow) approvedProposal = soleId;
-      pressedApproval = { typed_approval_of: soleId, typed_approval_words: card.message };
+    const soleId = waitingIds.size === 1 ? [...waitingIds][0]! : undefined;
+    // Its card as the user was shown it: the durable carrier, or this subject's last offer (the store may hold no carrier).
+    const soleCard = soleId === undefined ? undefined : [heldCardIds.find(([id]) => id === soleId)?.[1], lastApproveOffer.get(approveKey),
+      carriedProposals.get(approveKey)?.chip].find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === soleId);
+    if (approvedProposal === undefined && typedNow !== null && soleId !== undefined && soleCard !== undefined) {
+      if (soleCard.message === typedNow) approvedProposal = soleId;
+      pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
@@ -5288,6 +5290,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
     // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
     // figure fits." whole (the quote ends `."`, so it was one sentence). The narrator still states what was saved.
+    // ⭐ ONE APPROVAL ACTION: an approval the Agent applied from the user's typed words says the same receipt as its button
+    // (the capability's own follow-up, through the same Agent-direction boundary as the press path above).
+    const withApprovalReceipts = <N extends { status: string | null }>(n: N): N => {
+      const receipts = result.tool_calls.flatMap((c, i) => {
+        const r = result.tool_results[i];
+        return c.name === 'authorise_change' && r?.ok === true && r.mutated === true && typeof r.follow_up === 'string'
+          ? [withoutAgentDirections(r.follow_up).text] : [];
+      }).filter((x) => x.trim() !== '');
+      return receipts.length === 0 ? n : { ...n, status: [n.status, ...receipts].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
+    };
     const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
@@ -5296,7 +5308,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // A specific partial follow-up is already the narrator's authoritative status.
               text: result.tool_results.some(r => r.mutated === true && r.applied === false
                 && typeof r.outcome === 'string' && r.follow_up === text) ? '' : text })
-        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus, aiAsks: aiWroteReply }, approvalWords);
+        : withApprovalReceipts(narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null, alreadySaid: saidBeforeStatus, aiAsks: aiWroteReply }, approvalWords));
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.

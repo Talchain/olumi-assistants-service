@@ -784,7 +784,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approveChipOf(t1)).toBeUndefined();
   }, 120_000);
 
-  it('an exact-label Olumi suggestion waits for its displayed card; model yes cannot write, and the card includes the same option', async () => {
+  it('an exact-label Olumi suggestion waits for its card; with only that card waiting a typed yes IS its press (one write), and the card includes the same option', async () => {
     const graph = seedGraph();
     graphOf.set(SCENARIO, { ...graph, nodes: [...graph.nodes.map((node) => node.id === 'opt_b'
       ? { ...node, label: 'Raise to £54', proposed_by: 'olumi',
@@ -813,21 +813,23 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
 
     const before = structuredClone(graphNow());
     expect('analysis_state' in before, 'this adoption has no prior Run').toBe(false);
-    script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('Please use the card.')];
+    // ⭐ AN APPROVAL IS ONE ACTION (DL-3 ruling 18 Oct: every proposal family joins the one envelope; this row used to say
+    // "model yes cannot write"): with only this card waiting, the user's typed yes, read by the Agent as approval of THIS
+    // card, is its press — the same adoption and receipt. Two cards waiting bind nothing (approval-one-action.route.test.ts).
+    script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('Included the suggestion; run analysis to compare all three options.')];
     const plainYes = await turn({ message: 'yes' });
     expect(plainYes._agent.tool_calls.find((call) => call.name === 'authorise_change'))
-      .toMatchObject({ ok: false, mutated: false, refusal: 'approve_on_card' });
-    expect(graphNow()).toEqual(before);
-
-    script = [() => say('Included the suggestion; run analysis to compare all three options.')];
-    const pressed = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
-    expect(pressed._agent.tool_calls.find((call) => call.name === 'authorise_change'))
       .toMatchObject({ ok: true, mutated: true });
     // Plain words (#3038, Paul's principle review): the receipt no longer tells the user to run what runs automatically.
-    expect(pressed.assistant_text).toContain('Its Olumi origin and each level\'s recorded source remain unchanged.');
-    expect(pressed.assistant_text).not.toContain('run analysis to include this option');
-    expect(pressed.assistant_text).not.toMatch(/the earlier analysis|run it again/i);
-    expect(approveChipOf(pressed), 'the applied proposal is no longer offered').toBeUndefined();
+    expect(plainYes.assistant_text).toContain('Its Olumi origin and each level\'s recorded source remain unchanged.');
+    expect(plainYes.assistant_text).not.toContain('run analysis to include this option');
+    expect(plainYes.assistant_text).not.toMatch(/the earlier analysis|run it again/i);
+    expect(approveChipOf(plainYes), 'the applied proposal is no longer offered').toBeUndefined();
+    // The card pressed afterwards (a stale screen) writes nothing more.
+    script = [() => say('Already included.')];
+    const pressed = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(pressed._agent.tool_calls.find((call) => call.name === 'authorise_change'))
+      .toMatchObject({ ok: true, mutated: false });
     const after = graphNow();
     expect(after.nodes.filter((node) => node.kind === 'option')).toHaveLength(3);
     expect(after.nodes.find((node) => node.id === 'opt_b')).toMatchObject({
