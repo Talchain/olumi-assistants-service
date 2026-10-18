@@ -264,10 +264,13 @@ export function wholeStatementIn(message: string, quote: unknown): boolean {
     && !insideSpeech(text, at) && !insideSpeech(text, at + said.length)
     && !insideSingleSpeech(text, at) && !insideSingleSpeech(text, at + said.length));
 }
-/** The existing paired-speech reader, exposed for source-review display; no attribution or write permission is granted. */
-export function speechReading(quote: string): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
+/**
+ * The existing paired-speech reader; no attribution or write permission is granted. Authorship reads paired single marks too
+ * (`insideSingleSpeech`); the source-review DISPLAY keeps its double-mark reading (`single: false`), so its words are unchanged.
+ */
+export function speechReading(quote: string, single = true): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
   const text = plainQuote(quote);
-  return { text, inSpeech: (at) => insideSpeech(text, at) || insideSingleSpeech(text, at) };
+  return { text, inSpeech: (at) => insideSpeech(text, at) || (single && insideSingleSpeech(text, at)) };
 }
 
 /**
