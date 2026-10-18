@@ -30,7 +30,7 @@ export interface DoorContext {
 
 /** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
 export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
-  alsoAnswers: readonly DoorSubject[] = [], found?: { subject?: DoorSubject }): 'bound' | 'another' | 'unbound' {
+  alsoAnswers: readonly DoorSubject[] = [], found?: { subject?: DoorSubject }, correction?: Pick<ApprovedCorrectionEdit, 'retirement'>): 'bound' | 'another' | 'unbound' {
   if (found !== undefined) delete found.subject;
   // The subjects an ask of which this statement may answer: its own, and the row's `answersFor` (one key each).
   // The NODES this statement may answer for: its own, and the rows' `answersFor` (a cohort option's "the same people" answers the goal's ask).
@@ -41,12 +41,26 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
     if (subject.to_id !== undefined && namesBothEnds(quote, entities, subject.id, subject.to_id)) return 'bound';
   } else {
     const same = nodes.filter((n) => n.kind === subject.kind && typeof n.id === 'string' && typeof n.label === 'string');
-    const named = same.filter((n) => isFactorNamedByUser(String(n.label), quote));
+    let named = same.filter((n) => isFactorNamedByUser(String(n.label), quote));
+    if (correction !== undefined) {
+      // Corrections opt in. Old sentences are never names; quoted bytes identify only a node that uniquely holds them across the model.
+      const speech = speechReading(quote), retired = speechReading(correction.retirement.quote).text;
+      const outside = speech.text.split('').map((ch, at) => speech.inSpeech(at) ? ' ' : ch).join('');
+      const labelled = same.filter(n => isFactorNamedByUser(String(n.label), outside));
+      const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
+      const holders = cited ? nodes.filter(n => [
+        ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
+        ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
+      ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
+      named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : []
+        : same.filter(n => isFactorNamedByUser(String(n.label), speech.text));
+    }
     if (named.length === 1) {
       if (found !== undefined) found.subject = { ...subject, id: String(named[0]!.id) };
       return named[0]!.id === subject.id ? 'bound' : 'another';
     }
-    if (named.length > 1) return 'unbound';
+    if (named.length > 1) return correction !== undefined && named.some(n => n.id === subject.id)
+      && named.every(n => answers.has(subjectNodeKey({ ...subject, id: String(n.id) }))) ? 'bound' : 'unbound';
   }
   const s = ctx.selection;
   if (s !== undefined && s.unresolved === 'none' && s.element_ids.length === 1) {
@@ -364,13 +378,17 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     if (!isDeepStrictEqual(node, e.expected_node)
       || !isDeepStrictEqual(userStatementFor(graph, e.subject) ?? null, e.expected_record)) return { refused: 'node_changed' };
     const found: { subject?: DoorSubject } = {};
-    const binding = statementBoundTo(graph, e.subject, approved.source.quote, approved.binding_context, undefined, [], found);
+    let binding = statementBoundTo(graph, e.subject, approved.source.quote, approved.binding_context, undefined, [], found, e);
+    // A bundle can name several items; a question about one item does not bind the others.
+    if (binding === 'unbound') binding = statementBoundTo(graph, e.subject, approved.source.quote, {}, undefined,
+      approved.edits.map(edit => edit.subject), found, e);
     if (binding !== 'bound') {
       if (diagnostic !== undefined) Object.assign(diagnostic, { binder_result: binding, failed_edit_index: editIndex, bound_subject: found.subject,
         failed_check: `correction.postimage.unrelated_correction.${binding}` });
       return { refused: 'unrelated_correction' };
     }
-    const oldQuotes = e.expected_record?.statements.map(s => s.quote) ?? [];
+    // Unknown words prove held source bytes only; their original attribution remains unchanged in the postimage.
+    const oldQuotes = [...(e.expected_record?.statements.map(s => s.quote) ?? []), ...correctionUnknowns(node, e.subject).map(s => s.quote)];
     if (e.legacy !== undefined) {
       if (legacyOf(node, e.legacy.field) !== e.legacy.expected) return { refused: 'node_changed' };
       oldQuotes.push(e.legacy.expected);
@@ -472,13 +490,11 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
   const quote = line !== undefined && plainQuoteWords(line) === plainQuoteWords(request.quote) ? line : request.quote;
   if (!wholeStatementIn(texts.now ?? '', quote)) {
     // Display only facts from the existing literal/whole-statement and paired-speech readers; no source permission changes.
-    const speech = speechReading(texts.now ?? '', false), said = speechReading(request.quote).text;
+    const speech = speechReading(texts.now ?? ''), said = speechReading(request.quote).text;
     const spans = quoteSpansIn(speech.text, said);
-    const reported = spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length));
-    // Words inside paired SINGLE marks keep the display they had (speaker unknown): never "reported", never your excerpt.
-    const single = speechReading(texts.now ?? '');
-    const singleMarked = spans.length > 0 && spans.every(at => single.inSpeech(at) || single.inSpeech(at + said.length));
-    const partial = !reported && !singleMarked && spans.length > 0 && line !== undefined && wholeStatementIn(texts.now ?? '', line);
+    const quoted = spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length));
+    const reported = quoted && request.speaker === 'other';
+    const partial = !quoted && spans.length > 0 && line !== undefined && wholeStatementIn(texts.now ?? '', line);
     return refused('correction_not_stated', 'correction.quote_whole_current_turn', statementCorrectionWords({ readings,
       source_state: reported ? 'reported' : partial ? 'partial' : spans.length === 0 && line === undefined ? 'missing' : 'unknown',
       ...(line === undefined ? {} : { source_words: line }), ...(partial ? { excerpt_words: request.quote } : {}) }));
@@ -493,7 +509,9 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     if (node === undefined) return refused('node_not_found', 'correction.edit_subject_exists');
     const verified = verifyStatements([{ quote, form: 'describes', ...(request.speaker !== undefined ? { speaker: request.speaker } : {}) }], texts,
       { subject: { quantity: subjectKey(e.subject), node_id: e.subject.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
-    if (verified.kind === 'refused') return refused(verified.refusal, `correction.source.${verified.refusal}`);
+    if (verified.kind === 'refused') return refused(verified.refusal, `correction.source.${verified.refusal}`,
+      request.speaker === 'other' || request.speaker === 'unknown' ? statementCorrectionWords({ readings,
+        source_state: request.speaker === 'other' ? 'reported' : 'unknown', source_words: line ?? quote }) : undefined);
     source = verified.statements[0]!;
     if (!Array.isArray(e.retained)) return refused('retained_list_required', 'correction.retained_list');
     const expected = e.expected_record === undefined ? userStatementFor(graph, e.subject) ?? null : e.expected_record;
