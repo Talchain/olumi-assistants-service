@@ -7,12 +7,13 @@
  * key. Pure.
  */
 import { isDeepStrictEqual } from 'node:util';
-import { namesBothEnds, wholeStatementIn } from '../goal-target/input-claim-context.js';
+import { namesBothEnds, speechReading, wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
 import { userStatementOf, verifyStatements, type UserStatement } from '../agent-lane/user-statements.js';
 import { plainQuoteWords, verbatimSourceLine } from '../agent-lane/quote-confirmation.js';
+import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { isStatementField, subjectKey, subjectNodeKey, resolveSubject, SUBJECT_KINDS, type DoorSubject, type StatementField } from './subject.js';
 
 type Rec = Record<string, unknown>;
@@ -399,12 +400,17 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
 
 /** All changes are existing record/source members. The complete old/new bytes are available before approval. */
 export function statementCorrectionWords(c: StatementCorrection | { readonly selected_label: string; readonly bound_label?: string }
-  | { readonly readings: readonly string[]; readonly quote_missing: boolean; readonly source_words?: string }, legacy = false): string {
+  | { readonly readings: readonly string[]; readonly source_state: 'missing' | 'partial' | 'reported' | 'unknown';
+    readonly source_words?: string; readonly excerpt_words?: string }, legacy = false): string {
   if ('readings' in c) return ['Review the correction’s source',
     ...[...new Set(c.readings)].map(reading => `Olumi’s reading: ${reading}.`),
-    c.quote_missing ? 'Olumi could not find words of your own stating this correction. This review does not authorise a change.' : 'Olumi could not verify the proposed words as a complete statement in the current conversation.',
-    ...(c.source_words === undefined ? [] : [`Source words — speaker/source not verified: “${c.source_words}”.`]),
-    ...(c.quote_missing ? [] : ['This review does not authorise a change.']),
+    c.source_state === 'missing' ? 'Olumi could not find words of your own stating this correction. This review does not authorise a change.'
+      : c.source_state === 'partial' ? 'Olumi could not verify this excerpt as the complete applicable statement. This review does not authorise a change.'
+        : c.source_state === 'reported' ? 'These words report another speaker’s view; they do not establish that you assert the reported correction. This review does not authorise a change.'
+          : 'Olumi could not establish who asserted these words. This review does not authorise a change.',
+    ...(c.excerpt_words === undefined ? [] : [`Excerpt — your recorded words: “${c.excerpt_words}”.`]),
+    ...(c.source_words === undefined ? [] : [c.source_state === 'partial' ? `Recorded words — you: “${c.source_words}”.`
+      : c.source_state === 'reported' ? `Reported words — speaker unknown: “${c.source_words}”.` : `Words — speaker unknown: “${c.source_words}”.`]),
   ].join('\n');
   if ('selected_label' in c) return c.bound_label === undefined
     ? 'Olumi could not establish which item these words concern. Which item should this correction concern?'
@@ -459,12 +465,20 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return refused('correction_not_stated', 'correction.graph_shape');
   const readings = Array.isArray(request?.edits) ? request.edits.flatMap(e => isRec(e) && typeof e.reading_words === 'string' ? [e.reading_words] : []) : [];
   if (typeof request?.quote !== 'string') return refused('correction_not_stated', 'correction.quote_present',
-    statementCorrectionWords({ readings, quote_missing: true }));
+    statementCorrectionWords({ readings, source_state: 'missing' }));
   // Recover ONLY the same complete line in the existing quote reader's spelling, never an omitted remainder or another speaker.
   const line = verbatimSourceLine({ now: texts.now }, request.quote);
   const quote = line !== undefined && plainQuoteWords(line) === plainQuoteWords(request.quote) ? line : request.quote;
-  if (!wholeStatementIn(texts.now ?? '', quote)) return refused('correction_not_stated', 'correction.quote_whole_current_turn',
-    statementCorrectionWords({ readings, quote_missing: false, ...(line === undefined ? {} : { source_words: line }) }));
+  if (!wholeStatementIn(texts.now ?? '', quote)) {
+    // Display only facts from the existing literal/whole-statement and paired-speech readers; no source permission changes.
+    const speech = speechReading(texts.now ?? ''), said = speechReading(request.quote).text;
+    const spans = quoteSpansIn(speech.text, said);
+    const reported = spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length));
+    const partial = !reported && spans.length > 0 && line !== undefined && wholeStatementIn(texts.now ?? '', line);
+    return refused('correction_not_stated', 'correction.quote_whole_current_turn', statementCorrectionWords({ readings,
+      source_state: reported ? 'reported' : partial ? 'partial' : spans.length === 0 && line === undefined ? 'missing' : 'unknown',
+      ...(line === undefined ? {} : { source_words: line }), ...(partial ? { excerpt_words: request.quote } : {}) }));
+  }
   if (!Array.isArray(request.edits) || request.edits.length === 0) return refused('correction_not_stated', 'correction.edits_nonempty');
   const edits: ApprovedCorrectionEdit[] = [];
   let source: UserStatement | undefined;
