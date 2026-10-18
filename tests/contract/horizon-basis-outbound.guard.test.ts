@@ -69,7 +69,6 @@ const ALLOWLIST: (Sink & { reason: string })[] = [
   {"file": "src/routes/assist.evidence-pack.ts", "symbol": "<module>", "reason": "Request schema or internal share persistence; share readback is in the manifest.", "assignments": ["graph"]},
   {"file": "src/routes/assist.evidence-pack.ts", "symbol": "route", "reason": "Request schema or internal share persistence; share readback is in the manifest.", "assignments": ["graph"]},
   {"file": "src/routes/assist.v1.decision-review.ts", "symbol": "<module>", "reason": "Request schema declaration, not a graph value.", "assignments": ["graph"]},
-  {"file": "src/routes/assist.v1.enhanced-decision-review.ts", "symbol": "<module>", "reason": "Request schema declaration, not a graph value.", "assignments": ["graph"]},
   {"file": "src/routes/assist.v1.evidence-helper.ts", "symbol": "route", "reason": "Internal quality input with graph undefined.", "assignments": ["graph"]},
   {"file": "src/routes/assist.v1.explain-graph.ts", "symbol": "route", "reason": "Internal quality input, not serialised.", "assignments": ["graph"]},
   {"file": "src/routes/assist.v1.graph-readiness.ts", "symbol": "<module>", "reason": "Request schema declaration, not a graph value.", "assignments": ["graph"]},

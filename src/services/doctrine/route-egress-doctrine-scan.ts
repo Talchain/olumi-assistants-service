@@ -60,10 +60,7 @@
  * inherited:** (a) `/assist/v1/suggest-utility-weights` is **CLEAN** — its producer
  * is `cee/utility-weight-suggestions/`, which has zero hits; the weight-suggestion
  * strings above belong to `cee/verification/`, a different module reached by
- * different routes. (b) `cee/decision-review/templates.ts`'s three strings reach
- * **no registered route** — their only importer is
- * `routes/assist.v1.enhanced-decision-review.ts`, which `src/server.ts` never
- * registers.
+ * different routes.
  *
  * ## Why this module DETECTS but does not REMEDY — the reasoned half of the brief
  *

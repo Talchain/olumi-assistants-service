@@ -47,7 +47,7 @@ warnOnInvalid=0
 # `reconcileAnalysisSummaryWithEnrichment`. This edit FOLLOWS a genuine cleanup —
 # it is not a ratchet loosening. The gate requires current == baseline, so a real
 # removal fails the gate until the floor is lowered in the same PR.
-as_unknown_as=53
+as_unknown_as=47
 
 # Exact ratchet: constant fallback on a science field — `field ?? null|0|0.x`
 # or `field || null|0|0.x`. HIGH-SIGNAL (catches fabricated defaults like
@@ -56,4 +56,4 @@ as_unknown_as=53
 # means "not detected by this cheap gate", NOT "safe".
 # Lowered 16 -> 10 by PR #615 (V1 orchestrator-belt deletion banked the cleanup).
 # C1 group 2 removed three fallbacks with the unreachable conventional producers.
-science_field_default_fallback=7
+science_field_default_fallback=6
