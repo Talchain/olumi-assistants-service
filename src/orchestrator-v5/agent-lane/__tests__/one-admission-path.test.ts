@@ -49,6 +49,8 @@ function ratchetFailures(now: string[], baseline: Baseline): string[] {
 }
 
 const BUILD_FILE = 'orchestrator-v5/agent-lane/runtime/build-model.ts';
+/** The ONE construction pass that holds `admitForBuild` (K6: the exported `buildModelFromBrief` only runs it, once or twice). */
+const BUILD_PASS = 'buildModelFromBriefOnce';
 const ADMIT_FILE = 'orchestrator-v5/agent-lane/admit-model.ts';
 const protectedNames = new Set(['admitCandidateModel', 'admitOrdinaryCandidateModel']);
 
@@ -78,13 +80,13 @@ function scanSources(sources: Map<string, string>) {
     const ast = program.getSourceFile(full(file))!;
     let allowedBody: ts.Node | undefined;
     if (file === BUILD_FILE) {
-      const builds = ast.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === 'buildModelFromBrief');
+      const builds = ast.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === BUILD_PASS);
       const declarations = builds.length === 1 && builds[0]!.body
         ? builds[0]!.body.statements.filter(ts.isVariableStatement).flatMap(stmt => [...stmt.declarationList.declarations])
           .filter(node => ts.isIdentifier(node.name) && node.name.text === 'admitForBuild') : [];
       if (declarations.length === 1 && declarations[0]!.initializer && ts.isArrowFunction(declarations[0]!.initializer))
         allowedBody = declarations[0]!.initializer.body;
-      else forbidden.push(`${file}: expected exactly one admitForBuild arrow declared directly inside buildModelFromBrief`);
+      else forbidden.push(`${file}: expected exactly one admitForBuild arrow declared directly inside ${BUILD_PASS}`);
     }
     const protectedSymbol = (node: ts.Node): boolean => {
       let symbol = checker.getSymbolAtLocation(node);
@@ -163,7 +165,7 @@ describe('one production admission path', () => {
     expect(scan('planted.ts', '// admitCandidateModel(c)\n/* admitOrdinaryCandidateModel(c) */').forbidden).toEqual([]);
     expect(scan('planted.ts', 'admitCandidateModel(c)').forbidden).toHaveLength(1);
     const found = scan('orchestrator-v5/agent-lane/runtime/build-model.ts',
-      'function buildModelFromBrief() { const admitForBuild = (c) => { return admitCandidateModel(c); }; } admitOrdinaryCandidateModel(c);');
+      'function buildModelFromBriefOnce() { const admitForBuild = (c) => { return admitCandidateModel(c); }; } admitOrdinaryCandidateModel(c);');
     expect(found.allowed).toHaveLength(1);
     expect(found.forbidden).toHaveLength(1);
   });
@@ -186,10 +188,10 @@ describe('source guard bypass controls', () => {
     expect(scan('planted.ts', "import * as m from './orchestrator-v5/agent-lane/admit-model.js'; m.admitOrdinaryCandidateModel.apply(undefined, [c]);").forbidden).toHaveLength(1);
   });
   it('refuses an absent direct declaration even when there are no calls', () => {
-    expect(scan(BUILD_FILE, 'function buildModelFromBrief() {}').forbidden).toHaveLength(1);
+    expect(scan(BUILD_FILE, 'function buildModelFromBriefOnce() {}').forbidden).toHaveLength(1);
   });
   it('allows only the direct declaration, rejecting a nested namesake', () => {
-    const found = scan(BUILD_FILE, 'function buildModelFromBrief() { const admitForBuild = (c) => admitCandidateModel(c); function nested() { const admitForBuild = (c) => admitOrdinaryCandidateModel(c); } }');
+    const found = scan(BUILD_FILE, 'function buildModelFromBriefOnce() { const admitForBuild = (c) => admitCandidateModel(c); function nested() { const admitForBuild = (c) => admitOrdinaryCandidateModel(c); } }');
     expect(found.allowed).toHaveLength(1);
     expect(found.forbidden).toHaveLength(1);
   });
@@ -201,7 +203,7 @@ describe('source guard bypass controls', () => {
   });
   it('refuses two direct declarations', () => {
     const found = scan('orchestrator-v5/agent-lane/runtime/build-model.ts',
-      'function buildModelFromBrief() { const admitForBuild = (c) => admitCandidateModel(c); const admitForBuild = (c) => admitOrdinaryCandidateModel(c); }');
+      'function buildModelFromBriefOnce() { const admitForBuild = (c) => admitCandidateModel(c); const admitForBuild = (c) => admitOrdinaryCandidateModel(c); }');
     expect(found.allowed).toEqual([]);
     expect(found.forbidden.length).toBeGreaterThan(0);
   });
