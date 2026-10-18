@@ -30,7 +30,7 @@ export interface DoorContext {
 
 /** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
 export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
-  alsoAnswers: readonly DoorSubject[] = [], found?: { subject?: DoorSubject }, correction?: Pick<ApprovedCorrectionEdit, 'retirement' | 'legacy'>): 'bound' | 'another' | 'unbound' {
+  alsoAnswers: readonly DoorSubject[] = [], found?: { subject?: DoorSubject }, correction?: Pick<ApprovedCorrectionEdit, 'retirement'>): 'bound' | 'another' | 'unbound' {
   if (found !== undefined) delete found.subject;
   // The subjects an ask of which this statement may answer: its own, and the row's `answersFor` (one key each).
   // The NODES this statement may answer for: its own, and the rows' `answersFor` (a cohort option's "the same people" answers the goal's ask).
@@ -41,20 +41,20 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
     if (subject.to_id !== undefined && namesBothEnds(quote, entities, subject.id, subject.to_id)) return 'bound';
   } else {
     const same = nodes.filter((n) => n.kind === subject.kind && typeof n.id === 'string' && typeof n.label === 'string');
-    let named = same.filter(n => isFactorNamedByUser(String(n.label), quote));
+    let named = same.filter((n) => isFactorNamedByUser(String(n.label), quote));
     if (correction !== undefined) {
-      // Corrections opt in. Old sentences are never names; quoted bytes identify only their unique held node.
+      // Corrections opt in. Old sentences are never names; quoted bytes identify only a node that uniquely holds them across the model.
       const speech = speechReading(quote), retired = speechReading(correction.retirement.quote).text;
       const outside = speech.text.split('').map((ch, at) => speech.inSpeech(at) ? ' ' : ch).join('');
       const options = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string').map(n => String(n.label));
       const labelled = same.filter(n => factorTheUserNamed(String(n.label), outside,
         { options, others: nodes.filter(other => other.id !== n.id).map(other => String(other.label ?? '')) }));
       const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
-      const holders = cited ? same.filter(n => [
+      const holders = cited ? nodes.filter(n => [
         ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
       ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
-      named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders : []
+      named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : []
         : same.filter(n => factorTheUserNamed(String(n.label), speech.text,
           { options: [...options, String(n.label)], others: [] }));
     }
