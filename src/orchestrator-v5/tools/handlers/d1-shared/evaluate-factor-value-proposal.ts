@@ -1153,12 +1153,15 @@ function evaluateFactorValueProposalImpl(
 
     // 6b. CEILING.
     if (effectiveRaw > cap) {
-      if (!inputHasUnit) {
-        // A bare number asserts no scale, so the ceiling is the ONLY scale
-        // evidence in play. Widening on it would let a mistyped digit
-        // redefine what the factor measures — the "a bound absent admits
-        // nonsense" direction. Unchanged, and pinned as the opposite-direction
-        // twin of the founder's case.
+      // A bare number is held to a proportion's 1 (it could be a percent typed for a share) or to a cap the proposal
+      // states. Any other stored cap, a percentage's 100 included, is Olumi's reference or an encoding, never the
+      // factor's range (AIE 18 Oct 00:27/00:37, caution d): the user's figure takes the unconfirmed-limit remedy below.
+      if (!inputHasUnit && (cap === 1 || proposalCap !== undefined)) {
+        // A bare number asserts no scale, so a proportion's 1 or the
+        // proposal's own cap is the ONLY scale evidence in play. Widening on it
+        // would let a mistyped digit redefine what the factor measures — the
+        // "a bound absent admits nonsense" direction, pinned as the
+        // opposite-direction twin of the founder's case.
         return {
           ok: false,
           reason: 'bare_number_outside_cap',

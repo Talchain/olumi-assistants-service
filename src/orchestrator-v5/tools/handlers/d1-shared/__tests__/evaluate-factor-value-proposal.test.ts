@@ -80,16 +80,22 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
     if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('cap_non_positive');
   });
 
-  it('returns bare_number_outside_cap for unitless overshoot on a capped factor', () => {
-    const r = evaluateFactorValueProposal({
-      rawInput: 500,
-      operator: 'set',
-      factorCap: 100,
-      inputHasUnit: false,
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok)
+  it('U2 — a bare overshoot is held to a proportion\'s 1 or a stated cap; any other cap is Olumi\'s reference', () => {
+    // CHANGED 18 Oct (A, AIE 00:27/00:37, caution d): a stored 100, unitless or a percentage's, is Olumi's reference or
+    // an encoding, never the factor's range. The bare 500 is still refused, with the unconfirmed-limit remedy.
+    for (const factor of [{ factorCap: 100 }, { factorCap: 100, factorUnit: '%' }]) {
+      const r = evaluateFactorValueProposal({ rawInput: 500, operator: 'set', inputHasUnit: false, ...factor });
+      if (r.ok) throw new Error('expected a rejection');
+      expect(r.reason).toBe<ProposalRejectionReason>('value_exceeds_cap');
+      expect(r.unconfirmed_bound).toEqual({ cap: 100, rescale_cap_to: suggestExtendedCap(500) });
+    }
+    // Kept: a proportion's 1, and a cap the proposal states, are the scale a bare number must stay inside.
+    for (const held of [{ factorCap: 1, rawInput: 5 }, { proposalCap: 100, rawInput: 500 }]) {
+      const r = evaluateFactorValueProposal({ operator: 'set', inputHasUnit: false, ...held });
+      if (r.ok) throw new Error('expected a rejection');
       expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+      expect(r.unconfirmed_bound).toBeUndefined();
+    }
   });
 
   it('returns value_exceeds_cap for unit-bearing overshoot on a capped factor', () => {
@@ -411,7 +417,8 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
     });
 
     it('rejects a MULTIPLY whose product OVERSHOOTS the cap (falls through to the cap-range guard, not bare_ratio)', () => {
-      // 40000 * 5 = 200000 > cap 100000; bare multiplier → bare_number_outside_cap.
+      // 40000 * 5 = 200000 > cap 100000; still refused. CHANGED 18 Oct (A): a £ cap is Olumi's reference, not one the
+      // unit fixes, so the refusal is the unconfirmed-limit remedy rather than bare_number_outside_cap.
       const r = evaluateFactorValueProposal({
         rawInput: 5,
         operator: 'multiply',
@@ -422,7 +429,7 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
       });
       expect(r.ok).toBe(false);
       if (!r.ok)
-        expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+        expect(r.reason).toBe<ProposalRejectionReason>('value_exceeds_cap');
     });
 
     it('rejects a NEGATIVE MULTIPLY (product below 0, contained by the cap-range guard)', () => {
@@ -478,7 +485,8 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
     });
 
     it('evaluatePostOperatorFactorValue STILL enforces the cap-range guard on the computed value', () => {
-      // Suppressing bare_ratio must not suppress cap containment.
+      // Suppressing bare_ratio must not suppress cap containment. CHANGED 18 Oct (A): a £ cap is Olumi's reference, so
+      // the containment answers with the unconfirmed-limit remedy (value_exceeds_cap), still a refusal.
       const r = evaluatePostOperatorFactorValue({
         computedRaw: 200000, // > cap 100000
         factorUnit: '£',
@@ -487,7 +495,7 @@ describe('evaluateFactorValueProposal — predicate semantics', () => {
       });
       expect(r.ok).toBe(false);
       if (!r.ok)
-        expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+        expect(r.reason).toBe<ProposalRejectionReason>('value_exceeds_cap');
     });
 
     it('rejects a negative bare sub-1 number on a unit-bearing factor (fires before the cap-range guard)', () => {

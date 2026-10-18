@@ -176,7 +176,9 @@ const CASES: readonly PropertyCase[] = [
     entityId: 'f-churn',
     value: 500,
     operator: 'set',
-    expected: { kind: 'reject', reason: 'bare_number_outside_cap' },
+    // CHANGED 18 Oct (A, AIE caution d): a percentage's 100 is an encoding, not a hard bound — still refused, with the
+    // same remedy as the "150 %" row above. The guard keeps a proportion's 1 (evaluate-factor-value-proposal.test.ts U2).
+    expected: { kind: 'reject', reason: 'value_exceeds_cap' },
   },
   // ---- delta with existing raw_value ----
   {
@@ -281,7 +283,8 @@ const CASES: readonly PropertyCase[] = [
     entityId: 'f-budget', // 40000 * 5 = 200000 > cap
     value: 5,
     operator: 'multiply',
-    expected: { kind: 'reject', reason: 'bare_number_outside_cap' },
+    // CHANGED 18 Oct (A): a currency cap is Olumi's reference, not one the unit fixes — still refused, with the remedy.
+    expected: { kind: 'reject', reason: 'value_exceeds_cap' },
   },
   {
     label: 'NEGATIVE MULTIPLY on a capped currency factor (product < 0, contained)',

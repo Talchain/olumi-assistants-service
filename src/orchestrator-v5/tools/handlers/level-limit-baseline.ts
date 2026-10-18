@@ -34,7 +34,7 @@
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
-import { percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { percentScaleUnit, percentLimitFrameProvable, percentPeriodsDiffer, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 import { meetsLimit, statedOperatorOf } from '../../agent-lane/limit-operator-words.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { canReachAnyGoal, type ReachabilityEdge } from '../../../graph/reachability.js';
@@ -55,7 +55,8 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
  *     — "0.5%" certified as 50% beside a £ budget — so it never carries (`add-constraint.ts` refuses the same row for the
  *     same reason). ≤ 100 keeps it unclamped;
  *   · the node's level is ATTESTED to be that percentage ÷ 100: framed on exactly 100 (`cap`, or the agent-lane estimate's
- *     `scale_frame`) AND `value` = `raw_value` ÷ 100 on the node itself. A unitless level in [0, 1) is NOT proof of a
+ *     `scale_frame`) on a node whose OWN unit is a percent level (`percentScaleUnit`; a frame of 100 on any other node
+ *     is Olumi's reference, 18 Oct) AND `value` = `raw_value` ÷ 100 on the node itself. A unitless level in [0, 1) is NOT proof of a
  *     proportion on the `"%"` scale, and a node framed on 20 is read "≤ 10%" against raw/20 — neither carries.
  * Every other shape — unitless, a percent phrasing PLoT does not read as `"%"`, a currency in another unit — carries
  * nothing through THIS proof and fails closed at ISL's `missing_target_baseline`: an honest "could not be checked", never
@@ -64,6 +65,7 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
 export function levelLimitReadsOnNodeLevel(value: number, unit: string | undefined, node: Rec, os: Rec): boolean {
   if (unit === undefined || unit.trim() !== '%') return false;
   if (!(Number.isFinite(value) && value > 1 && value <= 100)) return false;
+  if (!percentScaleUnit(typeof os.unit === 'string' ? os.unit : undefined)) return false;
   if (!(os.cap === 100 || (os.cap === undefined && node.scale_frame === 100))) return false;
   return typeof os.value === 'number' && typeof os.raw_value === 'number' && valuesMatch(os.value, os.raw_value / 100);
 }

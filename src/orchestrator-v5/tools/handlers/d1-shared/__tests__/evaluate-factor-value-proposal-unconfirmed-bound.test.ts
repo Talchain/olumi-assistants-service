@@ -192,11 +192,27 @@ describe('an inherited ceiling is not a rule the user is refused against', () =>
 });
 
 describe('the guard is kept where the input asserts no scale of its own', () => {
-  it('TWIN — a bare number over an inherited ceiling carries no unconfirmed_bound', () => {
-    // Nothing in `100000` asserts a scale, so the ceiling is the only scale
-    // evidence there is and widening on it would let a typo redefine what the
-    // factor measures. This is the "a bound absent admits nonsense" direction,
-    // and it must not move when the other direction is fixed.
+  it('TWIN — a bare number over a proportion\'s 1 carries no unconfirmed_bound', () => {
+    // Nothing in `5` asserts a scale (5 %? 5 of 1?), so the proportion's 1 is
+    // the only scale evidence there is and widening on it would let a typo
+    // redefine what the factor measures. This is the "a bound absent admits
+    // nonsense" direction, and it must not move when the other is fixed.
+    const r = evaluateFactorValueProposal({
+      rawInput: 5,
+      operator: 'set',
+      inputHasUnit: false,
+      factorCap: 1,
+      factorObservedValue: 0.8,
+      factorObservedRawValue: 0.8,
+    });
+    if (r.ok) throw new Error('expected a rejection');
+    expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
+    expect(r.unconfirmed_bound).toBeUndefined();
+  });
+
+  it('U2 — the founder\'s bare figure over a £ ceiling no unit fixes gets the remedy, not the guard', () => {
+    // CHANGED 18 Oct (A, AIE 00:27/00:37): the £100 ceiling came from Olumi's reading, not from the unit, so it is
+    // Olumi's reference and never the factor's range. The bare figure is still refused, with the remedy.
     const r = evaluateFactorValueProposal({
       rawInput: 100_000,
       operator: 'set',
@@ -204,8 +220,8 @@ describe('the guard is kept where the input asserts no scale of its own', () => 
       ...FOUNDER_FACTOR,
     });
     if (r.ok) throw new Error('expected a rejection');
-    expect(r.reason).toBe<ProposalRejectionReason>('bare_number_outside_cap');
-    expect(r.unconfirmed_bound).toBeUndefined();
+    expect(r.reason).toBe<ProposalRejectionReason>('value_exceeds_cap');
+    expect(r.unconfirmed_bound).toEqual({ cap: 100, rescale_cap_to: suggestExtendedCap(100_000) });
   });
 
   it('TWIN — a value below zero is refused whatever the ceiling is', () => {
