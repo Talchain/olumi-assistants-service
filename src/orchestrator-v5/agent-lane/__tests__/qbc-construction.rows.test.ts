@@ -151,6 +151,18 @@ describe('row 3 (#3401): a re-chosen goal never overwrites the user\'s verified 
     expect(inputs, 'PRECONDITION: the one retry was asked').toHaveLength(2);
     expect(graph, `never registered: ${JSON.stringify(goalOf(graph))}`).toBeUndefined();
   });
+  // Codex #3412 r1: a target the first draft verified only as a STATEMENT keeps that statement's own terms (comparator, unit), in a
+  // level frame too, where the binder reads the figure alone.
+  it.each([
+    ['RED: a re-choice registering a ceiling for their floor', { operator: '<=', frame: 'level', quantity_frame: 'level' }],
+    ['GUARD: a re-choice registering USD for their %', { unit: 'USD', frame: 'level', quantity_frame: 'level' }],
+  ] as const)('%s (level frame) is not adopted', async (_name, change) => {
+    const retry = withStatement(redraft(), 'goal');
+    Object.assign(retry.goal, change);
+    const { graph, inputs } = await construct([firstDraft(), retry], FX.brief);
+    expect(inputs, 'PRECONDITION: the one retry was asked').toHaveLength(2);
+    expect(graph, `never registered: ${JSON.stringify(goalOf(graph))}`).toBeUndefined();
+  });
   it('RED: a re-choice that marks the kept target Olumi\'s (ai_proposed) never relabels it: the bound statement keeps it the user\'s', async () => {
     const retry = withStatement(redraft(), 'goal');
     retry.goal.provenance = 'ai_proposed';
