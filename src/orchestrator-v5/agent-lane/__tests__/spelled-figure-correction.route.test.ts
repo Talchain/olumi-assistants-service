@@ -26,7 +26,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
-import { figureTheUserWrote, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteSpan, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/capacity-358132d8-unsized-olumi-risk-graph-20261014.json', import.meta.url), 'utf8')) as Rec;
@@ -123,20 +123,21 @@ describe('a figure written in words is written, exactly as its digits are (deplo
     expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(digits.w.graph(), TEAM));
   }, 4 * ROUTE_MS);
 
-  it('⛔ a spelled figure of ANOTHER quantity in the same words is never attested to this one (nor are its digits)', async () => {
-    const digits = await correct('We now have 70 customers on the support plan; the team resolves the same as before.', teamLevel(70));
-    const words = await correct('We now have seventy customers on the support plan; the team resolves the same as before.', teamLevel(70));
-    // In words, a figure counts as written only with its unit word ("seventy TICKETS"): "seventy customers" is no figure of a
-    // tickets-per-week level, so the Agent's 70 has no human origin here and nothing is offered or written.
-    expect(words.result).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
-    expect(words.chip).toBeUndefined();
-    expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(SERVED.graph, TEAM));
-    // CONTROL (today's digits): presence is never attestation either: the card says which factor it is about is Olumi's reading,
-    // and after the press the saved figure keeps that binding unverified.
-    expect(digits.chip, 'CONTROL: digits give a card').toBeDefined();
-    expect(String(digits.chip!.detail)).toContain('(figure from the quoted message; field binding unverified)');
-    expect(nodeOf(digits.w.graph(), TEAM).observed_state).toMatchObject({ raw_value: 70, user_material_unverified: true });
-  }, 4 * ROUTE_MS);
+  it.each([
+    ['ANOTHER quantity', 'We now have 70 customers on the support plan; the team resolves the same as before.',
+      'We now have seventy customers on the support plan; the team resolves the same as before.'],
+    ['a name (Codex R2: the same with digits)', 'We signed with 70 TICKETS LTD this week.', 'We signed with SEVENTY TICKETS LTD this week.'],
+  ])('= %s: words and digits give the SAME card and save; presence is never attestation, so the binding stays labelled Olumi’s reading',
+    async (_n, digitText, wordText) => {
+      const digits = await correct(digitText, teamLevel(70));
+      const words = await correct(wordText, teamLevel(70));
+      for (const r of [digits, words]) {
+        expect(String(r.chip?.detail)).toContain('(figure from the quoted message; field binding unverified)');
+        expect(nodeOf(r.w.graph(), TEAM).observed_state).toMatchObject({ raw_value: 70, user_material_unverified: true });
+      }
+      expect(words.chip?.label).toBe(digits.chip?.label);
+      expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(digits.w.graph(), TEAM));
+    }, 4 * ROUTE_MS);
 
   it.each([
     ['an ordinal', 'This is the first week the new rota has run.'],
@@ -150,11 +151,10 @@ describe('a figure written in words is written, exactly as its digits are (deplo
   }, 2 * ROUTE_MS);
 });
 
-describe('another speaker’s quoted figure, a name or an ordinal is never the user’s correction (real route)', () => {
+describe('another speaker’s quoted figure or an ordinal is never the user’s correction (real route)', () => {
   it.each([
     ['an ordinal after a compound (Codex BLOCK 628a1634: saved 100)', 'This is our one hundred first ticket this week.', 100],
     ['another speaker’s quoted words', 'Our manager said: \u201Cthe team resolves seventy tickets per week\u201D.', 70],
-    ['a name', 'We moved to the Seventy Tickets plan last year.', 70],
   ])('⛔ %s: the Agent’s figure has no human origin, no card, nothing written', async (_n, typed, value) => {
     const { result, chip, w } = await correct(typed, teamLevel(value));
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
@@ -164,11 +164,11 @@ describe('another speaker’s quoted figure, a name or an ordinal is never the u
 });
 
 /**
- * ⛔ Codex SPELLED pair AMEND (AIE bb91dcdd; PL 20:57; verifier C4): a figure in words is read by the digit path's own unit check,
- * never a stricter one. What only words need: its unit word right after it (so "one of them" and ordinals are no figures), never
- * money, a percentage or a scaled unit, a name or another speaker's quoted words. Presence only, never attestation.
+ * ⭐ THE ONE READER (DL-3 ruling on Codex #3429 R2): `amountsWrittenIn` locates every amount in digits or words, and `amountTheUserWrote`
+ * is the ONE check for both forms. What only words need is whether a word is a number at all: it counts something (a word follows it
+ * that is no phrase break), and it is no ordinal. Money and percentages in words stay unread (Codex R1). Presence only.
  */
-describe('a figure in words is read by the digit path\'s own unit check, with its unit word after it', () => {
+describe('one reader, one check: a word is a number only where it counts something, then reads as its digits do', () => {
   it.each([
     ['a count with its unit', 70, 'tickets per week', 'Our team resolves seventy tickets per week.', true],
     ['a duration with its unit', 2, 'hours per week', 'It takes two hours per week.', true],
@@ -177,13 +177,12 @@ describe('a figure in words is read by the digit path\'s own unit check, with it
     ['a sentence that opens with it', 2, 'developers', 'Two developers left last month.', true],
     ['after a colon', 70, 'tickets per week', 'Correction: Seventy tickets per week, not eighty.', true],
     ['C4: a spelled figure with a spelled period', 15, 'food bags per 10 minutes', 'We pack fifteen bags per ten minutes.', true],
-    // trailing unit and period
     // the digit path's own check: the same figure, and no unit word of another kind ("2 weeks" is no count of people)
     ['another figure', 80, 'tickets per week', 'Our team resolves seventy tickets per week.', false],
     ['a unit word of another kind', 2, 'people per week', 'It took two weeks.', false],
-    ['no unit word', 2, 'hours per week', 'We have two of them.', false],
+    ['counts nothing: a phrase break after it', 2, 'hours per week', 'We have two of them.', false],
+    ['counts nothing: punctuation after it (the old figure)', 12, 'minutes', 'It is thirty-five minutes, not twelve.', false],
     ['the pronoun "one"', 1, 'specialists', 'One of them was off sick, and the one who covered was new.', false],
-    ['another count', 70, 'tickets per week', 'Our team serves seventy customers per week.', false],
     ['another kind of unit', 2, 'minutes', 'We hired two developers.', false],
     // scale, money, percentages and shares
     ['money in words, scaled unit', 2, '£k/month', 'It costs two thousand pounds a month.', false],
@@ -199,20 +198,20 @@ describe('a figure in words is read by the digit path\'s own unit check, with it
     ['an ordinal after "and"', 100, 'tickets per week', 'This is our one hundred and first ticket this week.', false],
     ['a hyphenated second', 20, 'tickets per week', 'This is our twenty-second ticket this week.', false],
     ['a spelled duration is still read', 20, 'seconds', 'Each check takes twenty seconds.', true],
-    // names
-    ['a name inside a sentence', 2, 'developers', 'We work with Two Developers Ltd on the app.', false],
-    ['a name that opens a sentence', 2, 'developers', 'Two Developers Ltd sent the quote.', false],
+    ['a hyphenated word after it is still read', 2, 'cars', 'We bought two second-hand cars.', true],
     // another speaker's quoted words
     ['double quotes', 70, 'tickets per week', 'Our manager said "we resolve seventy tickets per week" in the review.', false],
     ['curly quotes', 70, 'tickets per week', 'Our manager said: \u201Cwe resolve seventy tickets per week\u201D.', false],
+    ['double quotes, digits', 70, 'tickets per week', 'Our manager said "we resolve 70 tickets per week" in the review.', false],
   ] as const)('%s', (_n, value, unit, text, written) => {
     expect(figureTheUserWrote(value, unit, text)).toBe(written);
     expect(timesTheUserWrote(value, unit, text) >= 1).toBe(written);
   });
 
-  it('a name, an ordinal or a quote is never a second writing; the user’s own words are', () => {
-    expect(timesTheUserWrote(2, 'developers', 'We need two developers. We work with Two Developers Ltd.')).toBe(1);
+  it('an ordinal or another speaker’s quote is never a second writing; the user’s own words are, in either form', () => {
+    expect(timesTheUserWrote(20, 'tickets per week', 'Twenty tickets per week. It is our twenty-first week.')).toBe(1);
     expect(timesTheUserWrote(70, 'tickets per week', 'Seventy tickets per week. Our manager said "seventy tickets per week".')).toBe(1);
+    expect(timesTheUserWrote(70, 'tickets per week', 'Seventy tickets per week. Our manager said "70 tickets per week".')).toBe(1);
     expect(timesTheUserWrote(70, 'tickets per week', 'Seventy tickets per week, so 70 tickets per week.')).toBe(2);
   });
 
@@ -232,6 +231,35 @@ describe('a figure in words is read by the digit path\'s own unit check, with it
       expect(figureTheUserWrote(v, unit, words), words).toBe(figureTheUserWrote(v, unit, digits));
       expect(figureTheUserWrote(v, unit, words), words).toBe(true);
     }
+  });
+});
+
+/**
+ * ⭐ PARITY BY PROPERTY (DL-3 ruling 1): every phrase template × held unit × counted noun × modifier × period, written in words and in
+ * digits, gives the same verdict at the same place. Generated, so it is no list of examples; it must reach both verdicts.
+ */
+describe('parity by property: a spelled figure gives exactly its digits’ verdict and located value', () => {
+  const NUMBERS: [number, string][] = [[2, 'two'], [15, 'fifteen'], [35, 'thirty-five'], [120, 'one hundred and twenty']];
+  const UNITS = ['tickets per week', 'hours per week', 'minutes', 'food bags per 10 minutes', 'people', 'specialists per month'];
+  const NOUNS = ['tickets', 'hours', 'minutes', 'bags', 'people', 'customers', 'weeks'];
+  const MODIFIERS = ['', 'support ', 'food ', 'new '];
+  const PERIODS: [string, string][] = [['', ''], [' per week', ' per week'], [' a month', ' a month'], [' per ten minutes', ' per 10 minutes']];
+  const TEMPLATES = [(f: string) => `Correction: we handle ${f}, not more.`, (f: string) => `${f} today; the rest is unchanged.`,
+    (f: string) => `We signed with ${f.toUpperCase()} LTD this week.`];
+  it('same verdict and the same figure located, for every combination', () => {
+    const seen = { written: 0, not: 0 };
+    for (const [v, w] of NUMBERS) for (const unit of UNITS) for (const noun of NOUNS) for (const m of MODIFIERS) for (const [pw, pd] of PERIODS) for (const t of TEMPLATES) {
+      const words = t(`${w} ${m}${noun}${pw}`), digits = t(`${v} ${m}${noun}${pd}`);
+      const d = figureTheUserWroteSpan(v, unit, digits), x = figureTheUserWroteSpan(v, unit, words);
+      expect(x !== null, `${unit} | ${words}`).toBe(d !== null);
+      if (d !== null && x !== null) {
+        expect(digits.slice(d.start, d.end)).toBe(String(v));
+        expect(words.slice(x.start, x.end).toLowerCase()).toBe(w);
+      }
+      seen[d !== null ? 'written' : 'not'] += 1;
+    }
+    expect(seen.written).toBeGreaterThan(200);
+    expect(seen.not).toBeGreaterThan(200);
   });
 });
 
