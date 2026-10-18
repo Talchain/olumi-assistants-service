@@ -4608,9 +4608,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * is precisely the thing we could not observe.
      */
     /**
-     * ⭐ A FIRST ANALYSIS THAT DID NOT RUN IS SAID BY OLUMI, NEVER LEFT TO THE MODEL (Paul: "never a
-     * silent skip"). One deterministic sentence naming what is missing, or that the turn ran out of
-     * time; the control beside it (next step, or Run) is added to the chips below.
+     * ⭐ A FIRST ANALYSIS THAT DID NOT RUN IS NEVER A SILENT SKIP (Paul). A host-written reply says this one
+     * deterministic sentence naming what is missing, or that the turn ran out of time; the control beside it (next
+     * step, or Run) is added to the chips below. PR 4: an AI-written reply does not restate it — the AI holds the
+     * build result's `first_analysis` (its reason and next step) and is told to explain it (`owedHeldByAi`).
      */
     const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
     /**
@@ -4723,9 +4724,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // The typed identity ask owns the unconfirmed reading; no second goal-chance explanation is produced.
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
-    // BYPASS1: the owed lines the AI holds as typed facts (rescaled/ranges/resized values, `identity_ask_say`).
+    // BYPASS1: the owed lines the AI holds as typed facts (rescaled/ranges/resized values, `identity_ask_say`), and (PR 4)
+    // the first analysis that did not run, when this turn's build result handed the AI its `first_analysis`.
+    const firstAnalysisHeldByAi = firstAnalysisSaid !== null
+      && result.tool_results.some((r) => (r as { first_analysis?: unknown } | undefined)?.first_analysis !== undefined);
     const owedHeldByAi = new Set([...valueChangeDisclosures(stateFacts),
-      ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null)]);
+      ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
+      ...(firstAnalysisHeldByAi ? [firstAnalysisSaid] : [])]);
     // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
     // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
     askEachOnce(owed, await repliesToCheckAsks(owed, historyReader, scenarioId, undefined));
@@ -4785,10 +4790,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⭐ BYPASS1 (DL, 14 Oct; recovery/codex/BYPASS1.md): the reply is the AI's own words: a model wrote it (`narratorWords`, set
      * only where one did) and no host swap above replaced it. Only then does the host stop restating, in prose, facts the AI
      * holds as typed facts: the readiness sentence (`readiness_after`), the D1
-     * target/objective/deadline ask, the value changes and the identity ask, and (on an ordinary turn) the withheld
-     * goal-chance line; the code stays, dormant. A host-written reply keeps every host line. Server truth stays on both:
-     * receipts and refusals, what a proposal left out, the post-write ask (a root treated as zero), the first analysis and
-     * open questions, the methods note, the gate's
+     * target/objective/deadline ask, the value changes and the identity ask, the first analysis that did not run
+     * (`first_analysis`, PR 4), and (on an ordinary turn) the withheld goal-chance line; the code stays, dormant. A
+     * host-written reply keeps every host line. Server truth stays on both: receipts and refusals, what a proposal left
+     * out, the post-write ask (a root treated as zero), open questions, the methods note, the gate's
      * reason for a sentence it cut, the science Why? line, the link ask (never said beside another ask), and the chance and
      * draft faces on every Run/Explain/Draft reply. Every authority check (ranking redaction, the count guard, the final
      * leader egress, the estimate-% binding, the completion-claim stripper, currentness) runs on both.
@@ -5306,13 +5311,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ D1 + A7 (DL #75 5923918068; AIQ words 5923963470): on the brief and Run turns, at rest — the deadline the model holds
     // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
     const hostStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
-    // BYPASS1: the AI holds `readiness_after`, so the readiness sentence goes. The save or refusal receipt (with any claim the
-    // stripper removed), what a proposal left out, goal-not-checked, stale, the post-write ask (gate 2: a root treated as zero
-    // is always said) and held lapses stay: server truth "whatever the model said" (write-outcome, starting-point-omission,
-    // real-writer, one-reply-build rows). After a refused first analysis the readiness line is the REST of that refusal
-    // (T4: "Review all N readiness issues" names none; `refusalSaid` drops what it already said), so it stays with it.
+    // BYPASS1: the AI holds `readiness_after` (an approval) and the build result's `readiness` (a build), so the readiness
+    // sentence goes, after a refused first analysis too (PR 4: the AI holds that refusal's `first_analysis` as well). The save
+    // or refusal receipt (with any claim the stripper removed), what a proposal left out, goal-not-checked, stale, the post-write
+    // ask (gate 2: a root treated as zero is always said) and held lapses stay: server truth "whatever the model said"
+    // (write-outcome, starting-point-omission, real-writer, one-reply-build rows).
     const aiStatusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine,
-      firstAnalysisRefusalSaid ? readinessLine : null, ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+      ...heldLapseLines].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     // The retained fresh scope question is this turn's existing step, even if the
     // narrator parked it behind the questions toggle. Count it before another ask.
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
@@ -5373,9 +5378,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
-    // BYPASS1: on the AI's reply only the value changes and the identity ask it holds as typed facts are not restated. Every
-    // other owed line (receipts, what was left out, the first analysis, open questions, the methods note, the Run lines) is
-    // server truth and stays, and so does every line when the current state is unknown (the no-present-claim rule).
+    // BYPASS1: on the AI's reply only the value changes, the identity ask and (PR 4) the first analysis that did not run, which
+    // it holds as typed facts, are not restated. Every other owed line (receipts, what was left out, open questions, the
+    // methods note, the Run lines) is server truth and stays, and so does every line when the current state is unknown (the
+    // no-present-claim rule).
     // An interpreting call cannot issue the figure-confirm tool. Its existing card survives, and the exact
     // confirmation question remains owed if the AI omitted it; the asked-once pass above still owns repeats.
     const identityAskStillOwed = aiRunTurn ? identityAskLineOwed(result.tool_results, narrationText) : null;

@@ -414,17 +414,34 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(seen?.first_analysis).not.toHaveProperty('goal_chance');
   });
 
-  it('RED: NOT admissible → 0 PLoT calls, one server sentence naming what is missing, and a repair chip (test 3)', async () => {
+  /**
+   * PR 4 (reply quality; served rerun d8086781: "The first analysis could not run yet: …" in 6/22 replies and "The analysis
+   * can't run yet" in 8/22, judged boilerplate). On an AI-written reply the host restates neither: the AI's own input holds
+   * both facts, by identity, in the build result the model's next request carries. Was (test 3): the host sentence, "whatever
+   * the model said". A host-written reply still says it (CONTRAST below).
+   */
+  it('PR 4 (real route, AI-written reply): NOT admissible → 0 PLoT calls, 0 host first-analysis or readiness sentences; the AI holds the blocking fact by identity and names it; a repair chip (test 3)', async () => {
     knobs.graph = BLOCKED_GRAPH;
-    const b = await buildTurn(app);
+    const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
+    const { readinessViewOf } = await import('../readiness-view.js');
+    const { firstAnalysisSentence } = await import('../first-analysis.js');
+    const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
+    // The scripted AI names the first blocking issue in its own words.
+    script = [callTool('build_model_from_brief', { brief: BRIEF }), say(`I built the model. Before a first analysis can run: ${missing}`)];
+    const b = await turn(app, { message: BRIEF });
     expect(st(SID).inProcessRuns).toHaveLength(0);
     expect(st(SID).injectRuns).toBe(0);
     expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
-    const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
-    const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
-    // S6 (#3237): the AI-written reply is shaped like any other, so the ask may sit in its own bullet; every sentence of the
-    // server's missing step is still said, word for word.
-    for (const sentence of missing.split(/(?<=[.?!])\s+/)) expect(b.assistant_text, 'server-authored, whatever the model said').toContain(sentence);
+    // 0 host first-analysis or readiness sentences.
+    expect(b.assistant_text).not.toContain(firstAnalysisSentence({ ran: false, reason: 'not_admissible', nextStep: missing })!);
+    expect(b.assistant_text).not.toMatch(/The first analysis could not run yet|The analysis can(?:'|\u2019)t run yet|readiness issues together/);
+    // The AI's input holds the blocking fact, by identity: the build output its next request carries.
+    const seen = buildOutputSeenByModel();
+    expect(seen?.first_analysis, 'the first analysis\'s own reason and next step').toMatchObject({ ran: false, reason: 'not_admissible', next_step: missing });
+    expect(seen?.readiness, 'the readiness the host line was composed from').toEqual(JSON.parse(JSON.stringify(readinessViewOf(BLOCKED_GRAPH))));
+    expect(seen?.readiness).toMatchObject({ checked: true, may_run: false });
+    // The AI's reply names the first blocking issue, and the host scrubs leave it whole.
+    for (const sentence of missing.split(/(?<=[.?!])\s+/)) expect(b.assistant_text, 'the AI names what is missing').toContain(sentence);
     // The gap is Olumi's to fill (Option B's level: `olumi_can_offer`, nothing owed by the user), so the repair chip is
     // the specific one, "Suggest starting assumptions" (DL item 5, #2367), in place of the general next step.
     const ids = b.suggested_actions.map((c) => c.id);
@@ -444,6 +461,19 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const ids = b.suggested_actions.map((c) => c.id);
     expect(ids).not.toContain('agent-suggest-what-it-needs');
     expect(ids).not.toContain('agent-suggest-starting-assumptions');
+  });
+
+  it('CONTRAST (PR 4): a host-written reply (no AI words) still says the first analysis did not run, naming what is missing', async () => {
+    knobs.graph = BLOCKED_GRAPH;
+    const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
+    const { firstAnalysisSentence } = await import('../first-analysis.js');
+    const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
+    hostReplyOnly = true;
+    try {
+      const b = await buildTurn(app);
+      expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'not_admissible' });
+      expect(b.assistant_text).toContain(firstAnalysisSentence({ ran: false, reason: 'not_admissible', nextStep: missing })!);
+    } finally { hostReplyOnly = false; }
   });
 
   it('RED: a retry of the SAME turn_id replays — still exactly one run (test 1a)', async () => {
@@ -713,13 +743,15 @@ describe('RED: no time left in the proxy budget → skip, say so, offer Run (tes
     knobs = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false } };
   });
 
-  it('RED: 0 PLoT calls, reason no_time, one sentence, and the Run chip', async () => {
+  // PR 4: the AI wrote this reply, so the host no longer restates the skip; the AI's input holds it (its build output).
+  it('RED: 0 PLoT calls, reason no_time, the AI holds it, and the Run chip', async () => {
     const b = await buildTurn(app);
     expect(st(SID).inProcessRuns).toHaveLength(0);
     expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: false, reason: 'no_time' });
     expect(b.suggested_actions.filter((c) => c.id === RUN_CHIP_ID)).toEqual([expect.objectContaining({ action_type: 'run_analysis' })]);
+    expect(buildOutputSeenByModel()?.first_analysis).toMatchObject({ ran: false, reason: 'no_time' });
     const { firstAnalysisSentence } = await import('../first-analysis.js');
-    expect(b.assistant_text).toContain(firstAnalysisSentence({ ran: false, reason: 'no_time' })!);
+    expect(b.assistant_text).not.toContain(firstAnalysisSentence({ ran: false, reason: 'no_time' })!);
   });
 });
 
