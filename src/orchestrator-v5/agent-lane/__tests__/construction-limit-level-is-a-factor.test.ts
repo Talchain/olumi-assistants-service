@@ -306,6 +306,7 @@ describe('a limit the user states on a level is admitted on a factor that can ho
     expect(byId(graph, 'pro_plan_price')?.observed_state).toStrictEqual({
       value: 0.245, raw_value: 49, cap: 200, declared_scale: 'unit_interval', unit: 'GBP per month', source: 'brief_extraction',
       extractionType: 'explicit', // S7: the verifier-credited quantity carries the existing explicit type; every figure is unchanged
+      frame_source: 'olumi_convention', // CHANGED 18 Oct (A, D2): the drafter's 200 is Olumi's range, now disclosed as such
     });
     expect(graph.goal_constraints?.[0]?.value).toBe(10);
   });

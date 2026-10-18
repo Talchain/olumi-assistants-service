@@ -391,7 +391,12 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     // are inside the same digest, so a wrong frame, figure or unit still moves it.
     // 0.67.0's goal `unit_reading` postdates the digest too: the stand-in "served" graph is the body without it, so the
     // helper removes it only in the writer's closed shape; every frame is still read off the same factor nodes.
-    const readBack = asServedBeforeProjectedMeans(asServedBeforeOneForm(body, { ...body, nodes: (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => n) }));
+    // A (18 Oct): so does the disclosure on the drafter's own range; the stand-in holds none, so the helper removes it.
+    const standIn = (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => {
+      const { frame_source: _f, ...os } = (n.observed_state ?? {}) as Record<string, unknown>;
+      return n.observed_state === undefined ? n : { ...n, observed_state: os };
+    });
+    const readBack = asServedBeforeProjectedMeans(asServedBeforeOneForm(body, { ...body, nodes: standIn }));
     const untyped = withoutTypedLevels(beforeAiLevelTypes(readBack.nodes as Record<string, any>[], candidate, 'acyclic'));
     expect(untyped.length).toBe(readBack.nodes.length);
     // #3045's decision title postdates the digest as well: read back to "Decision: …", the title word only.

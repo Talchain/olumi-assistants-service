@@ -247,6 +247,25 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(r).toHaveProperty('leading_option_id', SWITCH);
   });
 
+  it('U4 (A, 18 Oct; AIE D1): Olumi\'s default strength on a link out of a factor framed on Olumi\'s reference withholds the movers\' goal figures at the Run, and the request still runs', async () => {
+    // The CONTROL above, with ONE link put back to the default admission writes when nobody sized it (±0.5, projected),
+    // out of a factor whose 0–12 range is Olumi's (disclosed as such). Its effect is set by that reference, not by anything said.
+    const g = clone(WORKING.graph);
+    for (const e of g.edges as Json[]) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+    const link = (g.edges as Json[]).find((e) => e.from === 'migration_downtime' && e.to === 'monthly_cloud_spend')!;
+    Object.assign(link, { strength: { mean: 0.5, std: 0.125 }, defaulted: true, provenance: { source: 'cee_hypothesis', mean_projected: true } });
+    const downtime = (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!;
+    downtime.observed_state = { ...downtime.observed_state, frame_source: 'olumi_convention' };
+    const r = await runOn(g);
+    const env = r.enrichment ?? r;
+    for (const id of [SWITCH, PHASE]) for (const e of entriesFor(env, id)) expect(e).not.toHaveProperty('probability_of_goal');
+    expect(JSON.stringify(env)).not.toContain('0.0617');
+    const w = (env.inference_warnings as Json[]).find((x) => x.code === GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.links).toEqual([{ from: 'migration_downtime', to: 'monthly_cloud_spend' }]);
+    expect(r).toHaveProperty('leading_option_id', null);
+    expect(leaderClaimOf(lastFact).mayBeNamed).toBe(false);
+  });
+
   it('CONTROL: a strength the user stated is theirs, not a placeholder', async () => {
     const g = clone(WORKING.graph);
     for (const e of g.edges as Json[]) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.source = 'user_specified';
