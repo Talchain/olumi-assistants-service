@@ -96,14 +96,19 @@ export interface ReconcileInput {
 /** The product holds this answer row carries (latest-row order), and the ones that went without the user (to be said). */
 export function reconcileHeldProposals(input: ReconcileInput): { carried: PendingAction[]; lapsed: HeldLapse[]; review: PendingAction[] } {
   const lapsed: HeldLapse[] = [];
-  /** Agent cards newly kept for review this turn (said once); a card already under review is carried silently. */
+  /**
+   * Agent cards newly kept for review this turn (said once); a card already under review at turn start is carried silently.
+   * "Newly" is judged against turn start, because this turn's own commit may already have marked it (`commit.ts` rule 4).
+   */
   const review: PendingAction[] = [];
+  const reviewAtStart = new Set(input.atStart.filter((h) => isHeldProposal(h) && heldCardUnderReview(h)).map((h) => heldProposalId(h)));
   const latestHolds = input.latest.filter((pa) => isHeldProposal(pa) && pa.scenario_id === input.scenarioId);
   const live: PendingAction[] = [];
   for (const hold of latestHolds) {
     if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold)) || input.isApplied?.(heldProposalId(hold))) continue;
     if (fulfilledIn(hold, input.graph)) continue;
     if (isPendingActionExpired(hold, input.nowMs)) { lapsed.push({ hold, reason: 'idle' }); continue; }
+    if (heldCardUnderReview(hold) && !reviewAtStart.has(heldProposalId(hold))) review.push(hold);
     if (!isProductHold(hold) && input.graphHash !== undefined && (hold.preconditions.graph_hash !== input.graphHash
       ? input.stillApplies?.(hold) !== true : input.subjectMoved?.(hold) === true)) {
       // ⭐ NO SILENT LAPSE (PR-2): kept, marked for review, and said once (`heldReviewSentence`).

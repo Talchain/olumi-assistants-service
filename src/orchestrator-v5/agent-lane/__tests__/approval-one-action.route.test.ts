@@ -76,9 +76,11 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(node(w.read(), 'prep_time_cut').observed_state, 'card A (Olumi\u2019s 0%) was not written').toBeUndefined();
     expect(typed._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: 'Yes, I approve the 15% mixer setting.' }]);
     expect(String(typed.assistant_text)).toContain('Saved on your typed approval: \u201cYes, I approve the 15% mixer setting.\u201d');
-    // Card A (Olumi's starting value) was made on the model before B's write, so it does not survive silently: it is SAID.
-    expect(String(typed.assistant_text)).toMatch(LAPSE);
-    expect(w.onLatestRow(approvalChipIdFor(a))).toBe(false);
+    // Card A (Olumi's starting value) was made on the model before B's write: KEPT for review and said, never applied or silent.
+    expect(String(typed.assistant_text)).toMatch(/Model changed: review this change\./);
+    expect(String(typed.assistant_text)).not.toMatch(LAPSE);
+    expect(chips(typed)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
+    expect(chips(typed), 'a card under review is not approvable').not.toContain(approvalChipIdFor(a));
   }, 120_000);
 
   it('A2 ambiguous: two cards waiting, a bare "yes" the Agent asks about → nothing written; every card offered with the change it applies; one press applies the chosen one', async () => {
@@ -97,9 +99,11 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
     expect(mixerSaved(w.read())).toBe(true);
     // Olumi's starting value was made on the model as it was (its basis may read what just changed: the values-only stale
-    // negative), so it does not survive this approval silently: it is SAID. (PR-2 keeps it visible for review instead.)
-    expect(String(pressed.assistant_text)).toMatch(LAPSE);
-    expect(w.onLatestRow(approvalChipIdFor(a))).toBe(false);
+    // negative), so it is not applicable as it stands: it is KEPT for review and said once, never lapsed silently.
+    expect(String(pressed.assistant_text)).toMatch(/Model changed: review this change\./);
+    expect(String(pressed.assistant_text)).not.toMatch(LAPSE);
+    expect(chips(pressed)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
+    expect(chips(pressed)).not.toContain(approvalChipIdFor(a));
   }, 120_000);
 
   it('A2 host check: with several waiting, a card the user was never SHOWN is not bound by typed words (a shown one is), and the refusal names the choice', async () => {
