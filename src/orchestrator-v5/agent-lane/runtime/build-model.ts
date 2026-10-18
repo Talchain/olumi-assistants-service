@@ -1168,6 +1168,21 @@ function recordedWholeRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, d
 }
 
 /**
+ * The goal's stated attributes exactly as registration holds them (`holdStatedGoalAttributes`, the one authority): `held.target`
+ * is true only where the target is the USER's (stamped `threshold_source: 'brief_extraction'`). ⭐ The goal's own verified target
+ * statements (the one statement contract, `construction-source-map.ts`): with no deadline claimed, a period is the goal's deadline
+ * only inside one of them (AIE 6184383302).
+ */
+function heldGoalAttributesOf<N extends { readonly kind?: unknown }>(nodes: readonly N[], candidate: CandidateModel, brief: string) {
+  const goalMetric = typeof candidate.goal?.metric === 'string' ? candidate.goal.metric : '';
+  const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf((candidate as { statements?: unknown }).statements, brief)
+    .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
+  const goalValue = candidate.goal?.value;
+  return holdStatedGoalAttributes(nodes, candidate.goal, brief, goalTargetQuotes,
+    typeof goalValue === 'number' ? goalTargetStatements(candidate, brief, goalValue) : undefined);
+}
+
+/**
  * ⛔ #3401 Codex r1/r2 P1: a retry asked a range is never adopted, for any reason, when it changes the ADMITTED goal target: its figure (and so its sign),
  * unit, frame or comparator, read through the one goal-record authority (S5), or the goal's authorship. Refusing keeps the first
  * draft, never a new figure.
@@ -2215,7 +2230,10 @@ export async function buildModelFromBrief(
         metric: String(admittedGoal?.description ?? admittedGoal?.label ?? ''),
         // The comparator is the goal's own claim (admission writes the node's comparator later, from it); the figure is what it RETAINED.
         operator: String(held?.comparator ?? retryCandidate.goal.operator),
-        value: typeof held?.raw === 'number' && Number.isFinite(held.raw) ? held.raw : null,
+        // ⛔ #3401 (DL-3 GO): credited only where registration will hold it as the USER's (`brief_extraction`, the one authority); a
+        // redraft that re-attributes it to Olumi keeps no user target, so it is refused and the AI asks.
+        value: typeof held?.raw === 'number' && Number.isFinite(held.raw) && heldGoalAttributesOf(retryAdmitted.nodes, retryCandidate, brief).held.target
+          ? held.raw : null,
         unit: held?.unit ?? null,
         frame: held?.frame ?? null,
       };
@@ -2501,14 +2519,8 @@ export async function buildModelFromBrief(
         } as AdmittedModel['loss'][number]])],
       };
     }
-    // ⭐ The goal's own verified target statements (the one statement contract, `construction-source-map.ts`): with no deadline
-    // claimed, a period is the goal's deadline only inside one of them (AIE 6184383302).
-    const goalMetric = typeof candidate.goal?.metric === 'string' ? candidate.goal.metric : '';
-    const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf((candidate as { statements?: unknown }).statements, brief)
-      .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
     const goalValue = candidate.goal?.value;
-    let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, goalTargetQuotes,
-      typeof goalValue === 'number' ? goalTargetStatements(candidate, brief, goalValue) : undefined);
+    let heldGoal = heldGoalAttributesOf(admitted.nodes, candidate, brief);
     // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
     const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
     if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {

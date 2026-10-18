@@ -85,7 +85,8 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(calls[1]!.input).toContain(JSON.stringify(`${UNATTESTED_GOAL_RETRY_ISSUE} Retained event wording: "${EVENT_WORDS}". Retained intent wording: "${GOVERNING}".`).slice(1, -1));
     expect(JSON.stringify(calls[1]!.schema.properties.goal.properties.metric)).not.toContain('Urgent launch');
     const goal = goalOf(graph!);
-    expect(goal).toMatchObject({ label: 'Productivity change by launch', goal_direction: '>=', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs' });
+    expect(goal).toMatchObject({ label: 'Productivity change by launch', goal_direction: '>=', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs',
+      threshold_source: 'brief_extraction' });
     expect(goal.goal_target_basis?.also_required).toEqual(['maintaining code quality', 'launch completed by the urgent launch date']);
     // The user's limit is kept; no node or row carries "Urgent launch" as a goal.
     expect((graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value])).toEqual([['Hiring cost', '<=', 200000]]);
@@ -98,7 +99,23 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(result.ok, JSON.stringify(result).slice(0, 1500)).toBe(true);
     expect(calls).toHaveLength(2);
     expect(calls[1]!.input, 'PRECONDITION: the range is asked of the same retry').toContain('The brief writes \\"£400 and £600\\" and no link in the model carries it.');
-    expect(goalOf(graph!)).toMatchObject({ label: 'Productivity change by launch', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs' });
+    expect(goalOf(graph!)).toMatchObject({ label: 'Productivity change by launch', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs',
+      threshold_source: 'brief_extraction' });
+  });
+
+  // ⛔ #3401 (DL-3 GO): the re-choice keeps the user's verified target only with the user's AUTHORSHIP. A redraft that keeps 10 % but
+  // marks the goal Olumi's would re-attribute the user's target to Olumi: it is refused and the AI asks (the base refusal).
+  it.each([
+    ['plain brief', 'inferred'], ['plain brief', 'ai_proposed'], ['range brief', 'inferred'], ['range brief', 'ai_proposed'],
+  ] as const)('⛔ NEGATIVE (%s): a redraft that keeps the user\'s 10 per cent target but marks the goal %s is NOT adopted; nothing re-attributes it', async (which, prov) => {
+    const brief = which === 'plain brief' ? FX.brief : `${FX.brief} Each contractor would cost between £400 and £600 a day.`;
+    const r = redraft();
+    r.goal.provenance = prov;
+    const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(r)], brief);
+    expect(calls).toHaveLength(2);
+    expect(graph, 'no goal is saved with the user\'s 10 % as Olumi\'s').toBeUndefined();
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expect(result.detail).toBe(`${UNATTESTED_GOAL_CLARIFICATION} Retained event wording: "${EVENT_WORDS}". Retained intent wording: "${GOVERNING}".`);
   });
 
   it('a redraft that still takes the unattested event as the goal saves nothing; the AI asks the user, with the reason and the words', async () => {
