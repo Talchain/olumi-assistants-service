@@ -3,7 +3,7 @@ import { projectModelContext } from '../runtime/agent-capabilities.js';
 import { userStatementOf } from '../user-statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { subjectKey } from '../../statement-door/subject.js';
-import { prepareStatementCorrection, userStatementFor, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { claimRecordFor, prepareStatementCorrection, userStatementFor, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const subject = { kind: 'goal' as const, id: 'coverage', field: 'measure' as const };
@@ -62,7 +62,7 @@ describe('N6: current retained words and complete earlier source remain distinct
     cold.nodes[0].user_statements[0].attest = Object.fromEntries(Object.entries(cold.nodes[0].user_statements[0].attest).reverse());
     const snapshot = structuredClone(cold);
     expect(recordView(cold).current_retained).toEqual({ spans: length ? [{ text: span, origin: 'held_user_statement' }] : [], complete: true });
-    expect(recordView(cold).source_record).toEqual(userStatementFor(cold, subject));
+    expect(recordView(cold).source_record).toEqual(claimRecordFor(cold, subject));
     if (length) expect(recordView(cold).source_record.statements[1].quote).toBe(old);
     expect(cold).toEqual(snapshot);
   });
@@ -72,7 +72,7 @@ describe('N6: current retained words and complete earlier source remain distinct
     w.graph.nodes[0].user_statements[0].attest.retained_0_origin = 'unknown';
     expect(recordView(w.graph).current_retained).toEqual({ spans: [{ text: 'staff hours', origin: 'unknown' }], complete: true });
     expect(recordedMeasureOf(w.graph.nodes[0])).toBeUndefined();
-    expect(recordView(w.graph).source_record).toEqual(userStatementFor(w.graph, subject));
+    expect(recordView(w.graph).source_record).toEqual(claimRecordFor(w.graph, subject));
   });
 
   it.each(['missing piece', 'unrecognised origin', 'invalid count'])('%s cannot restore the old quote as current', fault => {
@@ -84,7 +84,7 @@ describe('N6: current retained words and complete earlier source remain distinct
     if (fault === 'invalid count') attest.retained_count = Number.MAX_SAFE_INTEGER;
     expect(recordView(w.graph).current_retained).toEqual({ spans: [], complete: false });
     expect(recordedMeasureOf(w.graph.nodes[0])).toBeUndefined();
-    expect(recordView(w.graph).source_record).toEqual(userStatementFor(w.graph, subject));
+    expect(recordView(w.graph).source_record).toEqual(claimRecordFor(w.graph, subject));
   });
 
   it('a non-correction record keeps its complete source and measure in the shared reasoning projection', () => {

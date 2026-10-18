@@ -15,7 +15,7 @@ import { applyCohortForecastEdit, cohortForecastAskWords, storedTargetRowsOf } f
 import { readCohortForecast, targetForecastWireOf } from '../../goal-target/cohort-forecast.js';
 import { goalTargetBasisOf, launchWindowQuestion, periodWords } from '../../goal-target/goal-target-basis.js';
 import { cohortForecastAsks, COHORT_RELATION_ROW, COHORT_SAME_PEOPLE_ROW } from '../fields/cohort-relation.js';
-import { readStatement, type DoorQuote } from '../read.js';
+import { boundReading, readStatement, type DoorQuote } from '../read.js';
 import { doorRowFor } from '../role-table.js';
 import { userStatementFor } from '../statements.js';
 import type { DoorSubject } from '../subject.js';
@@ -140,7 +140,10 @@ describe.each(BRIEFS)('T8 cohort relation on the door: $name', (b) => {
   it('CONTRAST: the same-people answer binds through the goal\'s ask only; with no ask it is not about this option, and nothing is read', () => {
     const c = conversation(b);
     const v = readStatement(c.g, subjectOf(b), b.label, [{ quote: b.people, answering: c.quartileQ }, b.same, { quote: b.range, answering: c.quartileQ }], c.texts, c.ctx);
-    expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_subject' });
+    // ⭐ GATE → LABEL (change 1): the unbound answer is a labelled reading (its item Olumi's), never bound as this option's by itself.
+    expect(v).toMatchObject({ kind: 'read', reading: { binding: {} } });
+    expect(boundReading(v)).toBe(false);
+    expect(v.kind === 'read' && v.reading.statements.map((s) => s.checks?.subject_bound)).toEqual([undefined, false, undefined]);
   });
 
   it('CONTRAST: a range answering ANOTHER option\'s one-in-four ask is not this option\'s, and is refused', () => {
@@ -149,7 +152,10 @@ describe.each(BRIEFS)('T8 cohort relation on the door: $name', (b) => {
     const v = readStatement(c.g, subjectOf(b), b.label,
       [{ quote: b.people, answering: c.quartileQ }, { quote: b.same, answering: c.sameQ },
         { quote: b.range, answering: cohortForecastAskWords(other.label, periodWords(goalTargetBasisOf(c.g.nodes.find((n: Rec) => n.kind === 'goal'))!), b.window) }], c.texts, c.ctx);
-    expect(v).toMatchObject({ kind: 'refused', refusal: 'not_this_subject' });
+    // ⭐ GATE → LABEL: never this option's by itself: the range's item is Olumi's reading, labelled; the route never issues it.
+    expect(v).toMatchObject({ kind: 'read', reading: { binding: {} } });
+    expect(boundReading(v)).toBe(false);
+    expect(v.kind === 'read' && v.reading.statements.map((s) => s.checks?.subject_bound)).toEqual([undefined, undefined, false]);
   });
 
   it('CONTRAST: a missing statement writes nothing (incomplete), and two figures in one statement are kept as said', () => {

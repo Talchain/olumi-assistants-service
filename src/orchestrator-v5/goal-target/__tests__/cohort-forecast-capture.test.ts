@@ -198,10 +198,15 @@ describe("the user's cohort forecast: their words → one card → their press �
     // is pinned with the timing ask's own form. Only the question actually answered gives a bare "Yes." its meaning.
     expect(timingAskOf(plain(F.graph), goalOf(plain(F.graph)).id)).toBeUndefined();
     const timing = 'Would all of these effects be fully in place by the end of the first three months after launch: ‘Hire marketing manager’ on ‘Conversion rate’?';
-    expect(await w.caps.proposeStatement!(ctx('Yes.', `${timing}\nYes.`) as never, sameArgs({ statements: [{ quote: 'Yes.', answering: timing }] }) as never))
-      .toMatchObject({ ok: false, refusal: 'not_this_subject' });
-    expect(await w.caps.proposeStatement!(ctx() as never, args(undefined, { quote: RANGE, answering: timing }) as never)).toMatchObject({ ok: false });
-    expect(w.proposals.outstanding(SID, null)).toEqual([]);
+    // ⭐ GATE → LABEL (change 1): the bare "Yes." to the timing question is never the same-people answer by itself: its card says
+    // which item it concerns is Olumi's reading, its button is the reading's, and nothing is written before the press.
+    const timingYes = await w.caps.proposeStatement!(ctx('Yes.', `${timing}\nYes.`) as never, sameArgs({ statements: [{ quote: 'Yes.', answering: timing }] }) as never) as Rec;
+    expect(timingYes).toMatchObject({ ok: true, mutated: false, statement: { quotes: ['Yes.'], item_is_olumis_reading: true } });
+    expect(String(timingYes.public_label)).toContain('Olumi’s reading: these words concern “');
+    const timingRange = await w.caps.proposeStatement!(ctx() as never, args(undefined, { quote: RANGE, answering: timing }) as never) as Rec;
+    // The option's estimates answering the timing question are not a forecast either: the writer still needs all four answers.
+    expect(timingRange).toMatchObject({ ok: false, mutated: false, refusal: 'not_recordable' });
+    expect(w.proposals.outstanding(SID, null).filter((p) => p.public_label?.includes(RANGE))).toEqual([]);
     // CONTROL: the same "Yes." answering the same-people question itself is their answer to it.
     expect(await w.caps.proposeStatement!(ctx('Yes.', `${SAME_Q}\nYes.`) as never, sameArgs({ statements: [{ quote: 'Yes.', answering: SAME_Q }] }) as never))
       .toMatchObject({ ok: true, statement: { quotes: ['Yes.'] } });

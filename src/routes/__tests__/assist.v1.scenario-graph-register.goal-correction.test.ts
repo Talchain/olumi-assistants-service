@@ -313,10 +313,31 @@ describe('the interpretation card does not reauthor its context', () => {
     const out = await dispatchTool('propose_goal_target', JSON.stringify({ measures: 'angel funding', value: 200000,
       unit: 'GBP', constraint_type: 'at_least', derived_from: { base: 100000, multiplier: 2 } }), ctx, w.caps());
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false, outcome: 'target_reading:derived_target' });
-    expect(out.public_label).toContain(message); expect(out.public_label).toContain('Olumi derived this figure as 2 ×');
+    expect(out.public_label).toContain(message); expect(out.public_label).toContain('Derived by Olumi from your figures: £100,000 × 2 = £200,000;');
     const pid = String(out.proposal_id);
     expect(await w.caps().authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
     expect(w.graph().goal_constraints).toContainEqual(expect.objectContaining({ value: 200000, provenance: 'inferred', source_quote: message }));
     expect(w.graph().nodes.find((n: Rec) => n.kind === 'goal').observed_state?.raw_value).not.toBe(200000);
+  });
+
+  // ⭐ GATE → LABEL R3 (DL-3 AMEND 18 Oct): a target Olumi DERIVES from the user's figure is Olumi's derivation with its operands, approved
+  // by the press; never `threshold_source: user`, never "as you stated it". Synthetic words; a fractional multiple (a 15% cut).
+  it('R3: a derived target (200 × 1.5 = 300 tickets per week) on the saved goal itself → Olumi’s derivation card → the press → Olumi’s inference, never the user’s', async () => {
+    const w = await world(cases[1]);
+    const message = 'Our support handles 200 tickets per week of support throughput today. Set the target 50% higher than that.';
+    const ctx = { ...w.ctx, user_turn_text: message, user_text: message, verified_user_messages: [message] };
+    const out = await dispatchTool('propose_goal_target', JSON.stringify({ value: 300,
+      unit: 'tickets per week', constraint_type: 'at_least', derived_from: { base: 200, multiplier: 1.5 } }), ctx, w.caps());
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false, outcome: 'target_reading:derived_target' });
+    expect(out.public_label).toContain('Derived by Olumi from your figures: 200 tickets per week × 1.5 = 300 tickets per week;');
+    const pid = String(out.proposal_id);
+    expect(w.proposals.get(pid)!.provenance.authored_by).toBe('model_proposed');
+    expect(w.proposals.get(pid)!.operations[0]!.value).toMatchObject({ derived_from: { base: 200, multiplier: 1.5, unit: 'tickets per week' } });
+    const applied = await w.caps().authoriseChange({ ...ctx, user_turn_text: '', typed_approval_of: pid }, { proposal_id: pid }) as Rec;
+    expect(applied).toMatchObject({ ok: true, applied: true });
+    expect(JSON.stringify(applied)).not.toContain('as you stated');
+    const goal = w.graph().nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.threshold_source).toBe('cee_inference');
+    expect(w.graph().goal_constraints).toContainEqual(expect.objectContaining({ value: 300, provenance: 'inferred', source_quote: message }));
   });
 });

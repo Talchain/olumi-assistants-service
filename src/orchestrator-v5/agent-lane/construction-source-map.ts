@@ -138,13 +138,25 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
       return;
     }
     const key = subjectKey(subject, field);
-    const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: r['low'], high: r['high'], qualifier: r['qualifier'],
-      conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}), ...(r['speaker'] !== undefined && r['speaker'] !== null ? { speaker: r['speaker'] } : {}) }],
-      { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
+    const v = verifyEntry(r, form, key, brief, false);
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
     verified.set(key, [...(verified.get(key) ?? []), ...(field === 'effect' && form === 'range' ? v.statements.map(withOwnRangeUnit) : v.statements)]);
   });
   return { verified, refused };
+}
+
+/**
+ * One drafted statement through the ONE verifier, with the brief as its words. `claims`: the claim door's rule (claim record spec v2
+ * rule 6) — the AI's reading of WHO asserts it is kept (`said_by`: a party it names, or unresolved), its figures, unit and bounds
+ * checked exactly as the user's own. Without it a verified statement is the user's own, as before.
+ */
+function verifyEntry(r: Record<string, unknown>, form: StatementForm, key: string, brief: string, claims: boolean): ReturnType<typeof verifyStatements> {
+  const speaker = r['speaker'] !== undefined && r['speaker'] !== null ? { speaker: r['speaker'] } : {};
+  const source = claims ? Object.fromEntries((['said_by', 'party', 'relayed_by'] as const).filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]])) : {};
+  return verifyStatements([{ quote: r['quote'], form, value: r['value'], low: r['low'], high: r['high'], qualifier: r['qualifier'],
+    conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}), ...speaker, ...source }],
+  { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten,
+    ...(claims ? { claims: true as const } : {}) });
 }
 
 /**
@@ -488,11 +500,24 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
       if (source.author.origin !== 'human') continue;
     }
     const map = sourceMapOf([entry], brief);
+    // ⭐ CLAIM RECORD (plan converged step 2; DL-3 lease 18 Oct): a claim the AI reads as ANOTHER speaker's, or cannot place, keeps
+    // its owner and its bounds at construction — that party's range, unit and figures, checked exactly as the user's own, never the
+    // user's and never flattened to words. Only where that reading does not verify do the words fall back to speaker unknown.
+    const form = STATEMENT_FORMS.find((f) => f === r['form']);
+    const reported = map.refused[0]?.refusal === 'statement_not_found' && form !== undefined
+      && (r['speaker'] === 'other' || r['speaker'] === 'unknown' || r['said_by'] === 'party' || r['said_by'] === 'unknown')
+      ? verifyEntry(r, form, subjectKey(drafted, field), brief, true) : undefined;
+    // ⛔ A LABEL IS FOR A CARD (gate → label, 63f15228): the claim door now labels words or a figure it cannot find instead of refusing
+    // them, for a card the user sees and approves. Construction shows no card, so such a reading falls back exactly as a refusal did:
+    // a party's figure their words do not write is never recorded as theirs.
+    const claimed = reported?.kind === 'verified' && reported.statements.every((st) => st.checks === undefined
+      || (st.checks.words_found && st.checks.figure_found && st.checks.unit_found))
+      ? reported.statements.map((st) => (field === 'effect' && form === 'range' ? withOwnRangeUnit(st) : st)) : undefined;
     // ⛔ DL-3 16:14Z (#3363 R3; first loss P07/P09): words the brief writes verbatim, refused ONLY as not a whole statement there, are
     // kept with speaker unknown instead of dropped. Every other refusal still records nothing.
-    const unknown = map.refused[0]?.refusal === 'statement_not_found'
+    const unknown = claimed === undefined && map.refused[0]?.refusal === 'statement_not_found'
       ? unknownSpeakerWords(r['quote'], brief, { quantity: subjectKey(drafted, field) }) : undefined;
-    const said = unknown !== undefined ? [unknown] : [...map.verified.values()].flat();
+    const said = claimed ?? (unknown !== undefined ? [unknown] : [...map.verified.values()].flat());
     if (said.length === 0) continue;
     const ref = drafted.kind === 'option' && drafted.factor_label !== undefined
       ? { kind: 'factor', label: drafted.factor_label, option_label: drafted.label, field }
