@@ -11,7 +11,6 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
-import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 
 type Rec = Record<string, any>;

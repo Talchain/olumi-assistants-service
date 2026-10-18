@@ -1,8 +1,8 @@
 /**
  * ⭐ QUANTITY BINDING CONTRACT — naming and bound rows (outbox/QUANTITY-BINDING-CONTRACT-20261018.md; owner: lean core).
  * Row 12 (#3400 RES1, Claude review 142d9c03): label words inside ANOTHER item's held quoted words never name the item being corrected.
- * Row 10 (#3396 B2) is C5's (DL-3 ruling 18 Oct: build-model.ts drafter schema + T1 instruction region, #3413); its ADMISSION owner hunk
- * (outbox/C5-QBC-ROW10-OWNER-HUNK.patch, admit-model.ts) lands here with C5's OWED row as a plain row and a CONTROL. Synthetic words only.
+ * Row 10 (#3396 B2) is C5's (DL-3 ruling 18 Oct: build-model.ts drafter schema + T1 instruction region, #3413). Its admission owner hunk
+ * (outbox/C5-QBC-ROW10-OWNER-HUNK.patch) was WITHDRAWN by the owner: see the row-10 GUARD. Synthetic words only.
  */
 import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
@@ -63,27 +63,25 @@ async function constructPrice(said: string, statement: Rec): Promise<{ graph: Re
     dispatch, (async () => ({ text: JSON.stringify(draft), status: 'completed' })) as unknown as CallStructuredModel) as Rec;
   return { graph, result };
 }
-/** AIE-QUALIFIED-LIMIT-DISCLOSURE-20261018-v1 (SHA256 c80faee3…), exact, for the price. */
-const QUALIFIED_LINE = '\u2018Monthly price\u2019: this limit is kept with its qualifications for reasoning; it will not be enforced as a hard limit in analysis.';
+
 const hardPriceLimits = (g: Rec | undefined): Rec[] => {
   const price = ((g?.nodes ?? []) as Rec[]).find((n) => n.label === PRICE);
   return ((g?.goal_constraints ?? []) as Rec[]).filter((c) => c.node_id === price?.id && c.value === 40);
 };
-describe('row 10 admission (C5\'s owner hunk): a declared limit is hard only where its own bound statement is unqualified', () => {
-  it('RED: "likely at most £40", kept qualified by the AI yet declared as a limit, is never a hard limit, and is said so once (AIE, exact)', async () => {
-    const said = 'Our monthly price is likely at most £40 per month.';
-    const { graph, result } = await constructPrice(said, { qualifier: 'likely' });
-    expect(graph, 'PRECONDITION: the model registers').toBeDefined();
+describe('row 10 admission: OWED (C5\'s owner hunk withdrawn; a drafter qualifier is not a hedge)', () => {
+  // ⛔ WITHDRAWN 18 Oct (owner): "any qualifier on the bound statement makes the limit soft" dropped a recorded served draft's hard
+  // limit. The drafter fills `qualifier` descriptively ("available" on "We have £1,000 available for one-off research"; "current" on
+  // a level), so qualifier PRESENCE is not the user's hedge. Owed to the AI's own reading of the bound's hardness (drafter schema).
+  it.fails('OWED: "likely at most £40", kept qualified by the AI yet declared as a limit, is never a hard limit', async () => {
+    const { graph } = await constructPrice('Our monthly price is likely at most £40 per month.', { qualifier: 'likely' });
     expect(hardPriceLimits(graph)).toEqual([]);
-    // Never dropped silently: the AIE's sentence, once, in the build's own not_represented; the user's whole statement stays on the node.
-    expect((result.not_represented as string[]).filter((l) => l === QUALIFIED_LINE)).toHaveLength(1);
-    const price = ((graph!.nodes ?? []) as Rec[]).find((n) => n.label === PRICE)!;
-    expect(JSON.stringify(price.user_statements)).toContain(said);
-    expect(JSON.stringify(price.user_statements)).toContain('"qualifier":"likely"');
   });
-  it('CONTROL (the probe sees a limit): "cannot exceed £40", unqualified and declared, registers its hard limit of 40, with no such line', async () => {
-    const { graph, result } = await constructPrice('Our monthly price cannot exceed £40 per month.', { qualifier: null });
+  it('GUARD (the withdrawn hunk\'s counter-example): a descriptive qualifier ("available") never removes the user\'s declared limit', async () => {
+    const { graph } = await constructPrice('We have £40 available for the monthly price.', { qualifier: 'available' });
     expect(hardPriceLimits(graph)).toHaveLength(1);
-    expect(result.not_represented as string[]).not.toContain(QUALIFIED_LINE);
+  });
+  it('CONTROL (the probe sees a limit): "cannot exceed £40", unqualified and declared, registers its hard limit of 40', async () => {
+    const { graph } = await constructPrice('Our monthly price cannot exceed £40 per month.', { qualifier: null });
+    expect(hardPriceLimits(graph)).toHaveLength(1);
   });
 });
