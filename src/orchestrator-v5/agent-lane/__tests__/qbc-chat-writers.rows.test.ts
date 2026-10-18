@@ -97,6 +97,18 @@ describe('row 7 (W14): a likely range is the user\'s only by userStated, and nev
     expect(value.authored_by, JSON.stringify(value)).not.toBe('user_stated');
     expect(JSON.stringify(r.interventions)).not.toMatch(/"stated_by":"user"/);
   });
+  // Codex #3415 r1 (P1, P2): each end is credited only outside another speaker's quotation, and every candidate sentence is judged.
+  it('RED (Codex r1 P1): a quoted low end never borrows the user\'s repeated high end', async () => {
+    const said = 'Inez said: "For Migration, downtime is likely between 10 and 20 days"; for Migration I expect 20 days, most likely 15 days.';
+    const { r, value } = await proposeRangeLevel(said, said);
+    expect(value.likely_range, JSON.stringify({ r, value })).toBeUndefined();
+  });
+  it('RED (Codex r1 P2): a quoted range before the user\'s own same range never hides their valid range', async () => {
+    const said = 'Inez said: "For Migration, downtime is likely between 10 and 20 days". For Migration, my own likely downtime range is between 10 and 20 days, most likely 15 days.';
+    const { r, value } = await proposeRangeLevel(said, said);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(value.likely_range, JSON.stringify({ r, value })).toEqual({ low: 10, high: 20 });
+  });
   it('RED: another speaker\'s range (Inez, quoted) is never recorded as the user\'s likely range', async () => {
     const said = 'Inez said: "For Migration, downtime is likely between 10 and 20 days."';
     const { r, value } = await proposeRangeLevel(said, said);
@@ -144,6 +156,27 @@ describe('row 9: the user\'s credit for a figure inside quotation marks never co
     const { r, price } = await proposeTitled(`Let’s add the members plan: "${TITLE}".`);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(price, JSON.stringify(price)).toMatchObject({ source: 'cee_hypothesis', user_material_unverified: true });
+  });
+  it('RED (Codex r1 P1, row 9): a prior quoted WORDED level never hides the same user-owned worded level', async () => {
+    const graph = structuredClone(W15_GRAPH) as Rec;
+    const factor = (graph.nodes as Rec[]).find((n) => n.id === 'price')!;
+    factor.label = 'Outage duration'; factor.observed_state.unit = 'days';
+    const sent: Rec[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(graph), graph_hash: 'h0' } };
+      sent.push(body as Rec);
+      const p = (body as Rec).chip?.parameters;
+      return { status: 200, json: { suggested_actions: [{ id: gmHeldProposalRef(SID, `node:${p?.options?.[0]?.option_id ?? p?.option_id}`), label: 'Approve changes', message: 'Yes.' }] } };
+    };
+    const said = 'Inez said: "Outage duration is twenty-five days". For Extend coverage, outage duration is twenty-five days.';
+    const r = await createAgentCapabilities(d, new ProposalStore()).proposeNewOption(ctxOf(said) as never, { label: 'Extend coverage',
+      acts_on: [{ factor_label: 'Outage duration', direction: 'positive', level: { value: 25, unit: 'days', quote: said } }], rationale: 'The user asked for it.' } as never) as Rec;
+    const p = sent[0]?.chip?.parameters;
+    const entry = (p?.options ?? (p !== undefined ? [p] : [])).find((o: Rec) => o.label === 'Extend coverage') as Rec | undefined;
+    const cell = (entry?.interventions as Rec[] | undefined)?.find((i) => i.factor_id === 'price');
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(cell, JSON.stringify({ r, cell })).toBeDefined();
+    expect(cell).not.toHaveProperty('user_material_unverified');
   });
   it('GUARD: the same figure in the user\'s own unquoted words, cited, stays theirs (no stamp)', async () => {
     const said = 'Add an option: charge £25 for new members and keep current members.';

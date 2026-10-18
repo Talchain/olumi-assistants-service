@@ -47,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { figuresWritten, userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
+import { figureOccurrences, figuresWritten, userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -197,12 +197,10 @@ const ORIGIN_UNVERIFIED_NOTE =
  * to the user; they are recorded with their origin unverified (the writer's existing carrier). `null`: no occurrence binds.
  */
 function levelOccurrence(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): 'user' | 'quoted' | null {
-  const reading = speechReading(userText ?? '');
-  const span = figureTheUserWroteForSpan(value, unit, reading.text, scope);
-  if (span === null) return null;
-  if (!reading.inSpeech(span.start)) return 'user';
-  return findStatedAmounts(reading.text).some((a) => !reading.inSpeech(a.index)
-    && figureTheUserWroteForSpan(value, unit, reading.text, { ...scope, at: a.index }) !== null) ? 'user' : 'quoted';
+  // Every occurrence, digits AND words (`figureOccurrences`, the one list), each judged by the span reader at that occurrence.
+  const text = speechReading(userText ?? '').text;
+  const binding = figureOccurrences(userText ?? '', value).filter((o) => figureTheUserWroteForSpan(value, unit, text, { ...scope, at: o.index }) !== null);
+  return binding.some((o) => !o.inSpeech) ? 'user' : binding.length > 0 ? 'quoted' : null;
 }
 
 /** A level in a different unit is left out before its authorship is read. */
@@ -1108,19 +1106,21 @@ export const STATED_RANGE_CARD_CLOSING = 'Use this reading to record your origin
   + 'You can change or reject it instead.';
 
 /**
- * C2 (DL 15 Oct): the user's words for their likely range, kept on the level card for the record its press writes when it adopts
- * Olumi's approximation: their sentence that gives both ends in figures, else their latest message whole. The range itself is
- * still decided from the TYPED arguments (Codex CR 5963331228 P1), never by this. `undefined` only with no words of theirs.
+ * C2 (DL 15 Oct): the candidate words for the user's likely range, kept on the level card for the record its press writes when it
+ * adopts Olumi's approximation: each sentence that gives both ends in figures, then their latest message whole. Attribution is THE ONE
+ * RULE's (`verifyStatements`, below), over every candidate; this is never an authority. Empty only with no words of theirs.
  */
-function rangeWordsIn(now: string | null | undefined, conversation: string | null | undefined, low: number, high: number): string | undefined {
+function rangeWordsIn(now: string | null | undefined, conversation: string | null | undefined, low: number, high: number): string[] {
+  // ⭐ QBC PR-B (Codex #3415 r1 P2): EVERY candidate, in order, so the one rule picks the user's own sentence, never just the first.
+  const out: string[] = [];
   for (const text of [now, conversation]) {
     for (const sentence of (text ?? '').split(/(?<=[.?!])\s+|\n+/)) {
       const said = sentence.trim();
-      if (said !== '' && writtenIn(said, low) !== null && writtenIn(said, high) !== null) return said;
+      if (said !== '' && writtenIn(said, low) !== null && writtenIn(said, high) !== null && !out.includes(said)) out.push(said);
     }
   }
   const latest = (now ?? '').trim() !== '' ? (now ?? '').trim() : (conversation ?? '').split('\n').map((l) => l.trim()).filter((l) => l !== '').at(-1);
-  return latest !== undefined && latest !== '' ? latest : undefined;
+  return latest !== undefined && latest !== '' && !out.includes(latest) ? [...out, latest] : out;
 }
 
 /**
@@ -8150,17 +8150,17 @@ export function createAgentCapabilities(
                   : ' Tell the user that exact limitation, with their range in their words; do not ask them to restate it as a likely range just so a calculation can run.') });
           } else {
             // C2 (DL 15 Oct): the press adopts Olumi's approximation of THEIR range, so the card keeps their words for it.
-            rangeQuote = rangeWordsIn(ctx.user_turn_text, ctx.user_text, low, high);
             // ⭐ QBC row 7 (W14): the range is the user's only by THE ONE RULE (`verifyStatements`): their own span writes it, as one
-            // joined range or as both located ends (however worded: "five to twenty days"), never another speaker's quoted words.
-            // `rangeWordsIn` keeps only its source-quote and card work.
+            // joined range or as both located ends (however worded: "five to twenty days"), each end outside another speaker's
+            // quotation. Every candidate sentence is judged, so the user's own one is found wherever it sits (Codex #3415 r1 P2).
             const rangeRules = (form: 'range' | 'point') => ({ subject: { quantity: 'option_level', node_id: factor.id, option_id: option.id },
               unit: declaredUnit ?? '', forms: [form], figuresIn: figuresWritten });
-            const theirs = rangeQuote !== undefined
-              && (verifyStatements([{ quote: rangeQuote, form: 'range', low, high }], chatTexts(ctx, g.brief_text), rangeRules('range')).kind === 'verified'
-                || verifyStatements([{ quote: rangeQuote, form: 'point', value: low }, { quote: rangeQuote, form: 'point', value: high }],
-                  chatTexts(ctx, g.brief_text), rangeRules('point')).kind === 'verified');
-            if (theirs) likelyRange = { low, high };
+            const theirs = (quote: string): boolean =>
+              verifyStatements([{ quote, form: 'range', low, high }], chatTexts(ctx, g.brief_text), rangeRules('range')).kind === 'verified'
+              || verifyStatements([{ quote, form: 'point', value: low }, { quote, form: 'point', value: high }],
+                chatTexts(ctx, g.brief_text), rangeRules('point')).kind === 'verified';
+            rangeQuote = rangeWordsIn(ctx.user_turn_text, ctx.user_text, low, high).find(theirs);
+            if (rangeQuote !== undefined) likelyRange = { low, high };
             else rangesNotRecorded.push({ option: option.label, factor: factor.label,
               reason: 'No likely range was recorded: there are no words of the user’s to record it from. '
                 + 'Ask the user to restate their likely range in their own words, then propose it again.' });
