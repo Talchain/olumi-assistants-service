@@ -124,7 +124,10 @@ describe('a limit on a quantity drafted as an OUTCOME is a limit gap for the ONE
     const { inputs, trace } = await construct(firstPass(), churnAsFactor('ai_proposed', 3));
     expect(inputs).toHaveLength(2);
     expect(trace).toMatchObject({ retried: true, reasons: { coverage: 1 }, outcome: 'adopted' });
-    expect(inputs[1]).toContain(`${CHURN}: declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed — never the user's) — the user limits its level`);
+    // AIE W3 AMEND S4 (tests/fixtures/sys2/aie-w3-producer-bound-text-amend-v1.json, the AIE's file byte for byte): never retyped.
+    const S4 = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-w3-producer-bound-text-amend-v1.json', 'utf8')) as { spans: { span: string; effective_replace: string }[] })
+      .spans.find((x) => x.span.startsWith('S4'))!.effective_replace;
+    expect(inputs[1]).toContain(`${CHURN}: ${S4} (a provisional estimate with baseline_known:false, provenance ai_proposed — never the user's) — the user limits its level`);
   });
 
   it('⭐ RED: the retry that does as asked is ADOPTED — churn registers with Olumi\'s 3%, cee_inference, still the user\'s named quantity', async () => {

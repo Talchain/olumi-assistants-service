@@ -1,0 +1,73 @@
+{
+  "id": "AIE-W3-PRODUCER-BOUND-TEXT-AMEND-20261018-v1",
+  "status": "EXACT_TEXT_ADVICE_ONLY; NOT_APPLIED_OR_EXECUTED",
+  "submitted_packet": "/Users/paulslee/olumi-work/recovery/prompt/A-W3-PRODUCER-BOUND-TEXT-20261018-v1.json",
+  "submitted_packet_sha256": "74b41445d172a09cd46d3f7207a0856c61380dcb40607d770906d0c164d3e987",
+  "source_pin_claimed_by_owner": "CEE staging c18840658109223e3dc79b7532bd1e29e84dc23b",
+  "spans": [
+    {
+      "span": "S1 strict schema: factor plausible_max type and description (build-model.ts:335-336)",
+      "source_find": "      plausible_max: { type: 'number',\n        description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \\u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \\u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \\u2014 a value adopted later is read against this same range.' },",
+      "effective_find": "REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit — the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a £49 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today — a value adopted later is read against this same range.",
+      "decision": "AMEND description; CONFIRM number|null remains required",
+      "effective_replace": "Use a numerical plausible_max only for a supported upper domain bound in this factor’s actual unit and encoding. A percentage unit alone does not imply a maximum of 100: percentage change can exceed 100. Use 100 or 1 as a bound only for an established bounded part-of-whole percentage or proportion with that encoding; use a score maximum only where its actual domain is specified. An ordinary uncertain range’s upper end is not a hard maximum. Otherwise return null, never a round or typical maximum or a cap inferred from the current value. Retain the factor, stated figure, actual unit/encoding, full source, speaker, conditions and uncertainty. Null means the upper bound is unsupported; it does not supply an encoding, computational reference or effect law.",
+      "source_replace": "      plausible_max: { anyOf: [{ type: 'number' }, { type: 'null' }],\n        description: 'Use a numerical plausible_max only for a supported upper domain bound in this factor\\u2019s actual unit and encoding. A percentage unit alone does not imply a maximum of 100: percentage change can exceed 100. Use 100 or 1 as a bound only for an established bounded part-of-whole percentage or proportion with that encoding; use a score maximum only where its actual domain is specified. An ordinary uncertain range\\u2019s upper end is not a hard maximum. Otherwise return null, never a round or typical maximum or a cap inferred from the current value. Retain the factor, stated figure, actual unit/encoding, full source, speaker, conditions and uncertainty. Null means the upper bound is unsupported; it does not supply an encoding, computational reference or effect law.' },",
+      "source_find_sha256": "a3844d51d7d9b6c25c6122ae25c5360cc2d3c8418a5be8af7e4fddf266485a47",
+      "source_replace_sha256": "4e852f861c1e02e36c4dbdfa63dddd4fe80cb93da881ddf745fed94fd96b764d",
+      "effective_find_sha256": "b800710d058e5b30655bf3453f0179e14f5e997e000efff1bbd96db36b99aace",
+      "effective_replace_sha256": "62491c62a632bc064c75ce4635b2e256f67bcddb3e98726edf10636362c9a1e9"
+    },
+    {
+      "span": "S2 construction instruction (build-model.ts:606)",
+      "source_find": "  'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \\u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',\n",
+      "effective_find": "GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED — the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.",
+      "decision": "AMEND",
+      "effective_replace": "GIVE `plausible_max` ONLY FOR A SUPPORTED UPPER DOMAIN BOUND in the quantity’s actual unit and encoding; otherwise give null. A percentage unit alone is not a 100 maximum, and a value between 0 and 1 alone is not a bounded proportion. Preserve an explicitly supported part-of-whole domain or score maximum, but never treat an ordinary uncertain range’s high end as a hard bound. Keep source, speaker, conditions, uncertainty, factor and stated figure regardless; do not invent a round or typical maximum or a cap from that figure. A computational reference is separate from a bound, a prediction and an adopted scientific assumption.",
+      "source_replace": "  'GIVE `plausible_max` ONLY FOR A SUPPORTED UPPER DOMAIN BOUND in the quantity\\u2019s actual unit and encoding; otherwise give null. A percentage unit alone is not a 100 maximum, and a value between 0 and 1 alone is not a bounded proportion. Preserve an explicitly supported part-of-whole domain or score maximum, but never treat an ordinary uncertain range\\u2019s high end as a hard bound. Keep source, speaker, conditions, uncertainty, factor and stated figure regardless; do not invent a round or typical maximum or a cap from that figure. A computational reference is separate from a bound, a prediction and an adopted scientific assumption.',\n",
+      "source_find_sha256": "d74bb7d8cc6e2f10cfc0d17fc4462e047b95a2e0b9a25c76ebd4516d17bbeb20",
+      "source_replace_sha256": "7573e4a8a8a7b87eefcba3f8eb9ff59027111908ce25cfeb04a45aacb2cde483",
+      "effective_find_sha256": "d77ba98827fcd015a8b2e3e13607672dfcb221021647e0a18e0e9433e9b44582",
+      "effective_replace_sha256": "fbe0fa96241fd45222a1f910cb1cbb010489fc7ef4803a89dae011621fdcd7b6"
+    },
+    {
+      "span": "S3 level-gap retry prompt (build-model.ts:1550)",
+      "source_find": "an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists",
+      "effective_find": "an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists",
+      "decision": "CONFIRM supplied S3 exactly, subject to retained surrounding grounding constraints",
+      "effective_replace": "an ai_proposed estimate in the factor's unit); keep it only in changes if no defensible level exists",
+      "source_replace": "an ai_proposed estimate in the factor's unit); keep it only in changes if no defensible level exists",
+      "source_find_sha256": "1c5255d9ba294c8008b112f2de727491291d7c5b08489fab9bcce30b3670ad19",
+      "source_replace_sha256": "bde9f15f4acfe55f12b5581082a5076e918846292af388c24a56a9341aa1fe76",
+      "effective_find_sha256": "1c5255d9ba294c8008b112f2de727491291d7c5b08489fab9bcce30b3670ad19",
+      "effective_replace_sha256": "bde9f15f4acfe55f12b5581082a5076e918846292af388c24a56a9341aa1fe76"
+    },
+    {
+      "span": "S4 baseline-gap retry prompt (build-model.ts:1554)",
+      "source_find": "declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value",
+      "effective_find": "declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value",
+      "decision": "AMEND support and baseline wording",
+      "effective_replace": "declare it in factors, not outcomes (role observable; plausible_max only for a supported upper domain bound in its actual unit and encoding, else null), and give it a baseline_value only with its own separately grounded meaning and basis",
+      "source_replace": "declare it in factors, not outcomes (role observable; plausible_max only for a supported upper domain bound in its actual unit and encoding, else null), and give it a baseline_value only with its own separately grounded meaning and basis",
+      "source_find_sha256": "18fe29a05190dd8f4c28b82bc42585dee6568b93f34e343eb6210df34174c3f3",
+      "source_replace_sha256": "d43d27872cd4254eadfeeb38da9644eba7254ea16af1c08c4de1709e8091c1fc",
+      "effective_find_sha256": "18fe29a05190dd8f4c28b82bc42585dee6568b93f34e343eb6210df34174c3f3",
+      "effective_replace_sha256": "d43d27872cd4254eadfeeb38da9644eba7254ea16af1c08c4de1709e8091c1fc"
+    }
+  ],
+  "remaining_shared_outcome_risk_description": {
+    "decision": "AMEND the existing shared producer description too; do not claim W3 complete with this contradictory round-number instruction retained",
+    "effective_find": "With a unit: a SCALE for it, exactly as for a factor — a round number comfortably above anything realistic. null with no unit.",
+    "effective_replace": "For this risk or outcome, give plausible_max only for a supported upper domain bound in its actual unit and encoding, using the same rule as for a factor; otherwise null. A unit alone does not establish a bound, and an ordinary uncertain range’s high end is not a hard maximum. Retain its source, speaker, conditions, uncertainty and qualitative meaning. Do not invent a round scale; a separately disclosed computational reference does not establish a scientific bound or make an impact quantity an occurrence probability.",
+    "evidence": "Exact effective description read in submitted intent-routing-v2 construct/assembled/P01/1.sentBody.json at outcomes and risks; shared source literal at currentc188 pin is owner to verify, no invented source-find/hash asserted byAIE"
+  },
+  "D1": "CONFIRM scope-limited unsupported frame-dependent goal-chance withholding; actual goal-chance consumer and persisted/reopened licence must be traced by owner, not presumed from guidance-signals/strengthen-placeholder. No global ban on Olumi estimates/references. A supported frame alone does not earn an unsized causal effect, its uncertainty or a goal chance; preserve existing independently grounded/disclosed/adopted estimates only within their actual scientific support.",
+  "D2": "CONFIRM existing olumi_convention is origin/disclosure only, never bound/encoding/permission/calibration. Preserve known human source independently.",
+  "invariance_limit": "Raw-unit coefficient algebra is necessary but not sufficient: clipping, sampled support/spread, limits, nonlinear links and licence behavior must preserve actual scientific meaning. Plannedprepared-request rows do not prove executed-engine/results invariance.",
+  "W5": "All five retained next-turn writers must obey same reference/encoding/domain/disclosure/claim-scope contract, or exact remaining reachable hole is explicit scope debt before claiming complete repair. No new field/store/scanner required by this advice.",
+  "evidence_limits": [
+    "Sizing and supplied spans read FULL. Source pin/hash and anchor/reversal assertions are owner-submitted; AIE made no product-source/test/provider/engine call.",
+    "Correction-374 SCREEN-RESULT primary path was absent when read; DL01:09 synopsis only: MIXED/notadopted; no detailed result invented.",
+    "71of75 remains mandatory-field location count, not a judged defect count.",
+    "Own correction: earlier conditional phrasing for dimensionless definitions did not explicitly protect percentage-growth and range-end/domain distinctions; these exact spans now do."
+  ]
+}
