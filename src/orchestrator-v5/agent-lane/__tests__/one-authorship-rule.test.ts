@@ -41,10 +41,12 @@ describe('the one rule: whose value it is', () => {
     const whole = 'Our ops lead told me: “Returns will drop to 3% once the new labels ship.”';
     expect(userStated({ quote: whole, value: 3 }, quoted, SUBJECT).origin).toBe('unknown');
     // …nor is the report itself, as words: they END in the speaker's quoted words, so the claim is theirs (AIE: quoting an entire report
-    // does not transfer its embedded claim; C2, #3389's KNOWN BASE DEFECT rows), unless the AI reads it as the user's OWN instruction about them.
+    // does not transfer its embedded claim; C2, #3389's KNOWN BASE DEFECT rows). The AI's speaker label only subtracts credit, so an
+    // EXPLICIT `user` reading never makes the requoted report the user's (Founder 05:46 evidence row), whatever its lead-in words.
     expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'unknown', refusal: 'statement_not_found' });
+    expect(userStated({ quote: whole, form: 'describes', speaker: 'user' }, quoted, SUBJECT)).toMatchObject({ origin: 'unknown', refusal: 'statement_not_found' });
     const instruction = 'Ignore what our ops lead said: “Returns will drop to 3% once the new labels ship.”';
-    expect(userStated({ quote: instruction, form: 'describes', speaker: 'user' }, texts(instruction), SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: instruction } });
+    expect(userStated({ quote: instruction, form: 'describes', speaker: 'user' }, texts(instruction), SUBJECT).origin).toBe('unknown');
     expect(userStated({ quote: instruction, form: 'describes' }, texts(instruction), SUBJECT).origin).toBe('unknown');
     // CONTRAST: words of the user's own that only MENTION a quoted phrase mid-sentence are theirs…
     const own = 'We call it “the slow leak” and it worries me.';
