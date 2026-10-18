@@ -127,6 +127,11 @@ export interface StatementRules {
    * the quote, never a proof of what the quantity is: the row still decides which units its field takes.
    */
   readonly unitWritten?: true;
+  /**
+   * The exact labels of the entities this value is recorded for (the option it sets): quoted words that are exactly one of them are
+   * the user's own title for it, never another speaker's words (`speechReading`; Codex #3392 r1 B4).
+   */
+  readonly titles?: readonly string[];
 }
 
 export type StatementsVerdict =
@@ -209,8 +214,8 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
  * ⭐ LEAN CORE (check 3; #3389 probe P2): every place the quote writes `figure` sits inside another speaker's paired quotation marks
  * ("A colleague said: “we lose 5% a month”"): the figure is that speaker's, never the user's, though the user typed the report.
  */
-function figureOnlyInSpeech(quote: string, figure: number): boolean {
-  const { text, inSpeech } = speechReading(quote);
+function figureOnlyInSpeech(quote: string, figure: number, titles?: readonly string[]): boolean {
+  const { text, inSpeech } = speechReading(quote, true, titles);
   const spelled = [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) =>
     (parseCardinalAmount(m[0]) === Math.abs(figure) ? [m.index!] : []));
   const at = [...findStatedAmounts(text).filter((a) => Math.abs(a.magnitude) === Math.abs(figure)).map((a) => a.index), ...spelled];
@@ -276,7 +281,7 @@ export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['ref
  * that describe). Every writer that records a value or statement as the user's calls this, and nothing else. Pure.
  */
 export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
-  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection } = {}): StatedVerdict {
+  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection; readonly titles?: readonly string[] } = {}): StatedVerdict {
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
   // ⛔ K3 (kept): a declared own estimate never relabels a figure the retained words of unknown origin write (reseeded history, the
   // saved brief): that figure's source is unknown, never Olumi's. The stated-figure rule reads it there, in the AI's unit. This search
@@ -305,6 +310,7 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   const readScale = scale > 1 ? scale : percentEither ? 100 : 1;
   const percentAt = (q: string, n: number): boolean => findStatedAmounts(q).some((a) => a.kind === 'percent' && Math.abs(a.magnitude - n) <= 1e-9 * Math.max(1, Math.abs(n)));
   const v = verifyStatement({ ...claim, quote, form }, texts, { subject, unit: unit ?? '', forms: STATEMENT_FORMS, figuresIn: figuresWritten,
+    ...(opts.titles !== undefined ? { titles: opts.titles } : {}),
     allowsZero: true, sameFigure: (q, a, b) => a === b || (readScale > 1 && Math.abs(a * readScale - b) <= 1e-9 * Math.max(1, Math.abs(b))
       && ((!share && !percentEither) || percentAt(q, b))) }, opts.current);
   if (v.kind === 'refused') return notTheirs(v.refusal, v.detail);
@@ -423,7 +429,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-    if (figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
+    if (figureOnlyInSpeech(quote, read.high, rules.titles)) return anotherSpeaker(`${low}–${high}`);
     if (dropsBound(read.low) || dropsBound(read.high)) return boundDropped(`${low}–${high}`);
     if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
@@ -435,7 +441,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-  if (figureOnlyInSpeech(quote, end)) return anotherSpeaker(String(value));
+  if (figureOnlyInSpeech(quote, end, rules.titles)) return anotherSpeaker(String(value));
   if (dropsBound(end)) return boundDropped(String(value));
   if (givenUnit !== undefined && !unitWrittenAfter(quote, end, givenUnit)) return unitRefused(String(value));
   return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };

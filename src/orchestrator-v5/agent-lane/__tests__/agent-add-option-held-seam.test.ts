@@ -688,6 +688,40 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   }, 120_000);
 
   /**
+   * ⭐ G3 (W15; Codex #3392 r1 B3): a new option's level the one rule cannot credit, written in the user's own words, is RECORDED with its
+   * origin unverified (construction's `cee_hypothesis` + `user_material_unverified`): never refused, never "you said", never Olumi's.
+   */
+  const proposeUncited = (message: string) => {
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      () => say('I would add "Test £54 at release", linked from the decision and setting the price. Shall I add it?'),
+    ];
+    return turn({ message });
+  };
+  it('[G3 W15] RED: the user wrote £54 but the AI cites no span of it → ONE hold → one click → committed with its origin unverified, never said as Olumi\'s estimate', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeUncited('Add an option: test £54 at release.');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const iv = (newOption()?.interventions ?? {})['fac_price'] as Record<string, unknown> | undefined;
+    expect(iv, JSON.stringify(iv)).toMatchObject({ raw_value: 54, source: 'cee_hypothesis', user_material_unverified: true });
+    const { settingProvenanceOf } = await import('../../../cee/provenance/provenance-of.js');
+    expect(settingProvenanceOf(iv, graphNow().nodes.find((x) => x.id === 'fac_price')).origin).toBe('unknown');
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Olumi's estimate/);
+  }, 120_000);
+
+  it('[G3 W15] NEGATIVE kept: a figure written nowhere in the user\'s words, uncited and with no estimate flag → no level is committed', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeUncited('Add an option: test a new release price.');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect((newOption()?.interventions ?? {})['fac_price'] ?? null, JSON.stringify(newOption())).toBeNull();
+  }, 120_000);
+
+  /**
    * ⛔ ROUND-2 REVIEW, BLOCKER 3: the boundary every fast-path follow-up passes (`withoutAgentDirections`) dropped this
    * producer's sentences whenever a factor LABEL tripped it — "the user" inside "Size of the user base", a snake_case
    * label, or the id `labelOf` falls back to — so one click showed only "Saved.": what was added, and the C2

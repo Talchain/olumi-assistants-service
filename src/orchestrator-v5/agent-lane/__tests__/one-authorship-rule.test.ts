@@ -110,6 +110,24 @@ describe('the one rule: whose value it is', () => {
     expect(userStated({ quote: own, value: 14 }, texts(own), SUBJECT).origin).toBe('human');
   });
 
+  it('3d. quoted words that are EXACTLY the option\'s own label are the user\'s title for it (Codex #3392 r1 B4); every other quoted figure keeps the fail-safe', () => {
+    const TITLE = '£25 for new members; keep current members';
+    const said = `Let’s add the trial plan: "${TITLE}".`;
+    const claim = { quote: said, value: 25, unit: 'GBP per month' };
+    // RED → GREEN: the writer passes the option's label; the £25 in the user's own title for it is theirs.
+    expect(userStated(claim, texts(said), SUBJECT, { titles: [TITLE] }).origin).toBe('human');
+    // The same words with no title known keep the fail-safe (another speaker's quoted words, unknown).
+    expect(userStated(claim, texts(said), SUBJECT).origin).toBe('unknown');
+    // Identity only: quoted words that are not exactly the label stay another speaker's.
+    expect(userStated(claim, texts(said), SUBJECT, { titles: ['£25 for new members'] }).origin).toBe('unknown');
+    // A named speaker's quoted proposal that the option is named after: the AI's `other` reading still subtracts credit.
+    const reported = `Inez said: "${TITLE}".`;
+    expect(userStated({ ...claim, quote: reported, speaker: 'other' }, texts(reported), SUBJECT, { titles: [TITLE] }).origin).toBe('unknown');
+    // An unclosed quotation (the fail-safe region) is never a title, whatever words follow.
+    const open = `Let’s add the trial plan: "${TITLE}`;
+    expect(userStated({ ...claim, quote: open }, texts(open), SUBJECT, { titles: [TITLE] }).origin).toBe('unknown');
+  });
+
   it('4. a typed range keeps both ends, and its unit only where the span writes it after the figure', () => {
     const t = texts('Each courier costs between £400 and £650 a week, depending on the route.');
     expect(userStated({ quote: 'between £400 and £650 a week', low: 400, high: 650, unit: '£' }, t, SUBJECT))

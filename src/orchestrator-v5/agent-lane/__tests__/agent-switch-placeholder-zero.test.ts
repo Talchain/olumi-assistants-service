@@ -24,7 +24,6 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { UNKNOWN_ORIGIN_DETAIL } from '../runtime/statement-origin.js';
 import { gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 import { composeProposalReply } from '../proposal-reply.js';
 
@@ -85,7 +84,7 @@ const LEDGER = { value: 0, unit: '', estimate: false, basis: '' };
 const a07 = (level: unknown, extra: Record<string, unknown>[] = []) => ({
   label: GRANDFATHER,
   acts_on: [
-    { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+    { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month', quote: A07 } },
     { factor_label: GF_SWITCH, direction: 'positive', ...(level === undefined ? {} : { level }) },
     ...extra,
   ],
@@ -111,19 +110,20 @@ describe('RED — served A07 (one option): the placeholder 0 on the grandfather 
     ['Runtime\'s ledger shape { 0, "", false, "" }', LEDGER],
     ['the served rejected_levels shape { 0 }', { value: 0 }],
     ['{ 0, unit: "  ", estimate: null }', { value: 0, unit: '  ', estimate: null }],
-  ])('%s → held; the switch is on at 1 under the option; the £59 inside the quotation marks is left out WITH the unknown-origin disclosure (pending G3); the reading is said', async (_name, level) => {
+  ])('%s → held; the switch is on at 1 under the option; the £59 is still sent; the reading is said', async (_name, level) => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx(A07) as never, a07(level) as never) as Result;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(sent).toHaveLength(1);
     expect(on(sentOption(sent, GRANDFATHER), GF_KEY)).toEqual([{ factor_key: GF_KEY, value: 1 }]);
-    // ⭐ LEAN CORE (#3392, THE ONE RULE): the £59 is written ONLY inside the paired quotation marks of A07, which the estate's speech
-    // reader cannot tell from another speaker's quoted words (check 3). So it is not credited as the user's figure and is never Olumi's.
-    // PENDING G3 (DL-3 05:3xZ ruling 4): until the level writer carries an unknown author it is left out ONLY with the existing
-    // unknown-origin disclosure, never silently (was: sent as the user's); G3 records it with its origin unverified. The switch reading
-    // below is unchanged.
-    expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(false);
-    expect(r.levels_not_set).toEqual([expect.objectContaining({ factor: 'Pro plan price', value: 59, reason: UNKNOWN_ORIGIN_DETAIL })]);
+    // ⭐ LEAN CORE (#3392, THE ONE RULE; Codex r1 B4): the AI cites A07 whole, and the £59 sits inside the quotation marks that hold
+    // exactly this option's own title: the user's title for it, not another speaker's words. So it is still sent as the user's.
+    expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(true);
+    // …as THE USER'S (no Olumi or unverified stamp), never merely recorded with its origin unverified.
+    const price = sentOption(sent, GRANDFATHER)?.interventions?.find((i) => i.factor_id === 'pro_plan_price');
+    expect(price, JSON.stringify(price)).not.toHaveProperty('source');
+    expect(price).not.toHaveProperty('user_material_unverified');
+    expect(r).not.toHaveProperty('levels_not_set');
     expect(r.switch_placeholder_levels_read_as_on).toEqual([{ option: GRANDFATHER, factor: GF_SWITCH }]);
     expect(r.switch_placeholder_levels_note).toContain('a placeholder, not a figure');
   });

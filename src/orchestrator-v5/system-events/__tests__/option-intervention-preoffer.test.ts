@@ -428,6 +428,31 @@ describe('G3: an option cost the AI cannot cite is SAVED with its origin unverif
     expect(settingProvenanceOf(saved).origin).toBe('unknown');
   });
 
+  it('RED (Codex #3392 r1 B2): the user\'s likely range never credits a point it does not write → the point is saved unverified, the range stays theirs', async () => {
+    const w = world('The pilot likely needs between 1 and 3 tech leads.');
+    const r = await w.propose({ user_stated: true, likely_low: 1, likely_high: 3, range_user_stated: true, range_meaning: 'likely_range',
+      basis: 'the middle of the user\'s likely range' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, interventions: [{ value: 2, stated_by: 'origin_unverified', likely_range: { low: 1, high: 3 } }] });
+    expect(JSON.stringify(r)).not.toMatch(/"stated_by":"user"/);
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'cee_hypothesis', user_material_unverified: true,
+      range: { low: 1, high: 3, meaning: 'likely_range', source: 'user_specified' } });
+    expect(settingProvenanceOf(saved).origin).toBe('unknown');
+  });
+
+  it('CONTRAST: the user wrote the point AND its likely range, and the AI cites it → both are theirs (user_specified, no marker)', async () => {
+    const said = 'The pilot needs 2 tech leads, likely between 1 and 3.';
+    const w = world(said);
+    const r = await w.propose({ user_stated: true, quote: said, likely_low: 1, likely_high: 3, range_user_stated: true, range_meaning: 'likely_range',
+      basis: 'the user gave it' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, interventions: [{ value: 2, stated_by: 'user', likely_range: { low: 1, high: 3 } }] });
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'user_specified', range: { low: 1, high: 3, meaning: 'likely_range', source: 'user_specified' } });
+    expect(saved).not.toHaveProperty('user_material_unverified');
+  });
+
   it('NEGATIVE kept: a figure written nowhere in the user\'s words, with no own-estimate carrier, is not user material → refused, disclosed, nothing saved', async () => {
     const w = world('For the pilot we would bring in a couple of contractors.');
     const r = await w.propose({ user_stated: true, basis: 'the user mentioned a couple of contractors' });

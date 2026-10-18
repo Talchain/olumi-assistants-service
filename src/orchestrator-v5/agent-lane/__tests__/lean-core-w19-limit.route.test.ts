@@ -48,4 +48,14 @@ describe('W19: a limit\'s new figure the user wrote is theirs, whatever words th
     const said = 'Our advertising share went to 85% this quarter.';
     expect(await propose(said, said)).toMatchObject({ ok: false, mutated: false, refusal: 'figure_not_stated' });
   });
+
+  it('RED (Codex #3392 r1 B1): naming this limit in ANOTHER sentence never carries a second quantity\'s figure to it → figure_not_stated', async () => {
+    const said = 'Keep Coastal orders shipped within 2 days unchanged. Advertising share is 85% this quarter.';
+    expect(await propose(said, said)).toMatchObject({ ok: false, mutated: false, refusal: 'figure_not_stated' });
+  });
+
+  it('CONTRAST: the sentence that writes 85% names this limit → prepared, although another sentence names a second quantity', async () => {
+    const said = 'Advertising share is 20% this quarter. Coastal orders shipped within 2 days should be at least 85%.';
+    expect(await propose(said, said)).toMatchObject({ ok: true, mutated: false });
+  });
 });

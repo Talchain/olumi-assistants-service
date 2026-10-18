@@ -86,12 +86,13 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
     expect(priceLevelSent(sent)).toEqual(expect.objectContaining({ raw_value: 64, source: 'cee_hypothesis' }));
   });
 
-  it('A2h unknown-history option level stays unset even with an estimate label and basis', async () => {
+  it('A2h unknown-history option level is never Olumi\'s, even with an estimate label and basis: recorded with its origin unverified (G3, W15)', async () => {
     const { caps, sent } = setup();
     await caps.proposeNewOption({ ...ctxSaying(ADD_ALL), unverified_user_text: 'Raise Pro plan price to £64.' },
       suggested({ value: 64, unit: '£', estimate: true, basis: 'a step above the £59 option' }) as never);
-    expect(priceLevelSent(sent)?.value).toBeNull();
-    expect(priceLevelSent(sent)).not.toHaveProperty('raw_value');
+    // G3 (Codex #3392 r1 B3, W15): the £64 is USER MATERIAL of unknown origin (retained words), so it is recorded with its origin
+    // unverified (was: left unset), never Olumi's (K3, kept: never `cee_hypothesis` without the marker) and never the user's.
+    expect(priceLevelSent(sent), JSON.stringify(sent)).toMatchObject({ raw_value: 64, source: 'cee_hypothesis', user_material_unverified: true });
   });
 
   it('A2h unknown-history assumption revision cannot become Olumi authored', async () => {
