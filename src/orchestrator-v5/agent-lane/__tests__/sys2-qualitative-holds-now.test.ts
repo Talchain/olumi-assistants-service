@@ -14,7 +14,7 @@ import { sourceMapOf, subjectKey } from '../construction-source-map.js';
 
 type Rec = Record<string, any>;
 const PACKET = JSON.parse(readFileSync('tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'utf8')) as { changes: { id: string; old: string; replacement: string }[] };
-/** AIE T1 (18 Oct) supersedes H0's holds_now definition whole; H1 stands. */
+/** AIE T1 (18 Oct), sent beside H0/H1 (its holds_now clause went back to the AIE: H0 stands). */
 const T1 = JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as Record<'changes' | 'goal_changes', { id: string; old: string; replacement: string }[]>;
 const MARKETING = { brief: (JSON.parse(readFileSync(new URL('./fixtures/marketing-e2e-de659cfd-read05-before.json', import.meta.url), 'utf8')) as Rec).body.brief_text as string,
   label: 'Limited marketing experience', sentence: 'I can\'t spend more than 25% of my time on this, and I\'m not that experienced with marketing.' };
@@ -25,7 +25,7 @@ const holdsNow = (label: string, quote: string): Rec => ({ quote, subject: { kin
   field: 'holds_now', form: 'holds_now', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null });
 
 describe('AIE H0/H1: a qualitative current condition is a holds_now statement with null numerics', () => {
-  it('RED: the SENT drafter request carries H1 and the AIE T1 texts once (T1 holds_now supersedes H0), and no old text', async () => {
+  it('RED: the SENT drafter request carries both replacements and the AIE T1 texts once, and neither old text', async () => {
     let sent: Rec | undefined;
     await buildModelFromBrief('5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e', HIRING.brief, (async (path: string) => (path.endsWith('/graph/register')
       ? { status: 200, json: { registered: true, model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } })) as never,
@@ -33,12 +33,10 @@ describe('AIE H0/H1: a qualitative current condition is a holds_now statement wi
     const text = String(sent?.instructions);
     expect(PACKET.changes.map((c) => c.id)).toEqual(['H0', 'H1']);
     for (const c of PACKET.changes) {
-      const now = T1.changes.find((t) => t.old === c.replacement)?.replacement ?? c.replacement;
-      expect(text.split(now), c.id).toHaveLength(2);
+      expect(text.split(c.replacement), c.id).toHaveLength(2);
       expect(STATEMENTS_INSTRUCTION.includes(c.old), `${c.id} old text gone`).toBe(false);
     }
-    expect(T1.changes.find((t) => t.old === PACKET.changes[0]!.replacement)?.id).toBe('holds_now');
-    expect(text.includes(PACKET.changes[0]!.replacement), 'H0 text superseded by AIE T1 holds_now').toBe(false);
+    expect(T1.changes.map((t) => t.id), 'the T1 packet carries no holds_now clause; H0 above is sent').toEqual(['risk_own_statement']);
     for (const t of [...T1.changes, ...T1.goal_changes]) expect(text.split(t.replacement), t.id).toHaveLength(2);
   });
 

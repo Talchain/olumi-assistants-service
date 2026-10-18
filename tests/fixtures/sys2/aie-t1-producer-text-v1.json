@@ -5,14 +5,10 @@
   "goal_unit_source_sha256": "71da522c43729be7f53d8213c9106c9edb28ae8a7cf58ddae47a00feee74b474",
   "excluded": [
     "unit_unresolved_bound: owed to #3396 (nullable plausible_max contract); the staging sent schema types factor plausible_max as a required number",
-    "withdrawal: the UI/withdrawal owner applies it"
+    "withdrawal: the UI/withdrawal owner applies it",
+    "holds_now: reverted to base H0 (DL-3 18 Oct, S1 blind judges: no gain, and arm B P11-d1 held a breach as already true); back with the AIE"
   ],
   "changes": [
-    {
-      "id": "holds_now",
-      "old": "holds_now (an affirmative claim that the actual speaker's condition currently holds, including a qualitative limitation with no number; use field holds_now and form holds_now, with value, low, high and unit null; any separately stated quantity gets its own applicable statement field. Retain the whole sentence, its actual subject, qualifications and conditions. Negating a positive property can affirm a current limitation; interpret the clause's meaning rather than rejecting every sentence containing no or not. A future possibility, past-only state, another subject's condition, denial, correction or unresolved conflict is not an active holds_now claim. Preserve such words with their actual status rather than invent a current condition. This records current source meaning only, never future persistence, event probability, intensity or causal effect)",
-      "replacement": "holds_now (the actual speaker asserts that this subject’s condition holds now, including a qualitative current limitation without a number; use field holds_now and form holds_now with value, low, high and unit null. Retain the complete sentence, speaker, subject, stance, qualifications and conditions; give any separately stated quantity its own applicable statement. Uncertainty about whether a condition holds is not an assertion that it holds: preserve the uncertainty and its complete source in the existing describes/source representation and unknowns, not as already_true_evidence for that condition. A report that an assessment has not been made does not establish the condition being assessed. Negating a positive property may genuinely affirm a current limitation; interpret the clause’s meaning, not the presence of no or not. A possibility, question, past-only state, withdrawn guess, denial of the condition, other subject’s state or unresolved conflicting account must keep that status rather than become an active current condition. Current-state meaning does not establish future persistence, occurrence probability, intensity or causal effect)"
-    },
     {
       "id": "risk_own_statement",
       "old": "For each quantity, target, timing, measurement definition, relation or current-state claim that can be bound to a drafted item, add an entry to statements.",
