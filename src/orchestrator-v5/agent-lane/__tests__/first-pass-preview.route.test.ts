@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
+import { withoutNewReferenceMarker } from './fixtures/one-form-levels.js';
 import type { PipelineStageEvent } from '../../../cee/unified-pipeline/types.js';
 
 type RunArgs = { payload: { turn_id: string; scenario_id: string }; requestId: string; autoRun?: { draftTurnId: string } };
@@ -289,7 +290,8 @@ describe('O3 accepted first-pass preview', () => {
       const actual = snapshot(body, frames);
       {
         const baseline = JSON.parse(readFileSync(baselinePath, 'utf8')) as Record<string, Snapshot>;
-        expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline[c.name]!.graph));
+        // A (18 Oct): the recording predates the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+        expect(JSON.stringify(withoutNewReferenceMarker(actual.graph, baseline[c.name]!.graph))).toBe(JSON.stringify(baseline[c.name]!.graph));
         expect(actual.reply).toBe(baseline[c.name]!.reply);
       }
     } finally { vi.useRealTimers(); }
@@ -305,7 +307,7 @@ describe('O3 accepted first-pass preview', () => {
       const actual = snapshot(body, frames);
       {
         const baseline = JSON.parse(readFileSync(baselinePath, 'utf8')) as Record<string, Snapshot>;
-        expect(JSON.stringify(actual)).toBe(JSON.stringify(baseline[`${c.name}-no-repair`]));
+        expect(JSON.stringify(withoutNewReferenceMarker(actual, baseline[`${c.name}-no-repair`]))).toBe(JSON.stringify(baseline[`${c.name}-no-repair`]));
       }
     } finally { vi.useRealTimers(); }
   });

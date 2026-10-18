@@ -114,3 +114,22 @@ export function asServedBeforeProjectedMeans<G>(graph: G): G {
   }
   return out;
 }
+
+/**
+ * A (18 Oct, D2): a recording made before every Olumi range carried the disclosure. Removes `frame_source:
+ * 'olumi_convention'` ONLY at a path where the recording holds no `frame_source` (walked in parallel, by key and index);
+ * every other byte is compared as recorded. Which ranges carry it is pinned by `olumi-reference-disclosed.test.ts`.
+ */
+export function withoutNewReferenceMarker<T>(actual: T, recorded: unknown): T {
+  const walk = (a: unknown, r: unknown): unknown => {
+    if (Array.isArray(a)) return a.map((x, i) => walk(x, Array.isArray(r) ? r[i] : undefined));
+    if (!isDict(a)) return a;
+    const out: Dict = {};
+    for (const [k, v] of Object.entries(a)) {
+      if (k === 'frame_source' && v === 'olumi_convention' && !(isDict(r) && r.frame_source !== undefined)) continue;
+      out[k] = walk(v, isDict(r) ? r[k] : undefined);
+    }
+    return out;
+  };
+  return walk(actual, recorded) as T;
+}

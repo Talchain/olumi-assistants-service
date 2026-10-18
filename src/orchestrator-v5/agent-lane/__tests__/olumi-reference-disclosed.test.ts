@@ -15,6 +15,7 @@ import { ProposalStore } from '../proposal.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { levelDomain } from '../../../cee/magnitude/link-effect.js';
 
 type Rec = Record<string, any>;
 const SID = '41414141-4141-4141-8141-414141414141';
@@ -143,6 +144,11 @@ describe('A: Olumi\'s range is its reference, said the same way; the user\'s raw
     const limit = request.goal_constraints.find((c: Rec) => c.node_id === idOf(g, CANCEL));
     expect(limit).toMatchObject({ value: 30, unit: 'cancellations per week' });
     expect(limit.value / request.graph.nodes.find((n: Rec) => n.id === idOf(g, CANCEL)).observed_state.cap).toBeLessThanOrEqual(1);
+  });
+
+  it('(d): a frame of 1 is a [0, 1] domain only beside a unit that states a share; Olumi\'s default 1 on "0.5 FTE" is no maximum', () => {
+    for (const unit of ['fraction', 'share', 'proportion', 'share (0-1)']) expect(levelDomain(unit, 1), unit).toEqual({ lo: 0, hi: 1 });
+    for (const unit of ['FTE', 'hours per week', undefined]) expect(levelDomain(unit, 1), String(unit)).toBeNull();
   });
 
   it('P3/P4: Olumi\'s references ×10, or one end ×2, leave every raw level, word, size, spread and limit of the prepared Run request unchanged', async () => {

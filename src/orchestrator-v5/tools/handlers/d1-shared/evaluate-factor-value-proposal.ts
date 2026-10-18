@@ -113,9 +113,13 @@ function statesShareOrUnitRange(unit: string, value: number | undefined): boolea
   return head === 'share' || head === 'fraction' || head === 'proportion' || words[0] === 'proportion' || words[0] === 'fraction';
 }
 export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
-  const unit = typeof f.unit === 'string' ? f.unit.trim().toLowerCase() : '';
-  const isProportionUnit = PROPORTION_UNIT_TOKENS.has(unit) || (unit !== '' && statesShareOrUnitRange(unit, f.value));
-  return f.cap === 1 || (isProportionUnit && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
+  return f.cap === 1 || (isProportionUnit(f.unit, f.value) && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
+}
+
+/** A unit that states a 0–1 share by the one rule above (a closed token, or a share/fraction/proportion head or a written 0–1). */
+export function isProportionUnit(rawUnit: unknown, value?: number): boolean {
+  const unit = typeof rawUnit === 'string' ? rawUnit.trim().toLowerCase() : '';
+  return PROPORTION_UNIT_TOKENS.has(unit) || (unit !== '' && statesShareOrUnitRange(unit, value));
 }
 
 export function canonicaliseUnitForDisplay(unit: string | undefined): string | undefined {

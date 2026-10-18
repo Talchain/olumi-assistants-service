@@ -16,6 +16,7 @@ import type { InternalDispatch } from '../../runtime/agent-capabilities.js';
 import { beforeDoorTag } from '../licence-test-graphs.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { unsizedOlumiRiskIds } from '../../unsized-risk.js';
+import { withoutNewReferenceMarker } from './one-form-levels.js';
 
 export const fixture = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
 const json = (path: string): any => JSON.parse(fixture(path));
@@ -203,7 +204,8 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.deepEqual(omitted, RUN_OMITS_BY_RAW[c.file] ?? []);
     assert.deepEqual([...unsizedOlumiRiskIds({ nodes: a.nodes, edges: a.edges, goal_constraints: a.goal_constraints })], omitted);
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
-    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
+    // A (18 Oct): the recorded digests predate the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(withoutNewReferenceMarker(a, undefined), raw, c.file)) })), baseline[c.file]);
   },
 })));
 export const registrationRows: Row[] = probes.filter(p => p.id.startsWith('B-')).map(p => ({
