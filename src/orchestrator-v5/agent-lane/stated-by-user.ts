@@ -40,7 +40,7 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { nounUnitsAt, readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { speechReading } from '../goal-target/input-claim-context.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
@@ -69,21 +69,18 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
 
 /**
  * THE ONE CHECK, both forms: the written amount `a` is `value` in `unit` (`amountIs`, its unit and kind rules), in the user's own
- * words, never inside another speaker's quotation (the ONE speech reader, `speechReading`); a word must count something
- * (`countsSomething`). Presence only: never which quantity.
+ * words, never inside another speaker's quotation (the ONE speech reader, `speechReading`). Presence only: never which quantity.
+ *  · A count followed by its COUNTED NOUN PHRASE (`countedPhraseAfter`) counts THAT: where the phrase names something and no word of
+ *    the held unit, it is another quantity, in digits as in words ("45 nurses" is no figure of hours; DL-3 on #3429). A figure with
+ *    no noun after it ("it is 45 now", "all 6 on a prototype") is read as before.
+ *  · A word is a figure only where it counts something: "one OF them", "the one WHO" and "not twelve." are no figures.
  */
 export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string): boolean {
-  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && (a.kind !== 'words' || countsSomething(text, a))
+  const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
+  const held = namingWords(unit), said = namingWords(counted);
+  const another = (a.kind === 'plain' || a.kind === 'words') && held.length > 0 && said.length > 0 && !said.some((w) => held.some((h) => sameWord(w, h)));
+  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && (a.kind !== 'words' || counted !== '')
     && !speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length);
-}
-
-/**
- * A word is a figure the user wrote only where it COUNTS something: a word follows it that is no phrase break. "One OF them", "the one
- * WHO" and the old figure in "not twelve." are no figures; a digit is a figure by its form.
- */
-function countsSomething(text: string, a: WrittenAmount): boolean {
-  const counted = nounUnitsAt(text.slice(a.index + a.matchedText.length))[0];
-  return counted !== undefined && !PHRASE_BREAK.has(counted);
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
@@ -320,6 +317,14 @@ const PHRASE_BREAK = new Set([
   'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because',
 ]);
 
+/** The COUNTED NOUN PHRASE right after an amount ending at `end`: up to three words, to the first preposition or conjunction. */
+function countedPhraseAfter(text: string, end: number): string {
+  const window = /^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/.exec(text.slice(end))?.[1] ?? '';
+  const words = window.trim().split(/\s+/);
+  const cut = words.findIndex((w) => PHRASE_BREAK.has(w.toLowerCase()));
+  return (cut === -1 ? words : words.slice(0, cut)).join(' ');
+}
+
 /**
  * Whether the COUNTED NOUN PHRASE right after the amount at `m` names the factor and nothing else: every naming word of
  * the (up to three) words before the first preposition or conjunction (PR Review 5881529306: "three engineers for
@@ -327,10 +332,7 @@ const PHRASE_BREAK = new Set([
  */
 function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown, unit: unknown): boolean {
   if (typeof m.index !== 'number') return false;
-  const window = /^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/.exec(brief.slice(m.index + m[0].length))?.[1] ?? '';
-  const words = window.trim().split(/\s+/);
-  const cut = words.findIndex((w) => PHRASE_BREAK.has(w.toLowerCase()));
-  const phrase = (cut === -1 ? words : words.slice(0, cut)).join(' ');
+  const phrase = countedPhraseAfter(brief, m.index + m[0].length);
   // EVERY naming word in the phrase must name the factor, or it withholds. What a number counts is not reliably the first
   // word ("zero CUSTOMER complaints" counts complaints, PR Review 5881730098) nor the last (past a verb: "zero downtime
   // affects ENTERPRISE", 5881612484), so any word naming something else makes the reading uncertain: it withholds. Filler
