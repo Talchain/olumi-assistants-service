@@ -96,6 +96,8 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
       : fault === 'unknown speaker' ? `'${f.message}'` : f.message;
     const w = await correctionWorld(f.graph, message);
     const correction: Rec = { ...f.request };
+    if (fault === 'another speaker') correction.speaker = 'other';
+    if (fault === 'unknown speaker') correction.speaker = 'unknown';
     if (fault === 'missing') delete correction.quote;
     if (fault === 'partial') correction.quote = f.message.slice(0, f.message.indexOf(','));
     const review = await w.offer('propose_statement', { correction });
@@ -198,6 +200,19 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
 });
 
 describe.each(cases)('$name: correction uses the existing subject context', row => {
+  it('one item’s preceding question never binds unmentioned targets bundled beside it', async () => {
+    const f = fixture(row), message = 'Retract the earlier account.';
+    f.graph.nodes[0].goal_horizon_months = 6;
+    const ask = doorAsks(f.graph).find(a => a.subject.id === f.other.id && a.subject.field === f.other.field);
+    expect(ask).toBeDefined();
+    const w = await correctionWorld(f.graph, message);
+    Object.assign(w.ctx, { preceding_assistant_text: ask!.words });
+    const result = await w.offer('propose_statement', { correction: { ...f.request, quote: message } });
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+    expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  });
+
   it.each(['selection', 'question'] as const)('%s survives its own card, native press and cold read', async origin => {
     const f = fixture(row), message = `Retract “${row.withdrawn}”; keep the earlier report.`;
     f.graph.nodes[0].goal_horizon_months = 6;
@@ -615,4 +630,178 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(result.public_label).toContain('Your quote stays yours; the reading remains Olumi’s');
     expect(result.public_label).not.toMatch(/Subject:|field:|Retire as|Recorded figure\/bounds|subject_key|recorded_by|\{"/u);
   });
+});
+
+// DEV exposed source/binding classes; these independent domains contain no pilot wording.
+describe.each(cases)('$name: complete correction source and held identity', row => {
+  it.each(['quoted term', 'quoted retraction', 'distinctive word without full label', 'unknown earlier speaker'] as const)(
+    '%s reaches one approved native write and a complete cold read', async form => {
+      const f = fixture(row);
+      const message = form === 'quoted term' ? `${f.message} By 'current' I mean the report for this shift.`
+        : form === 'quoted retraction' ? f.message.replace(/[“”]/g, "'")
+          : `For ${row.factor.split(' ').at(-1)}, the earlier universal account was an assumption. Withdraw it and retain the local delay as a report.`;
+      const edit = f.request.edits[0]!;
+      let unknown: Rec | undefined;
+      if (form === 'unknown earlier speaker') {
+        const node = f.graph.nodes[1], record = node.user_statements[0];
+        unknown = { ...record.statements[0], speaker: 'unknown' };
+        record.statements = [unknown];
+        expect(userStatementFor(f.graph, f.subject)).toBeUndefined();
+      }
+      const w = await correctionWorld(f.graph, message);
+      const card = await w.offer('propose_statement', { correction: { quote: message, edits: [edit] } });
+      expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+      expect(card.public_label).toContain(message);
+      expect(card.public_label).toContain('Olumi’s reading:');
+      expect(w.writes).toHaveLength(0);
+      const pid = String(card.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, card);
+      expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
+      expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+      expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
+      const current = userStatementFor(w.graph(), f.subject)!;
+      expect(current.statements[0]).toMatchObject({ speaker: 'user', source: message, quote: message, reading: 'olumi' });
+      if (unknown !== undefined) {
+        expect(current.statements.every(s => s.speaker === 'user')).toBe(true);
+        expect(recordsWithUnknownSpeakerOn(w.graph().nodes[1])[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
+        expect(current.attest).toMatchObject({ recorded_by: 'correction', retained_0_origin: 'unknown' });
+      }
+      const saved = structuredClone(w.graph());
+      expect((await w.cold()).body.graph).toEqual(saved);
+      expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true });
+      expect(w.writes).toHaveLength(1);
+    });
+
+  it('a source shared by two indistinguishable same-field accounts still asks which item without a write', async () => {
+    const f = fixture(row), duplicate = structuredClone(f.graph.nodes[1]);
+    duplicate.id = 'second_report'; duplicate.label = row.factor;
+    duplicate.user_statements[0].subject_key = 'factor|second_report|||relation';
+    duplicate.user_statements[0].statements[0].subject.node_id = duplicate.id;
+    f.graph.nodes.push(duplicate);
+    const message = 'Retract the earlier account.';
+    const w = await correctionWorld(f.graph, message);
+    const review = await w.offer('propose_statement', { correction: { quote: message, edits: [f.request.edits[0]] } });
+    expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+    expect(review.public_label).toBe('Olumi could not establish which item these words concern. Which item should this correction concern?');
+    expect(review).not.toHaveProperty('proposal_id'); expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    expect(w.graph()).toEqual(f.graph);
+  });
+});
+
+it.each([
+  { name: 'Training reserve', value: 150000, scale: 3000000, otherWork: false },
+  { name: 'Training reserve', value: 150000, scale: 3000000, otherWork: true },
+  { name: 'Research reserve', value: 420000, scale: 9000000, otherWork: false },
+  { name: 'Research reserve', value: 420000, scale: 9000000, otherWork: true },
+])('goal target normalisation preserves other work: $name / otherWork=$otherWork', async ({ name, value, scale, otherWork }) => {
+  const graph: Rec = { nodes: [
+    { id: 'goal', kind: 'goal', label: name, goal_threshold_unit: 'GBP', scale_frame: scale,
+      description: 'The team disputes the timetable; this remains an open assumption.',
+      goal_horizon: { deadline: '2027-04-01' }, goal_deadline_as_stated: 'before the next annual review' },
+    { id: 'capacity', kind: 'factor', label: 'Available capacity', observed_state: { value: 0.4, raw_value: 40, unit: '%', source: 'cee_inference' } },
+    { id: 'option', kind: 'option', label: 'Explore contributions', interventions: { capacity: { value: 0.6, raw_value: 60, unit: '%' } } },
+    { id: 'later', kind: 'outcome', label: 'Later extension', analysis_participation: 'retained_excluded',
+      description: 'An extension remains an ambition, conditional on what the team learns.' },
+  ], edges: [ { from: 'capacity', to: 'goal', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' } ] };
+  if (otherWork) graph.nodes[0].future_reasoning = { source: 'Human note', disagreement: 'Retain this tension' };
+  const measures = 'Resources available for the immediate work';
+  const message = `If we could secure at least £${value} for ${measures}, we could retain the extra support for ${name}.`;
+  const w = await correctionWorld(graph, message), offered = await w.offer('propose_goal_target', {
+    value, unit: 'GBP', constraint_type: 'at_least', measures,
+  });
+  if (otherWork) {
+    expect(offered).toMatchObject({ ok: false, mutated: false, refusal: 'target_would_change_other_work' });
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph); return;
+  }
+  expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
+  expect(w.writes).toHaveLength(0);
+  const pid = String(offered.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, offered, 'propose_goal_target');
+  expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
+  expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+  expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
+  const goal = w.graph().nodes.find((n: Rec) => n.id === 'goal');
+  expect(goal).toMatchObject({ goal_threshold_raw: value, goal_threshold_unit: 'GBP', goal_direction: '>=',
+    description: graph.nodes[0].description, goal_horizon: graph.nodes[0].goal_horizon });
+  expect(goal).not.toHaveProperty('scale_frame');
+  expect(goal.goal_threshold_cap).toBeGreaterThan(0);
+  expect(goal.goal_threshold * goal.goal_threshold_cap).toBeCloseTo(value, 8);
+  expect(w.graph().goal_constraints).toContainEqual(expect.objectContaining({ node_id: 'goal', value, operator: '>=', value_frame: 'level' }));
+  for (const id of ['capacity', 'option', 'later']) expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === id))).toEqual(graph.nodes.find((n: Rec) => n.id === id));
+  const saved = structuredClone(w.graph()); expect((await w.cold()).body.graph).toEqual(saved);
+  expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true }); expect(w.writes).toHaveLength(1);
+});
+
+it.each(['warehouse', 'laboratory'].flatMap(domain => [
+  { domain, extra: false, selected: false }, { domain, extra: false, selected: true }, { domain, extra: true, selected: false },
+]))('$domain: a bundled correction can name the people in two held sources / extra=$extra / selected=$selected', async ({ domain, extra, selected }) => {
+  const first = { kind: 'factor' as const, id: 'first', field: 'relation' as const };
+  const second = { kind: 'factor' as const, id: 'second', field: 'relation' as const };
+  const earlier = ['Elif reported that customers enter only if every update comes from one reviewer.',
+    'Orin assumed that the same reviewer could handle every follow-up.'];
+  const record = (subject: typeof first, quote: string) => userStatementRecord(subject,
+    [{ speaker: 'unknown', quote, source: quote, form: 'describes', reading: 'olumi', subject: { quantity: domain, node_id: subject.id } }],
+    '2026-08-01T00:00:00Z', { recorded_by: 'construction' });
+  const graph: Rec = { nodes: [{ id: 'goal', kind: 'goal', label: 'Understand service conditions' },
+    { id: 'first', kind: 'factor', label: `${domain} arrival assurance`, user_statements: [record(first, earlier[0]!)] },
+    { id: 'second', kind: 'factor', label: `${domain} follow-up coverage`, user_statements: [record(second, earlier[1]!)] }], edges: [] };
+  const message = 'Elif clarified that reviewer updates were a preference, not a universal condition. Orin withdraws the same-reviewer assumption.';
+  const third = { kind: 'factor' as const, id: 'third', field: 'relation' as const };
+  if (extra) {
+    earlier.push('Noor stated that equipment was unavailable.');
+    graph.nodes.push({ id: 'third', kind: 'factor', label: 'Equipment reservation', user_statements: [record(third, earlier[2]!)] });
+  }
+  const request = { quote: message, edits: (extra ? [first, second, third] : [first, second]).map((subject, i) => ({ subject,
+    retirement: { quote: earlier[i]!, scope: 'whole', disposition: 'retracted' }, retained: [],
+    reading_words: i === 0 ? 'reported preference, not a universal condition' : 'the same-reviewer assumption is withdrawn' })) };
+  const w = await correctionWorld(graph, message);
+  if (selected) Object.assign(w.ctx, { grounded_selection: { element_ids: ['first'], unresolved: 'none' } });
+  const card = await w.offer('propose_statement', { correction: request });
+  if (extra) {
+    expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+    expect(card).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph); return;
+  }
+  expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);
+  const pid = String(card.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, card);
+  expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
+  expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+  expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
+  for (const [i, subject] of [first, second].entries()) {
+    const node = w.graph().nodes.find((n: Rec) => n.id === subject.id);
+    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual(graph.nodes[i + 1].user_statements[0].statements);
+    expect(userStatementFor(w.graph(), subject)!.statements[0]).toMatchObject({ speaker: 'user', quote: message, source: message, reading: 'olumi' });
+  }
+  const saved = structuredClone(w.graph()); expect((await w.cold()).body.graph).toEqual(saved);
+  expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true }); expect(w.writes).toHaveLength(1);
+});
+
+
+describe.each(cases)('$name: shared speaker reading in the correction review', row => {
+  it.each(['other', 'unknown'] as const)('%s reading only removes source credit and gives a non-authorising review', async speaker => {
+    const f = fixture(row), w = await correctionWorld(f.graph, f.message);
+    const review = await w.offer('propose_statement', { correction: { ...f.request, speaker } });
+    expect(review).toMatchObject({ ok: false, mutated: false });
+    expect(review.public_label).toContain('Review the correction’s source');
+    expect(review.public_label).toContain(speaker === 'other'
+      ? 'These words report another speaker’s view; they do not establish that you assert the reported correction.'
+      : 'Olumi could not establish who asserted these words.');
+    expect(review.public_label).toContain(f.message);
+    expect(review.public_label).not.toContain('Recorded words — you:');
+    expect(review).not.toHaveProperty('proposal_id'); expect(w.chips('propose_statement', review)).toEqual([]);
+    expect(w.proposals.size()).toBe(0); expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0);
+    expect(w.graph()).toEqual(f.graph);
+  });
+});
+
+
+it.each(cases)('$name: unknown words alone never author a correction without a new typed source', async row => {
+  const f = fixture(row), node = f.graph.nodes[1], earlier = node.user_statements[0].statements[0];
+  node.user_statements[0].statements = [{ ...earlier, speaker: 'unknown' }];
+  const w = await correctionWorld(f.graph, '');
+  Object.assign(w.ctx, { user_turn_text: undefined, user_text: earlier.source, unverified_user_text: earlier.source,
+    verified_user_messages: [earlier.source] });
+  const result = await w.offer('propose_statement', { correction: { ...f.request, quote: earlier.quote, edits: [f.request.edits[0]] } });
+  expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_not_stated' });
+  expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+  expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  expect(userStatementFor(w.graph(), f.subject)).toBeUndefined();
 });

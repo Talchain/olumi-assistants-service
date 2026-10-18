@@ -6639,7 +6639,7 @@ export function createAgentCapabilities(
           detail: 'The saved goal could not take this target correction. Nothing was prepared or changed.' };
         const preparedGoal = (result.mutatedGraph.nodes as Array<Record<string, unknown>>).find(n => n.id === goal.id);
         const targetFields = new Set(['goal_threshold', 'goal_threshold_raw', 'goal_threshold_unit', 'goal_threshold_cap',
-          'goal_threshold_cap_provenance', 'goal_threshold_frame', 'success_threshold', 'threshold_source', 'goal_direction', 'observed_state']);
+          'goal_threshold_cap_provenance', 'goal_threshold_frame', 'success_threshold', 'threshold_source', 'goal_direction', 'observed_state', 'scale_frame']);
         const otherGoalWork = (node: Record<string, unknown>) => Object.fromEntries(Object.entries(node).filter(([key]) => !targetFields.has(key)));
         if (preparedGoal === undefined || !isDeepStrictEqual(otherGoalWork(goal), otherGoalWork(preparedGoal))) return {
           ok: false, mutated: false, refusal: 'target_would_change_other_work',

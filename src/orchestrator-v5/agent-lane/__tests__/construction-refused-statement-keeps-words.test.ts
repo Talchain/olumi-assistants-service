@@ -153,12 +153,20 @@ describe('#3376 ruling 3: every reader sees exactly what it saw before, the user
     expect(currentStatementRetention(userStatementFor(r.candidate, subject)!)?.spans).toEqual([{ text: 'staff hours', origin: 'held_user_statement' }]);
   });
 
-  it('⛔ speaker unknown: every reader answers exactly as with no record at all; only the named accessor holds the words', () => {
+  it('speaker unknown: ordinary readers gain no human source; a new correction keeps unknown attribution', () => {
     const g = graphWith('unknown'), base = graphWith(null);
     expect(userStatementFor(g, subject)).toBeUndefined();
     expect(userStatementsOn(g.nodes[0])).toEqual([]);
     expect(recordedMeasureOf(g.nodes[0])).toBe(recordedMeasureOf(base.nodes[0]));
-    expect(correct(g), 'a correction cannot take them as a held source').toEqual(correct(base));
+    // Unknown words may identify the old bytes a NEW typed correction addresses; they never become human source.
+    expect(correct(base)).toMatchObject({ refused: 'retired_source_not_held' });
+    const fixed = correct(g);
+    if (!('candidate' in fixed)) throw new Error(JSON.stringify(fixed));
+    const node = (fixed.candidate.nodes as Rec[])[0]!;
+    expect(currentStatementRetention(userStatementFor(fixed.candidate, subject)!)?.spans).toEqual([{ text: 'staff hours', origin: 'unknown' }]);
+    expect(recordedMeasureOf(node)).toBe(recordedMeasureOf(base.nodes[0]));
+    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown'))
+      .toEqual(recordsWithUnknownSpeakerOn(g.nodes[0])[0]!.statements);
     expect(recordsWithUnknownSpeakerOn(g.nodes[0])).toEqual([expect.objectContaining({ subject_key: subjectKey(subject),
       statements: [expect.objectContaining({ speaker: 'unknown', quote: old })] })]);
   });
