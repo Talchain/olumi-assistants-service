@@ -227,6 +227,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { withoutSentenceCopies, withSentenceSaidOnce } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { bindHeldApprovalWriter, commitHeldProposalInProcess } from '../orchestrator-v5/handlers/approve-held-proposal.js';
@@ -1187,6 +1188,12 @@ export function leavesProposalAwaitingApproval(
       const { proposal_id: _hidden, ...rest } = d;
       return rest;
     })).length > 0);
+}
+
+/** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
+function placeExplainCaveat(text: string, caveat: string, keepFirst = false): string {
+  if (keepFirst) return withB3LinesAtRest(withSentenceSaidOnce(text, caveat, true), [caveat]);
+  return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
 }
 
 /**
@@ -5351,7 +5358,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
     const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
       && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
-    const scopedNarration = noDirectLink ?? scopedNarrationRaw;
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, aiRunTurn));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;

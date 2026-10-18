@@ -531,6 +531,34 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
       }
     },
   );
+  // ⭐ MEASURED (base reds triage, 18 Oct): #3291 `22b83b69` removed the one placement of this caveat, so an AI-written
+  // Explain said it 0 or 2 times (W20's counts, masked there by its retired shape assertions). The caveat alone, per variant.
+  it.each(['plain', 'bulleted', 'questions tail', 'exact copy', 'spaced copy', 'caveat bullet', 'two copies'])(
+    'W21: %s narrator \u2014 the robustness caveat is said exactly once, and every narrator line survives',
+    async (variant) => {
+      const sentence = NOT_ROBUST_SENTENCE.trim();
+      const questionTail = 'Questions this model does not answer yet: What baseline should we use?';
+      const cleanNarrator = variant === 'plain' ? NARRATOR
+        : variant === 'questions tail' || variant === 'two copies' ? `${bulletedNarrator(2)}\n\n${questionTail}` : bulletedNarrator(2);
+      // CONTROL: the same narrator on a robust Run carries no caveat.
+      narrator = cleanNarrator;
+      readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
+      const control = await press(await run());
+      expect(countSentenceCopies(control.assistant_text, sentence)).toBe(0);
+      providerCalls = 0;
+      readbackResult.enrichment.robustness = { level: 'low', is_robust: false };
+      narrator = variant === 'exact copy' ? `${sentence} ${cleanNarrator}`
+        : variant === 'spaced copy' ? `${sentence.replace('robust \u2014', 'robust  \u2014')} ${cleanNarrator}`
+          : variant === 'caveat bullet' ? `${NARRATOR}\n- ${sentence}\n${cleanNarrator.slice(NARRATOR.length + 1)}`
+            : variant === 'two copies' ? `${sentence} ${cleanNarrator}\n${sentence}` : cleanNarrator;
+      const b = await press(await run());
+      expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(1);
+      expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
+      for (const line of cleanNarrator.split('\n').filter(line => line.trim() !== '')) {
+        expect(count(b.assistant_text, line.replace(/^\s*[-*\u2022]\s+/, '').trim())).toBe(1);
+      }
+    },
+  );
   it('unavailable narration of a licensed fragile Run carries no caveat', async () => {
     emptyNarration = true;
     const b = await press(await run());
