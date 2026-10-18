@@ -8,6 +8,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import { namesBothEnds, speechReading, wholeStatementIn } from '../goal-target/input-claim-context.js';
+import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
 import { userStatementOf, verifyStatements, type UserStatement } from '../agent-lane/user-statements.js';
@@ -29,7 +30,7 @@ export interface DoorContext {
 
 /** The statement is about THIS subject: its words, else the user's selection, else the ask it answers, else Olumi's preceding ask. */
 export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: string, ctx: DoorContext = {}, answering?: string,
-  alsoAnswers: readonly DoorSubject[] = [], found?: { subject?: DoorSubject }, references?: (node: Rec) => readonly string[]): 'bound' | 'another' | 'unbound' {
+  alsoAnswers: readonly DoorSubject[] = [], found?: { subject?: DoorSubject }, correction?: Pick<ApprovedCorrectionEdit, 'retirement' | 'legacy'>): 'bound' | 'another' | 'unbound' {
   if (found !== undefined) delete found.subject;
   // The subjects an ask of which this statement may answer: its own, and the row's `answersFor` (one key each).
   // The NODES this statement may answer for: its own, and the rows' `answersFor` (a cohort option's "the same people" answers the goal's ask).
@@ -39,23 +40,29 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
     const entities = nodes.flatMap((n) => (typeof n.id === 'string' && typeof n.label === 'string' ? [{ id: n.id, label: n.label }] : []));
     if (subject.to_id !== undefined && namesBothEnds(quote, entities, subject.id, subject.to_id)) return 'bound';
   } else {
-    // Only corrections supply held references; an ordinary new claim cannot borrow its identity from old wording.
-    const entries = nodes.filter(n => typeof n.id === 'string' && typeof n.label === 'string').map(n => ({ node: n,
-      sources: references?.(n) ?? [] }));
-    const options = entries.filter(e => e.node.kind === 'option').map(e => String(e.node.label));
-    const matches = entries.filter(({ node }) => node.kind === subject.kind).map(({ node, sources }) => {
-      const others = entries.filter(other => other.node.id !== node.id);
-      return { node, labelled: factorTheUserNamed(String(node.label), quote, { options, others: others.map(other => String(other.node.label)) }),
-        referenced: sources.some(source => factorTheUserNamed(source, quote,
-          { options, others: others.flatMap(other => [String(other.node.label), ...other.sources]) })) };
-    });
-    const labelled = matches.filter(m => m.labelled);
-    const named = (labelled.length > 0 ? labelled : matches.filter(m => m.referenced)).map(m => m.node);
+    const same = nodes.filter((n) => n.kind === subject.kind && typeof n.id === 'string' && typeof n.label === 'string');
+    let named = same.filter(n => isFactorNamedByUser(String(n.label), quote));
+    if (correction !== undefined) {
+      // Corrections opt in. Old sentences are never names; quoted bytes identify only their unique held node.
+      const speech = speechReading(quote), retired = speechReading(correction.retirement.quote).text;
+      const outside = speech.text.split('').map((ch, at) => speech.inSpeech(at) ? ' ' : ch).join('');
+      const options = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string').map(n => String(n.label));
+      const labelled = same.filter(n => factorTheUserNamed(String(n.label), outside,
+        { options, others: nodes.filter(other => other.id !== n.id).map(other => String(other.label ?? '')) }));
+      const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
+      const holders = cited ? same.filter(n => [
+        ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
+        ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
+      ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
+      named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders : []
+        : same.filter(n => factorTheUserNamed(String(n.label), speech.text,
+          { options: [...options, String(n.label)], others: [] }));
+    }
     if (named.length === 1) {
       if (found !== undefined) found.subject = { ...subject, id: String(named[0]!.id) };
       return named[0]!.id === subject.id ? 'bound' : 'another';
     }
-    if (named.length > 1) return named.some(n => n.id === subject.id)
+    if (named.length > 1) return correction !== undefined && named.some(n => n.id === subject.id)
       && named.every(n => answers.has(subjectNodeKey({ ...subject, id: String(n.id) }))) ? 'bound' : 'unbound';
   }
   const s = ctx.selection;
@@ -367,7 +374,6 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
       && (e.legacy === undefined || isDeepStrictEqual(legacyOf(node, e.legacy.field), e.legacy.replacement === null ? undefined : e.legacy.replacement));
   });
   if (held) return { candidate: graph, unchanged: true };
-  const references = (node: Rec) => recordsWithUnknownSpeakerOn(node).flatMap(r => r.statements.map(s => s.quote));
   for (const [editIndex, e] of approved.edits.entries()) {
     const resolved = resolveSubject(graph, e.subject);
     const node = nodeOf(graph, e.subject.id);
@@ -375,10 +381,10 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     if (!isDeepStrictEqual(node, e.expected_node)
       || !isDeepStrictEqual(userStatementFor(graph, e.subject) ?? null, e.expected_record)) return { refused: 'node_changed' };
     const found: { subject?: DoorSubject } = {};
-    let binding = statementBoundTo(graph, e.subject, approved.source.quote, approved.binding_context, undefined, [], found, references);
+    let binding = statementBoundTo(graph, e.subject, approved.source.quote, approved.binding_context, undefined, [], found, e);
     // A bundle can name several items; a question about one item does not bind the others.
     if (binding === 'unbound') binding = statementBoundTo(graph, e.subject, approved.source.quote, {}, undefined,
-      approved.edits.map(edit => edit.subject), found, references);
+      approved.edits.map(edit => edit.subject), found, e);
     if (binding !== 'bound') {
       if (diagnostic !== undefined) Object.assign(diagnostic, { binder_result: binding, failed_edit_index: editIndex, bound_subject: found.subject,
         failed_check: `correction.postimage.unrelated_correction.${binding}` });

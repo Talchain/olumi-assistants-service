@@ -671,13 +671,13 @@ describe.each(cases)('$name: complete correction source and held identity', row 
       expect(w.writes).toHaveLength(1);
     });
 
-  it('a source shared by two indistinguishable same-field accounts still asks which item without a write', async () => {
+  it.each([false, true])('a source shared by two indistinguishable same-field accounts still asks which item without a write / quoted=%s', async quoted => {
     const f = fixture(row), duplicate = structuredClone(f.graph.nodes[1]);
     duplicate.id = 'second_report'; duplicate.label = row.factor;
     duplicate.user_statements[0].subject_key = 'factor|second_report|||relation';
     duplicate.user_statements[0].statements[0].subject.node_id = duplicate.id;
     f.graph.nodes.push(duplicate);
-    const message = 'Retract the earlier account.';
+    const message = quoted ? `Retract the earlier account “${f.graph.nodes[1].user_statements[0].statements[0].quote}”.` : 'Retract the earlier account.';
     const w = await correctionWorld(f.graph, message);
     const review = await w.offer('propose_statement', { correction: { quote: message, edits: [f.request.edits[0]] } });
     expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
@@ -731,8 +731,10 @@ it.each([
 });
 
 it.each(['warehouse', 'laboratory'].flatMap(domain => [
-  { domain, extra: false, selected: false }, { domain, extra: false, selected: true }, { domain, extra: true, selected: false },
-]))('$domain: a bundled correction can name the people in two held sources / extra=$extra / selected=$selected', async ({ domain, extra, selected }) => {
+  { domain, cue: 'quoted', extra: false, selected: false }, { domain, cue: 'quoted', extra: false, selected: true },
+  { domain, cue: 'labels', extra: false, selected: false }, { domain, cue: 'labels', extra: true, selected: false },
+  { domain, cue: 'unquoted source', extra: false, selected: false },
+]))('$domain: a bundled correction binds only named items or quoted old bytes / cue=$cue / extra=$extra / selected=$selected', async ({ domain, cue, extra, selected }) => {
   const first = { kind: 'factor' as const, id: 'first', field: 'relation' as const };
   const second = { kind: 'factor' as const, id: 'second', field: 'relation' as const };
   const earlier = ['Elif reported that customers enter only if every update comes from one reviewer.',
@@ -743,19 +745,20 @@ it.each(['warehouse', 'laboratory'].flatMap(domain => [
   const graph: Rec = { nodes: [{ id: 'goal', kind: 'goal', label: 'Understand service conditions' },
     { id: 'first', kind: 'factor', label: `${domain} arrival assurance`, user_statements: [record(first, earlier[0]!)] },
     { id: 'second', kind: 'factor', label: `${domain} follow-up coverage`, user_statements: [record(second, earlier[1]!)] }], edges: [] };
-  const message = 'Elif clarified that reviewer updates were a preference, not a universal condition. Orin withdraws the same-reviewer assumption.';
   const third = { kind: 'factor' as const, id: 'third', field: 'relation' as const };
-  if (extra) {
-    earlier.push('Noor stated that equipment was unavailable.');
-    graph.nodes.push({ id: 'third', kind: 'factor', label: 'Equipment reservation', user_statements: [record(third, earlier[2]!)] });
-  }
+  earlier.push('Noor stated that equipment was unavailable.');
+  graph.nodes.push({ id: 'third', kind: 'factor', label: 'Equipment reservation', user_statements: [record(third, earlier[2]!)] });
+  const message = cue === 'quoted'
+    ? `Withdraw the earlier accounts “${earlier[0]}” and “${earlier[1]}”. Keep other work unchanged.`
+    : cue === 'labels' ? `For ${graph.nodes[1].label} and ${graph.nodes[2].label}, the earlier account was wrong. Withdraw those statements.`
+      : 'Elif clarified that reviewer updates were a preference, not a universal condition. Orin withdraws the same-reviewer assumption.';
   const request = { quote: message, edits: (extra ? [first, second, third] : [first, second]).map((subject, i) => ({ subject,
     retirement: { quote: earlier[i]!, scope: 'whole', disposition: 'retracted' }, retained: [],
     reading_words: i === 0 ? 'reported preference, not a universal condition' : 'the same-reviewer assumption is withdrawn' })) };
   const w = await correctionWorld(graph, message);
   if (selected) Object.assign(w.ctx, { grounded_selection: { element_ids: ['first'], unresolved: 'none' } });
   const card = await w.offer('propose_statement', { correction: request });
-  if (extra) {
+  if (extra || cue === 'unquoted source') {
     expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
     expect(card).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
     expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph); return;
@@ -770,6 +773,7 @@ it.each(['warehouse', 'laboratory'].flatMap(domain => [
     expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual(graph.nodes[i + 1].user_statements[0].statements);
     expect(userStatementFor(w.graph(), subject)!.statements[0]).toMatchObject({ speaker: 'user', quote: message, source: message, reading: 'olumi' });
   }
+  expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === 'third'))).toEqual(graph.nodes[3]);
   const saved = structuredClone(w.graph()); expect((await w.cold()).body.graph).toEqual(saved);
   expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true }); expect(w.writes).toHaveLength(1);
 });
@@ -804,4 +808,20 @@ it.each(cases)('$name: unknown words alone never author a correction without a n
   expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
   expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   expect(userStatementFor(w.graph(), f.subject)).toBeUndefined();
+});
+
+
+it.each(cases)('$name: function words in a saved sentence never name the item for a new correction', async row => {
+  const subject = { kind: 'factor' as const, id: 'report', field: 'relation' as const };
+  const held = `Our ${row.factor.toLowerCase()} arrive late whenever the scanners fail.`;
+  const graph: Rec = { nodes: [{ id: 'goal', kind: 'goal', label: 'Reliable handling' },
+    { id: 'report', kind: 'factor', label: row.factor, user_statements: [userStatementRecord(subject,
+      [{ speaker: 'user', quote: held, source: held, form: 'describes', reading: 'olumi', subject: { quantity: 'reported_account', node_id: 'report' } }], '2026-08-01T00:00:00Z')] },
+    { id: 'energy', kind: 'factor', label: 'Energy use' }], edges: [] };
+  const message = 'Please withdraw the earlier claim, it was wrong.';
+  const w = await correctionWorld(graph, message), result = await w.offer('propose_statement', { correction: { quote: message,
+    edits: [{ subject, retirement: { quote: held, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'the earlier account is withdrawn' }] } });
+  expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+  expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+  expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph);
 });
