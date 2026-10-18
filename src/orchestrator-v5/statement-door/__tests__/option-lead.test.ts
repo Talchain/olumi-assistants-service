@@ -16,7 +16,7 @@ import { goalHorizonVerdict, withholdOptionsNotInPlaceAtPeriodEnd } from '../../
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { goalTargetBasisIn, optionTimingAtPeriodEnd, timingBasisNote, classifyOptionLead } from '../fields/goal-timing.js';
 import { OPTION_LEAD_ROW } from '../fields/option-lead.js';
-import { readStatement } from '../read.js';
+import { boundReading, readStatement } from '../read.js';
 import { doorRowFor } from '../role-table.js';
 
 type Rec = Record<string, any>;
@@ -125,7 +125,10 @@ describe('M3c on served hiring negative r4: each option\'s own lead gives the ch
     // The tech lead's clause, offered for the developers: it names the tech lead, so it is not about them.
     const wrong = readStatement(g, { kind: 'option', id: 'hire_two_developers', field: 'lead' }, 'Hire two developers',
       [{ quote: SAID, reading_words: 'lift productivity from month 2' }], { now: SAID } as never, {});
-    expect(wrong).toMatchObject({ kind: 'refused', refusal: 'not_this_subject' });
+    // ⭐ GATE → LABEL (change 1): never bound as theirs: a labelled reading whose item is Olumi's reading (the binder binds it to neither).
+    expect(wrong).toMatchObject({ kind: 'read', reading: { binding: {},
+      statements: [{ checks: { words_found: true, figure_found: true, unit_found: true, subject_bound: false } }] } });
+    expect(boundReading(wrong)).toBe(false);
     // Conditional: recorded as said, never in place.
     const cond = 'If we hire before November, the tech lead would lift productivity from month 2, and each developer from month 2.';
     const c = withAll(g, cond);

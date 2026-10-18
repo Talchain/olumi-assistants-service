@@ -99,13 +99,15 @@ describe('M3c on the real path: their words → one card per option → their pr
     }
   });
 
-  it('CONTRAST: words the user never typed, or a clause about another option, prepare nothing', async () => {
+  it('CONTRAST: words the user never typed prepare nothing; a clause about another option is only a labelled reading, never theirs', async () => {
     const w = world();
     expect(await w.caps.proposeStatement!(ctx('Please record it.') as never, args('Hire a Tech lead', 'lift productivity from month 2') as never))
       .toMatchObject({ ok: false });
-    expect(await w.caps.proposeStatement!(ctx(SAID) as never, args('Hire two developers', 'lift productivity from month 2') as never))
-      .toMatchObject({ ok: false, refusal: 'not_this_subject' });
     expect(w.proposals.outstanding(SID, null)).toEqual([]);
+    // ⭐ GATE → LABEL (change 1): the tech lead's clause offered for the developers is a card whose item is Olumi's reading, said so.
+    const other = await w.caps.proposeStatement!(ctx(SAID) as never, args('Hire two developers', 'lift productivity from month 2') as never) as Rec;
+    expect(other).toMatchObject({ ok: true, mutated: false, statement: { item_is_olumis_reading: true } });
+    expect(String(other.public_label)).toContain('Olumi’s reading: these words concern “Hire two developers”.');
   });
 });
 

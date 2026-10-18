@@ -13,7 +13,7 @@ import { verifyStatement, type StatementTexts, type UserStatement } from '../age
 import { figuresWritten } from '../agent-lane/user-statements.js';
 import { doorRowFor } from './role-table.js';
 import type { DoorSubject } from './subject.js';
-import { currentStatementRetention, statementBoundTo, userStatementFor, type DoorContext } from './statements.js';
+import { currentStatementRetention, labelOfSubject, statementBoundTo, userStatementFor, type DoorContext } from './statements.js';
 import type { CurrentCorrection } from '../agent-lane/user-statements.js';
 export { statementBoundTo, type DoorContext } from './statements.js';
 
@@ -24,7 +24,9 @@ export { statementBoundTo, type DoorContext } from './statements.js';
  */
 export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string;
   /** The AI's own speaker reading (`QUOTE_SPEAKER`, lean core P2), passed unchanged to the ONE verifier, which only subtracts credit. */
-  readonly speaker?: unknown } & AiReading;
+  readonly speaker?: unknown;
+  /** ⭐ CLAIM RECORD: who the AI reads as asserting the claim, the party's name as written, and the relay; kept on the claim. */
+  readonly said_by?: unknown; readonly party?: unknown; readonly relayed_by?: unknown } & AiReading;
 
 /**
  * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z): the AI's own reading of the statement, as the tool gives it, for a row that reads
@@ -48,7 +50,16 @@ export interface DoorReading {
   readonly assumptions: readonly string[];
   /** The user's own words a figure-free reading rests on (`DoorFigure.words`). */
   readonly words?: string;
+  /**
+   * ⭐ GATE → LABEL (change 1): the words do not name this subject by the host's binder, so WHICH item they concern is Olumi's reading,
+   * shown on the card and confirmed only by its press (`checks.subject_bound: false` on each such statement). `bound_label`: the item
+   * the binder read them as naming instead.
+   */
+  readonly binding?: { readonly bound_label?: string };
 }
+
+/** A reading whose every statement the host's binder bound to its subject: the only kind a route issuer may issue by itself. */
+export const boundReading = (v: DoorVerdict): boolean => v.kind === 'read' && v.reading.binding === undefined;
 
 export type DoorRefusal = 'no_table_row' | 'not_answered_now' | 'statement_malformed' | 'not_this_field' | 'not_this_subject' | 'origin_unknown' | 'statement_not_found'
   | 'figure_not_in_quote';
@@ -61,22 +72,25 @@ const KEEP = 'Keep the user’s words exactly as they said them and do not ask t
  * nothing by itself ('unbound', never 'another'). It binds when the question the AI says it answers is verbatim in Olumi's last
  * reply, that whole reply names this subject and no other of its kind, and the user typed the quote in THIS message (never an
  * earlier answer, never a chip). Containment proves where the question came from, never that the user agreed with it.
+ * ⭐ GATE → LABEL (change 1): a reply that does not ask about this subject alone leaves WHICH item the answer concerns to Olumi's reading
+ * (`unbound`, with the item that question names). A question not in Olumi's last reply, or words not typed in answer to it, stay
+ * refused: the card would say "in answer to Olumi's question", which would be false.
  */
-function answerBinds(graph: unknown, subject: DoorSubject, label: string, quote: string, answering: string | undefined, ctx: DoorContext,
-  texts: StatementTexts): 'bound' | Extract<DoorVerdict, { kind: 'refused' }> | undefined {
+function answerBinds(graph: unknown, subject: DoorSubject, quote: string, answering: string | undefined, ctx: DoorContext,
+  texts: StatementTexts): 'bound' | { readonly unbound: string | undefined } | Extract<DoorVerdict, { kind: 'refused' }> | undefined {
   const asked = typeof answering === 'string' ? answering.trim() : '';
   if (asked === '') return undefined;
   const reply = typeof ctx.preceding_ask === 'string' ? ctx.preceding_ask : '';
   if (!reply.includes(asked)) {
     return { kind: 'refused', refusal: 'not_this_subject', detail: `“${asked}” is not in Olumi’s last reply, so it does not bind “${quote}”. Nothing was prepared. ${KEEP}` };
   }
-  if (statementBoundTo(graph, subject, asked) !== 'bound' || statementBoundTo(graph, subject, reply) !== 'bound') {
-    return { kind: 'refused', refusal: 'not_this_subject', detail: `Olumi’s last reply does not ask about ‘${label}’ alone, so “${quote}” is not clearly about it. `
-      + `Nothing was prepared. ${KEEP} Ask only which part it is about.` };
-  }
   if (!wholeStatementIn(texts.now ?? '', quote)) {
     return { kind: 'refused', refusal: 'not_answered_now', detail: `“${quote}” is not in what the user typed in this message, so it does not answer Olumi’s last `
       + `question. Nothing was prepared. ${KEEP}` };
+  }
+  const found: { subject?: DoorSubject } = {};
+  if (statementBoundTo(graph, subject, asked, {}, undefined, [], found) !== 'bound' || statementBoundTo(graph, subject, reply) !== 'bound') {
+    return { unbound: found.subject === undefined || found.subject.id === subject.id ? undefined : labelOfSubject(graph, found.subject) };
   }
   return 'bound';
 }
@@ -91,11 +105,13 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
   }
   const statements: UserStatement[] = [];
   let words: string | undefined;
+  let binding: DoorReading['binding'];
   for (const raw of quotes) {
     const quote = (typeof raw === 'string' ? raw : raw.quote).trim();
     const answering = typeof raw === 'string' ? undefined : raw.answering;
     // ⭐ LEAN CORE P2: the AI's speaker reading reaches every verification of this statement (`verifyStatement` vetoes other/unknown).
-    const speaker = typeof raw === 'string' || raw.speaker === undefined ? {} : { speaker: raw.speaker };
+    const speaker = typeof raw === 'string' ? {} : Object.fromEntries((['speaker', 'said_by', 'party', 'relayed_by'] as const)
+      .filter((k) => raw[k] !== undefined).map((k) => [k, raw[k]]));
     if (row.aiReads !== undefined) {
       // ⭐ ONE BINDER: the AI read it (form, figures, unit, negation) and bound it to this subject; the host reads no figure and
       // binds nothing by name. It verifies only that the quote writes that reading (`figuresWritten`, the unit written after the
@@ -106,7 +122,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
       const v = verifyStatement({ quote, form: raw.form, value: raw.value, low: raw.low, high: raw.high, unit: raw.unit, negated: raw.negated,
         ...(answering !== undefined ? { answering } : {}), ...speaker }, texts,
       { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
-        unit: row.unit, forms: row.forms, figuresIn: figuresWritten, unitWritten: true, ...(row.allowsZero === true ? { allowsZero: true } : {}) });
+        unit: row.unit, forms: row.forms, figuresIn: figuresWritten, unitWritten: true, claims: true, ...(row.allowsZero === true ? { allowsZero: true } : {}) });
       if (v.kind === 'refused') return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
       const why = row.aiReads(v.statement, subject, graph);
       if (why !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${why} Nothing was prepared. ${KEEP}` };
@@ -119,13 +135,18 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     // figure's clause (or the quote) by `statementBoundTo`.
     const whole = typeof raw !== 'string' && row.bindsWhole?.(quote, subject, graph, raw.reading_words) === true;
     const source = row.sourceOf?.(subject, graph);
+    // ⭐ GATE → LABEL (change 1; Codex co-design §1 "binding guesses become disclosed interpretations"): words the binder does not
+    // bind to this subject (by name, selection or the ask they answer) are still the user's words and figure; WHICH item they concern
+    // is then Olumi's reading, labelled on the card and the claim, never a refusal and never "you said" until the press confirms it.
+    let unbound = false;
     if (!whole && !(source !== undefined && source === quote)) {
-      const bound = statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering, row.answersFor?.(subject, graph) ?? []);
-      const byAnswer = bound === 'unbound' && row.bindsByAnsweredQuestion === true ? answerBinds(graph, subject, label, quote, answering, ctx, texts) : undefined;
-      if (byAnswer !== undefined && byAnswer !== 'bound') return byAnswer;
-      if (bound !== 'bound' && byAnswer !== 'bound') {
-        return { kind: 'refused', refusal: 'not_this_subject', detail: `“${quote}” is not clearly about ‘${label}’, so nothing was prepared. ${KEEP} Ask only what it is about.` };
-      }
+      const found: { subject?: DoorSubject } = {};
+      const bound = statementBoundTo(graph, subject, fig.clause ?? quote, ctx, answering, row.answersFor?.(subject, graph) ?? [], found);
+      const byAnswer = bound === 'unbound' && row.bindsByAnsweredQuestion === true ? answerBinds(graph, subject, quote, answering, ctx, texts) : undefined;
+      if (typeof byAnswer === 'object' && 'kind' in byAnswer) return byAnswer;
+      unbound = bound !== 'bound' && byAnswer !== 'bound';
+      const other = bound === 'another' ? labelOfSubject(graph, found.subject) : typeof byAnswer === 'object' ? byAnswer.unbound : undefined;
+      if (unbound) binding ??= other === undefined ? {} : { bound_label: other };
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
     const v = verifyStatement({ quote, form: fig.form, ...(fig.qualifier !== undefined ? { qualifier: fig.qualifier } : {}),
@@ -143,13 +164,14 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id }, unit: row.unit, forms: row.forms, figuresIn: () => figures }).kind !== 'verified') {
       return { kind: 'refused', refusal: 'not_answered_now', detail: row.answerTypedNow.detail(subject, label, graph) };
     }
-    statements.push(v.statement);
+    statements.push(unbound ? { ...v.statement, checks: { words_found: true, figure_found: true, unit_found: true, subject_bound: false } } : v.statement);
     words ??= fig.words;
   }
   const missing = row.incomplete?.(statements, subject, graph, words);
   if (missing !== undefined) return { kind: 'refused', refusal: 'not_this_field', detail: `${missing} Nothing was prepared. ${KEEP}` };
   return { kind: 'read', reading: { subject, label, statements, reading: row.readingWords(statements, subject, label, graph, words),
-    assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}) } };
+    assumptions: row.assumptions(statements, subject, graph, words), ...(words !== undefined ? { words } : {}),
+    ...(binding !== undefined ? { binding } : {}) } };
 }
 
 /**

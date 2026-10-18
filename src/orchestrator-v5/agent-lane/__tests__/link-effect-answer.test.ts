@@ -184,14 +184,22 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       'Pro price is £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['At £1, Pro price increase loses us about 50 paying subscribers.',
       'At £1, Pro price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
-    // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
-    ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
-      'not_the_users_statement', 'end_not_named'],
   ])('NOT STATED, refused: %s', async (turn, quote, amount, per, refusal, why) => {
     const r = await stated(turn as string, quote as string, amount as number, per as number);
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal }));
     if (why !== undefined) expect(r.why).toBe(why);
     expect(r.stored).toBe(0);
+  });
+
+  // ⭐ GATE → LABEL (change 1): a NAMED under-claim — the source only implied ("a £10 rise") — is never inferred SILENTLY as the price:
+  // the card says WHICH link Olumi reads the figures as sizing, and only its press records it (it was a refusal before).
+  it('UNDER-CLAIM → LABEL: "A £10 rise loses us about 500 paying subscribers" → a card saying the link is Olumi’s reading; nothing stored', async () => {
+    const { caps, store } = world(C);
+    const quote = 'A £10 rise loses us about 500 paying subscribers';
+    const r = await caps.proposeLinkEffect!(ctxSaying(`${quote}.`), { ...SUBS_ARGS, amount: -500, per_source_change: 10, quote }) as Json;
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, link: { item_is_olumis_reading: true } });
+    expect(String(r.public_label)).toContain('Olumi’s reading: these words concern “Pro plan price → Pro plan paying subscribers”.');
+    expect(store.get(String(r.proposal_id))!.provenance.authored_by).toBe('model_proposed');
   });
 
   // RT-6 step 3, option B (DL; Science B2): the direction and verb vocabulary no longer refuses. These three were refused
@@ -283,6 +291,47 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const i = (graph.edges as Json[]).findIndex((x) => x.from === edge.from && x.to === edge.to);
     graph.edges[i] = edge;
   };
+
+  // ⭐ GATE → LABEL R1 (change 1; Codex amendment 2: "your figure, applied to <item>: Olumi's reading, approved by you"): the user's
+  // figures in words that do not name this link's ends are a card, never a refusal. The figure stays theirs; WHICH link it sizes is
+  // Olumi's reading, said on the card, and only the card's own press writes it. The proposal is never authored as the user's.
+  it('R1 (real path): figures whose words name neither end → a labelled card → its press → the user’s figure on the link Olumi read', async () => {
+    const graph = structuredClone(C);
+    const d: InternalDispatch = async (path) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) } };
+      throw new Error(`unexpected dispatch ${path}`);
+    };
+    let doorCalls = 0;
+    const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
+      doorCalls += 1;
+      storePostimage(graph, input);
+      return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
+    };
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionLevels });
+    const quote = 'Each £1 we add loses about 50 subscribers';
+    const r = await caps.proposeLinkEffect!(ctxSaying(`${quote}.`), { ...SUBS_ARGS, quote }) as Json;
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, link: { your_words: quote, item_is_olumis_reading: true } });
+    expect(String(r.public_label)).toContain('Olumi’s reading: these words concern “Pro plan price → Pro plan paying subscribers”.');
+    const id = String(r.proposal_id);
+    expect(store.get(id)!.provenance.authored_by).toBe('model_proposed');
+    expect(doorCalls).toBe(0);
+    const card = cardFor(store, r);
+    expect(await caps.authoriseChange(ctxPressing(id, card.message), { proposal_id: id })).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(doorCalls).toBe(1);
+    const edge = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
+    // The figure is the user's (their words, both figures); the stored reading says it was Olumi's reading, confirmed by the user.
+    expect(edge.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: quote, reading: 'agent_proposed_user_confirmed',
+      natural_effect: expect.objectContaining({ amount: -50, per_source_change: 1 }) });
+  });
+
+  it('CONTRAST (R1): a near miss about the figures themselves (a question) still asks, and prepares nothing', async () => {
+    const { caps, store } = world(C);
+    const quote = 'Does each £1 we add lose about 50 subscribers';
+    const r = await caps.proposeLinkEffect!(ctxSaying(`${quote}?`), { ...SUBS_ARGS, quote }) as Json;
+    expect(r).toMatchObject({ ok: false, refusal: 'not_the_users_statement', why: 'question' });
+    expect(store.size()).toBe(0);
+  });
 
   it('ONLY FROM THE CARD (PR Review\'s fifth CR): the Agent approving from the user\'s "yes" records nothing; the card then does', async () => {
     const graph = structuredClone(C);

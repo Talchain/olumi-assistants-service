@@ -15,7 +15,7 @@ import { createAgentCapabilities } from '../../agent-lane/runtime/agent-capabili
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { doorIssueArgs, typedDoorStatement } from '../door.js';
-import { DOOR_APPROVE } from '../card.js';
+import { DOOR_APPROVE, DOOR_DERIVED_APPROVE } from '../card.js';
 import { userStatementFor } from '../statements.js';
 
 type Rec = Record<string, any>;
@@ -108,8 +108,11 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     expect(r).toMatchObject({ ok: false, refusal: 'not_this_field' });
     expect(r.detail).toContain('ask only which time span it covers');
     expect(typedDoorStatement(G, launch, { preceding_ask: ASKED })).toBeUndefined();
-    expect(await w.caps.proposeStatement!(ctx(SAID, { preceding_assistant_text: 'Your results are ready.' }) as never, door(SAID)))
-      .toMatchObject({ ok: false, refusal: 'not_this_subject' });
+    // ⭐ GATE → LABEL (change 1): "it", with nothing binding it, is a LABELLED card, never "your estimate of this risk" by elimination:
+    // which item the words concern is Olumi's reading, said on the card, and the route never issues it by itself.
+    const unbound = await w.caps.proposeStatement!(ctx(SAID, { preceding_assistant_text: 'Your results are ready.' }) as never, door(SAID)) as Rec;
+    expect(unbound).toMatchObject({ ok: true, statement: { your_words: true, item_is_olumis_reading: true } });
+    expect(unbound.public_label).toBe(CARD.replace(' Record this reading?', ` Olumi’s reading: these words concern “${LABEL}”. Record this reading?`));
     expect(typedDoorStatement(G, SAID, {})).toBeUndefined();
     expect(await w.caps.proposeStatement!(ctx(SAID, { preceding_assistant_text: 'Your results are ready.',
       grounded_selection: { element_ids: [RISK], unresolved: 'none' } }) as never, door(SAID))).toMatchObject({ ok: true });
@@ -141,9 +144,36 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
     const g = withAttrition();
     const other = 'I’d say there’s about a 30% chance of key developer attrition within the next 3 months.';
     const w = world(g);
-    expect(await w.caps.proposeStatement!(ctx(other) as never, door(other))).toMatchObject({ ok: false, refusal: 'not_this_subject' });
+    // ⭐ GATE → LABEL: words naming ANOTHER risk are never silently this one's: the card names both items and asks for this one only.
+    const card = await w.caps.proposeStatement!(ctx(other) as never, door(other)) as Rec;
+    expect(card).toMatchObject({ ok: true, statement: { item_is_olumis_reading: true } });
+    expect(String(card.public_label)).toContain(`Olumi’s reading: these words concern “${LABEL}”. Olumi’s item reader matched them to “Key developer attrition” instead; `
+      + `approve only if “${LABEL}” is the item you mean. Record this reading?`);
     expect(typedDoorStatement(g, other, { preceding_ask: ASKED })).toEqual({ subject: { kind: 'risk', id: 'key_developer_attrition', field: 'occurrence' }, quotes: [other] });
     expect(w.commits()).toBe(0);
+  });
+
+  it('GATE → LABEL R1 (real path): an unbound chance → labelled card → its press → the user’s figure on the risk Olumi read, the binding approved; never "you said" before it', async () => {
+    const w = world();
+    const card = await w.caps.proposeStatement!(ctx(SAID, { preceding_assistant_text: 'Your results are ready.' }) as never, door(SAID)) as Rec;
+    const pid = String(card.proposal_id);
+    // The press is the reading's button, never "record what you said"; the plain "record what I said" is not this card's press.
+    const chips = approvalChipsFor([{ name: 'propose_statement', ok: true, mutated: false, proposal_id: pid }],
+      (id) => ({ proposal: w.store.get(id), result: card } as never)) as Rec[];
+    expect(chips[0]).toMatchObject({ label: DOOR_DERIVED_APPROVE.label, message: DOOR_DERIVED_APPROVE.message });
+    // Before the press nothing is written, and the statement is no "you said" anywhere.
+    expect(w.commits()).toBe(0);
+    expect(userStatementFor(w.graph(), { kind: 'risk', id: RISK, field: 'occurrence' })).toBeUndefined();
+    const pressed = await w.caps.authoriseChange({ ...ctx(DOOR_DERIVED_APPROVE.message), typed_approval_of: pid,
+      typed_approval_words: DOOR_DERIVED_APPROVE.message } as never, { proposal_id: pid }) as Rec;
+    expect(pressed).toMatchObject({ ok: true, applied: true,
+      follow_up: `${RECEIPT} Your figure, applied to “${LABEL}”: Olumi’s reading, approved by you.` });
+    // The figure is the user's (their words, figure and unit), so the block is theirs; the binding is Olumi's reading, approved.
+    expect(riskOf(w.graph()).event_risk).toEqual(USERS);
+    expect(userStatementFor(w.graph(), { kind: 'risk', id: RISK, field: 'occurrence' })?.statements).toEqual([expect.objectContaining({
+      speaker: 'user', quote: SAID, low: 30, high: 30, checks: { words_found: true, figure_found: true, unit_found: true, subject_bound: false },
+      approval: { proposal_id: pid } })]);
+    expect(w.commits()).toBe(1);
   });
 
   it('the window: theirs and the goal’s from today only; a year, a launch-relative goal window, or no window is refused with its reason', async () => {

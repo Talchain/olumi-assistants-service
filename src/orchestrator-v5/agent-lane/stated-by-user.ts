@@ -21,8 +21,9 @@
  * percentage unit it must retain the raw percentage: "40%" is 40, never 0.4. The unit is part of the figure.
  *
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
- * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
- * the Agent dropped (£54k vs 54).
+ * money and percentages ("four percent"), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
+ * the Agent dropped (£54k vs 54). A plain figure in WORDS ("thirty-five minutes") is read like its digits, by the one cardinal
+ * grammar (`writtenFigures`; deployed 7d052e5d: 7/7 corrections written in words were refused as origin unknown).
  *
  * SCALE: a MONEY unit's own magnitude letter is the scale its figure is in, so 100 in "£k/month" is the "£100k" the
  * user wrote (DL #72 5862282849: journey A's goal lost its brief source on every turn). Read by
@@ -39,7 +40,8 @@ import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
-import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { carrierCompatible, readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
+import { speechReading } from '../goal-target/input-claim-context.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
@@ -55,11 +57,40 @@ export function hasApproximateFigureQualifier(before: string, after: string): bo
     || /^(?:[-\s]*ish\b|\s*or so\b)/i.test(after);
 }
 
+/**
+ * Every figure `userText` writes: in digits (`findStatedAmounts`) or in words, by the repo's one cardinal grammar (`countsInWords`:
+ * no articles or fractions; each amount keeps its own span and kind). Read through `writtenIs`.
+ */
+function writtenFigures(userText: string | null | undefined): readonly (StatedAmount | ReturnType<typeof countsInWords>[number])[] {
+  return typeof userText !== 'string' ? findStatedAmounts(userText) : [...findStatedAmounts(userText), ...countsInWords(userText)];
+}
+
+/**
+ * `amountIs`, where a figure in WORDS is the user's only where the words after it state the held unit (Codex SPELLED pair AMEND;
+ * AIE bb91dcdd), read by the ONE tail reader (`statedTailParts`) under C3's carrier rule (`carrierCompatible`), so it never reads
+ * more broadly than its digits:
+ *  · the held unit's own noun comes first: "seventy TICKETS", never "seventy customers", "twenty-first week" or "one of them";
+ *  · no period, denominator or kind that conflicts: never "two hours per week" for hours per month, nor money, a percentage or a
+ *    share ("two thousand pounds", "two percent");
+ *  · never a name ("Two Developers Ltd": a Title-case word after it), nor another speaker's quoted words (`speechReading`).
+ * Presence only, never attestation of WHICH quantity it is. A brief's baseline keeps its own words binding (`baselineTheBriefStates`).
+ */
+function writtenIs(a: StatedAmount | ReturnType<typeof countsInWords>[number], value: number, unit: unknown,
+  family: ReturnType<typeof unitPhraseFamily>, text: string | undefined): boolean {
+  if (a.kind !== 'words') return amountIs(a, value, unit, family, text);
+  const declared = readUnitParts(unit), stated = statedTailParts(text ?? '', a);
+  if (text === undefined || declared === null || stated === null || !carrierCompatible(stated, declared)
+    || !(declared.noun ?? []).every((w, i) => stated.noun?.[i] === w)) return false;
+  const next = text.slice(a.index + a.matchedText.length).trimStart();
+  const name = next.charAt(0) !== next.charAt(0).toLowerCase() && next.charAt(1) === next.charAt(1).toLowerCase();
+  return !name && !speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length) && amountIs(a, value, unit, family, text);
+}
+
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
 export function figureTheUserWroteSpan(value: number, unit: unknown, userText: string | null | undefined): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const family = unitPhraseFamily(unit);
-  const a = findStatedAmounts(userText).find(a => amountIs(a, value, unit, family, userText ?? undefined));
+  const a = writtenFigures(userText).find(a => writtenIs(a, value, unit, family, userText ?? undefined));
   return a === undefined ? null : { start: a.index, end: a.index + a.matchedText.length };
 }
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
@@ -73,7 +104,7 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 export function timesTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText ?? undefined)).length;
+  return writtenFigures(userText).filter((a) => writtenIs(a, value, unit, family, userText ?? undefined)).length;
 }
 
 /**
@@ -250,9 +281,11 @@ const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_F
  * Every miss under-claims: the figure reads as Olumi's.
  */
 function baselineTheBriefStates(value: number, unit: unknown, brief: string, label: unknown): boolean {
-  if (figureTheUserWrote(value, unit, brief)) return true;
-  if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
+  // Digits first, as before; words keep this function's own stricter binding below (Codex SPELLED pair: "hire three engineers"
+  // never states three enterprise customers).
   const family = unitPhraseFamily(unit);
+  if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, family, brief))) return true;
+  if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
   if (family === 'currency' || family === 'percent') return false;
   return [...brief.matchAll(CARDINAL_PHRASE)].some((m) => {
     const v = parseCardinalAmount(m[0]);

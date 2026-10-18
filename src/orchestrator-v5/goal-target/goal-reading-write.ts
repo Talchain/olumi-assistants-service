@@ -29,7 +29,7 @@ import { CONDITIONS_NOT_KEPT, goalTargetBasisOf, periodWords, type GoalTargetBas
 import { readGoalRecord, type GoalRecord } from './goal-record.js';
 import { sayGoalChange } from '../agent-lane/limit-frame.js';
 import { sayFigureWithoutRounding } from '../agent-lane/say-figure.js';
-import { holdsUserStatement, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { holdsUserStatement, claimRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { subjectKey, type DoorSubject } from '../statement-door/subject.js';
 
 type Rec = Record<string, unknown>;
@@ -176,7 +176,7 @@ export function applyGoalReadingEdit(persistedGraph: unknown, approved: Approved
   // The user's words go with the members their reading sets, on THIS goal, as the door recorded them.
   const said = approved.user_statement;
   if (said !== undefined && (members === undefined || said.subject.kind !== 'goal' || said.subject.id !== approved.goal_id
-    || said.record.subject_key !== subjectKey(said.subject) || userStatementRecordOf(said.record) === undefined)) {
+    || said.record.subject_key !== subjectKey(said.subject) || claimRecordOf(said.record) === undefined)) {
     return { kind: 'refused', reason: 'invalid_members' };
   }
   const wordsHeld = (g: unknown): boolean => said === undefined || holdsUserStatement(g, said.record, said.subject);

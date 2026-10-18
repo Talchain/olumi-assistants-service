@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { log } from '../../../utils/telemetry.js';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
-import { applyStatementCorrection, recordsWithUnknownSpeakerOn, statementCorrectionWords, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
+import { applyStatementCorrection, claimRecordFor, claimRecordsOn, statementCorrectionWords, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
+import { saidByOf } from '../user-statements.js';
 import { createProposal } from '../proposal.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
 import { rangeLawAdopted, rangeLawSubject } from '../../intervention-range.js';
@@ -52,7 +53,7 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     const pid = String(card.proposal_id), proposal = w.proposals.get(pid)!, restored = w.restoreCard(proposal, card);
     expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
     const node = w.graph().nodes.find((n: Rec) => n.id === 'report');
-    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
+    expect(claimRecordsOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
     expect(userStatementFor(w.graph(), f.subject)!.statements.every(s => s.speaker === 'user')).toBe(true);
     const correction = approvedStatementRecordOf(proposal.operations[0]!)!.correction!;
     expect(applyStatementCorrection(w.graph(), correction)).toMatchObject({ unchanged: true });
@@ -101,22 +102,26 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     if (fault === 'missing') delete correction.quote;
     if (fault === 'partial') correction.quote = f.message.slice(0, f.message.indexOf(','));
     const review = await w.offer('propose_statement', { correction });
+    if (fault !== 'missing') {
+      // ⭐ GATE → LABEL (DL-3 change 1): a labelled card, never a refusal. Its source is said as established: the user's own words
+      // (an excerpt shows their complete line), else "speaker/source unknown" — never "you" for another's or unknown words.
+      expect(review, JSON.stringify(review)).toMatchObject({ ok: true, mutated: false });
+      expect(review.public_label).toContain(`Olumi’s reading: ${f.request.edits[0]!.reading_words}`);
+      if (fault === 'partial') expect(review.public_label).toContain(`Recorded words — you: “${message}”`);
+      else {
+        expect(review.public_label).not.toContain('Recorded words — you:');
+        expect(review.public_label).toContain(`Recorded words — speaker/source unknown: “${message}”`);
+      }
+      expect(review.public_label).toContain('it does not make it something you said');
+      expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+      return;
+    }
     expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'correction_not_stated' });
     expect(review.public_label).toContain('Review the correction’s source');
     expect(review.public_label).toContain(`Olumi’s reading: ${f.request.edits[0]!.reading_words}`);
-    const sourceStateWords = {
-      missing: 'Olumi could not find words of your own stating this correction. This review does not authorise a change.',
-      partial: 'Olumi could not verify this excerpt as the complete applicable statement. This review does not authorise a change.',
-      'another speaker': 'These words report another speaker’s view; they do not establish that you assert the reported correction. This review does not authorise a change.',
-      'unknown speaker': 'Olumi could not establish who asserted these words. This review does not authorise a change.',
-    };
-    expect(review.public_label).toContain(sourceStateWords[fault]);
-    if (fault === 'partial') expect(review.public_label).toContain('Excerpt — your recorded words');
-    if (fault === 'another speaker') expect(review.public_label).toContain('Reported words —');
-    if (fault === 'unknown speaker') expect(review.public_label).toContain('Words — speaker unknown:');
-    if (fault !== 'missing') expect(review.public_label).toContain(message);
-    if (fault === 'partial') expect(review.public_label).toContain(`Recorded words — you: “${message}”`);
-    else expect(review.public_label).not.toContain('Recorded words — you:');
+    // Missing words are structure, not a reading: still a non-authorising review with no card.
+    expect(review.public_label).toContain('Olumi could not find words of your own stating this correction. This review does not authorise a change.');
+    expect(review.public_label).not.toContain('Recorded words — you:');
     expect(review).not.toHaveProperty('proposal_id'); expect(w.chips('propose_statement', review)).toEqual([]);
     expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
@@ -125,15 +130,18 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
   it('KNOWN BASE DEFECT (lean core C2): another-speaker review cannot become a user-source card by requoting the whole reported line', async () => {
     const f = fixture(row), message = `A colleague said: “${f.message}”`;
     const w = await correctionWorld(f.graph, message);
+    // ⭐ GATE → LABEL: both are cards whose source is the reported, unresolved speaker; the press never makes them the user's.
     const review = await w.offer('propose_statement', { correction: f.request });
-    expect(review).toMatchObject({ ok: false, refusal: 'correction_not_stated' });
-    expect(review).not.toHaveProperty('proposal_id');
+    expect(review, JSON.stringify(review)).toMatchObject({ ok: true, mutated: false });
+    expect(review.public_label).not.toContain('Recorded words — you:');
     const requote = await w.offer('propose_statement', { correction: { ...f.request, quote: message } });
-    expect(requote).toMatchObject({ ok: false, mutated: false });
-    expect(requote.public_label ?? '').not.toContain('Recorded words — you:');
-    expect(requote).not.toHaveProperty('proposal_id');
-    expect(w.chips('propose_statement', requote)).toEqual([]);
-    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    expect(requote, JSON.stringify(requote)).toMatchObject({ ok: true, mutated: false });
+    expect(requote.public_label).not.toContain('Recorded words — you:');
+    expect(requote.public_label).toContain(`Recorded words — speaker/source unknown: “${message}”`);
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    expect(await w.press(String(requote.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(saidByOf(claimRecordFor(w.graph(), f.subject)!.statements[0]!)).toBe('unknown');
+    expect(userStatementFor(w.graph(), f.subject)?.statements.some(s => s.quote === message) ?? false).toBe(false);
   });
 
   // Founder 05:46 evidence row (DL-3): the AI's EXPLICIT speaker=user reading of the whole reported line never makes it the user's card.
@@ -141,11 +149,13 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     const f = fixture(row), message = `A colleague said: “${f.message}”`;
     const w = await correctionWorld(f.graph, message);
     const requote = await w.offer('propose_statement', { correction: { ...f.request, quote: message, speaker: 'user' } });
-    expect(requote, JSON.stringify(requote)).toMatchObject({ ok: false, mutated: false });
-    expect(requote.public_label ?? '').not.toContain('Recorded words — you:');
-    expect(requote).not.toHaveProperty('proposal_id');
-    expect(w.chips('propose_statement', requote)).toEqual([]);
-    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    // ⭐ GATE → LABEL: a card, and its source is still never the user's (the reported line ends in another speaker's words).
+    expect(requote, JSON.stringify(requote)).toMatchObject({ ok: true, mutated: false });
+    expect(requote.public_label).not.toContain('Recorded words — you:');
+    expect(requote.public_label).toContain('Recorded words — speaker/source unknown:');
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    expect(await w.press(String(requote.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(userStatementFor(w.graph(), f.subject)?.statements.some(s => s.quote === message) ?? false).toBe(false);
     // CONTRAST: the user's own complete line, read as theirs, still prepares the card.
     const own = await correctionWorld(f.graph, f.message);
     expect(await own.offer('propose_statement', { correction: { ...f.request, speaker: 'user' } })).toMatchObject({ ok: true, mutated: false });
@@ -175,17 +185,18 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     f.graph.nodes.push({ id: 'energy', kind: 'factor', label: 'Energy use' });
     const w = await correctionWorld(f.graph, quote);
     const review = await w.offer('propose_statement', { correction: { quote, edits: [f.request.edits[0]] } });
-    expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-    expect(review.public_label).toBe(binding === 'another'
-      ? `Olumi reads these words as referring to “Energy use”, rather than “${row.factor}”. Which item should this correction concern?`
-      : 'Olumi could not establish which item these words concern. Which item should this correction concern?');
-    expect(review).not.toHaveProperty('proposal_id'); expect(w.chips('propose_statement', review)).toEqual([]);
-    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
-    // Selection cannot override a source that positively names another item.
+    // ⭐ GATE → LABEL: a card for the item the AI named, saying the item is Olumi's reading (and which item the words matched
+    // instead); never retargeted, nothing written before its press.
+    expect(review, JSON.stringify(review)).toMatchObject({ ok: true, mutated: false });
+    expect(review.public_label).toContain(`Olumi’s reading: these words concern “${row.factor}”.${binding === 'another'
+      ? ` Olumi’s item reader matched them to “Energy use” instead; approve only if “${row.factor}” is the item you mean.` : ''}`);
+    expect(w.proposals.get(String(review.proposal_id))!.operations.map(o => o.path)).toEqual(['report']);
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    // A selection never hides that the words name another item.
     Object.assign(w.ctx, { grounded_selection: { element_ids: ['report'], unresolved: 'none' } });
     if (binding === 'another') {
-      expect(await w.offer('propose_statement', { correction: { quote, edits: [f.request.edits[0]] } })).toMatchObject({ ok: false, refusal: 'unrelated_correction' });
-      expect(w.proposals.size()).toBe(0);
+      expect((await w.offer('propose_statement', { correction: { quote, edits: [f.request.edits[0]] } })).public_label)
+        .toContain('Olumi’s item reader matched them to “Energy use” instead');
     }
     // A fresh supported correction still needs its own complete displayed card and separate approval.
     Object.assign(w.ctx, { user_turn_text: f.message, user_text: f.message });
@@ -208,8 +219,9 @@ describe.each(cases)('$name: correction uses the existing subject context', row 
     const w = await correctionWorld(f.graph, message);
     Object.assign(w.ctx, { preceding_assistant_text: ask!.words });
     const result = await w.offer('propose_statement', { correction: { ...f.request, quote: message } });
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-    expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    // ⭐ GATE → LABEL: the question about one item binds only that item; the other item is labelled Olumi's reading on the card.
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(result.public_label).toContain(`Olumi’s reading: these words concern “${row.factor}”.`);
     expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
@@ -257,9 +269,13 @@ describe.each(cases)('$name: correction uses the existing subject context', row 
     if (fault === 'other speaker') Object.assign(w.ctx, { user_turn_text: `A colleague said: “${quote}”` });
     const card = await w.offer('propose_statement', { correction: { quote, edits: [f.request.edits[0]],
       ...(fault === 'AI-supplied context' ? { binding_context: { selection: { element_ids: ['report'], unresolved: 'none' } } } : {}) } });
-    expect(card).toMatchObject({ ok: false, mutated: false,
-      refusal: ['no source', 'other speaker'].includes(fault) ? 'correction_not_stated' : 'unrelated_correction' });
-    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    // ⭐ GATE → LABEL: a card for the item the AI named, never another; its source says what was established. Context never authors.
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    expect(w.proposals.get(String(card.proposal_id))!.operations.map(o => o.path)).toEqual(['report']);
+    if (fault === 'no source') expect(card.public_label).toContain('Olumi’s proposed reading — source unverified:');
+    if (fault === 'other speaker') expect(card.public_label).toContain('Recorded words — speaker/source unknown:');
+    if (['no source', 'other speaker'].includes(fault)) expect(card.public_label).not.toContain('Recorded words — you:');
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
   it('the frozen context is covered by card integrity, and malformed persisted context is refused natively', async () => {
@@ -278,9 +294,7 @@ describe.each(cases)('$name: correction uses the existing subject context', row 
 
 it.each([
   ['missing quote', 'correction_not_stated', 'correction.quote_present'],
-  ['partial quote', 'correction_not_stated', 'correction.quote_whole_current_turn'],
   ['empty edits', 'correction_not_stated', 'correction.edits_nonempty'],
-  ['unrelated source', 'unrelated_correction', 'correction.postimage.unrelated_correction.unbound'],
   ['ordinary subject', 'subject_not_found', 'propose_statement.subject_not_found'],
 ])('refusal source diagnostic: %s keeps text private and changes no verdict', async (fault, refusal, check) => {
   const f = fixture(cases[0]!), secret = 'PRIVATE_SOURCE_AND_READING_CANARY_7d92';
@@ -321,6 +335,25 @@ it.each([
   } finally { spy.mockRestore(); }
 });
 
+// ⭐ GATE → LABEL: a partial quote or an unrelated source is a labelled card, so it logs no refusal diagnostic and leaks no text.
+it.each(['partial quote', 'unrelated source'] as const)('labelled card, no refusal diagnostic: %s keeps text private', async fault => {
+  const f = fixture(cases[0]!), secret = 'PRIVATE_SOURCE_AND_READING_CANARY_7d92';
+  const message = fault === 'unrelated source' ? 'Revenue rose last year; the current filing is not complete.' : f.message;
+  const args: Rec = { correction: structuredClone(f.request) };
+  args.correction.quote = fault === 'partial quote' ? message.slice(0, message.indexOf(',')) : message;
+  args.correction.edits[0].reading_words = secret;
+  const w = await correctionWorld(f.graph, `${message} ${secret}.`);
+  const spy = vi.spyOn(log, 'info').mockImplementation(() => undefined as never);
+  try {
+    const result = await w.offer('propose_statement', args);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    const events = spy.mock.calls.map(([event]) => event as Rec).filter(e => e.diagnostic_source === 'statement_preparation');
+    expect(events).toHaveLength(0);
+    expect(JSON.stringify(spy.mock.calls)).not.toContain(secret);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  } finally { spy.mockRestore(); }
+});
+
 it.each([
   { words: 'For Energy use, retract the earlier account.', binder: 'another', index: 0 },
   { words: 'Retract the earlier account.', binder: 'unbound', index: 0 },
@@ -332,13 +365,13 @@ it.each([
   try {
     const result = await w.offer('propose_statement', { correction: { ...f.request, quote: words,
       edits: index === 0 ? [f.request.edits[0]] : f.request.edits } });
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-    const event = spy.mock.calls.map(([e]) => e as Rec).find(e => e.diagnostic_source === 'statement_preparation')!;
-    expect(event).toMatchObject({ request_id: w.ctx.request_id, binder_result: binder, failed_edit_index: index,
-      failed_checks: [`correction.postimage.unrelated_correction.${binder}`] });
-    expect(JSON.stringify(event)).not.toContain(words);
-    expect(JSON.stringify(event)).not.toContain('Energy use');
-    expect(w.graph()).toEqual(f.graph); expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0);
+    // ⭐ GATE → LABEL: the binder's verdict is frozen as the edit's LABEL on the card (no refusal, no diagnostic, no logged text).
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    const edits = ((w.proposals.get(String(result.proposal_id))!.operations[0]!.value as Rec).correction as Rec).edits as Rec[];
+    expect(edits[index]!.labels).toEqual(binder === 'another' ? { binding: 'olumi_reading', bound_label: 'Energy use' } : { binding: 'olumi_reading' });
+    expect(spy.mock.calls.map(([e]) => e as Rec).filter(e => e.diagnostic_source === 'statement_preparation')).toHaveLength(0);
+    expect(JSON.stringify(spy.mock.calls)).not.toContain(words);
+    expect(w.graph()).toEqual(f.graph); expect(w.writes).toHaveLength(0);
   } finally { spy.mockRestore(); }
 });
 
@@ -382,12 +415,14 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(w.writes).toHaveLength(1);
   });
 
-  it('an unrelated dated revenue quote cannot retire either record', async () => {
+  it('an unrelated dated revenue quote retires nothing without its own press, and its card says each item is Olumi’s reading', async () => {
     const f = fixture(row), quote = 'Revenue was £2m as of 2026-09-01; the filing deadline is next month.';
     const w = await correctionWorld(f.graph, quote);
     const result = await w.offer('propose_statement', { correction: { ...f.request, quote } });
-    expect(result.ok).toBe(false); expect(w.writes).toHaveLength(0);
-    expect(w.graph()).toEqual(f.graph);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(result.public_label).toContain(`Olumi’s reading: these words concern “${row.factor}”.`);
+    expect(result.public_label).toContain(`Olumi’s reading: these words concern “${row.risk}”.`);
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
   it('retained source is kept without making the user repeat its original wording', async () => {
@@ -492,6 +527,7 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     const first = await w.offer('propose_statement', { correction: { quote: firstMessage, edits: [{ subject,
       retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' }, retained: ['about 40 people'], reading_words: 'about 40; not mostly nights' }] } });
     expect(first.ok, JSON.stringify(first)).toBe(true);
+    const firstOps = JSON.stringify(w.proposals.get(String(first.proposal_id))!.operations);
     const applied = await w.press(String(first.proposal_id));
     expect(applied).toMatchObject({ ok: true, applied: true });
     const message = `For ${row.factor}, retract “about 40 people” too; we do not know the headcount.`;
@@ -499,9 +535,19 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     const card = await second.offer('propose_statement', { correction: { quote: message, edits: [{ subject,
       retirement: { quote: 'about 40 people', scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'headcount unknown' }] } });
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    const cardOps = JSON.stringify(second.proposals.get(String(card.proposal_id))!.operations);
     const result = await second.press(String(card.proposal_id));
     expect(result).toMatchObject({ ok: true, applied: true });
     for (const response of [first, applied, card, result]) expect(JSON.stringify(response)).not.toContain('holds an approval');
+    // ⭐ DISCRIMINATING (Codex BLOCK @94b330bd P2: a mutant treating a correction's own record as protected survived the old-phrase
+    // check): neither card claims an approval in today's words, neither saved operation carries the approval label, and no history
+    // receipt is invented.
+    for (const shown of [first, card]) expect(String(shown.public_label)).not.toContain('This replaces a record you approved on its card');
+    for (const ops of [firstOps, cardOps]) {
+      expect(ops).toContain('"correction"'); // positive control: the saved operation is the correction itself
+      expect(ops).not.toContain('"approved":true');
+    }
+    expect((claimRecordFor(second.graph(), subject)?.history ?? []).some((st) => st.attested !== undefined)).toBe(false);
     const saved = userStatementFor(second.graph(), subject)!;
     expect(saved.statements).toEqual([expect.objectContaining({ source: message, quote: message, speaker: 'user', reading: 'olumi' })]);
     expect(saved.attest).toEqual({ recorded_by: 'correction', disposition: 'retracted', scope: 'whole', retained_count: 0 });
@@ -565,18 +611,24 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(rangeLawAdopted(f.graph, 'option', { factor_id: 'report', low: 40, high: 60 })).toBe(true);
     const w = await correctionWorld(f.graph, message), result = await w.offer('propose_statement', { correction: { quote: message,
       edits: [{ subject, retirement: { quote: 'mostly on nights', scope: 'part', disposition: 'retracted' }, retained: ['between 40 and 60 people'], reading_words: 'day and night distribution is unknown' }] } });
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_attestation_protected' });
-    expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    // ⭐ GATE → LABEL: a card that says the adoption it replaces stays in history and no longer applies; nothing changes before its press.
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(result.public_label).toContain('This replaces a record you approved on its card. That approval stays in its history and no longer applies once this correction is approved.');
     expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
     expect(rangeLawAdopted(w.graph(), 'option', { factor_id: 'report', low: 40, high: 60 })).toBe(true);
+    // Its press: the adoption is a historical receipt on the retired claim, and no longer applies.
+    expect(await w.press(String(result.proposal_id))).toMatchObject({ ok: true, applied: true });
+    expect(rangeLawAdopted(w.graph(), 'option', { factor_id: 'report', low: 40, high: 60 })).toBe(false);
+    expect(claimRecordFor(w.graph(), subject)!.history?.[0]).toMatchObject({ status: 'superseded', quote: source, attested: { range_law: 'equal_tail', low: 40, high: 60 } });
   });
 
   it.each([{ fingerprint: 'held-approval' }, { retained_flag: false }])('B1 refuses other writers’ attestation, including %j', async extra => {
     const f = fixture(row);
     f.graph.nodes[1].user_statements[0].attest = { recorded_by: 'approval', ...extra };
     const w = await correctionWorld(f.graph, f.message), result = await w.offer('propose_statement', { correction: f.request });
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_attestation_protected' });
-    expect(result).not.toHaveProperty('proposal_id'); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(result.public_label).toContain('This replaces a record you approved on its card. That approval stays in its history');
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
   it.each(['point', 'range'] as const)('N1/N2 keep the complete retained %s statement, with retention outside its conditions', async form => {
@@ -662,7 +714,7 @@ describe.each(cases)('$name: complete correction source and held identity', row 
       expect(current.statements[0]).toMatchObject({ speaker: 'user', source: message, quote: message, reading: 'olumi' });
       if (unknown !== undefined) {
         expect(current.statements.every(s => s.speaker === 'user')).toBe(true);
-        expect(recordsWithUnknownSpeakerOn(w.graph().nodes[1])[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
+        expect(claimRecordsOn(w.graph().nodes[1])[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual([unknown]);
         expect(current.attest).toMatchObject({ recorded_by: 'correction', retained_0_origin: 'unknown' });
       }
       const saved = structuredClone(w.graph());
@@ -680,10 +732,11 @@ describe.each(cases)('$name: complete correction source and held identity', row 
     const message = quoted ? `Retract the earlier account “${f.graph.nodes[1].user_statements[0].statements[0].quote}”.` : 'Retract the earlier account.';
     const w = await correctionWorld(f.graph, message);
     const review = await w.offer('propose_statement', { correction: { quote: message, edits: [f.request.edits[0]] } });
-    expect(review).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-    expect(review.public_label).toBe('Olumi could not establish which item these words concern. Which item should this correction concern?');
-    expect(review).not.toHaveProperty('proposal_id'); expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0);
-    expect(w.graph()).toEqual(f.graph);
+    // ⭐ GATE → LABEL: a card for the item the AI named (never its indistinguishable twin), saying the item is Olumi's reading.
+    expect(review, JSON.stringify(review)).toMatchObject({ ok: true, mutated: false });
+    expect(review.public_label).toContain(`Olumi’s reading: these words concern “${row.factor}”.`);
+    expect(w.proposals.get(String(review.proposal_id))!.operations.map(o => o.path)).toEqual(['report']);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 });
 
@@ -759,8 +812,9 @@ it.each(['warehouse', 'laboratory'].flatMap(domain => [
   if (selected) Object.assign(w.ctx, { grounded_selection: { element_ids: ['first'], unresolved: 'none' } });
   const card = await w.offer('propose_statement', { correction: request });
   if (extra || cue === 'unquoted source') {
-    expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-    expect(card).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    // ⭐ GATE → LABEL: an item the words do not name is labelled Olumi's reading on the card; nothing is written before its press.
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    expect(card.public_label).toContain(`Olumi’s reading: these words concern “${extra ? 'Forklift and crane booking' : graph.nodes[1].label}”.`);
     expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph); return;
   }
   expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);
@@ -770,7 +824,7 @@ it.each(['warehouse', 'laboratory'].flatMap(domain => [
   expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
   for (const [i, subject] of [first, second].entries()) {
     const node = w.graph().nodes.find((n: Rec) => n.id === subject.id);
-    expect(recordsWithUnknownSpeakerOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual(graph.nodes[i + 1].user_statements[0].statements);
+    expect(claimRecordsOn(node)[0]!.statements.filter(s => s.speaker === 'unknown')).toEqual(graph.nodes[i + 1].user_statements[0].statements);
     expect(userStatementFor(w.graph(), subject)!.statements[0]).toMatchObject({ speaker: 'user', quote: message, source: message, reading: 'olumi' });
   }
   expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === 'third'))).toEqual(graph.nodes[3]);
@@ -783,16 +837,11 @@ describe.each(cases)('$name: shared speaker reading in the correction review', r
   it.each(['other', 'unknown'] as const)('%s reading only removes source credit and gives a non-authorising review', async speaker => {
     const f = fixture(row), w = await correctionWorld(f.graph, f.message);
     const review = await w.offer('propose_statement', { correction: { ...f.request, speaker } });
-    expect(review).toMatchObject({ ok: false, mutated: false });
-    expect(review.public_label).toContain('Review the correction’s source');
-    expect(review.public_label).toContain(speaker === 'other'
-      ? 'These words report another speaker’s view; they do not establish that you assert the reported correction.'
-      : 'Olumi could not establish who asserted these words.');
-    expect(review.public_label).toContain(f.message);
+    // ⭐ GATE → LABEL: the reading only removes source credit — a card whose source is "speaker/source unknown", never "you".
+    expect(review, JSON.stringify(review)).toMatchObject({ ok: true, mutated: false });
+    expect(review.public_label).toContain(`Recorded words — speaker/source unknown: “${f.message}”`);
     expect(review.public_label).not.toContain('Recorded words — you:');
-    expect(review).not.toHaveProperty('proposal_id'); expect(w.chips('propose_statement', review)).toEqual([]);
-    expect(w.proposals.size()).toBe(0); expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0);
-    expect(w.graph()).toEqual(f.graph);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 });
 
@@ -804,8 +853,10 @@ it.each(cases)('$name: unknown words alone never author a correction without a n
   Object.assign(w.ctx, { user_turn_text: undefined, user_text: earlier.source, unverified_user_text: earlier.source,
     verified_user_messages: [earlier.source] });
   const result = await w.offer('propose_statement', { correction: { ...f.request, quote: earlier.quote, edits: [f.request.edits[0]] } });
-  expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'correction_not_stated' });
-  expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+  // ⭐ GATE → LABEL: a card whose source is unverified (no typed words hold it), never the user's; nothing written before its press.
+  expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+  expect(result.public_label).toContain(`Olumi’s proposed reading — source unverified: “${earlier.quote}”`);
+  expect(result.public_label).not.toContain('Recorded words — you:');
   expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   expect(userStatementFor(w.graph(), f.subject)).toBeUndefined();
 });
@@ -821,8 +872,9 @@ it.each(cases)('$name: function words in a saved sentence never name the item fo
   const message = 'Please withdraw the earlier claim, it was wrong.';
   const w = await correctionWorld(graph, message), result = await w.offer('propose_statement', { correction: { quote: message,
     edits: [{ subject, retirement: { quote: held, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'the earlier account is withdrawn' }] } });
-  expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-  expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+  // ⭐ GATE → LABEL: function words never NAME the item: the card says the item is Olumi's reading; nothing written before its press.
+  expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+  expect(result.public_label).toContain(`Olumi’s reading: these words concern “${row.factor}”.`);
   expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph);
 });
 
@@ -846,13 +898,12 @@ it.each(['L1 unnamed', 'L2 another quoted item', 'L5 named item'] as const)('%s:
     edits: [{ subject, retirement: { quote: held[positive ? 2 : 0], scope: 'whole', disposition: 'retracted' }, retained: [],
       reading_words: 'the earlier account is withdrawn' }] } });
   if (!positive) {
-    // Exercise an incorrectly offered card as well: even its own press must never retire the wrong item's words.
-    if (typeof card.proposal_id === 'string') {
-      const pid = card.proposal_id, restored = w.restoreCard(w.proposals.get(pid)!, card);
-      await w.press(pid, restored);
-    }
-    expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
-    expect(card).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    // ⭐ GATE → LABEL: a label conjunction never NAMES an item: the card writes only the item the AI named, says that item is
+    // Olumi's reading (and, for quoted words of another item, which item they matched), and nothing is written before its press.
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    expect(card.public_label).toContain(`Olumi’s reading: these words concern “Training and onboarding”.${form === 'L2 another quoted item'
+      ? ' Olumi’s item reader matched them to “Energy use” instead; approve only if “Training and onboarding” is the item you mean.' : ''}`);
+    expect(w.proposals.get(String(card.proposal_id))!.operations.map(o => o.path)).toEqual(['train']);
     expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph); return;
   }
   expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);

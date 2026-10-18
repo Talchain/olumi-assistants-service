@@ -224,7 +224,6 @@ describe('the founder’s own words for today’s levels, through the real route
   it.each([
     ['zero claimed as the user’s figure', { ...ARGS.assumptions[1]!, user_stated: true, statements: [{ quote: Q05, form: 'point', value: 0 }] }, 'origin_unknown', true],
     ['a figure the user never said (80 before they said it)', ARGS.assumptions[0]!, 'origin_unknown', false],
-    ['Olumi’s own words quoted as the user’s', { ...ARGS.assumptions[1]!, statements: [{ quote: 'Which activity is it?', form: 'describes' }] }, 'description_not_stated', true],
   ] as const)('⛔ CONTRAST: %s → refused, no card, nothing written', async (_why, a, refusal, saidT08) => {
     const w = world(SERVED);
     const turn = await route(w);
@@ -234,6 +233,25 @@ describe('the founder’s own words for today’s levels, through the real route
       [call('propose_assumptions', { assumptions: [a] }), say('Done.')]);
     expect((offer._agent.tool_calls as Rec[]).find((c) => c.name === 'propose_assumptions')).toMatchObject({ ok: false, mutated: false, refusal });
     expect((offer.suggested_actions ?? []).filter((c: Rec) => String(c.id).startsWith('agent-approve'))).toEqual([]);
+    expect(w.graph()).toEqual(SERVED.graph);
+    expect(graphWrites(w)).toBe(0);
+  }, 3 * ROUTE_MS);
+
+  // ⭐ GATE → LABEL (change 1; Codex amendment 1): Olumi's own words quoted as the user's are never "your words": the card quotes them as
+  // an unverified source beside Olumi's own estimate, and nothing is written before its press.
+  it('⛔ Olumi’s own words quoted as the user’s → labelled “source unverified”, never “your words”; nothing written', async () => {
+    const w = world(SERVED);
+    const turn = await route(w);
+    const sid = String((await turn({ message: T05, source: 'composer' }, [say('Noted.')]))._agent.session_id);
+    await turn({ message: T08, source: 'composer', agent_session_id: sid }, [say('Which activity is it?')]);
+    const a = { ...ARGS.assumptions[1]!, statements: [{ quote: 'Which activity is it?', form: 'describes' }] };
+    const offer = await turn({ message: 'Can you just update the model to reflect our conversation?', source: 'composer', agent_session_id: sid },
+      [call('propose_assumptions', { assumptions: [a] }), say('Done.')]);
+    const result = (offer._agent.tool_calls as Rec[]).find((c) => c.name === 'propose_assumptions');
+    expect(result).toMatchObject({ ok: true, mutated: false });
+    const label = JSON.stringify(offer);
+    expect(label).toContain('Olumi’s proposed reading — source unverified: “Which activity is it?”. Olumi’s figure from them is its own estimate, not yours.');
+    expect(label).not.toContain('From your words: “Which activity is it?”');
     expect(w.graph()).toEqual(SERVED.graph);
     expect(graphWrites(w)).toBe(0);
   }, 3 * ROUTE_MS);
