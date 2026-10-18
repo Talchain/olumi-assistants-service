@@ -2827,7 +2827,7 @@ export async function buildModelFromBrief(
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
   /** A defaulted-frame disclosure (`admit-model.ts`) still describes the registered node: the frame it names is the frame the node
    * is read on (`frameOf`, CEE's one reading order: scale_frame → cap → …), so a frame moved after admission is never mis-said. */
-  const defaultedFrameHeld = (l: { field_path: string; after: unknown }): boolean => {
+  const defaultedFrameHeld = (l: { readonly field_path: string; readonly after?: unknown }): boolean => {
     const id = /^nodes\[(.+)\]\.observed_state\.cap$/.exec(l.field_path)?.[1];
     return frameOf((graph.nodes as Record<string, unknown>[]).find((n) => n.id === id) as never) === l.after;
   };
