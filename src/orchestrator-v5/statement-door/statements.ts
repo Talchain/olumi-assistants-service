@@ -13,7 +13,7 @@ import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
 import { userStatementOf, verifyStatements, type UserStatement } from '../agent-lane/user-statements.js';
 import { plainQuoteWords, verbatimSourceLine } from '../agent-lane/quote-confirmation.js';
-import { factorTheUserNamed, quoteSpansIn } from '../agent-lane/stated-by-user.js';
+import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
 import { isStatementField, subjectKey, subjectNodeKey, resolveSubject, SUBJECT_KINDS, type DoorSubject, type StatementField } from './subject.js';
 
 type Rec = Record<string, unknown>;
@@ -46,17 +46,14 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
       // Corrections opt in. Old sentences are never names; quoted bytes identify only a node that uniquely holds them across the model.
       const speech = speechReading(quote), retired = speechReading(correction.retirement.quote).text;
       const outside = speech.text.split('').map((ch, at) => speech.inSpeech(at) ? ' ' : ch).join('');
-      const options = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string').map(n => String(n.label));
-      const labelled = same.filter(n => factorTheUserNamed(String(n.label), outside,
-        { options, others: nodes.filter(other => other.id !== n.id).map(other => String(other.label ?? '')) }));
+      const labelled = same.filter(n => isFactorNamedByUser(String(n.label), outside));
       const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
       const holders = cited ? nodes.filter(n => [
         ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
       ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
       named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : []
-        : same.filter(n => factorTheUserNamed(String(n.label), speech.text,
-          { options: [...options, String(n.label)], others: [] }));
+        : same.filter(n => isFactorNamedByUser(String(n.label), speech.text));
     }
     if (named.length === 1) {
       if (found !== undefined) found.subject = { ...subject, id: String(named[0]!.id) };

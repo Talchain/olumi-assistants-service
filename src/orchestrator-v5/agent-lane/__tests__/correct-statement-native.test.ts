@@ -634,12 +634,12 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
 
 // DEV exposed source/binding classes; these independent domains contain no pilot wording.
 describe.each(cases)('$name: complete correction source and held identity', row => {
-  it.each(['quoted term', 'quoted retraction', 'distinctive word without full label', 'unknown earlier speaker'] as const)(
+  it.each(['quoted term', 'quoted retraction', 'full label', 'unknown earlier speaker'] as const)(
     '%s reaches one approved native write and a complete cold read', async form => {
       const f = fixture(row);
       const message = form === 'quoted term' ? `${f.message} By 'current' I mean the report for this shift.`
         : form === 'quoted retraction' ? f.message.replace(/[“”]/g, "'")
-          : `For ${row.factor.split(' ').at(-1)}, the earlier universal account was an assumption. Withdraw it and retain the local delay as a report.`;
+          : `For ${row.factor}, the earlier universal account was an assumption. Withdraw it and retain the local delay as a report.`;
       const edit = f.request.edits[0]!;
       let unknown: Rec | undefined;
       if (form === 'unknown earlier speaker') {
@@ -747,7 +747,7 @@ it.each(['warehouse', 'laboratory'].flatMap(domain => [
     { id: 'second', kind: 'factor', label: `${domain} follow-up coverage`, user_statements: [record(second, earlier[1]!)] }], edges: [] };
   const third = { kind: 'factor' as const, id: 'third', field: 'relation' as const };
   earlier.push('Noor stated that equipment was unavailable.');
-  graph.nodes.push({ id: 'third', kind: 'factor', label: 'Equipment reservation', user_statements: [record(third, earlier[2]!)] });
+  graph.nodes.push({ id: 'third', kind: 'factor', label: 'Forklift and crane booking', user_statements: [record(third, earlier[2]!)] });
   const message = cue === 'quoted'
     ? `Withdraw the earlier accounts “${earlier[0]}” and “${earlier[1]}”. Keep other work unchanged.`
     : cue === 'labels' ? `For ${graph.nodes[1].label} and ${graph.nodes[2].label}, the earlier account was wrong. Withdraw those statements.`
@@ -824,4 +824,43 @@ it.each(cases)('$name: function words in a saved sentence never name the item fo
   expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
   expect(result).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
   expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph);
+});
+
+// Claude r2 L1/L2/L5: a conjunction in a label never names an item or overrides another item's quoted words.
+it.each(['L1 unnamed', 'L2 another quoted item', 'L5 named item'] as const)('%s: a label conjunction never authorises the wrong item', async form => {
+  const train = { kind: 'factor' as const, id: 'train', field: 'relation' as const };
+  const energy = { ...train, id: 'energy' }, report = { ...train, id: 'report' };
+  const held = ['New starters need three weeks before they work alone.', 'Energy use doubled over winter.',
+    'Our dispatch updates arrive late whenever the scanners fail.'];
+  const subjects = [train, energy, report], labels = ['Training and onboarding', 'Energy use', 'Dispatch updates'];
+  const graph: Rec = { nodes: [{ id: 'goal', kind: 'goal', label: 'Reliable handling' }, ...subjects.map((subject, i) => ({
+    id: subject.id, kind: subject.kind, label: labels[i], user_statements: [userStatementRecord(subject,
+      [{ speaker: 'user', quote: held[i]!, source: held[i]!, form: 'describes', reading: 'olumi',
+        subject: { quantity: 'reported_account', node_id: subject.id } }], '2026-08-01T00:00:00Z')],
+  }))], edges: [] };
+  const positive = form === 'L5 named item', subject = positive ? report : train;
+  const message = form === 'L1 unnamed' ? 'Please withdraw the earlier claim and keep the rest.'
+    : form === 'L2 another quoted item' ? `Withdraw “${held[1]}” and keep the rest.`
+      : 'Withdraw the dispatch updates claim and keep the rest.';
+  const w = await correctionWorld(graph, message), card = await w.offer('propose_statement', { correction: { quote: message,
+    edits: [{ subject, retirement: { quote: held[positive ? 2 : 0], scope: 'whole', disposition: 'retracted' }, retained: [],
+      reading_words: 'the earlier account is withdrawn' }] } });
+  if (!positive) {
+    // Exercise an incorrectly offered card as well: even its own press must never retire the wrong item's words.
+    if (typeof card.proposal_id === 'string') {
+      const pid = card.proposal_id, restored = w.restoreCard(w.proposals.get(pid)!, card);
+      await w.press(pid, restored);
+    }
+    expect(card).toMatchObject({ ok: false, mutated: false, refusal: 'unrelated_correction' });
+    expect(card).not.toHaveProperty('proposal_id'); expect(w.proposals.size()).toBe(0);
+    expect(w.registers).toHaveLength(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(graph); return;
+  }
+  expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false }); expect(w.writes).toHaveLength(0);
+  const pid = String(card.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, card);
+  expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
+  expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+  expect(w.registers).toHaveLength(1); expect(w.writes).toHaveLength(1);
+  for (const id of ['train', 'energy']) expect(withoutRef(w.graph().nodes.find((n: Rec) => n.id === id))).toEqual(graph.nodes.find((n: Rec) => n.id === id));
+  const saved = structuredClone(w.graph()); expect((await w.cold()).body.graph).toEqual(saved);
+  expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true }); expect(w.writes).toHaveLength(1);
 });
