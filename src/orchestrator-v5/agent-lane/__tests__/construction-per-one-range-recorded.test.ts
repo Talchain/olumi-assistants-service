@@ -60,7 +60,7 @@ function draft(withRange: 'recorded' | 'denied' | 'none'): Rec {
   };
 }
 
-async function build(drafts: readonly Rec[]) {
+async function build(drafts: readonly Rec[], brief = BRIEF) {
   let body: unknown = null;
   const inputs: string[] = [];
   const call = (async (req: { input: string }) => {
@@ -71,19 +71,39 @@ async function build(drafts: readonly Rec[]) {
     if (path.endsWith('/graph/register')) { body = structuredClone((b as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief(SID, BRIEF, d, call) as Rec;
+  const out = await buildModelFromBrief(SID, brief, d, call) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 800)).toBe(true);
   return { graph: GraphV3.parse(body) as unknown as Rec, raw: body as Rec, inputs };
+}
+/**
+ * ISOLATED for the Run (Codex r1 P2): today's level is stated and every other link is sized (Olumi's labelled estimates), so the
+ * per-one link is the ONLY unsized step, and only "Hire a second salesperson" rests on it. "Start a referral scheme" reaches the goal
+ * by a sized route of its own: its chance is unaffected.
+ */
+const TODAY = 'Today we bring in £300k of new contract value a year.';
+const RUN_BRIEF = `${AIM} ${SIZE} ${TODAY} We could hire a second salesperson or start a referral scheme.`;
+function isolated(): Rec {
+  const d = draft('recorded');
+  Object.assign(d.goal, { baseline_known: true, baseline_value: 300000, baseline_provenance: 'explicit' });
+  d.statements.push({ quote: TODAY, speaker: 'user', subject: { kind: 'goal', label: GOAL, to_label: null, factor_label: null }, field: 'level',
+    form: 'point', value: 300000, low: null, high: null, unit: '£', qualifier: null, conditions: null });
+  d.options.push({ label: 'Start a referral scheme', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+    interventions: [{ factor_label: 'Referral income', value: 100000, value_kind: 'absolute', unit: '£', provenance: 'ai_proposed' }] });
+  d.factors.push({ label: 'Referral income', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '£', provenance: 'inferred', plausible_max: 500000 });
+  Object.assign(d.links[0], { effect_amount: 6, effect_per_source_change: 1, effect_provenance: 'ai_proposed', basis: 'Provisional: about six contracts a year per salesperson.' });
+  d.links.push({ from: 'Referral income', to: GOAL, direction: 'positive', provenance: 'inferred', effect_amount: 1, effect_per_source_change: 1,
+    effect_provenance: 'ai_proposed', definitional: null, basis: 'Provisional: referral income adds to contract value one for one.', source_quote: null });
+  return d;
 }
 const ends = (g: Rec): { from: string; to: string } => ({ from: g.nodes.find((n: Rec) => n.label === COUNT).id, to: g.nodes.find((n: Rec) => n.kind === 'goal').id });
 const rangeRecord = (g: Rec, from: string, to: string): Rec | undefined => ((g.nodes as Rec[]).find((n) => n.id === from)?.user_statements as Rec[] | undefined)
   ?.find((r: Rec) => r.subject_key === `link|${from}|${to}||effect`);
 
 /** The stored model loaded cold for the Run, the REAL Run handler, PLoT faked: the request PLoT receives and the Run's facts. */
-async function runOnStored(raw: Rec): Promise<{ request: Rec; enrichment: Rec }> {
+async function runOnStored(raw: Rec, brief = BRIEF): Promise<{ request: Rec; enrichment: Rec }> {
   const stored = GraphV3.parse(projectGraphForPersistence(raw)) as unknown as Rec;
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', {
-    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: structuredClone(stored), briefText: BRIEF }),
+    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: structuredClone(stored), briefText: brief }),
     loadGraph: async () => structuredClone(stored),
   } as never);
   let request: Rec = {};
@@ -156,19 +176,47 @@ describe('A3: a per-one range is recorded on its link, never sized at an end', (
     expect(JSON.stringify(wireEdge)).not.toMatch(/40000|60000/u);
   });
 
-  it('⭐ withheld claim: a chance resting on the unsized per-one link is withheld for that reason only; outcomes and the range stay', async () => {
-    const { raw } = await build([draft('recorded')]);
+  it('⭐ withheld claim: ONLY the chance resting on the unsized per-one link is withheld, for that reason only; an unaffected chance and the range stay', async () => {
+    const { raw } = await build([isolated()], RUN_BRIEF);
     const { from, to } = ends(GraphV3.parse(raw) as unknown as Rec);
-    const { enrichment } = await runOnStored(raw);
-    const placeholder = (enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
-    expect(placeholder, JSON.stringify(enrichment.inference_warnings)).toBeDefined();
-    const cause = enrichment.__cee_unsized_path_leader_cause as Rec;
-    expect((cause.links as Rec[]).some((l) => l.from === from && l.to === to), JSON.stringify(cause)).toBe(true);
-    for (const id of placeholder!.option_ids as string[]) {
-      const row = (enrichment.option_comparison as Rec[]).find((r) => r.option_id === id)!;
-      expect(row).not.toHaveProperty('probability_of_goal');
-      expect(row.outcome).toBeDefined();
-    }
+    const { enrichment } = await runOnStored(raw, RUN_BRIEF);
+    const warnings = enrichment.inference_warnings as Rec[];
+    // The exact withheld identities and reasons: both name the per-one link alone, for the one option resting on it.
+    const withheld = warnings.filter((w) => Array.isArray(w.option_ids) && w.code !== 'GOAL_CHANCE_LICENSED');
+    expect(withheld.map((w) => [w.code, w.option_ids, w.first_ask]), JSON.stringify(warnings)).toEqual([
+      ['GOAL_FIGURES_PLACEHOLDER_PATH', ['hire_a_second_salesperson'], { kind: 'link', from, to }],
+      ['GOAL_FIGURES_TARGET_NOT_TESTABLE', ['hire_a_second_salesperson'], { kind: 'link', from, to }],
+    ]);
+    expect(withheld[0]!.links).toEqual([{ from, to }]);
+    expect(enrichment.__cee_unsized_path_leader_cause.links.map((l: Rec) => [l.from, l.to])).toEqual([[from, to]]);
+    const row = (id: string): Rec => (enrichment.option_comparison as Rec[]).find((r) => r.option_id === id)!;
+    // The withheld option shows no chance, and no win share in its place.
+    expect(row('hire_a_second_salesperson')).not.toHaveProperty('probability_of_goal');
+    expect(row('hire_a_second_salesperson')).not.toHaveProperty('win_probability');
+    // The unaffected option keeps ITS chance (PLoT's 0.6), never its win share (1/3).
+    expect(row('start_a_referral_scheme').probability_of_goal).toBeCloseTo(0.6, 9);
+    expect(row('start_a_referral_scheme')).not.toHaveProperty('win_probability');
     expect(linkHoldsStatedRange(raw, from, to)).toBe(true);
+  });
+
+  it('⛔ NEGATIVE (Codex r1 probe 1): a range recorded on a link subject that resolves to NO admitted link is not carried: it is asked, and nothing registers it', async () => {
+    const typo = draft('recorded');
+    typo.statements[1].subject.label = `${COUNT} TYPO`;
+    const { raw, inputs } = await build([typo]);
+    expect(inputs, 'an unbound range is asked of the retry').toHaveLength(2);
+    expect(inputs[1]).toContain(sent('The brief writes "£40k and £60k" and no link in the model carries it.'));
+    const { from, to } = ends(GraphV3.parse(raw) as unknown as Rec);
+    expect(linkHoldsStatedRange(raw, from, to)).toBe(false);
+  });
+
+  it('⛔ NEGATIVE (Codex r1 probe 2): a range-only retry that changes the admitted goal (£600k → £700k) is NOT adopted; the goal keeps the user\'s £600k', async () => {
+    const changed = draft('recorded');
+    changed.goal.value = 700000;
+    const { raw, inputs } = await build([draft('none'), changed]);
+    expect(inputs, 'PRECONDITION: the range was asked of the retry').toHaveLength(2);
+    const goal = (GraphV3.parse(raw) as unknown as Rec).nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.goal_threshold_raw).toBe(600000);
+    const { from, to } = ends(GraphV3.parse(raw) as unknown as Rec);
+    expect(linkHoldsStatedRange(raw, from, to), 'the first draft is kept, so the range is not registered').toBe(false);
   });
 });

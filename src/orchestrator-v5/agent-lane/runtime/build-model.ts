@@ -5,6 +5,7 @@ import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
+import { linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { timeClassOf } from '../../goal-target/time-class.js';
 import { goalIdentityScopeIsMaterial, materialScopeQuestion, reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
@@ -1143,23 +1144,44 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
  * issue for the EXISTING repair retry. The retry is adopted only when it CARRIES more ranges (`carriedRanges`), so a
  * range that is no per-one size (a budget, a target) costs one retry and changes nothing.
  */
-export function carriedRanges(admitted: Pick<AdmittedModel, 'edges'>, drafted?: CandidateModel, brief?: string): Set<string> {
+export function carriedRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted?: CandidateModel, brief?: string): Set<string> {
   const texts = admitted.edges.map((e) => (e.provenance as { natural_effect?: { stated_range?: { text?: unknown } } } | undefined)?.natural_effect?.stated_range?.text);
-  return new Set([...texts.filter((t): t is string => typeof t === 'string'), ...recordedWholeRanges(drafted, brief)]);
+  return new Set([...texts.filter((t): t is string => typeof t === 'string'), ...recordedWholeRanges(admitted, drafted, brief)]);
 }
 
 /**
  * ⭐ A3 (AIE A3 text; Lane A's host change): the producer keeps a written range WHOLE in `statements` on its link, its size null.
- * A range the AI's own verified link-effect statement records (both ends, in the sentence that writes it) is CARRIED: the retry is
- * never asked for what the draft already holds, and a retry that records it counts as carrying it (the adoption check below).
+ * A range is CARRIED only where registration will hold it: bound to an ADMITTED link by the statement door's own binding
+ * (`withConstructionStatements`, as registration writes it) and read by the Run's one reader (`linkHoldsStatedRange`), both ends
+ * in the sentence that writes it. The retry is never asked for what the draft already holds, and a retry that records it counts
+ * as carrying it (the adoption check below). ⛔ #3401 Codex r1 P1: a statement whose subject resolves to no admitted link
+ * ("Contracts signed TYPO") records nothing at registration, so it carries nothing here.
  */
-function recordedWholeRanges(drafted: CandidateModel | undefined, brief: string | undefined): string[] {
+function recordedWholeRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted: CandidateModel | undefined, brief: string | undefined): string[] {
   if (drafted === undefined || typeof brief !== 'string') return [];
-  const recorded = [...sourceMapOf(draftStatements(drafted), brief).verified].filter(([key]) => key.startsWith('link|') && key.endsWith('|effect'))
-    .flatMap(([, said]) => said).filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
+  // Bound only to read carriage, never saved: the record's time is a valid placeholder (the reader drops a record without one).
+  const bound = withConstructionStatements({ nodes: [...admitted.nodes], edges: [...admitted.edges] }, draftStatements(drafted), brief, new Date(0).toISOString());
+  const recorded = admitted.edges.filter((e) => linkHoldsStatedRange(bound, e.from, e.to))
+    .flatMap((e) => userStatementFor(bound, { kind: 'link', id: e.from, to_id: e.to, field: 'effect' })?.statements ?? [])
+    .filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
   return findStatedRanges(brief).filter((r) => recorded.some((st) => st.quote.includes(r.text)
     && Math.min(Math.abs(st.low!), Math.abs(st.high!)) === r.low.magnitude && Math.max(Math.abs(st.low!), Math.abs(st.high!)) === r.high.magnitude))
     .map((r) => r.text);
+}
+
+/**
+ * ⛔ #3401 Codex r1 P1: range progress never authorises a retry that changes the ADMITTED goal target: its figure (and so its sign),
+ * unit, frame or comparator, read through the one goal-record authority (S5), or the goal's authorship. Refusing keeps the first
+ * draft, never a new figure.
+ */
+function keepsTheAdmittedGoalTarget(first: Pick<AdmittedModel, 'nodes'>, retry: Pick<AdmittedModel, 'nodes'>): boolean {
+  const target = (m: Pick<AdmittedModel, 'nodes'>): string => {
+    const goal = m.nodes.find((n) => n.kind === 'goal');
+    const t = goal === undefined ? null : readGoalRecord(m, String(goal.id))?.target ?? null;
+    return JSON.stringify([t?.raw ?? null, t?.unit ?? null, t?.frame ?? null, t?.comparator ?? null, t?.source ?? null,
+      goal?.provenance ?? null, goal?.proposed_by ?? null]);
+  };
+  return target(first) === target(retry);
 }
 
 /**
@@ -1200,7 +1222,7 @@ function moneyHeldBy(drafted: CandidateModel): { readonly label: string; readonl
  * written about that quantity (`figureTheUserWroteFor`, strict, read `at` that end: the scoped reader #2409's door binds with).
  * Every miss asks the retry, which is adopted only when a link then CARRIES the range: asking costs one call, never a figure.
  */
-export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'edges'>, drafted: CandidateModel): string[] {
+export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted: CandidateModel): string[] {
   const carried = carriedRanges(admitted, drafted, brief);
   const held = moneyHeldBy(drafted);
   const quantities = [drafted.goal.metric, ...drafted.factors.map((f) => f.label), ...drafted.outcomes.map((o) => o.label), ...drafted.risks.map((r) => r.label)];
@@ -2223,7 +2245,8 @@ export async function buildModelFromBrief(
           || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(first.admitted))
           || (retryOpen < gapCount(first.preparation) && keepsEveryRegisteredOption)
           // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted, retryCandidate, brief).size > carriedRanges(first.admitted, first.candidate, brief).size && keepsEveryRegisteredOption)
+          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted, retryCandidate, brief).size > carriedRanges(first.admitted, first.candidate, brief).size && keepsEveryRegisteredOption
+            && keepsTheAdmittedGoalTarget(first.admitted, retryAdmitted))
           || (chainsAsked.length > 0 && keepsEveryRegisteredOption) || unattested !== null) &&
         // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
         (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(first.admitted))) &&
