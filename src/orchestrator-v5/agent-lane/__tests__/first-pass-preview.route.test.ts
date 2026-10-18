@@ -326,7 +326,8 @@ describe('O3 accepted first-pass preview', () => {
       expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
       const actual = snapshot(body, frames);
       const baseline = JSON.parse(readFileSync(wideningBaselinePath, 'utf8')) as Record<string, Snapshot>;
-      expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline[c.name]!.graph));
+      // A (18 Oct): the recording predates the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+      expect(JSON.stringify(withoutNewReferenceMarker(actual.graph, baseline[c.name]!.graph))).toBe(JSON.stringify(baseline[c.name]!.graph));
       expect(actual.reply).toBe(baseline[c.name]!.reply);
     } finally { vi.useRealTimers(); }
   });
@@ -367,7 +368,8 @@ describe('O3 accepted first-pass preview', () => {
       expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
       const baseline = JSON.parse(readFileSync(wideningBaselinePath, 'utf8')) as Record<string, Snapshot>;
       const actual = snapshot(body, frames);
-      expect(JSON.stringify(actual.graph)).toBe(JSON.stringify(baseline[c.name]!.graph));
+      // A (18 Oct): the recording predates the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+      expect(JSON.stringify(withoutNewReferenceMarker(actual.graph, baseline[c.name]!.graph))).toBe(JSON.stringify(baseline[c.name]!.graph));
       expect(actual.reply).toBe(baseline[c.name]!.reply);
     } finally { gate.mockRestore(); vi.useRealTimers(); }
   });
