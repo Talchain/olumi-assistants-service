@@ -11769,10 +11769,13 @@ export function createAgentCapabilities(
           ? { low: (heldRange as { low: number }).low, high: (heldRange as { high: number }).high, quote: (heldRange as { source_quote: string }).source_quote } : undefined;
         if (t.range_low !== undefined || t.range_high !== undefined) {
           const lo = t.range_low, hi = t.range_high;
-          // Both ends from the SAME cited span, by THE ONE RULE (`userStated`, a range keeps both ends).
+          // Both ends from ONE cited span, by THE ONE RULE (`userStated`, a range keeps both ends): the range's own citation
+          // (`range_quote`, when the user gave it in another sentence than the figure they chose), else the figure's.
           const rangeSaid = typeof lo === 'number' && typeof hi === 'number'
-            ? userStated({ quote: t.quote, low: lo, high: hi, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'range' }) : undefined;
-          const sentence = rangeSaid?.origin === 'human' && rangeSaid.statement.quote.length <= USER_TODAY_QUOTE_MAX ? rangeSaid.statement.quote : null;
+            ? userStated({ quote: t.range_quote ?? t.quote, low: lo, high: hi, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'range' }) : undefined;
+          // Stored with the complete line the cited span stands in (the rule's `source`), so its conditions are never dropped.
+          const sentence = rangeSaid?.origin !== 'human' ? null
+            : [rangeSaid.statement.source, rangeSaid.statement.quote].find((w) => w.length <= USER_TODAY_QUOTE_MAX) ?? null;
           const stored = sentence === null ? undefined
             : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
           if (!ownsIt || stored === undefined || !isStatedLevelRange(stored, framed)) {
