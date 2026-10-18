@@ -103,9 +103,18 @@ describe('the build line says what approval changes', () => {
     expect(n.status).not.toMatch(/model was saved|I saved the model/i);
   });
 
-  it('PR 4: a link proposed after the build adds no host reminder (its card says it; never "saved")', () => {
+  it('RED: a link proposed after the build is named as a change, not as figures', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_model_change' }], [BUILT, { ok: true, mutated: false, proposal_id: 'prop_dddddd' }]);
-    expect(n.status).toBeNull();
+    expect(n.status).toBe('What I proposed above is not made until you approve it.');
+    expect(n.status).not.toMatch(/\bsaved\b/i);
+  });
+
+  it('PR 4 CONTRAST: the same link on the AI\'s reply (aiAsks) adds no reminder; the host\'s reply keeps it', () => {
+    const calls = [{ name: 'build_model_from_brief' }, { name: 'propose_model_change' }];
+    const results = [BUILT, { ok: true, mutated: false, proposal_id: 'prop_dddddd' }];
+    expect(narrateWriteOutcome('', calls, results, { aiAsks: true }).status, 'AI-written reply').toBeNull();
+    expect(narrateWriteOutcome('', calls, results, { aiAsks: false }).status, 'host-written reply')
+      .toBe('What I proposed above is not made until you approve it.');
   });
 
   it('CONTRAST: a build with NO pending proposal has no status', () => {
