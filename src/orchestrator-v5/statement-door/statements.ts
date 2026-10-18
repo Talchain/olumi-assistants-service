@@ -12,7 +12,7 @@ import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
 import { userStatementOf, verifyStatements, type UserStatement } from '../agent-lane/user-statements.js';
-import { isStatementField, subjectKey, subjectNodeKey, resolveSubject, type DoorSubject, type StatementField } from './subject.js';
+import { isStatementField, subjectKey, subjectNodeKey, resolveSubject, SUBJECT_KINDS, type DoorSubject, type StatementField } from './subject.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -210,6 +210,8 @@ interface ApprovedCorrectionEdit extends CorrectionEditRequest {
 export interface StatementCorrection {
   readonly source: UserStatement;
   readonly edits: readonly ApprovedCorrectionEdit[];
+  /** The server's existing subject context, frozen with the card; never supplied by the tool's correction argument. */
+  readonly binding_context?: DoorContext;
 }
 type CorrectionResult = { readonly refused: string } | { readonly correction: StatementCorrection; readonly candidate: Rec; readonly words: string };
 
@@ -252,6 +254,18 @@ function replacementStatements(source: UserStatement, e: CorrectionEditRequest):
   })];
 }
 
+/** A pending card must not turn malformed context into a crash or a different binding on its native press. */
+function isCorrectionContext(value: unknown): value is DoorContext {
+  if (!isRec(value) || (value.preceding_ask !== undefined && typeof value.preceding_ask !== 'string')) return false;
+  const s = value.selection;
+  if (s !== undefined && (!isRec(s) || !Array.isArray(s.element_ids) || !s.element_ids.every(id => typeof id === 'string')
+    || typeof s.unresolved !== 'string')) return false;
+  return value.asks === undefined || (Array.isArray(value.asks) && value.asks.every(a => isRec(a) && typeof a.words === 'string'
+    && isRec(a.subject) && typeof a.subject.kind === 'string' && (SUBJECT_KINDS as readonly string[]).includes(a.subject.kind) && typeof a.subject.id === 'string'
+    && isStatementField(a.subject.field) && (a.subject.option_id === undefined || typeof a.subject.option_id === 'string')
+    && (a.subject.to_id === undefined || typeof a.subject.to_id === 'string') && (a.turn_id === undefined || typeof a.turn_id === 'string')));
+}
+
 /** Parse persisted approval bytes with the same complete-record parser as every other statement card. */
 export function statementCorrectionOf(value: unknown): StatementCorrection | undefined {
   if (!isRec(value) || !Array.isArray(value.edits) || value.edits.length < 1 || value.edits.length > 6
@@ -260,6 +274,8 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
   const source = userStatementOf(value.source);
   if (source === undefined || source.form !== 'describes' || source.low !== undefined || source.high !== undefined
     || !wholeStatementIn(source.source, source.quote)) return undefined;
+  const context = value.binding_context;
+  if (context !== undefined && !isCorrectionContext(context)) return undefined;
   const keys = new Set<string>();
   const edits: readonly ApprovedCorrectionEdit[] = value.edits;
   for (const raw of edits) {
@@ -277,7 +293,7 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
     if (raw.legacy !== undefined && (!isRec(raw.legacy) || !['already_true_quote', 'dependency'].includes(String(raw.legacy.field))
       || typeof raw.legacy.expected !== 'string' || !(raw.legacy.replacement === null || typeof raw.legacy.replacement === 'string'))) return undefined;
   }
-  return { ...value, source, edits };
+  return { ...value, source, edits, ...(context === undefined ? {} : { binding_context: context }) };
 }
 
 interface CorrectionDiagnostic {
@@ -305,7 +321,7 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     if (resolved.kind !== 'resolved' || !isDeepStrictEqual(resolved.subject, e.subject) || node === undefined) return { refused: 'node_not_found' };
     if (!isDeepStrictEqual(node, e.expected_node)
       || !isDeepStrictEqual(userStatementFor(graph, e.subject) ?? null, e.expected_record)) return { refused: 'node_changed' };
-    const binding = statementBoundTo(graph, e.subject, approved.source.quote);
+    const binding = statementBoundTo(graph, e.subject, approved.source.quote, approved.binding_context);
     if (binding !== 'bound') {
       if (diagnostic !== undefined) Object.assign(diagnostic, { binder_result: binding, failed_edit_index: editIndex,
         failed_check: `correction.postimage.unrelated_correction.${binding}` });
@@ -375,7 +391,7 @@ export function statementCorrectionWords(c: StatementCorrection): string {
 }
 
 export function prepareStatementCorrection(graph: unknown, request: StatementCorrectionRequest,
-  texts: { now?: string; conversation?: string }, at: string, diagnostic?: CorrectionDiagnostic): CorrectionResult {
+  texts: { now?: string; conversation?: string }, at: string, diagnostic?: CorrectionDiagnostic, context: DoorContext = {}): CorrectionResult {
   const refused = (reason: string, check: string): CorrectionResult => {
     if (diagnostic !== undefined) diagnostic.failed_check = check;
     return { refused: reason };
@@ -403,7 +419,8 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
       record: userStatementRecord(e.subject, replacementStatements(source, { ...e, expected_record: expected }), at,
         correctionAttest({ ...e, expected_record: expected })) });
   }
-  const correction: StatementCorrection = { source: source!, edits };
+  const correction: StatementCorrection = { source: source!, edits,
+    ...(context.selection === undefined && context.preceding_ask === undefined ? {} : { binding_context: structuredClone(context) }) };
   const written = applyStatementCorrection(graph, correction, diagnostic);
   if (written.refused || written.candidate === undefined) return refused(written.refused ?? 'invalid_statement', diagnostic?.failed_check ?? `correction.postimage.${written.refused ?? 'invalid_statement'}`);
   return { correction, candidate: written.candidate, words: statementCorrectionWords(correction) };

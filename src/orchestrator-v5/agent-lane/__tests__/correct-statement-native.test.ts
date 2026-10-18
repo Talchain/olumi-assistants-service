@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { log } from '../../../utils/telemetry.js';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
-import { userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
+import { applyStatementCorrection, userStatementRecord, userStatementFor, type StatementCorrectionRequest } from '../../statement-door/statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
 import { rangeLawAdopted, rangeLawSubject } from '../../intervention-range.js';
+import { doorAsks } from '../../statement-door/door.js';
 
 const cases = [
   { name: 'distribution', factor: 'Dispatch updates', risk: 'Service disruption', retained: 'delayed scans', withdrawn: 'the entire shift has stopped' },
@@ -36,6 +37,70 @@ function fixture(row: typeof cases[number]) {
   return { graph, message, subject, other, request };
 }
 const withoutRef = ({ ref: _ref, ...node }: Rec) => node;
+
+describe.each(cases)('$name: correction uses the existing subject context', row => {
+  it.each(['selection', 'question'] as const)('%s survives its own card, native press and cold read', async origin => {
+    const f = fixture(row), message = `Retract “${row.withdrawn}”; keep the earlier report.`;
+    f.graph.nodes[0].goal_horizon_months = 6;
+    const edit = f.request.edits[origin === 'selection' ? 0 : 1]!;
+    const w = await correctionWorld(f.graph, message);
+    if (origin === 'selection') Object.assign(w.ctx, { grounded_selection: { element_ids: [edit.subject.id], unresolved: 'none' } });
+    else {
+      const ask = doorAsks(f.graph).find(a => a.subject.id === edit.subject.id && a.subject.field === edit.subject.field);
+      expect(ask).toBeDefined();
+      Object.assign(w.ctx, { preceding_assistant_text: ask!.words });
+    }
+    const card = await w.offer('propose_statement', { correction: { quote: message, edits: [edit] } });
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(card.proposal_id), proposal = w.proposals.get(pid)!, restored = w.restoreCard(proposal, card);
+    expect(restored.get(pid)).toEqual(proposal);
+    expect(card.public_label).toContain(`For ${origin === 'selection' ? row.factor : row.risk}`);
+    expect(w.writes).toHaveLength(0);
+    // A pending-card press need not carry the selection or question from the preparation turn.
+    Object.assign(w.ctx, { grounded_selection: undefined, preceding_assistant_text: undefined });
+    expect(await w.press(pid, restored, false)).toMatchObject({ ok: false, mutated: false });
+    expect(await w.press(pid, restored)).toMatchObject({ ok: true, applied: true });
+    const saved = structuredClone(w.graph()), record = userStatementFor(saved, edit.subject)!;
+    expect(record.statements[0]).toMatchObject({ quote: message, source: message, speaker: 'user', reading: 'olumi' });
+    expect(record.statements[1]).toEqual(userStatementFor(f.graph, edit.subject)!.statements[0]);
+    expect(saved.nodes.find((n: Rec) => n.id === 'report').observed_state).toEqual(f.graph.nodes[1].observed_state);
+    expect(withoutRef(saved.nodes.find((n: Rec) => n.id === 'dissent'))).toEqual(f.graph.nodes[4]);
+    expect(await w.press(pid, restored)).toMatchObject({ ok: true, already_applied: true });
+    expect(w.writes).toHaveLength(1);
+    const cold = await w.cold(); expect(cold.body.graph).toEqual(saved);
+    expect(userStatementFor(cold.body.graph, edit.subject)).toEqual(record);
+  });
+
+  it.each(['absent', 'another named', 'multiple selected', 'no source', 'other speaker', 'AI-supplied context'])('%s cannot author this subject', async fault => {
+    const f = fixture(row), plain = `Retract “${row.withdrawn}”; keep the earlier report.`;
+    f.graph.nodes.push({ id: 'energy', kind: 'factor', label: 'Energy use' });
+    const quote = fault === 'another named' ? `For Energy use, ${plain}` : plain;
+    const w = await correctionWorld(f.graph, quote);
+    if (!['absent', 'AI-supplied context'].includes(fault)) Object.assign(w.ctx, {
+      grounded_selection: { element_ids: fault === 'multiple selected' ? ['report', 'energy'] : ['report'], unresolved: 'none' },
+    });
+    if (fault === 'no source') Object.assign(w.ctx, { user_turn_text: undefined, unverified_user_text: quote });
+    if (fault === 'other speaker') Object.assign(w.ctx, { user_turn_text: `A colleague said: “${quote}”` });
+    const card = await w.offer('propose_statement', { correction: { quote, edits: [f.request.edits[0]],
+      ...(fault === 'AI-supplied context' ? { binding_context: { selection: { element_ids: ['report'], unresolved: 'none' } } } : {}) } });
+    expect(card).toMatchObject({ ok: false, mutated: false,
+      refusal: ['no source', 'other speaker'].includes(fault) ? 'correction_not_stated' : 'unrelated_correction' });
+    expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  });
+
+  it('the frozen context is covered by card integrity, and malformed persisted context is refused natively', async () => {
+    const f = fixture(row), quote = `Retract “${row.withdrawn}”; keep the earlier report.`, w = await correctionWorld(f.graph, quote);
+    Object.assign(w.ctx, { grounded_selection: { element_ids: ['report'], unresolved: 'none' } });
+    const card = await w.offer('propose_statement', { correction: { quote, edits: [f.request.edits[0]] } });
+    expect(card.ok).toBe(true);
+    const pid = String(card.proposal_id), restored = w.restoreCard(w.proposals.get(pid)!, card);
+    const correction = (restored.get(pid)!.operations[0]!.value as Rec).correction;
+    expect(applyStatementCorrection(f.graph, { ...correction, binding_context: { asks: 'invalid' } })).toEqual({ refused: 'invalid_statement' });
+    correction.binding_context.selection.element_ids = ['different-subject'];
+    expect(await w.press(pid, restored)).toMatchObject({ ok: false, mutated: false });
+    expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
+  });
+});
 
 it.each([
   ['missing quote', 'correction_not_stated', 'correction.quote_present'],

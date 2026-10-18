@@ -6769,7 +6769,7 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'model_unavailable', detail: 'The model could not be read, so nothing was prepared.' };
       if (args?.correction !== undefined) {
         if (Object.keys(args).some(k => k !== 'correction')) return { ok: false, mutated: false, refusal: 'mixed_statement_changes' };
-        return proposeStatementCorrection(ctx, g.raw, g.graph_hash, args.correction as never, proposals, diagnostic);
+        return proposeStatementCorrection(ctx, g.raw, g.graph_hash, args.correction as never, proposals, diagnostic, doorContextOf(ctx, g.raw));
       }
       // Whose words they are is the verifier's ONE check (a whole statement of this turn's or a verified earlier message).
       const resolved = resolveSubject(g.raw, isPlainRecord(args?.subject) ? args.subject : {});
