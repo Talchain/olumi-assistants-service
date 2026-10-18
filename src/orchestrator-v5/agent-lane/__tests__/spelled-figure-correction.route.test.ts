@@ -26,7 +26,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
-import { figureTheUserWrote, timesTheUserWrote } from '../stated-by-user.js';
+import { figureTheUserWrote, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/capacity-358132d8-unsized-olumi-risk-graph-20261014.json', import.meta.url), 'utf8')) as Rec;
@@ -150,25 +150,64 @@ describe('a figure written in words is written, exactly as its digits are (deplo
   }, 2 * ROUTE_MS);
 });
 
+describe('another speaker’s quoted figure, or a name, is never the user’s correction (real route)', () => {
+  it.each([
+    ['another speaker’s quoted words', 'Our manager said: \u201Cthe team resolves seventy tickets per week\u201D.'],
+    ['a name', 'We moved to the Seventy Tickets plan last year.'],
+  ])('⛔ %s: the Agent’s 70 has no human origin, no card, nothing written', async (_n, typed) => {
+    const { result, chip, w } = await correct(typed, teamLevel(70));
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    expect(chip).toBeUndefined();
+    expect(nodeOf(w.graph(), TEAM)).toEqual(nodeOf(SERVED.graph, TEAM));
+  }, 2 * ROUTE_MS);
+});
+
 /**
- * ⛔ Codex SPELLED pair (AMEND): a figure in words is written only WITH its unit word, of the held unit's kind, so it is never read
- * more broadly than the same digits followed by that word. Presence only: never attestation of which quantity it is.
+ * ⛔ Codex SPELLED pair AMEND (AIE bb91dcdd; PL 20:57): a figure in words is the user's only where the words after it state the held
+ * unit (the one tail reader + C3's carrier rule). It never attests a baseline, another quantity, a source, a scale, a share or a
+ * unit/period its digits' guards protect, and never reads an ordinal, a name or another speaker's quoted words. Presence only.
  */
-describe('a figure in words is written only with its unit word, never more broadly than its digits', () => {
+describe('a figure in words is written only with the held unit after it, never more broadly than its digits', () => {
   it.each([
     ['a count with its unit', 70, 'tickets per week', 'Our team resolves seventy tickets per week.', true],
     ['a duration with its unit', 2, 'hours per week', 'It takes two hours per week.', true],
+    ['the same period, said another way', 2, 'hours per week', 'It takes two hours a week.', true],
     ['a correction', 35, 'minutes', 'The wait is thirty-five minutes, not forty-five.', true],
+    ['a sentence that opens with it', 2, 'developers', 'Two developers left last month.', true],
+    ['after a colon', 70, 'tickets per week', 'Correction: Seventy tickets per week, not eighty.', true],
+    // trailing unit and period
     ['no unit word', 2, 'hours per week', 'We have two of them.', false],
     ['the pronoun "one"', 1, 'specialists', 'One of them was off sick, and the one who covered was new.', false],
-    ['an ordinal', 20, 'specialists', 'This is the twenty-first week of the rota.', false],
-    ['a percentage in words', 2, 'people', 'Churn is two percent.', false],
+    ['another count', 70, 'tickets per week', 'Our team serves seventy customers per week.', false],
     ['another kind of unit', 2, 'minutes', 'We hired two developers.', false],
-    ['money in words', 2, '£k/month', 'It costs two thousand pounds a month.', false],
-    ['a share', 1, 'share of customers', 'About one customer in five leaves.', false],
+    ['another unit of the same kind', 35, 'hours', 'The wait is thirty-five minutes.', false],
+    ['another period', 2, 'hours per month', 'It takes two hours per week.', false],
+    // scale, money, percentages and shares
+    ['money in words, scaled unit', 2, '£k/month', 'It costs two thousand pounds a month.', false],
+    ['money in words, plain unit', 2000, '£', 'It costs two thousand pounds.', false],
+    ['a percentage in words', 2, 'people', 'Churn is two percent.', false],
+    ['a percentage in words, % unit', 50, '%', 'Fifty percent of customers renew.', false],
+    ['a share', 0.5, 'share of customers', 'About half of them renew.', false],
+    ['a share as a count', 1, 'share of customers', 'About one customer in five leaves.', false],
+    // ordinals
+    ['a hyphenated ordinal', 20, 'weeks', 'This is the twenty-first week of the rota.', false],
+    ['a spaced ordinal', 40, 'customers', 'She was our forty fifth customer.', false],
+    ['a scale ordinal', 1, 'customers', 'He was our one hundredth customer.', false],
+    // names
+    ['a name inside a sentence', 2, 'developers', 'We work with Two Developers Ltd on the app.', false],
+    ['a name that opens a sentence', 2, 'developers', 'Two Developers Ltd sent the quote.', false],
+    // another speaker's quoted words
+    ['double quotes', 70, 'tickets per week', 'Our manager said "we resolve seventy tickets per week" in the review.', false],
+    ['curly quotes', 70, 'tickets per week', 'Our manager said: \u201Cwe resolve seventy tickets per week\u201D.', false],
   ] as const)('%s', (_n, value, unit, text, written) => {
     expect(figureTheUserWrote(value, unit, text)).toBe(written);
     expect(timesTheUserWrote(value, unit, text) >= 1).toBe(written);
+  });
+
+  it('a name, an ordinal or a quote is never a second writing; the user’s own words are', () => {
+    expect(timesTheUserWrote(2, 'developers', 'We need two developers. We work with Two Developers Ltd.')).toBe(1);
+    expect(timesTheUserWrote(70, 'tickets per week', 'Seventy tickets per week. Our manager said "seventy tickets per week".')).toBe(1);
+    expect(timesTheUserWrote(70, 'tickets per week', 'Seventy tickets per week, so 70 tickets per week.')).toBe(2);
   });
 
   it('parity: wherever a spelled figure is written, its digits with the same words are too', () => {
@@ -184,3 +223,20 @@ describe('a figure in words is written only with its unit word, never more broad
   });
 });
 
+/**
+ * ⛔ A BRIEF'S BASELINE (Codex probe: "Hire three engineers" kept an unstated 3 enterprise customers as the user's): words never bypass
+ * `baselineTheBriefStates`'s own binding (the words right after the figure must name this factor); digits are read first, as before.
+ */
+describe('a spelled baseline is the user’s only where the words after it name the factor', () => {
+  const factor = (raw: number): Rec => ({ id: 'ent', kind: 'factor', label: 'Enterprise customers',
+    observed_state: { value: raw / 100, raw_value: raw, unit: 'customers', source: 'brief_extraction' } });
+  const sourceOf = (brief: string, raw: number): unknown => (withdrawUnstatedBaselineStamps([factor(raw)], brief)[0]!.observed_state as Rec).source;
+  it.each([
+    ['spelled, naming the factor', 'We serve three enterprise customers today.', 3, 'brief_extraction'],
+    ['digits, naming the factor', 'We serve 3 enterprise customers today.', 3, 'brief_extraction'],
+    ['spelled, another quantity', 'We plan to hire three engineers.', 3, 'cee_inference'],
+    ['spelled ordinal', 'Our twenty-first enterprise customer signed today.', 20, 'cee_inference'],
+  ] as const)('%s', (_n, brief, raw, source) => {
+    expect(sourceOf(brief, raw)).toBe(source);
+  });
+});
