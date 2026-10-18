@@ -87,7 +87,7 @@ describe('runAgentTurn', () => {
     const r = await runAgentTurn({ ctx, history: [], message: 'x', instructions: 'i', maxOutputTokens: 100 }, caps(), model);
     // The record now also names WHY it was refused — an unknown tool must not
     // read the same as a tool that ran and honestly returned ok:false.
-    expect(r.tool_calls[0]).toEqual({ name: 'delete_everything', ok: false, mutated: false, refusal: 'unknown_tool' });
+    expect(r.tool_calls[0]).toEqual({ name: 'delete_everything', ok: false, mutated: false, refusal: 'unknown_tool', arguments: {} });
   });
 
   it('a hop limit is REPORTED, never disguised as an empty answer', async () => {
