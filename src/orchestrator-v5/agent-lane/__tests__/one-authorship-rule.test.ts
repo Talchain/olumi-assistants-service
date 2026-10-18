@@ -36,9 +36,11 @@ describe('the one rule: whose value it is', () => {
     expect(userStated({ quote: 'Returns will drop to 3% once the new labels ship.', value: 3 }, quoted, SUBJECT).origin).toBe('unknown');
     const reported = texts('You suggested returns would drop to 3%. Is that right?');
     expect(userStated({ quote: 'returns would drop to 3%', value: 3 }, reported, SUBJECT).origin).toBe('unknown');
-    // CONTRAST: the speaker's words WITH the speaker are the user's report of them, kept whole as the source.
+    // Quoting the report WITH its speaker does not make the speaker's figure the user's (#3389 probe P2)…
     const whole = 'Our ops lead told me: “Returns will drop to 3% once the new labels ship.”';
-    expect(userStated({ quote: whole, value: 3 }, quoted, SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: whole } });
+    expect(userStated({ quote: whole, value: 3 }, quoted, SUBJECT).origin).toBe('unknown');
+    // …though the report itself, as words with no figure of the user's, is theirs to have typed, speaker kept in the quote.
+    expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: whole } });
     // CONTRAST: the user's own figure in their own words.
     expect(userStated({ quote: 'returns are 5% today', value: 5 }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
   });

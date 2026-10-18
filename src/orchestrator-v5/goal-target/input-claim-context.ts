@@ -284,6 +284,16 @@ export function usersSpanIn(message: string, quote: unknown): number {
     && !/(?:^|[\s:([\u2014\u2013-])'\p{L}/u.test(paragraphTo(text, at + said.length))) ?? -1;
 }
 
+/**
+ * ⭐ LEAN CORE (check 3, the #3389 probe P2): `quote` in the one spelling the speech reader uses, with that reader (`insideSpeech`):
+ * whether a place in it sits inside another speaker's PAIRED quotation marks. Only marks bound speech; an unmarked report ("A colleague
+ * said: …") is not seen by this reader (a named limitation, never a phrase list).
+ */
+export function speechReading(quote: string): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
+  const text = plainQuote(quote);
+  return { text, inSpeech: (at) => insideSpeech(text, at) };
+}
+
 /** ⭐ LEAN CORE: the user's own words `later` (each a later message) withdraw or disown their estimates, so an earlier span is not current. */
 export function withdrawnLater(later: readonly string[]): boolean {
   return later.some((m) => clausesOf(plainQuote(m)).some(disowns));

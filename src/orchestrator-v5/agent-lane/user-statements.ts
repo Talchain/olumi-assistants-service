@@ -12,7 +12,7 @@
 import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
-import { quoteIsNotTheUsersClaim, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
+import { quoteIsNotTheUsersClaim, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 
 /**
@@ -185,6 +185,18 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
 }
 
 /**
+ * ⭐ LEAN CORE (check 3; #3389 probe P2): every place the quote writes `figure` sits inside another speaker's paired quotation marks
+ * ("A colleague said: “we lose 5% a month”"): the figure is that speaker's, never the user's, though the user typed the report.
+ */
+function figureOnlyInSpeech(quote: string, figure: number): boolean {
+  const { text, inSpeech } = speechReading(quote);
+  const spelled = [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) =>
+    (parseCardinalAmount(m[0]) === Math.abs(figure) ? [m.index!] : []));
+  const at = [...findStatedAmounts(text).filter((a) => Math.abs(a.magnitude) === Math.abs(figure)).map((a) => a.index), ...spelled];
+  return at.length > 0 && at.every(inSpeech);
+}
+
+/**
  * ⭐ S4 NET LOSS (DL 15 Oct 06:43Z): "we're losing a net 15 members a month" states 15 AND, read as a net flow, −15: the same
  * figure with the opposite direction word, where the words state a NET flow. With no such words a negative is never the user's.
  * AIE 6187351293 (2a scope): "We lose 15 members a month" can be a gross count of 15 lost, so only a net flow states −15.
@@ -299,6 +311,8 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   const negated = given?.negated === true;
   const givenUnit = rules.unitWritten === true ? trimmed(given?.unit, 60) : undefined;
   if (rules.unitWritten === true && givenUnit === undefined) return malformed(`Give the unit “${quote}” writes after its figure, as unit. Nothing was prepared.`);
+  const anotherSpeaker = (figureWords: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_not_found',
+    detail: `In “${quote}”, ${figureWords} is in another speaker's quoted words, so it is not the user's own figure. Nothing was prepared.` });
   const unitRefused = (said: string): StatementVerdict => ({ kind: 'refused', refusal: 'figure_not_in_quote',
     detail: `“${quote}” does not state ${said} in ${givenUnit}: the unit read is the one written after the figure. Quote the words that state it. Nothing was prepared.` });
   const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: givenUnit ?? rules.unit,
@@ -317,6 +331,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+    if (figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
     if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
   }
@@ -327,6 +342,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+  if (figureOnlyInSpeech(quote, end)) return anotherSpeaker(String(value));
   if (givenUnit !== undefined && !unitWrittenAfter(quote, end, givenUnit)) return unitRefused(String(value));
   return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };
 }

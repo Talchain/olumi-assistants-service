@@ -8,7 +8,7 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { userStated } from '../user-statements.js';
 import { currentCorrectionOf } from '../../statement-door/read.js';
-import { prepareStatementCorrection, userStatementFor } from '../../statement-door/statements.js';
+import { prepareStatementCorrection, recordsWithUnknownSpeakerOn, userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We want to grow weekly bookings to at least 300 within 12 months.';
@@ -103,4 +103,38 @@ describe('PL-0048 (2): a span the user\'s correction retired is never re-credite
     expect(userStated({ quote: fresh, value: 210, unit: 'bookings a week' }, chat(BRIEF, FIX, fresh), { quantity: 'goal_level' },
       { current: currentCorrectionOf(graph, subject as never) }).origin).toBe('human');
   });
+});
+
+describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words is never the user\'s, on the real build → register path', () => {
+  const LOSS = 'Member loss';
+  const withLoss = (line: string, quote: string): { model: Rec; brief: string } => {
+    const base = draft();
+    const model = { ...base, factors: [...base.factors, { label: LOSS, role: 'external', baseline_known: true, baseline_value: 5, unit: '% a month',
+      provenance: 'explicit', plausible_max: 100 }], links: [...base.links, { from: LOSS, to: GOAL, direction: 'negative', provenance: 'inferred',
+      effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null }],
+    statements: [...(base.statements as Rec[]), { quote, subject: { kind: 'factor', label: LOSS, to_label: null, factor_label: null }, field: 'level',
+      form: 'point', value: 5, low: null, high: null, unit: '% a month', qualifier: null, conditions: null }] };
+    return { model, brief: [AIM, TODAY, line, 'We could add evening slots or run a referral offer.'].join('\n') };
+  };
+  const lossNode = (g: Rec): Rec => g.nodes.find((n: Rec) => n.label === LOSS);
+
+  it('the user\'s report of a colleague\'s words, speaker included: the 5% is NOT the user\'s; the words are kept, speaker unknown', async () => {
+    const line = 'A colleague said: “we lose 5% of members a month.”';
+    const { model, brief } = withLoss(line, line);
+    const g = await saved(model, brief);
+    expect(userStatementsOn(lossNode(g)), 'never the user\'s figure').toEqual([]);
+    expect(recordsWithUnknownSpeakerOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
+  });
+
+  it('CONTRAST: the user\'s own "we lose 5% of members a month" IS credited to them', async () => {
+    const line = 'Honestly, we lose 5% of members a month.';
+    const { model, brief } = withLoss(line, line);
+    const g = await saved(model, brief);
+    expect(userStatementsOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'user', quote: line, low: 5, high: 5 })]);
+  });
+
+  // ⛔ NAMED LIMITATION (DL-3 18 Oct, no phrase list added): the existing speech reader sees only PAIRED quotation marks, so an UNMARKED
+  // report ("A colleague said: we lose 5% a month") is still read as the user's own words. Closing it needs an attribution reading the
+  // estate does not have yet (the AI's own `speaker` reading, or a schema field), not a host word list.
+  it.todo('LIMITATION: an unmarked report of another speaker ("A colleague said: we lose 5% a month") is not yet told apart from the user\'s own words');
 });
