@@ -31,7 +31,11 @@ export interface StatementSubject {
 }
 
 export interface UserStatement {
-  readonly speaker: 'user';
+  /**
+   * `'unknown'` (the estate's speaker-unknown label, DL-3 16:14Z on #3363): words the brief writes verbatim that the quote check cannot
+   * bound as one whole statement, kept exactly as written. Never the user's, and never operative: `describes`, with no figure, unit or sign.
+   */
+  readonly speaker: 'user' | 'unknown';
   /** The user's words, verbatim, as the Agent quoted them. */
   readonly quote: string;
   /** The complete line of the user's typed words that holds the quote. */
@@ -189,6 +193,13 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };
 }
 
+/** Words `text` writes verbatim on one line, kept with speaker unknown for `subject`: no figure, unit or sign. `undefined` if not written. */
+export function unknownSpeakerWords(quote: unknown, text: string, subject: StatementSubject): UserStatement | undefined {
+  const q = trimmed(quote, 400);
+  const source = q === undefined ? undefined : verbatimSourceLine({ now: text }, q);
+  return q === undefined || source === undefined ? undefined : { speaker: 'unknown', quote: q, source, subject, form: 'describes', reading: 'olumi' };
+}
+
 /** Every statement verified, or the first refusal (all or nothing, for a chat card); then one set of conditions only. */
 export function verifyStatements(raw: unknown, texts: StatementTexts, rules: StatementRules): StatementsVerdict {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_STATEMENTS) {
@@ -263,10 +274,11 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
   const form = STATEMENT_FORMS.find((f) => f === r.form);
   const optional = (k: string): string | undefined => (typeof r[k] === 'string' ? r[k] as string : undefined);
   const end = (k: string): number | undefined => (typeof r[k] === 'number' && Number.isFinite(r[k]) ? r[k] as number : undefined);
-  if (r.speaker !== 'user' || r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
+  const unknownWords = r.speaker === 'unknown' && form === 'describes' && [r.low, r.high, r.unit, r.negated].every((x) => x === undefined);
+  if ((r.speaker !== 'user' && !unknownWords) || r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
     || subject === undefined || typeof subject.quantity !== 'string') return undefined;
   const low = end('low'), high = end('high'), qualifier = optional('qualifier'), conditions = optional('conditions');
-  return { speaker: 'user', quote: r.quote, source: r.source, form, reading: 'olumi',
+  return { speaker: unknownWords ? 'unknown' : 'user', quote: r.quote, source: r.source, form, reading: 'olumi',
     subject: { quantity: subject.quantity, ...(typeof subject.node_id === 'string' ? { node_id: subject.node_id } : {}),
       ...(typeof subject.option_id === 'string' ? { option_id: subject.option_id } : {}) },
     ...(low !== undefined ? { low } : {}), ...(high !== undefined ? { high } : {}),

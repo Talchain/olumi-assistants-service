@@ -17,7 +17,7 @@
  */
 import { findJoinedRanges, findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
-import { STATEMENT_FORMS, unitWrittenAfter, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
+import { STATEMENT_FORMS, unitWrittenAfter, unknownSpeakerWords, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
@@ -422,7 +422,8 @@ export function goalTargetStatements(model: unknown, brief: string, figure: numb
  * cold reopen and the AI's working input hold the user's own sentences, not only the authorship they decided. Each entry is
  * verified on its own, exactly as `sourceMapOf` does, and bound to a graph subject ONLY by the door's resolver (ids, else one
  * exact label; never guessed). An option's setting of a factor is the door's `{factor, option_id}`. An entry whose subject does
- * not resolve, or that is refused, records nothing and stays in the map, unknown (never Olumi's). Pure.
+ * not resolve, or that is refused, records nothing and stays in the map, unknown (never Olumi's), except words the brief writes
+ * verbatim that are refused only as not whole: those are recorded with speaker unknown (`unknownSpeakerWords`). Pure.
  */
 export function withConstructionStatements<G extends { nodes: unknown[] }>(graph: G, raw: unknown, brief: string, recordedAt: string): G {
   const entries = (Array.isArray(raw) ? raw : []).slice(0, MAX);
@@ -439,8 +440,13 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
       const source = subjectSource({ statements: entries }, brief, drafted);
       if (source.author.origin !== 'human') continue;
     }
-    const verified = [...sourceMapOf([entry], brief).verified.values()].flat();
-    if (verified.length === 0) continue;
+    const map = sourceMapOf([entry], brief);
+    // ⛔ DL-3 16:14Z (#3363 R3; first loss P07/P09): words the brief writes verbatim, refused ONLY as not a whole statement there, are
+    // kept with speaker unknown instead of dropped. Every other refusal still records nothing.
+    const unknown = map.refused[0]?.refusal === 'statement_not_found'
+      ? unknownSpeakerWords(r['quote'], brief, { quantity: subjectKey(drafted, field) }) : undefined;
+    const said = unknown !== undefined ? [unknown] : [...map.verified.values()].flat();
+    if (said.length === 0) continue;
     const ref = drafted.kind === 'option' && drafted.factor_label !== undefined
       ? { kind: 'factor', label: drafted.factor_label, option_label: drafted.label, field }
       : { kind: drafted.kind, label: drafted.label, ...(drafted.to_label !== undefined ? { to_label: drafted.to_label } : {}), field };
@@ -448,7 +454,7 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
     if (resolved.kind !== 'resolved') continue;
     const key = doorSubjectKey(resolved.subject);
     const group = groups.get(key) ?? { subject: resolved.subject, statements: [] };
-    group.statements.push(...verified);
+    group.statements.push(...said);
     groups.set(key, group);
   }
   let out = graph as G & Record<string, unknown>;
