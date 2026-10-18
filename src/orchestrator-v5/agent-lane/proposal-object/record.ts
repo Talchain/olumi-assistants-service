@@ -37,7 +37,8 @@ import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
-import { heldCardAppliesAt } from './still-applies.js';
+import { heldCardAppliesAt, heldCardUnderReview } from './still-applies.js';
+import { reviewChipFor } from './reply.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
 /** The approve chip id prefix (`approval-chips.ts` APPROVE_PREFIX), restated here only to build the card's id. */
@@ -180,6 +181,11 @@ export interface ProposalRecord<F extends ProposalField = ProposalField> {
   readonly operations: readonly HeldOp[];
   readonly fields: readonly F[];
   readonly missing: readonly MissingDatum[];
+  /**
+   * ⭐ NO SILENT LAPSE (PR-2): a card kept for review carries its "Review this change" action. It is projected beside its
+   * "Not now" in place of its approve (wire-only: never in the digest), so a reload shows it too.
+   */
+  readonly review_action?: CardAction;
 }
 
 export type HeldOp = { readonly op: string; readonly path: string; readonly value?: unknown };
@@ -409,7 +415,8 @@ export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.n
     const reading = identityReadingOf(held);
     if (reading === undefined || !identityCardOfferable(graph, reading.part_levels, reading)) return undefined;
   }
-  return productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
+  const record = productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
+  return record !== undefined && heldCardUnderReview(pa) ? { ...record, review_action: reviewChipFor(record.proposal_id, heldChangeLabel(pa)) } : record;
 }
 
 /** What the change is, in the user's words: "the risk 'X'", "the option 'X'", "the factors 'X' and 'Y'". */
@@ -542,6 +549,7 @@ export interface ProposalFieldsWire {
     readonly issued_turn_id: string | null;
     readonly approve_action: CardAction;
     readonly decline_action: CardAction;
+    readonly review_action?: CardAction;
     readonly fields: readonly ProposalField[];
     readonly missing: readonly MissingDatum[];
   }[];
@@ -552,6 +560,8 @@ export interface ProposalFieldsWire {
  * read on a moved model too: an unrelated approval never hides it); a product hold by its pin.
  */
 export function heldRecordAppliesAt(hold: PendingAction, record: ProposalRecord, graph: unknown, graphHash: string | undefined): boolean {
+  // A card kept for review is projected on any model (as review, never approvable): a reload must show it (PR-2, A6).
+  if (heldCardUnderReview(hold)) return true;
   const p = agentProposalOf(hold);
   return p !== undefined ? heldCardAppliesAt(p, graph, graphHash) : record.base_graph_hash === graphHash;
 }
@@ -581,6 +591,7 @@ export function proposalFieldsWire(
       proposal_id: r.proposal_id, revision: r.revision, digest: r.digest, approve_action: r.approve_action, decline_action: r.decline_action,
       // Wire-only context: issuing a card never changes the digest of what that card showed.
       issued_turn_id: issuedTurnIds.get(r.revision) ?? null,
+      ...(r.review_action !== undefined ? { review_action: r.review_action } : {}),
       fields: r.fields, missing: r.missing,
     })),
   };

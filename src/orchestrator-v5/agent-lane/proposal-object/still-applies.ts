@@ -19,6 +19,7 @@
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
  * Any other card keeps the whole-model rule.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import type { StructuredProposal } from '../proposal.js';
 import type { PendingAction } from '../../session/pending-action.js';
@@ -117,6 +118,8 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   if (op.op === 'set_hiring_times') return hiringTimesStillApply(op.value as ApprovedHiringTimes, graph);
   if (op.op === 'set_option_capacity_change') return optionCapacityChangeStillApplies(op.value as ApprovedOptionCapacityChange, graph);
   if (op.op === 'set_goal_deadline') return deadlineSubjectHolds(op, graph) === true;
+  // A limit card: its row still reads the figure it was made against (verifier F1: a same-turn limit card beside a figure card).
+  if (op.op === 'set_limit') return limitRowReadsAsMade(op, graph);
   // A risk occurrence card: its own writer's gate (its goal as bound, its node as shown; #3013).
   if (op.op === SET_RISK_OCCURRENCE_OP) return riskOccurrenceCardHolds(op, graph);
   // A cohort forecast card: its own writer's gate (the option as shown, the two targets as read).
@@ -124,6 +127,19 @@ export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, 
   // The goal's same-people card: its own writer's gate (the goal as shown).
   if (op.op === SET_STATEMENT_RECORD_OP) return statementRecordCardHolds(op, graph);
   return false;
+}
+
+/**
+ * The limit row a `set_limit` card changes, EXACTLY as the card was made against (`row_as_made`, its whole meaning: comparator
+ * as stated, figure, unit, frame, role). Codex BLOCK on #3424 @db2376d0: a strictness edit ("at most 3" → "less than 3") left a
+ * card showing "at most 2" applicable, and its press saved "less than 2". A card made before the snapshot holds only on its base.
+ */
+function limitRowReadsAsMade(op: { readonly path?: string; readonly value?: unknown }, graph: unknown): boolean {
+  const v = op.value as { constraint_id?: unknown; row_as_made?: unknown } | undefined;
+  if (!isRec(v?.row_as_made)) return false;
+  const rows = isRec(graph) && Array.isArray(graph['goal_constraints']) ? (graph['goal_constraints'] as unknown[]).filter(isRec) : [];
+  const row = rows.filter((r) => r['constraint_id'] === v.constraint_id);
+  return row.length === 1 && row[0]!['node_id'] === op.path && isDeepStrictEqual(row[0], v.row_as_made);
 }
 
 /**
@@ -146,6 +162,48 @@ export function heldCardSubjectMoved(p: Pick<StructuredProposal, 'operations'>, 
  * (`computeSurvivingPriorPendingsDetailed`, its hash rule). The hold keeps its pin: an Agent card's pin IS its proposal's base
  * (`agentProposalOf`), so re-pinning it would break the card the user sees.
  */
+/** A held Agent card as a stored pending carries it (`inline_patch.agent_proposal`). */
+export function isHeldAgentCard(pa: PendingAction): boolean {
+  return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.['agent_proposal']);
+}
+
+/**
+ * ⭐ NO SILENT LAPSE (DL-3 18 Oct, PR-2; Codex co-design §2: "Overlapping/dependency changes retain it visibly as 'Model
+ * changed — review this change'"): a held Agent card whose own subject moved is KEPT, marked for review, at every seam that
+ * used to drop it — the commit's carry-forward, the mutating commit's referee and the turn's reconcile. A card under review
+ * is never executable (its press is refused by its own base) and never bound by typed words; the reply offers it to be
+ * reviewed (the Agent prepares it again on the model as it is now) or set aside. Its pin and digest are unchanged.
+ */
+const AWAITING_REVIEW = 'awaiting_review';
+/**
+ * The card a verified approved write is applying now (PR-2 CI, run4 `after_write`): its OWN write moves its own subject, and that
+ * is never a model change to review. The commit seams that mark a card for review retire THIS card as before PR-2, so a retry
+ * after an interrupted turn still binds its press and is answered "already saved". The same async context as an approved
+ * adoption (`approved-adoption-context.ts`): unreachable from outside the process.
+ */
+const applying = new AsyncLocalStorage<{ readonly scenarioId: string; readonly proposalId: string }>();
+export function runApplyingHeldCard<T>(scenarioId: string, proposalId: string, fn: () => Promise<T>): Promise<T> {
+  return applying.run({ scenarioId, proposalId }, fn);
+}
+export function isHeldCardBeingApplied(pa: PendingAction): boolean {
+  const a = applying.getStore();
+  const p = pa.action.kind === 'apply_proposed_change' ? (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] : undefined;
+  return a !== undefined && pa.scenario_id === a.scenarioId && isRec(p) && p['proposal_id'] === a.proposalId;
+}
+export function heldCardUnderReview(pa: PendingAction): boolean {
+  return pa.action.kind === 'apply_proposed_change' && isRec((pa.action.inline_patch as Rec | undefined)?.[AWAITING_REVIEW]);
+}
+/** Whether the carrier of `proposalId` among these pendings is kept for review: its approve is never offered (any read). */
+export function heldCardUnderReviewIn(pendings: readonly PendingAction[], proposalId: string): boolean {
+  return pendings.some((pa) => pa.action.kind === 'apply_proposed_change' && heldCardUnderReview(pa)
+    && ((pa.action.inline_patch as Rec | undefined)?.['agent_proposal'] as Rec | undefined)?.['proposal_id'] === proposalId);
+}
+export function heldCardForReview(pa: PendingAction, modelNow: string | null | undefined): PendingAction {
+  if (pa.action.kind !== 'apply_proposed_change' || heldCardUnderReview(pa)) return pa;
+  return { ...pa, action: { ...pa.action, inline_patch: { ...pa.action.inline_patch,
+    [AWAITING_REVIEW]: { reason: 'model_changed', ...(typeof modelNow === 'string' && modelNow !== '' ? { model: modelNow } : {}) } } } } as PendingAction;
+}
+
 export function heldAgentCardStillApplies(pa: PendingAction, graph: unknown): boolean {
   if (pa.action.kind !== 'apply_proposed_change') return false;
   const proposal = (pa.action.inline_patch as Rec | undefined)?.['agent_proposal'];

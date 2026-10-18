@@ -244,8 +244,22 @@ export function approvalChipsFor(
   labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined,
 ): SuggestedAction[] {
   const offered = proposalsAwaitingApproval(toolCalls);
-  if (offered.size !== 1) return [];
-  const [proposalId, tool] = [...offered.entries()][0]!;
+  if (offered.size === 1) {
+    const [proposalId, tool] = [...offered.entries()][0]!;
+    return approvalChipsForOne(proposalId, tool, labelSourceFor);
+  }
+  /**
+   * ⭐ Several cards this turn, only beside a field-scoped limit card (`ONE_CHANGE_PER_APPROVAL`'s exception; verifier F1): each
+   * card's own button, built exactly as it would be alone, then ONE "Change something first". A card that could not be offered
+   * alone is not offered here either. Two other cards are still none: approving one would make the other stale.
+   */
+  if ([...offered.values()].filter((tool) => tool !== 'propose_limit_change').length > 1) return [];
+  const each = [...offered.entries()].map(([id, tool]) => approvalChipsForOne(id, tool, labelSourceFor));
+  return [...new Map(each.flatMap((chips) => chips.filter((c) => c.id !== AMEND_CHIP.id)).map((c) => [c.id, c] as const)).values(),
+    ...(each.some((chips) => chips.some((c) => c.id === AMEND_CHIP.id)) ? [AMEND_CHIP] : [])];
+}
+
+function approvalChipsForOne(proposalId: string, tool: string, labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined): SuggestedAction[] {
   let approve = APPROVE[tool]!;
   // ⭐ THE CHIP CARRIES THE PROPOSAL'S IDENTITY (fast path 2, RC #63 5803995225). The
   // UI echoes `chip.id` verbatim on the click, so the route applies EXACTLY this
