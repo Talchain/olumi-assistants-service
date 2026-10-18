@@ -17,6 +17,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { levelDomain } from '../../../cee/magnitude/link-effect.js';
 import { createSetFactorValueHandler } from '../../tools/handlers/set-factor-value.js';
+import { factorValuesPostimageIsScoped } from '../../system-events/option-intervention-edit.js';
 
 type Rec = Record<string, any>;
 const SID = '41414141-4141-4141-8141-414141414141';
@@ -229,6 +230,8 @@ describe('BUDDY-A #3396: widening Olumi\'s reference keeps every stated size (B1
     expect(edgeOf(after, SUPPLY, PRICE).strength.mean).toBeCloseTo(0.5 * 40 / 75, 12);
     // … and what the user said did not: author and words byte-equal, raw size and spread equal, saved and as the Run sends it.
     for (const [from, to] of [[PRICE, CANCEL], [SUPPLY, PRICE]] as const) expect(said(after, from, to)).toEqual(said(g, from, to));
+    // The approval path's scope check replays the same carry, so the value writer's postimage is admitted there too.
+    expect(factorValuesPostimageIsScoped(g, after, [idOf(g, PRICE)])).toBe(true);
     const request = (await prepared(after, B1_BRIEF))!;
     for (const graph of [after, request.graph as Rec]) {
       for (const [i, v] of rawSize(graph, PRICE, CANCEL).entries()) expect(v).toBeCloseTo(out[i]!, 12);
