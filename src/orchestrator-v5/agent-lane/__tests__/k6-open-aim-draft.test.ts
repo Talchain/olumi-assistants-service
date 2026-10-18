@@ -56,9 +56,10 @@ const labels = (g: Rec, kind: string): string[] => (g.nodes as Rec[]).filter((n)
 
 describe('K6: an explicit "draft it now" on a brief with no stated aim gets a labelled provisional draft', () => {
   it('⭐ RED→GREEN: the one-line brief + a verified "draft it now" → registered; the event is an option, the aim an open question', async () => {
-    const { graph, result, calls } = await construct([JSON.stringify(cafeDraft())], BRIEF, true);
+    const { graph, result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF, true);
     expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true });
-    expect(calls, 'no goal retry: the event is not asked to be re-chosen').toBe(1);
+    expect(calls, 'the one goal retry runs first (a stated aim, qualitative included, is kept when the drafter can name it)').toBe(2);
+    expect(result.open_aim, 'said as a provisional draft with its aim open').toBe(true);
     // The aim is an open question, Olumi's reading, with no figure invented for it; what led to the event leads to it.
     expect(goalOf(graph!)).toMatchObject({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' });
     expect('goal_threshold' in goalOf(graph!), 'no figure invented for the aim').toBe(false);
@@ -70,10 +71,19 @@ describe('K6: an explicit "draft it now" on a brief with no stated aim gets a la
 
   it('a draft with no choice of its own: the action becomes the option beside it', async () => {
     const one = cafeDraft(); one.options = (one.options as Rec[]).filter((o) => o.label === 'Keep one café');
-    const { graph, result } = await construct([JSON.stringify(one)], BRIEF, true);
+    const { graph, result } = await construct([JSON.stringify(one), JSON.stringify(one)], BRIEF, true);
     expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true });
     expect(labels(graph!, 'option').sort()).toEqual(['Keep one café', EVENT]);
     expect((graph!.nodes as Rec[]).find((n) => n.label === EVENT)).toMatchObject({ kind: 'option', provenance: 'ai_inferred' });
+  }, 60_000);
+
+  it('⭐ a stated QUALITATIVE aim is kept: when the retry names it, that goal is saved, never the open aim (AIE protection)', async () => {
+    const aimed = cafeDraft(); aimed.goal = { ...aimed.goal, kind: null, deliverable: null, metric: 'Weekend sales', unit: '£', provenance: 'explicit', source_quote: null };
+    aimed.links = (aimed.links as Rec[]).map((l) => (l.to === EVENT ? { ...l, to: 'Weekend sales' } : l));
+    const { graph, result } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(aimed)], 'Should we open a second café in Bristol next spring to grow weekend sales?', true);
+    expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true });
+    expect(result.open_aim).toBeUndefined();
+    expect(labels(graph!, 'goal')).toEqual(['Weekend sales']);
   }, 60_000);
 
   it('CONTRAST: the same brief WITHOUT the request → refused and asked, as today (turn one stays a question)', async () => {

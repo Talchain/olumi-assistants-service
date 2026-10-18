@@ -35,6 +35,8 @@ import { deriveDecisionContextGraphHash } from '../build-turn-context.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
+/** AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1 (`after_confirmed_saved_readback`, sha256 ab6a2d6f…), byte for byte. */
+export const OPEN_AIM_SAVED_LINE = 'Saved a provisional model. Its aim is still unconfirmed, and Olumi’s additions remain suggestions. What would you like this work to achieve?';
 
 const CLAIM_OPENER =
   /^(?:[-•*>#\s]*)(?:\*\*)?(?:Applied|Added|Updated|Saved|Recorded|Adopted|Linked)(?:\*\*)?(?:\s*:|\s+(?:(?:the|all|a|an|your|this|that|these|those|both|every|each|proposal|assumptions?|levels?|values?|it|them)\b|\*\*|`|\d))/i;
@@ -505,7 +507,8 @@ function writeStatusLine(name: string, r: ToolResult, pending: AwaitingApproval 
       const approval = pending === null ? '' : pending === 'figures'
         ? 'Figures you did not give me are Olumi\u2019s estimates; when you approve one, it stays marked as Olumi\u2019s estimate, approved by you.'
         : aiAsks ? '' : 'What I proposed above is not made until you approve it.';
-      return [approval, leftOutLine(r), contextFactorsLine(r), aiAsks ? '' : openQuestionsLine(r, alreadySaid)]
+      // ⭐ K6: a provisional draft with its aim open, said only on a confirmed saved readback (this branch: ok and mutated).
+      return [r.open_aim === true ? OPEN_AIM_SAVED_LINE : '', approval, leftOutLine(r), contextFactorsLine(r), aiAsks ? '' : openQuestionsLine(r, alreadySaid)]
         .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }
     if (r.refusal === 'event_goal_unadmitted') {

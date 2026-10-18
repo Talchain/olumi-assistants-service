@@ -817,8 +817,8 @@ function unattestedEventClarification(u: UnattestedEventGoal, brief: string): st
   return UNATTESTED_GOAL_CLARIFICATION + retainedWording(u, brief);
 }
 
-/** TODO-AIE (K6): the AIE's words for the open aim replace this label before merge. */
-export const OPEN_AIM_GOAL_LABEL = 'Your aim (not yet stated)';
+/** The open aim's label (AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1 `open_aim_label`, sha256 ab6a2d6f…). */
+export const OPEN_AIM_GOAL_LABEL = 'Aim to confirm';
 /**
  * ⭐ K6: the labelled provisional draft for a brief with no stated aim. The event the drafter took as the goal is the ACTION
  * being weighed: it becomes an option (Olumi's) unless the draft already offers a choice. The goal is an open question:
@@ -1855,7 +1855,41 @@ export function goalPathsCarryTheUsersFigures(graph: { readonly nodes: readonly 
 /** What a revised draft over the link limit says, once, in plain words (DL 14 Oct). */
 export const REVISED_DRAFT_MORE_LINKS = 'This model has more links than usual, because it tracks everything your goals depend on.';
 
+/**
+ * ⭐ K6 (PL amendment 2; DL ack 18 Oct; AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1, sha256 ab6a2d6f…). On the user's
+ * explicit request for a provisional draft (`draftNow`, verified by the caller), a brief that states no figure and whose ONE
+ * goal retry still holds the unattested event is drafted instead of refused: the first draft again, with the event as an
+ * option (when it weighs no choice of its own) and the aim an open question (`withOpenAim`). The retry runs FIRST, so a
+ * stated aim, qualitative included, is kept whenever the drafter can name it; a stated figure keeps the refusal and ask.
+ */
 export async function buildModelFromBrief(
+  scenarioId: string, brief: string, dispatch: InternalDispatch, callStructured: CallStructuredModel,
+  observeConstruction?: (t: ConstructionTrace) => void, deadlineAt?: number, wideningCallStructured?: CallStructuredModel,
+  observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
+  context?: ConstructionContext, attestedDeliverable?: string, revisedDraft?: boolean, onDraftAdmitted?: (graph: unknown) => void,
+  draftNow?: boolean,
+): Promise<ToolResult> {
+  const k6: OpenAimFallback = {};
+  const first = await buildModelFromBriefOnce(scenarioId, brief, dispatch, callStructured, observeConstruction, deadlineAt, wideningCallStructured,
+    observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted, draftNow === true ? k6 : undefined);
+  if (draftNow !== true || first.refusal !== 'construction_needs_redraft' || k6.openAim === undefined || k6.firstText === undefined
+    || findStatedAmounts(brief).length > 0) return first;
+  const drafted = JSON.stringify(withOpenAim(JSON.parse(k6.firstText) as CandidateModel, k6.openAim));
+  let answered = false;
+  // The first draft again, with the aim open: no new provider call for it; any repair or size retry still asks the drafter.
+  const openAimFirst: CallStructuredModel = async (req, deadline) => {
+    if (!answered) { answered = true; return { text: drafted, status: 'completed' }; }
+    return callStructured(req, deadline);
+  };
+  const second = await buildModelFromBriefOnce(scenarioId, brief, dispatch, openAimFirst, observeConstruction, deadlineAt, wideningCallStructured,
+    observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted);
+  return second.ok === true ? { ...second, open_aim: true } : first;
+}
+
+/** What one construction pass leaves for the K6 open-aim fallback: the first raw draft, and the event its retry kept. */
+interface OpenAimFallback { firstText?: string; openAim?: UnattestedEventGoal }
+
+async function buildModelFromBriefOnce(
   scenarioId: string,
   brief: string,
   dispatch: InternalDispatch,
@@ -1880,12 +1914,8 @@ export async function buildModelFromBrief(
    * Only when widening will run; an observer, so a throw never costs the build.
    */
   onDraftAdmitted?: (graph: unknown) => void,
-  /**
-   * ⭐ K6: the user explicitly asked to draft now (`explicit_draft_request`, verified by the caller as a whole statement of this
-   * turn's typed message). With it, a brief that states no figure gets a labelled provisional draft (`withOpenAim`) instead of
-   * the unattested-goal refusal. Omitted → today's path, byte for byte.
-   */
-  draftNow?: boolean,
+  /** K6: filled when this pass refuses an unattested event the retry kept (`buildModelFromBrief`). Omitted → today's path. */
+  k6?: OpenAimFallback,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   const construction: ConstructionAdmission = {
@@ -1918,6 +1948,7 @@ export async function buildModelFromBrief(
       };
     }
     // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
+    if (k6 !== undefined) k6.firstText = out.text;
     candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
     if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
       candidate = { ...candidate, goal: { ...candidate.goal, kind: null } };
@@ -2030,12 +2061,6 @@ export async function buildModelFromBrief(
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
-  // ⭐ K6 (PL amendment 2; DL ack 18 Oct): on the user's explicit "draft it now", a brief that states NO figure (so no attested
-  // aim can lose to it) keeps its draft: the drafted event becomes an option and the aim an open question. A stated figure
-  // keeps the retry-then-ask path below, which protects an attested aim (#3026, the hiring brief).
-  const openAim = draftNow === true && findStatedAmounts(brief).length === 0
-    ? unattestedEventGoal(candidate, brief, construction.event_by_date_prompted === true) : null;
-  if (openAim !== null) candidate = withOpenAim(candidate, openAim);
   const firstCandidate = candidate;
   // ⛔ An event the brief does not attest is never saved as the goal: asked of the one construction retry, else clarified.
   const unattested = unattestedEventGoal(firstCandidate, brief, construction.event_by_date_prompted === true);
@@ -2385,6 +2410,7 @@ export async function buildModelFromBrief(
     // The one redraft did not re-choose the goal (or failed): nothing unattested is saved as the goal; the AI asks the user.
     // Before the size gate: the goal is what blocks this draft (a retry may have fixed its size and been refused for the goal).
     if (unattested !== null && stillTheUnattestedEvent(candidate)) {
+      if (k6 !== undefined) k6.openAim = unattested;
       return { ok: false as const, refusal: { ok: false, mutated: false, refusal: 'construction_needs_redraft', detail: unattestedEventClarification(unattested, brief) } };
     }
 
