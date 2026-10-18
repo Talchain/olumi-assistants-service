@@ -123,21 +123,26 @@ describe('a figure written in words is written, exactly as its digits are (deplo
     expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(digits.w.graph(), TEAM));
   }, 4 * ROUTE_MS);
 
-  it.each([
-    ['ANOTHER quantity', 'We now have 70 customers on the support plan; the team resolves the same as before.',
-      'We now have seventy customers on the support plan; the team resolves the same as before.'],
-    ['a name (Codex R2: the same with digits)', 'We signed with 70 TICKETS LTD this week.', 'We signed with SEVENTY TICKETS LTD this week.'],
-  ])('= %s: words and digits give the SAME card and save; presence is never attestation, so the binding stays labelled Olumi’s reading',
-    async (_n, digitText, wordText) => {
-      const digits = await correct(digitText, teamLevel(70));
-      const words = await correct(wordText, teamLevel(70));
-      for (const r of [digits, words]) {
-        expect(String(r.chip?.detail)).toContain('(figure from the quoted message; field binding unverified)');
-        expect(nodeOf(r.w.graph(), TEAM).observed_state).toMatchObject({ raw_value: 70, user_material_unverified: true });
-      }
-      expect(words.chip?.label).toBe(digits.chip?.label);
-      expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(digits.w.graph(), TEAM));
-    }, 4 * ROUTE_MS);
+  it('⛔ ANOTHER quantity ("seventy customers" for a tickets level) is no figure of it, in digits as in words: no card, nothing written', async () => {
+    for (const typed of ['We now have 70 customers on the support plan; the team resolves the same as before.',
+      'We now have seventy customers on the support plan; the team resolves the same as before.']) {
+      const { result, chip, w } = await correct(typed, teamLevel(70));
+      expect(result, typed).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+      expect(chip).toBeUndefined();
+      expect(nodeOf(w.graph(), TEAM)).toEqual(nodeOf(SERVED.graph, TEAM));
+    }
+  }, 4 * ROUTE_MS);
+
+  it('= a name (Codex R2; the same with digits): the same card and save in both forms, its binding labelled Olumi’s reading', async () => {
+    const digits = await correct('We signed with 70 TICKETS LTD this week.', teamLevel(70));
+    const words = await correct('We signed with SEVENTY TICKETS LTD this week.', teamLevel(70));
+    for (const r of [digits, words]) {
+      expect(String(r.chip?.detail)).toContain('(figure from the quoted message; field binding unverified)');
+      expect(nodeOf(r.w.graph(), TEAM).observed_state).toMatchObject({ raw_value: 70, user_material_unverified: true });
+    }
+    expect(words.chip?.label).toBe(digits.chip?.label);
+    expect(nodeOf(words.w.graph(), TEAM)).toEqual(nodeOf(digits.w.graph(), TEAM));
+  }, 4 * ROUTE_MS);
 
   it.each([
     ['an ordinal', 'This is the first week the new rota has run.'],
@@ -184,6 +189,15 @@ describe('one reader, one check: a word is a number only where it counts somethi
     ['counts nothing: punctuation after it (the old figure)', 12, 'minutes', 'It is thirty-five minutes, not twelve.', false],
     ['the pronoun "one"', 1, 'specialists', 'One of them was off sick, and the one who covered was new.', false],
     ['another kind of unit', 2, 'minutes', 'We hired two developers.', false],
+    // a count's own counted noun (DL-3 on #3429): another noun is another quantity, in digits as in words
+    ['another counted noun, words', 45, 'hours per week', 'Correction: forty-five nurses cover the night shifts.', false],
+    ['another counted noun, digits', 45, 'hours per week', 'Correction: 45 nurses cover the night shifts.', false],
+    ['another unit of its kind, digits', 35, 'hours', 'The wait is 35 minutes.', false],
+    ['another count, digits', 70, 'tickets per week', 'Our team serves 70 customers per week.', false],
+    ['the held noun, digits', 45, 'hours per week', 'Night shifts take 45 hours a week.', true],
+    ['the held noun, words', 45, 'hours per week', 'Night shifts take forty-five hours per week.', true],
+    ['the held noun after a modifier', 70, 'tickets per week', 'We now have seventy support tickets per week.', true],
+    ['no noun after it: read as before, digits', 45, 'hours per week', 'Night shifts are 45 now.', true],
     // scale, money, percentages and shares
     ['money in words, scaled unit', 2, '£k/month', 'It costs two thousand pounds a month.', false],
     ['money in words, plain unit', 2000, '£', 'It costs two thousand pounds.', false],
@@ -222,8 +236,7 @@ describe('one reader, one check: a word is a number only where it counts somethi
       ['The wait is thirty-five minutes.', 'The wait is 35 minutes.', 35, 'minutes'],
       ['We pack fifteen bags per ten minutes.', 'We pack 15 bags per 10 minutes.', 15, 'food bags per 10 minutes'],
       ['We pack fifteen bags per ten minutes.', 'We pack 15 bags per ten minutes.', 15, 'food bags per 10 minutes'],
-      // Presence only, as for digits: a figure of the same kind of unit is no attestation of which unit or period it is.
-      ['The wait is thirty-five minutes.', 'The wait is 35 minutes.', 35, 'hours'],
+      // Presence only, as for digits: the held unit's own noun in another period is no attestation of which period it is.
       ['It takes two hours per week.', 'It takes 2 hours per week.', 2, 'hours per month'],
       ['About one customer in five leaves.', 'About 1 customer in 5 leaves.', 1, 'share of customers'],
     ];
@@ -236,12 +249,13 @@ describe('one reader, one check: a word is a number only where it counts somethi
 
 /**
  * ⭐ PARITY BY PROPERTY (DL-3 ruling 1): every phrase template × held unit × counted noun × modifier × period, written in words and in
- * digits, gives the same verdict at the same place. Generated, so it is no list of examples; it must reach both verdicts.
+ * digits, gives the same verdict at the same place; and a count whose noun names nothing of the held unit is never its figure (the
+ * noun-mismatch property). Generated, so it is no list of examples; it must reach both verdicts.
  */
 describe('parity by property: a spelled figure gives exactly its digits’ verdict and located value', () => {
   const NUMBERS: [number, string][] = [[2, 'two'], [15, 'fifteen'], [35, 'thirty-five'], [120, 'one hundred and twenty']];
   const UNITS = ['tickets per week', 'hours per week', 'minutes', 'food bags per 10 minutes', 'people', 'specialists per month'];
-  const NOUNS = ['tickets', 'hours', 'minutes', 'bags', 'people', 'customers', 'weeks'];
+  const NOUNS = ['tickets', 'hours', 'minutes', 'bags', 'people', 'customers', 'weeks', 'nurses'];
   const MODIFIERS = ['', 'support ', 'food ', 'new '];
   const PERIODS: [string, string][] = [['', ''], [' per week', ' per week'], [' a month', ' a month'], [' per ten minutes', ' per 10 minutes']];
   const TEMPLATES = [(f: string) => `Correction: we handle ${f}, not more.`, (f: string) => `${f} today; the rest is unchanged.`,
@@ -256,6 +270,9 @@ describe('parity by property: a spelled figure gives exactly its digits’ verdi
         expect(digits.slice(d.start, d.end)).toBe(String(v));
         expect(words.slice(x.start, x.end).toLowerCase()).toBe(w);
       }
+      // The noun-mismatch property: a count whose own noun (with its modifier) names nothing of the held unit is never its figure.
+      const heldWords = unit.toLowerCase().match(/[a-z]{3,}/g)!.map((x) => x.replace(/s$/, ''));
+      if (![noun, m.trim()].some((x) => x !== '' && heldWords.includes(x.toLowerCase().replace(/s$/, '')))) expect(d, `${unit} | ${digits}`).toBeNull();
       seen[d !== null ? 'written' : 'not'] += 1;
     }
     expect(seen.written).toBeGreaterThan(200);
