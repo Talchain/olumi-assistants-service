@@ -22,10 +22,8 @@ STDIN_DATA=$(cat || true)
 # #615 deleted with the dead V1 belt. Vitest SILENTLY IGNORES a path filter that
 # matches no file, so the gate ran GREEN while exercising 1/10 files — guarantee
 # theatre. This set is the current LIVE V5 critical pipeline; every entry is
-# verified to exist AND pass, `check_smoke_tests` now fails LOUD on any missing
-# entry (below), and tests/unit/smoke-gate-inventory.test.ts derives from THIS
-# list (reads it out of this script) and asserts each path exists on disk — so a
-# future deletion fails a test, not silently under-covers the gate.
+# verified to exist AND pass, and `check_smoke_tests` fails LOUD on any missing
+# entry (below), so a future deletion fails the hook, not silently under-covers it.
 #
 #   path                                                                  covers
 #   --------------------------------------------------------------------  -------------------------
@@ -266,7 +264,7 @@ check_smoke_tests() {
     print_check "smoke-tests" "FAIL"
     echo "    SMOKE_TESTS entries missing on disk (Vitest would SILENTLY skip these):${missing}"
     echo "    Update the SMOKE_TESTS list in scripts/validate-prepush.sh to current"
-    echo "    V5 critical-pipeline test paths. See tests/unit/smoke-gate-inventory.test.ts."
+    echo "    V5 critical-pipeline test paths."
     FAILURES=$((FAILURES + 1))
     return 0
   fi
