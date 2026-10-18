@@ -95,6 +95,15 @@ function isolated(): Rec {
     effect_provenance: 'ai_proposed', definitional: null, basis: 'Provisional: referral income adds to contract value one for one.', source_quote: null });
   return d;
 }
+/** Codex r2: a second option whose factor reaches the goal only when `linked` (a path issue of its own), plus the range. */
+function withReferral(d: Rec, linked: boolean): Rec {
+  d.options.push({ label: 'Start a referral scheme', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+    interventions: [{ factor_label: 'Referral income', value: 100000, value_kind: 'absolute', unit: '£', provenance: 'ai_proposed' }] });
+  d.factors.push({ label: 'Referral income', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '£', provenance: 'inferred', plausible_max: 500000 });
+  if (linked) d.links.push({ from: 'Referral income', to: GOAL, direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null,
+    effect_provenance: null, definitional: null, basis: null, source_quote: null });
+  return d;
+}
 const ends = (g: Rec): { from: string; to: string } => ({ from: g.nodes.find((n: Rec) => n.label === COUNT).id, to: g.nodes.find((n: Rec) => n.kind === 'goal').id });
 const rangeRecord = (g: Rec, from: string, to: string): Rec | undefined => ((g.nodes as Rec[]).find((n) => n.id === from)?.user_statements as Rec[] | undefined)
   ?.find((r: Rec) => r.subject_key === `link|${from}|${to}||effect`);
@@ -218,5 +227,32 @@ describe('A3: a per-one range is recorded on its link, never sized at an end', (
     expect(goal.goal_threshold_raw).toBe(600000);
     const { from, to } = ends(GraphV3.parse(raw) as unknown as Rec);
     expect(linkHoldsStatedRange(raw, from, to), 'the first draft is kept, so the range is not registered').toBe(false);
+  });
+
+  // ⛔ Codex r2: path progress in the SAME retry never carries a changed goal past the guard: it binds every range-bearing reason.
+  const referralReaches = (g: Rec): boolean => g.edges.some((e: Rec) => e.from === g.nodes.find((n: Rec) => n.label === 'Referral income')?.id
+    && e.to === g.nodes.find((n: Rec) => n.kind === 'goal').id);
+  it('CONTROL (Codex r2): a retry that records the range AND links the referral route, the goal unchanged, is adopted', async () => {
+    const { raw, inputs } = await build([withReferral(draft('none'), false), withReferral(draft('recorded'), true)]);
+    expect(inputs, 'PRECONDITION: the range was asked of the retry').toHaveLength(2);
+    expect(inputs[1]).toContain(sent('The brief writes "£40k and £60k" and no link in the model carries it.'));
+    const g = GraphV3.parse(raw) as unknown as Rec;
+    const { from, to } = ends(g);
+    expect(referralReaches(g), 'the retry\'s link is registered').toBe(true);
+    expect(linkHoldsStatedRange(raw, from, to)).toBe(true);
+    expect(g.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({ goal_threshold_raw: 600000, goal_threshold_unit: '£' });
+  });
+
+  it.each([
+    ['£600k → £700k', { value: 700000 }],
+    ['£ → USD', { unit: 'USD' }],
+  ] as const)('⛔ NEGATIVE (Codex r2 probe, range + link): a retry that also changes the goal (%s) is NOT adopted; the user\'s £600k stays', async (_c, change) => {
+    const changed = withReferral(draft('recorded'), true);
+    Object.assign(changed.goal, change);
+    const { raw, inputs } = await build([withReferral(draft('none'), false), changed]);
+    expect(inputs, 'PRECONDITION: the range was asked of the retry').toHaveLength(2);
+    const g = GraphV3.parse(raw) as unknown as Rec;
+    expect(g.nodes.find((n: Rec) => n.kind === 'goal')).toMatchObject({ goal_threshold_raw: 600000, goal_threshold_unit: '£' });
+    expect(referralReaches(g), 'the first draft is kept').toBe(false);
   });
 });
