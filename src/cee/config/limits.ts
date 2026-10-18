@@ -74,7 +74,6 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   CEE_STREAM_RATE_LIMIT_RPM: "draft",
 
   // --- read: cheap / deterministic / read-only ---
-  CEE_GRAPH_READINESS_RATE_LIMIT_RPM: "read",
   // Scenario-addressed graph read (ROADMAP 2.312): two indexed Supabase reads,
   // no LLM, no writes — the same cost shape as graph-readiness, so the same
   // tier. Its bucket is keyed on the CLIENT, not the key id; see the route.
@@ -120,12 +119,6 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   // harness needs a per-test bucket reset. The tier decision (coach) is fixed
   // here so the follow-up wires it with no config change.
   CEE_TURN_RATE_LIMIT_RPM: "coach",
-  CEE_OPTIONS_RATE_LIMIT_RPM: "coach",
-  CEE_BIAS_CHECK_RATE_LIMIT_RPM: "coach",
-  CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM: "coach",
-  CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM: "coach",
-  CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM: "coach",
-  CEE_EXPLAIN_RATE_LIMIT_RPM: "coach",
   CEE_EXPLAIN_POLICY_RATE_LIMIT_RPM: "coach",
   CEE_EXPLAIN_TRADEOFF_RATE_LIMIT_RPM: "coach",
   CEE_EDGE_FUNCTION_RATE_LIMIT_RPM: "coach",

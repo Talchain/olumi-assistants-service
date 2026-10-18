@@ -24,34 +24,6 @@ describe('GET /healthz', () => {
           feature_version: process.env.CEE_DRAFT_FEATURE_VERSION || "draft-model-1.0.0",
           rate_limit_rpm: resolveCeeRate(process.env.CEE_DRAFT_RATE_LIMIT_RPM),
         },
-        options: {
-          feature_version: process.env.CEE_OPTIONS_FEATURE_VERSION || "options-1.0.0",
-          rate_limit_rpm: resolveCeeRate(process.env.CEE_OPTIONS_RATE_LIMIT_RPM),
-        },
-        bias_check: {
-          feature_version: process.env.CEE_BIAS_CHECK_FEATURE_VERSION || "bias-check-1.0.0",
-          rate_limit_rpm: resolveCeeRate(process.env.CEE_BIAS_CHECK_RATE_LIMIT_RPM),
-        },
-        evidence_helper: {
-          feature_version:
-            process.env.CEE_EVIDENCE_HELPER_FEATURE_VERSION || "evidence-helper-1.0.0",
-          rate_limit_rpm: resolveCeeRate(process.env.CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM),
-        },
-        sensitivity_coach: {
-          feature_version:
-            process.env.CEE_SENSITIVITY_COACH_FEATURE_VERSION || "sensitivity-coach-1.0.0",
-          rate_limit_rpm: resolveCeeRate(process.env.CEE_SENSITIVITY_COACH_RATE_LIMIT_RPM),
-        },
-        team_perspectives: {
-          feature_version:
-            process.env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION || "team-perspectives-1.0.0",
-          rate_limit_rpm: resolveCeeRate(process.env.CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM),
-        },
-        explain_graph: {
-          feature_version:
-            process.env.CEE_EXPLAIN_FEATURE_VERSION || "explain-model-1.0.0",
-          rate_limit_rpm: resolveCeeRate(process.env.CEE_EXPLAIN_RATE_LIMIT_RPM),
-        },
       };
 
       return {
@@ -195,8 +167,6 @@ describe('GET /healthz', () => {
     const config = body.cee.config;
     expect(typeof config).toBe('object');
     expect(config).toHaveProperty('draft_graph');
-    expect(config).toHaveProperty('options');
-    expect(config).toHaveProperty('bias_check');
   });
 
   it('includes CEE timeout configuration', async () => {

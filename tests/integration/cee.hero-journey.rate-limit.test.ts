@@ -1,10 +1,10 @@
 /**
- * CEE v1 Hero Journey Integration Test (Mid-journey Rate Limit)
+ * CEE v1 Hero Journey Integration Test (partial journey)
  *
- * Exercises a CEE journey where Draft and Options succeed but Evidence Helper
- * hits a per-feature rate limit, then builds a partial CeeJourneySummary via
- * the SDK helper. Asserts that the error is retryable and that no brief text
- * leaks into error or journey metadata.
+ * Runs a real Draft, then builds a partial CeeJourneySummary via the SDK helper
+ * with a synthetic options envelope (the options and evidence-helper routes were
+ * deleted with R2). Asserts the journey is incomplete and that no brief text
+ * leaks into journey metadata.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -20,18 +20,13 @@ import {
   type CeeJourneySummary,
 } from "../../sdk/typescript/src/ceeHelpers.js";
 
-describe("CEE hero journey: mid-journey evidence rate limit", () => {
+describe("CEE SDK partial journey with a synthetic legacy envelope", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
     vi.stubEnv("ASSIST_API_KEYS", "cee-hero-rate-limit-key");
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-hero-rate-limit-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "5");
-    vi.stubEnv("CEE_OPTIONS_FEATURE_VERSION", "options-hero-rate-limit-test");
-    vi.stubEnv("CEE_OPTIONS_RATE_LIMIT_RPM", "5");
-    vi.stubEnv("CEE_EVIDENCE_HELPER_FEATURE_VERSION", "evidence-hero-rate-limit-test");
-    // Set a low per-feature rate limit so the second evidence call hits CEE_RATE_LIMIT
-    vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "1");
 
     cleanBaseUrl();
     app = await build();
@@ -43,7 +38,7 @@ describe("CEE hero journey: mid-journey evidence rate limit", () => {
     vi.unstubAllEnvs();
   });
 
-  it("handles an evidence-helper rate-limit failure without leaking brief text", async () => {
+  it("builds an incomplete journey without leaking brief text", async () => {
     const SECRET = "DO_NOT_LEAK_RATE_LIMIT";
 
     // 1) Draft My Model
@@ -58,55 +53,8 @@ describe("CEE hero journey: mid-journey evidence rate limit", () => {
 
     expect(draftRes.statusCode).toBe(200);
     const draftBody = draftRes.json();
-
-    // 2) Options Helper
-    const optionsRes = await app.inject({
-      method: "POST",
-      url: "/assist/v1/options",
-      headers: { "X-Olumi-Assist-Key": "cee-hero-rate-limit-key" },
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-    });
-
-    expect(optionsRes.statusCode).toBe(200);
-    const optionsBody = optionsRes.json();
-
-    // 3) Evidence Helper – first call succeeds, second hits per-feature rate limit
-    const evidencePayload = {
-      evidence: [
-        { id: "e1", type: "experiment" },
-        { id: "e2", type: "user_research" },
-      ],
-    };
-
-    const evidenceFirst = await app.inject({
-      method: "POST",
-      url: "/assist/v1/evidence-helper",
-      headers: { "X-Olumi-Assist-Key": "cee-hero-rate-limit-key" },
-      payload: evidencePayload,
-    });
-
-    expect(evidenceFirst.statusCode).toBe(200);
-
-    const evidenceLimited = await app.inject({
-      method: "POST",
-      url: "/assist/v1/evidence-helper",
-      headers: { "X-Olumi-Assist-Key": "cee-hero-rate-limit-key" },
-      payload: evidencePayload,
-    });
-
-    expect(evidenceLimited.statusCode).toBe(429);
-    const requestId = evidenceLimited.headers["x-cee-request-id"] as string;
-    expect(typeof requestId).toBe("string");
-
-    const errorBody = evidenceLimited.json();
-    expect(errorBody.schema).toBe("cee.error.v1");
-    expect(errorBody.code).toBe("CEE_RATE_LIMIT");
-    expect(errorBody.retryable).toBe(true);
-    expect(typeof errorBody.details?.retry_after_seconds).toBe("number");
-    expect(errorBody.details.retry_after_seconds).toBeGreaterThan(0);
+    // Synthetic legacy envelope keeps the retained SDK contract checks.
+    const optionsBody: any = { options: [{ id: "option-fixture" }], quality: { overall: 7 }, trace: { request_id: "sdk-fixture" } };
 
     // Build a journey summary from the envelopes that succeeded (draft + options).
     const journey: CeeJourneySummary = buildCeeJourneySummary({
@@ -120,7 +68,7 @@ describe("CEE hero journey: mid-journey evidence rate limit", () => {
     expect(journey.missing_envelopes).toContain("evidence");
 
     // Privacy: ensure the secret marker does not leak into error or journey metadata
-    const serialized = JSON.stringify({ errorBody, journey }).toLowerCase();
+    const serialized = JSON.stringify({ journey }).toLowerCase();
     expect(serialized.includes(SECRET.toLowerCase())).toBe(false);
   });
 });

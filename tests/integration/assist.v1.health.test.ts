@@ -50,8 +50,6 @@ describe("GET /assist/v1/health (CEE service health)", () => {
     expect(body.cee_config).toBeDefined();
     expect(typeof body.cee_config).toBe("object");
     expect(body.cee_config).toHaveProperty("draft_graph");
-    expect(body.cee_config).toHaveProperty("options");
-    expect(body.cee_config).toHaveProperty("bias_check");
   });
 
   it("requires authentication (no API key yields 401/403)", async () => {

@@ -1,13 +1,11 @@
 /**
  * CEE Status Consistency Tests
  *
- * E2E tests to verify that the same graph produces consistent status
- * across both endpoints:
- * - POST /assist/v1/draft-graph
- * - POST /assist/v1/graph-readiness
+ * E2E tests of the option status that POST /assist/v1/draft-graph reports in
+ * analysis_ready (the graph-readiness endpoint was deleted with R2).
  *
  * KEY ACCEPTANCE CRITERIA:
- * - Both endpoints produce identical status for identical graphs
+ * - The ready-or-encodable count never falls below the strict ready count
  * - Label-matched interventions count as resolved
  * - Pricing briefs with extracted values produce "ready" status
  */
@@ -34,7 +32,7 @@ describe("CEE Status Consistency", () => {
   });
 
   describe("Endpoint Consistency", () => {
-    it("draft-graph and graph-readiness produce consistent status for pricing brief", async () => {
+    it("draft-graph's ready-or-encodable count is never below its strict ready count (pricing brief)", async () => {
       const brief = "Should we increase Pro plan price from £49 to £59?";
 
       // Step 1: Call draft-graph to get the graph
@@ -57,7 +55,6 @@ describe("CEE Status Consistency", () => {
       const analysisReady = draftResult.analysis_ready as AnalysisReadyPayloadT;
 
       // Record the draft-graph status
-      const draftStatus = analysisReady.status;
       // ⚠ STRICT, AND THAT IS THE POINT. This used to count
       // `ready || needs_encoding`, while the graph-readiness endpoint's
       // `options_ready` numerator is strictly `status === "ready"`
@@ -78,92 +75,9 @@ describe("CEE Status Consistency", () => {
         (o) => o.status === "ready" || o.status === "needs_encoding"
       ).length;
 
-      // Step 2: Call graph-readiness with a V1-style graph + analysis_ready
-      // For V3 mode, graph-readiness reads options from analysis_ready
-      // Build V1-compatible graph — strip V3-only fields (observed_state on factors
-      // uses a different shape than the V1 ConstraintObservedState schema expects)
-      const v1Graph = {
-        version: "1",
-        default_seed: 17,
-        nodes: [
-          // ⚠ THIS USED TO APPEND THE OPTIONS A SECOND TIME.
-          //
-          // `draftResult.nodes` ALREADY contains the option nodes (measured:
-          // a pricing-brief draft returns opt_1/opt_2 as kind "option"). The
-          // block that followed re-added every entry of
-          // `analysisReady.options` as a fresh node, so the readiness request
-          // carried DUPLICATE options — `options_total` of 4 for a 2-option
-          // model.
-          //
-          // That defect was invisible for as long as the route read options
-          // from `analysis_ready` rather than from the graph: the duplicates
-          // sat in a part of the payload nothing counted. The unification made
-          // the graph the authority, and the duplication surfaced immediately
-          // as 4-vs-2.
-          //
-          // Options now come through exactly once, from the draft's own nodes,
-          // carrying the `interventions` those nodes hold — the same carrier
-          // the deployed UI populates (DecisionGuideAI #734). Both endpoints
-          // therefore derive their answer from ONE model, which is the only
-          // thing that makes "consistency" a meaningful claim: two endpoints
-          // agreeing because one read the other's answer back off the wire was
-          // never consistency.
-          ...draftResult.nodes.map((n: any) => ({
-            id: n.id,
-            kind: n.kind,
-            label: n.label,
-            ...(n.data ? { data: n.data } : {}),
-            ...(n.category ? { category: n.category } : {}),
-            ...(n.kind === "option" &&
-            n.interventions &&
-            Object.keys(n.interventions).length > 0
-              ? { interventions: n.interventions }
-              : {}),
-          })),
-        ],
-        edges: draftResult.edges.map((e: any) => ({
-          from: e.from,
-          to: e.to,
-          weight: Math.abs(e.strength?.mean) || 0.5,
-        })),
-        meta: draftResult.meta || {},
-      };
-
-      const readinessResponse = await app.inject({
-        method: "POST",
-        url: "/assist/v1/graph-readiness",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "test-key-consistency",
-        },
-        payload: JSON.stringify({
-          graph: v1Graph,
-          analysis_ready: analysisReady,
-        }),
-      });
-
-      expect(readinessResponse.statusCode).toBe(200);
-      const readinessResult = JSON.parse(readinessResponse.body);
-
-      // Record the graph-readiness status
-      const readinessOptionsReady = readinessResult.options_ready;
-      const readinessOptionsTotal = readinessResult.options_total;
-
-      // KEY ASSERTION: Both endpoints should agree on options_ready count
-      expect(readinessOptionsReady).toBe(draftOptionsReady);
-      expect(readinessOptionsTotal).toBe(analysisReady.options.length);
       // The looser count can only ever be >= the strict one; if it ever drops
       // below, a `needs_encoding` option has gone missing between the two.
       expect(draftOptionsReadyOrEncodable).toBeGreaterThanOrEqual(draftOptionsReady);
-
-      // Log for debugging
-      console.log({
-        brief,
-        draftStatus,
-        draftOptionsReady,
-        readinessOptionsReady,
-        readinessOptionsTotal,
-      });
     });
 
     it("label-matched interventions count as resolved", async () => {
@@ -260,22 +174,6 @@ describe("CEE Status Consistency", () => {
         (o) => o.raw_interventions && Object.keys(o.raw_interventions).length > 0
       );
 
-      // Log detailed output for debugging
-      console.log({
-        brief,
-        optionCount: analysisReady.options.length,
-        payloadStatus: analysisReady.status,
-        optionsWithRaw: optionsWithRaw.length,
-        optionDetails: analysisReady.options.map((o) => ({
-          id: o.id,
-          label: o.label,
-          status: o.status,
-          interventionCount: Object.keys(o.interventions).length,
-          rawInterventionCount: Object.keys(o.raw_interventions || {}).length,
-          rawValues: o.raw_interventions,
-        })),
-      });
-
       // If we have categorical options, verify they have correct status
       for (const option of optionsWithRaw) {
         const hasNonNumeric = Object.values(option.raw_interventions || {}).some(
@@ -309,71 +207,6 @@ describe("CEE Status Consistency", () => {
         expect(["needs_user_input", "needs_encoding", "needs_user_mapping"])
           .toContain(analysisReady.status);
       }
-    });
-
-    it("graph-readiness blocks needs_encoding options (post-2026-04-08)", async () => {
-      // After 2026-04-08, needs_encoding is a hard blocker. The run path
-      // (run-analysis.ts) checks numeric interventions directly and rejects
-      // empty/non-numeric ones; the readiness route must agree to avoid the
-      // false-positive "can run" → PLoT EMPTY_INTERVENTIONS divergence that
-      // motivated the intervention-lifecycle audit.
-      const analysisReady: AnalysisReadyPayloadT = {
-        options: [
-          {
-            id: "option_uk",
-            label: "Launch in UK",
-            status: "needs_encoding",
-            interventions: { factor_region: 1 }, // Placeholder numeric
-            raw_interventions: { factor_region: "UK" }, // Original categorical
-          },
-          {
-            id: "option_germany",
-            label: "Launch in Germany",
-            status: "needs_encoding",
-            interventions: { factor_region: 2 }, // Placeholder numeric
-            raw_interventions: { factor_region: "Germany" }, // Original categorical
-          },
-        ],
-        goal_node_id: "goal_growth",
-        status: "needs_encoding",
-      };
-
-      const graph = {
-        version: "1",
-        default_seed: 17,
-        nodes: [
-          { id: "goal_growth", kind: "goal", label: "Revenue Growth" },
-          { id: "factor_region", kind: "factor", label: "Target Region" },
-          { id: "outcome_success", kind: "outcome", label: "Launch Success" },
-          { id: "option_uk", kind: "option", label: "Launch in UK" },
-          { id: "option_germany", kind: "option", label: "Launch in Germany" },
-        ],
-        edges: [
-          // V4 topology: factor → outcome → goal (not factor → goal directly)
-          { from: "factor_region", to: "outcome_success", weight: 0.8 },
-          { from: "outcome_success", to: "goal_growth", weight: 1.0 },
-        ],
-        meta: {},
-      };
-
-      const readinessResponse = await app.inject({
-        method: "POST",
-        url: "/assist/v1/graph-readiness",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Olumi-Assist-Key": "test-key-consistency",
-        },
-        payload: JSON.stringify({ graph, analysis_ready: analysisReady }),
-      });
-
-      expect(readinessResponse.statusCode).toBe(200);
-      const readinessResult = JSON.parse(readinessResponse.body);
-
-      // needs_encoding options no longer count as ready.
-      expect(readinessResult.options_ready).toBe(0);
-      expect(readinessResult.options_total).toBe(2);
-      expect(readinessResult.can_run_analysis).toBe(false);
-      expect(readinessResult.blocker_reason).toBeDefined();
     });
   });
 
@@ -423,18 +256,6 @@ describe("CEE Status Consistency", () => {
         expect(["ready", "needs_user_mapping", "needs_encoding"]).toContain(option.status);
         expect(option.interventions).toBeDefined();
       }
-
-      // Log for debugging
-      console.log({
-        brief,
-        totalOptions: analysisReady.options.length,
-        status: analysisReady.status,
-        optionStatuses: analysisReady.options.map((o) => ({
-          id: o.id,
-          status: o.status,
-          interventionCount: Object.keys(o.interventions).length,
-        })),
-      });
     });
   });
 });

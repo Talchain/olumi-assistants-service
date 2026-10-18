@@ -32,12 +32,6 @@ describe("CEE hero journey: partial / deferred envelopes", () => {
     vi.stubEnv("ASSIST_API_KEYS", "cee-hero-partial-key");
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-partial-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "5");
-    vi.stubEnv("CEE_OPTIONS_FEATURE_VERSION", "options-partial-test");
-    vi.stubEnv("CEE_OPTIONS_RATE_LIMIT_RPM", "5");
-    vi.stubEnv("CEE_EVIDENCE_HELPER_FEATURE_VERSION", "evidence-partial-test");
-    vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "5");
-    vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-partial-test");
-    vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "5");
 
     cleanBaseUrl();
     app = await build();
@@ -64,20 +58,8 @@ describe("CEE hero journey: partial / deferred envelopes", () => {
 
     expect(draftRes.statusCode).toBe(200);
     const draftBody = draftRes.json();
-
-    // 2) Options Helper
-    const optionsRes = await app.inject({
-      method: "POST",
-      url: "/assist/v1/options",
-      headers: { "X-Olumi-Assist-Key": "cee-hero-partial-key" },
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-    });
-
-    expect(optionsRes.statusCode).toBe(200);
-    const optionsBody = optionsRes.json();
+    // Synthetic legacy envelope keeps the retained SDK contract checks.
+    const optionsBody: any = { options: [{ id: "option-fixture" }], quality: { overall: 7 }, trace: { request_id: "sdk-fixture" } };
 
     // Stage 1: draft + options only
     const review1: CeeDecisionReviewPayload = buildCeeDecisionReviewPayload({
@@ -89,22 +71,8 @@ describe("CEE hero journey: partial / deferred envelopes", () => {
     expect(review1.journey.missing_envelopes).toContain("evidence");
     expect(review1.journey.missing_envelopes).toContain("team");
     expect(review1.uiFlags.is_journey_complete).toBe(false);
-
-    // 3) Evidence Helper (deferred)
-    const evidenceRes = await app.inject({
-      method: "POST",
-      url: "/assist/v1/evidence-helper",
-      headers: { "X-Olumi-Assist-Key": "cee-hero-partial-key" },
-      payload: {
-        evidence: [
-          { id: "e1", type: "experiment" },
-          { id: "e2", type: "user_research" },
-        ],
-      },
-    });
-
-    expect(evidenceRes.statusCode).toBe(200);
-    const evidenceBody = evidenceRes.json();
+    // Synthetic legacy envelope keeps the retained SDK contract checks.
+    const evidenceBody: any = { items: [], response_limits: { items_max: 20, items_truncated: false }, quality: { overall: 7 }, trace: { request_id: "sdk-fixture" } };
 
     const review2: CeeDecisionReviewPayload = buildCeeDecisionReviewPayload({
       draft: draftBody,
@@ -115,23 +83,8 @@ describe("CEE hero journey: partial / deferred envelopes", () => {
     expect(review2.journey.is_complete).toBe(false);
     expect(review2.journey.missing_envelopes).toContain("team");
     expect(review2.journey.missing_envelopes).not.toContain("evidence");
-
-    // 4) Team Perspectives (deferred)
-    const teamRes = await app.inject({
-      method: "POST",
-      url: "/assist/v1/team-perspectives",
-      headers: { "X-Olumi-Assist-Key": "cee-hero-partial-key" },
-      payload: {
-        perspectives: [
-          { id: "p1", stance: "for", confidence: 0.9 },
-          { id: "p2", stance: "against", confidence: 0.6 },
-          { id: "p3", stance: "neutral" },
-        ],
-      },
-    });
-
-    expect(teamRes.statusCode).toBe(200);
-    const teamBody = teamRes.json();
+    // Synthetic legacy envelope keeps the retained SDK contract checks.
+    const teamBody: any = { summary: { participant_count: 3, has_team_disagreement: true }, quality: { overall: 6 }, trace: { request_id: "sdk-fixture" } };
 
     const review3: CeeDecisionReviewPayload = buildCeeDecisionReviewPayload({
       draft: draftBody,

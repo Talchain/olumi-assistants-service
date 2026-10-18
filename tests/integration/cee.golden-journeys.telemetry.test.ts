@@ -1,9 +1,9 @@
 /**
  * CEE v1 Golden Journey Telemetry Sanity Test
  *
- * Runs a healthy golden journey through /assist/v1/* endpoints with the fixtures
- * provider and asserts that expected telemetry events are emitted without any
- * free-text or banned substrings.
+ * Runs the draft step of golden journeys through /assist/v1/draft-graph with the
+ * fixtures provider and asserts that expected telemetry events are emitted
+ * without any free-text or banned substrings.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
@@ -90,14 +90,6 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
     vi.stubEnv("ASSIST_API_KEYS", "cee-telemetry-golden-journey");
     vi.stubEnv("CEE_DRAFT_FEATURE_VERSION", "draft-golden-telemetry-test");
     vi.stubEnv("CEE_DRAFT_RATE_LIMIT_RPM", "10");
-    vi.stubEnv("CEE_OPTIONS_FEATURE_VERSION", "options-golden-telemetry-test");
-    vi.stubEnv("CEE_OPTIONS_RATE_LIMIT_RPM", "10");
-    vi.stubEnv("CEE_EVIDENCE_HELPER_FEATURE_VERSION", "evidence-golden-telemetry-test");
-    vi.stubEnv("CEE_EVIDENCE_HELPER_RATE_LIMIT_RPM", "10");
-    vi.stubEnv("CEE_BIAS_CHECK_FEATURE_VERSION", "bias-golden-telemetry-test");
-    vi.stubEnv("CEE_BIAS_CHECK_RATE_LIMIT_RPM", "10");
-    vi.stubEnv("CEE_TEAM_PERSPECTIVES_FEATURE_VERSION", "team-golden-telemetry-test");
-    vi.stubEnv("CEE_TEAM_PERSPECTIVES_RATE_LIMIT_RPM", "10");
 
     cleanBaseUrl();
     app = await build();
@@ -125,7 +117,7 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.HEALTHY_PRODUCT_DECISION);
 
     const headers = { "X-Olumi-Assist-Key": "cee-telemetry-golden-journey" } as const;
-    const draftStep = await runJourneyStep({
+    await runJourneyStep({
       app,
       telemetrySink,
       method: "POST",
@@ -142,73 +134,18 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
       failedEvent: TelemetryEvents.CeeDraftGraphFailed,
     });
 
-    const draftBody = draftStep.res.json();
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/options",
-      headers,
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-      requestedEvent: TelemetryEvents.CeeOptionsRequested,
-      succeededEvent: TelemetryEvents.CeeOptionsSucceeded,
-    });
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/evidence-helper",
-      headers,
-      payload: {
-        evidence: fixture.inputs.evidence?.items ?? [],
-      },
-      requestedEvent: TelemetryEvents.CeeEvidenceHelperRequested,
-      succeededEvent: TelemetryEvents.CeeEvidenceHelperSucceeded,
-    });
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/bias-check",
-      headers,
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-      requestedEvent: TelemetryEvents.CeeBiasCheckRequested,
-      succeededEvent: TelemetryEvents.CeeBiasCheckSucceeded,
-    });
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/team-perspectives",
-      headers,
-      payload: {
-        perspectives: fixture.inputs.team?.perspectives ?? [],
-      },
-      requestedEvent: TelemetryEvents.CeeTeamPerspectivesRequested,
-      succeededEvent: TelemetryEvents.CeeTeamPerspectivesSucceeded,
-    });
 
     const all = serializeAllTelemetry(telemetrySink);
     expect(all.includes(SECRET.toLowerCase())).toBe(false);
   });
 
-  it("emits truncation telemetry for an evidence-heavy golden journey", async () => {
+  it("emits draft requested + succeeded events for the evidence-heavy golden journey brief", async () => {
     const fixture = await loadCeeGoldenJourney(
       CEE_GOLDEN_JOURNEYS.EVIDENCE_HEAVY_WITH_TRUNCATION,
     );
 
     const headers = { "X-Olumi-Assist-Key": "cee-telemetry-golden-journey" } as const;
-    const draftStep = await runJourneyStep({
+    await runJourneyStep({
       app,
       telemetrySink,
       method: "POST",
@@ -224,59 +161,13 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
       succeededEvent: TelemetryEvents.CeeDraftGraphSucceeded,
     });
 
-    const draftBody = draftStep.res.json();
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/options",
-      headers,
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-      requestedEvent: TelemetryEvents.CeeOptionsRequested,
-      succeededEvent: TelemetryEvents.CeeOptionsSucceeded,
-    });
-
-    const evidenceStep = await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/evidence-helper",
-      headers,
-      payload: {
-        evidence: fixture.inputs.evidence?.items ?? [],
-      },
-      requestedEvent: TelemetryEvents.CeeEvidenceHelperRequested,
-      succeededEvent: TelemetryEvents.CeeEvidenceHelperSucceeded,
-    });
-
-    const evidenceSucceededData = evidenceStep.succeeded[0].data as Record<string, any>;
-    expect(typeof evidenceSucceededData.any_truncated).toBe("boolean");
-    expect(evidenceSucceededData.any_truncated).toBe(true);
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/bias-check",
-      headers,
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-      requestedEvent: TelemetryEvents.CeeBiasCheckRequested,
-      succeededEvent: TelemetryEvents.CeeBiasCheckSucceeded,
-    });
   });
 
-  it("emits disagreement telemetry for a team-disagreement golden journey", async () => {
+  it("emits draft requested + succeeded events for the team-disagreement golden journey brief", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.TEAM_DISAGREEMENT);
 
     const headers = { "X-Olumi-Assist-Key": "cee-telemetry-golden-journey" } as const;
-    const draftStep = await runJourneyStep({
+    await runJourneyStep({
       app,
       telemetrySink,
       method: "POST",
@@ -292,52 +183,5 @@ describe("CEE golden journey telemetry sanity (fixtures provider)", () => {
       succeededEvent: TelemetryEvents.CeeDraftGraphSucceeded,
     });
 
-    const draftBody = draftStep.res.json();
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/options",
-      headers,
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-      requestedEvent: TelemetryEvents.CeeOptionsRequested,
-      succeededEvent: TelemetryEvents.CeeOptionsSucceeded,
-    });
-
-    await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/bias-check",
-      headers,
-      payload: {
-        graph: draftBody.graph,
-        archetype: draftBody.archetype,
-      },
-      requestedEvent: TelemetryEvents.CeeBiasCheckRequested,
-      succeededEvent: TelemetryEvents.CeeBiasCheckSucceeded,
-    });
-
-    const teamStep = await runJourneyStep({
-      app,
-      telemetrySink,
-      method: "POST",
-      url: "/assist/v1/team-perspectives",
-      headers,
-      payload: {
-        perspectives: fixture.inputs.team?.perspectives ?? [],
-      },
-      requestedEvent: TelemetryEvents.CeeTeamPerspectivesRequested,
-      succeededEvent: TelemetryEvents.CeeTeamPerspectivesSucceeded,
-    });
-
-    const succeededData = teamStep.succeeded[0].data as Record<string, any>;
-    expect(typeof succeededData.participant_count).toBe("number");
-    expect(succeededData.participant_count).toBeGreaterThan(0);
-    expect(typeof succeededData.disagreement_score).toBe("number");
   });
 });
