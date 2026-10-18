@@ -28,7 +28,7 @@ const SETTING = 'Evening appointments would bring the queue strain index to 70 p
 const QUESTION = 'Olumi holds 45 for “Queue strain index”, with its meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?';
 const ID = 'queue_strain_index';
 const statement = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null): Rec =>
-  ({ quote, subject: { kind: 'factor', to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null });
+  ({ quote, subject: { kind: 'factor', to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null, speaker: null });
 const QSI = { label: 'Queue strain index' };
 
 type Row = { level?: string; unit?: string; definition?: boolean; setting?: 'olumi' | 'stated' };
