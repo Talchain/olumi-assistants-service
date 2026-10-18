@@ -11,7 +11,7 @@ import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpret
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
-import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
+import { linkBandSource, quoteIsNotTheUsersClaim, speechReading } from '../../goal-target/input-claim-context.js';
 import { deadlineCardToIssue, deadlineOfferOpen, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
@@ -47,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
+import { figuresWritten, userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -190,6 +190,21 @@ const ORIGIN_UNVERIFIED_NOTE =
   + 'Distinguish an offered proposal from a saved change using the actual result and readback. '
   + 'Approval authorises only the displayed change and does not verify source credit or scientific support. '
   + 'Reuse supplied figures rather than asking the user to repeat or confirm them; ask only for a genuinely missing or conflicting meaning.';
+/**
+ * ⭐ QBC row 9 (B4; DL ruling A07 (a)): whose a NEW option's level is, by the figure's own OCCURRENCE, read in the one speech reader's
+ * coordinates (`speechReading`). `user`: an occurrence outside quotation marks binds (`figureTheUserWroteForSpan`). `quoted`: only an
+ * occurrence inside them does: another speaker's words, or a title the user quotes. Matching an option's name never credits those words
+ * to the user; they are recorded with their origin unverified (the writer's existing carrier). `null`: no occurrence binds.
+ */
+function levelOccurrence(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): 'user' | 'quoted' | null {
+  const reading = speechReading(userText ?? '');
+  const span = figureTheUserWroteForSpan(value, unit, reading.text, scope);
+  if (span === null) return null;
+  if (!reading.inSpeech(span.start)) return 'user';
+  return findStatedAmounts(reading.text).some((a) => !reading.inSpeech(a.index)
+    && figureTheUserWroteForSpan(value, unit, reading.text, { ...scope, at: a.index }) !== null) ? 'user' : 'quoted';
+}
+
 /** A level in a different unit is left out before its authorship is read. */
 export const UNIT_DIFFERS_FROM_DECLARED_DETAIL = (option: string, declaredUnit: string, sentUnit: string): string =>
   `Send ${option}'s figure exactly as the user wrote it, in ${declaredUnit} (the factor's unit); it was sent in ${sentUnit}. Nothing was changed.`;
@@ -8136,16 +8151,22 @@ export function createAgentCapabilities(
           } else {
             // C2 (DL 15 Oct): the press adopts Olumi's approximation of THEIR range, so the card keeps their words for it.
             rangeQuote = rangeWordsIn(ctx.user_turn_text, ctx.user_text, low, high);
-            if (rangeQuote !== undefined) likelyRange = { low, high };
+            // ⭐ QBC row 7 (W14): the range is the user's only by THE ONE RULE (`verifyStatements`): their own span writes both ends as
+            // one range, never another speaker's quoted words. `rangeWordsIn` keeps only its source-quote and card work.
+            const theirs = rangeQuote !== undefined && verifyStatements([{ quote: rangeQuote, form: 'range', low, high }],
+              chatTexts(ctx, g.brief_text),
+              { subject: { quantity: 'option_level', node_id: factor.id, option_id: option.id }, unit: declaredUnit ?? '', forms: ['range'],
+                figuresIn: figuresWritten }).kind === 'verified';
+            if (theirs) likelyRange = { low, high };
             else rangesNotRecorded.push({ option: option.label, factor: factor.label,
               reason: 'No likely range was recorded: there are no words of the user’s to record it from. '
                 + 'Ask the user to restate their likely range in their own words, then propose it again.' });
           }
         }
 
-        // A rejected range has no bearing on the ordinary level or its authorship.
-        const userWrote = claimedByUser && (likelyRange !== undefined
-          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+        // A rejected range has no bearing on the ordinary level or its authorship; ⭐ QBC row 7: nor does a recorded one. A range
+        // never authors its midpoint: the level is the user's only where their words write it.
+        const userWrote = claimedByUser && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
           || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
@@ -11084,8 +11105,9 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
-          const retained = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
+          const occurrence = levelOccurrence(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const wrote = occurrence === 'user';
+          const retained = occurrence === 'quoted' || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
             || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text);
           // ⭐ QBC row 8 (G3, W15): a figure only the retained or brief words write is USER MATERIAL of unknown origin: recorded with its
           // origin unverified (construction's `cee_hypothesis` + `user_material_unverified`), never refused and never Olumi's (K3).
@@ -11208,8 +11230,10 @@ export function createAgentCapabilities(
             continue;
           }
           const levelUnit = unit ?? today.unit;
-          const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
-          const retained = figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text) || figureTheUserWrote(asked, levelUnit, g.brief_text);
+          const occurrence = levelOccurrence(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          const wrote = occurrence === 'user';
+          const retained = occurrence === 'quoted' || figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
+            || figureTheUserWrote(asked, levelUnit, g.brief_text);
           // ⭐ QBC row 8 (G3, W15): a figure only the retained or brief words write is recorded with its origin unverified (as above).
           const unverifiedLv = statementOrigin(wrote, retained, ctx.user_text_complete,
             lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown';

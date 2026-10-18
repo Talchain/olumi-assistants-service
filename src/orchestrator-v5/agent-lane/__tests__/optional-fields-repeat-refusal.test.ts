@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { runAgentTurn, type CallModel, type ModelCallRequest } from '../runtime/agent-loop.js';
@@ -31,11 +30,6 @@ async function proposal(extra: Record<string, unknown>, valid = false) {
   const p = typeof result.proposal_id === 'string' ? store.get(result.proposal_id) : undefined;
   return { result, p, store };
 }
-const fixture = new URL('./fixtures/cut1-valid-range-base.json', import.meta.url);
-function stable(p: NonNullable<Awaited<ReturnType<typeof proposal>>['p']>) {
-  // Proposal identity is content-addressed: compare every serialized byte, including proposal_id.
-  return JSON.stringify(p);
-}
 
 describe('cut1 real level handler', () => {
   it.each([
@@ -59,14 +53,17 @@ describe('cut1 real level handler', () => {
       expect(result.ranges_not_recorded).toBeUndefined();
     }
   });
-  it('R2: valid range proposal content is byte-identical to the base', async () => {
+  // ⭐ QBC PR-B (row 7, W14; stated in the PR body): R2 pinned the base bytes, which recorded a 0.1–0.5 likely range that the user's words
+  // never write as theirs. A range is the user's only by the one rule (`verifyStatements`), so it is not recorded and the omission is
+  // said; the level the user wrote (0.3) stays theirs.
+  it('R2: a range the user\'s words never write is not recorded as theirs; the written level stays theirs and the omission is said', async () => {
     const { result, p } = await proposal({ likely_low: 0.1, likely_high: 0.5, range_user_stated: true, range_meaning: 'likely_range' }, true);
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(p).toBeDefined();
-    const content = stable(p!);
-    if (process.env.CUT1_CAPTURE_BASE === '1') writeFileSync(fixture, content + '\n');
-    expect(content).toBe(readFileSync(fixture, 'utf8').trimEnd());
-    expect(result.detail).toBeUndefined();
+    const op = p!.operations.find(o => o.op === 'set_option_intervention')!;
+    expect(op.value).toMatchObject({ raw: 0.3, authored_by: 'user_stated' });
+    expect(op.value).not.toHaveProperty('likely_range');
+    expect(result.ranges_not_recorded).toEqual([expect.objectContaining({ option: 'Trial', factor: 'Duration' })]);
+    expect(result.detail).toContain('No likely range was recorded');
   });
   it('R1 control: invalid range cannot confer user authorship on an unwritten level', async () => {
     const { caps, store } = real();
