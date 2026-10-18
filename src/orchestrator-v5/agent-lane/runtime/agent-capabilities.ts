@@ -7478,7 +7478,6 @@ export function createAgentCapabilities(
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
         // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
-        const explicitEstimate = a.user_stated === false && a.revise !== true;
         // ⭐ LEAN CORE: whose the figure is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words (`quote`, or
         // a point statement), with the figure read from it. Not cited or not theirs: unknown, Olumi's only as an explicit estimate.
         const point = Array.isArray(a?.statements) && a.statements[0]?.form === 'point' ? a.statements[0] : undefined;
