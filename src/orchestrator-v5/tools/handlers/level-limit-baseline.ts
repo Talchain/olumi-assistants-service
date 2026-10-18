@@ -285,7 +285,13 @@ function unprovablePercentFrameIndices(graph: unknown, goalConstraints: unknown)
     const node = nodes.find((n) => n.id === c.node_id);
     const gtc = node?.goal_threshold_cap;
     if (typeof gtc === 'number' && Number.isFinite(gtc) && gtc > 0) return;
-    if (percentLimitFrameProvable(typeof c.unit === 'string' ? c.unit : undefined, node === undefined ? undefined : targetScaleOf(node))) return;
+    const unit = typeof c.unit === 'string' ? c.unit : undefined;
+    const scale = node === undefined ? undefined : targetScaleOf(node);
+    // ⭐ A (18 Oct): a unitless node's frame of 100 is a percent only beside the user's own percent limit on it (admission's
+    // rule, `admit-model.ts`); Olumi's limit on Olumi's 100 is sent unframed, so ISL says it could not be checked.
+    const supported = scale !== undefined && (scale.cap !== undefined || scale.scale_frame !== undefined) && scale.unit === undefined
+      && c.provenance === 'explicit' && unit !== undefined ? { ...scale, unit } : scale;
+    if (percentLimitFrameProvable(unit, supported)) return;
     out.push(i);
   });
   return out;

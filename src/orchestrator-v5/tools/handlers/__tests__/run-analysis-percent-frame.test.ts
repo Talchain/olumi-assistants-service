@@ -98,7 +98,9 @@ describe('CONTROLS — the frame is kept wherever PLoT reads the limit on the le
     ['#1965\'s converted factor: framed on 100, no level yet', FRAMED_NO_LEVEL],
     ['the served capless proportion (0.07, no unit)', { observed_state: { value: 0.07 } }],
   ])('"10 %%" framed level on %s keeps value_frame (the SAME array is returned)', (_n, churn) => {
-    const rows = [limit()];
+    // The served churn limit is the user's: on a unitless node, only the user's own percent limit makes its frame of 100 a
+    // percent (18 Oct, A; Olumi's own limit there: `run-analysis-level-limit-baseline.test.ts` U1 residual).
+    const rows = [limit({ provenance: 'explicit' })];
     expect(withholdUnprovablePercentFrames(graphWith(churn), rows)).toBe(rows);
   });
 

@@ -211,6 +211,7 @@ export function buildGraphLookup(
           raw_value?: unknown;
           unit?: unknown;
           cap?: unknown;
+          frame_source?: unknown;
         };
         // ROADMAP 2.384 — the display string lives on the NODE, not on
         // `observed_state` (`set-factor-value.ts` writes `node.display_value`,
@@ -225,6 +226,7 @@ export function buildGraphLookup(
           ...(typeof o.raw_value === 'number' ? { raw_value: o.raw_value } : {}),
           ...(typeof o.unit === 'string' ? { unit: o.unit } : {}),
           ...(typeof o.cap === 'number' ? { cap: o.cap } : {}),
+          ...(o.frame_source === 'olumi_convention' ? { frame_source: 'olumi_convention' as const } : {}),
           ...(typeof nodeDisplay === 'string' && nodeDisplay.trim().length > 0
             ? { display_value: nodeDisplay }
             : {}),

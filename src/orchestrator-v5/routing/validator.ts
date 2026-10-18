@@ -85,6 +85,8 @@ export interface FactorObservedStateSnapshot {
   readonly raw_value?: number;
   readonly unit?: string;
   readonly cap?: number;
+  /** Olumi chose this cap (A, D2): its reference, never a bound a user's figure is refused against. */
+  readonly frame_source?: 'olumi_convention';
   /**
    * ROADMAP 2.384 (band-vocabulary refusal) — the factor's OWN persisted
    * display string, exactly as the enricher/handler wrote it and exactly as
@@ -903,6 +905,7 @@ function preexecuteSetFactorValue(
     // cannot disagree). Magnitude is never inspected.
     ...(obs?.value !== undefined ? { factorObservedValue: obs.value } : {}),
     ...(obs?.raw_value !== undefined ? { factorObservedRawValue: obs.raw_value } : {}),
+    factorCapIsOlumiReference: obs?.frame_source === 'olumi_convention',
     inputHasUnit: parsed.inputHasUnit,
   });
 

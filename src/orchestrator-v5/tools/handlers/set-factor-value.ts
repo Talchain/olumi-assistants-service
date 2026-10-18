@@ -497,6 +497,8 @@ export function createSetFactorValueHandler(): HandlerFn {
     // enforces exactly what the validator and executor precheck do (AC.1).
     // A non-`resolved` existing value omits `factorExistingRaw`, so any delta
     // fails closed via `delta_no_existing_value`.
+    // A (18 Oct, U2): a cap Olumi chose is its reference; a user's figure above it widens it (`widen_cap_to`), kept Olumi's.
+    const olumiReference = (targetNode as { observed_state?: { frame_source?: unknown } }).observed_state?.frame_source === 'olumi_convention';
     const preEvaluation = evaluateFactorValueProposal({
       rawInput: parsed.numeric,
       operator,
@@ -517,6 +519,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       // predicate (AC.1 parity): a pre-check that admits what the execute-time
       // re-check refuses is the disagreement this change exists to remove.
       factorRecordedScaleIsUnusable,
+      factorCapIsOlumiReference: olumiReference,
       inputHasUnit: parsed.inputHasUnit,
     });
     if (!preEvaluation.ok) {
@@ -536,10 +539,11 @@ export function createSetFactorValueHandler(): HandlerFn {
 
     const newRaw = applyFactorValueOperator(currentRaw, operator, parsed.numeric);
 
+    const widenTo = preEvaluation.widen_cap_to;
     const normalised = normaliseFactorValue({
       rawInput: newRaw,
       ...(parsed.unit !== undefined ? { unit: parsed.unit } : {}),
-      ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
+      ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : widenTo !== undefined ? { proposalCap: widenTo } : {}),
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
       // ROADMAP 2.159 — same two fields as `preEvaluation` above, so the
@@ -623,9 +627,11 @@ export function createSetFactorValueHandler(): HandlerFn {
           : {}),
       ...(parsed.cap !== undefined
         ? { cap: parsed.cap }
-        : before.cap !== undefined
-          ? { cap: before.cap }
-          : {}),
+        : widenTo !== undefined
+          ? { cap: widenTo }
+          : before.cap !== undefined
+            ? { cap: before.cap }
+            : {}),
     };
 
     // 1.16 item A2 — consented cap change detection. An explicit proposal
@@ -880,7 +886,8 @@ export function createSetFactorValueHandler(): HandlerFn {
       }
       // #2848: `frame_source: 'olumi_convention'` says OLUMI chose this cap. A write that changes the cap makes it
       // someone else's, so the marker (and the factor-detail disclosure it drives) goes with the old cap.
-      if (after.cap !== undefined && after.cap !== priorObserved.cap) {
+      // A widening of Olumi's own reference to cover the user's figure stays Olumi's (A, U2).
+      if (after.cap !== undefined && after.cap !== priorObserved.cap && widenTo === undefined) {
         delete (merged as { frame_source?: unknown }).frame_source;
       }
       /**
