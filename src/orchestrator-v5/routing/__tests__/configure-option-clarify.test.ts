@@ -1,12 +1,9 @@
 /**
- * L16 / N16 — unit contract for the bare-configure remedy predicate and its
- * composer.
+ * L16 / N16 — unit contract for the bare-configure value-payload predicate,
+ * and for the configure-option phrasing the detector accepts.
  *
- * The route-level pin lives in
- * `tests/integration/orchestrator/route-v2-configure-option-clarify.test.ts`
- * (that is where the walk's wire body is replayed). This file pins the two
- * things a route test cannot see cheaply: the DECLINE surface — every reason
- * the intercept must keep its hands off a turn — and the copy contract.
+ * The clarify intercept and its composer had no production importer and were
+ * deleted (O2 orphan deletion); their decline and copy rows went with them.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -31,13 +28,12 @@ describe('carriesConfigureOptionValuePayload — derived from the router\'s own 
   });
 });
 
-describe('composeConfigureOptionClarifyResponse — copy contract', () => {
+describe('detectConfigureOptionIntent — the option-effect phrasing', () => {
 
-  it('the phrasing it advises is one the router actually accepts — the loop closes', () => {
-    // ⭐ The 2.11 defect in one assertion: "the assistant suggests phrasings
-    // that cannot return to the lane that suggested them". Extract the advised
-    // sentence from the live copy, complete it with a value, and feed it back
-    // through the REAL detector.
+  it('accepts a hand-written "Set the <option> option\'s effect on <factor> to <value>" sentence', () => {
+    // The 2.11 defect was a suggested phrasing that could not return to the
+    // lane that suggested it. The composer is gone; this keeps the phrasing
+    // itself pinned against the REAL detector.
     const advised = `Set the ${OPTION_LABEL} option's effect on ${FACTOR_LABEL} to 1`;
     const back = detectConfigureOptionIntent(advised, [OPTION_LABEL]);
     expect(back.matched).toBe(true);
