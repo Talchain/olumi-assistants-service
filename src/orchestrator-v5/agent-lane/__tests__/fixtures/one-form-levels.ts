@@ -49,6 +49,11 @@ export function asServedBeforeOneForm<G>(graph: G, served: unknown): G {
     if (node.kind === 'goal' && isWrittenUnitReading(node.unit_reading) && servedById.get(node.id)?.unit_reading === undefined) {
       delete node.unit_reading;
     }
+    // A (18 Oct, D2): every graph served before it holds no disclosure on the drafter's own range. Removed ONLY where the
+    // served node holds none; which ranges carry it is pinned by `olumi-reference-disclosed.test.ts`.
+    const servedOs = servedById.get(node.id)?.observed_state;
+    if (isDict(node.observed_state) && node.observed_state.frame_source === 'olumi_convention'
+      && (!isDict(servedOs) || servedOs.frame_source === undefined)) delete node.observed_state.frame_source;
     if (node.kind !== 'option' || !isDict(node.interventions)) continue;
     for (const [key, cell] of Object.entries(node.interventions)) {
       if (!isDict(cell)) continue;

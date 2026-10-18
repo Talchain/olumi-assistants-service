@@ -74,6 +74,7 @@ import {
   admitCandidateConstraints,
   canonicalProvenance,
   percentLevelFrame,
+  percentScaleUnit,
   type CandidateConstraint,
   type AdmittedConstraint,
   type ConstraintAdmissionResult,
@@ -4046,6 +4047,20 @@ function admitOnce(
       capByLabel.set(iv.factor_label, frame);
     }
   }
+  // ⭐ A U3 (18 Oct): a level limit in the factor's own unit above Olumi's range widens the range the same way, so the
+  // user's limit is never read outside it. A range the brief writes is the user's, and a percentage's 100 is its
+  // encoding: both are left alone.
+  const limitWidened = new Set<string>();
+  for (const c of model.constraints) {
+    const f = model.factors.find((x) => canonicalLabel(x.label) === canonicalLabel(c.metric));
+    const stated = f === undefined ? undefined : capByLabel.get(f.label);
+    if (f === undefined || stated === undefined || (c.frame !== undefined && c.frame !== 'level') || !Number.isFinite(c.value)
+      || percentScaleUnit(f.unit ?? undefined)
+      || c.value <= stated || (c.unit ?? '').trim().toLowerCase() !== (f.unit ?? '').trim().toLowerCase()
+      || briefWritesFigure(brief, stated, conventionClassOf(f.label, f.unit, f.baseline_value), f.unit)) continue;
+    capByLabel.set(f.label, defaultFrameFor(c.value));
+    limitWidened.add(f.label);
+  }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
     const unframedEstimate = model.factors.some((f) => f.label === label && !f.baseline_known
@@ -4575,9 +4590,16 @@ function admitOnce(
   }
 
   // #2842 follow-up: a factor framed by Olumi's rescue convention says so on its own record, so a surface can disclose it.
-  for (const cf of conventionFrames) {
-    const node = nodes.find((n) => n.id === ids.get(cf.label)) as { observed_state?: Record<string, unknown> } | undefined;
-    if (node?.observed_state !== undefined) node.observed_state = { ...node.observed_state, frame_source: 'olumi_convention' };
+  // ⭐ A (18 Oct, D2): every frame Olumi chose says so the same way — a defaulted or widened frame, and the drafter's range
+  // that the brief does not write and the unit does not encode. Disclosure only: never a bound, an encoding or a licence.
+  const draftedReference = (f: CandidateModel['factors'][number]): boolean => typeof f.plausible_max === 'number'
+    && capByLabel.get(f.label) === f.plausible_max && !(f.plausible_max === 100 && percentScaleUnit(f.unit ?? undefined))
+    && !briefWritesFigure(brief, f.plausible_max, conventionClassOf(f.label, f.unit, f.baseline_value), f.unit);
+  const olumiFrameLabels = new Set([...conventionFrames.map((c) => c.label), ...defaultedFrames.map((d) => d.label),
+    ...widenedFrames.map((w) => w.label), ...limitWidened, ...model.factors.filter(draftedReference).map((f) => f.label)]);
+  for (const label of olumiFrameLabels) {
+    const node = nodes.find((n) => n.id === ids.get(label)) as { observed_state?: Record<string, unknown> } | undefined;
+    if (node?.observed_state !== undefined && !unscaled.has(label)) node.observed_state = { ...node.observed_state, frame_source: 'olumi_convention' };
   }
 
   // The scope choice, recorded with both readings: its `after` IS the assumption the build says, and
