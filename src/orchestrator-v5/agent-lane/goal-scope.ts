@@ -4,7 +4,7 @@ import { stableStringify } from '../../orchestrator/context/stable-stringify.js'
 import { valueClassOf } from '../../cee/graph-readiness/obligation-provenance.js';
 import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
-import { figureTheUserWrote } from './stated-by-user.js';
+import { userStated, type StatementTexts } from './user-statements.js';
 import type { AdmittedModel, CandidateModel } from './admit-model.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { isPendingActionExpired, PENDING_KIND_CLAIMS_BARE_NUMBER } from '../session/pending-action.js';
@@ -76,16 +76,22 @@ export function scopeShareAnswerCanBind(prior: readonly PendingAction[], goalId:
     && !prior.some(p => p.action.kind !== 'reconcile_goal_scope' && !isPendingActionExpired(p, now) && PENDING_KIND_CLAIMS_BARE_NUMBER[p.action.kind]);
 }
 
-export function scopeSourcesAreUserWords(scope: GoalScope, words: string, prior?: GoalScope): boolean {
-  const written = (quote: string, old?: string) => words.includes(quote) || quote === old;
+/**
+ * ⭐ LEAN CORE: every scope source is the user's own words by THE ONE RULE (`userStated`), or the source the saved scope already holds;
+ * a new share is the user's only where its source quote writes it (a percentage, read as the 0–1 share).
+ */
+export function scopeSourcesAreUserWords(scope: GoalScope, texts: StatementTexts, prior?: GoalScope): boolean {
+  const theirs = (quote: string, value?: number): boolean => userStated({ quote, ...(value !== undefined ? { value, unit: 'proportion' } : {}) }, texts,
+    { quantity: 'goal_scope' }).origin === 'human';
+  const written = (quote: string, old?: string) => theirs(quote) || quote === old;
   if (!written(scope.source.quote, prior?.source.quote)) return false;
-  if (prior && ['modelled', 'alternative', 'extent'].some(k => scope[k as 'extent'] !== prior[k as 'extent']) && !words.includes(scope.source.quote)) return false;
+  if (prior && ['modelled', 'alternative', 'extent'].some(k => scope[k as 'extent'] !== prior[k as 'extent']) && !theirs(scope.source.quote)) return false;
   const c = scope.component;
   if (!c) return true;
   if (!written(c.source.quote, prior?.component?.source.quote)) return false;
-  if (prior?.component && ['label', 'rate_id', 'count_id'].some(k => c[k as 'label'] !== prior.component![k as 'label']) && !words.includes(c.source.quote)) return false;
-  if (c.basis !== 'unknown' && (c.basis !== prior?.component?.basis || c.count_basis !== prior?.component?.count_basis) && (!c.basis_source || !words.includes(c.basis_source.quote))) return false;
-  if (c.share !== undefined && c.share !== prior?.component?.share && !figureTheUserWrote(c.share, 'proportion', c.source.quote)) return false;
+  if (prior?.component && ['label', 'rate_id', 'count_id'].some(k => c[k as 'label'] !== prior.component![k as 'label']) && !theirs(c.source.quote)) return false;
+  if (c.basis !== 'unknown' && (c.basis !== prior?.component?.basis || c.count_basis !== prior?.component?.count_basis) && (!c.basis_source || !theirs(c.basis_source.quote))) return false;
+  if (c.share !== undefined && c.share !== prior?.component?.share && !theirs(c.source.quote, c.share)) return false;
   return true;
 }
 

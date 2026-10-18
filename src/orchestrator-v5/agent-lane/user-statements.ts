@@ -206,6 +206,9 @@ function unitWrittenIn(quote: string, end: number | undefined, unit: string, sca
     && (Math.abs(a.magnitude) === Math.abs(end) || Math.abs(a.magnitude) === Math.abs(end * scale)));
 }
 
+/** Units whose figures are 0–1 shares of a whole: a percentage the user writes is that share ×100. */
+const SHARE_UNITS: ReadonlySet<string> = new Set(['proportion', 'share', 'fraction']);
+
 /** The subject's current recorded account (`userStatementFor`, statements.ts), as the rule reads it: never written here. */
 export interface CurrentRecord {
   readonly statements: readonly Pick<UserStatement, 'quote'>[];
@@ -246,9 +249,13 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   const form = STATEMENT_FORMS.find((f) => f === claim?.form) ?? opts.form
     ?? (given(claim?.low) && given(claim?.high) ? 'range' : given(claim?.value) ? 'point' : 'describes');
   const unit = trimmed(claim?.unit, 60);
-  const scale = unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
+  // The unit's own scale: a money unit's magnitude letter ("£k": ×1000), or a 0–1 share unit, which reads a written PERCENTAGE ("30%" is
+  // 0.3 of a proportion; never a plain "30 people").
+  const share = unit !== undefined && SHARE_UNITS.has(unit.toLowerCase());
+  const scale = share ? 100 : unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
+  const percentAt = (q: string, n: number): boolean => findStatedAmounts(q).some((a) => a.kind === 'percent' && Math.abs(a.magnitude - n) <= 1e-9 * Math.max(1, Math.abs(n)));
   const v = verifyStatement({ ...claim, quote, form }, texts, { subject, unit: unit ?? '', forms: STATEMENT_FORMS, figuresIn: figuresWritten,
-    allowsZero: true, sameFigure: (_q, a, b) => a === b || (scale > 1 && Math.abs(a * scale - b) <= 1e-9 * Math.max(1, Math.abs(b))) }, opts.current);
+    allowsZero: true, sameFigure: (q, a, b) => a === b || (scale > 1 && Math.abs(a * scale - b) <= 1e-9 * Math.max(1, Math.abs(b)) && (!share || percentAt(q, b))) }, opts.current);
   if (v.kind === 'refused') return notTheirs(v.refusal, v.detail);
   const { unit: _read, ...read } = v.statement;
   // An end read at the unit's own scale ("£54k" for 54 £k) is kept in the AI's unit, the figure the user wrote.
