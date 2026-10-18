@@ -223,6 +223,9 @@ describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the us
       'not_this_field', 'says the effect is NOT that range'],
     ['two ranges in one statement', 'The corporate deal could lift weekday attendance by 4 to 7 points, or 2 to 3 points in winter.', RANGE,
       'not_this_field', 'gives more than one range'],
+    // The same figures in two different units are two ranges, never one (the dedupe below needs the SAME unit after each).
+    ['the same figures in two units', 'The corporate deal could lift weekday attendance by 4 to 7 points, or by 4 to 7 members a day.', RANGE,
+      'not_this_field', 'gives more than one range'],
     ['a single figure, not a range', 'The corporate deal could lift weekday attendance by about 5 points.', { form: 'point', value: 5, unit: 'points' },
       'statement_malformed', 'one form of: range'],
     ['no reading given', 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.', {},
@@ -235,6 +238,17 @@ describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the us
     expect(w.card).toBeUndefined();
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
     stillAsked(stored, idOf(g, 'Corporate wellness deal'), w.from, w.to);
+  }, 60_000);
+
+  // ⭐ G3-unseen 1253187a T03 (C5 trace, replayed): the user restated ONE range in a second notation and the door refused it as
+  // "more than one range". The same ends AND the same unit after each are one range: the card is offered, exactly as for one notation.
+  it('⭐ the SAME range in two notations is one range: the card is offered, for that one range', async () => {
+    const g = await builtGraph();
+    const said = 'The corporate deal could lift weekday attendance by 4–7 points, so somewhere between 4 and 7 points.';
+    const w = await answered(g, said, said);
+    expect(w.card, JSON.stringify({ calls: w.b._agent?.tool_calls, toolResults })).toBeDefined();
+    expect(toolResults.map((r) => String(r.public_label ?? '')).join(' ')).toContain('a range of 4 to 7 points');
+    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
   }, 60_000);
 
   it('NEGATIVE: words the user never typed are never the source (statement_not_found): no card', async () => {

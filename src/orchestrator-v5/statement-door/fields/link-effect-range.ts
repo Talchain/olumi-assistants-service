@@ -8,7 +8,8 @@
  * record, and the link's size is still asked (an AI-omitted negation cannot be told apart from a genuine range). Pure.
  */
 import { linkEffectEndUnits, statedInOneOf } from '../../system-events/link-effect-edit.js';
-import { figuresWritten } from '../../agent-lane/user-statements.js';
+import { findJoinedRanges } from '../../../cee/provenance/stated-amounts.js';
+import { statedTailParts } from '../../agent-lane/same-unit.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
@@ -29,6 +30,18 @@ const fmt = (n: number): string => (Number.isInteger(n) ? n.toLocaleString('en-G
 /** The ONE link this subject names: a link (no option) whose edge is in the graph exactly once. */
 const linkHeld = (subject: DoorSubject, graph: unknown): boolean => subject.kind === 'link' && subject.to_id !== undefined
   && subject.option_id === undefined && edgesOf(graph).filter((e) => e.from === subject.id && e.to === subject.to_id).length === 1;
+
+/**
+ * How many DIFFERENT ranges `quote` writes (G3-unseen 1253187a T03: the same range restated in a second notation was refused as
+ * "more than one range"). A range written twice — equal ends AND the same unit read after each high end by the estate's one tail
+ * reader (`statedTailParts`, compared part for part as `sameUnit` compares units) — counts once. A range with no unit read after
+ * it is never the same as another, and equal figures in different units stay two ranges.
+ */
+function distinctRangesWritten(quote: string): number {
+  const ranges = findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude, unit: statedTailParts(quote, r.high) }));
+  return ranges.filter((r, i) => !ranges.slice(0, i).some((o) => o.low === r.low && o.high === r.high
+    && o.unit !== null && r.unit !== null && JSON.stringify(o.unit) === JSON.stringify(r.unit))).length;
+}
 
 const ends = (subject: DoorSubject, graph: unknown): string => `‘${labelOf(graph, subject.id)}’ → ‘${labelOf(graph, subject.to_id)}’`;
 
@@ -54,7 +67,7 @@ export const LINK_EFFECT_RANGE_ROW: RoleRow = {
     if (s.form !== 'range') return 'A link’s effect is recorded here only as a range the user wrote, for example “between 4 and 7 points”.';
     if (s.negated === true) return `“${s.quote}” says the effect is NOT that range, so it is not recorded as the link’s range; its question stays open.`;
     // Two ranges written in one statement ("4 to 7 points, or 2 to 3 in winter") are two readings, never one range: ask which holds.
-    if (figuresWritten(s.quote).filter((r) => r.low < r.high).length > 1) return `“${s.quote}” gives more than one range, so neither is recorded alone; ask which holds.`;
+    if (distinctRangesWritten(s.quote) > 1) return `“${s.quote}” gives more than one range, so neither is recorded alone; ask which holds.`;
     const units = linkEffectEndUnits(graph, subject.id, subject.to_id ?? '');
     const own = units === null ? [] : [...units.target.own, ...(units.target.adopted !== undefined ? [units.target.adopted] : [])];
     return statedInOneOf(s.unit, own) ? undefined
