@@ -189,7 +189,8 @@ export function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, 
   const message = scopeReasons === undefined ? STATIC_INPUTS_NOT_RECORDED
     : 'This Run’s recorded evidence does not support showing goal chances.';
   // A prior temporal projection already removed the licence; preserve its recorded cause on repeated readback.
-  const horizonWithhold = warnings.find(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
+  const horizonWithhold = scopeReasons === undefined ? undefined
+    : warnings.find(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
   const prior = horizonWithhold === undefined || !Array.isArray(candidate.inference_warnings) ? candidate
     : { ...candidate, inference_warnings: candidate.inference_warnings.filter(value => value !== horizonWithhold) };
   const gated = missingStaticEvidence ? withholdOptionGoalFigures(prior, new Set(ids), recordOf(horizonWithhold) ?? {

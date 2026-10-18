@@ -9,7 +9,7 @@ import { runFactsOf } from '../../agent-lane/run-facts.js';
 import { readRunEvidence, runEvidenceWireOf } from '../../agent-lane/run-evidence.js';
 import { bindRunAnalysisOccurrence } from '../../types/handler-fact.js';
 import { RUN_QUESTION_EVIDENCE_KEY } from '../../tools/handlers/run-input-snapshot.js';
-import { goalChanceScopeOf, withGoalChanceReadback } from '../goal-chance-licence.js';
+import { goalChanceScopeOf, withGoalChanceReadback, withReadTimeHorizonGate } from '../goal-chance-licence.js';
 import { runChanceHeadline } from '../../coaching/run-chance-headline.js';
 import { goalChanceSideOf } from '../goal-chance-sides.js';
 import { goalChanceRangeDisplayForAgent } from '../goal-chance-range-agent.js';
@@ -20,6 +20,8 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { SupabaseSessionStore } from '../../session/supabase-store.js';
 import { SessionLRUCache } from '../../session/cache.js';
+import { STATIC_INPUTS_NOT_RECORDED } from '../static-run-evidence.js';
+import { goalChanceWithheldForAgent, GOAL_CHANCE_WITHHELD_NOTE, PLACEHOLDER_PATH_NOTE } from '../../agent-lane/goal-chance-withheld.js';
 
 const storedRead = vi.hoisted(() => vi.fn());
 vi.mock('../../session/index.js', async original => ({
@@ -45,6 +47,38 @@ const viewOf = (fact: ReturnType<typeof deniedRun>) => projectCanonicalAnalysisV
 });
 
 describe('B0: the selected Run’s negative permission precedes every chance display', () => {
+  it.each([['RS3', rs3.result], ['capacity', capacity.result]] as const)(
+    'without an attempted display, %s retains its own figures, uncertainty and coaching byte-for-byte', (_brief, captured) => {
+      const result = structuredClone(captured);
+      result.enrichment.inference_warnings = result.enrichment.inference_warnings
+        .filter(warning => !['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(warning.code));
+      expect(goalChanceScopeOf(result).can_show_goal_chance).toBe(false);
+      const bytes = JSON.stringify(result);
+      expect(withGoalChanceReadback(result)).toBe(result);
+      expect(JSON.stringify(result)).toBe(bytes);
+    });
+
+  it('a genuine static-input loss keeps its exact cause even beside an existing horizon withhold', () => {
+    const result = { ...structuredClone(capacity.result), run_id: capacity.evidence.run_id };
+    result.enrichment.inference_warnings.push({ code: 'GOAL_FIGURES_HORIZON_NOT_TESTED', severity: 'warning',
+      message: 'The recorded horizon was not evaluated.' } as never);
+    const gated = withGoalChanceReadback(result);
+    const causes = gated.enrichment.inference_warnings.filter(warning => warning.code.startsWith('GOAL_FIGURES_'));
+    expect(causes.map(warning => warning.code)).toEqual(['GOAL_FIGURES_HORIZON_NOT_TESTED', 'GOAL_FIGURES_TARGET_NOT_TESTABLE']);
+    expect(causes[1]).toMatchObject({ message: STATIC_INPUTS_NOT_RECORDED, say: STATIC_INPUTS_NOT_RECORDED,
+      detail: { reason: 'EVALUATED_STATIC_INPUTS_NOT_RECORDED' } });
+  });
+
+  it('RS3 keeps the existing unsized-link next step unchanged after the selected-Run limitation', () => {
+    const fact = deniedRun();
+    const gated = withReadTimeHorizonGate(fact.result, rs3.graph, fact.result.enrichment);
+    const nextStep = rs3.result.enrichment.inference_warnings.find(warning => warning.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')?.message;
+    expect(nextStep).toBe("This comparison turns on the links from ‘Scanner rollout disruption’ to ‘Orders picked per day’ and from ‘Faster scanner upgrade’ to ‘Scanner rollout disruption’, whose strengths aren't sized in the model yet. Set them to see how much they matter.");
+    const coaching = goalChanceWithheldForAgent(gated, rs3.graph);
+    expect(coaching?.say).toBe(`This Run’s recorded evidence does not support showing goal chances. ${nextStep}`);
+    expect(coaching?.note).toBe(`${GOAL_CHANCE_WITHHELD_NOTE} ${PLACEHOLDER_PATH_NOTE}`);
+  });
+
   it('RED: readable RS3’s missing licence withholds its valid range and gives every affected option the recorded reason', () => {
     const fact = deniedRun(), bytes = JSON.stringify(fact);
     expect(goalChanceScopeOf(fact.result)).toMatchObject({ can_show_goal_chance: false, reasons: ['goal_chance_not_licensed'] });
@@ -176,5 +210,7 @@ describe('B0: the selected Run’s negative permission precedes every chance dis
     expect(facts.question?.scope.can_show_goal_chance).toBe(false);
     expect(facts.chances.goal_chance_range_display).toBeUndefined();
     expect(facts.chances.goal_chance_display).toBeUndefined();
+    const refused = withGoalChanceReadback(fact.result, fact.result, foreign);
+    expect(goalChanceWithheldForAgent(refused, rs3.graph)?.say).not.toContain('Set them to see how much they matter.');
   });
 });
