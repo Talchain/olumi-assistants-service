@@ -6,7 +6,7 @@
  * for "hire a Tech lead or two developers".
  */
 import { describe, it, expect, vi } from 'vitest';
-import { gateBriefReading, readBrief, MAX_OPTIONS, BRIEF_READING_MODEL, BRIEF_READING_SCHEMA } from '../brief-reading.js';
+import { gateBriefReading, readBrief, MAX_OPTIONS, BRIEF_READING_MODEL, BRIEF_READING_SCHEMA, BRIEF_READING_INSTRUCTIONS } from '../brief-reading.js';
 import { readFileSync } from 'node:fs';
 
 const corpus = JSON.parse(readFileSync(new URL('./fixtures/brief-reading-corpus.json', import.meta.url), 'utf8')) as {
@@ -60,6 +60,18 @@ describe('gateBriefReading — every item is the user\'s own words, or it is dro
 });
 
 describe('readBrief — one call, never throws', () => {
+  it.each([
+    { name: 'distribution', goal: 'reduce dispatch delays by 20%', option: 'trial evening staffing' },
+    { name: 'laboratory', goal: 'reduce sample errors by 20%', option: 'trial double labels' },
+  ])('$name: the actual reader call keeps the exact current message and its measured contract', async row => {
+    const message = `  We want to ${row.goal}; we could ${row.option}. Revenue was £2m on 2026-09-01. Asha disputes the cause, only if the existing checks continue.\n`;
+    const call = vi.fn(async () => j({ goal: row.goal, options: [row.option], limits: [], build: true }));
+    expect(await readBrief(message, call)).toEqual({ goal: row.goal, options: [row.option], limits: [], build: true });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith({ model: BRIEF_READING_MODEL, instructions: BRIEF_READING_INSTRUCTIONS,
+      input: message, schema: BRIEF_READING_SCHEMA });
+  });
+
   it('sends the user\'s message with the measured model and the goal / limits / options schema', async () => {
     const call = vi.fn(async () => j({ goal: 'reach £100k MRR within 6 months', options: [] }));
     await expect(readBrief(PAUL_C, call)).resolves.toEqual({ goal: 'reach £100k MRR within 6 months', options: [], limits: [] });

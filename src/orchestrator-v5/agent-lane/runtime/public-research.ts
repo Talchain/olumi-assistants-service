@@ -16,6 +16,7 @@
  * the answer row keeps, so a reload shows the same sources).
  */
 import { createHash } from 'node:crypto';
+import { turnContextItems } from '../turn-context.js';
 import { REPLY_SHAPE_INSTRUCTION } from '../reply/reply-shape-instruction.js';
 
 /** Hosted search calls one research request may make (the handoff's `max_tool_calls`). */
@@ -107,7 +108,7 @@ export function researchRequestBody(query: string, model: string): Record<string
   return {
     model,
     instructions: RESEARCH_INSTRUCTIONS,
-    input: [{ role: 'user', content: [{ type: 'input_text', text: query }] }],
+    input: turnContextItems({ scope: 'request-only', request: query }),
     max_output_tokens: RESEARCH_MAX_OUTPUT_TOKENS,
     store: false,
     tools: [{ type: 'web_search' }],

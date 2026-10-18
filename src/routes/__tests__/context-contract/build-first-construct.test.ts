@@ -42,7 +42,7 @@ describe('build/draft first-construct exact provider body', () => {
     // verbatim, the one typed message with its recorded speaker and source, and the retained reasoning context. An appended or
     // dropped block fails here (Codex delta review, PL-R3394-INPUT-0235).
     expect(body.input).toBe([TODAY_AT_HARNESS_CLOCK, `${BRIEF_LABEL}\n${BUILD_BRIEF}`,
-      `${LATER_MESSAGES_CONTEXT_LEAD}\n${JSON.stringify({ speaker: 'user', source: 'typed' })}\nHelp structure this strategic brief.`,
+      `${LATER_MESSAGES_CONTEXT_LEAD}\n${JSON.stringify({ speaker: 'user', source: 'typed' })}\n"Help structure this strategic brief."`,
       RETAINED_REASONING_CONTEXT].join('\n\n'));
     expect(body.input).toContain('Keep £49 price or raise price to £59');
     expect(body.input).toContain('Paul assumes churn stays at 3%; Maya disagrees.');

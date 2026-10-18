@@ -36,7 +36,7 @@ export interface ConstructionContext {
   readonly request?: string;
   readonly current_request_origin?: 'typed' | 'product control' | 'unknown';
   readonly verified_user_messages?: readonly string[];
-  readonly retained?: { readonly brief: string; readonly conversation: readonly RetainedMessage[]; readonly items?: readonly unknown[] };
+  readonly retained?: { readonly brief: string; readonly conversation: readonly RetainedMessage[] };
   readonly objections?: readonly string[];
 }
 
@@ -74,11 +74,18 @@ export function runFactsInstructionItem(use: string): unknown {
  * origin-unknown. A chip with identical text to a typed statement cannot inherit its authorship or approval.
  */
 export function turnContextItems(args: {
+  readonly scope?: undefined;
   readonly now: Date; readonly briefText: unknown; readonly conversation: readonly unknown[];
   readonly verifiedUserMessages?: readonly string[]; readonly unknownUserText?: string;
   readonly recentTurns?: number; readonly canonicalState?: unknown; readonly request?: string; readonly runFactsUse?: string; readonly currentRequestOrigin?: 'typed' | 'product control' | 'unknown';
   readonly construction?: ConstructionContext;
-}): unknown[] {
+} | { readonly scope: 'request-only'; readonly request: string }
+  | { readonly scope: 'model-only'; readonly canonicalState: unknown }): unknown[] {
+  // Narrow callers share the owner without gaining access to private history or a different source domain.
+  if (args.scope !== undefined) {
+    const text = args.scope === 'request-only' ? args.request : `${REASONING_CONTEXT_LABEL}\n${JSON.stringify(args.canonicalState)}`;
+    return [{ role: 'user', content: [{ type: 'input_text', text }] }];
+  }
   const items: unknown[] = [{ role: 'developer', content: [{ type: 'input_text', text: todayLine(args.now) }] }];
   const construction = args.construction !== undefined;
   const request = args.request ?? args.construction?.request;
@@ -137,7 +144,7 @@ export function turnContextItems(args: {
   if (args.construction !== undefined) {
     const context = args.construction;
     // Preserve the existing shared answered-pair/older-words items whole, without a caller's text-prefix filter.
-    const shared = [...items.slice(1).filter(item => item !== briefItem), ...(context.retained?.items ?? [])];
+    const shared = items.slice(1).filter(item => item !== briefItem);
     const constructionItems: unknown[] = [items[0]];
     const carry = (text: string): void => { constructionItems.push({ role: 'user', content: [{ type: 'input_text', text }] }); };
     const original = context.retained?.brief ?? (typeof args.briefText === 'string' ? args.briefText : '');
@@ -155,9 +162,8 @@ export function turnContextItems(args: {
         }] : [];
       }),
     ];
-    // Metadata labels an occurrence; it never authenticates its words. Authorship relies on the separate typed source,
-    // not on JSON quotation accidentally defeating a whole-statement check on a reference sentence.
-    if (references.length > 0) carry(`${LATER_MESSAGES_CONTEXT_LEAD}\n${references.map(({ text, ...origin }) => `${JSON.stringify(origin)}\n${text}`).join('\n\n')}`);
+    // Encode text so a pasted occurrence header stays inside its own value. Authorship still relies on the separate typed source.
+    if (references.length > 0) carry(`${LATER_MESSAGES_CONTEXT_LEAD}\n${references.map(({ text, ...origin }) => `${JSON.stringify(origin)}\n${JSON.stringify(text)}`).join('\n\n')}`);
     if (shared.length > 0) carry(`${REASONING_CONTEXT_LABEL}\n${JSON.stringify(shared)}`);
     if (context.current_model !== undefined) carry(`${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`);
     if (context.objections !== undefined && context.objections.length > 0) carry(`${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}`);

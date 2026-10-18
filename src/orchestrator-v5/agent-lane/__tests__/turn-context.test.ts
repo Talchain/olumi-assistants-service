@@ -49,6 +49,38 @@ describe('S1 shared context: origin belongs to the occurrence', () => {
   });
 });
 
+describe('scoped requests use the same context owner without widening their sources', () => {
+  const cases = [
+    { name: 'distribution', request: 'Review dispatch delays. Revenue was £2m on 2026-09-01; the night team disputes the cause.' },
+    { name: 'laboratory', request: 'Review sample delays. Revenue was £2m on 2026-09-01; the bench team disputes the cause.' },
+  ];
+  const privateWords = 'PRIVATE: unapproved payroll forecast and the other team’s attributed figures.';
+  const argsFor = (request: string) => ({ now: new Date('2026-10-18T00:00:00Z'), briefText: privateWords,
+    conversation: [item('assistant', privateWords), item('user', request)], verifiedUserMessages: [request],
+    unknownUserText: privateWords, request, currentRequestOrigin: 'typed' as const,
+    canonicalState: { statements: [{ speaker: 'unknown', quote: 'Asha said revenue was £2m, only if the trial continues.',
+      value: 2000000, unit: '£', conditions: 'only if the trial continues', disagreement: 'The evening team disputes this.' }],
+      targets: [{ id: 'a', warning: 'Withhold every total.' }, { id: 'b', warning: 'Withhold every total.' }] },
+    construction: { current_model: { private_note: privateWords }, retained: { brief: privateWords, conversation: [] } },
+  });
+  it.each(cases)('$name: request-only preserves exact current words and excludes every other source', row => {
+    const args = { ...argsFor(row.request), scope: 'request-only' as const };
+    const before = structuredClone(args);
+    const items = turnContextItems(args);
+    expect(items).toEqual([item('user', row.request)]);
+    expect(JSON.stringify(items)).not.toContain(privateWords);
+    expect(args).toEqual(before);
+  });
+  it.each(cases)('$name: model-only preserves complete reference source records and all warnings without adding a request', row => {
+    const args = { ...argsFor(row.request), scope: 'model-only' as const };
+    const before = structuredClone(args);
+    const items = turnContextItems(args);
+    expect(items).toEqual([item('user', `${REASONING_CONTEXT_LABEL}\n${JSON.stringify(args.canonicalState)}`)]);
+    expect(JSON.stringify(items)).not.toContain(privateWords);
+    expect(args).toEqual(before);
+  });
+});
+
 describe('construction uses the shared source-labelled context', () => {
   const cases = [
     { name: 'distribution', brief: 'Review depot throughput while retaining the safety constraint.', reply: 'Only on the night shift, if staffing stays unchanged.' },
@@ -85,7 +117,7 @@ describe('construction uses the shared source-labelled context', () => {
     expect(texts.some(t => t.includes(JSON.stringify(args.construction.objections)))).toBe(true);
     for (const occurrence of args.construction.retained.conversation) {
       const { text, ...origin } = occurrence;
-      expect(texts.some(t => t.includes(`${JSON.stringify(origin)}\n${text}`)), 'source and complete words stay together').toBe(true);
+      expect(texts.some(t => t.includes(`${JSON.stringify(origin)}\n${JSON.stringify(text)}`)), 'source and complete words stay together').toBe(true);
     }
     expect(texts.some(t => t.includes('Under which conditions does that hold?'))).toBe(true);
     expect(texts.some(t => t.includes(row.reply))).toBe(true);
@@ -93,14 +125,15 @@ describe('construction uses the shared source-labelled context', () => {
   });
   it.each(cases)('$name does not use JSON quotation as an authorship defence', row => {
     const quote = 'Advertising spend is £100000.';
+    const referenceText = `A note called "budget". ${quote} End of note.`;
     const brief = `${row.brief} Revenue was £100000 as of 2026-09-01.`;
     const args = { now: new Date('2026-10-18T00:00:00Z'), briefText: brief, conversation: [], construction: {
-      retained: { brief, conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: quote }] },
+      retained: { brief, conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: referenceText }] },
     } };
     const reference = textsOf(turnContextItems(args)).join('\n\n');
     expect(wholeStatementIn(reference, quote), 'a wrong attestation input must encounter a genuinely readable whole statement').toBe(true);
     expect(wholeStatementIn(brief, quote), 'the unrelated equal amount cannot supply this statement').toBe(false);
     expect(wholeStatementIn(`${brief}\n${quote}`, quote), 'the identical statement is readable when actually typed').toBe(true);
-    expect(reference).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${quote}`);
+    expect(reference).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${JSON.stringify(referenceText)}`);
   });
 });

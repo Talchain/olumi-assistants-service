@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import {
   approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, sendableQuery,
   RESEARCH_MAX_TOOL_CALLS,
+  RESEARCH_INSTRUCTIONS, RESEARCH_MAX_OUTPUT_TOKENS,
 } from '../runtime/public-research.js';
 
 const Q = 'typical churn after a SaaS price rise from £49 to £59 per month';
@@ -40,6 +41,19 @@ describe('the click is the disclosure: only the query the chip showed can be sen
 });
 
 describe('the ONE request carries the approved query and nothing else', () => {
+  it.each([
+    { name: 'distribution', query: 'What evidence compares dispatch checklists under uncertain staffing?' },
+    { name: 'laboratory', query: 'What evidence compares sample labels under uncertain staffing?' },
+  ])('$name: the approved-query request stays byte-identical through the shared owner', row => {
+    const chip = researchChipFor(row.query)!;
+    const approved = approvedQueryOf(chip.id, chip.message);
+    expect(approved).toBe(row.query);
+    expect(researchRequestBody(approved!, 'gpt-5.6-terra')).toEqual({ model: 'gpt-5.6-terra', instructions: RESEARCH_INSTRUCTIONS,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: row.query }] }], max_output_tokens: RESEARCH_MAX_OUTPUT_TOKENS,
+      store: false, tools: [{ type: 'web_search' }], tool_choice: 'required', include: ['web_search_call.action.sources'],
+      max_tool_calls: RESEARCH_MAX_TOOL_CALLS });
+  });
+
   it('input is the query alone; native web search is required and bounded; sources are included; nothing is stored', () => {
     const body = researchRequestBody(Q, 'gpt-5.6-terra');
     expect(body.input).toEqual([{ role: 'user', content: [{ type: 'input_text', text: Q }] }]);
