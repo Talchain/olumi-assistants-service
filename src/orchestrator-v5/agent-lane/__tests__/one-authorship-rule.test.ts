@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { userStated, verifyStatement, figuresWritten } from '../user-statements.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 
 const SUBJECT = { quantity: 'level', node_id: 'fac_1' };
 const texts = (...messages: string[]) => ({ now: messages[messages.length - 1], conversation: messages.join('\n'), messages });
@@ -60,6 +61,20 @@ describe('the one rule: whose value it is', () => {
     // CONTRAST: the user's own figure in their own words, with or without the AI's 'user' reading.
     expect(userStated({ quote: 'returns are 5% today', value: 5 }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
     expect(userStated({ quote: 'returns are 5% today', value: 5, speaker: 'user' }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
+  });
+
+  it('3b. a single mark bounds another speaker\'s words only when PAIRED (dev P01/P11): an apostrophe or an unpaired mark leaves the user\'s whole message theirs', () => {
+    // (a) the user's whole message, with an in-word apostrophe and an unpaired opening mark, is theirs: whole, and its figure.
+    const own = "We can't open on Sundays, so 'weekend demand stays flat at about 40 visits a day.";
+    expect(wholeStatementIn(own, own)).toBe(true);
+    expect(userStated({ quote: own, value: 40 }, texts(own), SUBJECT).origin).toBe('human');
+    // (b) a PAIRED single-quoted report is another speaker's: neither its words nor its figure are the user's, even quoted whole.
+    const report = "Our curator told me 'attendance will rise by 10% next term' and I doubt it.";
+    expect(userStated({ quote: 'attendance will rise by 10% next term', value: 10 }, texts(report), SUBJECT).origin).toBe('unknown');
+    expect(userStated({ quote: report, value: 10 }, texts(report), SUBJECT).origin).toBe('unknown');
+    // An apostrophe inside the quoted words never ends them early ("the users' pilot").
+    const nested = "Sam said: 'the users' pilot cut queues by 15%' last week.";
+    expect(userStated({ quote: 'pilot cut queues by 15%', value: 15 }, texts(nested), SUBJECT).origin).toBe('unknown');
   });
 
   it('4. a typed range keeps both ends, and its unit only where the span writes it after the figure', () => {

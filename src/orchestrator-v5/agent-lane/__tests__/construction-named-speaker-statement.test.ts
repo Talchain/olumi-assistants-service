@@ -73,17 +73,19 @@ async function expectKeptNeverTheUsers(graph: Promise<Rec>, quote: string, brief
 }
 
 describe('a person the brief quotes by name keeps their words, whole, on the link they are about', () => {
-  it('⭐ RED → GREEN, real build → register: "Name, role: “…”" closed after its full stop is recorded verbatim, speaker included', async () => {
-    const record = relationRecord(await saved(draft(SPEECH)));
-    expect(record?.statements, 'the named speech is recorded').toEqual([expect.objectContaining({ speaker: 'user', quote: SPEECH, form: 'describes' })]);
+  it('⭐ RED → GREEN, real build → register: "Name, role: “…”" closed after its full stop is kept verbatim, speaker included, as the speaker\'s words', async () => {
+    // ⭐ LEAN CORE P2 C2 (AIE 02:39Z: "Quoting an entire report does not transfer its embedded claim to the user"): the named speech is
+    // kept WHOLE, verbatim with its speaker, as speaker-unknown words; the claim is the speaker's, never the user's statement.
+    await expectKeptNeverTheUsers(saved(draft(SPEECH)), SPEECH, BRIEF, 'the named speech is recorded whole, speaker included');
   });
 
   it('⛔ #3363 B1 (BUDDY-A), real path: a two-sentence speech with an earlier qualification is kept whole; its last sentence alone is never the user\'s', async () => {
     const qualified = 'Priya, sales lead: “This is only true if the pilot works. More referrals mean more contracts signed, because the client already trusts us.”';
     const tail = 'More referrals mean more contracts signed, because the client already trusts us.”';
     const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
-    const whole = relationRecord(await saved(draft(qualified), brief));
-    expect(whole?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
+    // ⭐ LEAN CORE P2 C2 (AIE 02:39Z: "Quoting an entire report does not transfer its embedded claim to the user"): the named speech is
+    // kept WHOLE, verbatim with its speaker, as speaker-unknown words; the claim is the speaker's, never the user's statement.
+    await expectKeptNeverTheUsers(saved(draft(qualified), brief), qualified, brief, 'kept whole with Priya and her condition');
     await expectKeptNeverTheUsers(saved(draft(tail), brief), tail, brief, 'the tail loses Priya and her condition');
   });
 
@@ -91,7 +93,9 @@ describe('a person the brief quotes by name keeps their words, whole, on the lin
     const qualified = "Priya, sales lead: “This is only true if the users' pilot works. More referrals mean more contracts signed, because the client already trusts us”.";
     const tail = 'More referrals mean more contracts signed, because the client already trusts us”.';
     const brief = `${AIM} ${qualified} We could hire a second salesperson or start a referral scheme.`;
-    expect(relationRecord(await saved(draft(qualified), brief))?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: qualified })]);
+    // ⭐ LEAN CORE P2 C2 (AIE 02:39Z: "Quoting an entire report does not transfer its embedded claim to the user"): the named speech is
+    // kept WHOLE, verbatim with its speaker, as speaker-unknown words; the claim is the speaker's, never the user's statement.
+    await expectKeptNeverTheUsers(saved(draft(qualified), brief), qualified, brief, 'kept whole with Priya and her condition');
     await expectKeptNeverTheUsers(saved(draft(tail), brief), tail, brief, 'the tail loses Priya and her condition');
   });
 
