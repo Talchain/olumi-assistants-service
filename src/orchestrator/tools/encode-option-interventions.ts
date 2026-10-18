@@ -189,6 +189,8 @@ interface RawIntervention {
   readonly cap?: number;
   /** A NON-user provenance the writer stated explicitly; absent ⇒ default. */
   readonly source?: string;
+  /** G3: beside that provenance only, the origin could not be verified (construction's marker); it narrows, never widens. */
+  readonly user_material_unverified?: true;
   readonly value_confidence?: string;
   readonly reasoning?: string;
   /** TEMPORAL: a stated range the writer supplied with THIS figure (validated at persist, `intervention-range.ts`). */
@@ -225,6 +227,7 @@ function toRawIntervention(src: unknown): RawIntervention {
     unit?: string;
     cap?: number;
     source?: string;
+    user_material_unverified?: true;
     value_confidence?: string;
     reasoning?: string;
     range?: Dict;
@@ -241,6 +244,7 @@ function toRawIntervention(src: unknown): RawIntervention {
   // through to the unchanged default in `buildInterventionV3`.
   if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
     out.source = src.source;
+    if (src.user_material_unverified === true) out.user_material_unverified = true;
     if (typeof src.value_confidence === 'string' && INTERVENTION_CONFIDENCES.has(src.value_confidence)) {
       out.value_confidence = src.value_confidence;
     }
@@ -378,7 +382,8 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
  * annotations do not, so they survive.
  */
 const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
-  'value', 'source', 'target_match',
+  // G3: whose the figure is belongs to THIS write (its `source` and origin marker), never inherited from the old cell.
+  'value', 'source', 'user_material_unverified', 'target_match',
   'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence', 'source_quote',
   'reasoning',
   // The range the OLD figure was read against: it travels with `raw_value`, so a new number never inherits it.
@@ -445,6 +450,7 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
     // writer stated explicitly (see `PRESERVED_INTERVENTION_SOURCES`), so this
     // can narrow the claim but never widen it to user-authored.
     source: rec.source ?? 'user_specified',
+    ...(rec.source !== undefined && rec.user_material_unverified === true ? { user_material_unverified: true } : {}),
     target_match:
       isPlainObject(existing) && isPlainObject(existing.target_match)
         ? existing.target_match

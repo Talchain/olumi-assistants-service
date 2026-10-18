@@ -272,7 +272,13 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const r = await caps.proposeStartingPoint({ ...ctx, user_text: 'Suggest starting figures.', user_text_complete: false,
       unverified_user_text: unverified }, { assumptions: [],
       option_levels: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, ...claim }] });
-    expect(r).toEqual({ ok: false, mutated: false, refusal: 'nothing_to_propose',
+    if (unverified !== '') {
+      // G3: the £45,000 is USER MATERIAL (their unverified words write it): it STAYS unknown, never the user's or Olumi's, and is read
+      // with its origin unverified (was: refused). The starting point still needs every option's level, so nothing is proposed yet.
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_starting_point',
+        option_levels: [{ option: 'Hire PA', factor: 'Annual PA salary', value: 45000, stated_by: 'origin_unverified' }] });
+      expect(JSON.stringify(r)).not.toMatch(/"stated_by":"(?:user|olumi_estimate)"/);
+    } else expect(r).toEqual({ ok: false, mutated: false, refusal: 'nothing_to_propose',
       option_levels_refused: { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL } });
     expect(store.outstanding(SCENARIO, 'user-a')).toEqual([]);
     expect(chipsFor(store, [{ name: 'propose_starting_point', result: r }])).toEqual([]);

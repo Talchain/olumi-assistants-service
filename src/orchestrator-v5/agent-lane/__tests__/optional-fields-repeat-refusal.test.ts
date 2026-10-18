@@ -72,7 +72,8 @@ describe('cut1 real level handler', () => {
     const { caps, store } = real();
     const r = await caps.proposeOptionInterventions({ ...ctx, user_text: 'Please estimate duration' }, { interventions: [{ ...entries[0], range_meaning: 'likely_range' }] } as never);
     expect(r.ok).toBe(true);
-    expect(store.get(String(r.proposal_id))?.operations[0].value).toMatchObject({ authored_by: 'model_proposed' });
+    // G3: the user's cited figure the binding cannot tie to this pair is unknown origin (was: Olumi's); never the user's, as before.
+    expect(store.get(String(r.proposal_id))?.operations[0].value).toMatchObject({ authored_by: 'unknown' });
   });
 });
 

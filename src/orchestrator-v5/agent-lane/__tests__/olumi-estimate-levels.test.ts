@@ -25,7 +25,8 @@ const setup = () => {
     sent.push({ path, body });
     return { status: 500, json: {} };
   };
-  return { caps: createAgentCapabilities(d, new ProposalStore()), sent };
+  const store = new ProposalStore();
+  return { caps: createAgentCapabilities(d, store), sent, store };
 };
 type Iv = { factor_id: string; value: unknown; raw_value?: unknown; source?: unknown };
 const priceLevelSent = (sent: { body: unknown }[]) =>
@@ -102,10 +103,13 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
   });
 
   it('A2h unknown-history intervention cannot become Olumi authored', async () => {
-    const { caps, sent } = setup();
+    const { caps, sent, store } = setup();
     const out = await caps.proposeOptionInterventions!({ ...ctxSaying('Use that price.'), unverified_user_text: 'Raise Pro plan price to £64.' },
       { interventions: [{ option_label: 'Raise to £59 at Release', factor_label: 'Pro plan price', value: 64, unit: 'GBP per month', user_stated: false, basis: 'retained context' }] } as never);
-    expect(out).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+    // G3: the £64 is USER MATERIAL of unknown origin (retained words), so it is proposed with its origin unverified (was: refused),
+    // never Olumi's (K3, kept) and never the user's. Nothing is sent before approval.
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false, interventions: [{ stated_by: 'origin_unverified' }] });
+    expect((store.get(String(out.proposal_id))!.operations[0]!.value as { authored_by?: string }).authored_by).toBe('unknown');
     expect(sent).toEqual([]);
   });
 
