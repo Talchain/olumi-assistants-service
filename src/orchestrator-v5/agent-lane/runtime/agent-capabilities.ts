@@ -3153,8 +3153,10 @@ export function createAgentCapabilities(
       ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id,
       refusal: 'not_applied', reason, detail, parts: [], receipts: [], ...extra,
     });
-    // (1) The carried revision starts at what the user approved.
-    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+    // (1) The carried revision starts at what the user approved — or, on a model moved since, at the current one while the
+    // card's own field-scoped rule still holds (`heldCardStillApplies`: the rule its press and its lapse read; a new link
+    // with its level is untouched by Olumi's starting value for that factor, assessment 18 Oct K5 T4).
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash && !heldCardStillApplies(parent, approvedRead.raw)) {
       return { ok: false as const, result: notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.') };
     }
     const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
@@ -3333,7 +3335,7 @@ export function createAgentCapabilities(
       .map((n) => [n.id, (n.observed_state as { value?: unknown } | undefined)?.value]));
     const levels = levelInputs.map(l => levelOnFinalFrame({ ...l, value: l.value as number }, frameOf(workingNodes.find(n => n.id === l.factor_id))));
     const input: CommitOptionLevelsInput = {
-      scenario_id: ctx.scenario_id, base_graph_hash: parent.base_graph_identity_hash,
+      scenario_id: ctx.scenario_id, base_graph_hash: approvedRead.graph_hash,
       turn_id: authorisationTurnId(`${parent.proposal_id}#levels`), links: linkOps.map(o => pairOf(o.path)), levels,
       ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
       ...(values.length > 0 ? { values } : {}), ...(frames.length > 0 ? { frames } : {}),
@@ -3363,7 +3365,7 @@ export function createAgentCapabilities(
     const receipts: ReceiptSummary[] = [];
     const reencodedSiblings: ReencodedSibling[] = [];
     let valuesLanded = false;
-    let carried = parent.base_graph_identity_hash;
+    let carried = approvedRead.graph_hash;
 
     // (3) ⭐ THE LINKS AND LEVELS AS ONE COMMIT (Canonical #70 5847348206): the product's N-ary level writer commits the
     // whole approved scope on the revision our values write produced (or the approved one) — any pair refused means
@@ -8528,7 +8530,9 @@ export function createAgentCapabilities(
         };
       }
       if (decision.status !== 'execute') {
-        return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
+        return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}),
+          // The card it waits on is named, so the reply can offer that card's button first (one approval action).
+          ...(decision.status === 'approval_required' ? { proposal_id: args.proposal_id } : {}) };
       }
       if (correctionSaved) {
         proposals.markApplied(decision.proposal.proposal_id, []);
@@ -8622,7 +8626,7 @@ export function createAgentCapabilities(
       if (opts.turnAuthority === true && ctx.typed_approval_of !== args.proposal_id) {
         if (ops.some(o => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
         if (ops.some(o => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
-        return { ok: false, mutated: false, refusal: 'approval_required' };
+        return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: args.proposal_id };
       }
 
       /**

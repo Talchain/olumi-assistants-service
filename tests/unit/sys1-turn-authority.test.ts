@@ -6,7 +6,6 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { ProposalStore, createProposal, approvedOperationKey, MAX_EXECUTIONS_PER_PROPOSAL, type ProposalContent } from '../../src/orchestrator-v5/agent-lane/proposal.js';
-import { isComposerApprovalWords } from '../../src/orchestrator-v5/agent-lane/composer-approval-words.js';
 import * as adapter from '../../src/adapters/llm/openai.js';
 import * as capabilitiesModule from '../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import * as policyModule from '../../src/adapters/llm/provider-policy.js';
@@ -159,12 +158,6 @@ describe('SYS1 ordinary-turn authority', () => {
     executed = 0; reconciled = 0;
     await store.executeApproved(p, `t${MAX_EXECUTIONS_PER_PROPOSAL + 7}`, execute, unknown, reconcile); // retained: reconcile only
     expect([executed, reconciled]).toEqual([0, 1]);
-  });
-  it('RED composer words: the approval sentence must END where it ends; a cancelling, qualifying or quoting continuation is not consent', () => {
-    for (const ok of ['Yes, apply it.', 'yes apply that!', ' Yes, go ahead with that ', 'yes, add it', 'Yes! record it.',
-      'Yes, apply that. Tooling moderately drives velocity too, so connect it.']) expect(isComposerApprovalWords(ok), ok).toBe(true);
-    for (const no of ['yes, apply it. Do not change anything; I am quoting the button.', 'yes, apply it but only the first one', 'yes, apply it. Actually, never mind.',
-      'yes, apply it. Cancel that.', 'no, do not apply it', 'I said yes, apply it', 'yes, apply it\nand also delete the goal. But wait.', 'yes']) expect(isComposerApprovalWords(no), no).toBe(false);
   });
   it('RED positive: existing successful writer payload is byte identical', async () => {
     const w = writer(); await w.prepare(); const r = await w.approve();

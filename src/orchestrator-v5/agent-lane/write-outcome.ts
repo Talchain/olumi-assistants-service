@@ -156,10 +156,19 @@ const UNCONFIRMED_WORDS: Record<string, string> = {
 const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
 /**
  * R2 T1 words: an unapproved change is waiting, not failed. AIE AMENDED (#94 6128697025): the button alone, always ("or type
- * its words" is gone: the typed binding matches the card's message, which the button may not show).
+ * its words" is gone: the typed binding matches the card's message, which the button may not show). With several cards
+ * waiting, the route says which (`approvalChoiceWords`).
  */
 export const APPROVAL_REQUIRED_WORDS = 'Not saved yet: press the approval button on the card.';
-export const APPROVAL_REQUIRED_BUTTON_WORDS = 'Not saved yet: press the approval button on the card.';
+const COUNT_WORDS = ['no', 'one', 'two', 'three'];
+/** Several cards wait and a typed yes binds none of them: the user chooses with one press, the one the words seemed to mean named. */
+export function approvalChoiceWords(waiting: number, meant?: string): string {
+  const n = COUNT_WORDS[waiting] ?? String(waiting);
+  const named = meant?.trim().replace(/\.$/, '');
+  return named !== undefined && named !== ''
+    ? `Not saved yet: ${n} changes are waiting. To apply "${named}", press its button below.`
+    : `Not saved yet: ${n} changes are waiting. Press the button on the one you mean.`;
+}
 const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
 const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
 
@@ -443,7 +452,7 @@ export function partialRangeLevelsWarning(ranges: readonly { factor: string; ran
 }
 
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', exactlyOneCardWaits = false, aiAsks = false): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', approvalRequiredWords = APPROVAL_REQUIRED_WORDS, aiAsks = false): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
@@ -532,7 +541,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
   }
   const mutated = r.mutated === true;
   // R2 T1 (friction audit): "could not be made this time — ask me to try again" was false here; the change waits for its card.
-  if (code === 'approval_required' && !mutated) return exactlyOneCardWaits ? APPROVAL_REQUIRED_WORDS : APPROVAL_REQUIRED_BUTTON_WORDS;
+  if (code === 'approval_required' && !mutated) return approvalRequiredWords;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
 }
 
@@ -557,8 +566,8 @@ export function narrateWriteOutcome(
     /** ⭐ S6 (Paul ≤¼, 15 Oct): the AI wrote the reply, so it decides what to ask; the build's questions line is not added. */
     readonly aiAsks?: boolean;
   } = {},
-  /** R2 T1: exactly one card waits, so typed card words bind; otherwise "approval_required" names the button only. */
-  exactlyOneCardWaits = false,
+  /** What an unapproved change says: its button, or, with several cards waiting, which one (`approvalChoiceWords`). */
+  approvalRequiredWords = APPROVAL_REQUIRED_WORDS,
 ): WriteOutcomeNarration {
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
@@ -607,7 +616,7 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? '', exactlyOneCardWaits, opts.aiAsks === true));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true, opts.alreadySaid ?? '', approvalRequiredWords, opts.aiAsks === true));
   const status = lines.length > 0
     ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
