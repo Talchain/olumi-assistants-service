@@ -29,7 +29,9 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
   if ('refused' in prepared) return { ok: false, mutated: false, refusal: prepared.refused,
     detail: prepared.refused === 'correction_attestation_protected'
       ? 'This record also holds an approval or other confirmation. A source correction cannot replace it safely yet. No card was created and the record is unchanged.'
-      : 'No correction was prepared. Keep the source, intended subject and explicitly retained material together.' };
+      : prepared.words ?? 'No correction was prepared. Keep the source, intended subject and explicitly retained material together.',
+    ...(prepared.words === undefined ? {} : { public_label: prepared.words,
+      note: 'Reuse complete applicable source already present before asking the user to repeat it. If source or subject remains unresolved, show this review without an approval action. Clarification does not approve a write. Prepare a fresh supported correction on its own complete card once its source and subject are resolved.' }) };
   const first = prepared.correction.edits[0]!;
   const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: baseHash,
@@ -50,7 +52,9 @@ export async function applyCorrectedStatement(ctx: AgentToolContext, parent: Str
   const approved = parent.operations.length === 1 ? approvedStatementRecordOf(parent.operations[0]!) : undefined;
   const no = (refusal: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal });
   if (ctx.typed_approval_of !== parent.proposal_id || approved?.correction === undefined) return no('not_applied');
-  if (parent.public_label !== statementCorrectionWords(approved.correction)) return no('invalid_statement');
+  // Pending cards from before the reading label keep their exact complete wording check too.
+  if (parent.public_label !== statementCorrectionWords(approved.correction)
+    && parent.public_label !== statementCorrectionWords(approved.correction, true)) return no('invalid_statement');
   const written = applyStatementRecordEdit(before.raw, approved);
   if (written.kind === 'refused') return no(written.reason === 'node_changed' ? 'superseded' : written.reason);
   if (written.kind === 'unchanged') return no('own_write_unverified');
