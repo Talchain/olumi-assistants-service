@@ -77,7 +77,20 @@ export interface StatementArgs {
   readonly answering?: unknown;
   /** The unit the AI reads the figure in, as the sentence writes it (checked only under `StatementRules.unitWritten`). */
   readonly unit?: unknown;
+  /**
+   * ⭐ LEAN CORE P2 (DL-3 18 Oct): the AI's OWN reading of whose claim the quoted words are (`QUOTE_SPEAKER`): `'user'`, `'other'` (the user
+   * reports someone else's words or view, marked or not: "A colleague said: we lose 5% a month") or `'unknown'`. Only the user's own words
+   * can be theirs; an AI-read `'user'` still needs the literal span. Absent: no reading given, the span check alone decides (as before).
+   */
+  readonly speaker?: unknown;
 }
+
+/**
+ * ⭐ LEAN CORE P2 (DL-3 18 Oct 2026; AIE text signed exactly, AIE-SPEAKER-AND-USER-QUOTE-TEXT-20261018-v1): ONE schema fragment, the AI's own reading of whose claim a quote is, for every
+ * statement the AI cites (construction's draft statements, the statement door, team time, assumptions). Read by `verifyStatement`.
+ */
+export const QUOTE_SPEAKER_WORDS = "Identify who asserts the particular claim being recorded, not merely who sent the message: \"user\" for the user\u2019s own assertion; \"other\" for another speaker\u2019s assertion reported by the user, with or without quotation marks; \"unknown\" when attribution cannot be established. Quoting an entire report does not transfer its embedded claim to the user. A user\u2019s instruction to correct or withdraw quoted material is their instruction; the embedded claim keeps its own speaker and stance. Preserve the source, qualifications, conditions and uncertainty. This field is Olumi\u2019s interpretation of attribution, not proof of user authorship or authority to write.";
+export const QUOTE_SPEAKER = { type: 'string', enum: ['user', 'other', 'unknown'], description: QUOTE_SPEAKER_WORDS } as const;
 
 export interface StatementTexts {
   /** The user's words typed this turn. */
@@ -328,6 +341,10 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   const form = STATEMENT_FORMS.find((f) => f === given?.form && rules.forms.includes(f));
   if (quote === undefined || form === undefined) {
     return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
+  }
+  // ⭐ LEAN CORE P2 (DL-3 18 Oct): words the AI itself reads as another speaker's, or cannot place, are never the user's statement.
+  if (given?.speaker === 'other' || given?.speaker === 'unknown') {
+    return { kind: 'refused', refusal: 'statement_not_found', detail: `You read “${quote}” as ${given.speaker === 'other' ? 'someone else\u2019s words or view, reported by the user' : 'words whose speaker you cannot tell'}, so they are not the user's own statement and nothing was prepared. Their words stay as said, with that speaker.` };
   }
   // ⭐ THE ONE AUTHORSHIP RULE (lean core, DL-3 18 Oct): the span is the user's own words, literally, in a verified message.
   const said = usersOwnSpan(texts, quote, current);

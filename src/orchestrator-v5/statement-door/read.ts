@@ -22,7 +22,9 @@ export { statementBoundTo, type DoorContext } from './statements.js';
  * One statement as the Agent gives it: the user's exact words, the ask of Olumi's they answer (its exact words), if any, and for a
  * figure-free field its reading in the user's own words (`reading_words`), which the field's reader checks inside the quote.
  */
-export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string } & AiReading;
+export type DoorQuote = string | { readonly quote: string; readonly answering?: string; readonly reading_words?: string;
+  /** The AI's own speaker reading (`QUOTE_SPEAKER`, lean core P2), passed unchanged to the ONE verifier, which only subtracts credit. */
+  readonly speaker?: unknown } & AiReading;
 
 /**
  * ⭐ ONE BINDER (DL-3 22:53Z + RULING 23:12Z): the AI's own reading of the statement, as the tool gives it, for a row that reads
@@ -92,6 +94,8 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
   for (const raw of quotes) {
     const quote = (typeof raw === 'string' ? raw : raw.quote).trim();
     const answering = typeof raw === 'string' ? undefined : raw.answering;
+    // ⭐ LEAN CORE P2: the AI's speaker reading reaches every verification of this statement (`verifyStatement` vetoes other/unknown).
+    const speaker = typeof raw === 'string' || raw.speaker === undefined ? {} : { speaker: raw.speaker };
     if (row.aiReads !== undefined) {
       // ⭐ ONE BINDER: the AI read it (form, figures, unit, negation) and bound it to this subject; the host reads no figure and
       // binds nothing by name. It verifies only that the quote writes that reading (`figuresWritten`, the unit written after the
@@ -100,7 +104,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
         return { kind: 'refused', refusal: 'statement_malformed', detail: `Give your reading of “${quote}”: its form, figures, unit as written, and whether it says the opposite (negated). Nothing was prepared.` };
       }
       const v = verifyStatement({ quote, form: raw.form, value: raw.value, low: raw.low, high: raw.high, unit: raw.unit, negated: raw.negated,
-        ...(answering !== undefined ? { answering } : {}) }, texts,
+        ...(answering !== undefined ? { answering } : {}), ...speaker }, texts,
       { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
         unit: row.unit, forms: row.forms, figuresIn: figuresWritten, unitWritten: true, ...(row.allowsZero === true ? { allowsZero: true } : {}) });
       if (v.kind === 'refused') return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
@@ -125,7 +129,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
     }
     const figures = fig.low === undefined && fig.high === undefined ? [] : [{ low: (fig.low ?? fig.high)!, high: (fig.high ?? fig.low)! }];
     const v = verifyStatement({ quote, form: fig.form, ...(fig.qualifier !== undefined ? { qualifier: fig.qualifier } : {}),
-      ...(answering !== undefined ? { answering } : {}),
+      ...(answering !== undefined ? { answering } : {}), ...speaker,
       ...(fig.form === 'range' ? { low: fig.low, high: fig.high } : { value: fig.form === 'upper_bound' ? fig.high : fig.low }) }, texts,
     { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
       unit: row.unit, forms: row.forms, figuresIn: () => figures, ...(row.allowsZero === true ? { allowsZero: true } : {}),
@@ -134,7 +138,7 @@ export function readStatement(graph: unknown, subject: DoorSubject, label: strin
       return { kind: 'refused', refusal: v.refusal === 'different_conditions' ? 'statement_malformed' : v.refusal, detail: v.detail };
     }
     // A form the row records only from this turn's words: the same statement, verified against what the user typed now alone.
-    if (row.answerTypedNow?.forms.includes(fig.form) === true && verifyStatement({ quote, form: fig.form, ...(answering !== undefined ? { answering } : {}),
+    if (row.answerTypedNow?.forms.includes(fig.form) === true && verifyStatement({ quote, form: fig.form, ...(answering !== undefined ? { answering } : {}), ...speaker,
       ...(fig.form === 'range' ? { low: fig.low, high: fig.high } : { value: fig.form === 'upper_bound' ? fig.high : fig.low }) }, { now: texts.now },
     { subject: { quantity: row.quantity ?? subject.field, node_id: subject.id }, unit: row.unit, forms: row.forms, figuresIn: () => figures }).kind !== 'verified') {
       return { kind: 'refused', refusal: 'not_answered_now', detail: row.answerTypedNow.detail(subject, label, graph) };

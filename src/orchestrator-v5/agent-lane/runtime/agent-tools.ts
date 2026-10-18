@@ -14,7 +14,7 @@
 import type { EffectsTiming } from '../../goal-target/period-end-assumption.js';
 import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import type { ProposalEditsRequest } from '../proposal-object/amend.js';
-import type { StatementArgs } from '../user-statements.js';
+import { QUOTE_SPEAKER, type StatementArgs } from '../user-statements.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 import { LOSS_THRESHOLD_CONSEQUENCES } from '../stated-limit.js';
@@ -316,7 +316,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           // S2 (DL 14 Oct, pricing r2): a figure the user already wrote, confirmed from their own statement, never asked again.
           // (c)/(d) DL-3 17 Oct (founder levels): a figure whose factor is Olumi's reading; work not started as Olumi's provisional zero.
           statements: { type: 'array', minItems: 1, maxItems: 1, description: 'The user\u2019s complete statement about this factor, copied exactly from their brief or a message. (a) A figure they already WROTE that the model holds as unverified (for example "from £49 to £59 per month" for today\u2019s price): form "point" with that figure as value, user_stated true and the same figure as value; approval records it as theirs and never changes it. (b) Words that DESCRIBE the factor without a figure (for example "I\u2019m not that experienced with marketing"): form "describes", with user_stated false, your own estimate as value and your reading as basis; the card quotes their words and the figure stays your estimate. (c) A figure they gave for this factor\u2019s level today in words that do not name the factor (for example "about 60% of my working time goes on it"): where the conversation makes this factor the one they most likely meant, form "point" with that figure as value and user_stated true; the figure stays theirs, and which factor it is about stays Olumi\u2019s unverified reading after approval, shown on the card for them to accept or correct. Ask once instead when two factors fit, or when its time, scope or denominator is unclear. (d) Words saying that work on this activity has not started (for example "nobody has begun the website redesign"): form "describes", user_stated false, value 0 and, as basis, your assumption that no time goes into it now; zero is your provisional assumption, never their figure or a measurement. Words saying only that a result is unfinished or not yet reached, a plan or need, an unknown, or that the work has started do not ground zero. Omit it otherwise.',
-            items: obj({ quote: { type: 'string' }, form: { type: 'string', enum: ['point', 'describes'] }, value: { type: 'number' } }, ['quote', 'form']) },
+            items: obj({ quote: { type: 'string' }, speaker: QUOTE_SPEAKER, form: { type: 'string', enum: ['point', 'describes'] }, value: { type: 'number' } }, ['quote', 'form']) },
           // AIE packet 6e52e896 `event_risk.occurrence_range_description`, byte for byte (hiring path (a)).
           occurrence_range: { ...obj({
             low_percent: { type: 'number' },
@@ -567,6 +567,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and contextual SAME-Run coaching flow, with no duplicate Run.',
     parameters: { ...obj({
       correction: obj({ quote: { type: 'string', description: 'The complete verified CURRENT correction message, verbatim.' },
+        speaker: QUOTE_SPEAKER,
         edits: { type: 'array', minItems: 1, maxItems: 6, items: obj({
           subject: obj({ kind: { type: 'string', enum: ['goal', 'factor', 'option', 'risk', 'link'] }, id: { type: 'string' }, to_id: { type: 'string' }, option_id: { type: 'string' }, field: { type: 'string', enum: ['level', 'target', 'holds_now', 'occurrence', 'lead', 'effect', 'measure', 'relation'] } }, ['kind', 'id', 'field']),
           retirement: obj({ quote: { type: 'string', description: 'Exact held source span to retire.' }, scope: { type: 'string', enum: ['whole', 'part'] }, disposition: { type: 'string', enum: ['historical', 'retracted'] } }, ['quote', 'scope', 'disposition']),
@@ -589,6 +590,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       }, ['kind', 'label', 'field']),
       statements: { type: 'array', minItems: 1, maxItems: 2, items: obj({
         quote: { type: 'string', description: 'The user\u2019s complete statement, copied exactly from one of their messages.' },
+        speaker: QUOTE_SPEAKER,
         answering: { type: 'string', description: 'Only when the statement answers a question you asked: that question, copied exactly from your reply.' },
         reading_words: { type: 'string', description: 'Only for a statement without a figure (what a goal is measured in, or when effects are in place), or for when one option\u2019s effect is fully in place: the user\u2019s own words that say it, copied from the quote.' },
         // AIE amended semantic guidance; these optional readings do not establish a verified human fact.
@@ -609,6 +611,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       statements: { type: 'array', minItems: 1, maxItems: 6, description: 'The user’s statements of this time, one per statement, in place of quote, low_months and high_months.',
         items: obj({
           quote: { type: 'string', description: 'The user’s complete statement, copied exactly from one of their messages (for example "At least 7 months", or "8 months" when they answered your question about the likely upper end).' },
+          speaker: QUOTE_SPEAKER,
           form: { type: 'string', enum: ['point', 'range', 'lower_bound', 'upper_bound'], description: 'Your reading: a single time, a range, the soonest it could be (lower_bound, for example "at least"), or the latest (upper_bound, for example "no more than", or an answer to a question about the upper end).' },
           value: { type: 'number', exclusiveMinimum: 0, description: 'For point, lower_bound or upper_bound: the months the quote states.' },
           low: { type: 'number', exclusiveMinimum: 0, description: 'For range: its soonest end in months.' },

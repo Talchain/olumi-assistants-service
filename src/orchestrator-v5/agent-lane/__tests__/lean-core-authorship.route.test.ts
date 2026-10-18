@@ -174,17 +174,31 @@ describe('PL-0048 (2): a span the user\'s correction retired is never re-credite
     expect(f.out.reconciliation?.current_level).toMatchObject({ value: 210, source: { quote: fresh } });
     expect(f.proposals).toHaveLength(1);
   });
+
+  // ⭐ P2 at the correction door (DL-3 18 Oct, integration hunk in statements.ts): the AI's own speaker reading of the correction's
+  // words reaches the ONE correction check (`verifyStatements`). The label only takes credit away; "user" still needs the literal span.
+  it('P2 correction door: a correction the AI reads as another speaker\'s ("other") or cannot place ("unknown") prepares nothing; "user" prepares', async () => {
+    const g = await saved(draft({ statements: [...(draft().statements as Rec[]), levelStatement] }));
+    const subject = { kind: 'goal' as const, id: String(goalOf(g).id), field: 'level' as const };
+    const ask = (quote: string, speaker: string) => prepareStatementCorrection(g, { quote, speaker, edits: [{ subject,
+      retirement: { quote: TODAY, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'The earlier weekly figure is withdrawn.' }] } as never,
+    { now: quote }, '2026-10-18T01:00:00Z');
+    const reported = 'My manager says we should ignore the weekly bookings figure of 180, there is no reliable count.';
+    for (const speaker of ['other', 'unknown']) expect(ask(reported, speaker), speaker).toMatchObject({ refused: 'statement_not_found' });
+    // CONTRAST: the user's own correction, read as theirs, prepares the card.
+    expect(ask(FIX, 'user')).toHaveProperty('candidate');
+  });
 });
 
 describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words is never the user\'s, on the real build → register path', () => {
   const LOSS = 'Member loss';
-  const withLoss = (line: string, quote: string): { model: Rec; brief: string } => {
+  const withLoss = (line: string, quote: string, speaker: string | null = null): { model: Rec; brief: string } => {
     const base = draft();
     const model = { ...base, factors: [...base.factors, { label: LOSS, role: 'external', baseline_known: true, baseline_value: 5, unit: '% a month',
       provenance: 'explicit', plausible_max: 100 }], links: [...base.links, { from: LOSS, to: GOAL, direction: 'negative', provenance: 'inferred',
       effect_amount: null, effect_per_source_change: null, effect_provenance: null, definitional: null, basis: null, source_quote: null }],
     statements: [...(base.statements as Rec[]), { quote, subject: { kind: 'factor', label: LOSS, to_label: null, factor_label: null }, field: 'level',
-      form: 'point', value: 5, low: null, high: null, unit: '% a month', qualifier: null, conditions: null }] };
+      form: 'point', value: 5, low: null, high: null, unit: '% a month', qualifier: null, conditions: null, speaker }] };
     return { model, brief: [AIM, TODAY, line, 'We could add evening slots or run a referral offer.'].join('\n') };
   };
   const lossNode = (g: Rec): Rec => g.nodes.find((n: Rec) => n.label === LOSS);
@@ -204,8 +218,21 @@ describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words 
     expect(userStatementsOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'user', quote: line, low: 5, high: 5 })]);
   });
 
-  // ⛔ NAMED LIMITATION (DL-3 18 Oct, no phrase list added): the existing speech reader sees only PAIRED quotation marks, so an UNMARKED
-  // report ("A colleague said: we lose 5% a month") is still read as the user's own words. Closing it needs an attribution reading the
-  // estate does not have yet (the AI's own `speaker` reading, or a schema field), not a host word list.
-  it.todo('LIMITATION: an unmarked report of another speaker ("A colleague said: we lose 5% a month") is not yet told apart from the user\'s own words');
+  // ⭐ P2 (DL-3 18 Oct): an UNMARKED report has no quotation marks for the host to read, so the AI's OWN speaker reading decides
+  // (`QUOTE_SPEAKER`, the drafter's statement field). Never a host word list.
+  it('an unmarked report the AI reads as another speaker\'s ("A colleague said: we lose 5% of members a month"): not the user\'s figure; the words are kept, speaker unknown', async () => {
+    const line = 'A colleague said: we lose 5% of members a month.';
+    const { model, brief } = withLoss(line, line, 'other');
+    const g = await saved(model, brief);
+    expect(userStatementsOn(lossNode(g)), 'never the user\'s figure').toEqual([]);
+    expect(recordsWithUnknownSpeakerOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'unknown', quote: line, source: line })]);
+  });
+
+  it('CONTRAST: the user\'s own words, read as theirs ("user"), are credited; an AI-read "user" still needs the literal span', async () => {
+    const own = 'Honestly, we lose 5% of members a month.';
+    const g = await saved(withLoss(own, own, 'user').model, withLoss(own, own, 'user').brief);
+    expect(userStatementsOn(lossNode(g)).flatMap((r) => r.statements)).toEqual([expect.objectContaining({ speaker: 'user', quote: own, low: 5, high: 5 })]);
+    const notWritten = await saved(withLoss(own, 'we lose 5% of all members a month', 'user').model, withLoss(own, own, 'user').brief);
+    expect(userStatementsOn(lossNode(notWritten)), 'words the user never wrote are not theirs, whatever the reading').toEqual([]);
+  });
 });

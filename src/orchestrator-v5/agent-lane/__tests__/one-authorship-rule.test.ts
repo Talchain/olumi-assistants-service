@@ -41,8 +41,15 @@ describe('the one rule: whose value it is', () => {
     expect(userStated({ quote: whole, value: 3 }, quoted, SUBJECT).origin).toBe('unknown');
     // …though the report itself, as words with no figure of the user's, is theirs to have typed, speaker kept in the quote.
     expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: whole } });
-    // CONTRAST: the user's own figure in their own words.
+    // ⭐ P2 (DL-3 18 Oct): an UNMARKED report, read by the AI itself as another speaker's ('other') or unplaced ('unknown'), is never theirs.
+    const unmarked = texts('A colleague said: we lose 5% of members a month.');
+    for (const speaker of ['other', 'unknown']) {
+      expect(userStated({ quote: 'A colleague said: we lose 5% of members a month.', value: 5, speaker }, unmarked, SUBJECT).origin).toBe('unknown');
+      expect(userStated({ quote: whole, form: 'describes', speaker }, quoted, SUBJECT).origin).toBe('unknown');
+    }
+    // CONTRAST: the user's own figure in their own words, with or without the AI's 'user' reading.
     expect(userStated({ quote: 'returns are 5% today', value: 5 }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
+    expect(userStated({ quote: 'returns are 5% today', value: 5, speaker: 'user' }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
   });
 
   it('4. a typed range keeps both ends, and its unit only where the span writes it after the figure', () => {

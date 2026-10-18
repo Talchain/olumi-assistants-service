@@ -193,7 +193,7 @@ describe('a deadline the model cannot hold is asked where the user always sees i
   it('CONTROL (statement era): the goal\'s own target statement holds the period, so nothing is asked about it', async () => {
     const r = await build({ ...NO_DEADLINE, statements: [{ quote: 'Budget is £900k either way and we want to add £3m of new ARR within eighteen months.',
       subject: { kind: 'goal', label: 'New ARR', to_label: null, factor_label: null }, field: 'target', form: 'describes',
-      value: null, low: null, high: null, unit: null, qualifier: null, conditions: null }] });
+      value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker: null }] });
     expect((r.open_questions ?? []).filter((q) => /within \d+ months|no deadline|eighteen months/.test(q))).toHaveLength(0);
   });
 });
