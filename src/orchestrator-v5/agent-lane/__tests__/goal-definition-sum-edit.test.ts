@@ -40,6 +40,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { createSetFactorValueHandler } from '../../tools/handlers/set-factor-value.js';
 import { buildHandlerInvocation } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import type { ProposalAction } from '../../routing/types.js';
+import { prepareOptionInterventionEdit } from '../../system-events/option-intervention-edit.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554408a8';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f18a8';
@@ -194,6 +195,14 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     expect(String((reg.json as Rec).message)).toContain('Change the goal\'s current level and it changes with it. Nothing was written.');
     expect(h.appends).toHaveLength(0);
     expect(nodeOf(h.stored(), 'option_a')!.interventions[TODAY]).toBeUndefined();
+  });
+
+  it('RED (DL-3 scope decision): the option-intervention writer never lets an option set the today part; its own part it may', async () => {
+    const g = await constructed(true);
+    const hash = computeAnalysisAffectingGraphHash(g as never) as string;
+    const at = (factorId: string) => prepareOptionInterventionEdit({ persistedGraph: clone(g), optionId: 'option_a', factorId, modelValue: 0.5, expectedGraphHash: hash });
+    expect(at(TODAY)).toEqual({ kind: 'refused', reason: 'goal_today_part_owned' });
+    expect(at('net_change_in_widgets_per_hour').kind).not.toBe('refused');
   });
 
   it('CONTRAST: an ordinary sum part (not the part construction minted for the goal\'s level today) is never moved', async () => {

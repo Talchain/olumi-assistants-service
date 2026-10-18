@@ -226,6 +226,9 @@ describe('STEP 8 Route A — what d5 does not hold as a definition stays exactly
  * round 2 BLOCK): "adds exactly 20 widgets per hour before maintenance losses. Maintenance removes 10 widgets per hour under
  * Option A" compiled an exact +20 where the complete change is +10, and an unrelated "Last year we made 20 widgets per hour"
  * bound a figure that never named the goal. A figure's quantity is not the option's COMPLETE effect on the goal.
+ * A single-occurrence binding (v4: the link's own located quote, complete by its figures) was then BLOCKED at the approach by
+ * the Codex pair (PAIR4): a figure-free condition ("before maintenance losses") cannot be read by any existing reader without a
+ * phrase matcher, so no compliant binding exists for this shape. Fail-safe: it stays Olumi's disclosed estimate.
  */
 describe('STEP 8 Route A — LIMITATION (measured): the drafted per-option "net effect" shape is not compiled', () => {
   it('"Option A net effect" / "Option B net effect" → "Widgets per hour", flagged definitional with a basis, keeps today\'s numbers', async () => {

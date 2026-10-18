@@ -106,6 +106,7 @@ import { goalDeadlineFromRecord } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { ADJUST_EDGE_STRENGTH_STD_MAX } from '../../cee/magnitude/olumi-spread.js';
+import { goalSumTodayPart } from '../agent-lane/goal-definition-sum.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -1767,6 +1768,9 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     || typeof option.label !== 'string' || typeof factor.label !== 'string') {
     return refuse('unresolved_identity');
   }
+  // ⭐ STEP 8 (DL-3 scope decision; Codex review round 2 of #3421): a goal's compiled today part IS that goal's level today. No
+  // option ever sets it: an option acts only on its own change, and the Run never carries an option override of the baseline.
+  if (graph.nodes.some(g => g.kind === 'goal' && goalSumTodayPart(graph.nodes, g.id)?.id === factor.id)) return refuse('goal_today_part_owned');
   if (figure?.raw_value !== undefined && figure.cap === undefined
     && (((factor.observed_state as { cap?: number } | undefined)?.cap ?? 0) > 1
       || ((factor as { scale_frame?: number }).scale_frame ?? 0) > 1)) {
