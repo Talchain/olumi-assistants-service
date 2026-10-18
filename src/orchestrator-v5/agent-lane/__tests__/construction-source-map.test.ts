@@ -19,7 +19,7 @@ type Rec = Record<string, any>;
  */
 const AIE_TEXT = ['tests/fixtures/sys2/aie-qualitative-statement-amendment-v1.json', 'tests/fixtures/sys2/aie-quote-lead-in-amendment-v1.json',
   'tests/fixtures/sys2/aie-range-central-figure-amendment-v1.json', 'tests/fixtures/sys2/aie-option-setting-statement-amendment-v1.json',
-  'tests/fixtures/sys2/aie-one-figure-option-total-amendment-v1.json']
+  'tests/fixtures/sys2/aie-one-figure-option-total-amendment-v1.json', 'tests/fixtures/sys2/aie-t1-producer-text-v1.json']
   .flatMap((path) => (JSON.parse(readFileSync(path, 'utf8')) as { changes: { old: string; replacement: string }[] }).changes)
   .reduce((text, c) => { if (text.split(c.old).length !== 2) throw new Error(`AIE old text not found once: ${c.old.slice(0, 60)}`); return text.replace(c.old, c.replacement); },
     readFileSync('tests/fixtures/sys2/aie-statements-6180604131.txt', 'utf8'));

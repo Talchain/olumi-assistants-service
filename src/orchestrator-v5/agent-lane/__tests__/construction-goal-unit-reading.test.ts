@@ -127,4 +127,14 @@ describe("the funding goal's unit is Olumi's reading, quoting the brief's senten
     const { graph } = await build({ ...wire, goal: { ...wire.goal, unit: 'conversations' } });
     expect(goalOf(graph).unit_reading).toBeUndefined();
   });
+
+  // AIE item 6 (UNITS, 18 Oct): "leave unsupported units unknown, using null only where the actual schema permits null". goal.unit
+  // is a REQUIRED string in the sent schema, so its one absence form is "": the strict schema takes it and admission saves no unit.
+  it('AIE item 6: an unsupported goal unit left unknown ("", the required string\'s absence) is accepted and saves no unit and no reading', async () => {
+    const wire = funding(OLUMIS_75K);
+    const { graph } = await build({ ...wire, goal: { ...wire.goal, unit: '' } });
+    expect(goalOf(graph).label).toBe('securing funding');
+    expect(goalOf(graph)).not.toHaveProperty('goal_threshold_unit');
+    expect(goalOf(graph).unit_reading).toBeUndefined();
+  });
 });

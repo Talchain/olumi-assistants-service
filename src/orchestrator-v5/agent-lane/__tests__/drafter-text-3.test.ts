@@ -20,6 +20,8 @@ import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 type Rec = Record<string, any>;
 const TEXT = JSON.parse(readFileSync('tests/fixtures/drafter-text-3/drafter-text-3.json', 'utf8')) as
   { goal_is_the_aim: string; current_aim_not_later_ambition: string; date_not_asked: string; unknowns_description: string; goal_level_in_other_words: string };
+/** AIE T1 (18 Oct): the hedged-goal clause follows the aim sentence's last clause. */
+const T1_GOAL = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { goal_changes: { old: string; replacement: string }[] }).goal_changes[0]!;
 const HIRING_BRIEF = (JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007.json', 'utf8')) as Rec).brief as string;
 const HIRING_DRAFT = JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007-draft.json', 'utf8')) as Rec;
 const CAPACITY_BRIEF = (JSON.parse(readFileSync('tests/fixtures/drafter-text-3/served-capacity-brief.json', 'utf8')) as Rec).brief as string;
@@ -60,7 +62,9 @@ describe('what the drafter is sent', () => {
   it('1. hiring: the instructions open with the goal as the user\'s governing aim, before the event-by-date rule', async () => {
     // The instructions are one joined string: Olumi's purpose lines open it (#3045, Paul's principle), then the aim sentence,
     // before the event-by-date rule.
-    expect(BUILD_INSTRUCTIONS.startsWith(`${OLUMI_PURPOSE_CORE_LINES.join(' ')} ${TEXT.goal_is_the_aim} For an EVENT by a date`)).toBe(true);
+    expect(TEXT.goal_is_the_aim.endsWith(T1_GOAL.old)).toBe(true);
+    const aimLine = TEXT.goal_is_the_aim.slice(0, -T1_GOAL.old.length) + T1_GOAL.replacement;
+    expect(BUILD_INSTRUCTIONS.startsWith(`${OLUMI_PURPOSE_CORE_LINES.join(' ')} ${aimLine} For an EVENT by a date`)).toBe(true);
     const sent = await firstRequest(HIRING_BRIEF);
     expect(sent.instructions as string).toContain(TEXT.goal_is_the_aim);
     // Contrast in the same request: the event-by-date rule it now governs is still sent.
