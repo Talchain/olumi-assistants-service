@@ -164,7 +164,7 @@ describe('B4 final reply boundary through the real Agent route', () => {
     expect(response.statusCode, response.body).toBe(200);
     expect(regenerate).toHaveBeenCalledTimes(1);
     const body = response.json();
-    expect(body.assistant_text.split('\n\n')[0]).toBe('The explanation is unavailable.');
+    expect(body.assistant_text).toBe('That change was already saved (version 2); nothing was written again.');
     expect(body._agent.receipts).toEqual([receipt]);
     expect(rows.get(id)?.assistant_message).toBe(body.assistant_text);
   });
@@ -235,7 +235,7 @@ describe('B4 final reply boundary through the real Agent route', () => {
     const id = randomUUID(), response = await turn(id);
     expect(response.statusCode, response.body).toBe(200);
     const body = response.json();
-    expect(body.assistant_text).toBe('The explanation is unavailable.');
+    expect(body.assistant_text).toBe(lateText === safe ? safe : '');
     const card = body.suggested_actions.find((action: Rec) => action.detail === proposal.public_label);
     expect(card).toEqual({ id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Use as starting assumptions', message: 'Yes, use those.', detail: proposal.public_label });
     expect(rows.get(id)?.pending_actions).toEqual(expect.arrayContaining([expect.objectContaining({ chip_id: card.id })]));
@@ -272,7 +272,7 @@ describe('B4 final reply boundary through the real Agent route', () => {
     const response = await turn();
     expect(response.statusCode, response.body).toBe(200);
     const body = response.json();
-    expect(body.assistant_text).toBe('The explanation is unavailable.');
+    expect(body.assistant_text).toBe(lateText === safe ? safe : '');
     expect(body.suggested_actions.some((action: Rec) => action.id === `agent-approve-proposal:${proposal.proposal_id}`)).toBe(false);
     expect(body._proposal_fields).toBeUndefined();
     expect(regenerate).toHaveBeenCalledTimes(1);
@@ -328,7 +328,7 @@ describe('B4 final reply boundary through the real Agent route', () => {
     const id = randomUUID();
     const response = await turn(id);
     expect(response.statusCode, response.body).toBe(200);
-    expect(response.json().assistant_text).toBe('The explanation is unavailable.');
+    expect(response.json().assistant_text).toBe(safe);
     expect(response.json().action_bar).toBeUndefined();
     expect(rows.has(id)).toBe(!unavailable);
     if (!unavailable) expect(rows.get(id)?.assistant_message).toBe(response.json().assistant_text);

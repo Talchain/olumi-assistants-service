@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
@@ -168,7 +169,9 @@ const rows = new Map<string, { id: string; turn_id: string; request_hash: string
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, id: string) => rows.get(id) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }) => {
+  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null };
     rows.set(w.turn_id, row);
     return { id: row.id };

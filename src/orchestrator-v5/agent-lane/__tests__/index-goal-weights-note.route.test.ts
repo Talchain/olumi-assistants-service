@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /** Real Agent route; all provider, orchestration and session operations are stubbed locally. */
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,7 +22,9 @@ const rows = new Map<string, { id: string; turn_id: string; request_hash: string
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string }) => {
+  append: vi.fn(async (w: { turn_id: string; request_hash: string }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash
       ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };

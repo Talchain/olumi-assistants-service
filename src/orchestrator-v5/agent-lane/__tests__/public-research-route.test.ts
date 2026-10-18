@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /**
  * ⭐ PUBLIC RESEARCH R1 THROUGH THE AGENT ROUTE (seam #70 5849869441). The Agent can only OFFER a search; the user's
  * click on the control that shows the exact query runs ONE native web search, and the reply — the finding with its
@@ -21,7 +22,9 @@ const rows = new Map<string, Record<string, unknown>>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: Record<string, unknown>) => {
+  append: vi.fn(async (w: Record<string, unknown>, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     appended.push(w);
     rows.set(String(w.turn_id), { request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, response_emitted: w.response_emitted });
     return { id: `row-${rows.size}` };
@@ -150,7 +153,7 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     expect(b.assistant_text).not.toContain('**Sources**');
   });
   const WHY = /No single option can be put forward yet/;
-  const RANKING = '- **Raising the price is the better option.** It beats holding the price for most SaaS firms.';
+  const RANKING = '- **Raising the price is most likely to meet the goal in this model.** It beats holding the price for most SaaS firms.';
   const click = async () => {
     await offer();
     const chip = researchChipFor(Q)!;
@@ -164,7 +167,7 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     researchExtra = RANKING;
     const b = await click();
     expect(b._diagnostic_trace?.fast_path).toBe('research');
-    expect(b.assistant_text, 'the wire drop ran: the ranking is gone').not.toContain('the better option');
+    expect(b.assistant_text, 'the wire drop ran: the ranking is gone').not.toContain('most likely to meet the goal in this model');
     expect(b.assistant_text).toContain('less than 1% for enterprise SaaS. [1]');
     expect(b.assistant_text).not.toMatch(WHY);
   });
@@ -172,7 +175,7 @@ describe('public research: the Agent offers, the user\'s click searches once, th
   it('PRECONDITION: with no withheld run the same answer keeps the sentence — the RED row\'s drop is the wire gate\'s', async () => {
     researchExtra = RANKING;
     const b = await click();
-    expect(b.assistant_text).toContain('the better option');
+    expect(b.assistant_text).toContain('most likely to meet the goal in this model');
     expect(b.assistant_text).not.toMatch(WHY);
   });
 });

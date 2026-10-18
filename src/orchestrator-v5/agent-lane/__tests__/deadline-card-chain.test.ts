@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /** Retained d2/d1 replay: local dispatch and real approval writer; providers forbidden. */
 import { randomUUID } from 'node:crypto';
@@ -53,7 +54,9 @@ function world(fixture: { graph: Rec; brief: string } = d2) {
     readRecent: async () => rows.filter(r => !r.turn_id.endsWith(':claim')),
     readFactsWithTurnFor: async ids => rows.flatMap(r => ids.includes(r.id) ? (writes.find(w => w.turn_id === r.turn_id)?.handler_facts ?? [])
       .map((fact: Rec) => ({ turn_id: r.id, fact_created_at: r.created_at, fact })) : []),
-    append: async write => {
+    append: async (write, options?: SessionAppendOptions) => {
+    write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
       writes.push(write); if (write.graph !== undefined) bytes = JSON.stringify(write.graph);
       const id = randomUUID(); rows.unshift({ ...makeSessionTurnRow({ id, scenario_id: sid, turn_id: write.turn_id, request_hash: write.request_hash,
         turn_class: write.turn_class, handler_id: write.handler_id, response_emitted: write.response_emitted, created_at: new Date().toISOString(),

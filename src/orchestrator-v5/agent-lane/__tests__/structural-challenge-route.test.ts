@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,7 +75,9 @@ const store = {
     const key = `${sid}:${turnId}`;
     if (rows.get(key)?.request_hash === hash) rows.delete(key);
   }),
-  append: vi.fn(async (w: Rec) => { const key = `${w.scenario_id}:${w.turn_id}`; rows.set(key, { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` }); return { id: rows.get(key)!.id }; }),
+  append: vi.fn(async (w: Rec, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+ const key = `${w.scenario_id}:${w.turn_id}`; rows.set(key, { ...w, assistant_message: w.assistantMessage, user_message: w.userMessage, id: `row-${rows.size + 1}` }); return { id: rows.get(key)!.id }; }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({ ...(await importOriginal<Record<string, unknown>>()), resolveUserIdentity: async () => ({ mode: 'off' }) }));

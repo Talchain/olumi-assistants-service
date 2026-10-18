@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { randomUUID } from 'node:crypto';
@@ -72,7 +73,9 @@ function world(initial = held(), brief = fixture.brief, scenarioId = SID) {
   const proposals = new ProposalStore(); const writes: Rec[] = [];
   const store = createMockSessionStore({
     loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: brief }),
-    append: async write => { writes.push(write); if (write.graph !== undefined) bytes = JSON.stringify(write.graph); return { id: `row-${writes.length}` }; },
+    append: async (write, options?: SessionAppendOptions) => {
+    write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+ writes.push(write); if (write.graph !== undefined) bytes = JSON.stringify(write.graph); return { id: `row-${writes.length}` }; },
     readCommittedTurn: async (_sid, id) => { const w = writes.find(w => w.turn_id === id); return w ? { id: `row-${writes.indexOf(w)+1}`, request_hash: w.request_hash, pending_actions: w.pending_actions ?? [], user_message: w.userMessage ?? null, assistant_message: w.assistantMessage ?? null, llm_calls_used: w.llm_calls_used } : null; },
     readMostRecentPendingActions: async (_sid, opts) => { const w = [...writes].reverse().find(w => !w.turn_id.endsWith(':claim')); opts?.onLatestRowId?.(w ? `row-${writes.indexOf(w)+1}` : null); return w?.pending_actions ?? []; },
     readRecent: async () => writes.map((w, i) => makeSessionTurnRow({ id: `row-${i+1}`, scenario_id: w.scenario_id, turn_id: w.turn_id,

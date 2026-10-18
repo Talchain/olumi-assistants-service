@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +19,9 @@ const store = {
   readAnalysisInvalidatedAt: vi.fn(async () => null),
   append: vi.fn(async (w: {
     turn_id: string; request_hash: string; userMessage?: string; assistantMessage?: string; llm_calls_used: number;
-  }) => {
+  }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash
       ? { id: prior.id, replayedPriorTurn: true as const }
@@ -40,7 +43,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 const SCENARIO = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const USER_WORDS = 'Which assumptions should we examine?';
 const FOLLOW_UP = 'What should we examine next?';
-const STRIPPED = 'AI Reporting Sprint currently performs best, leading in 46% of simulations.';
+const STRIPPED = 'AI Reporting Sprint is most likely to meet the goal in this model, leading in 46% of simulations.';
 const SAFE = '\n\nCheck the assumptions with your team.';
 const GRAPH = { nodes: [
   { id: 'goal', kind: 'goal', label: 'Quarterly revenue' },

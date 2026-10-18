@@ -21,6 +21,8 @@ const SINK_MANIFEST: Sink[] = [
 ];
 
 const ALLOWLIST: (Sink & { reason: string })[] = [
+  { file: 'src/routes/agent-v1-turn.ts', symbol: 'checkedUnavailableReply', assignments: ['graph'],
+    reason: 'The final unavailable reply reads evidence.model as an internal permission input; it emits no graph field.' },
   {"file": "src/orchestrator-v5/handlers/approve-held-proposal.ts", "symbol": "applyHeldProposal", "reason": "Forwards buildAppliedGraphWireField output from the manifest, after the same held-card commit.", "assignments": ["draft_graph"]},
   {"file": "src/adapters/llm/caching.ts", "symbol": "getConfiguredMaxTokens", "reason": "Task token budget lookup, not a graph.", "assignments": ["draft_graph"]},
   {"file": "src/adapters/llm/router.ts", "symbol": "<module>", "reason": "Task model-routing configuration, not a graph.", "assignments": ["draft_graph"]},
@@ -65,7 +67,7 @@ const ALLOWLIST: (Sink & { reason: string })[] = [
   {"file": "src/routes/agent-v1-turn.ts", "symbol": "withRetainedScopeIssues", "reason": "Internal graph validation input; returns issues only.", "assignments": ["graph"]},
   {"file": "src/routes/agent-v1-turn.ts", "symbol": "agentTurnHandler", "reason": "Internal reasoning inputs and draft readback from buildAppliedGraphWireField. C3 final number check consumes an in-process graph, not a new wire field. B4: the delivered-ask recheck uses the same pinned graph without emitting it. #3310: the unreadable-held stop passes graph: null to the estimate-point egress (no Run, no wire field).", "assignments": ["draft_graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph"]},
   {"file": "src/routes/agent-v1-turn.ts", "symbol": "prepare", "reason": "Internal action-bar facts from the pinned graph and final append carriers, before final reply validation; no graph is emitted.", "assignments": ["graph"]},
-  {"file": "src/routes/agent-v1-turn.ts", "symbol": "replayed", "reason": "Internal replay reasoning inputs and draft readback from buildAppliedGraphWireField.", "assignments": ["draft_graph", "graph", "graph", "graph", "graph", "graph", "graph"]},
+  {"file": "src/routes/agent-v1-turn.ts", "symbol": "replayed", "reason": "Internal replay reasoning inputs and draft readback from buildAppliedGraphWireField. R-REPLAY restores BASE's four egress input reads; these do not emit graph fields.", "assignments": ["draft_graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph", "graph"]},
   {"file": "src/routes/agent-v1-turn.ts", "symbol": "emitGraphReady", "reason": "Streamed GRAPH_READY frame: forwards buildAppliedGraphWireField output from the manifest (#3244).", "assignments": ["graph"]},
   {"file": "src/routes/assist.evidence-pack.ts", "symbol": "<module>", "reason": "Request schema or internal share persistence; share readback is in the manifest.", "assignments": ["graph"]},
   {"file": "src/routes/assist.evidence-pack.ts", "symbol": "route", "reason": "Request schema or internal share persistence; share readback is in the manifest.", "assignments": ["graph"]},

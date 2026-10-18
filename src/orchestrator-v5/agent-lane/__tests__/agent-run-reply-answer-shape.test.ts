@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * ⭐ EVERY REPLY ON THE AGENT ROUTE ARRIVES IN ONE SHAPE (S-A REPLY SHAPE v1, lane COPY-SHAPE, 7 Oct 2026; Paul: "It was a
@@ -84,7 +85,9 @@ const rows = new Map<string, Row>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }) => {
+  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
     const row: Row = { id: `row-${rows.size + 1}`, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null };

@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { runPressToolResponse } from './fixtures/run-press-model.js';
 /**
  * AI HARNESS — CODEX_CLI_OVERFLOW CHANGES_REQUIRED on #2470 (5936280278). The two-request Run keeps its promise on the
@@ -47,7 +48,9 @@ const store = {
       // As the real store reads it back (T1h, migration 20261013230000): the narration this answer was sent with.
       run_narration: r.run_narration ?? null };
   }),
-  append: vi.fn(async (row: Row) => { rows.push({ ...row }); return { id: String(row.turn_id) }; }),
+  append: vi.fn(async (row: Row, options?: SessionAppendOptions) => {
+    row = Object.assign({}, row, options?.prepare?.(row as typeof row & SessionTurnWrite, { finalPending: (row as typeof row & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+ rows.push({ ...row }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),

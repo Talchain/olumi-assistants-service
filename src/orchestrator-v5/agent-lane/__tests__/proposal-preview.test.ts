@@ -87,6 +87,6 @@ describe('the preview rides only beside its own consent chip, after the final eg
     const attach = src.indexOf('proposal_preview: preview');
     expect(egress).toBeGreaterThan(0);
     expect(attach).toBeGreaterThan(egress);
-    expect(src.split('proposal_preview:').length - 1, 'one attach site').toBe(1);
+    expect(src.match(/proposal_preview: preview/g)?.length, 'initial and prepared writes').toBe(2);
   });
 });

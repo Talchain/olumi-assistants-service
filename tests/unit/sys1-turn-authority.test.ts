@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../src/orchestrator-v5/session/store.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
@@ -195,7 +196,7 @@ describe('SYS1 ordinary-turn authority', () => {
 
 // The real ordinary-turn route is exercised with local responses only.
 // `readStatedObjectionFactsFor` is a SUCCESSFUL empty read: a store without it is "unknown" to the route (S8 row 2) and the golden bytes would carry the flag.
-const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })), readCommittedTurn: vi.fn(async () => null), append: vi.fn(async () => ({ id: 'row-1' })), readStatedObjectionFactsFor: vi.fn(async () => []) };
+const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })), readCommittedTurn: vi.fn(async () => null), append: vi.fn(async (write: SessionTurnWrite, options?: SessionAppendOptions) => { write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null })); return ({ id: 'row-1' }); }), readStatedObjectionFactsFor: vi.fn(async () => []) };
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../src/orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 describe('SYS1 ordinary Responses transport', () => {

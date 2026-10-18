@@ -107,7 +107,7 @@ describe('the agent route surfaces them, and only when there is something to say
   const ROUTE = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
 
   it('the probe can see the sidecar (not vacuous)', () => {
-    expect(ROUTE.lastIndexOf('_agent: {')).toBeGreaterThan(-1);
+    expect(ROUTE.indexOf('_agent: {\n        session_id: sessionId,\n        mode,\n        tool_calls: result.tool_calls,')).toBeGreaterThan(-1);
   });
 
   it('⛔ the facts are COLLECTED from the tool results', () => {
@@ -120,7 +120,7 @@ describe('the agent route surfaces them, and only when there is something to say
     // ⚠ The call is HOISTED now, because the same facts also feed the
     // user-facing disclosure block. The sidecar consumes the hoisted value, so
     // this pins the consumption rather than the call site.
-    const sidecar = ROUTE.slice(ROUTE.lastIndexOf('_agent: {'));
+    const sidecar = ROUTE.slice(ROUTE.indexOf('_agent: {\n        session_id: sessionId,\n        mode,\n        tool_calls: result.tool_calls,'));
     expect(sidecar).toContain('state_facts: stateFacts');
   });
 
@@ -128,7 +128,7 @@ describe('the agent route surfaces them, and only when there is something to say
     // An always-present empty object reads as "we checked and there was nothing",
     // which is true — but it also trains a consumer to ignore the field. The
     // conditional is what keeps its presence meaningful.
-    const sidecar = ROUTE.slice(ROUTE.lastIndexOf('_agent: {'));
+    const sidecar = ROUTE.slice(ROUTE.indexOf('_agent: {\n        session_id: sessionId,\n        mode,\n        tool_calls: result.tool_calls,'));
     // ⚠ WIDENED, and the widening is the point. The gate used to be
     // `rescaled.length > 0 || ranges_added.length > 0`, which omitted the key on
     // exactly the turn a reconciling surface most needs it: a frame write refused

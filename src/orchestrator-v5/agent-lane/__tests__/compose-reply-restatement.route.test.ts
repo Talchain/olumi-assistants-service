@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 /** Existing target-not-testable-beside-ranges.route harness: real route, fixed narrator, in-memory readback/store. */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
 import { randomUUID } from 'node:crypto';
@@ -44,7 +45,9 @@ const store = {
   readMostRecentPendingActions: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
-  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }) => {
+  append: vi.fn(async (w: { turn_id: string; request_hash: string; assistantMessage?: string }, options?: SessionAppendOptions) => {
+    w = Object.assign({}, w, options?.prepare?.(w as typeof w & SessionTurnWrite, { finalPending: (w as typeof w & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null }));
+
     if (w.assistantMessage !== undefined) saved.push(w.assistantMessage);
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash

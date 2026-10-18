@@ -1,3 +1,4 @@
+import type { SessionAppendOptions, SessionTurnWrite } from '../../session/store.js';
 import { randomUUID } from 'node:crypto';
 /** R1: the Run control enters the agent loop; the existing read-only Explain follow-up remains independent. */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
@@ -7,7 +8,7 @@ const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d6f';
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async () => null),
-  append: vi.fn(async () => ({ id: 'row-1' })),
+  append: vi.fn(async (write: SessionTurnWrite, options?: SessionAppendOptions) => { write = Object.assign({}, write, options?.prepare?.(write as typeof write & SessionTurnWrite, { finalPending: (write as typeof write & SessionTurnWrite).pending_actions ?? [], prospectiveGuidance: null })); return ({ id: 'row-1' }); }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
@@ -19,6 +20,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
+  let savedCapacity: number | undefined;
   // How the ONE interpreting call behaves: answers, fails with an HTTP error, or says nothing.
   let interp: 'ok' | 'throw' | 'empty' | 'claims' | 'leads' = 'ok';
   // A NON-RANKING interpretation: this fixture's readback WITHHOLDS the leader (`constraint_verdict_withheld`),
@@ -58,6 +60,13 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async (_req, reply) => {
+      const body = _req.body as { kind?: string; turn_id?: string; event?: { value?: number } };
+      if (body.kind === 'system_event') {
+        savedCapacity = body.event?.value;
+        return { response_version: 2, assistant_text: 'Updated the Capacity starting assumption to 3.',
+          suggested_actions: [], insights: [], blocks: [], graph_hash: 'h1',
+          receipts: [{ version: 1, version_id: 'capacity-v1', mutation_id: 'capacity-edit', source_turn_id: body.turn_id }] };
+      }
       runs += 1;
       if (failed) return reply.code(500).send({ error: 'INTERNAL_ERROR', details: { retryable: true, reason: 'handler_invocation_failed', stage: 'analyse' } });
       if (blocked) {
@@ -69,7 +78,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     });
     // The goal carries a stated target, so D1's goal ask (`decision-input-ask.ts`, pinned there) stays out of these exact-text rows.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
+      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity', ...(savedCapacity === undefined ? {} : { value: savedCapacity }) }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: 'h1',
       // The canonical verdict the interpreter must be GIVEN (Paul's case: a guardrail the engine could not score).
       analysis_state: failed
@@ -81,7 +90,7 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; blocked = false; failed = false; });
+  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; blocked = false; failed = false; savedCapacity = undefined; });
   const explain = async (first: { json(): { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string } } }) => {
     const b = first.json();
     modelBodies = []; // Count the independent Explain request, after the completed Run loop.
@@ -308,6 +317,12 @@ describe('Run loop and the retained read-only Explain follow-up', () => {
    */
   it('RED: the interpretation reaches the user intact — no sentence stripped, no write-status line appended', async () => {
     interp = 'claims';
+    const written = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'system_event', scenario_id: SCENARIO, turn_id: randomUUID(),
+      event: { kind: 'factor_value_edit', target_id: 'f', value: 3 },
+    } });
+    expect(written.statusCode, written.body).toBe(200);
+    expect(savedCapacity).toBe(3);
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: randomUUID(), message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
