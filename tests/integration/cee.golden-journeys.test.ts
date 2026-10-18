@@ -60,9 +60,11 @@ async function runGoldenJourney(
 }
 
 // The options, evidence, bias and team routes were deleted (R2). Each row drafts
-// a REAL graph and runs the kept SDK snapshot helper over it; the other
-// envelopes are synthetic, so nothing here asserts truncation, team
-// disagreement or journey completeness (those would only echo the stubs).
+// a REAL graph and runs the kept SDK snapshot helper over it. Truncation,
+// validation, quality and privacy are read from that real draft (the options
+// and bias stubs carry none of them). Team disagreement and journey
+// completeness are not asserted: with no team envelope the first is constant
+// false, and completeness needs explain/sensitivity envelopes never passed here.
 describe("CEE golden-journey SDK snapshot over real drafts (fixtures provider)", () => {
   let app: FastifyInstance;
 
@@ -81,10 +83,11 @@ describe("CEE golden-journey SDK snapshot over real drafts (fixtures provider)",
     vi.unstubAllEnvs();
   });
 
-  it("healthy_product_decision: snapshot validation flag as expected, quality band not low, no brief text", async () => {
+  it("healthy_product_decision: snapshot untruncated, validation flag as expected, quality band not low, no brief text", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.HEALTHY_PRODUCT_DECISION);
     const { snapshot } = await runGoldenJourney(app, fixture);
 
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
     expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     expect(snapshot.quality_band).not.toBe("low");
@@ -94,6 +97,15 @@ describe("CEE golden-journey SDK snapshot over real drafts (fixtures provider)",
       const serialized = JSON.stringify(snapshot).toLowerCase();
       expect(serialized.includes(briefLower)).toBe(false);
     }
+  });
+
+  it("under_specified_strategic_decision: snapshot untruncated", async () => {
+    const fixture = await loadCeeGoldenJourney(
+      CEE_GOLDEN_JOURNEYS.UNDER_SPECIFIED_STRATEGIC_DECISION,
+    );
+    const { snapshot } = await runGoldenJourney(app, fixture);
+
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
   });
 
   it("evidence_heavy_with_truncation: snapshot validation flag as expected", async () => {
@@ -105,10 +117,11 @@ describe("CEE golden-journey SDK snapshot over real drafts (fixtures provider)",
     expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
   });
 
-  it("long_term_strategic_bet: snapshot validation flag as expected, no brief text", async () => {
+  it("long_term_strategic_bet: snapshot untruncated, validation flag as expected, no brief text", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.LONG_TERM_STRATEGIC_BET);
     const { snapshot } = await runGoldenJourney(app, fixture);
 
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
     expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     const briefLower = fixture.inputs.draft?.brief.toLowerCase() ?? "";
@@ -118,18 +131,20 @@ describe("CEE golden-journey SDK snapshot over real drafts (fixtures provider)",
     }
   });
 
-  it("launch_vs_delay_feature: snapshot validation flag as expected", async () => {
+  it("launch_vs_delay_feature: snapshot untruncated, validation flag as expected", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.LAUNCH_VS_DELAY_FEATURE);
     const { snapshot } = await runGoldenJourney(app, fixture);
 
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
     expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
   });
-  it("high_band_portfolio_prioritisation: snapshot validation flag as expected, quality band not low", async () => {
+  it("high_band_portfolio_prioritisation: snapshot untruncated, validation flag as expected, quality band not low", async () => {
     const fixture = await loadCeeGoldenJourney(
       CEE_GOLDEN_JOURNEYS.HIGH_BAND_PORTFOLIO_PRIORITISATION,
     );
     const { snapshot } = await runGoldenJourney(app, fixture);
 
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
     expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
 
     // High-band journeys should never be classified as low band, but we avoid
@@ -137,10 +152,11 @@ describe("CEE golden-journey SDK snapshot over real drafts (fixtures provider)",
     // heuristic tuning.
     expect(snapshot.quality_band).not.toBe("low");
   });
-  it("kill_vs_pivot_experiment: snapshot validation flag as expected", async () => {
+  it("kill_vs_pivot_experiment: snapshot untruncated, validation flag as expected", async () => {
     const fixture = await loadCeeGoldenJourney(CEE_GOLDEN_JOURNEYS.KILL_VS_PIVOT_EXPERIMENT);
     const { snapshot } = await runGoldenJourney(app, fixture);
 
+    expect(snapshot.any_truncated).toBe(fixture.expectations.expect_any_truncated);
     expect(snapshot.has_validation_issues).toBe(fixture.expectations.expect_has_validation_issues);
   });
 });
