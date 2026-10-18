@@ -79,7 +79,7 @@ function runFact(opts: { separated: boolean }) {
   return RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
-      scenario_id: SCENARIO, run_id: 'requested-run', computed_at: RUN_AT, graph_hash_at_run: HASH,
+      scenario_id: SCENARIO, computed_at: RUN_AT, graph_hash_at_run: HASH,
       leading_option_id: 'option-b', summary: 'The analysis is complete.',
       win_probabilities: { 'option-a': 0.35, 'option-b': 0.65 },
       constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },

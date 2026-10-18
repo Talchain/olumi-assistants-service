@@ -303,7 +303,6 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
 it('stored hot and durable chances are withheld after H=12 is added, with a no-H contrast', async () => {
   const run = analysisFact('stored');
   if (run.fact_type !== 'run_analysis') throw new Error('Run fixture');
-  run.result.run_id = 'stored-run';
   run.result.enrichment = { analysis_status: 'completed',
     option_comparison: [{ option_id: 'option-stored', probability_of_goal: .63, win_probability: .8 }],
     inference_warnings: [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',

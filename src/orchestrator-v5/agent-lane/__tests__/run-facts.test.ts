@@ -9,7 +9,6 @@ import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { runFactsOf, RUN_FACTS_USE } from '../run-facts.js';
-import { readRunEvidence } from '../run-evidence.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { decisionSensitivityOf } from '../decision-sensitivity.js';
 import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
@@ -30,10 +29,6 @@ const BRIEFS: readonly [string, Rec][] = [
   ['capacity post3010', (JSON.parse(readFileSync('tests/fixtures/zero-spread/served-capacity-post3010-read01-20261014.json', 'utf8')) as Rec).body],
   ['marketing 7f5659fd', JSON.parse(readFileSync('tests/fixtures/reply-face-p2/marketing-7f5659fd-reopen.json', 'utf8')) as Rec],
 ];
-// Older public-result captures omit the selected identity; their existing saved read records it.
-for (const [, body] of BRIEFS) body.analysis_run_evidence = { run_id: body.current_read.run_id };
-const selectedFacts = (body: Rec, current: boolean) => runFactsOf(body.analysis_result, body.graph, current,
-  { runEvidence: readRunEvidence(body.analysis_run_evidence) });
 const read = async (body: Rec): Promise<Rec> => {
   const caps = createAgentCapabilities((async () => ({ status: 200, json: structuredClone(body) })) as never, new ProposalStore());
   const r = (await dispatchTool('get_canonical_state', '{}', ctx, caps)) as Rec;
@@ -72,14 +67,14 @@ describe('S7 step 1: ONE Run-facts packet in canonical state, built from the own
       const s = runFactsOf(x.analysis_result, x.graph, false);
       expect(s.chances).toEqual({});
       expect(s.olumi_inputs).toBeUndefined();
-      carried += Object.keys(selectedFacts(x, true).chances).length;
+      carried += Object.keys(runFactsOf(x.analysis_result, x.graph, true).chances).length;
     }
     expect(carried).toBeGreaterThan(0);
   });
 
   it('hiring post3000 (a third brief): the count of Olumi’s inputs is THIS Run’s licence census, and a stale Run carries none', () => {
     const fx = JSON.parse(readFileSync('tests/fixtures/hiring-shortfall/served-hiring-post3000-run-turn17-20261014.json', 'utf8')) as Rec;
-    const result = { run_id: 'hiring-licence-census-fixture', enrichment: { inference_warnings: [structuredClone(fx.served_licence)] } };
+    const result = { enrichment: { inference_warnings: [structuredClone(fx.served_licence)] } };
     const l = fx.served_licence as Rec;
     expect(runFactsOf(result, fx.graph, true).olumi_inputs).toEqual({ links: l.olumi_estimate_link_count,
       values: l.olumi_estimate_value_count, settings_by_option: l.olumi_estimate_settings_by_option });

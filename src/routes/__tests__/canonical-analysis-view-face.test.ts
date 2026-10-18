@@ -33,12 +33,11 @@ const certainty = { option_id: 'raise', probability_of_goal: 1, earned: false,
 const identity = { code: 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', severity: 'warning',
   message: 'Not shown. This run could not calculate the goal from its parts.' };
 function args(warnings: Json[] = [licence], decisions: Json[] = []): Json {
-  const result = { run_id: 'face-run', goal_certainty: decisions, enrichment: {
-    option_comparison: [{ option_id: 'raise' }, { option_id: 'keep' }], inference_warnings: warnings,
-  } };
-  return { graph, runFact: { fact_type: 'run_analysis', result },
+  return { graph, runFact: { fact_type: 'run_analysis', result: { goal_certainty: decisions } },
     analysisState: { run_state: { kind: 'complete_current' } },
-    derivation: { freshness: 'fresh' }, currentResult: { type: 'analysis_result', ...result } };
+    derivation: { freshness: 'fresh' }, currentResult: { type: 'analysis_result', enrichment: {
+      option_comparison: [{ option_id: 'raise' }, { option_id: 'keep' }], inference_warnings: warnings,
+    } } };
 }
 function project(input: Json): Json { return projectCanonicalAnalysisView(input as never); }
 const cell = (view: Json, id = 'raise'): Json => view.options.find((o: Json) => o.option_id === id).cell;
@@ -59,7 +58,7 @@ function projectWithReasonCarrier(input: Json, reasonCarrier: Json): Json {
 
 describe('canonical cell faces — moved copy, one existing chance composer', () => {
   it('FACE-DIGITS: captured point faces equal the existing CEE prose and their displayed percentages', () => {
-    const run: Json = { fact_type: 'run_analysis', result: { scenario_id: saved.scenario_id, run_id: saved.current_read.run_id,
+    const run: Json = { fact_type: 'run_analysis', result: { scenario_id: saved.scenario_id,
       summary: saved.analysis_result.summary, enrichment: saved.analysis_result.enrichment,
       goal_certainty: saved.analysis_goal_certainty, graph_hash_at_run: saved.current_read.computed_against_hash } };
     const input = { ...args(), graph: saved.graph, runFact: run,

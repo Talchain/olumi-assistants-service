@@ -39,7 +39,7 @@ const graph = (): Rec => ({ goal_node_id: 'goal', nodes: [
 ], edges: [['decision', 'a'], ['decision', 'b'], ['a', 'factor'], ['b', 'factor'], ['factor', 'goal']]
   .map(([from, to]) => ({ from, to, strength: { mean: 1, std: .1 }, exists_probability: 1, effect_direction: 'positive' })) });
 const fact = (g: Rec) => RunAnalysisHandlerFactSchema.parse({ fact_type: 'run_analysis', fact_version: 1, noop: false,
-  result: { scenario_id: SCENARIO, run_id: 'horizon-test-run', summary: 'Analysis complete.', computed_at: '2026-10-08T12:00:00.000Z',
+  result: { scenario_id: SCENARIO, summary: 'Analysis complete.', computed_at: '2026-10-08T12:00:00.000Z',
     graph_hash_at_run: computeAnalysisAffectingGraphHash(g as never), leading_option_id: 'a', win_probabilities: { a: .8, b: .2 },
     constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
     enrichment: { analysis_status: 'completed', robustness: { level: 'strong', near_tie: { is_tie: false } },

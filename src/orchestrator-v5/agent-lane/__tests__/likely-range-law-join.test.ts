@@ -122,7 +122,7 @@ describe('the goal chance on the served pricing brief: withheld until the approx
     e.inference_warnings = [];
     const published = projectGoalProbabilitiesForTransport(withGoalChanceLicence(e, after, GOAL), RUN.goal_certainty);
     const block = RUN.blocks.find((b: Rec) => b.type === 'analysis_result');
-    const facts = runFactsOf({ ...block, run_id: READ.current_read.run_id, enrichment: published }, after, true) as Rec;
+    const facts = runFactsOf({ ...block, enrichment: published }, after, true) as Rec;
     expect(facts.chances.goal_chance_display).toHaveProperty(STARTER);
     expect((facts.must_say as string[]).filter((x) => x === ADOPTED_LINE)).toHaveLength(1);
   });

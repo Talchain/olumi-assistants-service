@@ -170,8 +170,7 @@ function withholdUntestedHorizonFigures<E>(response: E, graph: unknown, brief?: 
 }
 
 /** Existing remove-only projection, shared by the temporal boundary and the evaluated static record. */
-export function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, missingStaticEvidence: boolean,
-  scopeReasons?: readonly string[]): R {
+export function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, missingStaticEvidence: boolean): R {
   const block = recordOf(result);
   if (block === undefined) return result;
   const enrichment = recordOf(block.enrichment), envelope = enrichment ?? block;
@@ -186,17 +185,9 @@ export function withChanceReadbackWithheld<R>(result: R, currentGraph: unknown, 
   });
   const ids = [...new Set([...readOptionResultSources(candidate).flat().map(row => row.option_id ?? row.id), ...displayIds]
     .filter((id): id is string => typeof id === 'string' && id !== ''))];
-  const message = scopeReasons === undefined ? STATIC_INPUTS_NOT_RECORDED
-    : 'This Run’s recorded evidence does not support showing goal chances.';
-  // A prior temporal projection already removed the licence; preserve its recorded cause on repeated readback.
-  const horizonWithhold = scopeReasons === undefined ? undefined
-    : warnings.find(value => recordOf(value)?.code === GOAL_FIGURES_HORIZON_NOT_TESTED);
-  const prior = horizonWithhold === undefined || !Array.isArray(candidate.inference_warnings) ? candidate
-    : { ...candidate, inference_warnings: candidate.inference_warnings.filter(value => value !== horizonWithhold) };
-  const gated = missingStaticEvidence ? withholdOptionGoalFigures(prior, new Set(ids), recordOf(horizonWithhold) ?? {
-    code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', message, say: message,
-    option_ids: ids, detail: scopeReasons === undefined ? { reason: 'EVALUATED_STATIC_INPUTS_NOT_RECORDED' }
-      : { reason: 'goal_chance_not_licensed', missing_or_conflicting: scopeReasons },
+  const gated = missingStaticEvidence ? withholdOptionGoalFigures(candidate, new Set(ids), {
+    code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE', severity: 'warning', message: STATIC_INPUTS_NOT_RECORDED, say: STATIC_INPUTS_NOT_RECORDED,
+    option_ids: ids, detail: { reason: 'EVALUATED_STATIC_INPUTS_NOT_RECORDED' },
   }, { keepOutcome: true, keepOrdering: true }) : withholdUntestedHorizonFigures(candidate, currentGraph);
   if (gated === candidate) return result;
   // Stored display records contain percentages and attainment wording of their own. They cannot survive the withhold.

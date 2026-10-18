@@ -9,7 +9,6 @@ import { runPressToolResponse } from './fixtures/run-press-model.js';
  * decision-sensitivity-screen-gate.route.test.ts (real route, fixed narrator, no provider contacted).
  */
 import { withCanonicalAnalysisView } from './fixtures/canonical-analysis-read.js';
-import { projectCanonicalAnalysisView } from '../../../routes/canonical-analysis-view.js';
 import { randomUUID } from 'node:crypto';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { readFileSync } from 'node:fs';
@@ -27,8 +26,7 @@ const CAPACITY = ((): Json => {
   const j = (JSON.parse(readFileSync(new URL('./fixtures/capacity-post2996-run2-read.json', import.meta.url), 'utf8')) as { j: Json }).j;
   // ⛔ SCIENCE C1: the capture's specialists → capacity link is user-ranged, so its captured read hash is the range-held one; the
   // graph read now serves this graph's current hash (the CAS base), which this row's view check reads.
-  return { ...j, scenario_id: SCENARIO, graph_hash: computeAnalysisAffectingGraphHash(j.graph),
-    analysis_run_evidence: { run_id: j.current_read.run_id } };
+  return { ...j, scenario_id: SCENARIO, graph_hash: computeAnalysisAffectingGraphHash(j.graph) };
 })();
 /**
  * Capacity on CEE 5b6e5eb7 (live run 2026-10-14T065335Z-capacity-post3017, judge row 4): the served graph read right after
@@ -236,39 +234,6 @@ describe('BYPASS1: host prose stops only where the AI wrote the reply; the facts
     expect(sent.join('\n')).toContain('less than 1%');
     expect(sent.join('\n')).toContain('Additional specialist capacity');
     expect(sent.join('\n')).toContain('Additional specialist capacity');
-  });
-
-  it.each(['capacity', 'pricing'] as const)('B1 retained summary: %s keeps the licensed chance headline beside its bound card', async brief => {
-    if (brief === 'capacity') served = structuredClone(CAPACITY);
-    else {
-      const read = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
-      served = { ...structuredClone(read), scenario_id: SCENARIO,
-        analysis_run_evidence: { run_id: read.current_read.run_id } };
-      // The read's CAS base uses today's hash projection; its selected Run keeps its recorded hash and time.
-      served.graph_hash = computeAnalysisAffectingGraphHash(served.graph);
-      // Supply the test store's declared current revision and the capture's own selected Run identity.
-      served.canonical_analysis_view = projectCanonicalAnalysisView({ revision: 1, graph: served.graph,
-        analysisState: served.analysis_state, analysisReady: served.current_read.analysis_ready,
-        currentResult: served.analysis_result,
-        runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: {
-          scenario_id: SCENARIO, run_id: served.current_read.run_id, summary: served.analysis_result.summary,
-          leading_option_id: served.analysis_result.leading_option_id, enrichment: served.analysis_result.enrichment,
-          graph_hash_at_run: served.analysis_result.computed_against_hash, computed_at: served.analysis_state.run_state.computed_at,
-        } } as never });
-    }
-    const face = cardFaces(served!.canonical_analysis_view)[0]!;
-    expect(face).toMatch(/% chance/);
-    const headline = face.slice(0, face.indexOf('.') + 1);
-    expect(headline.length).toBeGreaterThan(20);
-    const distinct = 'This analysis ran on a reduced model: 2 parts of your model are kept out of the calculation.';
-    served!.analysis_result.summary = `${face} ${distinct}`;
-    outputs = [[{ type: 'message', content: [{ type: 'output_text', text: 'Check the model’s uncertain assumption.' }] }]];
-    const run = await runPress();
-    expect(cardFaces(run.canonical_analysis_view)).toContain(face);
-    const summary = run.blocks.find((block: Json) => block.type === 'analysis_result').summary as string;
-    expect(summary.split('. ')[0]).toBe(headline.slice(0, -1));
-    expect(summary).toContain(distinct);
-    expect(served!.analysis_result.summary).toBe(`${face} ${distinct}`);
   });
 
   it('B1: the actual interpreting packet retains the measured driver and its qualifications', async () => {

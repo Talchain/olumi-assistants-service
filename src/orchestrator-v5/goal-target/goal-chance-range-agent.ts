@@ -7,7 +7,7 @@ import {
   GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_SHARE_APPROXIMATION,
 } from '../../orchestrator/context/option-result-source.js';
-import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver, STATIC_MODEL_SCOPE_NOTE, withGoalChanceReadback } from './goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver, STATIC_MODEL_SCOPE_NOTE } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 import { jointWithheldLine } from './goal-targets-joint.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
@@ -56,10 +56,6 @@ const rangeEnd = (v: number): string => v === 0 ? 'less than 1%' : v === 100 ? '
 
 /** PR-S1's carrier (`GOAL_CHANCE_RANGE`), read by its code. Conflicting records fail closed. */
 export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown): Record<string, GoalChanceRangeDisplay> | undefined {
-  const selected = rec(result);
-  if (selected !== undefined && ('run_id' in selected || 'computed_at' in selected || 'input_snapshot' in selected)) {
-    result = withGoalChanceReadback(result);
-  }
   const records = warningsOf(result).filter((w) => w.code === GOAL_CHANCE_RANGE);
   if (records.length !== 1) return undefined;
   const r = goalChanceRangeRecordOf(records[0]);

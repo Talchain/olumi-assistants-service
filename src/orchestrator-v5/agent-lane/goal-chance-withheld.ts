@@ -298,19 +298,6 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
       ...(other.option_ids !== undefined && base.option_ids !== undefined
         ? { option_ids: [...new Set([...other.option_ids, ...base.option_ids])] } : { option_ids: undefined }) };
   }
-  // Keep the selected Run's established sole-placeholder guidance beside its display restriction.
-  const readback = warnings.find(w => {
-    const detail = recordOf(w.detail);
-    return w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && detail?.reason === 'goal_chance_not_licensed'
-      && Array.isArray(detail.missing_or_conflicting) && detail.missing_or_conflicting.includes('goal_chance_not_licensed');
-  });
-  if (readback !== undefined && warnings.length > 1
-    && warnings.every(w => w === readback || w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
-    const prior = goalChanceFromWarnings(warnings.filter(w => w !== readback), '', guidedText, scoredIds);
-    const limitation = typeof readback.say === 'string' ? readback.say : String(readback.message ?? '');
-    return { withheld: true, say: `${limitation} ${prior.say}`.trim(), node_ids: prior.node_ids,
-      note: `${GOAL_CHANCE_WITHHELD_NOTE} ${prior.note}` };
-  }
   // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
   if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
     const w = warnings[0]!;

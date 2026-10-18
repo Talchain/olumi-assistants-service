@@ -5606,7 +5606,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const held = Array.isArray(nodes) ? nodes.find(node => node.id === noChange?.option_id) : undefined;
       const baselineSuffix = noChange !== undefined && held !== undefined && typeof held.label === 'string'
         ? buildBaselineHoldSuffix([{ option_id: noChange.option_id, label: held.label }]).trim() : null;
-      const owned = [...(cardDetail?.disclosures ?? []), ...(baselineSuffix === null ? [] : [baselineSuffix])];
+      const owned = [...cardView.options.flatMap(({ cell }) => cell.kind !== 'none' && typeof cell.face === 'string' ? [cell.face] : []),
+        ...(cardDetail?.disclosures ?? []), ...(baselineSuffix === null ? [] : [baselineSuffix])];
       wireBody = { ...wireBody, blocks: wireBody.blocks.map((block, index) => {
         // Only index0 is this route's selected final-read result (installed above); other blocks carry no card binding.
         if (index !== 0 || block.type !== 'analysis_result' || typeof block.summary !== 'string') return block;

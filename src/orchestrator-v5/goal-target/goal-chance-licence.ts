@@ -608,14 +608,8 @@ export function goalChanceScopeOf(result: unknown, evidence?: SelectedRunEvidenc
 
 /** Remove-only projection. Public blocks can use their selected fact's evidence without inventing missing fields. */
 export function withGoalChanceReadback<R>(result: R, selectedResult: unknown = result, evidence?: SelectedRunEvidence): R {
-  const block: Rec = isRec(result) ? result : {};
-  const displayed = [block.inference_warnings, isRec(block.enrichment) ? block.enrichment.inference_warnings : undefined]
-    .flatMap(value => Array.isArray(value) ? value : [])
-    .some(warning => isRec(warning) && ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(warning.code)));
-  if (!displayed) return result;
-  const scope = goalChanceScopeOf(selectedResult, evidence);
-  return scope.can_show_goal_chance ? result : withChanceReadbackWithheld(result, undefined, true,
-    hasRecordedLevelCalculation(result) ? undefined : scope.reasons);
+  return hasRecordedLevelCalculation(result) && !goalChanceScopeOf(selectedResult, evidence).can_show_goal_chance
+    ? withChanceReadbackWithheld(result, undefined, true) : result;
 }
 
 /** Deadline edits omitted from legacy hashes may only remove a chance, never reopen a withheld Run. */
@@ -624,12 +618,6 @@ export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, sto
   if (hasRecordedLevelCalculation(result)) return withGoalChanceReadback(result);
   const envelope = isRec(result.enrichment) ? result.enrichment : result;
   const warnings = [result.inference_warnings, envelope.inference_warnings].flatMap(v => Array.isArray(v) ? v : []);
-  // Legacy range records are attempted displays too; the same selected-Run reader owns their permission.
-  if (('run_id' in result || 'computed_at' in result || 'input_snapshot' in result)
-    && warnings.some(w => isRec(w) && ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(w.code)))) {
-    const selected = withGoalChanceReadback(result);
-    if (selected !== result) return selected;
-  }
   return warnings.some(w => isRec(w) && w.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')
     || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold'
     ? result : withChanceReadbackWithheld(result, currentGraph, false);
