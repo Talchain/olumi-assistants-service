@@ -104,6 +104,14 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(String(pressed.assistant_text)).not.toMatch(LAPSE);
     expect(chips(pressed)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
     expect(chips(pressed)).not.toContain(approvalChipIdFor(a));
+    // ⭐ A6 (cold reopen): the card under review is on the wire a reload restores from, as review, never approvable.
+    const listed = (r: Rec) => ((r._proposal_fields?.proposals ?? []) as Rec[]).find((p) => p.proposal_id === a);
+    expect(listed(pressed)?.review_action?.id, 'listed for review on this reply').toBe(`agent-review-proposal:${a}`);
+    const cold = await turn({ message: 'What is still waiting for me?', source: 'composer', agent_session_id: `cold-${session}` }, [say('One change waits for your review.')]);
+    expect(authorised(cold)).toEqual([]);
+    expect(listed(cold)?.review_action?.id, 'still listed for review after a cold reopen').toBe(`agent-review-proposal:${a}`);
+    expect(chips(cold)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
+    expect(chips(cold), 'never approvable after a cold reopen').not.toContain(approvalChipIdFor(a));
   }, 120_000);
 
   it('A2 host check: with several waiting, a card the user was never SHOWN is not bound by typed words (a shown one is), and the refusal names the choice', async () => {
