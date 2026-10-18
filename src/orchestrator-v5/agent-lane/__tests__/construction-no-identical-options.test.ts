@@ -31,6 +31,10 @@ import { subtractMagnitudeDelta } from './magnitude-delta.js';
 import { asProjectedMeanCapture, asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 import { valueAuthorshipOf } from '../turn-context/guidance-signals.js';
 import { nodeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
+const COVERAGE = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { coverage_templates: { id: string; replacement: string }[] }).coverage_templates;
+/** The AIE T1 coverage clause (18 Oct), as the retry SENDS it for one gap: the template's placeholders filled, never retyped. */
+const coverageClause = (id: string, factor: string, option = ''): string =>
+  COVERAGE.find((c) => c.id === id)!.replacement.split('${g.option}').join(option).split('${g.factor}').join(factor);
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -788,9 +792,8 @@ describe('ordering — the rule runs inside admission, so the size gate measures
  * never asked — the compliant retry is adopted, and the withheld option is said exactly once whichever draft is kept.
  */
 describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate option and coverage gaps', () => {
-  const USER_GAP = '£59 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
-    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
-  const BASELINE_GAP = 'AI feature availability: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it';
+  const USER_GAP = coverageClause('coverage_option_level', 'AI feature availability', '£59 with AI release');
+  const BASELINE_GAP = coverageClause('coverage_option_acted_baseline', 'AI feature availability');
   type Req = { instructions: string; input: string };
   /** The real construction, drafter faked (`drafts[i]` answers call i, the last repeats); a refusal is returned, not thrown. */
   async function construct(...drafts: (CandidateModel & { unknowns: string[] })[]) {
@@ -891,8 +894,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    * retry's own admission withholds it, has not covered more: it is refused and £54 stays registered at its level. The
    * duplicate the FIRST draft already withheld is still left out of the retry's gaps — the first draft never registered it.
    */
-  const GAP_54 = '£54 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
-    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+  const GAP_54 = coverageClause('coverage_option_level', 'AI feature availability', '£54 with AI release');
   const PRICE_54 = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
   type Opt = CandidateModel['options'][number];
   /** Within the limit: `padded(0, withTest)` (the user's option gap-free) plus Olumi's £54, AI availability open unless `o54` sets it. */

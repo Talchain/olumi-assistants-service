@@ -1,0 +1,46 @@
+{
+  "source_ref": "AIE-T1-PRODUCER-AND-WITHDRAWAL-TEXT-20261018-v1 (created 2026-10-18T07:10:17Z), producer_texts: supported subset per DL-3 ACK 18 Oct",
+  "source_sha256": "21e7a8a5f7ed0e9a21627d972a665583aba79e4af5050023357afb418d7b63c1",
+  "goal_unit_source_ref": "AIE-GOAL-UNIT-AND-DRAFTER-SCREEN-20261018-v2 (created 2026-10-18T07:43:57Z), goal_unit.instruction_exact (DL-3 item 6)",
+  "goal_unit_source_sha256": "71da522c43729be7f53d8213c9106c9edb28ae8a7cf58ddae47a00feee74b474",
+  "excluded": [
+    "unit_unresolved_bound: owed to #3396 (nullable plausible_max contract); the staging sent schema types factor plausible_max as a required number",
+    "withdrawal: the UI/withdrawal owner applies it"
+  ],
+  "changes": [
+    {
+      "id": "holds_now",
+      "old": "holds_now (an affirmative claim that the actual speaker's condition currently holds, including a qualitative limitation with no number; use field holds_now and form holds_now, with value, low, high and unit null; any separately stated quantity gets its own applicable statement field. Retain the whole sentence, its actual subject, qualifications and conditions. Negating a positive property can affirm a current limitation; interpret the clause's meaning rather than rejecting every sentence containing no or not. A future possibility, past-only state, another subject's condition, denial, correction or unresolved conflict is not an active holds_now claim. Preserve such words with their actual status rather than invent a current condition. This records current source meaning only, never future persistence, event probability, intensity or causal effect)",
+      "replacement": "holds_now (the actual speaker asserts that this subject’s condition holds now, including a qualitative current limitation without a number; use field holds_now and form holds_now with value, low, high and unit null. Retain the complete sentence, speaker, subject, stance, qualifications and conditions; give any separately stated quantity its own applicable statement. Uncertainty about whether a condition holds is not an assertion that it holds: preserve the uncertainty and its complete source in the existing describes/source representation and unknowns, not as already_true_evidence for that condition. A report that an assessment has not been made does not establish the condition being assessed. Negating a positive property may genuinely affirm a current limitation; interpret the clause’s meaning, not the presence of no or not. A possibility, question, past-only state, withdrawn guess, denial of the condition, other subject’s state or unresolved conflicting account must keep that status rather than become an active current condition. Current-state meaning does not establish future persistence, occurrence probability, intensity or causal effect)"
+    },
+    {
+      "id": "risk_own_statement",
+      "old": "For each quantity, target, timing, measurement definition, relation or current-state claim that can be bound to a drafted item, add an entry to statements.",
+      "replacement": "For each quantity, target, timing, measurement definition, relation or current-state claim that can be bound to a drafted item, add an entry to statements. For each stated risk, safeguard, mandatory condition or concern represented by a risk item, add its own applicable statements entry naming that risk as subject, with the complete attributed source sentence, speaker, qualifications, conditions and dissent. A mention in another item’s conditions does not replace this subject-bound entry. Preserve whether the words assert a current condition, describe a concern, require a safeguard or raise an unresolved possibility; use describes with null numeric fields where appropriate, not holds_now or a probability merely because a risk is named. A safeguard does not assert that its violation is happening. Do not invent a human source for an Olumi-added risk or force an unsupported subject binding; retain unresolved source/binding honestly. Introduction, source authorship, numerical sizing and permission to omit a risk from a calculation remain separate."
+    }
+  ],
+  "goal_changes": [
+    {
+      "id": "hedged_goal_candidate",
+      "old": "If the governing meaning is unclear, retain the original words and ask; do not invent a target or a launch-completion percentage.",
+      "replacement": "If the governing meaning is unclear, retain the original words and ask; do not invent a target or a launch-completion percentage. Distinguish the user’s governing aim from a tentative way of measuring it. A suggested or hedged metric is retained as that candidate with its exact source, speaker, uncertainty and alternatives; it is not an agreed metric or target merely because its words appear in the brief. If you use that candidate as Olumi’s provisional working interpretation, set goal.provenance inferred rather than explicit and preserve the original human source and hedge separately. Use ai_proposed only for a genuinely new Olumi proposal, never for missing or unverified source. Do not invent a score unit, scale, target or deadline to make the candidate calculable. Keep an actually explicit governing aim and target under their own supported attribution. Ask only for the consequential unresolved framing or measurement choice, after reusing supplied answers; the lack of an agreed numerical metric does not prevent useful qualitative exploration."
+    },
+    {
+      "id": "goal_unit",
+      "old": "Never model only the change from today when the brief states today’s operands, and never put a stated figure only in a question.",
+      "replacement": "Never model only the change from today when the brief states today’s operands, and never put a stated figure only in a question. UNITS. For goal.unit and each goal statement’s unit, use only a unit supported by the complete applicable source for that claim’s own quantity and figure. A written unit may precede or follow its figure, or be established by an explicit definition of that same measure. Preserve its actual currency, counted thing, denominator, period, reference and change-versus-level meaning. Canonicalise equivalent notation without changing meaning: £ may be recorded as GBP, and an explicitly quarterly money rate keeps its quarterly period. The canonical spelling need not appear verbatim in the quote; the complete original quote still does. Do not borrow a nearby unit, another quantity’s identical numeral, a budget’s unit or a different time period to fill the field. A qualitative aim or tentative metric does not establish score points, a numeric scale or a target. Leave unsupported units unknown, using null only where the actual schema permits null; never fabricate a unit to satisfy the schema. Preserve supported dimensionless definitions and all source, speaker, qualifications, uncertainty and conditions. An Olumi-proposed measurement convention remains separately identified as Olumi’s proposal, not a unit the user supplied."
+    }
+  ],
+  "coverage_templates": [
+    {
+      "id": "coverage_option_level",
+      "old": "${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists",
+      "replacement": "${g.option} -> ${g.factor}: retain this option’s action on this factor. Put its own stated absolute setting or signed addition in interventions, preserving the actual unit, reference, period, range and conditions. A figure supplied only as a budget, allowance, limit, target or another option’s value is not this option’s setting. Where no setting is supplied, a defensible provisional Olumi estimate may be offered with provenance ai_proposed, a grounded basis and its uncertainty; never fabricate stated evidence. If no defensible level exists, keep the action unsized in changes and retain a focused question in unknowns after reusing applicable supplied answers. Do not invent zero, 100% or another placeholder to close coverage, drop the action, or turn an uncertain downstream response into the action setting. Preserve independently supported settings and useful qualitative reasoning."
+    },
+    {
+      "id": "coverage_option_acted_baseline",
+      "old": "${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) — an option acts on it",
+      "replacement": "${g.factor}: retain the factor because an option acts on it. Use its supported current baseline only for the same quantity, unit, reference and period; a target, limit, allowance or option setting does not supply that baseline. If no baseline is supplied, a defensible provisional Olumi modelling estimate may be offered with baseline_known false, its basis and uncertainty, without changing who introduced the factor or fabricating baseline_evidence. Otherwise leave baseline_value null and baseline_known false, preserve the unsized action and add only the genuinely missing question in unknowns. Never fill a gap with placeholder zero or 100%; retain actual stated zeroes and existing valid structural definitions under their own rules. Keep supported quantitative and qualitative work available; an unsized baseline does not by itself justify refusing the whole scenario."
+    }
+  ]
+}

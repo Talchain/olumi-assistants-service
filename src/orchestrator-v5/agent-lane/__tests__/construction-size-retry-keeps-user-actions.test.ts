@@ -36,6 +36,10 @@ import { BRIEF_LABEL } from '../turn-context.js';
 import { COMPACT_LIMITS, assessConstructionSize, retryInstruction } from '../construction-size-gate.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+const COVERAGE = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { coverage_templates: { id: string; replacement: string }[] }).coverage_templates;
+/** The AIE T1 coverage clause (18 Oct), as the retry SENDS it for one gap: the template's placeholders filled, never retyped. */
+const coverageClause = (id: string, factor: string, option = ''): string =>
+  COVERAGE.find((c) => c.id === id)!.replacement.split('${g.option}').join(option).split('${g.factor}').join(factor);
 
 type Iv = { factor_label: string; value: number; value_kind: 'absolute' | 'additional'; unit: string; provenance: string };
 type Opt = { label: string; provenance: string; is_status_quo: boolean | null; changes: string[]; interventions: Iv[] };
@@ -340,8 +344,8 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
   it.each<[string, () => Draft, string, number]>([
     // The calls: an echoed draft with a gap is ADOPTED yet still over, so one more retry runs (3); with a mechanism issue the
     // echo is REJECTED (the issue is still open), and a rejection is never retried (2). DL rulings 04:00Z/04:07Z 14 Oct.
-    ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level', 3],
-    ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value', 3],
+    ['a level gap', () => oversized(c22()), coverageClause('coverage_option_level', 'Engineering delivery capacity', 'Hire Two Developers'), 3],
+    ['a baseline gap', withBaselineGap, coverageClause('coverage_option_acted_baseline', 'Engineering delivery capacity'), 3],
     ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis', 2],
   ])('RED: with %s, the FIRST retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue, calls) => {
     const first = draft();
@@ -828,7 +832,7 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
     const out = await construct(firstWithOneGap(), compact());
     // Combined size+repair route, byte for byte: the budget, the copy-exactly rule, its one exception, the compaction's repair rule.
     expect(out.reqs[1]!.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(firstWithOneGap()))} ${COPY_RULE_TEXT} ${ONLY_REPAIRS} ${COMPACTION_REPAIR_RULE}`);
-    expect(out.reqs[1]!.input).toContain('Hire a Tech Lead -> Technical leadership capacity: give the level');
+    expect(out.reqs[1]!.input).toContain(JSON.stringify(coverageClause('coverage_option_level', 'Technical leadership capacity', 'Hire a Tech Lead')).slice(1, -1));
     expectCompactAdopted(out);
     expect(levelOn(out.graph!, 'hire_a_tech_lead', 'technical_leadership_capacity'), 'the gap was levelled').toBeDefined();
   });

@@ -48,6 +48,10 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
 import { asQuestionTitled } from '../../__tests__/support/question-title.support.js';
+const COVERAGE = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { coverage_templates: { id: string; replacement: string }[] }).coverage_templates;
+/** The AIE T1 coverage clause (18 Oct), as the retry SENDS it for one gap: the template's placeholders filled, never retyped. */
+const coverageClause = (id: string, factor: string, option = ''): string =>
+  COVERAGE.find((c) => c.id === id)!.replacement.split('${g.option}').join(option).split('${g.factor}').join(factor);
 
 
 type Edge = { from: string; to: string; provenance?: { source?: string }; effect_direction?: string; strength?: { mean: number } };
@@ -665,8 +669,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
     o.changes = ['AI feature availability'];
     return x as unknown as CandidateModel;
   };
-  const GAP_ISSUE = 'Phased £54 Price -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
-    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+  const GAP_ISSUE = coverageClause('coverage_option_level', 'AI feature availability', 'Phased £54 Price');
   const issues = (input: string): string[] => JSON.parse(/Construction issues: (\[.*\])\n/.exec(input)![1]!) as string[];
   const phasedLevels = (g: Graph) => Object.keys((g.nodes.find((n) => n.id === 'phased_54_price') as { interventions?: Record<string, unknown> } | undefined)?.interventions ?? {});
 
