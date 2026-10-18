@@ -90,6 +90,7 @@ import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
 import { draftStatements, figureSource, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { QUOTE_SPEAKER, QUOTE_SPEAKER_WORDS } from '../user-statements.js';
 
 /**
  * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
@@ -415,7 +416,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
         form: { type: 'string', enum: ['point', 'range', 'lower_bound', 'upper_bound', 'holds_now', 'describes'] },
         value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, low: { anyOf: [{ type: 'number' }, { type: 'null' }] }, high: { anyOf: [{ type: 'number' }, { type: 'null' }] },
         unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, qualifier: { anyOf: [{ type: 'string' }, { type: 'null' }] }, conditions: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-      }, ['quote', 'subject', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions']) },
+        // ⭐ LEAN CORE P2 (DL-3 18 Oct): the AI's own reading of whose claim the words are (`QUOTE_SPEAKER`); read by the one rule.
+        speaker: { anyOf: [{ type: 'string', enum: QUOTE_SPEAKER.enum }, { type: 'null' }], description: QUOTE_SPEAKER_WORDS },
+      }, ['quote', 'subject', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'speaker']) },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
 

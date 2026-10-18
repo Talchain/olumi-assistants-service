@@ -69,7 +69,7 @@ export interface SourceMap {
 
 /** How many entries one draft has checked; the rest are retained unchecked (`not_checked`), never dropped. */
 const MAX = 60;
-const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'negated'] as const;
+const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'negated', 'speaker'] as const;
 const plain = (v: unknown): v is string | number | boolean | null => v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v));
 function givenOf(r: Record<string, unknown>): GivenStatement {
   const out: Record<string, GivenStatement[string]> = {};
@@ -137,7 +137,7 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
     }
     const key = subjectKey(subject, field);
     const v = verifyStatements([{ quote: r['quote'], form, value: r['value'], low: r['low'], high: r['high'], qualifier: r['qualifier'],
-      conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}) }],
+      conditions: r['conditions'], ...(r['negated'] === true ? { negated: true } : {}), ...(r['speaker'] !== undefined && r['speaker'] !== null ? { speaker: r['speaker'] } : {}) }],
       { now: brief }, { subject: { quantity: key }, unit: text(r['unit'], 60) ?? '', forms: STATEMENT_FORMS as readonly StatementForm[], figuresIn: figuresWritten });
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
     verified.set(key, [...(verified.get(key) ?? []), ...(field === 'effect' && form === 'range' ? v.statements.map(withOwnRangeUnit) : v.statements)]);
