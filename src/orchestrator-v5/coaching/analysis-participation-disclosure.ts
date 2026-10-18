@@ -34,10 +34,11 @@
  *      sent it. It says nothing about whether the result would have differed,
  *      because nothing here can know that.
  *
- *   2. "N part(s) of your model are kept out of the calculation" — the user's
- *      own act, in the house voice this handler already uses on the refusal
- *      path ("You've kept '…' out of the calculation"). Present tense, because
- *      the field still reads `'retained_excluded'` when they come back.
+ *   2. "N part(s) of your model are kept out of the calculation" — passive, so
+ *      it stays true whoever kept a part out: the user, or admission for
+ *      Olumi's unsized risk suggestion (`retainUnsizedOlumiRisks`; that Run
+ *      names it separately, from its own omission record). Present tense,
+ *      because the field still reads `'retained_excluded'` when they come back.
  *
  *   3. "which also leaves out M connection(s) to it/them" — ⭐ THE CLAUSE THE
  *      WHOLE MODULE EXISTS FOR, and its grammar is load-bearing. The user
