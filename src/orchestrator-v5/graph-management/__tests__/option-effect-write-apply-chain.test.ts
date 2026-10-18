@@ -44,7 +44,6 @@ import { buildCanonicalAnalysisReadyFromGraph, computeStructuralReadiness, merge
 import { evaluateEditGraphMutations } from '../../handlers/edit-graph-referee-gate.js';
 import { deriveMissingEffectPairs } from '../../routing/repair-value-binding.js';
 import { buildOptionEffectRawOperation, readCommittedOptionEffect, resolveOptionEffectWrite } from '../../routing/option-effect-write.js';
-import { evaluateConfigureOptionOutcome } from '../../routing/configure-option-outcome.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
@@ -175,25 +174,6 @@ describe('2.1266 — deterministic option-effect write, full apply chain', () =>
     const statusById = (r: ReturnType<typeof computeStructuralReadiness>) =>
       Object.fromEntries((r?.options ?? []).filter((o) => o.option_id !== OPTION_ID).map((o) => [o.option_id, o.status]));
     expect(statusById(after)).toEqual(statusById(before));
-  });
-
-  it('hop 5 — the retained outcome reader recognises the exact written option', () => {
-    const base = GraphV3.parse(graph()) as GraphV3T;
-    const resolved = resolveOrThrow(ADVISED_SENTENCE, graph());
-    const applied = applyPatchOperations(base, canonicalise(resolved));
-    const { graph: encoded } = encodeOptionInterventionsForEdit(applied, new Set([OPTION_ID]));
-
-    // The 2.427 outcome guard owns the TEXT: it must see the intent HONOURED
-    // for the option the user named, so the recovery copy never replaces the
-    // acknowledgement.
-    expect(
-      evaluateConfigureOptionOutcome({
-        message: ADVISED_SENTENCE,
-        before: graph(),
-        after: encoded,
-      }),
-    ).toEqual({ status: 'honoured', optionId: OPTION_ID });
-
   });
 
   it('ACCEPTANCE 5 — the chain still lands for a SURVIVOR after structural deletes', () => {
@@ -449,17 +429,5 @@ describe('A2 — the prose answer, through the full chain', () => {
     // the SAME blocker with its fabricated constant moved 0.5 → 0.8; that
     // outcome cannot pass this line.
     expect(afterBlockers).toEqual(beforeBlockers.filter((b) => blockerKey(b) !== target));
-  });
-
-  it('the retained outcome reader preserves the prose-answer acknowledgement', () => {
-    const encoded = applyProseAnswer();
-    // The outcome guard must not read this turn as a mis-targeted configure.
-    expect(
-      evaluateConfigureOptionOutcome({
-        message: J18.wire.t4_user_message,
-        before: j18(),
-        after: encoded,
-      }).status,
-    ).not.toBe('not_honoured');
   });
 });

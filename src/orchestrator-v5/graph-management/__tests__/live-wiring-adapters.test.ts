@@ -10,11 +10,6 @@
  *     entity supersedes the older held one — module-local, no persistence.
  */
 import { describe, expect, it } from 'vitest';
-
-import {
-  contextFrameToMutationFrame,
-  narrowFrameFreshness,
-} from '../adapters/context-frame.js';
 import {
   editOperationsToCandidateEnvelopes,
   parseEdgeTargetPath,
@@ -28,46 +23,7 @@ import { parseEnvelope } from '../parse-envelope.js';
 import { refereeMutationBatch } from '../referee.js';
 import { PROPOSAL_CAP, type CandidateMutationEnvelope } from '../types.js';
 import { BATCH_CAP_EXCEEDED } from '../reason-codes.js';
-import type { CanonicalContextFrame } from '../../context/frame/types.js';
 import { makeEnvelope, SAMPLE_PAYLOADS, buildReadyGraph, frameFor } from './fixtures.js';
-
-// ── helpers ─────────────────────────────────────────────────────────────────
-
-function frameStub(overrides: {
-  graphHash?: string | null;
-  verdict?: string;
-  status?: string | null;
-}): CanonicalContextFrame {
-  return {
-    version: '0.3.0',
-    model: {
-      graphHash: 'graphHash' in overrides ? (overrides.graphHash ?? null) : 'a1b2c3d4e5f6a1b2',
-      graphHashAtRun: null,
-    },
-    analysis: {
-      status: (overrides.status ?? 'ready') as never,
-      usableForProse: true,
-      usableForChips: true,
-      usableForFollowupContext: true,
-      requiresRerun: false,
-      blockedUnusable: false,
-      source: 'turn_executor' as never,
-    },
-    freshness: {
-      verdict: (overrides.verdict ?? 'fresh') as never,
-      reason: 'graph_hash_match' as never,
-      computedAt: null,
-    },
-    changes: [],
-    conversation: { priorTurnCount: 0, recentChangeCount: 0, pendingConfirmation: false },
-    intent: { deterministicMatch: false },
-    evidence: {},
-    claimPermissions: {} as never,
-    actions: {},
-    uiTargets: {},
-    diagnostics: {},
-  };
-}
 
 let seq = 0;
 function makeId(): string {
@@ -87,51 +43,6 @@ function parsedEnvelope(kind: keyof typeof SAMPLE_PAYLOADS, overrides = {}): Can
   if (!parsed.ok) throw new Error(`fixture envelope for ${kind} must parse`);
   return parsed.envelope;
 }
-
-// ── 1. CanonicalContextFrame → MutationFrame ────────────────────────────────
-
-describe('contextFrameToMutationFrame (Part 2b)', () => {
-  it('null/undefined frame → null (referee resolves FRAME_UNAVAILABLE → held)', () => {
-    expect(contextFrameToMutationFrame(null)).toBeNull();
-    expect(contextFrameToMutationFrame(undefined)).toBeNull();
-  });
-
-  it('projects hash + freshness + canonical readiness from the frame authorities', () => {
-    const mf = contextFrameToMutationFrame(frameStub({ graphHash: 'abc123', verdict: 'fresh' }));
-    expect(mf).toEqual({
-      currentGraphHash: 'abc123',
-      graphReadable: true,
-      freshness: 'fresh',
-      canonicalReady: true,
-    });
-  });
-
-  it('null graphHash → graphReadable=false (fail-closed to CURRENT_GRAPH_UNREADABLE)', () => {
-    const mf = contextFrameToMutationFrame(frameStub({ graphHash: null }));
-    expect(mf?.currentGraphHash).toBeNull();
-    expect(mf?.graphReadable).toBe(false);
-  });
-
-  it('empty-string graphHash is treated as unreadable, never a matchable hash', () => {
-    const mf = contextFrameToMutationFrame(frameStub({ graphHash: '' }));
-    expect(mf?.currentGraphHash).toBeNull();
-    expect(mf?.graphReadable).toBe(false);
-  });
-
-  it('unknown freshness vocabulary narrows to "unknown" (fail-closed to stale)', () => {
-    expect(narrowFrameFreshness('fresh')).toBe('fresh');
-    expect(narrowFrameFreshness('none')).toBe('none');
-    expect(narrowFrameFreshness('unconfirmed')).toBe('unknown');
-    expect(narrowFrameFreshness(undefined)).toBe('unknown');
-    const mf = contextFrameToMutationFrame(frameStub({ verdict: 'weird_future_value' }));
-    expect(mf?.freshness).toBe('unknown');
-  });
-
-  it('non-ready analysis status → canonicalReady=false (diagnostic only)', () => {
-    const mf = contextFrameToMutationFrame(frameStub({ status: 'incomplete' }));
-    expect(mf?.canonicalReady).toBe(false);
-  });
-});
 
 // ── 2. edit_graph producer projection ───────────────────────────────────────
 

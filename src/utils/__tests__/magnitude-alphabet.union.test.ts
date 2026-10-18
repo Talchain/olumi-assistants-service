@@ -73,7 +73,6 @@ import {
   NUMERIC_SUFFIX_SOURCE,
 } from "../../orchestrator-v5/context/cqe/rules.js";
 import { MAGNITUDE_ALT as WORD_NUMBER_MAGNITUDE_ALT } from "../../orchestrator-v5/context/cqe/word-numbers.js";
-import { ANCHORING_MAGNITUDE_ALT } from "../../cee/validation/pre-decision-checks.js";
 import { BACKSTOP_MAGNITUDE_MULTIPLIERS } from "../../orchestrator-v5/context/cqe/compromise-backstop.js";
 import { SUFFIX_FACTOR as VALUE_UNIT_SUFFIX_FACTOR } from "../../orchestrator-v5/routing/value-unit-resolution.js";
 
@@ -170,11 +169,6 @@ const SIBLING_VOCABULARIES: readonly SiblingVocabulary[] = [
     module: "src/orchestrator-v5/context/cqe/word-numbers.ts",
     symbol: "MAGNITUDE_ALT",
     source: WORD_NUMBER_MAGNITUDE_ALT,
-  },
-  {
-    module: "src/cee/validation/pre-decision-checks.ts",
-    symbol: "ANCHORING_MAGNITUDE_ALT",
-    source: ANCHORING_MAGNITUDE_ALT,
   },
 ];
 
@@ -661,7 +655,6 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     "cee/context-integrity/not-modelled-manifest.ts":
       "no lookup — imports resolveMagnitude/magnitudeSuffixPattern from the canonical " +
       "alphabet; the magnitude words appear only in a comment explaining that import",
-    "cee/validation/pre-decision-checks.ts": "sibling vocabulary (recognition-only) — compared in Part A",
 
     // --- Comment-only mentions. Each of these imports the canonical alphabet
     // --- or spells no magnitude list at all; the hits are prose describing the

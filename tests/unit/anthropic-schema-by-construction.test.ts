@@ -18,10 +18,6 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  enforceAnthropicSchemaCompliance,
-  UNSUPPORTED_KEYWORDS,
-} from "../../src/adapters/llm/anthropic-schema-compliance.js";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA, countUnionParams } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { NodeKind, FactorCategory } from "../../src/schemas/graph.js";
 
@@ -109,10 +105,23 @@ function findRefs(node: SchemaNode, path: string = "root", results: string[] = [
 // stop an empty array — the exact defect behind the 2026-07-19 OPTIONS_IDENTICAL
 // outage (see tests/unit/draft-grammar-option-interventions.test.ts).
 // `maxItems` stays banned: not probed, no use case.
-// IMPORTED from the normaliser, plus `oneOf`. `oneOf` is NOT in the shared
-// strip list because the normaliser CONVERTS it to `anyOf` rather than
-// dropping it — but the converted OUTPUT must still contain none, so it
-// belongs in this assertion and not in the policy.
+// Test-only API keyword expectations retained after retiring the unused normaliser.
+const UNSUPPORTED_KEYWORDS = new Set([
+  "minLength",
+  "maxLength",
+  "minimum",
+  "maximum",
+  "maxItems",
+  "pattern",
+  "format",
+  "minProperties",
+  "maxProperties",
+  "uniqueItems",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "default",
+]);
+
 const ASSERTED_ABSENT_KEYWORDS = [...UNSUPPORTED_KEYWORDS, "oneOf"];
 
 /** Collect every `minItems` value in the tree with its path. */
@@ -292,13 +301,6 @@ function assertFullCompliance(schema: SchemaNode, label: string) {
       expect(serialised).not.toContain('"description"');
     });
 
-    // 6. Normaliser is a no-op (idempotency)
-    it("normaliser is a no-op (idempotency proves compliance)", () => {
-      const cloned = JSON.parse(serialised);
-      const normalised = enforceAnthropicSchemaCompliance(cloned, `${label}_test`);
-      expect(JSON.stringify(normalised, null, 2)).toEqual(JSON.stringify(schema, null, 2));
-    });
-
     // 7. Complexity check
     // Depth 6 is reached by nodes.items.data.interventions.items (option node
     // intervention pairs). Anthropic does not enforce a strict depth limit.
@@ -443,47 +445,5 @@ describe("OpenAI regression", () => {
     expect(schema).not.toHaveProperty("output_config");
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
-  });
-});
-
-// ============================================================================
-// minItems is PARTIALLY supported — the normaliser must discriminate by VALUE
-// ============================================================================
-
-describe("enforceAnthropicSchemaCompliance — minItems value handling", () => {
-  // The keyword was blanket-stripped until 2026-07-19. That blanket ban is what
-  // left the draft grammar unable to stop an option emitting `interventions: []`
-  // — the OPTIONS_IDENTICAL outage. Live-probed limits (claude-sonnet-4-6):
-  // 0 and 1 are accepted, >=2 is a hard 400. See MIN_ITEMS_ALLOWED_VALUES.
-  const wrap = (minItems: number) => ({
-    type: "object",
-    properties: { xs: { type: "array", minItems, items: { type: "string" } } },
-    required: ["xs"],
-    additionalProperties: false,
-  });
-
-  it("KEEPS minItems: 1 — the only lever that makes an empty array ungrammatical", () => {
-    const out = enforceAnthropicSchemaCompliance(wrap(1), "minitems_keep_test") as {
-      properties: { xs: Record<string, unknown> };
-    };
-    expect(out.properties.xs.minItems).toBe(1);
-  });
-
-  it("KEEPS minItems: 0 (accepted by the API, though a no-op)", () => {
-    const out = enforceAnthropicSchemaCompliance(wrap(0), "minitems_zero_test") as {
-      properties: { xs: Record<string, unknown> };
-    };
-    expect(out.properties.xs.minItems).toBe(0);
-  });
-
-  it("STRIPS minItems >= 2 — the API 400s the whole request on those", () => {
-    // Positive control for the strip path: without this the test above could
-    // pass on a normaliser that had simply stopped touching minItems at all.
-    for (const bad of [2, 5, 100]) {
-      const out = enforceAnthropicSchemaCompliance(wrap(bad), "minitems_strip_test") as {
-        properties: { xs: Record<string, unknown> };
-      };
-      expect(out.properties.xs, `minItems: ${bad} must be stripped`).not.toHaveProperty("minItems");
-    }
   });
 });

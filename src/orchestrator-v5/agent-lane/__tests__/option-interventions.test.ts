@@ -17,7 +17,6 @@ import { describe, it, expect } from 'vitest';
 import { authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
-import { renormaliseOptionInterventionsForCapChange } from '../../tools/handlers/d1-shared/renormalise-interventions-for-cap-change.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -302,12 +301,17 @@ describe('authorise_change records the STORED levels', () => {
 
   /**
    * Another writer extends Pro plan price's range 200 → 400 the way the product does it: the factor's range moves and
-   * the PRODUCTION renormaliser rescales every option level on it to KEEP its absolute value (0.27 → 0.135, still £54).
+   * the fixture rescales every option level on it to KEEP its absolute value (0.27 → 0.135, still £54).
    */
   const extendPriceRange = (ns: Node[]): Node[] => {
     const g = { nodes: ns.map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } })) };
-    const count = renormaliseOptionInterventionsForCapChange(g as never, 'pro_plan_price', 200, 400);
-    expect(count, 'PRECONDITION: the production renormaliser rewrote the levels').toBeGreaterThan(0);
+    for (const n of g.nodes) {
+      const entry = n.interventions?.pro_plan_price as number | { value: number; raw_value?: number } | undefined;
+      if (entry != null) {
+        const raw_value = typeof entry === 'number' ? entry * 200 : entry.raw_value ?? entry.value * 200;
+        n.interventions!.pro_plan_price = { value: raw_value / 400, raw_value };
+      }
+    }
     return g.nodes.map((n) => (n.id === 'pro_plan_price' ? { ...n, observed_state: { ...n.observed_state, cap: 400, value: 49 / 400 } } : n));
   };
   const cell = (p: ReturnType<typeof fakeProduct>) => p.read().find((n) => n.id === 'phase_increase')?.interventions?.pro_plan_price;

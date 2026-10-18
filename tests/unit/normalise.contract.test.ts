@@ -9,7 +9,61 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { STAGE_CONTRACT } from "../../src/cee/unified-pipeline/stages/normalise.contract.js";
+
+// Test-only field-preservation expectations, formerly in the orphan stage contract.
+const STAGE_CONTRACT = {
+  name: "normalise",
+  allowedDrops: {
+    topLevel: [] as string[],
+    node: [] as string[],
+    edge: [] as string[],
+    option: [] as string[],
+    nodeData: [
+      "factor_type",
+      "uncertainty_drivers",
+    ] as string[],
+  },
+  allowedModifications: {
+    topLevel: [] as string[],
+    node: [
+      "category",
+    ] as string[],
+    edge: [
+      "strength_mean",
+      "effect_direction",
+    ] as string[],
+    option: [] as string[],
+    nodeData: [
+      "factor_type",
+      "extractionType",
+      "uncertainty_drivers",
+    ] as string[],
+  },
+  preservationGuarantees: {
+    topLevel: [
+      "version",
+      "default_seed",
+    ] as string[],
+    node: [
+      "id",
+      "kind",
+      "label",
+    ] as string[],
+    edge: [
+      "from",
+      "to",
+      "strength_std",
+      "belief_exists",
+    ] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
+  },
+  allowedRemovals: {
+    nodes: false,
+    edges: false,
+  },
+} as const;
+
 import {
   assertSentinel,
   assertPreservationGuarantees,
@@ -370,12 +424,6 @@ describe("Stage 2 (Normalise) — field preservation contract", () => {
 
     // Category should be reclassified (no longer controllable)
     expect(orphanNode.category).not.toBe("controllable");
-
-    // allowedDrops.nodeData fields should be absent after reclassification
-    for (const _field of STAGE_CONTRACT.allowedDrops.nodeData) {
-      // These are allowed to be dropped when reclassified
-      // (they may or may not be — STRP may keep them if new category still uses them)
-    }
 
     // But the sentinel data field must survive even on reclassified nodes
     assertSentinel(

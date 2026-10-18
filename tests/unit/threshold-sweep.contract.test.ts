@@ -6,6 +6,56 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Test-only field-preservation expectations, formerly in the orphan stage contract.
+const STAGE_CONTRACT = {
+  name: "threshold-sweep",
+  allowedDrops: {
+    topLevel: [] as string[],
+    node: [
+      "goal_threshold",
+      "goal_threshold_raw",
+      "goal_threshold_unit",
+      "goal_threshold_cap",
+    ] as string[],
+    edge: [] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
+  },
+  allowedModifications: {
+    topLevel: [] as string[],
+    node: [] as string[],
+    edge: [] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
+  },
+  preservationGuarantees: {
+    topLevel: [
+      "version",
+      "default_seed",
+    ] as string[],
+    node: [
+      "id",
+      "kind",
+      "label",
+    ] as string[],
+    edge: [
+      "from",
+      "to",
+      "strength_mean",
+      "strength_std",
+      "belief_exists",
+      "effect_direction",
+    ] as string[],
+    option: [] as string[],
+    nodeData: [] as string[],
+  },
+  allowedRemovals: {
+    nodes: false,
+    edges: false,
+  },
+} as const;
+
 import {
   assertSentinel,
   assertPreservationGuarantees,
@@ -20,7 +70,6 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 import { runStageThresholdSweep } from "../../src/cee/unified-pipeline/stages/threshold-sweep.js";
-import { STAGE_CONTRACT } from "../../src/cee/unified-pipeline/stages/threshold-sweep.contract.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

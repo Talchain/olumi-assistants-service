@@ -19,7 +19,6 @@ import { projectDraftRecords } from '../../src/cee/draft/records/seam.js';
 import { transformResponseToV3, type V3DraftGraphResponse } from '../../src/cee/transforms/schema-v3.js';
 import type { V1DraftGraphResponse } from '../../src/cee/transforms/schema-v2.js';
 import { buildConfigureOptionChipMessage } from '../../src/orchestrator-v5/configure-option-chip-text.js';
-import { shouldInterceptBeforeEditLane } from '../../src/orchestrator-v5/routing/configure-option-clarify.js';
 import { carriesConfigureOptionValuePayload, detectConfigureOptionIntent, projectOptionLabels } from '../../src/orchestrator-v5/routing/configure-option-intent.js';
 
 interface CorpusCase {
@@ -245,15 +244,6 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
     expect(carriesConfigureOptionValuePayload(message)).toBe(false);
     expect(detection.matched).toBe(true);
 
-    const intercept = shouldInterceptBeforeEditLane({
-      message,
-      detection,
-      graph: { nodes: compiled.nodes, edges: compiled.edges },
-    });
-    expect(intercept.matched).toBe(true);
-    if (!intercept.matched) return;
-    expect(intercept.optionId).toBe(temporalNode?.id);
-    expect(intercept.factorLabels).toEqual(['Monthly Subscription Price']);
 
   });
 });
