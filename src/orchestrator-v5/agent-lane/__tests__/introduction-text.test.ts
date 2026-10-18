@@ -1,5 +1,5 @@
 /**
- * ⭐ THE INTRODUCTION CLAIM, IN THE AIE'S WORDS (AIE packet 6e52e896 `introduction.description`; DL 14 Oct). The drafter
+ * ⭐ THE INTRODUCTION CLAIM, IN THE AIE'S WORDS (AIE candidate cbb6db4e, replacing packet 6e52e896's text; DL-3 18 Oct). The drafter
  * already claims who introduced each option, factor, risk and outcome (`provenance`), but was never told what the three
  * values mean, so it used them inconsistently (T5: 16 first-draft risks, explicit 9 / inferred 3 / ai_proposed 4, the
  * "inferred" ones mixed). The schema now says, on those four items only, never on a value's provenance.

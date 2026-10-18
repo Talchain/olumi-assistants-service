@@ -1,11 +1,11 @@
 {
  "_source": {
-  "packet": "recovery/codex/AIE-INTRODUCTION-SAY-SHOWN-AND-EVENT-RISK-RULINGS-20261014.json",
-  "packet_sha256": "6e52e896233a194e91657a35f919e4f4218c05f91a2ed9f9580e1492c8acd303",
-  "board": "#94 6161383921",
-  "field": "introduction.description",
-  "note": "extracted programmatically, byte for byte"
+  "packet": "recovery/prompt/AIE-DRAFTER-INTRODUCTION-ORIGIN-CANDIDATE-20261018-v1.json",
+  "packet_sha256": "cbb6db4eaff10c05524ea564883bbda877df19d2182f51fd02614f264c557644",
+  "board": "DL-3 18 Oct ~20:4xZ (AIE 20:25Z)",
+  "field": "replace_one_existing_field_description",
+  "note": "extracted programmatically, byte for byte; replaces packet 6e52e896 introduction.description (text_sha256 593ff5c9…)"
  },
- "text": "Who introduced this item, independently of who supplied its values. “explicit”: it is stated in the retained user or source material. “inferred”: it interprets that material, or its introduction is uncertain. “ai_proposed”: a genuinely new item you are adding beyond that material. Reformulating a supplied purpose, condition or concern is not a new AI addition. Use “ai_proposed” only for your own additions after reading the relevant source; absence of a label or figure is not evidence. If source is missing, unread or ambiguous, use “inferred” and preserve that uncertainty. Label your own additions as Olumi’s suggestions; approval does not change their origin or approve their numbers.",
- "text_sha256": "593ff5c9b3dba2c89d9359c289cfcb25293eba31db5a9b6cca97a0ca3c4c90cf"
+ "text": "Identify who introduced this item, separately from confidence in it or the source of its numerical values. Use explicit for an item directly supplied in retained source; inferred for an interpretation or reformulation of a supplied item, or genuinely unresolved introduction; ai_proposed for a new alternative, factor, mechanism or risk you introduce beyond that source. A new hypothesis remains ai_proposed even when its plausibility, likelihood or size is unknown. Preserve supplied conditions, concerns and dissent as their source’s material; rephrasing them does not make them your addition. Read the relevant source before classifying: missing, unread, conflicting or ambiguous source remains inferred, never ai_proposed by default. Keep Olumi additions visibly provisional; approval changes neither authorship nor numerical support.",
+ "text_sha256": "bc299a4861985e8c2620f45821c11dc31e37fcb2616e51b6e540ee796a3fd602"
 }
