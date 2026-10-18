@@ -568,3 +568,40 @@ describe('R09 (converged plan): a correction never changes the note while leavin
   });
 });
 
+
+/**
+ * ⭐ LABEL, NOT GATE (verifier R1, outbox/PROMPT-INT-VERDICT-3730912b.md: 9/9 R1 corrections refused `unrelated_correction` on staging
+ * when the words named the period differently from the item's label). The AI's chosen item, with its verbatim quote, is accepted:
+ * where Olumi's item reader cannot tie the words to the label, the card SAYS the item is Olumi's reading. Never refused for label
+ * words. SYNTHETIC words.
+ */
+describe('LABEL, NOT GATE: a correction naming the period differently from the item\'s label binds to the AI\'s chosen item', () => {
+  const ITEM = { kind: 'factor' as const, id: 'late_handovers', field: 'level' as const };
+  const SAID = 'We log 6 late handovers per ward week.';
+  const graph = (): Rec => ({ nodes: [
+    { id: 'goal', kind: 'goal', label: 'Safe handovers goal' },
+    { id: 'late_handovers', kind: 'factor', label: 'Late handovers per ward week',
+      observed_state: { value: 0.3, raw_value: 6, unit: 'late handovers per week', cap: 20, source: 'brief_extraction' },
+      user_statements: [userStatementRecord(ITEM, [{ speaker: 'user', quote: SAID, source: SAID, form: 'point', low: 6, high: 6, unit: 'late handovers per week',
+        reading: 'olumi', subject: { quantity: 'level', node_id: 'late_handovers' } }], '2026-10-10T09:00:00.000Z', { recorded_by: 'construction' })] },
+  ], edges: [{ from: 'late_handovers', to: 'goal', strength: { mean: -0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }] });
+  const FIX = 'That six was over the last month, not each week.';
+
+  it('card → press → cold read: accepted on the AI\'s item and labelled as Olumi\'s reading; the per-week figure is withdrawn; never `unrelated_correction`', async () => {
+    const w = await correctionWorld(graph(), FIX);
+    const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [{ subject: ITEM,
+      retirement: { quote: SAID, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'six late handovers over a month' }] } }) as Rec;
+    expect(card, JSON.stringify(card).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(JSON.stringify(card)).not.toContain('unrelated_correction');
+    expect(card.public_label).toContain('Olumi’s reading: these words concern “Late handovers per ward week”.');
+    expect(card.public_label).toContain('If you approve, the current figure for “Late handovers per ward week”, which is the one you are withdrawing, will be withdrawn too');
+    const res = await w.press(card.proposal_id) as Rec;
+    expect(res, JSON.stringify(res).slice(0, 600)).toMatchObject({ ok: true, applied: true });
+    for (const g of [w.writes[0]!.graph, (await w.cold()).body.graph]) {
+      const record = claimRecordFor(g, ITEM)!;
+      expect(record.statements[0]).toMatchObject({ quote: FIX, subject: { node_id: 'late_handovers' } });
+      expect(record.history?.map((st) => [st.low, st.status])).toEqual([[6, 'withdrawn']]);
+      expect(g.nodes.find((n: Rec) => n.id === 'late_handovers')).not.toHaveProperty('observed_state');
+    }
+  });
+});
