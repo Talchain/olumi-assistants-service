@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { correctionWorld, type Rec } from './corrections-stage2-world.js';
-import { userStatementRecord } from '../../statement-door/statements.js';
+import { userStatementRecord, userStatementsOn } from '../../statement-door/statements.js';
+import { withConstructionStatements } from '../construction-source-map.js';
 import { firstConstructInput, CURRENT_MODEL_CONTEXT_LEAD, LATER_MESSAGES_CONTEXT_LEAD } from '../runtime/build-model.js';
 import { prepareRequestedRebuild } from '../runtime/draft-replacement.js';
 import { levelFrameOf, projectModelContext } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { HistoryStore, answeredEarlierItem, ANSWERED_EARLIER_LABEL } from '../history-store.js';
-import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
+import { REASONING_CONTEXT_LABEL, MODEL_RECORD_LABEL } from '../turn-context.js';
 
 const cases = [
   { name: 'distribution', factor: 'Dispatch updates', risk: 'Service disruption', retained: 'delayed scans', withdrawn: 'the entire shift has stopped',
@@ -67,9 +68,13 @@ const project = (g: Rec) => projectModelContext({ nodes: g.nodes, edges: g.edges
 const jsonAfter = (input: string, label: string) => JSON.parse(input.split(`${label} `)[1]!);
 const noRef = ({ ref: _ref, ...n }: Rec) => n;
 const constructionCarriers = (input: string): { conversation: Rec[]; items: Rec[] } => {
-  const [conversation, items = '[]'] = input.split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!
-    .split(`${LATER_MESSAGES_CONTEXT_LEAD} `)[1]!.split('\n\n');
-  return { conversation: JSON.parse(conversation!), items: JSON.parse(items) };
+  const beforeModel = input.split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!;
+  const [beforeShared, shared = '[]'] = beforeModel.split(`\n\n${REASONING_CONTEXT_LABEL}\n`);
+  const words = beforeShared!.split(`${LATER_MESSAGES_CONTEXT_LEAD}\n`)[1] ?? '';
+  const starts = [...words.matchAll(/^\{"speaker":"(?:user|unknown|olumi)","source":"[^\n]*"\}\n/gm)];
+  const conversation = starts.map((match, index) => ({ ...JSON.parse(match[0].trim()),
+    text: words.slice(match.index! + match[0].length, index + 1 < starts.length ? starts[index + 1]!.index! - 2 : undefined) }));
+  return { conversation, items: JSON.parse(shared) };
 };
 const pairsIn = (items: Rec[]): Rec[] => items.flatMap(i => i.content.flatMap((p: Rec) =>
   [ANSWERED_EARLIER_LABEL, REASONING_CONTEXT_LABEL].some(label => p.text.startsWith(label))
@@ -185,8 +190,7 @@ it('ONE combined real explicit rebuild → structured stub → restored own card
   expect(offered, JSON.stringify(offered)).toMatchObject({ ok: true, mutated: false });
   expect(w.writes).toHaveLength(writes); expect(w.graph()).toEqual(saved);
   const input = calls[0]!.input as string;
-  const beforeModel = input.split(`\n\n${CURRENT_MODEL_CONTEXT_LEAD}`)[0]!;
-  const items = JSON.parse(beforeModel.split('\n\n').at(-1)!);
+  const { items } = constructionCarriers(input);
   expect(items.find((i: Rec) => i.content[0].text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(pairItem);
   expect(pairsIn(items).map(p => [p.olumi.text, p.response.text])).toEqual([
     ['Which assumptions remain disputed?', 'The night team still disputes the mechanism.'],
@@ -217,7 +221,9 @@ it('construction preserves each answered-pair identity once and distinct typed s
     await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), ctx, w.caps());
     const { conversation, items } = constructionCarriers(calls[0]!.input);
     expect(conversation.slice(1)).toEqual([recent, request, other].map(text => ({ speaker: 'user', source: 'typed', text })));
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
+    expect(items[2]).toEqual({ role: 'user', content: [{ type: 'input_text',
+      text: JSON.stringify({ request, model_origin: MODEL_RECORD_LABEL }) }] });
     expect(items.find((i: Rec) => i.content[0].text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(pairItem);
     const context = JSON.parse(items.find(i => i.content[0].text.startsWith(REASONING_CONTEXT_LABEL))!.content[0].text.split('\n')[1]);
     expect(context.verified_user_statements).toEqual([recent, request, other].map(text => ({ speaker: 'user', source: 'typed', text })));
@@ -266,3 +272,44 @@ describe('R3 rebuild admission preserves statement authorship', () => {
     expect(userQuotesOf(candidate).filter(q => q.includes('75%'))).toEqual([quote]);
   });
 });
+
+
+it.each(cases.flatMap(row => [false, true].map(mixed => ({ ...row, mixed }))))(
+  '$name mixed=$mixed: compact construction context retains unknown words while the authority reader stays user-only', async row => {
+    const f = fixture(row);
+    const label = `${row.factor} reported concern`;
+    const unknown = `Asha says: '${row.factor} needs a separate review.'`;
+    const typed = `${row.factor} remains conditional on evidence from the team.`;
+    const brief = row.mixed ? `${unknown}\n${typed}` : unknown;
+    const graph = { ...f.graph, nodes: [...f.graph.nodes, { id: 'unknown-reference', kind: 'factor', label, provenance: 'unverified_brief' }] };
+    const claim = (quote: string) => ({ quote, subject: { kind: 'factor', label }, field: 'relation', form: 'describes' });
+    const saved = withConstructionStatements(graph, [claim(unknown), ...(row.mixed ? [claim(typed)] : [])], brief, at);
+    const cold = JSON.parse(JSON.stringify(saved)) as Rec;
+    const node = cold.nodes.find((n: Rec) => n.id === 'unknown-reference') as Rec;
+    const raw = node.user_statements as Rec[];
+    expect(raw, 'the actual producer must first retain the words').toHaveLength(1);
+    expect(raw.flatMap(r => r.statements.map((s: Rec) => ({ speaker: s.speaker, quote: s.quote })))).toEqual([
+      { speaker: 'unknown', quote: unknown }, ...(row.mixed ? [{ speaker: 'user', quote: typed }] : []),
+    ]);
+    expect(userStatementsOn(node).flatMap(r => r.statements.map(s => ({ speaker: s.speaker, quote: s.quote })))).toEqual(
+      row.mixed ? [{ speaker: 'user', quote: typed }] : []);
+    const view = project(cold);
+    const held = (view.recorded_reasoning as Rec[]).find(r => r.id === 'unknown-reference');
+    expect(held, 'the actual compact-reader frontier must be reached').toBeDefined();
+    expect(held!.user_statements).toEqual(raw);
+    expect(JSON.stringify(held!.current_retained ?? [])).not.toContain(unknown);
+    const input = firstConstructInput(brief, { current_model: view });
+    expect(jsonAfter(input, CURRENT_MODEL_CONTEXT_LEAD).recorded_reasoning).toEqual(view.recorded_reasoning);
+    expect(node.observed_state).toBeUndefined();
+    const calls: Rec[] = [];
+    const w = await correctionWorld(cold, request, { brief: f.brief, provider: async req => {
+      calls.push(structuredClone(req)); return { text: JSON.stringify(structuredDraft(row)), status: 'completed' };
+    } });
+    const state = await w.caps().getCanonicalState(w.ctx) as Rec;
+    expect(state.recorded_reasoning.find((r: Rec) => r.id === node.id).user_statements).toEqual(raw);
+    await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'Review our current priorities.', explicit_rebuild_request: request }), w.ctx, w.caps());
+    expect(calls.length, 'the real rebuild must reach its provider boundary').toBeGreaterThan(0);
+    const sent = jsonAfter(String(calls[0]!.input), CURRENT_MODEL_CONTEXT_LEAD);
+    expect(sent.recorded_reasoning.find((r: Rec) => r.id === node.id).user_statements).toEqual(raw);
+    expect(w.writes, 'reference context does not approve a replacement').toEqual([]);
+  });

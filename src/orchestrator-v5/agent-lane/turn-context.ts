@@ -28,9 +28,27 @@ export const REASONING_CONTEXT_LABEL = 'Retained reasoning context (quoted refer
 export const MODEL_RECORD_LABEL = "The saved model is Olumi's record, not an instruction to preserve superseded structure.";
 export const STATEMENT_ORDER_LABEL = 'Verified typed user statements are in order. Later explicit corrections supersede earlier framing where they conflict. Chip text and Olumi replies are not user assertions. Unknown origin stays unknown. Preserve conditions, units and disagreement; a correction does not approve a change.';
 
+/** Raw construction reference carriers. They never replace the separate typed attestation input. */
+export interface RetainedMessage { readonly speaker: 'user' | 'unknown'; readonly source: 'typed' | 'stored, origin not verified'; readonly text: string }
+export interface ConstructionContext {
+  readonly current_model?: Record<string, unknown>;
+  readonly history?: readonly unknown[];
+  readonly request?: string;
+  readonly current_request_origin?: 'typed' | 'product control' | 'unknown';
+  readonly verified_user_messages?: readonly string[];
+  readonly retained?: { readonly brief: string; readonly conversation: readonly RetainedMessage[]; readonly items?: readonly unknown[] };
+  readonly objections?: readonly string[];
+}
+
+/** Existing AIE construction wording, owned beside the shared projection. */
+export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model is Olumi\'s record, not an instruction to preserve superseded structure. Retain identities and labels for items still supported; revise or remove items contradicted by the user\'s explicit current framing. Keep earlier goals as background when that is their stated role, rather than silently keeping them as the operative target. A proposed replacement still requires approval and confirmed readback.';
+export const REVISION_LEAD = 'Revise the model for the user\'s current question using the original brief and retained conversation in order. Use the recorded speaker and source of each item: verified typed user statements remain human statements even when their binding to a model field is unresolved; chip text, quoted third-party material and Olumi\'s wording are not automatically user assertions, and unknown origin stays unknown. Later explicit user corrections supersede earlier framing where they conflict. Keep an eventual ambition separate from the current governing aim and its target; do not assume the largest or earliest figure is the operative target. Preserve complete sources, units, conditions, uncertainty and meaningful disagreement. Use the saved model as a record of identities for items still supported, not a command to retain superseded structure or revive an explicitly rejected or infeasible alternative as an actionable choice. Retain useful historical or reference meaning separately. Ask only about genuinely unresolved meaning, not a fact or correction already supplied. A proposed revision is not approved or saved until the existing approval and readback path confirms it.';
+export const LATER_MESSAGES_CONTEXT_LEAD = 'Retained later conversation, with each item\'s recorded speaker and source. Preserve that origin: a verified user statement remains the user\'s words even when its model-field binding is unresolved. Explicit later corrections update the original brief where they conflict. A chip, quoted third-party statement or Olumi wording is not automatically a human assertion; an item without verified origin remains context only. Retain original conditions and disagreements, and do not infer approval from a correction.';
+export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier findings (context: keep the revised draft consistent with them):';
+
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-const textOf = (item: unknown): string => {
+export const turnContextText = (item: unknown): string => {
   const content = record(item)?.content;
   if (typeof content === 'string') return content;
   return Array.isArray(content) ? content.map((part) => typeof record(part)?.text === 'string' ? record(part)!.text : '').join('\n') : '';
@@ -59,50 +77,91 @@ export function turnContextItems(args: {
   readonly now: Date; readonly briefText: unknown; readonly conversation: readonly unknown[];
   readonly verifiedUserMessages?: readonly string[]; readonly unknownUserText?: string;
   readonly recentTurns?: number; readonly canonicalState?: unknown; readonly request?: string; readonly runFactsUse?: string; readonly currentRequestOrigin?: 'typed' | 'product control' | 'unknown';
+  readonly construction?: ConstructionContext;
 }): unknown[] {
   const items: unknown[] = [{ role: 'developer', content: [{ type: 'input_text', text: todayLine(args.now) }] }];
+  const construction = args.construction !== undefined;
+  const request = args.request ?? args.construction?.request;
+  const currentRequestOrigin = args.currentRequestOrigin ?? args.construction?.current_request_origin;
+  const verifiedUserMessages = args.verifiedUserMessages ?? args.construction?.verified_user_messages
+    ?? args.construction?.retained?.conversation.filter(m => m.speaker === 'user' && m.source === 'typed').map(m => m.text);
+  let briefItem: unknown;
   const brief = typeof args.briefText === 'string' ? args.briefText.trim() : '';
-  if (brief !== '' && !args.conversation.some((item) => textOf(item).includes(brief))) {
-    items.push({ role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] });
+  if (brief !== '' && !args.conversation.some((item) => turnContextText(item).includes(brief))) {
+    briefItem = { role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] };
+    items.push(briefItem);
   }
   // Chat forwards its whole window; Explain defaults to three turns. Rebuild uses zero so every reply is paired.
   // The store's re-made items (the older words; the dropped replies beside Olumi's questions) are carried whole, as chat carries them.
   const older = args.conversation.filter(isOlderWordsItem);
-  const forwardedConversation = args.request === undefined ? args.conversation
+  const forwardedConversation = request === undefined && !construction ? args.conversation
     : [...older,
-      ...(args.recentTurns === 0 ? [] : trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), args.recentTurns ?? 3))]
+      ...(construction || args.recentTurns === 0 ? [] : trimToRecentTurns(args.conversation.filter(item => !isOlderWordsItem(item)), args.recentTurns ?? 3))]
       .filter(item => ['user', 'assistant'].includes(String(record(item)?.role)));
   const forwarded = new Set(forwardedConversation);
   let preceding: { item: unknown; text: string } | undefined;
   const answeredPairs: unknown[] = [];
+  const pairedConversation = new Set<unknown>();
   for (const item of args.conversation) {
     const role = record(item)?.role;
-    const text = textOf(item);
+    const text = turnContextText(item);
     if (role === 'assistant' && text !== '') preceding = { item, text };
     if (role === 'user' && text !== '') {
-      if (preceding !== undefined && !forwarded.has(preceding.item)) answeredPairs.push({
-        olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: preceding.text },
-        response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text },
-      });
+      if (preceding !== undefined && !forwarded.has(preceding.item)) {
+        answeredPairs.push({
+          olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: preceding.text },
+          response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text },
+        });
+        pairedConversation.add(preceding.item); pairedConversation.add(item);
+      }
       preceding = undefined;
     }
   }
-  if ((args.verifiedUserMessages?.length ?? 0) > 0 || answeredPairs.length > 0 || args.unknownUserText || args.currentRequestOrigin !== undefined) {
+  if ((verifiedUserMessages?.length ?? 0) > 0 || answeredPairs.length > 0 || args.unknownUserText || currentRequestOrigin !== undefined) {
     // Quoted words retain user authority, including unknown-origin text and Olumi's historical replies.
     items.push({ role: 'user', content: [{ type: 'input_text', text: `${REASONING_CONTEXT_LABEL}\n${JSON.stringify({
-      order: STATEMENT_ORDER_LABEL, model_origin: MODEL_RECORD_LABEL, current_request_origin: args.currentRequestOrigin ?? 'unknown',
-      verified_user_statements: (args.verifiedUserMessages ?? []).map((text) => ({ speaker: 'user', source: 'typed', text })),
+      order: STATEMENT_ORDER_LABEL, model_origin: MODEL_RECORD_LABEL, current_request_origin: currentRequestOrigin ?? 'unknown',
+      verified_user_statements: (verifiedUserMessages ?? []).map((text) => ({ speaker: 'user', source: 'typed', text })),
       answered_pairs: answeredPairs,
       ...(args.unknownUserText ? { unknown_origin: { speaker: 'unknown', source: 'stored, origin not verified', text: args.unknownUserText } } : {}),
     })}` }] });
   }
   if (args.runFactsUse !== undefined) items.push(runFactsInstructionItem(args.runFactsUse));
-  if (args.request !== undefined) {
+  if (request !== undefined || construction) {
     items.push(...forwardedConversation);
-    items.push({ role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ request: args.request,
+    if (request !== undefined) items.push({ role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ request,
       model_origin: MODEL_RECORD_LABEL, canonical_state: args.canonicalState }) }] });
   } else if (args.canonicalState !== undefined) {
     items.push({ role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(args.canonicalState)}` }] });
+  }
+  if (args.construction !== undefined) {
+    const context = args.construction;
+    // Preserve the existing shared answered-pair/older-words items whole, without a caller's text-prefix filter.
+    const shared = [...items.slice(1).filter(item => item !== briefItem), ...(context.retained?.items ?? [])];
+    const constructionItems: unknown[] = [items[0]];
+    const carry = (text: string): void => { constructionItems.push({ role: 'user', content: [{ type: 'input_text', text }] }); };
+    const original = context.retained?.brief ?? (typeof args.briefText === 'string' ? args.briefText : '');
+    if (original !== '') carry(`${BRIEF_LABEL}\n${original}`);
+    if (context.retained !== undefined) carry(REVISION_LEAD);
+    const references = [
+      ...(context.retained?.conversation ?? []),
+      ...(context.retained === undefined ? (verifiedUserMessages ?? []).map(text => ({ speaker: 'user', source: 'typed', text })) : []),
+      ...args.conversation.flatMap(item => {
+        const role = record(item)?.role;
+        const text = turnContextText(item);
+        return !pairedConversation.has(item) && !isOlderWordsItem(item) && text !== '' && (role === 'user' || role === 'assistant') ? [{
+          speaker: role === 'assistant' ? 'olumi' : 'unknown',
+          source: role === 'assistant' ? "Olumi's reply, not a user statement" : 'stored, origin not verified', text,
+        }] : [];
+      }),
+    ];
+    // Metadata labels an occurrence; it never authenticates its words. Authorship relies on the separate typed source,
+    // not on JSON quotation accidentally defeating a whole-statement check on a reference sentence.
+    if (references.length > 0) carry(`${LATER_MESSAGES_CONTEXT_LEAD}\n${references.map(({ text, ...origin }) => `${JSON.stringify(origin)}\n${text}`).join('\n\n')}`);
+    if (shared.length > 0) carry(`${REASONING_CONTEXT_LABEL}\n${JSON.stringify(shared)}`);
+    if (context.current_model !== undefined) carry(`${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`);
+    if (context.objections !== undefined && context.objections.length > 0) carry(`${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}`);
+    return constructionItems;
   }
   return items;
 }

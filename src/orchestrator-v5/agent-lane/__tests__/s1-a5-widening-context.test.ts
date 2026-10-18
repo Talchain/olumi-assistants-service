@@ -10,7 +10,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, firstConstructInput, type ConstructionContext } from '../runtime/build-model.js';
 import { answeredEarlierItem } from '../history-store.js';
-import { userStatementRecord } from '../../statement-door/statements.js';
+import { userStatementRecord, userStatementFor } from '../../statement-door/statements.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
 
 type Rec = Record<string, any>;
 const LEVEL = 'We run a 300-member gym and weekday attendance is about 45% at the moment.';
@@ -95,9 +97,9 @@ describe('S1 A5: the widening calls read the same assembled context as the draft
   it('the rejection reaches the widening calls as the user\'s typed words; the chip stays of unknown origin', async () => {
     const { widening } = await built(CONTEXT);
     const context = (JSON.parse(widening[0]!.input as string) as Rec).construction_context as string;
-    expect(context).toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: REJECTION }));
-    expect(context).toContain(JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified', text: CHIP }));
-    expect(context).not.toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: CHIP }));
+    expect(context).toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${REJECTION}`);
+    expect(context).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${CHIP}`);
+    expect(context).not.toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${CHIP}`);
   });
   it('BOTH ARMS (BUDDY-A): with one lever the risks AND options calls each carry the same context, verbatim', async () => {
     const { drafter, widening } = await built(CONTEXT, { drafts: [draftText(['Corporate deal active'])] });
@@ -134,10 +136,10 @@ describe('S1 A5: the widening calls read the same assembled context as the draft
     ] } };
     const { widening } = await built(context);
     const text = inputOf(widening[0]!).construction_context as string;
-    const at = [REJECTION, QUOTED, REVERSAL].map((t) => text.indexOf(JSON.stringify(t)));
+    const at = context.retained!.conversation.map(({ text: words, ...origin }) => text.indexOf(`${JSON.stringify(origin)}\n${words}`));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect(at).toEqual([...at].sort((a, b) => a - b));
-    expect(text).toContain(JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified', text: QUOTED }));
+    expect(text).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${QUOTED}`);
   });
   it('ORIGIN NEGATIVE (BUDDY-A): a figure seen only in the context (an unknown chip) never becomes the user\'s in a widened option', async () => {
     const CHIP_FIGURE = 'Spend £100k/year on paid advertising.';
@@ -184,6 +186,64 @@ const briefs = [
 ];
 
 describe('A2/A3/A5 share the frozen first context across both briefs', () => {
+  it.each(briefs)('$name: initial construction keeps complete SDK pairs and distinct typed and stored occurrences', async source => {
+    const brief = `${source.level} ${source.target} Option one: ${source.options[0]}.`;
+    const question = 'Which shift does that cover, and under which conditions?';
+    const reply = 'The evening shift only, if the checks are complete.';
+    const context: ConstructionContext = { history: [
+      { role: 'assistant', content: [{ type: 'output_text', text: question }] },
+      { role: 'user', content: [{ type: 'input_text', text: reply }] },
+    ], verified_user_messages: [reply], request: 'Review the bottleneck.', current_request_origin: 'typed' };
+    const { drafter, widening } = await built(context, { brief, drafts: [draftText(['Checklist active'], 0, source)] });
+    const input = String(drafter[0]!.input);
+    const shared = JSON.parse(input.split(`${REASONING_CONTEXT_LABEL}\n`)[1]!);
+    expect(Array.isArray(shared), 'initial construction must use the shared construction projection').toBe(true);
+    const packetItem = (shared as Rec[]).find(i => i.content[0].text.startsWith(REASONING_CONTEXT_LABEL));
+    expect(packetItem, 'the actual first provider input contains the shared reasoning packet').toBeDefined();
+    const packet = JSON.parse(packetItem!.content[0].text.slice(REASONING_CONTEXT_LABEL.length));
+    expect(packet.current_request_origin).toBe('typed');
+    expect(packet.verified_user_statements).toEqual([{ speaker: 'user', source: 'typed', text: reply }]);
+    expect(packet.answered_pairs).toEqual([{ olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: question },
+      response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: reply } }]);
+    for (const call of widening) expect(inputOf(call).construction_context).toBe(input);
+  });
+
+  it.each(briefs)('$name: reference-only intervention authorship is checked at admission AND recording, with the same-cell typed positive', async source => {
+    const brief = `${source.level} ${source.target} Option one: ${source.options[0]}. Revenue was £100000 as of 2026-09-01.`;
+    const quote = `${source.options[0]} sets advertising spend to £100000.`;
+    const draft = JSON.parse(draftText(['Checklist active'], 0, source)) as Rec;
+    draft.factors.push({ label: 'Advertising spend', role: 'controllable', baseline_known: false, baseline_value: null,
+      unit: '£', provenance: 'ai_proposed', plausible_max: 200000 });
+    draft.links.push({ ...draft.links[0], from: 'Advertising spend' });
+    draft.options[1].interventions.push({ factor_label: 'Advertising spend', value: 100000, value_kind: 'absolute', unit: '£', provenance: 'explicit' });
+    draft.statements.push(statement(quote, { kind: 'option', label: source.options[0], factor_label: 'Advertising spend' }, 'level', 'point', { value: 100000 }, '£'));
+    const captured = async (typed: boolean) => {
+      const context: ConstructionContext | undefined = typed ? undefined : { retained: { brief, conversation: [
+        { speaker: 'unknown', source: 'stored, origin not verified', text: quote },
+      ] } };
+      const result = await built(context, { brief: typed ? `${brief}\n${quote}` : brief, drafts: [JSON.stringify(draft)] });
+      const factor = (result.graph.nodes as Rec[]).find(n => n.label === 'Advertising spend');
+      const option = (result.graph.nodes as Rec[]).find(n => n.label === source.options[0]);
+      expect(factor, 'the actual factor remains in the registered graph').toBeDefined();
+      const cell = option?.interventions?.[factor!.id] as Rec | undefined;
+      expect(cell, 'the actual admission carrier must exist').toBeDefined();
+      expect(cell!.raw_value ?? cell!.value).toBe(100000);
+      expect(cell!.unit).toBe('£');
+      const record = userStatementFor(result.graph, { kind: 'factor', id: factor!.id, option_id: option!.id, field: 'level' });
+      const recorded = (record?.statements ?? []).filter(s => s.quote === quote);
+      return { ...result, cell: cell!, recorded };
+    };
+    const genuine = await captured(true);
+    expect(genuine.cell.source, 'the positive must exercise the admission carrier, independently of the recorder').toBe('brief_extraction');
+    expect(genuine.recorded.map((s: Rec) => ({ speaker: s.speaker, quote: s.quote }))).toEqual([{ speaker: 'user', quote }]);
+    const reference = await captured(false);
+    expect(wholeStatementIn(String(reference.drafter[0]!.input), quote), 'the admission/recorder mutants must encounter a readable whole reference statement').toBe(true);
+    expect(wholeStatementIn(brief, quote)).toBe(false);
+    expect(reference.cell.source).toBe('cee_hypothesis');
+    expect(reference.cell.user_material_unverified).toBe(true);
+    expect(reference.recorded).toEqual([]);
+  });
+
   it.each(briefs.flatMap(source => (['repair', 'size'] as const).map(branch => ({ ...source, branch }))))(
     '$name $branch retains exact base, pairs, source and conditions in the retry and both widening arms', async source => {
       const brief = `${source.level} ${source.target} Option one: ${source.options[0]}. Option two: ${source.options[1]}.`;

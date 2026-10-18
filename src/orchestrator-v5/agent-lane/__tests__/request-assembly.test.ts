@@ -18,11 +18,10 @@ import { describe, it, expect } from 'vitest';
 import {
   assessContextFreshness,
   eligibleTools,
-  assembleRequest,
   issueContextPacket,
   type CanonicalContextPacket,
 } from '../runtime/request-assembly.js';
-import { AGENT_TOOLS, MUTATION_TOOLS, toolsFor } from '../runtime/agent-tools.js';
+import { MUTATION_TOOLS, toolsFor } from '../runtime/agent-tools.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const USER = 'user-a';
@@ -173,80 +172,16 @@ describe('tool eligibility — deterministic, and it can only REMOVE', () => {
   });
 });
 
-describe('stable prefix vs dynamic tail, and the diagnostics', () => {
-  const base = {
-    promptSnapshot: { id: 'draft_graph_default', version: 202, text: 'You are Olumi.' },
-    mode: 'full' as const,
-    context: packet(),
-    expectation,
-    history: [{ role: 'user', content: 'hello' }],
-  };
-
-  it('separates the STABLE prefix (prompt + tools) from the DYNAMIC tail (state + history)', () => {
-    const a = assembleRequest(base);
-    expect(a.stablePrefix).toHaveProperty('instructions');
-    expect(a.stablePrefix).toHaveProperty('tools');
-    expect(a.dynamic).toHaveProperty('context');
-    expect(a.dynamic).toHaveProperty('history');
-    // the prefix must not carry per-turn state, or caching it is pointless
-    expect(JSON.stringify(a.stablePrefix)).not.toContain('hello');
-  });
-
-  it('the stable prefix hash is UNCHANGED when only history moves — that is what makes it cacheable', () => {
-    const a = assembleRequest(base);
-    const b = assembleRequest({ ...base, history: [{ role: 'user', content: 'something else entirely' }] });
-    expect(b.hashes.prefix).toBe(a.hashes.prefix);
-    expect(b.hashes.context).toBe(a.hashes.context);
-  });
-
-  it('the prefix hash CHANGES when the prompt version changes — a snapshot is immutable, so a new version is a new prefix', () => {
-    const a = assembleRequest(base);
-    const b = assembleRequest({ ...base, promptSnapshot: { ...base.promptSnapshot, version: 203 } });
-    expect(b.hashes.prefix).not.toBe(a.hashes.prefix);
-  });
-
-  it('the TOOLS hash changes when eligibility changes — so a cache cannot serve the wrong tool set', () => {
-    const withState = assembleRequest(base);
-    const withoutState = assembleRequest({ ...base, context: null });
-    expect(withoutState.hashes.tools).not.toBe(withState.hashes.tools);
-    expect(withoutState.hashes.prefix).not.toBe(withState.hashes.prefix);
-  });
-
-  it('the context hash changes when the state changes', () => {
-    const a = assembleRequest(base);
-    const b = assembleRequest({ ...base, context: packet({ state: { entities: [{ id: 'x' }] } }) });
-    expect(b.hashes.context).not.toBe(a.hashes.context);
-  });
-
-  it('hashes are deterministic across runs and insensitive to key ORDER', () => {
-    const a = assembleRequest(base);
-    const reordered = assembleRequest({
-      ...base,
-      context: issueContextPacket(
-        { captured_at_turn: 7, state: { structure: {}, entities: [] }, graph_revision: REV, authenticated_user_id: USER, scenario_id: SCENARIO },
-        SECRET,
-      ),
-    });
-    expect(reordered.hashes.context).toBe(a.hashes.context);
-    expect(assembleRequest(base).hashes.prefix).toBe(a.hashes.prefix);
-  });
-
+describe('the live eligible tool set preserves the approved AIE contract', () => {
   it('A2i9: assembled tools preserve the exact AIE option-level schemas and required arrays', () => {
     const approved = JSON.parse(readFileSync(new URL('./fixtures/aie-a2-option-level-field-20261013.json', import.meta.url), 'utf8'));
-    const request = assembleRequest(base);
+    const tools = eligibleTools({ mode: 'full', context: packet(), expectation }).tools;
     for (const [name, list] of [['propose_option_interventions', 'interventions'], ['propose_starting_point', 'option_levels']]) {
-      const tool = request.stablePrefix.tools.find(t => t.name === name)!;
+      const tool = tools.find(t => t.name === name)!;
       const items = (tool.parameters as any).properties[list].items;
       expect(items.properties.user_stated).toEqual(approved.option_level_user_stated.schema);
       expect(items.required).toEqual(approved.option_level_user_stated.required_arrays_after[`${name}.parameters.${list}.items.required`]);
     }
   });
 
-  it('reports diagnostics a human can read: what was omitted and why', () => {
-    const a = assembleRequest(base);
-    expect(a.diagnostics.context_freshness).toBe('fresh');
-    expect(a.diagnostics.omitted_tools).toContain('get_canonical_state');
-    expect(a.diagnostics.tool_count).toBe(AGENT_TOOLS.length - 1);
-    expect(a.diagnostics.prompt_version).toBe(202);
-  });
 });

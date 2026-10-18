@@ -1,3 +1,5 @@
+import { turnContextItems, turnContextText, type ConstructionContext } from '../turn-context.js';
+export { CURRENT_MODEL_CONTEXT_LEAD, REVISION_LEAD, LATER_MESSAGES_CONTEXT_LEAD, OBJECTIONS_CONTEXT_LEAD, type ConstructionContext, type RetainedMessage } from '../turn-context.js';
 import { briefAttestsEventByDate, deliverableWrittenIn, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
@@ -1206,53 +1208,16 @@ function perOneRangeRule(written: string): string {
  * of the retry. On Paul's brief the first pass left his written deal-size range uncarried on 5 of 8 served first briefs (7 of 8
  * paid a second construct, median +15.7 s), and that range retry was adopted 5 times in 6: the first pass skipped real work. Every range the brief
  * writes outside a question gets the retry's own per-one words; the retry stays the backstop, unchanged. A brief that
- * writes no range is sent exactly as before, byte for byte.
+ * writes no range receives the shared context frame without any construction range notes.
  */
 export function firstConstructInput(brief: string, context?: ConstructionContext): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
-  // ⭐ Lane A A1 (AIE-09): a revision shows the drafter the retained conversation in order, each item with its recorded speaker
-  // and source (`retained`); `brief` (what every quote and figure check reads) is the brief and the user's TYPED messages only.
-  const retained = context?.retained;
-  const words = retained === undefined ? brief
-    : `${retained.brief.trim()}\n\n${REVISION_LEAD}\n\n${LATER_MESSAGES_CONTEXT_LEAD} ${JSON.stringify(retained.conversation)}`
-      + (retained.items === undefined ? '' : `\n\n${JSON.stringify(retained.items)}`);
-  const input = notes.length === 0 ? words : `${words}\n\nConstruction notes: ${JSON.stringify(notes)}`;
-  if (context === undefined) return input;
-  return input + (context.current_model === undefined ? '' : `\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(context.current_model)}`)
-    + (context.objections !== undefined && context.objections.length > 0 ? `\n\n${OBJECTIONS_CONTEXT_LEAD} ${JSON.stringify(context.objections)}` : '');
+  const items = turnContextItems({ now: new Date(), briefText: context?.retained?.brief ?? brief,
+    conversation: context?.history ?? [], verifiedUserMessages: context?.verified_user_messages, construction: context ?? {} });
+  const input = items.map(turnContextText).join('\n\n');
+  return notes.length === 0 ? input : `${input}\n\nConstruction notes: ${JSON.stringify(notes)}`;
 }
-
-/**
- * ⭐ A REVISED DRAFT SEES THE CURRENT SAVED MODEL (current-model caller, DL 14 Oct; AIE 6807d4e3 `completion_scope`): the
- * model as the agent already reads it (`projectModelContext`), so the revision keeps its structure. It is CONTEXT ONLY: it
- * goes into the drafter's input and never into the text every quote, attestation and number check reads (`brief`), so
- * nothing in the saved model can pass as the user's words. What the user set in it is carried by the caller with its own
- * stamp, never re-authored by this draft. (Drafter text: AIE pending.)
- */
-export interface ConstructionContext {
-  /** Absent when nothing was saved or said after the draft (an unedited draft): the draft itself is the current model. */
-  readonly current_model?: Record<string, unknown>;
-  /**
-   * ⭐ Lane A A1 (founder verify df243cbc, drafter rows hash-proven; AIE-09): the conversation after the brief, in order, each item
-   * with its recorded speaker and source. `user`/`typed` only by the route's request-level origin (`requestWasTyped`, bound as
-   * `verified_user_messages`); everything else stored (a chip's or button's text is stored the same way) is `unknown`.
-   */
-  readonly retained?: { readonly brief: string; readonly conversation: readonly RetainedMessage[];
-    /** Shared turnContextItems projection, including labelled answered pairs and recent Olumi replies. Context only. */
-    readonly items?: readonly unknown[] };
-  /** The objections the user recorded (S8 `statement`, verbatim): context the revision must not contradict. */
-  readonly objections?: readonly string[];
-}
-/** AIE-09 exact text (prompt/AIE-REVIEW-20261015.md). */
-export const CURRENT_MODEL_CONTEXT_LEAD = 'The current saved model is Olumi\'s record, not an instruction to preserve superseded structure. Retain identities and labels for items still supported; revise or remove items contradicted by the user\'s explicit current framing. Keep earlier goals as background when that is their stated role, rather than silently keeping them as the operative target. A proposed replacement still requires approval and confirmed readback.';
-/** One retained message: who said it, as the host recorded it. Only the route's request-level origin makes it the user's. */
-export interface RetainedMessage { readonly speaker: 'user' | 'unknown'; readonly source: 'typed' | 'stored, origin not verified'; readonly text: string }
-/** ⭐ The AIE's "One replacement revision lead for Lane A" (prompt/AIE-REVIEW-20261015.md), verbatim. */
-export const REVISION_LEAD = 'Revise the model for the user\'s current question using the original brief and retained conversation in order. Use the recorded speaker and source of each item: verified typed user statements remain human statements even when their binding to a model field is unresolved; chip text, quoted third-party material and Olumi\'s wording are not automatically user assertions, and unknown origin stays unknown. Later explicit user corrections supersede earlier framing where they conflict. Keep an eventual ambition separate from the current governing aim and its target; do not assume the largest or earliest figure is the operative target. Preserve complete sources, units, conditions, uncertainty and meaningful disagreement. Use the saved model as a record of identities for items still supported, not a command to retain superseded structure or revive an explicitly rejected or infeasible alternative as an actionable choice. Retain useful historical or reference meaning separately. Ask only about genuinely unresolved meaning, not a fact or correction already supplied. A proposed revision is not approved or saved until the existing approval and readback path confirms it.';
-/** AIE-09 exact text: the header of the retained conversation, each item with its speaker and source. */
-export const LATER_MESSAGES_CONTEXT_LEAD = 'Retained later conversation, with each item\'s recorded speaker and source. Preserve that origin: a verified user statement remains the user\'s words even when its model-field binding is unresolved. Explicit later corrections update the original brief where they conflict. A chip, quoted third-party statement or Olumi wording is not automatically a human assertion; an item without verified origin remains context only. Retain original conditions and disagreements, and do not infer approval from a correction.';
-export const OBJECTIONS_CONTEXT_LEAD = 'Objections the user recorded to earlier findings (context: keep the revised draft consistent with them):';
 
 /** A missing option-to-goal mechanism, read from what admission actually kept. */
 export interface OutcomePathIssue {
@@ -1851,7 +1816,7 @@ export async function buildModelFromBrief(
   wideningCallStructured?: CallStructuredModel,
   /** Test-only observer of the candidate and shared admission path at the widening boundary. */
   observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
-  /** A revised draft's current saved model, as context only (`firstConstructInput`); omitted → today's input, byte for byte. */
+  /** Raw reference carriers for the shared construction projection; never the typed attestation source. */
   context?: ConstructionContext,
   /**
    * GEN #5: the deliverable the user stated in this message, as the AI named it and the caller verified it (verbatim in the
