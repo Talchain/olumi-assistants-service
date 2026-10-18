@@ -17,6 +17,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/
 
 const SCENARIO_ID = '38b6c2a6-0000-4000-8000-0000000000e5';
 import { readFileSync } from 'node:fs';
+import { citeUserSpans } from '../../../src/orchestrator-v5/agent-lane/__tests__/helpers/cite-user-span.js';
 
 /** The served journey-E model the salaries were stated against (5d73351, D1 brief turn). */
 const SERVED = (JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/served-journey-e-salaries-5d73351-d1.json', import.meta.url), 'utf8')) as { graph: { nodes: unknown[]; edges: unknown[] } }).graph;
@@ -112,9 +113,10 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
       }
       return { status: 200, json: { graph: persisted, graph_hash: currentHash() } };
     };
-    const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
+    // LEAN CORE (#3392, USER_QUOTE): the AI cites the user's typed sentence for each figure it claims as theirs.
+    const caps = citeUserSpans(createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
-    });
+    }));
     return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text } };
   };
   const os = (id: string) => (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === id)!.observed_state ?? {};
@@ -158,7 +160,8 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     const ctx = { ...a.ctx, user_turn_text: text, user_text_complete: false, verified_user_messages: [text] };
     const p = await a.caps.proposeAssumptions(ctx, { assumptions: [
       { user_stated: true, factor_label: 'Senior engineer annual salary', value: 90000, quote: ctx.user_text, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Blue quote', revise: true },
-      { user_stated: false, factor_label: 'Junior engineer annual salary', value: 60000, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Green quote', revise: true },
+      // The user typed the £60k (“Green’s is £60k”): the AI cites their span; its estimate flag never relabels their figure.
+      { user_stated: false, factor_label: 'Junior engineer annual salary', value: 60000, quote: ctx.user_text, unit: 'GBP/year per engineer', basis: 'Olumi’s binding of the Green quote', revise: true },
       { user_stated: true, factor_label: 'Annual salary spend', value: 140000, quote: ctx.user_text, unit: 'GBP/year', basis: 'Olumi’s binding of the Orange quote', revise: true },
     ] });
     expect(p.ok, JSON.stringify(p)).toBe(true); expect(p.not_the_users_figure).toBeUndefined();

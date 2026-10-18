@@ -108,16 +108,18 @@ function product(opts: { outcome: Outcome; foreign?: (nodes: Node[]) => Node[]; 
   return { d, posted, rev: () => rev, node: (id: string) => nodes.find((n) => n.id === id) };
 }
 
+// LEAN CORE (#3392, USER_QUOTE): "the user asked for 35%" — their typed words, which the AI cites for the revision it claims as theirs.
+const SAID = 'Please revise the win rate to 35%.';
 async function approve(p: ReturnType<typeof product>, assumptions: Record<string, unknown>[]) {
   const caps = createAgentCapabilities(p.d, new ProposalStore());
-  const prop = await caps.proposeAssumptions(guest, { assumptions } as never);
+  const prop = await caps.proposeAssumptions({ ...guest, user_text: SAID, user_turn_text: SAID }, { assumptions } as never);
   expect(prop.ok, JSON.stringify(prop)).toBe(true);
   const revAtApproval = p.rev();
   const r = await caps.authoriseChange(guest, { proposal_id: String(prop.proposal_id) });
   return { r: r as Record<string, unknown>, revAtApproval };
 }
 
-const REVISE_WIN_RATE = [{ user_stated: true, factor_label: 'Win rate', value: 0.35, unit: '', basis: 'the user asked for 35%', revise: true }];
+const REVISE_WIN_RATE = [{ user_stated: true, factor_label: 'Win rate', value: 0.35, unit: '', basis: 'the user asked for 35%', revise: true, quote: SAID }];
 const ADOPT_PRO_SHARE = [{ user_stated: false, factor_label: 'Pro share', value: 0.4, unit: '', basis: 'a starting assumption' }];
 
 describe('(i) an UNRELATED concurrent edit does not make a refused write "saved"', () => {

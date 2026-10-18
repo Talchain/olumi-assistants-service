@@ -7,40 +7,51 @@
 import { quoteOfFigure } from '../../stated-by-user.js';
 
 type Rec = Record<string, unknown>;
-const textOf = (ctx: unknown): string => {
-  const c = (ctx ?? {}) as { user_turn_text?: unknown; user_text?: unknown };
-  return typeof c.user_turn_text === 'string' && c.user_turn_text !== '' ? c.user_turn_text : typeof c.user_text === 'string' ? c.user_text : '';
+/** The user's verified typed words the AI may cite from: this turn's message, the session's words, then each verified message. */
+const textOf = (ctx: unknown): string[] => {
+  const c = (ctx ?? {}) as { user_turn_text?: unknown; user_text?: unknown; verified_user_messages?: unknown };
+  const all = [c.user_turn_text, c.user_text, ...(Array.isArray(c.verified_user_messages) ? c.verified_user_messages : [])];
+  return all.filter((t): t is string => typeof t === 'string' && t !== '');
 };
-/** The user's own sentence writing `value` (the whole turn, else the one line that writes it), or none. */
-const quoteFor = (value: number, unit: unknown, text: string): string | null => {
-  const u = typeof unit === 'string' ? unit : '';
-  return quoteOfFigure(value, u, text) ?? text.split('\n').find((l) => quoteOfFigure(value, u, l) !== null) ?? null;
+/**
+ * The user's own sentence writing `value` (the whole turn, else the one line that writes it), or none. The AI's sent unit is tried
+ * first, then none: which unit the figure is in stays the host verifier's check against the factor's declared unit, never the cite's.
+ */
+const quoteFor = (value: number, unit: unknown, texts: readonly string[]): string | null => {
+  const find = (u: string): string | null => {
+    for (const text of texts) {
+      const q = quoteOfFigure(value, u, text) ?? text.split('\n').find((l) => quoteOfFigure(value, u, l) !== null);
+      if (q != null) return q;
+    }
+    return null;
+  };
+  return (typeof unit === 'string' && unit !== '' ? find(unit) : null) ?? find('');
 };
 /** An item the AI claims as the user's (`user_stated: true`) and has not cited. */
-const cite = (item: unknown, value: unknown, unit: unknown, text: string): unknown => {
+const cite = (item: unknown, value: unknown, unit: unknown, texts: readonly string[]): unknown => {
   if (item === null || typeof item !== 'object' || (item as Rec).quote !== undefined || (item as Rec).user_stated !== true) return item;
-  const quote = typeof value === 'number' ? quoteFor(value, unit, text) : null;
+  const quote = typeof value === 'number' ? quoteFor(value, unit, texts) : null;
   return quote === null ? item : { ...(item as Rec), quote };
 };
 /** A new option's level claims nothing by a flag: the user's when cited, Olumi's only with `estimate`. Cited where written. */
-const citeLevel = (level: unknown, text: string): unknown => {
+const citeLevel = (level: unknown, texts: readonly string[]): unknown => {
   if (level === null || typeof level !== 'object' || (level as Rec).quote !== undefined || (level as Rec).estimate !== undefined) return level;
   const value = (level as Rec).value;
-  const quote = typeof value === 'number' ? quoteFor(value, (level as Rec).unit, text) : null;
+  const quote = typeof value === 'number' ? quoteFor(value, (level as Rec).unit, texts) : null;
   return quote === null ? level : { ...(level as Rec), quote };
 };
 
 /** The capabilities, with each figure-carrying call cited from the turn's own typed words. */
 export function citeUserSpans<T extends object>(caps: T): T {
   const c = caps as unknown as Record<string, ((ctx: unknown, args: Rec) => unknown) | undefined>;
-  const wrap = (name: string, rewrite: (args: Rec, text: string) => Rec) => {
+  const wrap = (name: string, rewrite: (args: Rec, texts: readonly string[]) => Rec) => {
     const fn = c[name];
     return fn === undefined ? undefined : (ctx: unknown, args: Rec) => fn.call(caps, ctx, rewrite(args ?? {}, textOf(ctx)));
   };
-  const items = (key: string) => (args: Rec, text: string): Rec => (Array.isArray(args[key])
-    ? { ...args, [key]: (args[key] as Rec[]).map((i) => cite(i, i?.value, i?.unit, text)) } : args);
-  const actsOn = (o: Rec, text: string): Rec => (Array.isArray(o.acts_on)
-    ? { ...o, acts_on: (o.acts_on as Rec[]).map((a) => (a?.level === undefined ? a : { ...a, level: citeLevel(a.level, text) })) } : o);
+  const items = (key: string) => (args: Rec, texts: readonly string[]): Rec => (Array.isArray(args[key])
+    ? { ...args, [key]: (args[key] as Rec[]).map((i) => cite(i, i?.value, i?.unit, texts)) } : args);
+  const actsOn = (o: Rec, texts: readonly string[]): Rec => (Array.isArray(o.acts_on)
+    ? { ...o, acts_on: (o.acts_on as Rec[]).map((a) => (a?.level === undefined ? a : { ...a, level: citeLevel(a.level, texts) })) } : o);
   const wrapped: Record<string, unknown> = {
     proposeAssumptions: wrap('proposeAssumptions', items('assumptions')),
     proposeOptionInterventions: wrap('proposeOptionInterventions', items('interventions')),

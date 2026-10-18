@@ -77,13 +77,15 @@ function product(opts: { foreignBeforeFirst?: boolean; foreignAfterFirst?: boole
 
 async function approveLevels(p: ReturnType<typeof product>, levels: Record<string, unknown>[]) {
   const caps = createAgentCapabilities(p.d, new ProposalStore());
-  const prop = await caps.proposeOptionInterventions(guest, { interventions: levels } as never);
+  const prop = await caps.proposeOptionInterventions({ ...guest, user_text: SAID, user_turn_text: SAID }, { interventions: levels } as never);
   expect(prop.ok, JSON.stringify(prop)).toBe(true);
   return (await caps.authoriseChange(guest, { proposal_id: String(prop.proposal_id) })) as Record<string, unknown>;
 }
 
-const PRICE_TO_60 = { option_label: 'Raise price', factor_label: 'Price', value: 60, basis: 'the user said 60' };
-const REACH_TO_07 = { option_label: 'Raise price', factor_label: 'Reach', value: 0.7, basis: 'the user said 0.7' };
+// LEAN CORE (#3392, USER_QUOTE): "the user said 60" — the user's typed words, which the AI cites for the levels it claims as theirs.
+const SAID = 'Raise price should set the price to 60 and the reach to 0.7.';
+const PRICE_TO_60 = { option_label: 'Raise price', factor_label: 'Price', value: 60, basis: 'the user said 60', user_stated: true, quote: SAID };
+const REACH_TO_07 = { option_label: 'Raise price', factor_label: 'Reach', value: 0.7, basis: 'the user said 0.7', user_stated: true, quote: SAID };
 
 describe('a level is "recorded" only when THIS approval\'s own write committed it', () => {
   it('⛔ a REFUSED edit on a pair that already holds a level is NOT reported recorded', async () => {

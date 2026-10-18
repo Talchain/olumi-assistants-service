@@ -50,7 +50,9 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
 
   it('CONTRAST: the user wrote £64 → theirs, with no source sent (the builder\'s default, byte-identical to today)', async () => {
     const { caps, sent } = setup();
-    await caps.proposeNewOption(ctxSaying('Add an option: raise to £64 with the AI release.'), suggested({ value: 64, unit: '£', estimate: true, basis: 'x' }) as never);
+    // LEAN CORE (#3392, USER_QUOTE): the AI cites the span the user typed; its estimate flag never relabels their figure.
+    await caps.proposeNewOption(ctxSaying('Add an option: raise to £64 with the AI release.'), suggested({ value: 64, unit: '£', estimate: true, basis: 'x',
+      quote: 'Add an option: raise to £64 with the AI release.' }) as never);
     const iv = priceLevelSent(sent);
     expect(iv?.raw_value).toBe(64);
     expect(iv).not.toHaveProperty('source');
