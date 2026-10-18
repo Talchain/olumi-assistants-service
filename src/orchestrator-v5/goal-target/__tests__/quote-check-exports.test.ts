@@ -32,10 +32,14 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     const two = 'Sam, site lead: “Crews start early only if parts arrive the day before. A late van wastes the morning.” He agrees.';
     expect(wholeStatementIn(two, 'Sam, site lead: “Crews start early only if parts arrive the day before. A late van wastes the morning.”')).toBe(true);
   });
-  it('⛔ DL-3 16:14Z: speech an attribution opens with a SINGLE mark cannot be bounded (a single mark is also an apostrophe): nothing from the attribution to the paragraph end is whole', () => {
+  // Supersedes DL-3 16:14Z's fail-safe (dev P01/P11 first loss; DL-3 05:0xZ): a SINGLE mark bounds speech only when PAIRED, as a double does.
+  it('⛔ speech an attribution opens with a PAIRED single mark is bounded like double-marked speech: whole only with its speaker; the sentence after it is whole', () => {
     const message = "We fit kitchens. Sam, site lead: 'Crews start early only if parts arrive the day before.' He assumes the van is free.\nWe work weekends.";
-    expect(wholeStatementIn(message, "Sam, site lead: 'Crews start early only if parts arrive the day before.'")).toBe(false);
-    expect(wholeStatementIn(message, 'He assumes the van is free.')).toBe(false);
+    expect(wholeStatementIn(message, "Sam, site lead: 'Crews start early only if parts arrive the day before.'")).toBe(true);
+    expect(wholeStatementIn(message, 'He assumes the van is free.')).toBe(true);
+    // An UNPAIRED opening mark (no closing mark later in its paragraph) opens nothing.
+    const unpaired = "We fit kitchens. Our 'quick lane idea saves an hour a day.\nWe work weekends.";
+    expect(wholeStatementIn(unpaired, "Our 'quick lane idea saves an hour a day.")).toBe(true);
     // Before the attribution, and in the next paragraph, statements are whole as ever.
     expect(wholeStatementIn(message, 'We fit kitchens.')).toBe(true);
     expect(wholeStatementIn(message, 'We work weekends.')).toBe(true);
@@ -56,12 +60,15 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     const check = (message: string, quote: string, expected: boolean): void => {
       if (wholeStatementIn(message, quote) !== expected) wrong.push(`${expected ? 'not whole' : 'whole'}: «${quote}» in «${message}»`);
     };
-    // A contraction and a plural possessive inside the speech (BUDDY-A AMEND 6 + R2 A).
+    // A contraction and a plural possessive inside the speech (BUDDY-A AMEND 6 + R2 A); `clean` has the contraction only.
     const first = "This is only true if the users' pilot works", second = "We don't start early unless parts arrive";
+    const clean = 'This is only true if the pilot works';
     for (const t of TERMINALS) for (const outside of [false, true]) {
       const end = (words: string, close: string): string => (outside ? `${words}${close}${t}` : `${words}${t}${close}`);
-      // DOUBLE marks bound the speech: only all of it, with its speaker, is whole; the sentence after it is whole too.
-      for (const [open, close] of DOUBLE) for (const who of SPEAKERS) {
+      // PAIRED marks bound the speech: only all of it, with its speaker, is whole; the sentence after it is whole too. Double marks
+      // always pair (by nesting); single marks only as a CLEAN pair (dev P01/P11, DL-3 05:0xZ), so their speech here has no possessive.
+      for (const [open, close, lead] of [...DOUBLE.map(([o, c]) => [o, c, first] as const), ...SINGLE.map(([o, c]) => [o, c, clean] as const)]) for (const who of SPEAKERS) {
+        const first = lead;
         const whole = `${who}${open}${first}${t} ${end(second, close)}`;
         const message = `We fit kitchens. ${whole} He agrees.`;
         check(message, whole, true);
@@ -76,8 +83,9 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
         // A closed fragment with no full stop of its own is never whole.
         check(`${who}${open}parts first${close} and left.`, `${who}${open}parts first${close}`, false);
       }
-      // SINGLE marks after an attribution (with or without a colon: BUDDY-A R3 A): nothing from it to the paragraph end is whole;
-      // before it, and the next paragraph, are.
+      // ⛔ AMBIGUOUS SINGLE marks keep the fail-safe (Codex #3398 r1 B2; DL-3 16:14Z): a possessive inside the speech ("the users'
+      // pilot") could be its close, so (with or without a colon: BUDDY-A R3 A) nothing from the attribution to the paragraph's end is
+      // whole; before it, and the next paragraph, are.
       for (const [open, close] of SINGLE) for (const who of SPEAKERS) {
         const whole = `${who}${open}${first}${t} ${end(second, close)}`;
         const message = `We fit kitchens. ${whole} He agrees.\nWe work weekends.`;
@@ -99,9 +107,11 @@ describe('wholeStatementIn: the quote is a WHOLE statement of the message', () =
     check(inch, 'Parts arrive on Mondays.', false);
     check(inch, 'Sam: "Crews start early. Parts arrive on Mondays."', true);
     check(inch, 'He agrees.', true);
-    // FAIL-SAFE COST (stated): a single mark that may open speech ("the 'fast track'", "'em") leaves the rest of its paragraph unverified.
-    check("The 'fast track' option is cheaper. It saves money.", 'It saves money.', false);
-    check("We told 'em early. Referrals help.", 'Referrals help.', false);
+    // The old fail-safe's stated cost is gone (dev P01/P11): a paired single-marked term closes before the next sentence, and an unpaired
+    // mark ("'em") opens nothing; the marked term itself stays inside its marks.
+    check("The 'fast track' option is cheaper. It saves money.", 'It saves money.', true);
+    check("We told 'em early. Referrals help.", 'Referrals help.', true);
+    check("The 'fast track' option is cheaper. It saves money.", 'fast track', false);
     expect(wrong).toEqual([]);
   });
   it('words the message never holds, and a non-string quote, are not whole', () => {

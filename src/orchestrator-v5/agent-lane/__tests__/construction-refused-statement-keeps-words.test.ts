@@ -26,6 +26,8 @@ const brief = (open: string, close: string): string => [AIM, `Our depot tracks a
   `Tomasz, workshop lead: ${open}${SAID}${close}`, 'We could add a second van or open the quick lane on Saturdays.'].join('\n');
 const SINGLE = brief("'", "'");
 const DOUBLE = brief('“', '”');
+/** The level sentence inside another speaker's PAIRED single marks: the quote check cannot bound it as the user's (dev P01/P11 rule). */
+const SPOKEN = [AIM, `Kim, analyst: '${LEVEL}'`, SINGLE.split('\n')[2]!, 'We could add a second van or open the quick lane on Saturdays.'].join('\n');
 const GOAL = 'Repairs completed';
 const SCORE = 'Quick lane score';
 const PARTS = 'Parts delivery speed';
@@ -81,9 +83,9 @@ const unknownWords = (quote: string, source: string, quantity: string): Rec[] =>
   [{ speaker: 'unknown', quote, source, subject: { quantity }, form: 'describes', reading: 'olumi' }];
 
 describe('words the quote check cannot bound as whole are kept with speaker unknown, never dropped and never the user\'s', () => {
-  it('⭐ RED → GREEN, real build → register: a line with a single-marked term keeps its level sentence; a single-marked named speech keeps its words', async () => {
-    const g = await saved(draft([level(), speech(SPEECH(SINGLE))]), SINGLE);
-    expect(levelRecord(g)?.statements, 'the "no unit" words, kept').toEqual(unknownWords(LEVEL, SINGLE.split('\n')[1]!, 'factor|quick lane score|||level'));
+  it('⭐ RED → GREEN, real build → register: a level sentence inside another speaker\'s single marks is kept; a single-marked named speech keeps its words', async () => {
+    const g = await saved(draft([level(), speech(SPEECH(SINGLE))]), SPOKEN);
+    expect(levelRecord(g)?.statements, 'the "no unit" words, kept').toEqual(unknownWords(LEVEL, SPOKEN.split('\n')[1]!, 'factor|quick lane score|||level'));
     expect(speechRecord(g)?.statements, 'the named speech, kept whole with its name').toEqual(
       unknownWords(SPEECH(SINGLE), SPEECH(SINGLE), 'link|parts delivery speed|repairs completed||relation'));
     expect(levelRecord(g)?.attest).toEqual({ recorded_by: 'construction' });
@@ -95,10 +97,13 @@ describe('words the quote check cannot bound as whole are kept with speaker unkn
     expect(recordOf(g, GOAL, `goal|${nodeOf(g, GOAL).id}|||target`)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: AIM, low: 900 })]);
   });
 
-  it('CONTRAST, real path: the same claims in double marks are recorded as the user-verified statements they were before', async () => {
-    const g = await saved(draft([level(), speech(SPEECH(DOUBLE))]), DOUBLE);
-    expect(levelRecord(g)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: LEVEL, form: 'point', low: 45, high: 45 })]);
-    expect(speechRecord(g)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: SPEECH(DOUBLE), form: 'describes' })]);
+  it('CONTRAST, real path: the level sentence after a marked TERM is the user\'s, single (paired, dev P01/P11) or double; a named speech in either is the speaker\'s (C2)', async () => {
+    for (const text of [SINGLE, DOUBLE]) {
+      const g = await saved(draft([level(), speech(SPEECH(text))]), text);
+      expect(levelRecord(g)?.statements).toEqual([expect.objectContaining({ speaker: 'user', quote: LEVEL, form: 'point', low: 45, high: 45 })]);
+      // AIE: quoting an entire report does not transfer its embedded claim; kept whole with its speaker, never the user's statement.
+      expect(speechRecord(g)?.statements).toEqual(unknownWords(SPEECH(text), SPEECH(text), 'link|parts delivery speed|repairs completed||relation'));
+    }
   });
 
   it('⛔ a refusal for any other reason keeps nothing: a figure the sentence does not write, or words the brief never wrote', async () => {
@@ -110,11 +115,11 @@ describe('words the quote check cannot bound as whole are kept with speaker unkn
 
   it('⛔ not operative: construction adds only the speaker-unknown record; every other member of the graph is unchanged', () => {
     const graph = { nodes: [{ id: 'score', kind: 'factor', label: SCORE, observed_state: { value: 0.45, raw_value: 45, cap: 100 } }], edges: [] };
-    const out = withConstructionStatements(structuredClone(graph), [level()], SINGLE, '2026-10-17T22:00:00Z') as Rec;
+    const out = withConstructionStatements(structuredClone(graph), [level()], SPOKEN, '2026-10-17T22:00:00Z') as Rec;
     const { user_statements: kept, ...rest } = out.nodes[0];
     expect({ ...out, nodes: [rest] }).toEqual(graph);
     expect(kept).toEqual([{ subject_key: 'factor|score|||level', field: 'level', recorded_at: '2026-10-17T22:00:00Z', attest: { recorded_by: 'construction' },
-      statements: unknownWords(LEVEL, SINGLE.split('\n')[1]!, 'factor|quick lane score|||level') }]);
+      statements: unknownWords(LEVEL, SPOKEN.split('\n')[1]!, 'factor|quick lane score|||level') }]);
     // The one reader never admits a speaker-unknown statement that carries a figure, unit or sign.
     for (const extra of [{ low: 45 }, { high: 45 }, { unit: 'points' }, { negated: true }, { form: 'point' }]) {
       expect(userStatementOf({ ...kept[0].statements[0], ...extra }), JSON.stringify(extra)).toBeUndefined();
@@ -164,7 +169,8 @@ describe('#3376 ruling 3, zero base flips: a link\'s working point is the same w
   const NOW = 'The recycling rate is 42% today.';
   const RANGE = 'Our recycling lead thinks switching to weekly food collection could lift the rate by between 4 and 7 percentage points.';
   const KEPT = 'It mostly depends on households sorting their food waste.';
-  const TEXT = [AIM2, NOW, RANGE, `The council calls it the 'green bin' plan. ${KEPT}`, 'We could start weekly food collection or keep fortnightly collection.'].join('\n');
+  // KEPT sits inside the council's paired single marks, so the quote check cannot bound it as the user's (kept, speaker unknown).
+  const TEXT = [AIM2, NOW, RANGE, `The council says: '${KEPT}'`, 'We could start weekly food collection or keep fortnightly collection.'].join('\n');
   const RATE = 'Household recycling rate', SWITCH = 'Weekly food collection running';
   const on = { kind: 'link', label: SWITCH, to_label: RATE, factor_label: null };
   const model = (kept: boolean): Rec => ({

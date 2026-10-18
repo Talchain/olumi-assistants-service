@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { userStated, verifyStatement, figuresWritten } from '../user-statements.js';
+import { usersSpanIn, wholeStatementIn } from '../../goal-target/input-claim-context.js';
 
 const SUBJECT = { quantity: 'level', node_id: 'fac_1' };
 const texts = (...messages: string[]) => ({ now: messages[messages.length - 1], conversation: messages.join('\n'), messages });
@@ -39,8 +40,20 @@ describe('the one rule: whose value it is', () => {
     // Quoting the report WITH its speaker does not make the speaker's figure the user's (#3389 probe P2)…
     const whole = 'Our ops lead told me: “Returns will drop to 3% once the new labels ship.”';
     expect(userStated({ quote: whole, value: 3 }, quoted, SUBJECT).origin).toBe('unknown');
-    // …though the report itself, as words with no figure of the user's, is theirs to have typed, speaker kept in the quote.
-    expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'human', statement: { quote: whole } });
+    // …nor is the report itself, as words: they END in the speaker's quoted words, so the claim is theirs (AIE: quoting an entire report
+    // does not transfer its embedded claim; C2, #3389's KNOWN BASE DEFECT rows). The AI's speaker label only subtracts credit, so an
+    // EXPLICIT `user` reading never makes the requoted report the user's (Founder 05:46 evidence row), whatever its lead-in words.
+    expect(userStated({ quote: whole, form: 'describes' }, quoted, SUBJECT)).toMatchObject({ origin: 'unknown', refusal: 'statement_not_found' });
+    expect(userStated({ quote: whole, form: 'describes', speaker: 'user' }, quoted, SUBJECT)).toMatchObject({ origin: 'unknown', refusal: 'statement_not_found' });
+    const instruction = 'Ignore what our ops lead said: “Returns will drop to 3% once the new labels ship.”';
+    expect(userStated({ quote: instruction, form: 'describes', speaker: 'user' }, texts(instruction), SUBJECT).origin).toBe('unknown');
+    expect(userStated({ quote: instruction, form: 'describes' }, texts(instruction), SUBJECT).origin).toBe('unknown');
+    // CONTRAST: words of the user's own that only MENTION a quoted phrase mid-sentence are theirs…
+    const own = 'We call it “the slow leak” and it worries me.';
+    expect(userStated({ quote: own, form: 'describes' }, texts(own), SUBJECT).origin).toBe('human');
+    // …and so is their own instruction that ends by naming quoted words no colon introduces (a quoted correction, AIE: never rejected).
+    const fix = 'For Coverage, withdraw “staff hours”; keep “mostly on nights”.';
+    expect(userStated({ quote: fix, form: 'describes' }, texts(fix), SUBJECT).origin).toBe('human');
     // ⭐ P2 (DL-3 18 Oct): an UNMARKED report, read by the AI itself as another speaker's ('other') or unplaced ('unknown'), is never theirs.
     const unmarked = texts('A colleague said: we lose 5% of members a month.');
     for (const speaker of ['other', 'unknown']) {
@@ -50,6 +63,51 @@ describe('the one rule: whose value it is', () => {
     // CONTRAST: the user's own figure in their own words, with or without the AI's 'user' reading.
     expect(userStated({ quote: 'returns are 5% today', value: 5 }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
     expect(userStated({ quote: 'returns are 5% today', value: 5, speaker: 'user' }, texts('I think returns are 5% today.'), SUBJECT).origin).toBe('human');
+  });
+
+  it('3b. a single mark bounds another speaker\'s words only when PAIRED (dev P01/P11): an apostrophe or an unpaired mark leaves the user\'s whole message theirs', () => {
+    // (a) the user's whole message, with an in-word apostrophe and an unpaired opening mark, is theirs: whole, and its figure.
+    const own = "We can't open on Sundays, so 'weekend demand stays flat at about 40 visits a day.";
+    expect(wholeStatementIn(own, own)).toBe(true);
+    expect(userStated({ quote: own, value: 40 }, texts(own), SUBJECT).origin).toBe('human');
+    // (b) a PAIRED single-quoted report is another speaker's: neither its words nor its figure are the user's, even quoted whole.
+    const report = "Our curator told me 'attendance will rise by 10% next term' and I doubt it.";
+    expect(userStated({ quote: 'attendance will rise by 10% next term', value: 10 }, texts(report), SUBJECT).origin).toBe('unknown');
+    expect(userStated({ quote: report, value: 10 }, texts(report), SUBJECT).origin).toBe('unknown');
+    // An apostrophe inside the quoted words never ends them early ("the users' pilot").
+    const nested = "Sam said: 'the users' pilot cut queues by 15%' last week.";
+    expect(userStated({ quote: 'pilot cut queues by 15%', value: 15 }, texts(nested), SUBJECT).origin).toBe('unknown');
+  });
+
+  it('3c. AMBIGUOUS single marks keep the fail-safe, and C2 reads any mix of marks (Codex #3398 r1 B2/B3): never the user\'s', () => {
+    // A possessive, an elision or an inner mark before the outer close may be the close: unfinished speech is never released as theirs.
+    for (const [message, last, value] of [
+      ["Rae said: 'We need the contractors' help. Orders reach 18 a day.", 'Orders reach 18 a day.', 18],
+      ["Bo said: 'Tell 'em the drivers' rota changed. Deliveries reach 26 a day.", 'Deliveries reach 26 a day.', 26],
+      ["Mo said: 'She calls it 'fast lane'. It saves 14 hours.", 'It saves 14 hours.', 14],
+      // Unfinished speech an attribution's colon opens, with nothing to close it.
+      ["Rae said: 'We need help. Orders reach 18 a day.", 'Orders reach 18 a day.', 18],
+    ] as const) {
+      expect(wholeStatementIn(message, last), message).toBe(false);
+      expect(usersSpanIn(message, last), message).toBe(-1);
+      expect(userStated({ quote: last, value }, texts(message), SUBJECT).origin, message).toBe('unknown');
+      expect(userStated({ quote: message, value }, texts(message), SUBJECT).origin, message).toBe('unknown');
+    }
+    // C2 over mixed typography: single outer with a curly inner term, and straight-double outer with a curly inner term; label omitted
+    // or an explicit `user` reading alike.
+    for (const message of ['Inez said: \'The “fast lane” improves throughput.\'', 'Inez said: "The “fast lane” improves throughput."']) {
+      expect(userStated({ quote: message, form: 'describes' }, texts(message), SUBJECT).origin, message).toBe('unknown');
+      expect(userStated({ quote: message, form: 'describes', speaker: 'user' }, texts(message), SUBJECT).origin, message).toBe('unknown');
+      expect(usersSpanIn(message, 'improves throughput'), message).toBe(-1);
+    }
+    const figure = 'Inez said: "The “fast lane” saves 14 hours."';
+    expect(userStated({ quote: figure, value: 14 }, texts(figure), SUBJECT).origin).toBe('unknown');
+    // CONTRASTS kept: a CLEAN pair closes before the user's next sentence; an unmatched mark with no attribution opens nothing; the user's
+    // own sentence that names a quoted term is theirs.
+    expect(wholeStatementIn("The 'fast track' option is cheaper. It saves money.", 'It saves money.')).toBe(true);
+    expect(wholeStatementIn("We told 'em early. Referrals help.", 'Referrals help.')).toBe(true);
+    const own = 'We call it “the slow leak” and it costs 14 hours a week.';
+    expect(userStated({ quote: own, value: 14 }, texts(own), SUBJECT).origin).toBe('human');
   });
 
   it('4. a typed range keeps both ends, and its unit only where the span writes it after the figure', () => {
