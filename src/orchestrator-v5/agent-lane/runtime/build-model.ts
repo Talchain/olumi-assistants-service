@@ -1143,9 +1143,23 @@ export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: str
  * issue for the EXISTING repair retry. The retry is adopted only when it CARRIES more ranges (`carriedRanges`), so a
  * range that is no per-one size (a budget, a target) costs one retry and changes nothing.
  */
-export function carriedRanges(admitted: Pick<AdmittedModel, 'edges'>): Set<string> {
+export function carriedRanges(admitted: Pick<AdmittedModel, 'edges'>, drafted?: CandidateModel, brief?: string): Set<string> {
   const texts = admitted.edges.map((e) => (e.provenance as { natural_effect?: { stated_range?: { text?: unknown } } } | undefined)?.natural_effect?.stated_range?.text);
-  return new Set(texts.filter((t): t is string => typeof t === 'string'));
+  return new Set([...texts.filter((t): t is string => typeof t === 'string'), ...recordedWholeRanges(drafted, brief)]);
+}
+
+/**
+ * ⭐ A3 (AIE A3 text; Lane A's host change): the producer keeps a written range WHOLE in `statements` on its link, its size null.
+ * A range the AI's own verified link-effect statement records (both ends, in the sentence that writes it) is CARRIED: the retry is
+ * never asked for what the draft already holds, and a retry that records it counts as carrying it (the adoption check below).
+ */
+function recordedWholeRanges(drafted: CandidateModel | undefined, brief: string | undefined): string[] {
+  if (drafted === undefined || typeof brief !== 'string') return [];
+  const recorded = [...sourceMapOf(draftStatements(drafted), brief).verified].filter(([key]) => key.startsWith('link|') && key.endsWith('|effect'))
+    .flatMap(([, said]) => said).filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
+  return findStatedRanges(brief).filter((r) => recorded.some((st) => st.quote.includes(r.text)
+    && Math.min(Math.abs(st.low!), Math.abs(st.high!)) === r.low.magnitude && Math.max(Math.abs(st.low!), Math.abs(st.high!)) === r.high.magnitude))
+    .map((r) => r.text);
 }
 
 /**
@@ -1187,22 +1201,15 @@ function moneyHeldBy(drafted: CandidateModel): { readonly label: string; readonl
  * Every miss asks the retry, which is adopted only when a link then CARRIES the range: asking costs one call, never a figure.
  */
 export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'edges'>, drafted: CandidateModel): string[] {
-  const carried = carriedRanges(admitted);
+  const carried = carriedRanges(admitted, drafted, brief);
   const held = moneyHeldBy(drafted);
   const quantities = [drafted.goal.metric, ...drafted.factors.map((f) => f.label), ...drafted.outcomes.map((o) => o.label), ...drafted.risks.map((r) => r.label)];
   // The written amount AT that end is this quantity's value, in its unit and currency, and written about it.
   const holdsAt = (label: string, end: { readonly index: number }) => held.some((h) => h.label === label
     && figureTheUserWroteFor(h.value, h.unit, brief, { target: [label], others: quantities.filter((q) => q !== label), strict: true, at: end.index }));
   const heldAsOne = (r: StatedRange) => [...new Set(held.map((h) => h.label))].some((label) => holdsAt(label, r.low) && holdsAt(label, r.high));
-  // ⭐ A3 (AIE A3 text; Lane A's host change): the producer keeps a written range WHOLE in `statements` on its link, its size null.
-  // A range the AI's own verified link-effect statement records (both ends, in the sentence that writes it) is carried: the retry
-  // is never asked for what the draft already holds.
-  const recorded = [...sourceMapOf(draftStatements(drafted), brief).verified].filter(([key]) => key.startsWith('link|') && key.endsWith('|effect'))
-    .flatMap(([, said]) => said).filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
-  const recordedWhole = (r: StatedRange) => recorded.some((st) => st.quote.includes(r.text)
-    && Math.min(Math.abs(st.low!), Math.abs(st.high!)) === r.low.magnitude && Math.max(Math.abs(st.low!), Math.abs(st.high!)) === r.high.magnitude);
   return [...new Map(findStatedRanges(brief).map((r) => [r.text, r] as const)).values()]
-    .filter((r) => !carried.has(r.text) && !recordedWhole(r) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
+    .filter((r) => !carried.has(r.text) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
     // `written`, never a one-letter name: a quoted `"${t}"` reads as a currency token to the currency-vocabulary guard.
     .map((r) => r.text).map((written) =>
     `The brief writes "${written}" and no link in the model carries it. ${perOneRangeRule(written)} If it is not a size `
@@ -2216,7 +2223,7 @@ export async function buildModelFromBrief(
           || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(first.admitted))
           || (retryOpen < gapCount(first.preparation) && keepsEveryRegisteredOption)
           // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(first.admitted).size && keepsEveryRegisteredOption)
+          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted, retryCandidate, brief).size > carriedRanges(first.admitted, first.candidate, brief).size && keepsEveryRegisteredOption)
           || (chainsAsked.length > 0 && keepsEveryRegisteredOption) || unattested !== null) &&
         // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
         (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(first.admitted))) &&
