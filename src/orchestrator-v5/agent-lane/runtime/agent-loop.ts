@@ -785,7 +785,10 @@ export async function runAgentTurn(
           : String(call.name) === WITHDRAW_PROPOSAL && !(proposalIdArg(call.arguments) ?? '').startsWith('goal-scope:')
             && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
             ? await (async (id: string): Promise<ToolResult> => {
-                const own = /^prop_[0-9a-f]{32}$/.test(id) && mode !== 'preview' && caps.withdrawProposal !== undefined
+                // ONE earlier card per response (Codex #3405 r1 P1): a reply never clears several of the user's held cards.
+                const tookOne = toolCalls.some(c => c.name === WITHDRAW_PROPOSAL && c.ok && /^prop_[0-9a-f]{32}$/.test(c.proposal_id ?? '')
+                  && !toolCalls.some(d => d.name !== WITHDRAW_PROPOSAL && d.proposal_id === c.proposal_id));
+                const own = !tookOne && /^prop_[0-9a-f]{32}$/.test(id) && mode !== 'preview' && caps.withdrawProposal !== undefined
                   ? await caps.withdrawProposal(input.ctx, earlierTurnWithdrawal(id)) : undefined;
                 return own?.ok === true ? own : {
                   ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,

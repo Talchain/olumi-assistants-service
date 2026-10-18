@@ -307,6 +307,72 @@ describe('DL-3 ruling F: Olumi takes back its own earlier card', () => {
     expect(offeredIds(r).some((x) => x.includes(p.proposal_id))).toBe(offeredIds(without).some((x) => x.includes(q.proposal_id)));
   }, 240_000);
 
+  /** A refused earlier-card withdrawal: the existing refusal, no set-aside line, and the card offered and carried as before. */
+  const refusedAndKept = async (p: { proposal_id: string; approve_action: Chip }) => {
+    const before = bytes();
+    const r = await aiWithdraws(p.proposal_id);
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'withdraw_proposal', ok: false, refusal: 'not_proposed_this_turn' })]);
+    expect(r.assistant_text).not.toContain('Set aside:');
+    expect(offeredIds(r)).toContain(p.approve_action.id);
+    expect(shownIds(r)).toContain(p.proposal_id);
+    expect(await carrierOf(p.proposal_id)).toBeDefined();
+    expect(bytes()).toBe(before);
+  };
+
+  it('CONTRAST user’s exact-band link: the band the user typed is theirs, so the link card refuses withdrawal', async () => {
+    seed();
+    script = [() => fnCall('propose_model_change', { from_label: 'Cost', to_label: 'Hours', direction: 'positive', strength: 'strong',
+      rationale: 'The user says Cost has a strong effect on Hours.' }), () => say('Here is that link, as your own estimate.')];
+    const b = await turn({ message: 'Cost has a strong effect on Hours.' });
+    const p = b._proposal_fields!.proposals.at(-1)!;
+    const { agentProposalOf } = await import('../proposal-object/record.js');
+    const card = agentProposalOf((await carrierOf(p.proposal_id))!)!;
+    // The shape Codex named: Olumi-level provenance, but an add_edge with no Olumi stamp of its own.
+    expect(card.provenance.authored_by).toBe('model_proposed');
+    expect(card.operations.map((o) => o.op)).toEqual(['add_edge']);
+    await refusedAndKept(p);
+  }, 180_000);
+
+  it('CONTRAST requested adoption: an Olumi option the user asked to include refuses withdrawal', async () => {
+    seed();
+    const g = graphNow();
+    graphOf.set(SCENARIO, projectGraphForPersistence({ ...g,
+      nodes: [...g.nodes, { id: 'opt_c', kind: 'option', label: 'Outsource', proposed_by: 'olumi', interventions: { fac_hours: { value: 20 } } }],
+      edges: [...g.edges, { from: 'dec_x', to: 'opt_c', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+        { from: 'opt_c', to: 'fac_hours', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }] }));
+    script = [() => fnCall('propose_new_option', { label: 'Outsource', rationale: 'The user asked to include it.' }), () => say('Here is that option, ready to include.')];
+    const b = await turn({ message: 'Add Olumi\'s suggestion Outsource to my comparison.' });
+    const p = b._proposal_fields!.proposals.at(-1)!;
+    const { agentProposalOf } = await import('../proposal-object/record.js');
+    const card = agentProposalOf((await carrierOf(p.proposal_id))!)!;
+    expect(card.provenance.authored_by).toBe('model_proposed');
+    expect(card.operations.map((o) => o.op)).toEqual(['adopt_olumi_option']);
+    await refusedAndKept(p);
+  }, 180_000);
+
+  it('BULK: one response takes back ONE earlier card; a second withdrawal is refused and that card stays', async () => {
+    seed(); const first = await olumisCard();
+    script = [() => fnCall('propose_assumptions', { assumptions: [
+      { user_stated: false, factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'A starting estimate' },
+    ] }), () => say('Here is a starting assumption for the other missing figure.')];
+    const b = await turn({ message: 'Suggest a starting assumption for the other missing figure.' });
+    const second = b._proposal_fields!.proposals.find((x) => x.proposal_id !== first.proposal_id)!;
+    expect(second.proposal_id).toMatch(/^prop_[0-9a-f]{32}$/);
+    expect(await carrierOf(first.proposal_id), 'both cards are held').toBeDefined();
+    expect(await carrierOf(second.proposal_id)).toBeDefined();
+    script = [() => fnCall('withdraw_proposal', { proposal_id: first.proposal_id }), () => fnCall('withdraw_proposal', { proposal_id: second.proposal_id }),
+      () => say('On reflection neither estimate was well grounded.')];
+    const r = await turn({ message: 'Are those figures well grounded?' });
+    expect(r._agent.tool_calls).toEqual([
+      expect.objectContaining({ name: 'withdraw_proposal', ok: true, proposal_id: first.proposal_id }),
+      expect.objectContaining({ name: 'withdraw_proposal', ok: false, refusal: 'not_proposed_this_turn' }),
+    ]);
+    expect(r.assistant_text.split('Set aside:').length - 1, 'one card set aside').toBe(1);
+    expect(await carrierOf(first.proposal_id)).toBeUndefined();
+    expect(await carrierOf(second.proposal_id), 'the second card stays held').toBeDefined();
+    expect(offeredIds(r)).toContain(second.approve_action.id);
+  }, 180_000);
+
   it('THIS TURN unchanged: a card proposed and withdrawn in the same turn is withdrawn, never offered', async () => {
     seed();
     script = [() => fnCall('propose_assumptions', { assumptions: [
