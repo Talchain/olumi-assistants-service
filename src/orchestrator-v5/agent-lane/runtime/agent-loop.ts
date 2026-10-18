@@ -86,6 +86,8 @@ export function answerIsIncomplete(resp: ModelCallResponse): boolean {
 export type CallModel = (req: ModelCallRequest) => Promise<ModelCallResponse>;
 
 /** A call's `proposal_id` argument, or undefined when its arguments do not parse or carry none. Never throws. */
+/** The one proposer whose card is field-scoped beside another this turn (`ONE_CHANGE_PER_APPROVAL`'s exception). */
+const LIMIT_CHANGE_TOOL = 'propose_limit_change';
 const proposalIdArg = (raw: unknown): string | undefined => {
   try {
     const id = (JSON.parse(String(raw ?? '{}')) as { proposal_id?: unknown } | null)?.proposal_id;
@@ -852,8 +854,11 @@ export async function runAgentTurn(
             detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.',
           }
         // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
-        // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
-        : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
+        // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`). ⭐ Except a
+        // limit change (verifier F1, 18 Oct: refusing it left the old limit live after the figure's approval): its card holds
+        // while its row reads as it did (`heldCardStillApplies`), so approving the other never stales it; it is its own card.
+        : isProposingTool(String(call.name)) && [...proposalsAwaitingApproval(toolCalls).values()].some((awaiting) =>
+          awaiting !== LIMIT_CHANGE_TOOL && String(call.name) !== LIMIT_CHANGE_TOOL)
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
           // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
           // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`). ⭐ Except Olumi's OWN earlier card, still offered and

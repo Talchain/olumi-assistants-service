@@ -21,8 +21,11 @@ vi.mock('../../../adapters/llm/router.js', () => ({
 vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 import { approvalChipIdFor } from '../approval-chips.js';
 import { declineChipIdFor } from '../proposal-object/record.js';
+import { heldAgentCardStillApplies, heldCardUnderReview } from '../proposal-object/still-applies.js';
+import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
+import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
 import { authorised, bothCards, call, chipFor, chips, closeApps, hash, idOf, LAPSE, MIXER, MIXER_WORDS, mixerSaved, node, route as routeOver, say,
-  world as worldOver, type Rec } from './fixtures/approval-world.js';
+  shownBy, world as worldOver, type Rec } from './fixtures/approval-world.js';
 
 const world = () => worldOver(live);
 const route = (w: ReturnType<typeof world>) => routeOver(w);
@@ -61,42 +64,71 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(hash(w.read())).toBe(before);
   }, 90_000);
 
-  it('⭐ A2 (the live T3 shape): two cards waiting, typed yes naming one → nothing written, both buttons shown, that card first; one press applies it', async () => {
+  // ⭐ PL amendment (DL-3 18 Oct 16:28): with several cards waiting, an EXPLICIT selection is honoured — the card the Agent
+  // names binds only if it is one the user was shown, and the write quotes their words. Only an ambiguous yes re-offers.
+  it('⭐ A2 (the live T3 shape): two cards waiting, a typed yes that names one → exactly that card is saved, as a typed approval; the other keeps its button', async () => {
+    const w = world(); const turn = await route(w);
+    const { a, b, session } = await bothCards(w, turn);
+    const typed = await turn({ message: 'Yes, I approve the 15% mixer setting.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: b }), say('Saved the 15% mixer setting.')]);
+    expect(authorised(typed), JSON.stringify(authorised(typed))).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
+    expect(mixerSaved(w.read())).toBe(true);
+    expect(node(w.read(), 'prep_time_cut').observed_state, 'card A (Olumi\u2019s 0%) was not written').toBeUndefined();
+    expect(typed._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: 'Yes, I approve the 15% mixer setting.' }]);
+    expect(String(typed.assistant_text)).toContain('Saved on your typed approval: \u201cYes, I approve the 15% mixer setting.\u201d');
+    // Card A (Olumi's starting value) was made on the model before B's write: KEPT for review and said, never applied or silent.
+    expect(String(typed.assistant_text)).toMatch(/Model changed: review this change\./);
+    expect(String(typed.assistant_text)).not.toMatch(LAPSE);
+    expect(chips(typed)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
+    expect(chips(typed), 'a card under review is not approvable').not.toContain(approvalChipIdFor(a));
+  }, 120_000);
+
+  it('A2 ambiguous: two cards waiting, a bare "yes" the Agent asks about → nothing written; every card offered with the change it applies; one press applies the chosen one', async () => {
     const w = world(); const turn = await route(w);
     const { a, b, session } = await bothCards(w, turn);
     const before = hash(w.read());
-    const typed = await turn({ message: 'Yes, I approve the 15% mixer setting.', source: 'composer', agent_session_id: session },
-      [call('authorise_change', { proposal_id: b }), say('You approved the 15% mixer setting.')]);
-    expect(authorised(typed), JSON.stringify(authorised(typed))).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
-    expect(hash(w.read()), 'nothing written').toBe(before);
+    const typed = await turn({ message: 'yes', source: 'composer', agent_session_id: session }, [say('Which change do you mean?')]);
+    expect(authorised(typed)).toEqual([]);
+    expect(hash(w.read())).toBe(before);
     const ids = chips(typed);
-    expect(ids, 'a button for EVERY waiting card').toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b)]));
-    expect(ids.indexOf(approvalChipIdFor(b)), 'the card the words meant comes first').toBeLessThan(ids.indexOf(approvalChipIdFor(a)));
-    expect(ids).toEqual(expect.arrayContaining([declineChipIdFor(a), declineChipIdFor(b)]));
-    expect(String(typed.assistant_text)).toMatch(/two changes are waiting\. To apply "Buy a faster mixer[^"]*", press its button below\./);
-    // ONE click applies the right one; the other card keeps its button. Each button shows the change it applies.
-    const chip = chipFor(typed, b);
-    expect(String(chip.detail)).toMatch(/^Buy a faster mixer acts on Prep time cut from mixer/);
+    expect(ids, 'a button for EVERY waiting card').toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b), declineChipIdFor(a), declineChipIdFor(b)]));
+    expect(String(chipFor(typed, b).detail)).toMatch(/^Buy a faster mixer acts on Prep time cut from mixer/);
     expect(String(chipFor(typed, a).detail)).toMatch(/Prep time cut from mixer = 0%/);
+    const chip = chipFor(typed, b);
     const pressed = await turn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: session });
     expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
     expect(mixerSaved(w.read())).toBe(true);
     // Olumi's starting value was made on the model as it was (its basis may read what just changed: the values-only stale
-    // negative), so it does not survive this approval silently: it is SAID. (PR-2 keeps it visible for review instead.)
-    expect(String(pressed.assistant_text)).toMatch(LAPSE);
-    expect(w.onLatestRow(approvalChipIdFor(a))).toBe(false);
+    // negative), so it is not applicable as it stands: it is KEPT for review and said once, never lapsed silently.
+    expect(String(pressed.assistant_text)).toMatch(/Model changed: review this change\./);
+    expect(String(pressed.assistant_text)).not.toMatch(LAPSE);
+    expect(chips(pressed)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
+    expect(chips(pressed)).not.toContain(approvalChipIdFor(a));
+    // ⭐ A6 (cold reopen): the card under review is on the wire a reload restores from, as review, never approvable.
+    const listed = (r: Rec) => ((r._proposal_fields?.proposals ?? []) as Rec[]).find((p) => p.proposal_id === a);
+    expect(listed(pressed)?.review_action?.id, 'listed for review on this reply').toBe(`agent-review-proposal:${a}`);
+    const cold = await turn({ message: 'What is still waiting for me?', source: 'composer', agent_session_id: `cold-${session}` }, [say('One change waits for your review.')]);
+    expect(authorised(cold)).toEqual([]);
+    expect(listed(cold)?.review_action?.id, 'still listed for review after a cold reopen').toBe(`agent-review-proposal:${a}`);
+    expect(chips(cold)).toEqual(expect.arrayContaining([`agent-review-proposal:${a}`, declineChipIdFor(a)]));
+    expect(chips(cold), 'never approvable after a cold reopen').not.toContain(approvalChipIdFor(a));
   }, 120_000);
 
-  it('A2 ambiguous: two cards waiting, a bare typed "yes" → never bound (even when the Agent picks one), both buttons offered', async () => {
+  it('A2 host check: with several waiting, a card the user was never SHOWN is not bound by typed words (a shown one is), and the refusal names the choice', async () => {
     const w = world(); const turn = await route(w);
-    const { a, b, session } = await bothCards(w, turn);
+    const { a, b, session, second } = await bothCards(w, turn);
     const before = hash(w.read());
-    const typed = await turn({ message: 'yes', source: 'composer', agent_session_id: session },
-      [call('authorise_change', { proposal_id: a }), say('Which change do you mean?')]);
-    expect(authorised(typed)).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
-    expect(hash(w.read())).toBe(before);
-    expect(chips(typed)).toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b)]));
-    expect(String(typed.assistant_text)).toMatch(/two changes are waiting/);
+    // The client shows only card A (B's reply never reached it): B is not in its displayed set.
+    const unseen = await turn({ message: 'Yes, apply that.', source: 'composer', agent_session_id: session,
+      displayed_proposals: shownBy(second).filter((p) => p.proposal_id !== b) }, [call('authorise_change', { proposal_id: b }), say('Applied.')]);
+    expect(authorised(unseen), JSON.stringify(authorised(unseen))).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
+    expect(hash(w.read()), 'nothing written for the unseen card').toBe(before);
+    // The card it named is now SHOWN, with its own button (the user had not seen it).
+    expect(String(unseen.assistant_text)).toMatch(/two changes are waiting\. To apply "Buy a faster mixer[^"]*", press its button below\./);
+    expect(chips(unseen)).toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b)]));
+    const shown = await turn({ message: 'Yes, use the starting value.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: a }), say('Saved.')]);
+    expect(authorised(shown), JSON.stringify(authorised(shown))).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: a })]);
   }, 120_000);
 
   it('⭐ A4: approving Olumi’s starting value never lapses the user’s new-link card on the same factor; it stays pressable, then saves', async () => {
@@ -117,6 +149,86 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(authorised(pressedB), JSON.stringify(authorised(pressedB)) + String(pressedB.assistant_text)).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     expect(mixerSaved(w.read())).toBe(true);
   }, 150_000);
+
+  // ⭐ PR-2, NO SILENT LAPSE (A4-negative): an overlapping change keeps the user's card VISIBLE for review, never gone.
+  it('⭐ A4\u2212: the user draws the same link elsewhere → the waiting card is kept for review (said once), not applicable, not bound by typed words; "Review this change" prepares it again', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions'); const session = first._agent.session_id;
+    w.edit((g) => { g.edges.push({ from: 'buy_faster_mixer', to: 'prep_time_cut', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }); });
+    const next = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: session }, [say('Here is where things stand.')]);
+    expect(String(next.assistant_text)).toMatch(/Model changed: review this change\. The held change "Buy a faster mixer[^"]*" was prepared before the model changed/);
+    expect(String(next.assistant_text)).not.toMatch(LAPSE);
+    expect(w.onLatestRow(approvalChipIdFor(b)), 'still held').toBe(true);
+    expect(chips(next), JSON.stringify(chips(next))).toEqual(expect.arrayContaining([`agent-review-proposal:${b}`, declineChipIdFor(b)]));
+    expect(chips(next), 'never approvable as it stands').not.toContain(approvalChipIdFor(b));
+    // Typed words never bind a card under review; nothing is written.
+    const before = hash(w.read());
+    const typed = await turn({ message: 'Yes, apply that.', source: 'composer', agent_session_id: session },
+      [call('authorise_change', { proposal_id: b }), say('Applied.')]);
+    expect(authorised(typed)).toEqual([expect.objectContaining({ ok: false, mutated: false })]);
+    expect(hash(w.read())).toBe(before);
+    expect(String(typed.assistant_text), 'said once').not.toMatch(/Model changed: review this change/);
+    // Cold: still visible for review.
+    const cold = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: randomUUID() }, [say('Here is where things stand.')]);
+    expect(chips(cold)).toContain(`agent-review-proposal:${b}`);
+    // "Review this change": the Agent prepares it again on the model as it is now; the reviewed card is replaced by it.
+    const review = (next.suggested_actions as { id: string; message: string }[]).find((c) => c.id === `agent-review-proposal:${b}`)!;
+    const again = await turn({ message: review.message, source: 'chip_click', chip: { id: review.id }, agent_session_id: session },
+      [call('propose_option_interventions', MIXER), say('Here it is on the model as it is now.')]);
+    const c = idOf(again, 'propose_option_interventions');
+    expect(c).not.toBe(b);
+    expect(w.onLatestRow(approvalChipIdFor(b)), 'the reviewed card is replaced').toBe(false);
+    const chipC = chipFor(again, c);
+    const pressed = await turn({ message: chipC.message, source: 'chip_click', chip: { id: chipC.id }, agent_session_id: session });
+    expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: c })]);
+    expect(node(w.read(), 'buy_faster_mixer').interventions?.prep_time_cut).toBeDefined();
+  }, 180_000);
+
+  // PR-2: the SAME keep-for-review rule at the two commit seams that used to drop a moved Agent card (no route needed).
+  it('A4\u2212 commit seams: the carry-forward and the mutating commit keep the moved card for review; a non-Agent pending still drops', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions');
+    const card = w.latestPendings().find((p) => p.chip_id === approvalChipIdFor(b))!;
+    expect(card, 'the card is stored').toBeDefined();
+    w.edit((g) => { g.edges.push({ from: 'buy_faster_mixer', to: 'prep_time_cut', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }); });
+    const moved = w.read(); const movedHash = hash(moved);
+    expect(movedHash).not.toBe(card.preconditions.graph_hash);
+    const other = { ...card, chip_id: 'chip_action_run_analysis', action: { kind: 'run_analysis' } };
+    const carried = computeSurvivingPriorPendingsDetailed([card, other] as never, [], [], movedHash, Date.now(), (pa) => heldAgentCardStillApplies(pa, moved));
+    expect(carried.survivors.map((p) => [p.chip_id, heldCardUnderReview(p)])).toEqual([[approvalChipIdFor(b), true]]);
+    expect(carried.summary.hashInvalidatedCount, 'the non-Agent pending still drops').toBe(1);
+    const thread = threadHoldsThroughMutatingCommit({ priorPendingActions: [card] as never, graphAfterCommit: moved, graphHashAfterCommit: movedHash,
+      appliedOperations: null, nowMs: Date.now(), scenarioId: w.sid, turnId: 't-seam', requestId: 'r-seam' });
+    expect(thread.lapsed).toEqual([]);
+    expect(thread.threaded.map((p) => [p.chip_id, heldCardUnderReview(p)])).toEqual([[approvalChipIdFor(b), true]]);
+  }, 120_000);
+});
+
+// ⭐ A5, ONE OPERATION (DL-3 PR-2): the same card approved twice at once — its press and the user's typed approval, sent
+// together — is written ONCE; the second sees it applied and writes nothing.
+describe('one operation: a press and a typed approval of the same card, at once, write once', () => {
+  it('⭐ A5: concurrent press + typed approval → exactly one write of the card; the model holds it once', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions'); const chip = chipFor(first, b);
+    const writesBefore = w.graphWrites();
+    const [pressed, typed] = await Promise.all([
+      turn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: first._agent.session_id }),
+      turn({ message: 'Yes, go ahead with the 15% mixer change.', source: 'composer', agent_session_id: first._agent.session_id },
+        [call('authorise_change', { proposal_id: b }), say('Done.')]),
+    ]);
+    const wrote = [...authorised(pressed), ...authorised(typed)].filter((c) => c.mutated === true);
+    expect(wrote, JSON.stringify([authorised(pressed), authorised(typed)])).toHaveLength(1);
+    expect(mixerSaved(w.read())).toBe(true);
+    expect(w.graphWrites() - writesBefore, 'one graph write').toBe(1);
+    // The other approval reads the first one's outcome: already saved. Never "Not saved" or "review this change" for a
+    // change that WAS saved (before A5: "superseded", then the saved card was put under review).
+    const other = [pressed, typed].find((r) => !authorised(r).some((c) => c.mutated === true))!;
+    expect(authorised(other), JSON.stringify(authorised(other))).toEqual([expect.objectContaining({ ok: true, mutated: false })]);
+    expect(String(other.assistant_text)).not.toMatch(/Not saved|review this change/i);
+  }, 120_000);
 });
 
 // ⭐ THE DISPLAYED-OPERATION CONTRACT (Codex BLOCK on #3420@42e08cdc, 18 Oct: its three CEE probes, adopted as rows). Typed
@@ -206,5 +318,27 @@ describe('typed assent binds only to what the user was shown, and always keeps t
     expect(attemptedId).toBe(idOf(reply, 'propose_option_interventions'));
     expect(authorised(reply)[0]!.refusal).toBe('not_on_narration');
     expect(authorised(reply).some((c) => c.mutated)).toBe(false); expect(hash(w.read())).toBe(before);
+  }, 120_000);
+});
+
+// ⭐ Codex BLOCK on #3424 @db2376d0 (independent probe, adopted): replaying the turn that offered a card, after a later turn
+// kept it for review, keeps the review control and the review state, whether or not the model is back on the card's base.
+describe('a card kept for review stays under review on a replay', () => {
+  it.each([false, true])('replaying the original offer after review (model back on its base: %s) → review controls only, no write', async (back) => {
+    const w = world(); const turn = await route(w); const original = w.read(); const offerId = randomUUID();
+    const payload = { message: MIXER_WORDS, source: 'composer', turn_id: offerId };
+    const first = await turn(payload, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions');
+    w.edit((g) => { g.edges.push({ from: 'buy_faster_mixer', to: 'prep_time_cut', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }); });
+    const marked = await turn({ message: 'Where are we?', source: 'composer', agent_session_id: first._agent.session_id }, [say('Here is where things stand.')]);
+    expect(chips(marked), 'control: the card really is under review').toContain(`agent-review-proposal:${b}`);
+    expect(chips(marked)).not.toContain(approvalChipIdFor(b));
+    if (back) w.edit((g) => { for (const key of Object.keys(g)) delete g[key]; Object.assign(g, structuredClone(original)); });
+    const writes = w.graphWrites();
+    const replay = await turn(payload);
+    expect(replay._agent.replayed, 'control: this is the durable replay path').toBe(true);
+    expect(w.graphWrites()).toBe(writes);
+    expect((replay._proposal_fields?.proposals ?? []).find((r: Rec) => r.proposal_id === b)?.review_action?.id, 'review state survives replay').toBe(`agent-review-proposal:${b}`);
+    expect(chips(replay), 'a review card is never re-offered as approvable').not.toContain(approvalChipIdFor(b));
   }, 120_000);
 });

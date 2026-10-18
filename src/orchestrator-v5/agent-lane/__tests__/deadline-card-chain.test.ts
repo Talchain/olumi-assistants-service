@@ -829,14 +829,15 @@ describe('a held deadline card survives an unrelated model change, and lapses wh
     expect((after.edges as Rec[]).filter((x) => x.from === changed[0]!.from && x.to === changed[0]!.to), 'the link change is kept').toEqual(changed);
   });
 
-  it('NEGATIVE: the model moved AND the goal’s own date changed → the card lapses, said; Yes writes nothing', async () => {
+  // ⛔ CHANGED CONTRACT (PR-2, no silent lapse): kept for review and said (it used to lapse); its Yes still writes nothing.
+  it('NEGATIVE: the model moved AND the goal’s own date changed → the card is kept for review, said; Yes writes nothing', async () => {
     const w = world(), turn = await route(w), first = await turn(), { yes } = card(first);
     const g = moveOneLink(w.read());
     goal(g).goal_horizon = { ...(goal(g).goal_horizon ?? {}), deadline: '2027-01-31' };
     w.replace(g);
     const next = await turn({ agent_session_id: first._agent.session_id });
-    expect(String(next.assistant_text)).toMatch(/no longer fits the model as it now stands, so it has lapsed/);
-    expect(onLatestRow(w, yes.id)).toBe(false);
+    expect(String(next.assistant_text)).toMatch(/Model changed: review this change/);
+    expect(((next.suggested_actions ?? []) as { id: string }[]).map((a) => a.id)).not.toContain(yes.id);
     await turn({ message: yes.message, source: 'chip_click', chip: { id: yes.id }, agent_session_id: first._agent.session_id });
     expect(goal(w.read()).goal_horizon.deadline).toBe('2027-01-31');
   });

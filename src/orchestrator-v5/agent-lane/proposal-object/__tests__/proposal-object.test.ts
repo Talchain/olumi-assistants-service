@@ -15,6 +15,7 @@ import type { PendingAction } from '../../../session/pending-action.js';
 import { amendHeldOperations,parseProposalEdits,proposalEditsDigest,readUserEdits } from '../amend.js';
 import { PROPOSAL_IDLE_TTL_MS,reconcileHeldProposals } from '../lifecycle.js';
 import { FIELD_CLASS_BY_OP,declinedProposalOf,heldChangeName,issuedTurnIdsForProposalRecords,productHoldRecord,proposalFieldsWire,proposalIssuances,proposalRecord,type ProposalIssuingRow } from '../record.js';
+import { heldCardUnderReview } from '../still-applies.js';
 import { editsRefusedSentence,heldDeclineSentence,heldLapseSentence,userEditsReceipt } from '../reply.js';
 
 const SID = '5c0e1d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f';
@@ -354,8 +355,8 @@ describe('the ONE lifecycle (lifecycle.ts): held until approved or declined, nev
 
   it('approved or declined → gone and NOT said; already in the model → gone and not said', () => {
     const h = hold();
-    expect(reconcileHeldProposals({ ...base, atStart: [h], latest: [h], approved: new Set([h.chip_id]) })).toEqual({ carried: [], lapsed: [] });
-    expect(reconcileHeldProposals({ ...base, atStart: [h], latest: [h], declined: new Set([h.chip_id]) })).toEqual({ carried: [], lapsed: [] });
+    expect(reconcileHeldProposals({ ...base, atStart: [h], latest: [h], approved: new Set([h.chip_id]) })).toEqual({ carried: [], lapsed: [], review: [] });
+    expect(reconcileHeldProposals({ ...base, atStart: [h], latest: [h], declined: new Set([h.chip_id]) })).toEqual({ carried: [], lapsed: [], review: [] });
     const applied = { ...graph, nodes: [...graph.nodes, { id: 'risk_competitive_response', kind: 'risk', label: 'Competitive response' }],
       edges: [...graph.edges, { from: 'risk_competitive_response', to: 'goal_x' }, { from: 'fac_price', to: 'risk_competitive_response' }] };
     expect(reconcileHeldProposals({ ...base, atStart: [h], latest: [], graph: applied }).lapsed).toEqual([]);
@@ -479,14 +480,19 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const start = performance.now(); declinedProposalOf(`agent-decline-proposal:${' '.repeat(20_000)}`);
     if (timingGated) { expect(performance.now() - start).toBeLessThan(50); }
   });
-  it('RED Agent lifecycle never re-pins, says model and idle lapses, and refreshes each live item', async () => {
+  it('RED Agent lifecycle never re-pins, keeps a moved card for review (said once), says idle lapses, and refreshes each live item', async () => {
     const { carrier, g } = await fixture(); const nowMs = Date.now();
     const base = { atStart: [carrier], latest: [carrier], approved: new Set<string>(), declined: new Set<string>(), graph: g,
       graphHash: 'pin', scenarioId: SID, requestId: 'request', nowMs };
     const kept = reconcileHeldProposals(base); expect(kept.carried).toHaveLength(1);
     expect(Date.parse(kept.carried[0]!.expires_at_iso)).toBe(nowMs + PROPOSAL_IDLE_TTL_MS);
     const moved = reconcileHeldProposals({ ...base, graphHash: 'new pin' });
-    expect(moved.carried).toEqual([]); expect(moved.lapsed).toEqual([{ hold: carrier, reason: 'model_changed' }]);
+    // ⛔ CHANGED CONTRACT (DL-3 18 Oct, PR-2, no silent lapse; Codex co-design §2): a card whose model moved used to lapse
+    // ("model_changed"). It is now KEPT, marked for review and said once, never applicable as it stands. Still never re-pinned.
+    expect(moved.lapsed).toEqual([]); expect(moved.review).toEqual([carrier]);
+    expect(moved.carried).toHaveLength(1); expect(heldCardUnderReview(moved.carried[0]!)).toBe(true);
+    expect(moved.carried[0]!.id, 'the same revision').toBe(carrier.id);
+    expect(moved.carried[0]!.preconditions, 'never re-pinned').toEqual(carrier.preconditions);
     const idle = { ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() };
     expect(reconcileHeldProposals({ ...base, latest: [idle] }).lapsed[0]?.reason).toBe('idle');
   });
@@ -498,7 +504,7 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
       graphHash: 'own approval moved the pin', scenarioId: SID, requestId: 'request', nowMs,
       isApplied: (id: string) => proposals.isApplied(id) };
     for (const latest of [[carrier], [{ ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() }], []]) {
-      expect(reconcileHeldProposals({ ...base, latest })).toEqual({ carried: [], lapsed: [] });
+      expect(reconcileHeldProposals({ ...base, latest })).toEqual({ carried: [], lapsed: [], review: [] });
     }
     expect(proposals.authorise({ proposal_id: p.proposal_id, scenario_id: SID, authenticated_user_id: null,
       current_graph_identity_hash: base.graphHash }).status).toBe('already_applied');

@@ -259,7 +259,10 @@ describe('Explain scoped assembly safety', () => {
       // Current qualifications, tool constraints, numbers and negative assertions remain; generated quality is unverified.
       // AIE robustness sentence (AIE-RUN-ROBUSTNESS-SEMANTIC-INSTRUCTION-20261018-v1, sha256 2bb83b6d…) in RUN_FACTS_USE: the SENT
       // instructions minus exactly that sentence reproduce 851e5abd… byte for byte; nothing else in the body differs.
-      .toBe('52520051ae61e3c7a62f607988900647a321496ee7855596a1b4117b25fe72e4');
+      // PROMPT-INT coach currentness (#3423, merged at 7d052e5d; fix-forward of its one NEW CI red): the coach template's TRUTH,
+      // REASONING, AUTHORSHIP and CALCULATION BOUNDARY sentences only: 49,310 → 50,626 bytes. Captured from the SENT body; swapping
+      // back exactly the template text reproduces 52520051… and 49,310 bytes.
+      .toBe('e68f11f78bec9d74f60a300b32284ffb922926e9ea848c98528097e1e0b26b5e');
   },60000);
 });
 

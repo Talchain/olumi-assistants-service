@@ -193,11 +193,13 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
     const offers = await readExecutableHeldProposalOffers({ scenarioId: w.sid, userId: null, graphHash: hash(w.read()), graph: w.read(),
       latest: await (live.store as Rec).readMostRecentPendingActions(w.sid), rows: w.rows, store: live.store } as never);
     expect(offers.map((x: Rec) => x.proposal_id)).toContain(p.proposal_id);
-    // CONTRAST: its goal renamed (the hash unchanged) → a cold session neither offers the card nor projects its fields.
+    // CONTRAST: its goal renamed (the hash unchanged) → a cold session never offers the card as approvable. ⛔ CHANGED CONTRACT
+    // (PR-2, no silent lapse): its fields are still projected, as review only (`review_action`), so a reload shows it.
     const g = w.read(); goal(g).label = 'Team productivity'; w.replace(g);
     const cold2 = await turn({ message: 'And now?', source: 'composer', agent_session_id: randomUUID() });
     expect((cold2.suggested_actions ?? []).some((a: Rec) => a.id === deadline.id)).toBe(false);
-    expect((cold2._proposal_fields?.proposals ?? []).map((a: Rec) => a.proposal_id)).not.toContain(p.proposal_id);
+    expect((cold2._proposal_fields?.proposals ?? []).find((a: Rec) => a.proposal_id === p.proposal_id)?.review_action?.id)
+      .toBe(`agent-review-proposal:${p.proposal_id}`);
   }, 90_000);
 
   /** DGAI's press of a card it shows (SuggestedChips: the record's revision and digest, the SHOWN `graph_hash`, `fields: []`). */
@@ -261,34 +263,38 @@ describe('held deadline card: an unrelated approval never lapses it; any change 
     expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   }, 90_000);
 
-  it('NEGATIVE: the goal’s TARGET changed (with the links) → the card lapses, said; its press writes nothing', async () => {
+  it('NEGATIVE: the goal’s TARGET changed (with the links) → the card is kept for review, said; its press writes nothing', async () => {
     const w = world(); const turn = await route(w);
     const { deadline, session } = await bothCards(w, turn);
     const g = w.read(); goal(g).goal_threshold_raw = 15; w.replace(g);
     const next = await turn({ message: 'And now?', source: 'composer', agent_session_id: session });
-    expect(String(next.assistant_text)).toMatch(LAPSE);
-    expect(w.onLatestRow(deadline.id)).toBe(false);
+    // ⛔ CHANGED CONTRACT (DL-3 18 Oct, PR-2, no silent lapse): kept for review and SAID, never approvable; a press writes nothing.
+    expect(String(next.assistant_text)).toMatch(/Model changed: review this change/);
+    expect((next.suggested_actions ?? []).map((a: Rec) => a.id)).not.toContain(deadline.id);
     await turn({ message: deadline.message, source: 'chip_click', chip: { id: deadline.id }, agent_session_id: session });
     expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   }, 90_000);
 
-  it('NEGATIVE: the goal renamed elsewhere (the hash unchanged) → the card lapses, said; its press writes nothing', async () => {
+  it('NEGATIVE: the goal renamed elsewhere (the hash unchanged) → the card is kept for review, said; its press writes nothing', async () => {
     const w = world(); const turn = await route(w);
     const { deadline, session } = await bothCards(w, turn);
     const g = w.read(); const before = hash(g); goal(g).label = 'Team productivity'; expect(hash(g)).toBe(before); w.replace(g);
     const next = await turn({ message: 'And now?', source: 'composer', agent_session_id: session });
-    expect(String(next.assistant_text)).toMatch(LAPSE);
-    expect(w.onLatestRow(deadline.id)).toBe(false);
+    // ⛔ CHANGED CONTRACT (DL-3 18 Oct, PR-2, no silent lapse): kept for review and SAID, never approvable; a press writes nothing.
+    expect(String(next.assistant_text)).toMatch(/Model changed: review this change/);
+    expect((next.suggested_actions ?? []).map((a: Rec) => a.id)).not.toContain(deadline.id);
     await turn({ message: deadline.message, source: 'chip_click', chip: { id: deadline.id }, agent_session_id: session });
     expect(goal(w.read()).goal_horizon ?? null).toBeNull();
   }, 90_000);
 
-  it('NEGATIVE: the goal’s own date was set elsewhere → the card lapses, said; its press writes nothing', async () => {
+  it('NEGATIVE: the goal’s own date was set elsewhere → the card is kept for review, said; its press writes nothing', async () => {
     const w = world(); const turn = await route(w);
     const { deadline, session } = await bothCards(w, turn);
     const g = w.read(); goal(g).goal_horizon = { deadline: '2027-03-31' }; w.replace(g);
     const next = await turn({ message: 'And now?', source: 'composer', agent_session_id: session });
-    expect(String(next.assistant_text)).toMatch(LAPSE);
+    // ⛔ CHANGED CONTRACT (PR-2): kept for review and SAID, never approvable; a press writes nothing.
+    expect(String(next.assistant_text)).toMatch(/Model changed: review this change/);
+    expect((next.suggested_actions ?? []).map((a: Rec) => a.id)).not.toContain(deadline.id);
     await turn({ message: deadline.message, source: 'chip_click', chip: { id: deadline.id }, agent_session_id: session });
     expect(goal(w.read()).goal_horizon).toEqual({ deadline: '2027-03-31' });
   }, 90_000);

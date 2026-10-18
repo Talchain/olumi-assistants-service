@@ -8,7 +8,7 @@ import { isPendingActionExpired, parsePendingAction, type PendingAction } from '
 import { identityReadingOf } from './identity-card.js';
 import { identityCardOfferable } from '../system-events/identity-confirm-edit.js';
 import type { StructuredProposal } from './proposal.js';
-import { heldCardStillApplies, heldCardSubjectMoved } from './proposal-object/still-applies.js';
+import { heldCardStillApplies, heldCardSubjectMoved, heldCardUnderReviewIn } from './proposal-object/still-applies.js';
 
 /**
  * ⛔ A HELD IDENTITY CARD IS SHOWN ONLY WHILE IT IS STILL OFFERABLE (#2851 Codex buddy r1 P1-1): a card held from before
@@ -109,6 +109,9 @@ export async function readExecutableHeldProposalOffers(input: {
     const candidates = membership.outstanding(input.scenarioId, input.userId);
     if (candidates.length !== 1) return [];
     const id = candidates[0]!.proposal_id;
+    // ⭐ PR-2 (Codex BLOCK on #3424 @db2376d0): a card kept for review has no approve authority on this read either, even back
+    // on its own model; `proposal_fields` lists it for review.
+    if (heldCardUnderReviewIn(live, id)) return [];
     const request = { proposal_id: id, scenario_id: input.scenarioId,
       authenticated_user_id: input.userId, current_graph_identity_hash: input.graphHash,
       // Test the exact chip click; the row below must still offer this same typed identity.
