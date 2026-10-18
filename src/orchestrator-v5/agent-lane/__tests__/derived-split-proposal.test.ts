@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { quoteOfFigure } from '../stated-by-user.js';
 import { gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
 
 const SCENARIO = '205b462e-edfc-439d-9a4a-5398ffc11ecf';
@@ -42,10 +43,12 @@ function setup(graph: unknown) {
 
 async function propose(message: string, levels: { features?: number; ads?: number; total?: number }, graph: unknown = cGraph, sessionText?: string, label = 'Split it 50/50 at this stage') {
   const { caps, sent } = setup(graph);
+  // ⭐ LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence that writes a level's figure; none where it is unwritten.
+  const cite = (value: number) => (q => (q !== null ? { quote: q } : {}))(quoteOfFigure(value, 'GBP', message));
   const acts = [
-    { factor_label: FEATURES, direction: 'positive', ...(levels.features !== undefined ? { level: { value: levels.features, unit: 'GBP' } } : {}) },
-    { factor_label: ADS, direction: 'positive', ...(levels.ads !== undefined ? { level: { value: levels.ads, unit: 'GBP' } } : {}) },
-    { factor_label: TOTAL, direction: 'positive', ...(levels.total !== undefined ? { level: { value: levels.total, unit: 'GBP' } } : {}) },
+    { factor_label: FEATURES, direction: 'positive', ...(levels.features !== undefined ? { level: { value: levels.features, unit: 'GBP', ...cite(levels.features) } } : {}) },
+    { factor_label: ADS, direction: 'positive', ...(levels.ads !== undefined ? { level: { value: levels.ads, unit: 'GBP', ...cite(levels.ads) } } : {}) },
+    { factor_label: TOTAL, direction: 'positive', ...(levels.total !== undefined ? { level: { value: levels.total, unit: 'GBP', ...cite(levels.total) } } : {}) },
   ];
   const r = await caps.proposeNewOption(
     { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_turn_text: message, user_text: sessionText ?? message },

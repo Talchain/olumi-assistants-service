@@ -30,7 +30,7 @@ describe('a level on an unlinked factor brings its own link; the model is told n
     const store = new ProposalStore();
     const r = await createAgentCapabilities(d, store).proposeOptionInterventions(
       { scenario_id: '550e8400-e29b-41d4-a716-446655440099', authenticated_user_id: 'user-a', request_id: 'r', user_text: 'it lowers Monthly churn to 6%' },
-      { interventions: [{ option_label: 'Test £54 versus £59 by customer cohort before rollout', factor_label: 'Monthly churn', value: 0.06, basis: 'the user: 6%', user_stated: true }] },
+      { interventions: [{ option_label: 'Test £54 versus £59 by customer cohort before rollout', factor_label: 'Monthly churn', value: 0.06, quote: 'it lowers Monthly churn to 6%', basis: 'the user: 6%', user_stated: true }] },
     );
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const ops = store.get(String(r.proposal_id))!.operations;

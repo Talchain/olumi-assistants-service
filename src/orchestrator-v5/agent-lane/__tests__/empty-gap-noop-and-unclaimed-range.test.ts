@@ -6,7 +6,11 @@ import { readinessViewOf } from '../readiness-view.js';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/empty-gaps-served-2919.json', import.meta.url), 'utf8'));
 const served = fixture.served;
-const exact = JSON.parse(fixture.raw_arguments) as { interventions: Record<string, unknown>[]; whole_request: boolean };
+const served_args = JSON.parse(fixture.raw_arguments) as { interventions: Record<string, unknown>[]; whole_request: boolean };
+// ⭐ LEAN CORE (#3392, USER_QUOTE): served before the citation field existed; the AI now cites the user's span for the level it claims
+// as theirs (and none for its own estimate). Every other served argument is unchanged.
+const exact = { ...served_args, interventions: served_args.interventions.map((level) => (level.user_stated === true && level.quote === undefined
+  ? { ...level, quote: 'Trial takes 0.3 days, which is my own figure' } : level)) };
 const ctx = { scenario_id: served.scenario_id, authenticated_user_id: 'user-a', request_id: 'empty-gaps-2919', user_text: fixture.message };
 const llm = vi.fn(() => { throw new Error('Live LLM calls forbidden'); });
 vi.mock('../../session/index.js', () => ({

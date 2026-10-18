@@ -305,7 +305,9 @@ async function proposalTurn(trigger: Trigger, name: string) {
   const w = await run(trigger, { evidenceLabel: name, expectedCalls: 2,
     payload: { message: 'Prepare a £54 price level for review. What should we examine next?' },
     providerReply: (_body, index) => index === 1 ? { status: 'completed', output: [{ type: 'function_call', call_id: 'c2-level', name: 'propose_option_interventions', arguments: JSON.stringify({
-      interventions: [{ option_label: 'raise_price_to_54', factor_label: 'pro_price', value: 54, unit: '£/subscriber/month', user_stated: true }], whole_request: false,
+      // LEAN CORE (#3392, USER_QUOTE): the AI cites the span the user typed for the figure it claims as theirs.
+      interventions: [{ option_label: 'raise_price_to_54', factor_label: 'pro_price', value: 54, unit: '£/subscriber/month', user_stated: true,
+        quote: 'Prepare a £54 price level for review.' }], whole_request: false,
     }) }] } : response(proposalText),
   });
   recordC2(name, w);

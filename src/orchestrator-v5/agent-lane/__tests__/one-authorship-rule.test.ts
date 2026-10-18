@@ -110,6 +110,24 @@ describe('the one rule: whose value it is', () => {
     expect(userStated({ quote: own, value: 14 }, texts(own), SUBJECT).origin).toBe('human');
   });
 
+  it('3d. quoted words that are EXACTLY the option\'s own label are the user\'s title for it (Codex #3392 r1 B4); every other quoted figure keeps the fail-safe', () => {
+    const TITLE = '£25 for new members; keep current members';
+    const said = `Let’s add the trial plan: "${TITLE}".`;
+    const claim = { quote: said, value: 25, unit: 'GBP per month' };
+    // RED → GREEN: the writer passes the option's label; the £25 in the user's own title for it is theirs.
+    expect(userStated(claim, texts(said), SUBJECT, { titles: [TITLE] }).origin).toBe('human');
+    // The same words with no title known keep the fail-safe (another speaker's quoted words, unknown).
+    expect(userStated(claim, texts(said), SUBJECT).origin).toBe('unknown');
+    // Identity only: quoted words that are not exactly the label stay another speaker's.
+    expect(userStated(claim, texts(said), SUBJECT, { titles: ['£25 for new members'] }).origin).toBe('unknown');
+    // A named speaker's quoted proposal that the option is named after: the AI's `other` reading still subtracts credit.
+    const reported = `Inez said: "${TITLE}".`;
+    expect(userStated({ ...claim, quote: reported, speaker: 'other' }, texts(reported), SUBJECT, { titles: [TITLE] }).origin).toBe('unknown');
+    // An unclosed quotation (the fail-safe region) is never a title, whatever words follow.
+    const open = `Let’s add the trial plan: "${TITLE}`;
+    expect(userStated({ ...claim, quote: open }, texts(open), SUBJECT, { titles: [TITLE] }).origin).toBe('unknown');
+  });
+
   it('4. a typed range keeps both ends, and its unit only where the span writes it after the figure', () => {
     const t = texts('Each courier costs between £400 and £650 a week, depending on the route.');
     expect(userStated({ quote: 'between £400 and £650 a week', low: 400, high: 650, unit: '£' }, t, SUBJECT))
@@ -127,6 +145,11 @@ describe('the one rule: whose value it is', () => {
     const bare = userStated({ quote: 'between 4 and 6 a day', low: 4, high: 6, unit: 'kg a day' }, texts('Waste is between 4 and 6 a day.'), SUBJECT);
     expect(bare).toMatchObject({ origin: 'human', unitIsUsers: false, statement: { low: 4, high: 6 } });
     expect(bare.origin === 'human' && bare.statement.unit).toBeUndefined();
+    // A unit of no known family ("share per month"): a written PERCENTAGE grounds its 0–1 fraction (the estate's figure rule)…
+    expect(userStated({ quote: 'churn falls to 6%', value: 0.06, unit: 'share per month' }, texts('With this, churn falls to 6%.'), SUBJECT))
+      .toMatchObject({ origin: 'human', statement: { low: 0.06, high: 0.06 } });
+    // …never a plain number's fraction.
+    expect(userStated({ quote: 'we add 6 a month', value: 0.06, unit: 'share per month' }, texts('Then we add 6 a month.'), SUBJECT).origin).toBe('unknown');
     // A money unit's own scale letter reads the written amount: "£54k" is 54 in £k.
     expect(userStated({ quote: 'a budget of £54k', value: 54, unit: '£k' }, texts('We have a budget of £54k this year.'), SUBJECT))
       .toMatchObject({ origin: 'human', unitIsUsers: true, statement: { low: 54, high: 54, unit: '£k' } });
@@ -163,6 +186,9 @@ describe('the one rule: whose value it is', () => {
     // CONTRAST: a bound on the SAME figure in another sentence of the line is not this span's bound.
     const line = texts('We need attendance of at least 55% by March. A manager thinks more staff could add between 40 and 55 points.');
     expect(userStated({ quote: 'A manager thinks more staff could add between 40 and 55 points.', low: 40, high: 55 }, line, SUBJECT).origin).toBe('human');
+    // CONTRAST: a comparator on a LATER writing of the same figure in the sentence is that writing's, not this span's.
+    const twice = texts('Set the new price to £59 under “£59 for new customers”.');
+    expect(userStated({ quote: 'to £59 under', value: 59, unit: '£' }, twice, SUBJECT).origin).toBe('human');
   });
 
   it('sign reads from the span: a net loss states its negative; a gross count never does', () => {

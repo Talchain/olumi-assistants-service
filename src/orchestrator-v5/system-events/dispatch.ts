@@ -3395,8 +3395,12 @@ export type CommitOptionLevelsInput = {
     readonly factor_id: string;
     /** Model scale (the proposal's `normalised`). */
     readonly value: number;
-    /** Whose level: an Olumi level is stamped through the server-side adoption authority, never from this string alone. */
-    readonly author: 'user_specified' | 'model_proposed';
+    /**
+     * Whose level: an Olumi level is stamped through the server-side adoption authority, never from this string alone.
+     * `unverified` (G3): a level whose origin could not be verified, recorded as construction records one (`cee_hypothesis` with
+     * `user_material_unverified`), through the same authority: never the user's.
+     */
+    readonly author: 'user_specified' | 'model_proposed' | 'unverified';
     /** The level as the user gave it, and the range it was normalised on — kept on the cell (all three, or none). */
     readonly raw_value?: number;
     readonly unit?: string;
@@ -3567,8 +3571,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
         ...(l.cap !== undefined ? { cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
         ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
-  const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
-    scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
+  const adoptions = input.levels.filter(l => l.author === 'model_proposed' || l.author === 'unverified').map(l => ({
+    scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+    ...(l.author === 'unverified' ? { unverified: true as const } : {}) }));
   // Digested in `computeRequestHash`'s format over every link, level and the base revision (informational;
   // the idempotency key is (scenario_id, turn_id)).
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',

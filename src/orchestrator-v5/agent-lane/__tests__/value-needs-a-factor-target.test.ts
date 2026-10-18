@@ -61,7 +61,8 @@ describe('a starting value is only proposed for a node the value writer accepts'
    * succeeding — and the joined result used to drop the value half's omission, so the starting point
    * looked complete at the moment of one-click consent.
    */
-  const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
+  // LEAN CORE (#3392, PL-0048): Olumi's own starting level carries the AI's own-estimate carrier, as its values do.
+  const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding', user_stated: false };
   it('RED (joined): risk value + factor value + a valid level → the compound holds only the factor and the level, and the left-out risk is disclosed before consent', async () => {
     const { c, store } = caps();
     const r = await c.proposeStartingPoint(ctx, { assumptions: [
@@ -110,7 +111,8 @@ describe('a starting value is only proposed for a node the value writer accepts'
 });
 
 describe('an INCOMPLETE starting point (both halves proposed) still reports what it left out', () => {
-  const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
+  // LEAN CORE (#3392, PL-0048): Olumi's own starting level carries the AI's own-estimate carrier, as its values do.
+  const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding', user_stated: false };
   it('both halves succeed but a level is missing → incomplete, and not_a_factor travels with it (Codex 5807008891)', async () => {
     // hire_two now acts on TWO factors, and only one level is given → incomplete.
     const edges = [...EDGES, edge('hire_two', 'team_size')];

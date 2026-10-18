@@ -15,6 +15,7 @@ import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { endsInQuotedSpeech, quoteIsNotTheUsersClaim, sentenceAroundSpan, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 import { comparatorTheUserWroteFor, figureTheUserWroteSpan } from './stated-by-user.js';
+import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { unitPhraseFamily, unitPhraseHead } from './unit-conflict.js';
 import { classifyValueUnitAgainstFactor } from '../routing/value-unit-resolution.js';
 
@@ -126,6 +127,11 @@ export interface StatementRules {
    * the quote, never a proof of what the quantity is: the row still decides which units its field takes.
    */
   readonly unitWritten?: true;
+  /**
+   * The exact labels of the entities this value is recorded for (the option it sets): quoted words that are exactly one of them are
+   * the user's own title for it, never another speaker's words (`speechReading`; Codex #3392 r1 B4).
+   */
+  readonly titles?: readonly string[];
 }
 
 export type StatementsVerdict =
@@ -208,8 +214,8 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
  * ⭐ LEAN CORE (check 3; #3389 probe P2): every place the quote writes `figure` sits inside another speaker's paired quotation marks
  * ("A colleague said: “we lose 5% a month”"): the figure is that speaker's, never the user's, though the user typed the report.
  */
-function figureOnlyInSpeech(quote: string, figure: number): boolean {
-  const { text, inSpeech } = speechReading(quote);
+function figureOnlyInSpeech(quote: string, figure: number, titles?: readonly string[]): boolean {
+  const { text, inSpeech } = speechReading(quote, true, titles);
   const spelled = [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) =>
     (parseCardinalAmount(m[0]) === Math.abs(figure) ? [m.index!] : []));
   const at = [...findStatedAmounts(text).filter((a) => Math.abs(a.magnitude) === Math.abs(figure)).map((a) => a.index), ...spelled];
@@ -275,10 +281,16 @@ export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['ref
  * that describe). Every writer that records a value or statement as the user's calls this, and nothing else. Pure.
  */
 export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
-  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection } = {}): StatedVerdict {
+  opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection; readonly titles?: readonly string[] } = {}): StatedVerdict {
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
+  // ⛔ K3 (kept): a declared own estimate never relabels a figure the retained words of unknown origin write (reseeded history, the
+  // saved brief): that figure's source is unknown, never Olumi's. The stated-figure rule reads it there, in the AI's unit. This search
+  // never credits the user; only a cited span does.
+  const retainedFigure = (): boolean => typeof texts.unverified === 'string' && texts.unverified !== ''
+    && [claim?.value, claim?.low, claim?.high].some((n) => typeof n === 'number' && Number.isFinite(n)
+      && figureTheUserWroteSpan(Math.abs(n), trimmed(claim?.unit, 60), texts.unverified as string) !== null);
   const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
-    ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
+    ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true || retainedFigure() } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
   const quote = trimmed(claim?.quote, QUOTE_MAX);
   if (quote === undefined) return notTheirs('no_quote', 'No words of the user were quoted for this, so its source is not verified.');
   const given = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);
@@ -287,16 +299,25 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   const unit = trimmed(claim?.unit, 60);
   // The unit's own scale: a money unit's magnitude letter ("£k": ×1000), or a 0–1 share unit, which reads a written PERCENTAGE ("30%" is
   // 0.3 of a proportion; never a plain "30 people").
-  const share = unit !== undefined && SHARE_UNITS.has(unit.toLowerCase());
+  // A 0–1 share unit, by the estate's one share-unit rule (`isProportionScaledFactor`: "proportion", "share (0-1)", …).
+  // No unit at all: a written percentage may be read in the model's 0–1 coordinate ("7%" as 0.07), as the stated-figure rule reads it.
+  const share = unit === undefined || (SHARE_UNITS.has(unit.toLowerCase())
+    || isProportionScaledFactor({ unit, cap: undefined, value: typeof claim?.value === 'number' ? claim.value : undefined, raw_value: undefined }));
   const scale = share ? 100 : unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
+  // A unit of no known family (neither a share, a percentage, money, a count nor a time: "share per month"): a written PERCENTAGE grounds
+  // its figure or its 0–1 fraction, exactly as the estate's figure rule reads it (`amountIs`, stated-by-user.ts).
+  const percentEither = scale === 1 && unit !== undefined && !share && unitPhraseFamily(unit) === null;
+  const readScale = scale > 1 ? scale : percentEither ? 100 : 1;
   const percentAt = (q: string, n: number): boolean => findStatedAmounts(q).some((a) => a.kind === 'percent' && Math.abs(a.magnitude - n) <= 1e-9 * Math.max(1, Math.abs(n)));
   const v = verifyStatement({ ...claim, quote, form }, texts, { subject, unit: unit ?? '', forms: STATEMENT_FORMS, figuresIn: figuresWritten,
-    allowsZero: true, sameFigure: (q, a, b) => a === b || (scale > 1 && Math.abs(a * scale - b) <= 1e-9 * Math.max(1, Math.abs(b)) && (!share || percentAt(q, b))) }, opts.current);
+    ...(opts.titles !== undefined ? { titles: opts.titles } : {}),
+    allowsZero: true, sameFigure: (q, a, b) => a === b || (readScale > 1 && Math.abs(a * readScale - b) <= 1e-9 * Math.max(1, Math.abs(b))
+      && ((!share && !percentEither) || percentAt(q, b))) }, opts.current);
   if (v.kind === 'refused') return notTheirs(v.refusal, v.detail);
   const { unit: _read, ...read } = v.statement;
   // An end read at the unit's own scale ("£54k" for 54 £k) is kept in the AI's unit, the figure the user wrote.
   const claimed = [claim?.value, claim?.low, claim?.high].filter((n): n is number => typeof n === 'number');
-  const inUnit = (n: number | undefined): number | undefined => (n !== undefined && scale > 1 && !claimed.includes(n) && claimed.some((c) => Math.abs(c * scale - n) <= 1e-9 * Math.max(1, Math.abs(n))) ? n / scale : n);
+  const inUnit = (n: number | undefined): number | undefined => (n !== undefined && readScale > 1 && !claimed.includes(n) && claimed.some((c) => Math.abs(c * readScale - n) <= 1e-9 * Math.max(1, Math.abs(n))) ? n / readScale : n);
   const rest = { ...read, ...(read.low !== undefined ? { low: inUnit(read.low)! } : {}), ...(read.high !== undefined ? { high: inUnit(read.high)! } : {}) };
   const unitIsUsers = unit !== undefined && unitWrittenIn(quote, rest.high ?? rest.low, unit, scale);
   if (unit !== undefined && !unitIsUsers && writtenInAnotherUnit(quote, claimed, unit, scale)) {
@@ -318,12 +339,13 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
 function writtenInAnotherUnit(quote: string, claimed: readonly number[], unit: string, scale: number): boolean {
   const family = unitPhraseFamily(unit);
   const head = unitPhraseHead(unit) ?? unit;
-  const money = readCurrencyUnitWithQualifiers(unit).kind === 'currency';
+  // Money by either reader: the currency parser, or the unit-phrase family ("GBP over 6 months" is money over a period).
+  const money = readCurrencyUnitWithQualifiers(unit).kind === 'currency' || family === 'currency';
   return claimed.some((n) => {
     const size = Math.abs(n);
     const at = findStatedAmounts(quote).filter((a) => [size, size * scale].some((s) => Math.abs(Math.abs(a.magnitude) - s) <= 1e-9 * Math.max(1, s)));
     // A count in words ("six") is never money or a percentage, which are written with their unit (the stated-figure rule's own reading).
-    if (at.length === 0) return money || family === 'currency' || family === 'percent';
+    if (at.length === 0) return money || family === 'percent';
     // An amount written in a currency is never a figure in a unit that is not money (the brief rule's own class, `isAmountStatedInBrief`).
     if (!money && at.every((a) => a.kind === 'currency')) return true;
     if (figureTheUserWroteSpan(size, unit, quote) === null) return true;
@@ -376,7 +398,15 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   // ⛔ A span cut from inside a line never drops the bound the user wrote on its own figure (the confirmed widening's limit; ebd S2 row):
   // "7 months" out of "At least 7 months" is not their point. The estate's one comparator reader reads the line and the span alike.
   // Read in the span's own sentence of its line only: the same figure elsewhere on the line ("at least 55%" in another sentence) is not its bound.
-  const spanSentence = sentenceAroundSpan(source, quote);
+  // …and only up to the next figure after the span: a comparator on a LATER writing of the same figure ("to £59 under “£59 for …”") is
+  // that writing's bound, not this span's.
+  const spanSentence = ((): string | undefined => {
+    const whole = sentenceAroundSpan(source, quote);
+    const at = whole === undefined ? -1 : plainQuoteWords(whole).indexOf(plainQuoteWords(quote));
+    if (whole === undefined || at < 0) return whole;
+    const plain = plainQuoteWords(whole), end = at + plainQuoteWords(quote).length, next = plain.slice(end).search(/\d/u);
+    return next < 0 ? plain : plain.slice(0, end + next);
+  })();
   const dropsBound = (figure: number): boolean => spanSentence !== undefined && comparatorTheUserWroteFor(spanSentence, Math.abs(figure)) !== null
     && comparatorTheUserWroteFor(quote, Math.abs(figure)) === null;
   const boundDropped = (figureWords: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_not_found',
@@ -399,7 +429,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-    if (figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
+    if (figureOnlyInSpeech(quote, read.high, rules.titles)) return anotherSpeaker(`${low}–${high}`);
     if (dropsBound(read.low) || dropsBound(read.high)) return boundDropped(`${low}–${high}`);
     if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
@@ -411,7 +441,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-  if (figureOnlyInSpeech(quote, end)) return anotherSpeaker(String(value));
+  if (figureOnlyInSpeech(quote, end, rules.titles)) return anotherSpeaker(String(value));
   if (dropsBound(end)) return boundDropped(String(value));
   if (givenUnit !== undefined && !unitWrittenAfter(quote, end, givenUnit)) return unitRefused(String(value));
   return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };

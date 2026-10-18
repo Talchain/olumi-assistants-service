@@ -9,6 +9,9 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { createAgentCapabilities } from '../../agent-lane/runtime/agent-capabilities.js';
+import { dispatchTool } from '../../agent-lane/runtime/agent-tools.js';
+import { settingProvenanceOf } from '../../../cee/provenance/provenance-of.js';
+import { UNKNOWN_ORIGIN_DETAIL } from '../../agent-lane/runtime/statement-origin.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
 import { runWithApprovedLevelAdoptions } from '../../agent-lane/approved-adoption-context.js';
 import { optionGapsHeld, parseOptionGapsOfLevelOps } from '../../agent-lane/unmodelled-mechanisms.js';
@@ -387,3 +390,110 @@ describe('S5 complete native preparation before an offer', () => {
 function execute(input: native.OptionInterventionBatchExecutionInput) {
   return inAdoption(input, () => native.executeOptionInterventionBatch(input, getSessionStore()));
 }
+
+/**
+ * ⭐ G3 (DL-3 05:2xZ; unseen 8e9132fc T02: option B's cost was REFUSED `origin_unknown`): under THE ONE RULE a miss is RECORDED with
+ * its origin unverified, never refused and never "you said". Real tool dispatch → proposal → typed approval → the level writer →
+ * the persisted cell, read back cold through the one provenance authority (`settingProvenanceOf`). Synthetic words only.
+ */
+/** The AIE's exact Agent note (`prompt/AIE-B0-GUIDANCE-AND-ORIGIN-NOTE-20261018-v1.json`), pinned byte-for-byte. */
+const AIE_ORIGIN_UNVERIFIED_NOTE = 'These entries retain figures found in the user-supplied material, but Olumi could not verify their attribution or binding to the proposed quantities from a cited statement. Their origin remains unverified (`origin_unverified`): do not call them the user’s statements or Olumi’s estimates. Preserve the source, speaker, unit, reference, qualifications and conditions actually available; do not invent missing ones. Distinguish an offered proposal from a saved change using the actual result and readback. Approval authorises only the displayed change and does not verify source credit or scientific support. Reuse supplied figures rather than asking the user to repeat or confirm them; ask only for a genuinely missing or conflicting meaning.';
+describe('G3: an option cost the AI cannot cite is SAVED with its origin unverified — not refused, not credited "you said"', () => {
+  const world = (said: string) => {
+    delete node(persisted, 'pilot').interventions;
+    const proposals = new ProposalStore();
+    const caps = createAgentCapabilities(savingDispatch, proposals, undefined, 'full', undefined,
+      { commitOptionLevels: input => commitOptionLevelsInProcess(input, 'req-g3') });
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-g3', user_text: said, user_turn_text: said, verified_user_messages: [said] };
+    const propose = (level: Dict) => dispatchTool('propose_option_interventions', JSON.stringify({ interventions: [{
+      option_label: 'Pilot', factor_label: 'Staffing', value: 2, unit: 'tech leads', ...level }] }), ctx as never, caps) as Promise<Dict>;
+    const approve = (pid: string) => caps.authoriseChange({ ...ctx, typed_approval_of: pid } as never, { proposal_id: pid });
+    return { propose, approve };
+  };
+
+  it('RED → GREEN: the user wrote the cost but the AI cites no span of it → prepared, approved and saved with its origin unverified', async () => {
+    const w = world('The pilot needs 2 tech leads.');
+    const r = await w.propose({ user_stated: true, basis: 'the user gave the pilot two tech leads' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, interventions: [{ option: 'Pilot', factor: 'Staffing', value: 2, stated_by: 'origin_unverified' }],
+      origin_unverified: [{ option: 'Pilot', factor: 'Staffing', value: 2 }] });
+    expect(r.origin_unverified_note).toBe(AIE_ORIGIN_UNVERIFIED_NOTE);
+    expect(r).not.toHaveProperty('refusal');
+    expect(r).not.toHaveProperty('not_the_users_figure');
+    expect(JSON.stringify(r)).not.toMatch(/"stated_by":"user"|your_figure/);
+    expect(rows.size).toBe(0);
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    expect(rows.size).toBe(1);
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'cee_hypothesis', user_material_unverified: true });
+    expect(settingProvenanceOf(saved).origin).toBe('unknown');
+  });
+
+  it('RED (Codex #3392 r1 B2): the user\'s likely range never credits a point it does not write → the point is saved unverified, the range stays theirs', async () => {
+    const w = world('The pilot likely needs between 1 and 3 tech leads.');
+    const r = await w.propose({ user_stated: true, likely_low: 1, likely_high: 3, range_user_stated: true, range_meaning: 'likely_range',
+      basis: 'the middle of the user\'s likely range' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, interventions: [{ value: 2, stated_by: 'origin_unverified', likely_range: { low: 1, high: 3 } }] });
+    expect(JSON.stringify(r)).not.toMatch(/"stated_by":"user"/);
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'cee_hypothesis', user_material_unverified: true,
+      range: { low: 1, high: 3, meaning: 'likely_range', source: 'user_specified' } });
+    expect(settingProvenanceOf(saved).origin).toBe('unknown');
+  });
+
+  it('CONTRAST: the user wrote the point AND its likely range, and the AI cites it → both are theirs (user_specified, no marker)', async () => {
+    const said = 'The pilot needs 2 tech leads, likely between 1 and 3.';
+    const w = world(said);
+    const r = await w.propose({ user_stated: true, quote: said, likely_low: 1, likely_high: 3, range_user_stated: true, range_meaning: 'likely_range',
+      basis: 'the user gave it' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, interventions: [{ value: 2, stated_by: 'user', likely_range: { low: 1, high: 3 } }] });
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'user_specified', range: { low: 1, high: 3, meaning: 'likely_range', source: 'user_specified' } });
+    expect(saved).not.toHaveProperty('user_material_unverified');
+  });
+
+  it('NEGATIVE kept: a figure written nowhere in the user\'s words, with no own-estimate carrier, is not user material → refused, disclosed, nothing saved', async () => {
+    const w = world('For the pilot we would bring in a couple of contractors.');
+    const r = await w.propose({ user_stated: true, basis: 'the user mentioned a couple of contractors' });
+    expect(r).toEqual({ ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL });
+    expect(rows.size).toBe(0);
+  });
+
+  it('CONTRAST: the user\'s own cited cost is theirs (user_specified, human, no marker)', async () => {
+    const said = 'The pilot needs 2 tech leads.';
+    const w = world(said);
+    const r = await w.propose({ user_stated: true, quote: said, basis: 'the user gave it' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, interventions: [{ stated_by: 'user' }] });
+    expect(r).not.toHaveProperty('origin_unverified');
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'user_specified' });
+    expect(saved).not.toHaveProperty('user_material_unverified');
+    expect(settingProvenanceOf(saved).origin).toBe('human');
+  });
+
+  it('CONTRAST: Olumi\'s declared estimate (user_stated: false) stays Olumi\'s (cee_hypothesis, ai, no marker)', async () => {
+    const w = world('What would the pilot need?');
+    const r = await w.propose({ user_stated: false, basis: 'Olumi’s pilot assumption' });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, interventions: [{ stated_by: 'olumi_estimate' }] });
+    expect(r).not.toHaveProperty('origin_unverified');
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'cee_hypothesis' });
+    expect(saved).not.toHaveProperty('user_material_unverified');
+    expect(settingProvenanceOf(saved).origin).toBe('ai');
+  });
+
+  it('NEGATIVE kept: a user-typed level over an unverified cell is the user\'s — the old marker never rides on a new write', async () => {
+    const said = 'The pilot needs 2 tech leads.';
+    const w = world(said);
+    node(persisted, 'pilot').interventions = { staffing: { value: 0.1, raw_value: 1, unit: 'tech leads', source: 'cee_hypothesis', user_material_unverified: true,
+      target_match: { node_id: 'staffing', match_type: 'exact_id', confidence: 'high' } } };
+    const r = await w.propose({ user_stated: true, quote: said, basis: 'the user gave it' });
+    expect(await w.approve(String(r.proposal_id))).toMatchObject({ ok: true });
+    const saved = cell(cold());
+    expect(saved).toMatchObject({ raw_value: 2, source: 'user_specified' });
+    expect(saved).not.toHaveProperty('user_material_unverified');
+  });
+});

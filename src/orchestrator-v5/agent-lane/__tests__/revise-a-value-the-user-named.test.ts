@@ -51,7 +51,7 @@ describe('the user can change an assumption the analysis named', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked what 6% would do', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, quote: ctx.user_text, unit: '%', basis: 'the user asked what 6% would do', revise: true }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.assumptions).toEqual([
@@ -74,7 +74,7 @@ describe('the user can change an assumption the analysis named', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'b', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, quote: ctx.user_text, unit: '%', basis: 'b', revise: true }],
     });
     // The old figure must be in the label the receipt quotes, not only the new one.
     expect(r.public_label).toContain('4%');
@@ -87,7 +87,7 @@ describe('the user can change an assumption the analysis named', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'b', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, quote: ctx.user_text, unit: '%', basis: 'b', revise: true }],
     });
     const stored = store.get(String(r.proposal_id));
     expect(stored?.provenance.authored_by).toBe('model_proposed');
@@ -100,7 +100,7 @@ describe('the user can change an assumption the analysis named', () => {
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeAssumptions(ctx, {
       assumptions: [
-        { user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'they asked', revise: true },
+        { user_stated: true, factor_label: 'Monthly churn rate', value: 6, quote: ctx.user_text, unit: '%', basis: 'they asked', revise: true },
         { user_stated: false, factor_label: 'Pro subscribers', value: 400, unit: 'subscribers', basis: 'my estimate' },
       ],
     });
@@ -118,7 +118,7 @@ describe('the user can change an assumption the analysis named', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'b', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, quote: ctx.user_text, unit: '%', basis: 'b', revise: true }],
     });
     expect(r.mutated).toBe(false);
     expect(p.posted).toHaveLength(0);
@@ -208,7 +208,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     const caps = createAgentCapabilities(p.d, new ProposalStore());
 
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Evidence strength', value: 50, quote: ctx.user_text, unit: 'points', basis: 'the user said 50', revise: true }],
     });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
 
@@ -239,7 +239,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     const p = framedProduct('refused');
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Evidence strength', value: 50, quote: ctx.user_text, unit: 'points', basis: 'the user said 50', revise: true }],
     });
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
 
@@ -259,7 +259,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     const p = framedProduct('committed_no_receipt');
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Evidence strength', value: 50, quote: ctx.user_text, unit: 'points', basis: 'the user said 50', revise: true }],
     });
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     expect(p.read()[0]!.observed_state, 'the write really did land').toMatchObject({ value: 0.5, raw_value: 50 });
@@ -271,7 +271,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', revise: true }],
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn rate', value: 6, quote: ctx.user_text, unit: '%', basis: 'the user asked', revise: true }],
     });
     expect(proposed.assumptions).toEqual([
       { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4, interpretation: 'olumi', user_material_unverified: true, source: ctx.user_text },

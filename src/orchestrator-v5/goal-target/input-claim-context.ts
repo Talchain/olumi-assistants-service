@@ -269,8 +269,15 @@ export function wholeStatementIn(message: string, quote: unknown): boolean {
  * The ONE speech reader (`speechRegions`), exposed over `plainQuote(quote)`'s indices; no attribution or write permission is granted.
  * Authorship reads single marks too; the source-review DISPLAY keeps its double-mark reading (`single: false`), so its words are unchanged.
  */
-export function speechReading(quote: string, single = true): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
-  return { text: plainQuote(quote), inSpeech: speechAt(speechRegions(markedQuote(quote), single)) };
+export function speechReading(quote: string, single = true, titles: readonly string[] = []): { readonly text: string; readonly inSpeech: (at: number) => boolean } {
+  const marked = markedQuote(quote);
+  // ⭐ Codex #3392 r1 B4 (A07 `Let’s add …: "£59 for new Pro customers; grandfather existing customers"`): a CLOSED region whose words are
+  // exactly the label of the entity the writer records for (`titles`) is the user's own title for it, not another speaker's words.
+  // Identity only (the whole region equals the label); an unclosed fail-safe region never qualifies.
+  const own = new Set(titles.map(plainQuote).filter((t) => t !== ''));
+  const regions = speechRegions(marked, single).filter((r) => !(own.size > 0 && r.close < marked.length
+    && /["\u201C\u201D\u00AB\u00BB'\u2018\u2019]/u.test(marked[r.close]!) && own.has(plainQuote(marked.slice(r.open + 1, r.close)))));
+  return { text: plainQuote(quote), inSpeech: speechAt(regions) };
 }
 
 /**
@@ -395,7 +402,7 @@ export function namesBothEnds(text: string, nodes: readonly Entity[], from: stri
  * - agreed by its whole message's reading (attribution, framing, dispute and disowning still reject it), and not superseded
  *   by a later verified message.
  * `copied`: no verified quote, yet the conversation (verified or not) reads THIS band for THIS link, so the band is copied
- * or unknown material, never Olumi's own new estimate (`statementOrigin` makes it unknown).
+ * or unknown material, never Olumi's own new estimate (the link-set writer keeps it unknown).
  */
 export function linkBandSource(quote: unknown, band: InfluenceBand, conversation: {
   readonly messages: readonly string[]; readonly thisMessage?: string; readonly unverified?: string;

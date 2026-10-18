@@ -84,7 +84,7 @@ const LEDGER = { value: 0, unit: '', estimate: false, basis: '' };
 const a07 = (level: unknown, extra: Record<string, unknown>[] = []) => ({
   label: GRANDFATHER,
   acts_on: [
-    { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+    { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month', quote: A07 } },
     { factor_label: GF_SWITCH, direction: 'positive', ...(level === undefined ? {} : { level }) },
     ...extra,
   ],
@@ -116,7 +116,14 @@ describe('RED — served A07 (one option): the placeholder 0 on the grandfather 
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(sent).toHaveLength(1);
     expect(on(sentOption(sent, GRANDFATHER), GF_KEY)).toEqual([{ factor_key: GF_KEY, value: 1 }]);
+    // ⭐ LEAN CORE (#3392, THE ONE RULE; Codex r1 B4): the AI cites A07 whole, and the £59 sits inside the quotation marks that hold
+    // exactly this option's own title: the user's title for it, not another speaker's words. So it is still sent as the user's.
     expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(true);
+    // …as THE USER'S (no Olumi or unverified stamp), never merely recorded with its origin unverified.
+    const price = sentOption(sent, GRANDFATHER)?.interventions?.find((i) => i.factor_id === 'pro_plan_price');
+    expect(price, JSON.stringify(price)).not.toHaveProperty('source');
+    expect(price).not.toHaveProperty('user_material_unverified');
+    expect(r).not.toHaveProperty('levels_not_set');
     expect(r.switch_placeholder_levels_read_as_on).toEqual([{ option: GRANDFATHER, factor: GF_SWITCH }]);
     expect(r.switch_placeholder_levels_note).toContain('a placeholder, not a figure');
   });

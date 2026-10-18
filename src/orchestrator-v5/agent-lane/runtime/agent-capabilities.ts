@@ -10,7 +10,7 @@ import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
-import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
+import { UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';
 import { deadlineCardToIssue, deadlineOfferOpen, sentenceHolding, type DeadlineIssueInput, type DeadlineTurnStart } from '../deadline-card.js';
 import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread-horizon-line.js';
@@ -26,9 +26,9 @@ import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords,
 import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
 import { optionCapacityRecordedWords } from '../../statement-door/fields/option-capacity.js';
 import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
-import { readStatement, statementBoundTo, type DoorContext } from '../../statement-door/read.js';
+import { currentCorrectionOf, readStatement, statementBoundTo, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
-import { resolveSubject } from '../../statement-door/subject.js';
+import { resolveSubject, type DoorSubject } from '../../statement-door/subject.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
 import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
@@ -47,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
+import { userStated, userStatementOf, verifyStatements, type CurrentCorrection, type StatementTexts } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -177,6 +177,17 @@ const DIRECTION_CONFLICT_NOTE =
 const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
+/**
+ * ⭐ G3 (DL-3; unseen 8e9132fc T02): a figure THE ONE RULE could not attribute is recorded with its origin unverified, never refused.
+ * The AIE's exact text (`prompt/AIE-B0-GUIDANCE-AND-ORIGIN-NOTE-20261018-v1.json`, g3.origin_unverified_note_exact).
+ */
+const ORIGIN_UNVERIFIED_NOTE =
+  'These entries retain figures found in the user-supplied material, but Olumi could not verify their attribution or binding to the proposed quantities from a cited statement. '
+  + 'Their origin remains unverified (`origin_unverified`): do not call them the user\u2019s statements or Olumi\u2019s estimates. '
+  + 'Preserve the source, speaker, unit, reference, qualifications and conditions actually available; do not invent missing ones. '
+  + 'Distinguish an offered proposal from a saved change using the actual result and readback. '
+  + 'Approval authorises only the displayed change and does not verify source credit or scientific support. '
+  + 'Reuse supplied figures rather than asking the user to repeat or confirm them; ask only for a genuinely missing or conflicting meaning.';
 
 /** A level in a different unit is left out before its authorship is read. */
 export const UNIT_DIFFERS_FROM_DECLARED_DETAIL = (option: string, declaredUnit: string, sentUnit: string): string =>
@@ -1053,8 +1064,16 @@ function unverifiedValueBinding(op: ProposalOperation): { source: string; quote:
  * when the user gave it (`user_stated` on the proposal) or the whole proposal is theirs; an op
  * without the field (a carrier stored before it existed) is Olumi's — the narrower claim.
  */
-function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
+function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' | 'unknown' {
+  // ⭐ G3: a level whose origin THE ONE RULE could not verify stays unverified through approval (approval never rewrites origin).
+  if (((op.value ?? {}) as { authored_by?: unknown }).authored_by === 'unknown') return 'unknown';
   return valueOpAuthor(op, proposal);
+}
+
+/** The level writer's author for one approved level (`CommitOptionLevelsInput.levels[].author`). */
+function levelCommitAuthor(op: ProposalOperation, proposal: StructuredProposal): 'user_specified' | 'model_proposed' | 'unverified' {
+  const author = levelOpAuthor(op, proposal);
+  return author === 'user_stated' ? 'user_specified' : author === 'unknown' ? 'unverified' : 'model_proposed';
 }
 
 /**
@@ -1493,14 +1512,15 @@ export function levelFrameOf(factor: { observed_state?: Record<string, unknown>;
  * - `placeLevel`: the name rule (Olumi's figure only), then the writer's range (`levelFrameOf`) → the stored cell.
  * - `estimateLevelPersists`: both, in the door's order, for a level that is Olumi's estimate.
  */
-export interface DoorLevel { readonly value: number; readonly unit?: string }
+export interface DoorLevel { readonly value: number; readonly unit?: string; readonly quote?: string }
 type LevelFactor = { readonly id?: unknown; observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined;
 
 export function doorLevelOf(level: unknown): DoorLevel | undefined {
-  const l = level as { value?: unknown; unit?: unknown } | null | undefined;
+  const l = level as { value?: unknown; unit?: unknown; quote?: unknown } | null | undefined;
   const v = l?.value;
   if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
-  return { value: v, ...(typeof l?.unit === 'string' && l.unit.trim() !== '' ? { unit: l.unit.trim() } : {}) };
+  return { value: v, ...(typeof l?.unit === 'string' && l.unit.trim() !== '' ? { unit: l.unit.trim() } : {}),
+    ...(typeof l?.quote === 'string' && l.quote.trim() !== '' ? { quote: l.quote } : {}) };
 }
 
 export function factorUnitConflict(lvl: DoorLevel, factor: LevelFactor, rawGraph: unknown): { readonly factorUnit: string | undefined; readonly conflict: boolean } {
@@ -2248,9 +2268,22 @@ const readingNote = (i: ProposalInterpretation): string =>
  * ⭐ LEAN CORE: the texts THE ONE AUTHORSHIP RULE (`userStated`) reads in chat: this turn's typed words, the verified conversation and
  * its messages in order, and retained words of unknown origin (reseeded history and the saved brief), which never verify anything.
  */
+/** The subject's current correction, as THE ONE RULE reads it (`currentCorrectionOf`); spread into `userStated`'s options. */
+const correctionOn = (graph: unknown, subject: DoorSubject): { current?: CurrentCorrection } => {
+  const current = currentCorrectionOf(graph, subject);
+  return current === undefined ? {} : { current };
+};
 const chatTexts = (ctx: AgentToolContext, brief?: string | null): StatementTexts => ({ now: ctx.user_turn_text, conversation: ctx.user_text,
   unverified: [ctx.unverified_user_text, brief].filter((t): t is string => typeof t === 'string' && t !== '').join('\n'),
   ...(ctx.verified_user_messages !== undefined && ctx.verified_user_messages.length > 0 ? { messages: ctx.verified_user_messages } : {}) });
+/**
+ * ⭐ G3: the figure is USER MATERIAL — written somewhere in what the user typed or the saved brief, by the estate's stated-figure rule
+ * (`figureTheUserWrote`, never a credit) — so a level the one rule cannot credit is theirs-unverified (`user_material_unverified`),
+ * never an invented figure. A figure nowhere in their words is not user material: it stays left out with its disclosure.
+ */
+const userMaterial = (ctx: AgentToolContext, brief: string | null | undefined, value: number, unit: string | undefined): boolean =>
+  [ctx.user_text, ctx.user_turn_text, ...(ctx.verified_user_messages ?? []), ctx.unverified_user_text, brief]
+    .some((t) => typeof t === 'string' && t !== '' && figureTheUserWrote(value, unit, t));
 
 /**
  * ⭐ HOW A LINK'S BAND IS GROUNDED IN THE USER'S WORDS (slice C3; ruling ChatGPT 5854968869 P3B). Measured on Paul's
@@ -2335,20 +2368,6 @@ function resolveLinkEffectEnds(g: GraphRead, ctx: AgentToolContext, fromName: st
 type AmbiguousTarget = { readonly requested: string; readonly candidates: readonly Record<string, unknown>[] };
 
 /** One ambiguous request, with what tells its candidates apart — the SAME projection as every other tool. */
-/**
- * Recovery Batch B (SYS3 TRACE L6): the ONE sentence of the user's own words that states BOTH ends of a range ("currently
- * they spend between 20% and 30% of their time on non-development tasks …"), whole and trimmed, or `null`. Sentences end
- * where `quoteOfFigure`'s do (. ! ? before a space, or a new line); each end must be a figure `quoteOfFigure` finds in
- * that sentence, in the figure's unit. Longer than a hold quote may be: `null` (asked, never cut).
- */
-function sentenceStatingBoth(low: number, high: number, unit: string, userText: string): string | null {
-  for (const raw of userText.split(/(?<=[.!?])(?=\s)|\n/)) {
-    const sentence = raw.trim();
-    if (sentence === '' || sentence.length > USER_TODAY_QUOTE_MAX) continue;
-    if (quoteOfFigure(low, unit, sentence) !== null && quoteOfFigure(high, unit, sentence) !== null) return sentence;
-  }
-  return null;
-}
 
 function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: string, candidates: GraphRead['nodes']): AmbiguousTarget {
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label]));
@@ -3170,7 +3189,7 @@ export function createAgentCapabilities(
     const levelInputs = levelOps.map((o) => ({
       ...pairOf(o.path),
       value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
-      author: levelOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+      author: levelCommitAuthor(o, parent),
       ...levelFigureOf(o),
     }));
     const rangeLaws = rangeLawsOfCard(parent, approvedRead.raw);
@@ -4996,9 +5015,10 @@ export function createAgentCapabilities(
     const prepared = await prepareCompoundChange(ctx, parent, before);
     if (!prepared.ok) return refuse({ ...prepared.result, refusal: prepared.result.reason ?? prepared.result.refusal });
     const { input, approvedBindings } = prepared;
-    // Exactly dispatch's model_proposed-only adoption list, bound to the final submitted native level.
-    const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
+    // Exactly dispatch's adoption list (Olumi's and unverified levels), bound to the final submitted native level.
+    const adoptions = input.levels.filter(l => l.author === 'model_proposed' || l.author === 'unverified').map(l => ({
       scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+      ...(l.author === 'unverified' ? { unverified: true as const } : {}),
     }));
     const nativeInput: Parameters<typeof preOfferOptionInterventions>[0] = {
       scenarioId: input.scenario_id, turnId: input.turn_id, requestId: ctx.request_id,
@@ -6059,7 +6079,9 @@ export function createAgentCapabilities(
         const origin = declared === 'user'
           ? (nonBlank(l.from_words) && source.verified ? 'human' : 'unknown')
           : declared === 'olumi' && !nonBlank(l.from_words) && nonBlank(l.basis)
-            ? statementOrigin(false, source.copied, ctx.user_text_complete !== false, true)
+            // Olumi's declared new estimate (the existing positive carrier): Olumi's, unless the conversation already reads this band
+            // for this link (copied or unknown material, never relabelled as Olumi's).
+            ? (source.copied ? 'unknown' : 'ai')
             : storedOlumis ? 'ai' : 'unknown';
         // An UNKNOWN band is left out and named, never written; the links whose origin IS known are still offered (Paul's
         // served set: his named links are his, "all other listed effects to moderate" names no link, so those stay unknown).
@@ -7539,33 +7561,25 @@ export function createAgentCapabilities(
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
         // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
-        const explicitEstimate = a.user_stated === false && a.revise !== true;
-        const writtenFigure = figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text);
-        const origin = statementOrigin(writtenFigure,
-          figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
-          || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
-        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
-        // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
-        // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
-        if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
-          const claimed = Number(a.value), unit = a?.unit ?? nodeUnit;
-          const v = verifyStatements(a.statements.map((st: unknown) => ({ ...(isPlainRecord(st) ? st : {}), form: 'point', value: claimed })),
-            { now: ctx.user_turn_text, conversation: ctx.user_text,
-              unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
-            { subject: { quantity: 'level_today', node_id: node.id }, unit: String(unit ?? ''), forms: ['point'],
-              figuresIn: (q) => (figureTheUserWrote(claimed, unit, q) ? [{ low: claimed, high: claimed }] : []) });
-          if (v.kind === 'refused') {
-            return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'level_not_stated',
-              detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
-          }
-        }
-        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && origin !== 'human') {
+        // ⭐ LEAN CORE: whose the figure is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words (`quote`, or
+        // a point statement), with the figure read from it. Not cited or not theirs: unknown, Olumi's only as an explicit estimate.
+        const point = Array.isArray(a?.statements) && a.statements[0]?.form === 'point' ? a.statements[0] : undefined;
+        // ⭐ P2 (Codex B2 on #3395): the AI's own speaker reading of the statement it gives reaches the ONE verifier (other/unknown: vetoed).
+        const reading = Array.isArray(a?.statements) && isPlainRecord(a.statements[0]) ? a.statements[0] : undefined;
+        const said = userStated({ quote: typeof a?.quote === 'string' ? a.quote : point?.quote, value: Number(a.value), unit: a?.unit ?? nodeUnit,
+          ...(reading?.speaker !== undefined ? { speaker: reading.speaker } : {}) },
+          chatTexts(ctx, g.brief_text), { quantity: 'level_today', node_id: node.id },
+          // Positive evidence of Olumi's own figure: the AI's declared `user_stated: false` (K3: never a revise on incomplete source).
+          { form: 'point', ownEstimate: a.user_stated === false && (a.revise !== true || ctx.user_text_complete !== false),
+            ...correctionOn(g.raw, { kind: 'factor', id: node.id, field: 'level' }) });
+        const origin = said.origin;
+        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && said.origin !== 'human' && ctx.user_text_complete !== false) {
           return { ok: false, mutated: false, refusal: 'figure_not_in_users_words',
             detail: 'That is not the percentage the user wrote in this unit. Use the number in their percentage unit, not the 0–1 model coordinate. Nothing was proposed.' };
         }
-        // Keep the base's strict field check on this typed turn; it never decides the figure's source.
-        const source = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])].reverse()
-          .find(message => figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, message)) ?? ctx.user_text ?? '';
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        // The complete line the user's figure stands in (the rule's record), for the binding disclosure below.
+        const source = said.origin === 'human' ? said.statement.source : ctx.user_text ?? '';
         // Near-only pairs a point for display; it cannot attest its speaker or original field role.
         const bound = writtenAbout && isFactorNamedByUser(node.label, bindingWords ?? '')
           && !quoteIsNotTheUsersClaim(source, source)
@@ -7974,6 +7988,8 @@ export function createAgentCapabilities(
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
+      /** G3: levels whose origin THE ONE RULE could not establish: recorded with their origin unverified, never refused. */
+      const originUnverified: { option: string; factor: string; value: unknown }[] = [];
       const unitDiffers: { option: string; factor: string; value: unknown; declared_unit: string; sent_unit: string; detail: string }[] = [];
       const rangesNotRecorded: { option: string; factor: string; reason: string }[] = [];
       const seen = new Set<string>();
@@ -7983,6 +7999,8 @@ export function createAgentCapabilities(
         derivedFrame: number | null;
         /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
         userStated: boolean;
+        /** G3: neither the user's (no verified span) nor Olumi's (no own-estimate carrier): recorded with its origin unverified. */
+        unverified: boolean;
         // The option is not yet linked to this factor: the link is added in the same change, before the level.
         needsLink: boolean;
         /** The user's likely range for this level, raw units (TEMPORAL). */
@@ -8132,13 +8150,26 @@ export function createAgentCapabilities(
         }
 
         // A rejected range has no bearing on the ordinary level or its authorship.
-        const userWrote = claimedByUser && (likelyRange !== undefined
-          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
-        if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
-          || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
-          return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
-        }
-        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+        // ⭐ LEAN CORE: whose the level is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words, the figure read
+        // from it. Not cited or not theirs: unknown (nothing is prepared), and Olumi's only as its declared own estimate.
+        const said = userStated({ quote: i?.quote, value: raw, unit: declaredUnit ?? statedUnit }, chatTexts(ctx, g.brief_text),
+          { quantity: 'level', node_id: factor.id, option_id: option.id },
+          { form: 'point', ownEstimate: i.user_stated === false, titles: [option.label], ...correctionOn(g.raw, { kind: 'factor', id: factor.id, option_id: option.id, field: 'level' }) });
+        // The binding half (Olumi's reading, never authorship), unchanged: the credited figure is THIS factor's only where the user's words
+        // do not give it to another quantity of the model (`figureTheUserWroteFor` with this pair's scope, as before).
+        const boundHere = said.origin === 'human'
+          && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
+        // ⛔ Codex #3392 r1 B2: the point is the user's ONLY by the one rule. Their likely range (verified above, kept beside the level)
+        // never credits a point it does not write: "likely between 10 and 20 days" is not "15 days".
+        const userWrote = claimedByUser && boundHere;
+        // ⭐ G3 (unseen 8e9132fc T02: option B's cost refused `origin_unknown`): USER MATERIAL the one rule cannot credit or bind here (no
+        // verified span, or a span the binding does not tie to this pair, or a point inside the user's own verified likely range) is
+        // RECORDED with its origin unverified, never refused and never "you said" or Olumi's. A figure nowhere in the user's words, with
+        // no own-estimate carrier (PL-0048), stays refused, disclosed.
+        const unverified = !userWrote && said.origin !== 'ai'
+          && (said.origin === 'human' || likelyRange !== undefined || userMaterial(ctx, g.brief_text, raw, declaredUnit ?? statedUnit));
+        if (!userWrote && !unverified && said.origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
+        if (claimedByUser && !userWrote && !unverified) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
             option: option.label, factor: factor.label, value: i?.value,
@@ -8237,7 +8268,7 @@ export function createAgentCapabilities(
           const prior = set.find(level => `${level.option.id}::${level.factor.id}` === key)!;
           const unit = typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? '');
           if (prior.raw !== raw || prior.normalised !== normalised || prior.cap !== (cap ?? derivedFrame)
-            || prior.unit !== unit || prior.userStated !== userWrote || prior.needsLink !== needsLink
+            || prior.unit !== unit || prior.userStated !== userWrote || prior.unverified !== unverified || prior.needsLink !== needsLink
             || !isDeepStrictEqual(prior.likelyRange, likelyRange)
             || (declaration.kind === 'valid' && prior.mechanisms !== undefined
               && !isDeepStrictEqual(prior.mechanisms, declaration.mechanisms))) {
@@ -8250,11 +8281,12 @@ export function createAgentCapabilities(
           continue;
         }
         seen.add(key);
+        if (unverified) originUnverified.push({ option: option.label, factor: factor.label, value: i?.value });
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
-          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, unverified, needsLink,
           ...(likelyRange !== undefined && rangeQuote !== undefined ? { likelyRange, rangeQuote } : {}),
           ...(declaration.kind === 'valid' && gapOperands != null ? { mechanisms: declaration.mechanisms, gapOperands } : {}),
         });
@@ -8289,6 +8321,7 @@ export function createAgentCapabilities(
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
           ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
+          ...(originUnverified.length > 0 ? { origin_unverified: originUnverified, origin_unverified_note: ORIGIN_UNVERIFIED_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           ...(rangesNotRecorded.length > 0 ? { ranges_not_recorded: rangesNotRecorded } : {}),
           detail: (unitDiffers.length > 0 ? unitDiffers.map(r => r.detail).join(' ')
@@ -8310,7 +8343,7 @@ export function createAgentCapabilities(
           ...(i.unit !== '' ? { unit: i.unit } : {}),
           ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, ...(i.rangeQuote !== undefined ? { range_quote: i.rangeQuote } : {}) } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
-          authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+          authored_by: i.userStated ? 'user_stated' : i.unverified ? 'unknown' : 'model_proposed',
           ...(i.mechanisms !== undefined ? { unmodelled_mechanisms: i.mechanisms, gap_operands: i.gapOperands } : {}),
         },
       }))];
@@ -8349,7 +8382,7 @@ export function createAgentCapabilities(
           ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange, likely_range_law: LIKELY_RANGE_LAW_NOTE } : {}),
           basis: i.basis,
           // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
-          stated_by: i.userStated ? 'user' : 'olumi_estimate',
+          stated_by: i.userStated ? 'user' : i.unverified ? 'origin_unverified' : 'olumi_estimate',
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
         ...(linkOps.length > 0 ? {
@@ -8360,6 +8393,7 @@ export function createAgentCapabilities(
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
         ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
+        ...(originUnverified.length > 0 ? { origin_unverified: originUnverified, origin_unverified_note: ORIGIN_UNVERIFIED_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(rangesNotRecorded.length > 0 ? {
           ranges_not_recorded: rangesNotRecorded,
@@ -9168,7 +9202,7 @@ export function createAgentCapabilities(
           return {
             path: o.path, option_id: option_id ?? '', factor_id: factor_id ?? '',
             value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
-            author: levelOpAuthor(o, decision.proposal) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+            author: levelCommitAuthor(o, decision.proposal),
             figure: levelFigureOf(o),
           };
         });
@@ -10739,7 +10773,7 @@ export function createAgentCapabilities(
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
-      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown } | null };
+      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown; quote?: unknown } | null };
       const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
       /**
        * ⭐ SEVERAL OPTIONS, ONE CHANGE (F4; Canonical's typed transaction #1940, contract #70 5841655730). "Add A
@@ -11007,7 +11041,7 @@ export function createAgentCapabilities(
         const req = requestedNew.find((r) => norm((r as { label?: unknown } | null)?.label) === norm(f.label)) as { today?: unknown } | undefined;
         const today = req?.today;
         if (today === undefined || today === null) continue;
-        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown };
+        const t = (typeof today === 'object' && !Array.isArray(today) ? today : {}) as { value?: unknown; unit?: unknown; quote?: unknown };
         const unit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : undefined;
         const shown = `${typeof t.value === 'number' ? t.value : JSON.stringify(t.value ?? null)}${unit !== undefined ? ` ${unit}` : ''}`;
         if (f.kind === 'switch') {
@@ -11022,7 +11056,8 @@ export function createAgentCapabilities(
         }
         // Not bound to the factor (unlike the goal target and limit doors): journey A's accepted A1 row grounds the NEW price
         // factor's today with the brief's "£49", written about the existing "Pro plan price" (#2132; DL #72 5862394804).
-        if (!figureTheUserWrote(t.value, unit, ctx.user_text)) {
+        // ⭐ LEAN CORE: by THE ONE RULE (`userStated`): the user's cited words write that figure.
+        if (userStated({ quote: t.quote, value: t.value, unit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'point' }).origin !== 'human') {
           todayNotSet.push({ factor: f.label, value: t.value,
             reason: `The user's own words do not state ${shown}, so today's value for "${f.label}" is not set: it is never taken from Olumi's words or a guess. Ask the user what it is today.` });
           continue;
@@ -11035,7 +11070,7 @@ export function createAgentCapabilities(
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' | 'unverified'; quote?: string };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const lv = doorLevelOf(a.level);
@@ -11072,13 +11107,15 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
-          if (statementOrigin(wrote, figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text), ctx.user_text_complete, lvl.estimate !== undefined) === 'unknown') {
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
-            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
-          }
-          const derived = !wrote && split.kind === 'derived' && split.factor_ids.includes(f.id) ? split : undefined;
+          // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
+          // Positive evidence of Olumi's own figure: the AI's declared estimate, or the host's own derivation of the user's split.
+          const derivedPart = split.kind === 'derived' && split.factor_ids.includes(f.id);
+          const lvlSaid = userStated({ quote: lvl.quote, value: lvl.value, unit: lvl.unit ?? factorUnit }, chatTexts(ctx, g.brief_text),
+            { quantity: 'level', node_id: f.id }, { form: 'point', ownEstimate: lvl.estimate !== undefined || derivedPart, titles: [plan.label] });
+          // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
+          const wrote = lvlSaid.origin === 'human'
+            && figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const derived = !wrote && derivedPart && split.kind === 'derived' ? split : undefined;
           // A part of the user's split in another period is refused with its own reason, even as Olumi's estimate.
           if (!wrote && split.kind === 'period_mismatch' && split.factor_ids.includes(f.id)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
@@ -11094,23 +11131,28 @@ export function createAgentCapabilities(
            */
           if (derived !== undefined) lvl.estimate = `${derived.working}, as Olumi read it`;
           const byUser = wrote;
-          if (!byUser && lvl.estimate === undefined) {
+          // ⭐ G3 (W15; Codex #3392 r1 B3): USER MATERIAL the one rule cannot credit or bind here is RECORDED with its origin unverified,
+          // exactly as an existing option's level (`propose_option_interventions`): never refused, never "you said", never Olumi's.
+          const unverifiedLvl = !byUser && derived === undefined && lvlSaid.origin !== 'ai'
+            && (lvlSaid.origin === 'human' || userMaterial(ctx, g.brief_text, lvl.value, lvl.unit ?? factorUnit));
+          if (!byUser && !unverifiedLvl && (lvl.estimate === undefined || lvlSaid.origin === 'unknown')) {
             const ask = split.kind === 'ask_which_total' && split.factor_ids.includes(f.id)
               ? `The user's split could be of more than one total they set (${split.candidates.map((t) => `"${t.label}" ${t.value}${t.unit !== undefined ? ` ${t.unit}` : ''}`).join(' or ')}), so ${f.label}'s level is left unset. Ask which total they mean; never pick one.`
               : undefined;
-            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: ask ?? notWrittenReason(lvl.value, f.label) });
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+              reason: ask ?? (lvlSaid.origin === 'unknown' ? UNKNOWN_ORIGIN_DETAIL : notWrittenReason(lvl.value, f.label)) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
           // The name rule, then the writer's range: `placeLevel`, the stage the Widen gate calls too.
-          const placed = placeLevel(lvl, factor, factorUnit, plan.label, !byUser && derived === undefined);
+          const placed = placeLevel(lvl, factor, factorUnit, plan.label, !byUser && !unverifiedLvl && derived === undefined);
           if (placed.kind === 'contradicts_name') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          lvl.by = byUser ? 'user' : 'olumi';
-          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
+          lvl.by = byUser ? 'user' : unverifiedLvl ? 'unverified' : 'olumi';
+          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const, ...(unverifiedLvl ? { user_material_unverified: true as const } : {}) };
           if (placed.kind === 'out_of_range') {
             outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: placed.range });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
@@ -11149,8 +11191,8 @@ export function createAgentCapabilities(
          * "switch" and is refused below, never rounded to on.
          */
         /** A1 £59: this option's level on each new GRADED factor with an accepted today level, by the factor's batch key. */
-        const newGradedLevels = new Map<string, { value: number; unit?: string; by: 'user' | 'olumi'; basis?: string;
-          iv: { value: number; raw_value?: number; unit?: string; source?: 'cee_hypothesis' } }>();
+        const newGradedLevels = new Map<string, { value: number; unit?: string; by: 'user' | 'olumi' | 'unverified'; basis?: string;
+          iv: { value: number; raw_value?: number; unit?: string; source?: 'cee_hypothesis'; user_material_unverified?: true } }>();
         for (const a of plan.newActsOn) {
           // ⛔ EVERY entry that names this factor (VERIFIER-S1 on A1 r2): reading only the first let a bare entry followed
           // by `{1, '%'}` through — held, approved, committed with the user's figure dropped — while the reverse was refused.
@@ -11191,12 +11233,17 @@ export function createAgentCapabilities(
             continue;
           }
           const levelUnit = unit ?? today.unit;
-          const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
-          if (statementOrigin(wrote, figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text)
-            || figureTheUserWrote(asked, levelUnit, g.brief_text), ctx.user_text_complete, lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '') === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
+          // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
+          const lvSaid = userStated({ quote: lv.quote, value: asked, unit: levelUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level' },
+            { form: 'point', ownEstimate: lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '', titles: [plan.label] });
+          // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
+          const wrote = lvSaid.origin === 'human' && figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          // ⭐ G3 (W15; Codex #3392 r1 B3): user material the one rule cannot credit or bind here is recorded with its origin unverified.
+          const unverifiedLv = !wrote && lvSaid.origin !== 'ai' && (lvSaid.origin === 'human' || userMaterial(ctx, g.brief_text, asked, levelUnit));
+          if (lvSaid.origin === 'unknown' && !unverifiedLv) { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
-          if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
-          if (!wrote && contradictsItsName(asked, levelUnit, plan.label)) {
+          if (!wrote && !unverifiedLv && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
+          if (!wrote && !unverifiedLv && contradictsItsName(asked, levelUnit, plan.label)) {
             notSet(`Olumi's estimate of ${asked} for ${a.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.`);
             continue;
           }
@@ -11208,9 +11255,10 @@ export function createAgentCapabilities(
             continue;
           }
           newGradedLevels.set(a.key, {
-            value: asked, ...(levelUnit !== undefined ? { unit: levelUnit } : {}), by: wrote ? 'user' : 'olumi', ...(!wrote ? { basis } : {}),
+            value: asked, ...(levelUnit !== undefined ? { unit: levelUnit } : {}), by: wrote ? 'user' : unverifiedLv ? 'unverified' : 'olumi',
+            ...(!wrote && !unverifiedLv ? { basis } : {}),
             iv: { value: framed, ...(typeof cap === 'number' ? { raw_value: asked } : {}), ...(levelUnit !== undefined ? { unit: levelUnit } : {}),
-              ...(wrote ? {} : { source: 'cee_hypothesis' as const }) },
+              ...(wrote ? {} : { source: 'cee_hypothesis' as const, ...(unverifiedLv ? { user_material_unverified: true as const } : {}) }) },
           });
         }
         /**
@@ -11416,7 +11464,8 @@ export function createAgentCapabilities(
               const option = ops.find((o) => o.op === 'add_node' && o.path === plan.optionId)?.value as { interventions?: Record<string, unknown> } | undefined;
               const iv = (id !== undefined ? option?.interventions?.[id] : undefined) as Record<string, unknown> | undefined;
               return iv !== undefined && iv['value'] === l.iv.value && iv['raw_value'] === l.iv.raw_value && iv['unit'] === l.iv.unit
-                && iv['source'] === (l.iv.source ?? 'user_specified');
+                && iv['source'] === (l.iv.source ?? 'user_specified')
+                && (iv['user_material_unverified'] === true) === (l.iv.user_material_unverified === true);
             }));
         } catch {
           heldBatchOk = false;
@@ -11442,14 +11491,14 @@ export function createAgentCapabilities(
           const lvl = set.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
-              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
+              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : lvl.by === 'unverified' ? { stated_by: 'origin_unverified' } : { stated_by: 'user' }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
         // A1 £59: a new graded factor's level set in this same change, said exactly as an existing factor's is.
         ...plan.newActsOn.flatMap((a) => {
           const l = newGradedLevels.get(a.key);
           return l === undefined ? [] : [{ factor: a.label, value: l.value, ...(l.unit !== undefined ? { unit: l.unit } : {}),
-            ...(l.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: l.basis } : { stated_by: 'user' }) }];
+            ...(l.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: l.basis } : l.by === 'unverified' ? { stated_by: 'origin_unverified' } : { stated_by: 'user' }) }];
         })],
       }));
       return {
@@ -11464,6 +11513,12 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        // G3 (W15): levels recorded with their origin unverified, said as that (the AIE's note), never as the user's or Olumi's.
+        ...(described.some((d) => d.levels.some((l) => 'stated_by' in l && l.stated_by === 'origin_unverified')) ? {
+          origin_unverified: described.flatMap((d) => d.levels.flatMap((l) => ('stated_by' in l && l.stated_by === 'origin_unverified'
+            ? [{ option: d.label, factor: l.factor, value: l.value }] : []))),
+          origin_unverified_note: ORIGIN_UNVERIFIED_NOTE,
+        } : {}),
         // A placeholder 0 on the only entry naming a new switch was no level: the option turns the switch on.
         ...(switchPlaceholderRead.some((d) => labels.includes(d.option)) ? {
           switch_placeholder_levels_read_as_on: switchPlaceholderRead.filter((d) => labels.includes(d.option)),
@@ -11742,7 +11797,6 @@ export function createAgentCapabilities(
       // The route's retained typed-word records exclude chips, assistant text and source-unknown restored rows.
       // Reusing a verified earlier figure does not change its author. Multiple figures still need pairing approval.
       const turnText = ctx.user_turn_text ?? '';
-      const sourceMessages = ctx.verified_user_messages ?? [ctx.user_text ?? turnText];
       const confirmPairing = inCall.length >= 2 || figuresWrittenIn(turnText) >= 2;
       // Existing held quantity records retain their independently verified figure/range source across turns.
       const retained = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).flatMap(hold => {
@@ -11815,19 +11869,18 @@ export function createAgentCapabilities(
             reason: `${shown} is in a scaled unit; give the figure in whole units (120000 for £120k) in the user's own unit.` });
           continue;
         }
-        // Read each verified message separately: a figure in a different message cannot lend its subject to this one.
-        const source = [turnText, ...sourceMessages.slice().reverse()].find(text =>
-          quoteOfFigure(t.value as number, todayUnit, text) !== null
-          && (confirmPairing || figureTheUserWroteFor(t.value as number, todayUnit, text, newFactorScopeIn(g, label, todayUnit, inCall))));
+        // ⭐ LEAN CORE: whose today's figure is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words, the
+        // figure read from it. A held, independently verified record keeps its source. Anything else is unknown (never Olumi's).
+        const tSaid = userStated({ quote: t.quote, value: t.value, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'point' });
+        // The binding half (Olumi's reading): on the cited line, the figure is about THIS new factor, unless the card pairs it explicitly.
+        const source = tSaid.origin === 'human' && (confirmPairing
+          || figureTheUserWroteFor(t.value, todayUnit, tSaid.statement.source, newFactorScopeIn(g, label, todayUnit, inCall))) ? tSaid.statement.source : undefined;
         const prior = retained.find(r => norm(r.label) === norm(label)
           && (r.os.raw_value ?? r.os.value) === t.value && unitComparisonKey(String(r.os.unit ?? '')) === unitComparisonKey(todayUnit));
         const priorHuman = prior?.member !== undefined && prior.member.basis !== 'olumi_estimate'
           && provenanceOf({ value: prior.os }).origin === 'human';
-        const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
-        const origin = statementOrigin(source !== undefined || priorHuman,
-          (prior !== undefined && prior.member === undefined)
-          || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
-          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
+        const quote = source !== undefined && tSaid.origin === 'human' ? tSaid.statement.quote : priorHuman ? prior!.member!.quote ?? null : null;
+        const origin = source !== undefined || priorHuman ? 'human' : 'unknown';
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
           originUnknown = true;
@@ -11850,7 +11903,13 @@ export function createAgentCapabilities(
           ? { low: (heldRange as { low: number }).low, high: (heldRange as { high: number }).high, quote: (heldRange as { source_quote: string }).source_quote } : undefined;
         if (t.range_low !== undefined || t.range_high !== undefined) {
           const lo = t.range_low, hi = t.range_high;
-          const sentence = typeof lo === 'number' && typeof hi === 'number' ? sentenceStatingBoth(lo, hi, todayUnit, ctx.user_text ?? turnText) : null;
+          // Both ends from ONE cited span, by THE ONE RULE (`userStated`, a range keeps both ends): the range's own citation
+          // (`range_quote`, when the user gave it in another sentence than the figure they chose), else the figure's.
+          const rangeSaid = typeof lo === 'number' && typeof hi === 'number'
+            ? userStated({ quote: t.range_quote ?? t.quote, low: lo, high: hi, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'range' }) : undefined;
+          // Stored with the complete line the cited span stands in (the rule's `source`), so its conditions are never dropped.
+          const sentence = rangeSaid?.origin !== 'human' ? null
+            : [rangeSaid.statement.source, rangeSaid.statement.quote].find((w) => w.length <= USER_TODAY_QUOTE_MAX) ?? null;
           const stored = sentence === null ? undefined
             : { low: lo as number, high: hi as number, meaning: 'min_max' as const, source: USER_TODAY_SOURCE, source_quote: sentence };
           if (!ownsIt || stored === undefined || !isStatedLevelRange(stored, framed)) {
@@ -12086,10 +12145,24 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
           detail: `The limit on "${node.label}" is in ${String(unit)}, and the figure given is a different kind of figure, so nothing was prepared. Ask the user for the limit in its own units.` };
       }
-      // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
-      // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (interpretation === null && (!figureTheUserWrote(value, unit, ctx.user_text)
-        || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label)))) {
+      // ⭐ LEAN CORE (#3392, W19; proof-1 dev P05): recorded as the user's own figure, so it is theirs only by THE ONE RULE
+      // (`userStated`): the AI's cited span of the user's words, the figure, unit and bound read from it ("300 Pro paying
+      // subscribers" is never £300: the unit check). WHICH limit it is stays the AI's reading of a limit the model holds (checked
+      // by identity above), never a host match of the user's words against the limit's label (P05: "the remote-village
+      // constraint should be at least 85%" was refused against "Remote requests served within 30 days").
+      const limitSaid = interpretation !== null ? undefined : userStated({ quote: args?.quote, value, unit: unit ?? undefined }, chatTexts(ctx, g.brief_text),
+        { quantity: 'limit', node_id: node.id }, { form: operator === '>=' ? 'lower_bound' : 'upper_bound' });
+      // The binding stays the AI's reading; the cited words only must not give the figure to ANOTHER quantity of the model instead of this
+      // limit (DL #72: "£30,000 of Advertising spend" is never the decision budget's figure). ⛔ Codex #3392 r1 B1: read in the sentence
+      // that WRITES the figure (`quoteOfFigure`), never the whole span: "Keep Coastal orders … unchanged. Advertising share is 85% this
+      // quarter." names this limit only in a sentence without the figure, so the 85% stays Advertising share's.
+      const limitScope = limitScopeIn(g, node.label);
+      const namedIn = (q: string, label: string, rest: readonly string[]): boolean => factorTheUserNamed(label, q, { options: [], others: rest });
+      const figureSentence = limitSaid?.origin === 'human'
+        ? quoteOfFigure(value, unit ?? undefined, limitSaid.statement.quote) ?? limitSaid.statement.quote : '';
+      const givenToAnother = limitSaid?.origin === 'human' && !namedIn(figureSentence, node.label, limitScope.others)
+        && limitScope.others.some((o) => namedIn(figureSentence, o, [node.label, ...limitScope.others.filter((x) => x !== o)]));
+      if (limitSaid !== undefined && (limitSaid.origin !== 'human' || givenToAnother)) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

@@ -6,7 +6,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { authorshipOf, provenanceOf, requestWasTyped, type Origin } from '../provenance-of.js';
-import { statementOrigin } from '../../../orchestrator-v5/agent-lane/runtime/statement-origin.js';
 import { typedByUser } from '../../../orchestrator-v5/agent-lane/stated-by-user.js';
 import { valueAuthorshipOf as guidanceValueAuthorshipOf } from '../../../orchestrator-v5/agent-lane/turn-context/guidance-signals.js';
 import { valueAuthorshipOf } from '../provenance-of.js';
@@ -15,7 +14,7 @@ type Rec = Record<string, any>;
 /** Served hiring positive r4 (CEE e7f95dc6), the server read after the deadline approval. */
 const R4 = JSON.parse(readFileSync(new URL('../../../orchestrator-v5/agent-lane/__tests__/fixtures/hiring-positive-r4-turn06.json', import.meta.url), 'utf8')) as { graph: Rec };
 
-describe('words: who said it (statementOrigin and typedByUser are the authority\'s answer)', () => {
+describe('words: who said it (the authority\'s answer; `userStated` is its one caller for words, LEAN CORE)', () => {
   // Today's formula, verbatim, so any drift in the authority is caught.
   const before = (verified: boolean, unknown: boolean, sourceComplete: boolean, ownEstimate: boolean): Origin =>
     verified ? 'human' : unknown || (!sourceComplete && !ownEstimate) ? 'unknown' : 'ai';
@@ -23,7 +22,6 @@ describe('words: who said it (statementOrigin and typedByUser are the authority\
     for (const verified of [true, false]) for (const unknown of [true, false]) for (const complete of [true, false]) for (const own of [true, false]) {
       const want = before(verified, unknown, complete, own);
       expect(authorshipOf({ words: { verified, unknown, sourceComplete: complete, ownEstimate: own } }).origin).toBe(want);
-      expect(statementOrigin(verified, unknown, complete, own)).toBe(want);
     }
   });
   it('a request is typed only from the composer (or an API caller): a chip, a retry or a system event never is', () => {

@@ -223,7 +223,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   };
   const proposeOptionC = (level: number | undefined, message = 'Add an option: test £54 at release.') => {
     script = [
-      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', ...(level !== undefined ? { level: { value: level, unit: 'GBP' } } : {}) }], rationale: 'The user asked for it.' }),
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', ...(level !== undefined ? { level: { value: level, unit: 'GBP', quote: level === 54 ? 'test £54 at release' : message } } : {}) }], rationale: 'The user asked for it.' }),
       () => say('I would add "Test £54 at release", linked from the decision and setting the price. Shall I add it?'),
     ];
     return turn({ message });
@@ -238,7 +238,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map(node => node.kind === 'factor'
       ? { ...node, label: factor, observed_state: { value: 0.245, raw_value: 49, unit, cap: 200 } }
       : node.kind === 'option' ? { ...node, interventions: { fac_price: { value: node.id === 'opt_a' ? 0.245 : 0.295, raw_value: node.id === 'opt_a' ? 49 : 59, unit } } } : node) });
-    script = [() => fnCall('propose_new_option', { label, acts_on: [{ factor_label: factor, direction: 'positive', level: { value: 54, unit } }], rationale: 'The user asked for it.' }), () => say('Shall I add it?')];
+    script = [() => fnCall('propose_new_option', { label, acts_on: [{ factor_label: factor, direction: 'positive', level: { value: 54, unit, quote: message } }], rationale: 'The user asked for it.' }), () => say('Shall I add it?')];
     const approve = approveChipOf(await turn({ message }))!;
     expect(approve).toBeDefined();
     const beforeWrites = store.append.mock.calls.filter(([write]) => write.graph != null).length;
@@ -436,7 +436,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       return typeof id === 'string' ? id : undefined;
     };
     script = [
-      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }], rationale: 'The user asked for it.' }),
       (body) => fnCall('withdraw_proposal', { proposal_id: heldIdIn(body) }),
       () => say('I have withdrawn that option: it was not what you asked for.'),
     ];
@@ -595,7 +595,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approve.message, 'the click replays the Agent\'s label, with its figure').toContain('£54');
     await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     script = [
-      () => fnCall('propose_new_option', { label: 'Release price trial', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for one more.' }),
+      () => fnCall('propose_new_option', { label: 'Release price trial', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }], rationale: 'The user asked for one more.' }),
       () => say('I would add it. Shall I?'),
     ];
     const t3 = await turn({ message: 'Add one more like it.' });
@@ -688,6 +688,40 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   }, 120_000);
 
   /**
+   * ⭐ G3 (W15; Codex #3392 r1 B3): a new option's level the one rule cannot credit, written in the user's own words, is RECORDED with its
+   * origin unverified (construction's `cee_hypothesis` + `user_material_unverified`): never refused, never "you said", never Olumi's.
+   */
+  const proposeUncited = (message: string) => {
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      () => say('I would add "Test £54 at release", linked from the decision and setting the price. Shall I add it?'),
+    ];
+    return turn({ message });
+  };
+  it('[G3 W15] RED: the user wrote £54 but the AI cites no span of it → ONE hold → one click → committed with its origin unverified, never said as Olumi\'s estimate', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeUncited('Add an option: test £54 at release.');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const iv = (newOption()?.interventions ?? {})['fac_price'] as Record<string, unknown> | undefined;
+    expect(iv, JSON.stringify(iv)).toMatchObject({ raw_value: 54, source: 'cee_hypothesis', user_material_unverified: true });
+    const { settingProvenanceOf } = await import('../../../cee/provenance/provenance-of.js');
+    expect(settingProvenanceOf(iv, graphNow().nodes.find((x) => x.id === 'fac_price')).origin).toBe('unknown');
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Olumi's estimate/);
+  }, 120_000);
+
+  it('[G3 W15] NEGATIVE kept: a figure written nowhere in the user\'s words, uncited and with no estimate flag → no level is committed', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeUncited('Add an option: test a new release price.');
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect((newOption()?.interventions ?? {})['fac_price'] ?? null, JSON.stringify(newOption())).toBeNull();
+  }, 120_000);
+
+  /**
    * ⛔ ROUND-2 REVIEW, BLOCKER 3: the boundary every fast-path follow-up passes (`withoutAgentDirections`) dropped this
    * producer's sentences whenever a factor LABEL tripped it — "the user" inside "Size of the user base", a snake_case
    * label, or the id `labelOf` falls back to — so one click showed only "Saved.": what was added, and the C2
@@ -769,7 +803,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, seedGraph());
     let toolOutput: { refusal?: string; same_levels_as?: string; detail?: string } = {};
     script = [
-      () => fnCall('propose_new_option', { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      () => fnCall('propose_new_option', { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP', quote: 'test £59 at release' } }], rationale: 'The user asked for it.' }),
       (body) => {
         const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
         toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
@@ -1035,8 +1069,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     let toolOutput: { ok?: boolean; refusal?: string; not_added?: { option: string; same_levels_as: string }[]; not_added_note?: string; options?: unknown; option?: { label?: string } } = {};
     script = [
       () => fnCall('propose_new_option', { options: [
-        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }] },
-        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP', quote: 'test £59 at release' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }] },
       ], rationale: 'The user asked for both.' }),
       (body) => {
         const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
@@ -1066,8 +1100,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     let toolOutput: { ok?: boolean; not_added_note?: string; option?: { label?: string } } = {};
     script = [
       () => fnCall('propose_new_option', { options: [
-        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }] },
-        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP', quote: 'the £59 suggestion' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'a new £54 option' } }] },
       ], rationale: 'The user asked for both.' }),
       (body) => {
         const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
@@ -1091,7 +1125,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, g);
     let toolOutput: { ok?: boolean; adds_links_note?: string; not_linked?: unknown } = {};
     script = [
-      () => fnCall('propose_option_interventions', { interventions: [{ option_label: 'Cohort test', factor_label: 'Price', value: 54, basis: 'the user said £54', user_stated: true }] }),
+      () => fnCall('propose_option_interventions', { interventions: [{ option_label: 'Cohort test', factor_label: 'Price', value: 54, quote: 'The cohort test is £54 on Pro plan price.', basis: 'the user said £54', user_stated: true }] }),
       (body) => {
         const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
         toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
@@ -1118,7 +1152,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';
     script = [
-      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }], rationale: 'The user asked for it.' }),
       (body) => { proposed = JSON.stringify(body['input']); return say('I would add it; the price level needs a range first. Shall I add it?'); },
     ];
     const t1 = await turn({ message: 'Add an option: test £54 at release.' });
@@ -1133,8 +1167,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, seedGraph());
     script = [
       () => fnCall('propose_new_option', { options: [
-        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
-        { label: 'Raise to £64 for new customers', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }] },
+        { label: 'Raise to £64 for new customers', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP', quote: 'raise to £64 for new customers' } }] },
       ], rationale: 'The user asked for both.' }),
       () => say('I would add both options, each linked from the decision. Shall I add them?'),
     ];
@@ -1180,7 +1214,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     };
     script = [
       () => fnCall('propose_new_option', { options: [
-        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }] },
         { label: 'Raise to £64 for new customers', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP' } }] },
       ], rationale: 'x' }),
       () => say('That could not be prepared.'),
@@ -1194,7 +1228,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, seedGraph());
     script = [
       () => fnCall('propose_new_option', { options: [
-        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }] },
         { label: 'Bundle support', acts_on: [{ factor_label: 'Support quality', direction: 'positive' }] },
       ], rationale: 'x' }),
       () => say('One of those could not be prepared.'),
@@ -1219,7 +1253,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   it('two options asked for in one turn → the FIRST is held and offered (one button), the second is refused in plain words — never zero buttons', async () => {
     graphOf.set(SCENARIO, seedGraph());
     script = [
-      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'x' }),
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', quote: 'test £54 at release' } }], rationale: 'x' }),
       () => fnCall('propose_new_option', { label: 'Keep £49 with an add-on', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 49, unit: 'GBP' } }], rationale: 'y' }),
       () => say('I have prepared the first option; I will add the second after you approve it.'),
     ];
@@ -1285,7 +1319,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       () => fnCall('propose_new_option', {
         label: GRANDFATHER,
         acts_on: [
-          { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+          { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month', quote: '£59 for new Pro customers' } },
           { factor_label: 'Existing customers grandfathered', direction: 'positive' },
         ],
         new_factors: [{ label: 'Existing customers grandfathered', ...(kind !== undefined ? { kind } : {}),
@@ -1404,7 +1438,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       () => fnCall('propose_new_option', {
         label: GRANDFATHER,
         acts_on: [
-          { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+          { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month', quote: '£59 for new Pro customers' } },
           ...switchEntries.map((e) => ({ factor_label: 'Existing customers grandfathered', direction: 'positive', ...e })),
         ],
         new_factors: [{ label: 'Existing customers grandfathered', kind: 'switch',
@@ -1460,7 +1494,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       () => fnCall('propose_new_option', {
         options: [
           { label: GRANDFATHER, acts_on: [
-            { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+            { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month', quote: '£59 for new Pro customers' } },
             { factor_label: 'Existing customers grandfathered', direction: 'positive', level }] },
           { label: ANNUAL_OPT, acts_on: [
             { factor_label: 'Pro plan price', direction: 'positive', level: { value: 54, unit: 'GBP per month' } },
@@ -1734,7 +1768,15 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const proposeJourneyA = async (today: Record<string, unknown> | undefined, firstMessage: string = BRIEF_A, olumiSaid = 'Noted. Shall I build on the model you have?',
     // A1 £59 rows: the option's label, its level on the new price (`null` = none given) and the user's message.
     opts: { label?: string; level?: Record<string, unknown> | null; message?: string } = {}) => {
-    const level = opts.level === undefined ? { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59' } : opts.level;
+    // The AI's citation (lean core USER_QUOTE): a £ figure the brief writes cites the brief's sentence that writes it (a cited human figure
+    // stays theirs whatever the estimate flag says); a figure the brief never writes cites nothing.
+    const cite = <T extends Record<string, unknown> | null | undefined>(o: T): T => {
+      if (o === undefined || o === null || 'quote' in o || typeof o['value'] !== 'number') return o;
+      const quote = firstMessage.split(/(?<=[.!?])\s+/).find((x) => x.includes(`£${o['value'] as number}`));
+      return (quote === undefined ? o : { ...o, quote }) as T;
+    };
+    const level = cite(opts.level === undefined ? { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59' } : opts.level);
+    today = cite(today);
     script = [() => say(olumiSaid)];
     await turn({ message: firstMessage });
     script = [
@@ -1879,7 +1921,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text).toMatch(/Tell me its value today|Tell me today's value for "New Pro customer price"/);
     // The SAME £59 follow-up as the positive row, so the ONLY difference between the two rows is the today level.
     script = [
-      () => fnCall('propose_option_interventions', { interventions: [{ option_label: OPT_A, factor_label: NEW_PRICE, value: 59, unit: 'GBP/month', basis: 'the user said £59 for new Pro customers', user_stated: true }] }),
+      () => fnCall('propose_option_interventions', { interventions: [{ option_label: OPT_A, factor_label: NEW_PRICE, value: 59, quote: 'to £59 under', unit: 'GBP/month', basis: 'the user said £59 for new Pro customers', user_stated: true }] }),
       () => say('I would set it. Shall I?'),
     ];
     const t3 = await turn({ message: `Set "${NEW_PRICE}" to £59 under "${OPT_A}".` });

@@ -10,6 +10,8 @@
  * The words now follow the stored authorship value by value: a figure the proposal records as the user's is marked
  * `your_figure` and is never called an assumption; every other value keeps the assumption wording.
  */
+// LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence for a figure it claims as theirs (none where unwritten).
+import { citeUserSpans } from './helpers/cite-user-span.js';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -28,7 +30,7 @@ const setup = () => {
     throw new Error(`unexpected dispatch ${path}`);
   };
   const store = new ProposalStore();
-  return { caps: createAgentCapabilities(d, store), store };
+  return { caps: citeUserSpans(createAgentCapabilities(d, store)), store };
 };
 const CHURN = { user_stated: true, factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave', revise: true };
 const SUBS = { user_stated: false, factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate', revise: true };
@@ -87,12 +89,13 @@ describe('propose_starting_point says a level the user gave as theirs — the re
       if (path.endsWith('/graph')) return { status: 200, json: { graph: projectGraphForPersistence({ nodes, edges }), graph_hash: computeAnalysisAffectingGraphHash(projectGraphForPersistence({ nodes, edges }) as never) } };
       throw new Error(`unexpected dispatch ${path}`);
     };
-    return createAgentCapabilitiesWithLevelsPort(d, new ProposalStore());
+    return citeUserSpans(createAgentCapabilitiesWithLevelsPort(d, new ProposalStore()));
   };
   const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
   const levels = (userSaid: boolean) => [
-    { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', ...(userSaid ? { user_stated: true } : {}) },
-    { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
+    { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', user_stated: userSaid },
+    // Olumi's own working (its basis says so), declared with the AI's own-estimate carrier (`user_stated: false`, PL-0048).
+    { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire', user_stated: false },
   ];
   const OLD_NOTE = 'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
     'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
@@ -130,7 +133,7 @@ describe('a confirmed-as-is Olumi value is never said as the user\'s figure (AIQ
       throw new Error(`unexpected dispatch ${path}`);
     };
     const store = new ProposalStore();
-    const caps = createAgentCapabilities(d, store);
+    const caps = citeUserSpans(createAgentCapabilities(d, store));
     const r = await caps.proposeAssumptions(ctxSaying('I checked Olumi\'s churn estimate and it looks right, but nudge it up a little.'),
       { assumptions: [{ ...CHURN, user_stated: false, basis: 'Olumi\'s estimate, nudged up as asked' }] }) as R;
     expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -156,7 +159,7 @@ describe('a FIRST value the user typed for a factor with no value yet is theirs,
       throw new Error(`unexpected dispatch ${path}`);
     };
     const store = new ProposalStore();
-    return { caps: createAgentCapabilities(d, store), store };
+    return { caps: citeUserSpans(createAgentCapabilities(d, store)), store };
   };
   const FIRST_CHURN = { user_stated: true, factor_label: 'Monthly churn', value: 3.7, unit: 'percent per month', basis: 'the figure the user gave' };
   const FIRST_SUBS = { user_stated: false, factor_label: 'Pro subscribers', value: 300, unit: 'subscribers', basis: 'a round starting estimate' };

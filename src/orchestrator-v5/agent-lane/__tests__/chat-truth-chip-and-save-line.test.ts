@@ -138,7 +138,7 @@ describe('the build line says what approval changes', () => {
 describe('the approve chip is labelled from the stored proposal it approves', () => {
   it('RED: one option level → "Save £50,000 for Hire PA"; id and message exactly as before', async () => {
     const { store, caps } = capsOver();
-    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, user_stated: true, basis: 'the figure the user gave' }] });
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, quote: ctx.user_text, user_stated: true, basis: 'the figure the user gave' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const chips = chipsFor(store, [{ name: 'propose_option_interventions', result: r }]);
     expect(chips.map((c) => [c.id, c.label, c.message])).toEqual([
@@ -212,7 +212,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const graph = structuredClone(PA_GRAPH), before = JSON.stringify(graph);
     const { store, caps } = capsOver(graph);
     const r = await caps.proposeAssumptions({ ...ctx, user_text_complete: false },
-      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', basis: 'original figure', ...(user_stated === undefined ? {} : { user_stated }) }] } as never);
+      { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: 'The recruitment fee is £5,000', unit: 'GBP', basis: 'original figure', ...(user_stated === undefined ? {} : { user_stated }) }] } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const proposal = store.get(String(r.proposal_id))!;
     expect(proposal.provenance.authored_by).toBe('user_stated');
@@ -272,7 +272,13 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const r = await caps.proposeStartingPoint({ ...ctx, user_text: 'Suggest starting figures.', user_text_complete: false,
       unverified_user_text: unverified }, { assumptions: [],
       option_levels: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, ...claim }] });
-    expect(r).toEqual({ ok: false, mutated: false, refusal: 'nothing_to_propose',
+    if (unverified !== '') {
+      // G3: the £45,000 is USER MATERIAL (their unverified words write it): it STAYS unknown, never the user's or Olumi's, and is read
+      // with its origin unverified (was: refused). The starting point still needs every option's level, so nothing is proposed yet.
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'incomplete_starting_point',
+        option_levels: [{ option: 'Hire PA', factor: 'Annual PA salary', value: 45000, stated_by: 'origin_unverified' }] });
+      expect(JSON.stringify(r)).not.toMatch(/"stated_by":"(?:user|olumi_estimate)"/);
+    } else expect(r).toEqual({ ok: false, mutated: false, refusal: 'nothing_to_propose',
       option_levels_refused: { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL } });
     expect(store.outstanding(SCENARIO, 'user-a')).toEqual([]);
     expect(chipsFor(store, [{ name: 'propose_starting_point', result: r }])).toEqual([]);
@@ -281,7 +287,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('RED: one starting value → "Set Recruitment fee to £5,000"', async () => {
     const { store, caps } = capsOver();
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'a consultant’s one-off fee' }] });
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'a consultant’s one-off fee' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0]!.label).toBe('Set Recruitment fee to £5,000');
   });
@@ -289,7 +295,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
   it('RED: several figures in one starting point → "Use these 3 starting figures"', async () => {
     const { store, caps } = capsOver();
     const r = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'one-off' }],
+      assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'one-off' }],
       option_levels: [
         { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, user_stated: false, basis: 'market rate' },
         { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 0, user_stated: false, basis: 'no salary; agency fees instead' },
@@ -328,7 +334,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: name } : n)) };
     const { store, caps } = capsOver(graph);
     const r = await caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
-      { assumptions: [{ factor_label: name, value: 60, unit: 'subscriptions/month', user_stated: true, basis: 'keeps the base stable' }] });
+      { assumptions: [{ factor_label: name, value: 60, quote: 'We get about 60 new Pro subscriptions a month.', unit: 'subscriptions/month', user_stated: true, basis: 'keeps the base stable' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const label = chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0]!.label;
     expect(label.length).toBeLessThanOrEqual(APPROVAL_LABEL_MAX);
@@ -338,13 +344,13 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('CONTROL: a name that fits is never shortened; a cut that leaves under 6 characters keeps the tool\u2019s own label', async () => {
     const fits = capsOver();
-    const a = await fits.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'x' }] });
+    const a = await fits.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'x' }] });
     expect(chipsFor(fits.store, [{ name: 'propose_assumptions', result: a }])[0]!.label).toBe('Set Recruitment fee to £5,000');
     const tiny = 'All subscriptions per month'; // the room is 10: the cut at a word leaves "All"
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: tiny } : n)) };
     const t = capsOver(graph);
     const b = await t.caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
-      { assumptions: [{ factor_label: tiny, value: 60, unit: 'subscriptions/month', user_stated: true, basis: 'x' }] });
+      { assumptions: [{ factor_label: tiny, value: 60, quote: 'We get about 60 new Pro subscriptions a month.', unit: 'subscriptions/month', user_stated: true, basis: 'x' }] });
     expect(b.ok, JSON.stringify(b)).toBe(true);
     // DL ruling (X8, 12 Oct): "We get about 60 …" is the user's first figure for this factor, so the label the cut falls
     // back to is the one that records it as theirs, never "starting assumptions".
@@ -365,8 +371,8 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const valued = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, observed_state: { value: 0.2, raw_value: 4000, cap: 20000, unit: 'GBP' } } : n)) };
     const s3 = capsOver(valued);
     const revise = await s3.caps.proposeAssumptions(ctx, { assumptions: [
-      { factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
-      { factor_label: 'Annual PA salary', value: 45000, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
+      { factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
+      { factor_label: 'Annual PA salary', value: 45000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
     ] });
     expect(revise.ok, JSON.stringify(revise)).toBe(true);
     // Re-recorded (AIQ 5909998288, R2): both values are ones the USER wrote (`user_stated`), so the button records them as
@@ -480,7 +486,7 @@ describe('the real route: build + proposal in one turn', () => {
   it('RED: one level proposed after the build → the honest save line, and a chip naming the STORED £50,000 even though the prose says £60,000', async () => {
     script = [
       callTool('build_model_from_brief', { brief: BRIEF }),
-      callTool('propose_option_interventions', { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, basis: 'the figure you gave', user_stated: true }] }),
+      callTool('propose_option_interventions', { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, quote: 'A PA would cost about £50,000', basis: 'the figure you gave', user_stated: true }] }),
       say('These are starting assumptions, not measurements. Shall I save the £60,000 assumption for Hire PA?'),
     ];
     const b = await turn();

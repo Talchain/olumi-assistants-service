@@ -160,7 +160,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     const before = currentHash();
     const p = await caps.proposeStartingPoint(ctx, {
       assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
-      option_levels: [{ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'the option\'s own name' }],
+      option_levels: [{ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'the option\'s own name', user_stated: false }],
     });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
@@ -178,8 +178,8 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     const p = await caps.proposeStartingPoint(ctx, {
       assumptions: [{ user_stated: false, factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a typical SaaS churn' }],
       option_levels: [
-        { option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'the option\'s own name' },
-        { option_label: RAISE, factor_label: 'Word of mouth', value: 0.4, basis: 'a guess' },
+        { option_label: RAISE, factor_label: 'Pro plan monthly price', value: 59, basis: 'the option\'s own name', user_stated: false },
+        { option_label: RAISE, factor_label: 'Word of mouth', value: 0.4, basis: 'a guess', user_stated: false },
       ],
     });
     // The same native refusal now happens before consent, rather than offering an impossible card.
@@ -209,7 +209,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     if (where !== 'node') Object.assign(rows[1]!, structuredClone(GAP));
     expect(projectGraphForPersistence(persisted)).toEqual(persisted);
   }
-  const clearLevel = () => ({ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 49, basis: 'Keep the same level; resolve the stated gap', unmodelled_mechanisms: [] as string[] });
+  const clearLevel = () => ({ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 49, basis: 'Keep the same level; resolve the stated gap', user_stated: false, unmodelled_mechanisms: [] as string[] });
 
   it.each([
     ['81 characters', ['x'.repeat(81)]], ['six entries', ['a', 'b', 'c', 'd', 'e', 'f']],

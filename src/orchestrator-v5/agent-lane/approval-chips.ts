@@ -758,7 +758,10 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
      * AI-availability estimate were one approval, and the chip read "Use as starting option levels", calling the user's
      * own figure a starting estimate. It says what is recorded and how many of those are Olumi's.
      */
-    const olumi = levelOps.length - byUser;
+    // G3: a level whose origin is unverified is neither the user's nor Olumi's estimate, so it is not counted as either.
+    const unverified = levelOps.filter((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'unknown').length;
+    const olumi = levelOps.length - byUser - unverified;
+    if (unverified > 0) return `Record ${levelOps.length} levels (${olumi} Olumi estimate${olumi === 1 ? '' : 's'}, ${unverified} unverified)`;
     return `Record ${levelOps.length} levels (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
   }
   if (ops.length === 0 || ops.some((o) => !FIGURE_OPS.has(o.op))) return fallback;

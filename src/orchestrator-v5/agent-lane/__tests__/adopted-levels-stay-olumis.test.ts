@@ -145,7 +145,7 @@ describe('an approved option level carries WHOSE level it is, through the real w
     const p = product(hiring());
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'the user: one hire', user_stated: true }],
+      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, quote: ctx.user_text, basis: 'the user: one hire', user_stated: true }],
     });
     expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'user_specified' });
@@ -156,10 +156,10 @@ describe('an approved option level carries WHOSE level it is, through the real w
     const p = product(start);
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const sp = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ user_stated: true, factor_label: 'Onboarding share', value: 0.4, unit: '', basis: 'the user: it is 40%', revise: true } as never],
+      assumptions: [{ user_stated: true, factor_label: 'Onboarding share', value: 0.4, quote: ctx.user_text, unit: '', basis: 'the user: it is 40%', revise: true } as never],
       option_levels: [
         { option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire', user_stated: false },
-        { option_label: 'Hire Two Developers', factor_label: 'Onboarding share', value: 0.45, basis: 'the user: two starters', user_stated: true },
+        { option_label: 'Hire Two Developers', factor_label: 'Onboarding share', value: 0.45, quote: ctx.user_text, basis: 'the user: two starters', user_stated: true },
       ],
     });
     expect(sp.ok, JSON.stringify(sp)).toBe(true);
@@ -209,7 +209,7 @@ describe('the Agent-facing contract can say whose level it is', () => {
     const p = product(hiring());
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await dispatchTool('propose_option_interventions', JSON.stringify({
-      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'the user: one hire', user_stated: true }],
+      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, quote: ctx.user_text, basis: 'the user: one hire', user_stated: true }],
     }), ctx, caps);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), ctx, caps);

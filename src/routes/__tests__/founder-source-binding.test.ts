@@ -130,7 +130,7 @@ it.each(['and', 'plus'])('same-turn pronoun stays an Olumi field reading even wh
   const quote = "I have been spending probably 80% of my time on it, and it's not complete, so I assume I would need to continue that amount of time to complete it quickly.";
   const w = await goalWorld(g => { g.nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').label = `Founder time on PoC testing ${join} improvement`; }, quote);
   const label = w.graph().nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').label;
-  const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: label, value: 80, unit: '% of founder working time', user_stated: true, basis: 'Your figure' }], option_levels: [] }), w.ctx, w.caps());
+  const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: label, value: 80, quote: w.ctx.user_text, unit: '% of founder working time', user_stated: true, basis: 'Your figure' }], option_levels: [] }), w.ctx, w.caps());
   expect(r.ok, JSON.stringify(r)).toBe(true); expect(r.public_label).toContain('field binding unverified'); expect(r.public_label).toContain(quote);
   const pid = String(r.proposal_id); expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
   expect(w.graph().nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').observed_state).toMatchObject({ raw_value: 80, value: 0.8, user_material_unverified: true }); expect(w.writes).toHaveLength(1);
@@ -138,7 +138,7 @@ it.each(['and', 'plus'])('same-turn pronoun stays an Olumi field reading even wh
 it('a complete current factor name keeps the genuine bound human figure positive', async () => {
   const quote = 'Founder time on PoC testing and improvement is 80% of founder working time today.';
   const w = await goalWorld(undefined, quote);
-  const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: 'Founder time on PoC testing and improvement', value: 80, unit: '% of founder working time', user_stated: true, basis: 'Your figure' }], option_levels: [] }), w.ctx, w.caps());
+  const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions: [{ factor_label: 'Founder time on PoC testing and improvement', value: 80, quote: w.ctx.user_text, unit: '% of founder working time', user_stated: true, basis: 'Your figure' }], option_levels: [] }), w.ctx, w.caps());
   expect(r.ok, JSON.stringify(r)).toBe(true); expect(r.public_label).not.toContain('field binding unverified');
   const pid = String(r.proposal_id); expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });
   const os = w.graph().nodes.find((n: Rec) => n.id === 'founder_time_on_poc_testing_and_improvement').observed_state;
@@ -182,7 +182,8 @@ it('the real Run reader and final payload keep human 80% at model 0.8, never 0.8
   const w = await goalWorld(undefined, 'Record those current levels.'); w.ctx.user_text = quote; w.ctx.verified_user_messages.push(quote);
   const assumptions = w.graph().nodes.filter((n: Rec) => n.kind === 'factor').map((n: Rec) => ({ factor_label: n.label,
     value: n.id === 'founder_time_on_poc_testing_and_improvement' ? 80 : 10, unit: '% of founder working time',
-    user_stated: n.id === 'founder_time_on_poc_testing_and_improvement', basis: 'Controlled native reader test, other levels are Olumi assumptions.' }));
+    user_stated: n.id === 'founder_time_on_poc_testing_and_improvement', ...(n.id === 'founder_time_on_poc_testing_and_improvement' ? { quote } : {}),
+    basis: 'Controlled native reader test, other levels are Olumi assumptions.' }));
   const r = await dispatchTool('propose_starting_point', JSON.stringify({ assumptions, option_levels: [] }), w.ctx, w.caps()), pid = String(r.proposal_id);
   expect(r.ok, JSON.stringify(r)).toBe(true);
   expect(await w.caps(restoreCard(w.proposals.get(pid)!, r, w.ctx)).authoriseChange({ ...w.ctx, typed_approval_of: pid }, { proposal_id: pid })).toMatchObject({ ok: true, applied: true });

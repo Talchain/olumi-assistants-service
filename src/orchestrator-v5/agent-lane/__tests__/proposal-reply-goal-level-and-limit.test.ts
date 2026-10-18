@@ -16,6 +16,7 @@
  *
  * The producer rows run the REAL capability on the SERVED graphs of those turns, with the user's words verbatim.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { composeProposalReply } from '../proposal-reply.js';
@@ -39,7 +40,9 @@ async function produce(s: Served, tool: string, args: Record<string, unknown>): 
     : { status: 500, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore());
   const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: s.message, user_turn_text: s.message };
-  return (await dispatchTool(tool, JSON.stringify(args), ctx as never, caps)) as Record<string, unknown>;
+  // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+  const quote = tool === 'propose_limit_change' && args.quote === undefined ? quoteOfFigure(Number(args.new_value), String(args.unit ?? ''), s.message) : null;
+  return (await dispatchTool(tool, JSON.stringify(quote !== null ? { ...args, quote } : args), ctx as never, caps)) as Record<string, unknown>;
 }
 const GOAL_ARGS = { goal_label: 'MRR', value: 72000, unit: 'GBP/month', goal_is: 'at_least', user_stated: true };
 const limitLabel = (C05.graph.goal_constraints as Array<{ label: string; value: number }>).find((c) => c.value === 20000)!.label;

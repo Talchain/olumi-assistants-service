@@ -242,7 +242,7 @@ describe('the button says what the Yes records — never "Set … to" for a figu
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const c = { ...ctx, user_text: 'Make it 6 hours a week.', user_turn_text: 'Make it 6 hours a week.' };
-    const r = await caps.proposeAssumptions(c, { assumptions: [{ user_stated: true, factor_label: 'Hours per week finding warm connections', value: 6, unit: 'hours/week', basis: 'their figure', revise: true }] });
+    const r = await caps.proposeAssumptions(c, { assumptions: [{ user_stated: true, factor_label: 'Hours per week finding warm connections', value: 6, quote: c.user_text, unit: 'hours/week', basis: 'their figure', revise: true }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const [approve] = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: String(r.proposal_id) }], (id) => ({ proposal: store.get(id)!, result: r }) as never);
     expect(approve!.label).toBe(`Set Hours per week\u2026 to ${figureInUserUnits(6, 'hours/week')}`);
@@ -289,7 +289,7 @@ describe('the receipt of a keep names the acceptance, never "starting values"', 
     const { caps, nodes } = compound();
     const before = JSON.stringify(nodes());
     const c = { ...sctx, user_text: 'Make it 3 a month.', user_turn_text: 'Make it 3 a month.' };
-    const r = await caps.proposeAssumptions(c, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their figure', revise: true }] } as never);
+    const r = await caps.proposeAssumptions(c, { assumptions: [{ user_stated: true, factor_label: LABEL, value: 3, quote: c.user_text, unit: 'connections/month', basis: 'their figure', revise: true }] } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(await caps.authoriseChange(c, { proposal_id: String(r.proposal_id) })).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
     expect(JSON.stringify(nodes())).toBe(before);

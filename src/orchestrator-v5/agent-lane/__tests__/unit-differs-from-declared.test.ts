@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { ProposalStore } from '../proposal.js';
+import { citeUserSpans } from './helpers/cite-user-span.js';
 import { runAgentTurn, type CallModel, type ModelCallRequest } from '../runtime/agent-loop.js';
 
 const message = 'Set the Duration levels for the two options. Trial takes 0.3 days, which is my own figure. For Full, use your own estimate of 20 days.';
@@ -42,7 +43,8 @@ afterAll(() => { expect(llm).not.toHaveBeenCalled(); });
 function real(testGraph = graph) {
   const store = new ProposalStore();
   const read = vi.fn(async (path: string) => { expect(path).toContain('/graph'); return { status: 200, json: { ...served, graph: testGraph } }; });
-  return { store, caps: createAgentCapabilities(read as never, store, undefined, 'full') };
+  // LEAN CORE (#3392, USER_QUOTE): the AI cites the user's sentence for the figure it claims as theirs.
+  return { store, caps: citeUserSpans(createAgentCapabilities(read as never, store, undefined, 'full')) };
 }
 async function propose(interventions: Record<string, unknown>[], declaredUnit = 'days', text = message) {
   const before = JSON.stringify(graph);

@@ -16,8 +16,8 @@ const graph = { nodes: [
   { id: 'trial', kind: 'option', label: 'Trial' }, { id: 'full', kind: 'option', label: 'Full' },
 ], edges: ['trial', 'full'].map(from => ({ from, to: 'duration', strength: { mean: 1, std: 0 }, exists_probability: 1 })) };
 const entries = [
-  { option_label: 'trial', factor_label: 'duration', value: 0.3, user_stated: true, basis: 'my own figure' },
-  { option_label: 'full', factor_label: 'duration', value: 20, basis: 'Olumi estimate requested by the user' },
+  { option_label: 'trial', factor_label: 'duration', value: 0.3, quote: 'Trial takes 0.3 days', user_stated: true, basis: 'my own figure' },
+  { option_label: 'full', factor_label: 'duration', value: 20, basis: 'Olumi estimate requested by the user', user_stated: false },
 ];
 function real() {
   const store = new ProposalStore();
@@ -72,7 +72,8 @@ describe('cut1 real level handler', () => {
     const { caps, store } = real();
     const r = await caps.proposeOptionInterventions({ ...ctx, user_text: 'Please estimate duration' }, { interventions: [{ ...entries[0], range_meaning: 'likely_range' }] } as never);
     expect(r.ok).toBe(true);
-    expect(store.get(String(r.proposal_id))?.operations[0].value).toMatchObject({ authored_by: 'model_proposed' });
+    // G3: the user's cited figure the binding cannot tie to this pair is unknown origin (was: Olumi's); never the user's, as before.
+    expect(store.get(String(r.proposal_id))?.operations[0].value).toMatchObject({ authored_by: 'unknown' });
   });
 });
 
@@ -166,7 +167,7 @@ describe('joined starting-point disclosures', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store);
     const r = await dispatchTool('propose_starting_point', JSON.stringify({
-      assumptions: [{ factor_label: 'Additional baseline', value: 4, unit: 'days', basis: 'Starting estimate' }],
+      assumptions: [{ factor_label: 'Additional baseline', value: 4, unit: 'days', basis: 'Starting estimate', user_stated: false }],
       option_levels: entries.map(entry => ({ ...entry, range_meaning: 'likely_range', range_user_stated: true })),
     }), ctx, caps);
     expect(r.ok, JSON.stringify(r)).toBe(true);

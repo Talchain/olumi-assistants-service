@@ -69,7 +69,7 @@ describe('SYSTEM 1 M1: the user’s own chance for a risk, through the ONE door 
   it('PRECONDITION: Olumi’s unsized risk is not asked; a user statement sent through propose_assumptions is sent to the door', async () => {
     // HIRING (DL 23:19Z): Olumi's unsized risk is left out of the Run, so readiness does not ask; the user's words still size it here.
     expect(asks(G)).toEqual([]);
-    const r = await world().caps.proposeAssumptions(ctx(SAID) as never, { assumptions: [{ factor_label: LABEL, value: 30, unit: '%', basis: '',
+    const r = await world().caps.proposeAssumptions(ctx(SAID) as never, { assumptions: [{ factor_label: LABEL, value: 30, quote: SAID, unit: '%', basis: '',
       user_stated: true, statements: [{ quote: SAID }] }] } as never) as Rec;
     expect(r).toMatchObject({ ok: false, refusal: 'use_propose_statement' });
     expect(r.detail).toContain('Record it with propose_statement (subject: kind risk, label ‘Code quality deterioration’, field occurrence');
