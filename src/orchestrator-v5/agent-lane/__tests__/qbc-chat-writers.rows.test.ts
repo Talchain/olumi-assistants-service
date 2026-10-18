@@ -139,6 +139,36 @@ describe('row 8 (B3): uncited figures PRESENT in the user\'s words are recorded 
   });
 });
 
+const TODAY_GRAPH = {
+  nodes: [
+    { id: 'dec', kind: 'decision', label: 'Delivery question' },
+    { id: 'goal', kind: 'goal', label: 'Monthly revenue' },
+    { id: 'opt_keep', kind: 'option', label: 'Carry on as now' },
+  ],
+  edges: [{ from: 'dec', to: 'opt_keep' }],
+};
+/* Row 8, new option (:11037): a new factor's today the user wrote, uncited, is recorded unverified, never "you said", never lost. */
+describe('row 8 (B3, propose_new_option today): an uncited today figure the user wrote is kept with its origin unverified', () => {
+  it('RED: "Couriers cost 400 GBP per week today." → the new factor\'s today is 400, never stated_by user', async () => {
+    const said = 'Add an option to hire couriers. Couriers cost 400 GBP per week today.';
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(TODAY_GRAPH), graph_hash: 'h0' } };
+      const p = (body as Rec).chip?.parameters;
+      const oid = p?.options?.[0]?.option_id ?? p?.option_id;
+      return { status: 200, json: { suggested_actions: [{ id: gmHeldProposalRef(SID, `node:${oid}`), label: 'Approve changes', message: 'Yes.' }] } };
+    };
+    const r = await createAgentCapabilities(d, new ProposalStore()).proposeNewOption(ctxOf(said) as never, { label: 'Hire couriers',
+      acts_on: [{ factor_label: 'Courier cost', direction: 'positive' }],
+      new_factors: [{ label: 'Courier cost', unit: 'GBP per week', today: { value: 400, unit: 'GBP per week' }, affects: [{ label: 'Monthly revenue', direction: 'negative' }] }],
+      rationale: 'The user asked for it.' } as never) as Rec;
+    expect(r.ok, JSON.stringify(r).slice(0, 800)).toBe(true);
+    const nf = ((r.new_factors ?? r.options?.[0]?.new_factors ?? []) as Rec[]).find((f) => f.label === 'Courier cost');
+    expect(nf?.current_value, JSON.stringify(r).slice(0, 1200)).toMatchObject({ value: 400 });
+    expect(nf!.current_value.stated_by).not.toBe('user');
+    expect(nf!.current_value.stated_by).not.toBe('olumi_estimate');
+  });
+});
+
 /* ── Row 9 (B4 + DL ruling (a)): a quoted option title is never credited by label equality ── */
 const TITLE = '£25 for new members; keep current members';
 const W15_GRAPH = {
