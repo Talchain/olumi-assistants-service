@@ -187,7 +187,7 @@ it('carries the rescued convention frame through construction, registration, per
   // the range the drafter wrote (nothing re-framed); the price keeps 200 below.
   for (const node of armB.nodes) {
     if (node.observed_state?.frame_source === undefined) continue;
-    const drafted = (candidate as { factors?: { label: string; plausible_max?: number | null }[] }).factors?.find((f) => f.label === node.label)?.plausible_max;
+    const drafted = candidate.factors.find((f) => f.label === node.label)?.plausible_max;
     expect(node.observed_state.cap ?? node.scale_frame, String(node.label)).toBe(drafted);
   }
   expect(priceOf(armB).observed_state?.cap, 'Arm B: the unmodified recording keeps the original cap').toBe(200);
