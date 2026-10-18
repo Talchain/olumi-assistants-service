@@ -253,12 +253,34 @@ describe('BUDDY-A #3396: widening Olumi\'s reference keeps every stated size (B1
     expect(nodeOf(await setPrice(g, brief, 60), PRICE).observed_state).toMatchObject({ raw_value: 60, cap: 75, frame_source: 'olumi_convention' });
   });
 
-  it('B2 contrast: a range the brief states for the price ends at its bound, so it is the user\'s: not marked, and £60 above it is asked about', async () => {
-    const brief = `${BRIEF} Our monthly price has ranged between £10 and £40 a month.`;
+  // BUDDY-A R2 (PL-A2-FRAME-0435): a point, a range, a domain and a limit keep their roles. Only a verified LIMIT or scale top on
+  // THIS factor is the user's bound; a stated range (historical or uncertain) is no maximum (AIE W3), and another quantity's never counts.
+  it.each([
+    ['the price\'s own historical range', 'Our monthly price has ranged between £10 and £40 a month.'],
+    ['another quantity\'s range sharing a word', 'Our supplier price has ranged between £10 and £40 per month.'],
+  ])('B2: %s is no bound: the reference stays Olumi\'s and the user\'s £60 widens it', async (_name, sentence) => {
+    const brief = `${BRIEF} ${sentence}`;
     const g = await build(BASE, brief);
+    expect(nodeOf(g, PRICE).observed_state).toMatchObject({ cap: 40, frame_source: 'olumi_convention' });
+    expect(nodeOf(await setPrice(g, brief, 60), PRICE).observed_state).toMatchObject({ raw_value: 60, cap: 75, frame_source: 'olumi_convention' });
+  });
+
+  const LIMIT = 'Our monthly price cannot exceed £40 per month.';
+  it('B2 contrast: the user\'s explicit limit on the price, verified in their words, is their bound: not marked, and £60 above it is asked about', async () => {
+    const brief = `${BRIEF} ${LIMIT}`;
+    const g = await build(BASE, brief, (w) => {
+      w.statements.push(s(LIMIT, { kind: 'factor', label: PRICE }, 'target', 40, '£ per month'));
+      w.statements.at(-1).form = 'upper_bound';
+    });
     expect(nodeOf(g, PRICE).observed_state).toMatchObject({ cap: 40 });
     expect(nodeOf(g, PRICE).observed_state).not.toHaveProperty('frame_source');
     await expect(setPrice(g, brief, 60)).rejects.toMatchObject({ details: { rejection_reason: 'value_exceeds_cap' } });
+  });
+
+  it('B2 fail-safe: the same words with no verified limit statement bound nothing: an unresolved role never becomes the user\'s bound', async () => {
+    const brief = `${BRIEF} ${LIMIT}`;
+    const g = await build(BASE, brief);
+    expect(nodeOf(g, PRICE).observed_state).toMatchObject({ cap: 40, frame_source: 'olumi_convention' });
   });
 
   it('B2 contrast: today\'s price written at the drafted range\'s end is a point, not a bound: the range stays Olumi\'s', async () => {
