@@ -178,6 +178,9 @@ describe('a figure in words is read by the digit path\'s own unit check, with it
     ['after a colon', 70, 'tickets per week', 'Correction: Seventy tickets per week, not eighty.', true],
     ['C4: a spelled figure with a spelled period', 15, 'food bags per 10 minutes', 'We pack fifteen bags per ten minutes.', true],
     // trailing unit and period
+    // the digit path's own check: the same figure, and no unit word of another kind ("2 weeks" is no count of people)
+    ['another figure', 80, 'tickets per week', 'Our team resolves seventy tickets per week.', false],
+    ['a unit word of another kind', 2, 'people per week', 'It took two weeks.', false],
     ['no unit word', 2, 'hours per week', 'We have two of them.', false],
     ['the pronoun "one"', 1, 'specialists', 'One of them was off sick, and the one who covered was new.', false],
     ['another count', 70, 'tickets per week', 'Our team serves seventy customers per week.', false],
