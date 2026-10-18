@@ -196,6 +196,9 @@ describe('a figure in words is read by the digit path\'s own unit check, with it
     ['a spaced ordinal', 40, 'customers', 'She was our forty fifth customer.', false],
     ['a scale ordinal', 1, 'customers', 'He was our one hundredth customer.', false],
     ['an ordinal after a compound (Codex BLOCK 628a1634)', 100, 'tickets per week', 'This is our one hundred first ticket this week.', false],
+    ['an ordinal after "and"', 100, 'tickets per week', 'This is our one hundred and first ticket this week.', false],
+    ['a hyphenated second', 20, 'tickets per week', 'This is our twenty-second ticket this week.', false],
+    ['a spelled duration is still read', 20, 'seconds', 'Each check takes twenty seconds.', true],
     // names
     ['a name inside a sentence', 2, 'developers', 'We work with Two Developers Ltd on the app.', false],
     ['a name that opens a sentence', 2, 'developers', 'Two Developers Ltd sent the quote.', false],
