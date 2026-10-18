@@ -17,7 +17,7 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { currentStatementRetention, userStatementsOn, claimRecordsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { bindingReadingWords, currentStatementRetention, userStatementsOn, claimRecordsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
@@ -56,6 +56,8 @@ import { findLinkEffectAmounts } from '../link-effect-figures.js';
  * an unclear or level figure, a figure of another quantity) stands.
  */
 const OPTION_READS_PAST: ReadonlySet<string> = new Set(['not_one_statement', 'figure_counts_another_unit', 'figures_not_in_statement']);
+/** GATE → LABEL: the one binder miss that is about WHICH link the user's figures size, never about the figures themselves. */
+const ITEM_READING_MISS = 'end_not_named';
 /** ⛔ Wrong author (served hiring 14 Oct): Olumi's claim, reported, framed, disputed or disowned, is never the user's figure. */
 const NOT_THE_USERS_CLAIM = 'Nothing was prepared: these words report, dispute or disown Olumi\u2019s estimate, so they are not the user\u2019s own figure. '
   + 'Ask the user for their own figure, in their words.';
@@ -5522,7 +5524,7 @@ export function createAgentCapabilities(
         if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
         let working: unknown = g.raw;
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
-          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
+          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true; item_is_olumis_reading?: true }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
@@ -5588,7 +5590,9 @@ export function createAgentCapabilities(
             fail('not_the_users_statement', linkEffectDeniedWords(from, to));
             continue;
           }
-          if (miss !== null) {
+          // ⭐ GATE → LABEL (change 1; Codex amendment 2): a statement whose figures the binder finds but whose words do not name this
+          // link's ends is the user's figure; WHICH link it sizes is Olumi's reading, said on the card, approved only by its press.
+          if (miss !== null && miss !== ITEM_READING_MISS) {
             fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label,
               linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question), from, to));
             continue;
@@ -5643,6 +5647,7 @@ export function createAgentCapabilities(
           const mediated = linkEffectMediatorReadings(unitView, from.id, to.id);
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
             ...unitReadings, ...labelReadings, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
+            ...(miss === ITEM_READING_MISS ? { item_is_olumis_reading: true as const } : {}),
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
@@ -5658,12 +5663,16 @@ export function createAgentCapabilities(
             ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
             ...(item.label_readings !== undefined ? { label_readings: item.label_readings } : {}),
             ...(item.mediator_readings !== undefined ? { mediator_readings: item.mediator_readings } : {}) } }));
+        // GATE → LABEL (Codex amendment 1): "user_stated" only where every link is the user's by the binder; never for Olumi's reading.
+        const readings = prepared.filter((item) => item.item_is_olumis_reading === true);
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
-          operations, provenance: { authored_by: 'user_stated', basis: prepared.map((item) => item.said).join('\n') },
-          validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links` });
+          operations, provenance: { authored_by: readings.length === 0 ? 'user_stated' : 'model_proposed', basis: prepared.map((item) => item.said).join('\n') },
+          validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links`
+            + readings.map((item) => ` ${bindingReadingWords(`${item.from_label} → ${item.to_label}`)}`).join('') });
         proposals.put(proposal);
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
-          links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said })),
+          links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said,
+            ...(item.item_is_olumis_reading === true ? { item_is_olumis_reading: true } : {}) })),
           ...(notPrepared.length > 0 ? { not_prepared: notPrepared } : {}),
           note: 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
       }
@@ -5734,7 +5743,10 @@ export function createAgentCapabilities(
       if (miss === 'denied' && saysNoChange(quote, text)) {
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, detail: linkEffectDeniedWords(from, to) };
       }
-      if (miss !== null) {
+      // ⭐ GATE → LABEL (change 1; Codex amendment 2): the user's figures, in words that do not name this link's ends: WHICH link they
+      // size is Olumi's reading, said on the card and approved only by its press; the figure stays theirs. Every other miss still asks.
+      const itemReading = miss === ITEM_READING_MISS;
+      if (miss !== null && !itemReading) {
         const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds, statedScope.target_units)?.question);
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, question: ask,
           detail: linkEffectUnitAskWords(ask, from, to) };
@@ -5787,9 +5799,10 @@ export function createAgentCapabilities(
           value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...labelReadings,
             // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
             ...((m) => m.length > 0 ? { mediator_readings: m } : {})(linkEffectMediatorReadings(unitView, from.id, to.id)), ...consent } }],
-        provenance: { authored_by: 'user_stated', basis: said },
+        provenance: { authored_by: itemReading ? 'model_proposed' : 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,
+        public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`
+          + (itemReading ? ` ${bindingReadingWords(`${cardNameOf(g, from.id)} → ${cardNameOf(g, to.id)}`)}` : ''),
       });
       proposals.put(proposal);
       return {
@@ -5797,8 +5810,9 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
+        link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said, ...(itemReading ? { item_is_olumis_reading: true } : {}) },
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
+          + (itemReading ? 'and that which link it sizes is Olumi’s reading of their words, confirmed only by the card’s button, ' : '')
           + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
