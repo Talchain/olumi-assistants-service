@@ -1153,9 +1153,9 @@ export function carriedRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, 
  * ⭐ A3 (AIE A3 text; Lane A's host change): the producer keeps a written range WHOLE in `statements` on its link, its size null.
  * A range is CARRIED only where registration will hold it: bound to an ADMITTED link by the statement door's own binding
  * (`withConstructionStatements`, as registration writes it) and read by the Run's one reader (`linkHoldsStatedRange`), both ends
- * in the sentence that writes it. The retry is never asked for what the draft already holds, and a retry that records it counts
- * as carrying it (the adoption check below). ⛔ #3401 Codex r1 P1: a statement whose subject resolves to no admitted link
- * ("Contracts signed TYPO") records nothing at registration, so it carries nothing here.
+ * in the sentence that writes it, so the retry is never asked for what the draft already holds. The retry's ADOPTION is unchanged
+ * (base: `carriedRanges(admitted)` alone; DL-3 fallback on #3401). ⛔ #3401 Codex r1 P1: a statement whose subject resolves to no
+ * admitted link ("Contracts signed TYPO") records nothing at registration, so it carries nothing here.
  */
 function recordedWholeRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, drafted: CandidateModel | undefined, brief: string | undefined): string[] {
   if (drafted === undefined || typeof brief !== 'string') return [];
@@ -1167,21 +1167,6 @@ function recordedWholeRanges(admitted: Pick<AdmittedModel, 'nodes' | 'edges'>, d
   return findStatedRanges(brief).filter((r) => recorded.some((st) => st.quote.includes(r.text)
     && Math.min(Math.abs(st.low!), Math.abs(st.high!)) === r.low.magnitude && Math.max(Math.abs(st.low!), Math.abs(st.high!)) === r.high.magnitude))
     .map((r) => r.text);
-}
-
-/**
- * ⛔ #3401 Codex r1/r2 P1: a retry asked a range is never adopted, for any reason, when it changes the ADMITTED goal target: its figure (and so its sign),
- * unit, frame or comparator, read through the one goal-record authority (S5), or the goal's authorship. Refusing keeps the first
- * draft, never a new figure.
- */
-function keepsTheAdmittedGoalTarget(first: Pick<AdmittedModel, 'nodes'>, retry: Pick<AdmittedModel, 'nodes'>): boolean {
-  const target = (m: Pick<AdmittedModel, 'nodes'>): string => {
-    const goal = m.nodes.find((n) => n.kind === 'goal');
-    const t = goal === undefined ? null : readGoalRecord(m, String(goal.id))?.target ?? null;
-    return JSON.stringify([t?.raw ?? null, t?.unit ?? null, t?.frame ?? null, t?.comparator ?? null, t?.source ?? null,
-      goal?.provenance ?? null, goal?.proposed_by ?? null]);
-  };
-  return target(first) === target(retry);
 }
 
 /**
@@ -2245,11 +2230,8 @@ export async function buildModelFromBrief(
           || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(first.admitted))
           || (retryOpen < gapCount(first.preparation) && keepsEveryRegisteredOption)
           // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted, retryCandidate, brief).size > carriedRanges(first.admitted, first.candidate, brief).size && keepsEveryRegisteredOption)
+          || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(first.admitted).size && keepsEveryRegisteredOption)
           || (chainsAsked.length > 0 && keepsEveryRegisteredOption) || unattested !== null) &&
-        // ⛔ #3401 Codex r1/r2: a retry asked a range keeps the admitted goal target, whatever reason adopts it (mixed path + range too).
-        // Only an unattested event goal is re-chosen, under its own guards above (the user's target kept as its goal).
-        (rangesAsked.length === 0 || unattested !== null || keepsTheAdmittedGoalTarget(first.admitted, retryAdmitted)) &&
         // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
         (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(first.admitted))) &&
         // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).

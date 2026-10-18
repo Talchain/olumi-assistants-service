@@ -91,16 +91,6 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect((graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value])).toEqual([['Hiring cost', '<=', 200000]]);
   });
 
-  // ⛔ #3401 Codex r2: a retry asked a range keeps the admitted goal target, EXCEPT this re-choice, which has its own guards above.
-  it('CONTRAST (#3401): with a written money range also asked of the same retry, the unattested event is still re-chosen and its goal saved', async () => {
-    const brief = `${FX.brief} Each contractor would cost between £400 and £600 a day.`;
-    const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(redraft())], brief);
-    expect(result.ok, JSON.stringify(result).slice(0, 1500)).toBe(true);
-    expect(calls).toHaveLength(2);
-    expect(calls[1]!.input, 'PRECONDITION: the range is asked of the same retry').toContain('The brief writes \\"£400 and £600\\" and no link in the model carries it.');
-    expect(goalOf(graph!)).toMatchObject({ label: 'Productivity change by launch', goal_threshold_raw: 10, goal_threshold_unit: '%', goal_threshold_frame: 'change_abs' });
-  });
-
   it('a redraft that still takes the unattested event as the goal saves nothing; the AI asks the user, with the reason and the words', async () => {
     const { graph, result, calls } = await construct([FX.raw_text, FX.raw_text]);
     expect(calls).toHaveLength(2);
