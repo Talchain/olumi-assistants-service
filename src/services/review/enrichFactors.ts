@@ -7,6 +7,7 @@
  * @module services/review/enrichFactors
  */
 
+import { turnContextItems, turnContextText } from "../../orchestrator-v5/agent-lane/turn-context.js";
 import { log } from "../../utils/telemetry.js";
 import { callLLMForExtraction } from "../../adapters/llm/extraction.js";
 import {
@@ -263,18 +264,6 @@ export function buildEnrichFactorsInput(
   };
 }
 
-/**
- * Build the user prompt with input data.
- */
-function buildUserPrompt(input: EnrichFactorsInputT): string {
-  return `Generate factor enrichments for the following decision model:
-
-INPUT:
-${JSON.stringify(input, null, 2)}
-
-Output ONLY valid JSON with the enrichments array.`;
-}
-
 // =============================================================================
 // Response Validation
 // =============================================================================
@@ -446,7 +435,8 @@ export async function enrichFactors(
     const systemPrompt = factorScope === "sensitive"
       ? ENRICH_FACTORS_PROMPT + "\nFor this review, controllable_factors is a legacy field name: it contains sensitivity-listed graph factors, including observable factors. Membership does not imply controllability."
       : ENRICH_FACTORS_PROMPT;
-    const userPrompt = buildUserPrompt(input);
+    // AIE 04:07Z (AIE-P9-REQUEST-WORDING-20261018-v1): the explicit task line stays OUTSIDE the quoted reference-data block.
+    const userPrompt = `Generate factor enrichments for the following decision model:\n\n${turnContextItems({ scope: "model-only", canonicalState: input }).map(turnContextText).join("\n\n")}`;
 
     // Call LLM
     const llmResult = await callLLMForExtraction(systemPrompt, userPrompt, {

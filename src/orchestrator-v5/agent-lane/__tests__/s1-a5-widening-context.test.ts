@@ -25,10 +25,11 @@ const CONTEXT: ConstructionContext = {
     user_statements: [userStatementRecord({ kind: 'risk', id: 'risk', field: 'holds_now' }, [{ speaker: 'user', source: REJECTION,
       quote: REJECTION, reading: 'olumi', form: 'describes', subject: { quantity: 'risk', node_id: 'risk' } }],
     '2026-08-01T00:00:00Z', { recorded_by: 'correction', disposition: 'retracted', scope: 'whole', retained_count: 0 })] }] },
+  history: [answeredEarlierItem([{ olumi: 'Which attendance does that concern?', reply: 'Weekday attendance only.', reply_source: 'typed' }])],
   retained: { brief: BRIEF, conversation: [
     { speaker: 'user', source: 'typed', text: REJECTION },
     { speaker: 'unknown', source: 'stored, origin not verified', text: CHIP },
-  ], items: [answeredEarlierItem([{ olumi: 'Which attendance does that concern?', reply: 'Weekday attendance only.', reply_source: 'typed' }])] },
+  ] },
   objections: [REJECTION],
 };
 const statement = (quote: string, subject: Rec, field: string, form: string, figures: Rec, unit: string): Rec =>
@@ -97,9 +98,9 @@ describe('S1 A5: the widening calls read the same assembled context as the draft
   it('the rejection reaches the widening calls as the user\'s typed words; the chip stays of unknown origin', async () => {
     const { widening } = await built(CONTEXT);
     const context = (JSON.parse(widening[0]!.input as string) as Rec).construction_context as string;
-    expect(context).toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${REJECTION}`);
-    expect(context).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${CHIP}`);
-    expect(context).not.toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${CHIP}`);
+    expect(context).toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${JSON.stringify(REJECTION)}`);
+    expect(context).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${JSON.stringify(CHIP)}`);
+    expect(context).not.toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${JSON.stringify(CHIP)}`);
   });
   it('BOTH ARMS (BUDDY-A): with one lever the risks AND options calls each carry the same context, verbatim', async () => {
     const { drafter, widening } = await built(CONTEXT, { drafts: [draftText(['Corporate deal active'])] });
@@ -136,10 +137,10 @@ describe('S1 A5: the widening calls read the same assembled context as the draft
     ] } };
     const { widening } = await built(context);
     const text = inputOf(widening[0]!).construction_context as string;
-    const at = context.retained!.conversation.map(({ text: words, ...origin }) => text.indexOf(`${JSON.stringify(origin)}\n${words}`));
+    const at = context.retained!.conversation.map(({ text: words, ...origin }) => text.indexOf(`${JSON.stringify(origin)}\n${JSON.stringify(words)}`));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect(at).toEqual([...at].sort((a, b) => a - b));
-    expect(text).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${QUOTED}`);
+    expect(text).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${JSON.stringify(QUOTED)}`);
   });
   it('ORIGIN NEGATIVE (BUDDY-A): a figure seen only in the context (an unknown chip) never becomes the user\'s in a widened option', async () => {
     const CHIP_FIGURE = 'Spend £100k/year on paid advertising.';
@@ -219,7 +220,7 @@ describe('A2/A3/A5 share the frozen first context across both briefs', () => {
     draft.statements.push(statement(quote, { kind: 'option', label: source.options[0], factor_label: 'Advertising spend' }, 'level', 'point', { value: 100000 }, '£'));
     const captured = async (typed: boolean) => {
       const context: ConstructionContext | undefined = typed ? undefined : { retained: { brief, conversation: [
-        { speaker: 'unknown', source: 'stored, origin not verified', text: quote },
+        { speaker: 'unknown', source: 'stored, origin not verified', text: `A note called "budget". ${quote} End of note.` },
       ] } };
       const result = await built(context, { brief: typed ? `${brief}\n${quote}` : brief, drafts: [JSON.stringify(draft)] });
       const factor = (result.graph.nodes as Rec[]).find(n => n.label === 'Advertising spend');
@@ -252,7 +253,7 @@ describe('A2/A3/A5 share the frozen first context across both briefs', () => {
         { speaker: 'user' as const, source: 'typed' as const, text: 'Our current aim is understanding the bottleneck; later we may expand. Keep the night team’s dissent and the missing evidence.' },
         { speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: 'Revenue was £999000 last year; another speaker’s forecast is 77%. Neither is this model’s target.' },
       ];
-      const context: ConstructionContext = { retained: { brief, conversation, items: [pair] }, objections: ['Do not revive the withdrawn target.'] };
+      const context: ConstructionContext = { history: [pair], retained: { brief, conversation }, objections: ['Do not revive the withdrawn target.'] };
       const first = JSON.parse(draftText(['Checklist active'], source.branch === 'size' ? 20 : 0, source)) as Rec;
       if (source.branch === 'repair') {
         first.factors[0].unit = 'points'; first.factors[0].baseline_value = null;

@@ -18,6 +18,8 @@
  *   · Superseded by the model and never persisted: the frame is display-only, sent before GRAPH_READY or not at all.
  */
 
+import { turnContextItems, turnContextText } from './turn-context.js';
+
 /** The model the measurement ran (gpt-4.1-2025-04-14 served it). */
 export const BRIEF_READING_MODEL = 'gpt-4.1';
 
@@ -131,7 +133,8 @@ export type CallBriefReading = (req: {
 export async function readBrief(message: string, call: CallBriefReading): Promise<BriefReading | null> {
   if (message.trim().length === 0) return null;
   try {
-    const text = await call({ model: BRIEF_READING_MODEL, instructions: BRIEF_READING_INSTRUCTIONS, input: message, schema: BRIEF_READING_SCHEMA });
+    const input = turnContextItems({ scope: 'request-only', request: message }).map(turnContextText).join('\n\n');
+    const text = await call({ model: BRIEF_READING_MODEL, instructions: BRIEF_READING_INSTRUCTIONS, input, schema: BRIEF_READING_SCHEMA });
     return gateBriefReading(message, text);
   } catch {
     return null;

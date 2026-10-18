@@ -2,7 +2,10 @@
  * Tests for enrich-factors prompt and service
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import * as extraction from "../../src/adapters/llm/extraction.js";
+import { REASONING_CONTEXT_LABEL } from "../../src/orchestrator-v5/agent-lane/turn-context.js";
+import { EXTRACTION_TIMEOUT_MS } from "../../src/config/timeouts.js";
 import {
   EnrichFactorsInput,
   EnrichFactorsOutput,
@@ -23,6 +26,7 @@ import {
   extractOutcomeLabels,
   extractRiskLabels,
   extractControllableFactors,
+  enrichFactors,
 } from "../../src/services/review/enrichFactors.js";
 import type { GraphT } from "../../src/schemas/graph.js";
 
@@ -676,4 +680,48 @@ describe("filterMismatchedSensitivity", () => {
       invalid_elasticity: 0,
     });
   });
+});
+
+
+describe("the real factor service uses the scoped shared reference frame", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+  const cases = [
+    { name: "distribution", goal: "Meet the delivery target under the existing conditions", price: "Freight price", time: "Dispatch time" },
+    { name: "laboratory", goal: "Meet the assay target under the existing conditions", price: "Assay price", time: "Labelling time" },
+  ];
+  it.each(cases.flatMap(row => (["controllable", "sensitive"] as const).map(factorScope => ({ ...row, factorScope }))))(
+    "$name $factorScope retains exact engine data and each factor's full uncertainty source", async row => {
+      const graph = makeTestGraph();
+      const priceSources = ["Asha said revenue was £2m on 2026-09-01; the quoted figure is unverified.",
+        "The night team disputes the cause, only if the existing checks continue."];
+      const timeSources = ["Boris disputes the timetable; the deadline remains conditional on the current assay."];
+      graph.nodes.find(n => n.id === "goal_growth")!.label = row.goal;
+      graph.nodes.find(n => n.id === "fac_price")!.label = row.price;
+      graph.nodes.find(n => n.id === "fac_price")!.data!.uncertainty_drivers = priceSources;
+      graph.nodes.find(n => n.id === "fac_dev_time")!.label = row.time;
+      graph.nodes.find(n => n.id === "fac_dev_time")!.data!.uncertainty_drivers = timeSources;
+      const before = structuredClone(graph);
+      const reply = { factor_id: "fac_price", sensitivity_rank: 1,
+        observations: ["This factor changes the model result.", "Its current input is uncertain."],
+        perspectives: ["Existing evidence could test the stated condition.", "A comparison could separate the competing claims."],
+        confidence_question: "What evidence would test this assumption?" };
+      const call = vi.spyOn(extraction, "callLLMForExtraction").mockResolvedValueOnce({ success: true, response: { enrichments: [reply] } });
+      const result = await enrichFactors(graph, [...makeFactorSensitivity(), { factor_id: "other-factor", elasticity: 2, rank: 2 }],
+        { factorScope: row.factorScope, requestId: "scoped-factor-review" });
+      expect(result.success).toBe(true);
+      expect(call).toHaveBeenCalledTimes(1);
+      const expected = { goal_label: row.goal, outcome_labels: ["Monthly Recurring Revenue", "Customer Retention"],
+        risk_labels: ["Customer Churn"], controllable_factors: [
+          { factor_id: "fac_price", label: row.price, factor_type: "price", uncertainty_drivers: priceSources },
+          { factor_id: "fac_dev_time", label: row.time, factor_type: "time", uncertainty_drivers: timeSources },
+        ], factor_sensitivity: [{ factor_id: "fac_price", elasticity: 0.72, rank: 1 }, { factor_id: "fac_dev_time", elasticity: 0.35, rank: 4 }] };
+      expect(call.mock.calls[0]![1]).toBe(`Generate factor enrichments for the following decision model:\n\n${REASONING_CONTEXT_LABEL}\n${JSON.stringify(expected)}`);
+      expect(call.mock.calls[0]![0]).toBe(row.factorScope === "sensitive"
+        ? ENRICH_FACTORS_PROMPT + "\nFor this review, controllable_factors is a legacy field name: it contains sensitivity-listed graph factors, including observable factors. Membership does not imply controllability."
+        : ENRICH_FACTORS_PROMPT);
+      expect(call.mock.calls[0]![2]).toEqual({ requestId: "scoped-factor-review", timeoutMs: EXTRACTION_TIMEOUT_MS, maxTokens: 4000, temperature: 0 });
+      expect(result.enrichments).toEqual([reply]);
+      expect(result.warnings).toEqual(["Dropped 1 factor sensitivity entries: other-factor"]);
+      expect(graph).toEqual(before);
+    });
 });

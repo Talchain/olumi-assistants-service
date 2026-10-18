@@ -17,6 +17,7 @@ import { buildEnrichFactorsInput, extractControllableFactors } from '../../../se
 import type { GraphT } from '../../../schemas/graph.js';
 import { agentFactorEnrichments, factorReviewSensitivity, readFactorEnrichments } from '../factor-review.js';
 import { decisionReviewFor, factorReviewPressLine } from '../decision-review-press.js';
+import { REASONING_CONTEXT_LABEL } from '../turn-context.js';
 
 type Capture = (typeof captures)[number];
 type ProviderInput = { controllable_factors: { factor_id: string; label: string }[];
@@ -31,8 +32,12 @@ const enrichment = (factor_id: string, sensitivity_rank: number) => ({ factor_id
 // Reflect only factors the real service actually supplies. A canned rank-1 answer would mask its input drop.
 function providerResponse(request: ProviderRequest) {
   const prompt = request.messages.find(m => m.role === 'user')!.content;
-  const input = JSON.parse(prompt.slice(prompt.indexOf('INPUT:\n') + 'INPUT:\n'.length,
-    prompt.lastIndexOf('\n\nOutput ONLY'))) as ProviderInput;
+  // AIE 04:07Z: the explicit task line, a blank line, then the quoted reference-data block (label + compact JSON).
+  const [task, blank, label, ...data] = prompt.split('\n');
+  expect(task).toBe('Generate factor enrichments for the following decision model:');
+  expect(blank).toBe('');
+  expect(label).toBe(REASONING_CONTEXT_LABEL);
+  const input = JSON.parse(data.join('\n')) as ProviderInput;
   providerInputs.push(input);
   const ids = new Set(input.controllable_factors.map(f => f.factor_id));
   return { choices: [{ message: { content: JSON.stringify({ enrichments: input.factor_sensitivity

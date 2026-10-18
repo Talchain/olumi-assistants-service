@@ -73,7 +73,7 @@ const constructionCarriers = (input: string): { conversation: Rec[]; items: Rec[
   const words = beforeShared!.split(`${LATER_MESSAGES_CONTEXT_LEAD}\n`)[1] ?? '';
   const starts = [...words.matchAll(/^\{"speaker":"(?:user|unknown|olumi)","source":"[^\n]*"\}\n/gm)];
   const conversation = starts.map((match, index) => ({ ...JSON.parse(match[0].trim()),
-    text: words.slice(match.index! + match[0].length, index + 1 < starts.length ? starts[index + 1]!.index! - 2 : undefined) }));
+    text: JSON.parse(words.slice(match.index! + match[0].length, index + 1 < starts.length ? starts[index + 1]!.index! - 2 : undefined).trim()) }));
   return { conversation, items: JSON.parse(shared) };
 };
 const pairsIn = (items: Rec[]): Rec[] => items.flatMap(i => i.content.flatMap((p: Rec) =>
