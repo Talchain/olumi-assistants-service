@@ -708,7 +708,9 @@ function correctionSource(request: StatementCorrectionRequest, quote: string, li
   const verified = verifyStatements([{ quote, form: 'describes', ...(request.speaker !== undefined ? { speaker: request.speaker } : {}),
     ...(request.said_by !== undefined ? { said_by: request.said_by } : {}), ...(request.party !== undefined ? { party: request.party } : {}) }],
   { now: texts.now }, { subject: about, unit: '', forms: ['describes'], figuresIn: () => [], claims: true });
-  if (verified.kind === 'verified') return verified.statements[0]!;
+  // The claim door's verifier labels words not in THIS message as found nowhere; a correction labels them by whether the
+  // conversation holds them at all (below), as before the claim door's labels.
+  if (verified.kind === 'verified' && verified.statements[0]!.checks?.words_found !== false) return verified.statements[0]!;
   // Words not found as anyone's in the messages: kept as the AI gave them, speaker unresolved, labelled.
   const found = line !== undefined || spans.length > 0;
   return { said_by: 'unknown', quote, source: line ?? quote, subject: about, form: 'describes', reading: 'olumi',

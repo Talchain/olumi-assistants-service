@@ -115,6 +115,22 @@ describe('negatives: stale and tampered writes still refuse; nothing is written'
   });
 });
 
+describe('a correction source from an EARLIER message', () => {
+  // A correction is what the user says NOW: words held only in an earlier message are never its human source. They are labelled
+  // Olumi's proposed reading with the source unverified (the claim door's verifier and the correction's fallback agree on this).
+  it('is labelled "source unverified", never "Recorded words — you"', async () => {
+    const earlier = 'Tutoring barely moves the pass rate, honestly.';
+    const now = 'Please use what I said before about tutoring.';
+    const w = await correctionWorld(start(), now);
+    w.ctx.user_text = `${earlier}\n${now}`;
+    w.ctx.verified_user_messages = [earlier, now];
+    const card = await w.offer('propose_statement', correction(earlier)) as Rec;
+    expect(card, JSON.stringify(card).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    expect(card.public_label).toContain(`Olumi’s proposed reading — source unverified: “${earlier}”.`);
+    expect(card.public_label).not.toContain('Recorded words — you');
+  });
+});
+
 describe('R09 (converged plan): a correction never changes the note while leaving the old figure live', () => {
   const COUNT = 'I counted three late deliveries by the night crew last week.';
   const LEVEL = { kind: 'factor' as const, id: 'late_deliveries', field: 'level' as const };

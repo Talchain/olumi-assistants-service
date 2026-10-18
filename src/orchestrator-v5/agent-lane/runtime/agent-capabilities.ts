@@ -1937,6 +1937,15 @@ function linkSelectedByRequest(ctx: AgentToolContext, from: string, to: string):
     && (selection.element_ids.includes(from) && selection.element_ids.includes(to)
       || (ctx.grounded_links ?? []).some(link => link.from === from && link.to === to));
 }
+/**
+ * ⭐ GATE → LABEL: the user's canvas selection names ANOTHER link (or an element that is not one of this link's ends). That is the
+ * user's own evidence against Olumi's reading of WHICH link their words size, so the card is never offered against it: ask instead.
+ */
+function selectionNamesAnotherLink(ctx: AgentToolContext, from: string, to: string): boolean {
+  const selection = ctx.grounded_selection;
+  if (selection === undefined || selection.unresolved !== 'none' || linkSelectedByRequest(ctx, from, to)) return false;
+  return (ctx.grounded_links ?? []).length > 0 || selection.element_ids.some(id => id !== from && id !== to);
+}
 function linkEffectConsent(raw: unknown, from: string, to: string, effect: { amount: number; per_source_change: number }): { reversal?: LinkEffectReversal } {
   const found = linkEffectTargetOf(raw, from, to);
   if (found.kind !== 'one') return {};
@@ -5592,7 +5601,7 @@ export function createAgentCapabilities(
           }
           // ⭐ GATE → LABEL (change 1; Codex amendment 2): a statement whose figures the binder finds but whose words do not name this
           // link's ends is the user's figure; WHICH link it sizes is Olumi's reading, said on the card, approved only by its press.
-          if (miss !== null && miss !== ITEM_READING_MISS) {
+          if (miss !== null && (miss !== ITEM_READING_MISS || selectionNamesAnotherLink(ctx, from.id, to.id))) {
             fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label,
               linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question), from, to));
             continue;
@@ -5647,7 +5656,7 @@ export function createAgentCapabilities(
           const mediated = linkEffectMediatorReadings(unitView, from.id, to.id);
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
             ...unitReadings, ...labelReadings, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
-            ...(miss === ITEM_READING_MISS ? { item_is_olumis_reading: true as const } : {}),
+            ...(miss !== null ? { item_is_olumis_reading: true as const } : {}),
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
@@ -5745,7 +5754,7 @@ export function createAgentCapabilities(
       }
       // ⭐ GATE → LABEL (change 1; Codex amendment 2): the user's figures, in words that do not name this link's ends: WHICH link they
       // size is Olumi's reading, said on the card and approved only by its press; the figure stays theirs. Every other miss still asks.
-      const itemReading = miss === ITEM_READING_MISS;
+      const itemReading = miss === ITEM_READING_MISS && !selectionNamesAnotherLink(ctx, from.id, to.id);
       if (miss !== null && !itemReading) {
         const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds, statedScope.target_units)?.question);
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, question: ask,
