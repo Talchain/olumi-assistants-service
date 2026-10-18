@@ -404,6 +404,14 @@ describe('T2A3 buddy review 3 (Codex, read-only, 35aae691): the band belongs to 
       }
     }
   });
+  // Codex #3398 r2: the contrast-in-quotation check reads the ONE speech reader (`speechRegions`), not a parity count of marks.
+  it('a contrast inside Olumi\u2019s quotation (any double marks) is Olumi\u2019s; after the quotation closes it is the user\u2019s', () => {
+    // « » too: a parity count of " “ ” never saw them, so Olumi's quoted words were credited to the user.
+    for (const [open, close] of [['"', '"'], ['\u201C', '\u201D'], ['\u00AB', '\u00BB']]) {
+      expect(latestLinkBands(`Olumi says ${open}Quality is weak, but I think Price has a strong effect on MRR.${close}`, nodes, 'price', 'mrr')).toBeNull();
+      expect(latestLinkBands(`Olumi says ${open}Quality is weak,${close} but I think Price has a strong effect on MRR.`, nodes, 'price', 'mrr')).toEqual(['strong']);
+    }
+  });
   it('a selected reverse link cannot borrow an outgoing plural ("Price effects are strong." with MRR \u2192 Price selected)', () => {
     expect(latestLinkBands('Price effects are strong.', nodes, 'mrr', 'price', { bound: [{ from: 'mrr', to: 'price' }] })).toBeNull();
     expect(latestLinkBands('Price effects are strong.', nodes, 'price', 'mrr', { bound: [] }), 'control: the outgoing link').toEqual(['strong']);
