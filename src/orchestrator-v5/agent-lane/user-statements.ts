@@ -365,7 +365,7 @@ function writtenInAnotherUnit(quote: string, claimed: readonly number[], unit: s
     const size = Math.abs(n);
     const at = findStatedAmounts(quote).filter((a) => [size, size * scale].some((s) => Math.abs(Math.abs(a.magnitude) - s) <= 1e-9 * Math.max(1, s)));
     // A count in words ("six") is never money or a percentage, which are written with their unit (the stated-figure rule's own reading).
-    if (at.length === 0) return money || family === 'currency' || family === 'percent';
+    if (at.length === 0) return money || family === 'percent';
     // An amount written in a currency is never a figure in a unit that is not money (the brief rule's own class, `isAmountStatedInBrief`).
     if (!money && at.every((a) => a.kind === 'currency')) return true;
     if (figureTheUserWroteSpan(size, unit, quote) === null) return true;
