@@ -76,7 +76,7 @@ import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructural
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
-import { clampForPersist, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
+import { clampForPersist, frameOf, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
@@ -2825,6 +2825,12 @@ export async function buildModelFromBrief(
   if (finalRefusal !== null) return finalRefusal;
   admitted = final.admitted;
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
+  /** A defaulted-frame disclosure (`admit-model.ts`) still describes the registered node: the frame it names is the frame the node
+   * is read on (`frameOf`, CEE's one reading order: scale_frame → cap → …), so a frame moved after admission is never mis-said. */
+  const defaultedFrameHeld = (l: { field_path: string; after: unknown }): boolean => {
+    const id = /^nodes\[(.+)\]\.observed_state\.cap$/.exec(l.field_path)?.[1];
+    return frameOf((graph.nodes as Record<string, unknown>[]).find((n) => n.id === id) as never) === l.after;
+  };
 
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated. The event's hold is
   // no link whose direction is unknown.
@@ -2961,7 +2967,11 @@ export async function buildModelFromBrief(
         // estimate, or why an estimate in another unit was set aside (G3 a735; AIE A3 13:11Z, AIE unit wording 16:04Z). Computed
         // at admission and, until A3 (T01, unseen 8e9132fc), never said: the user was not told their range was not the size used.
         // `retained_later_ambition`: a later aim the user named, kept as Olumi's reading and never a target this model tests (G1).
-        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|stated_range_beside_estimate|stated_range_other_unit|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|stated_range_beside_estimate|stated_range_other_unit|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path)
+          // ⛔ QBC row 10 (#3413 Codex r1): a factor with no supported range (`plausible_max` null) is read on admission's DEFAULTED
+          // frame; its own warn-level disclosure ("… a unit of measurement, not a forecast or a limit …") is said, never dropped here,
+          // and only while the registered node still holds that frame.
+          || (l.severity === 'warn' && /\.observed_state\.cap$/.test(l.field_path) && defaultedFrameHeld(l)))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
