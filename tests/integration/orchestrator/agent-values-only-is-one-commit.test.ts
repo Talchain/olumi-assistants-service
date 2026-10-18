@@ -158,7 +158,7 @@ describe('Olumi\'s starting point with NO levels (served F1s) is ONE commit thro
     const p = await caps.proposeStartingPoint(ctx, F1S as never);
     expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
     const twelve = await caps.proposeAssumptions({ ...ctx, user_text: 'Monthly churn is 12%.' }, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn', value: 12, unit: '%', basis: 'the user said 12%', revise: true }] } as never);
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn', value: 12, quote: 'Monthly churn is 12%.', unit: '%', basis: 'the user said 12%', revise: true }] } as never);
     expect(twelve.ok, JSON.stringify(twelve)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(twelve.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
@@ -185,7 +185,7 @@ describe('Olumi\'s starting point with NO levels (served F1s) is ONE commit thro
     for (const e of g.edges) if (e.from === 'monthly_churn' || e.to === 'monthly_churn') e.provenance = { source: 'user_specified' };
     const { caps, ctx } = agent();
     const p = await caps.proposeAssumptions({ ...ctx, user_text: 'Monthly churn is 12%.' }, {
-      assumptions: [{ user_stated: true, factor_label: 'Monthly churn', value: 12, unit: '%', basis: 'the user said 12%', revise: true }] } as never);
+      assumptions: [{ user_stated: true, factor_label: 'Monthly churn', value: 12, quote: 'Monthly churn is 12%.', unit: '%', basis: 'the user said 12%', revise: true }] } as never);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(Object.hasOwn(out, 'links_resized'), JSON.stringify(out)).toBe(false);

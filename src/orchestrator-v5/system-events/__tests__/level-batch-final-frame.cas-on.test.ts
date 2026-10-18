@@ -226,7 +226,7 @@ describe('native cohort on its final factor frame, CAS ON', () => {
     const proposal = await caps.proposeOptionInterventions(ctx, { interventions: [
       { option_label: 'Trial', factor_label: 'Duration', value: 0.3, quote: ctx.user_text, user_stated: true, basis: 'the user’s stated duration',
         ...(likely ? { likely_low: 0.1, likely_high: 0.5, range_meaning: 'likely_range' as const, range_user_stated: true } : {}) },
-      { option_label: 'Full', factor_label: 'Duration', value: 20, basis: 'an estimate for approval' },
+      { option_label: 'Full', factor_label: 'Duration', value: 20, basis: 'an estimate for approval', user_stated: false },
     ] });
     expect(proposal.ok).toBe(true);
     const result = await caps.authoriseChange({ ...ctx, typed_approval_of: String(proposal.proposal_id) }, { proposal_id: String(proposal.proposal_id) });

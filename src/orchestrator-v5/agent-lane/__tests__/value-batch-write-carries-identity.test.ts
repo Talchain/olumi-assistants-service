@@ -29,8 +29,8 @@ const wired = (ns: Node[]) => ns.filter((o) => o.kind === 'option').flatMap((o) 
   .map((f) => ({ from: o.id, to: f.id, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' })));
 const ASSUMPTIONS = [{ user_stated: false, factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
 const LEVELS = [
-  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires' },
-  { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
+  { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires', user_stated: false },
+  { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire', user_stated: false },
 ];
 
 /** A product whose read route returns both hashes; a rename moves ONLY the identity hash. */

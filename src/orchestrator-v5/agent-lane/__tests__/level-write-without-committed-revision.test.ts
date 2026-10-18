@@ -56,7 +56,7 @@ async function approveOneLevel(committed: boolean) {
   const store = new ProposalStore();
   const caps = createAgentCapabilities(p.d, store);
   const proposed = await caps.proposeOptionInterventions(ctx, {
-    interventions: [{ option_label: 'Hire Two Developers', factor_label: 'Developers hired', value: 2, basis: 'two hires' }],
+    interventions: [{ option_label: 'Hire Two Developers', factor_label: 'Developers hired', value: 2, basis: 'two hires', user_stated: false }],
   });
   expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
   const r = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });

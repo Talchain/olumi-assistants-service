@@ -276,8 +276,13 @@ export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['ref
 export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
   opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection } = {}): StatedVerdict {
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
+  // ⛔ K3 (kept): a declared own estimate never relabels a figure the retained words of unknown origin write (reseeded history, the
+  // saved brief): that figure's source is unknown, never Olumi's. The stated-figure rule reads it there, in the AI's unit.
+  const retainedFigure = (): boolean => typeof texts.unverified === 'string' && texts.unverified !== ''
+    && [claim?.value, claim?.low, claim?.high].some((n) => typeof n === 'number' && Number.isFinite(n)
+      && figureTheUserWroteSpan(Math.abs(n), trimmed(claim?.unit, 60), texts.unverified as string) !== null);
   const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
-    ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
+    ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true || retainedFigure() } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
   const quote = trimmed(claim?.quote, QUOTE_MAX);
   if (quote === undefined) return notTheirs('no_quote', 'No words of the user were quoted for this, so its source is not verified.');
   const given = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v);

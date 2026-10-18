@@ -8067,7 +8067,11 @@ export function createAgentCapabilities(
         const said = userStated({ quote: i?.quote, value: raw, unit: declaredUnit ?? statedUnit }, chatTexts(ctx, g.brief_text),
           { quantity: 'level', node_id: factor.id, option_id: option.id },
           { form: 'point', ownEstimate: i.user_stated === false, ...correctionOn(g.raw, { kind: 'factor', id: factor.id, option_id: option.id, field: 'level' }) });
-        const userWrote = claimedByUser && (likelyRange !== undefined || said.origin === 'human');
+        // The binding half (Olumi's reading, never authorship): the credited figure is THIS factor's only where its own line does not give
+        // it to another quantity of the model (`figureTheUserWroteFor` with this pair's scope, on the cited line only).
+        const boundHere = said.origin === 'human'
+          && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), said.statement.source, scopeIn(g, factor.label, option.label));
+        const userWrote = claimedByUser && (likelyRange !== undefined || boundHere);
         if (!userWrote && said.origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
@@ -10984,7 +10988,9 @@ export function createAgentCapabilities(
           // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
           const lvlSaid = userStated({ quote: lvl.quote, value: lvl.value, unit: lvl.unit ?? factorUnit }, chatTexts(ctx, g.brief_text),
             { quantity: 'level', node_id: f.id }, { form: 'point', ownEstimate: lvl.estimate !== undefined });
-          const wrote = lvlSaid.origin === 'human';
+          // The binding half: on the cited line, the figure is about THIS factor (`figureTheUserWroteFor`, this pair's scope).
+          const wrote = lvlSaid.origin === 'human'
+            && figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, lvlSaid.statement.source, scopeIn(g, f.label, plan.label));
           if (lvlSaid.origin === 'unknown') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
@@ -11105,7 +11111,8 @@ export function createAgentCapabilities(
           // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
           const lvSaid = userStated({ quote: lv.quote, value: asked, unit: levelUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level' },
             { form: 'point', ownEstimate: lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' });
-          const wrote = lvSaid.origin === 'human';
+          // The binding half: on the cited line, the figure is about THIS factor (`figureTheUserWroteFor`, this pair's scope).
+          const wrote = lvSaid.origin === 'human' && figureTheUserWroteFor(asked, levelUnit, lvSaid.statement.source, scopeIn(g, a.label, plan.label));
           if (lvSaid.origin === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
           if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }
@@ -11730,13 +11737,15 @@ export function createAgentCapabilities(
         // ⭐ LEAN CORE: whose today's figure is, by THE ONE RULE (`userStated`): the AI's cited span of the user's own words, the
         // figure read from it. A held, independently verified record keeps its source. Anything else is unknown (never Olumi's).
         const tSaid = userStated({ quote: t.quote, value: t.value, unit: todayUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level_today' }, { form: 'point' });
-        const source = tSaid.origin === 'human' ? tSaid.statement.source : undefined;
+        // The binding half (Olumi's reading): on the cited line, the figure is about THIS new factor, unless the card pairs it explicitly.
+        const source = tSaid.origin === 'human' && (confirmPairing
+          || figureTheUserWroteFor(t.value, todayUnit, tSaid.statement.source, newFactorScopeIn(g, label, todayUnit, inCall))) ? tSaid.statement.source : undefined;
         const prior = retained.find(r => norm(r.label) === norm(label)
           && (r.os.raw_value ?? r.os.value) === t.value && unitComparisonKey(String(r.os.unit ?? '')) === unitComparisonKey(todayUnit));
         const priorHuman = prior?.member !== undefined && prior.member.basis !== 'olumi_estimate'
           && provenanceOf({ value: prior.os }).origin === 'human';
-        const quote = tSaid.origin === 'human' ? tSaid.statement.quote : priorHuman ? prior!.member!.quote ?? null : null;
-        const origin = tSaid.origin === 'human' || priorHuman ? 'human' : 'unknown';
+        const quote = source !== undefined && tSaid.origin === 'human' ? tSaid.statement.quote : priorHuman ? prior!.member!.quote ?? null : null;
+        const origin = source !== undefined || priorHuman ? 'human' : 'unknown';
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
           originUnknown = true;

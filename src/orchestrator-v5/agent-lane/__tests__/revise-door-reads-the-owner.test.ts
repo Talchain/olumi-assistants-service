@@ -113,7 +113,7 @@ it.each([true, false])('a claimed 7 when the human typed 6.5 never becomes human
   const store = new ProposalStore();
   const result = await createAgentCapabilities(d, store).proposeAssumptions({ scenario_id: 'absent-point', authenticated_user_id: null,
     request_id: 'source', user_text: 'Churn is 6.5%.', user_turn_text: 'Churn is 6.5%.', user_text_complete: complete },
-    { assumptions: [{ factor_label: 'Churn', value: 7, unit: '%', user_stated: true, revise: true, basis: 'proposed reading' }] });
+    { assumptions: [{ factor_label: 'Churn', value: 7, quote: 'Churn is 6.5%.', unit: '%', user_stated: true, revise: true, basis: 'proposed reading' }] });
   if (complete) {
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'figure_not_in_users_words' });
     expect(store.outstanding('absent-point', null)).toHaveLength(0);

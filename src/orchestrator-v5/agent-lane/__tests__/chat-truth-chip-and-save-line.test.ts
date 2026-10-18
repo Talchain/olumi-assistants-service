@@ -149,8 +149,8 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('A2i6 K3: starting-point estimates require explicit false in incomplete source', async () => {
     const levels = [
-      { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, basis: 'market rate' },
-      { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 30000, basis: 'agency day rate over a year' },
+      { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, basis: 'market rate', user_stated: false },
+      { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 30000, basis: 'agency day rate over a year', user_stated: false },
     ];
     const context = { ...ctx, user_text: 'Suggest starting figures.', user_turn_text: 'Suggest starting figures.', user_text_complete: false };
     for (const explicit of [false, true]) {
@@ -328,7 +328,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: name } : n)) };
     const { store, caps } = capsOver(graph);
     const r = await caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
-      { assumptions: [{ factor_label: name, value: 60, unit: 'subscriptions/month', user_stated: true, basis: 'keeps the base stable' }] });
+      { assumptions: [{ factor_label: name, value: 60, quote: 'We get about 60 new Pro subscriptions a month.', unit: 'subscriptions/month', user_stated: true, basis: 'keeps the base stable' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const label = chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0]!.label;
     expect(label.length).toBeLessThanOrEqual(APPROVAL_LABEL_MAX);
@@ -344,7 +344,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: tiny } : n)) };
     const t = capsOver(graph);
     const b = await t.caps.proposeAssumptions({ ...ctx, user_text: 'We get about 60 new Pro subscriptions a month.' },
-      { assumptions: [{ factor_label: tiny, value: 60, unit: 'subscriptions/month', user_stated: true, basis: 'x' }] });
+      { assumptions: [{ factor_label: tiny, value: 60, quote: 'We get about 60 new Pro subscriptions a month.', unit: 'subscriptions/month', user_stated: true, basis: 'x' }] });
     expect(b.ok, JSON.stringify(b)).toBe(true);
     // DL ruling (X8, 12 Oct): "We get about 60 …" is the user's first figure for this factor, so the label the cut falls
     // back to is the one that records it as theirs, never "starting assumptions".

@@ -149,7 +149,7 @@ describe('the same rule on the level and link proposers', () => {
     const p = product();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Raise price', factor_label: 'Churn', value: 0.2, basis: 'b' }],
+      interventions: [{ option_label: 'Raise price', factor_label: 'Churn', value: 0.2, basis: 'b', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(candidateIds(r)).toEqual([['Churn', ['churn_pricing', 'churn_support']]]);
@@ -164,7 +164,7 @@ describe('the same rule on the level and link proposers', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: 'Raise price', factor_label: 'churn_support', value: 0.2, basis: 'b' }],
+      interventions: [{ option_label: 'Raise price', factor_label: 'churn_support', value: 0.2, basis: 'b', user_stated: false }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual(['raise::churn_support']);

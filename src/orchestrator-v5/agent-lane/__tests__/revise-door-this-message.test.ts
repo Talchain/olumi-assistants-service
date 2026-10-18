@@ -26,7 +26,7 @@ async function revise(typed: readonly string[], turnText: string | undefined) {
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-446655440c03', authenticated_user_id: null, request_id: 'r', user_text: typed.join('\n'), verified_user_messages: typed,
       ...(turnText !== undefined ? { user_turn_text: turnText } : {}) } as never,
-    { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, unit: '%', basis: "your team's quote", revise: true }] } as never) as Json;
+    { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, quote: typed.join('\n'), unit: '%', basis: "your team's quote", revise: true }] } as never) as Json;
   expect(r.proposal_id, 'a proposal is prepared').toEqual(expect.any(String));
   const op = store.get(r.proposal_id)!.operations[0] as Json;
   const chip = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: r.proposal_id }],

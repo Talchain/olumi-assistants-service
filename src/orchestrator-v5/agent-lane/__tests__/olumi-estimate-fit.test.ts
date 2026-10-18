@@ -451,7 +451,7 @@ it.each([true, false])('row (l): goal edit → estimate set aside, not clamped; 
   };
   const caps = createAgentCapabilities(dispatch, new ProposalStore());
   const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400cc', authenticated_user_id: null, request_id: 'req-edit', user_text: 'Our Y is £80 today.' };
-  const proposed = await dispatchTool('propose_goal_current_level', JSON.stringify({ goal_label: 'Y', value: 80, unit: '£', goal_is: 'at_most', user_stated: true }), ctx, caps) as Rec;
+  const proposed = await dispatchTool('propose_goal_current_level', JSON.stringify({ goal_label: 'Y', value: 80, quote: ctx.user_text, unit: '£', goal_is: 'at_most', user_stated: true }), ctx, caps) as Rec;
   expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
   const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: proposed.proposal_id }), ctx, caps) as Rec;
   expect(out.ok, JSON.stringify(out)).toBe(true);

@@ -166,7 +166,7 @@ describe('joined starting-point disclosures', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store);
     const r = await dispatchTool('propose_starting_point', JSON.stringify({
-      assumptions: [{ factor_label: 'Additional baseline', value: 4, unit: 'days', basis: 'Starting estimate' }],
+      assumptions: [{ factor_label: 'Additional baseline', value: 4, unit: 'days', basis: 'Starting estimate', user_stated: false }],
       option_levels: entries.map(entry => ({ ...entry, range_meaning: 'likely_range', range_user_stated: true })),
     }), ctx, caps);
     expect(r.ok, JSON.stringify(r)).toBe(true);
