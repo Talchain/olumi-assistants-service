@@ -406,7 +406,8 @@ export interface UnconfirmedCapBound {
  * degrades to today's behaviour and never to a corrupt write.
  */
 export type FactorValueProposalEvaluation =
-  | { readonly ok: true }
+  /** `widen_cap_to`: the user's figure lies above Olumi's reference, which the writer widens to cover it (A, U2). */
+  | { readonly ok: true; readonly widen_cap_to?: number }
   | {
       readonly ok: false;
       readonly reason: ProposalRejectionReason;
@@ -432,6 +433,8 @@ export interface EvaluateFactorValueProposalInput {
   readonly proposalCap?: number;
   /** Cap stored on the factor's observed_state, if any. */
   readonly factorCap?: number;
+  /** That cap is Olumi's reference (`frame_source: 'olumi_convention'`; A, D2): widened to the user's figure, never enforced. */
+  readonly factorCapIsOlumiReference?: boolean;
   /**
    * The factor's stored unit, if any. Used as fallback when the proposal
    * parameter omits the unit.
@@ -712,6 +715,7 @@ function evaluateFactorValueProposalImpl(
     unit: rawUnit,
     proposalCap,
     factorCap,
+    factorCapIsOlumiReference,
     factorUnit: rawFactorUnit,
     factorExistingRaw,
     factorObservedValue,
@@ -1153,6 +1157,9 @@ function evaluateFactorValueProposalImpl(
 
     // 6b. CEILING.
     if (effectiveRaw > cap) {
+      // A (18 Oct, U2; AIE 00:27/00:37): a cap Olumi chose (`frame_source: 'olumi_convention'`) is its reference, never a
+      // bound on the user's figure. The figure is kept and the reference widened by the one policy (`suggestExtendedCap`).
+      if (factorCapIsOlumiReference === true && proposalCap === undefined) return { ok: true, widen_cap_to: suggestExtendedCap(effectiveRaw) };
       // A bare number is held to a proportion's 1 (it could be a percent typed for a share) or to a cap the proposal
       // states. Any other stored cap, a percentage's 100 included, is Olumi's reference or an encoding, never the
       // factor's range (AIE 18 Oct 00:27/00:37, caution d): the user's figure takes the unconfirmed-limit remedy below.

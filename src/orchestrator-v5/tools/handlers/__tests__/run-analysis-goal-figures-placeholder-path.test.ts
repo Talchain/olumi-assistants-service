@@ -261,7 +261,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     for (const id of [SWITCH, PHASE]) for (const e of entriesFor(env, id)) expect(e).not.toHaveProperty('probability_of_goal');
     expect(JSON.stringify(env)).not.toContain('0.0617');
     const w = (env.inference_warnings as Json[]).find((x) => x.code === GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.links).toEqual([{ from: 'migration_downtime', to: 'monthly_cloud_spend' }]);
+    expect(w?.links).toEqual([{ from: 'migration_downtime', to: 'monthly_cloud_spend' }]);
     expect(r).toHaveProperty('leading_option_id', null);
     expect(leaderClaimOf(lastFact).mayBeNamed).toBe(false);
   });
