@@ -46,7 +46,7 @@ export function mayPresentComparedRunLeader(turnPermission: boolean, fact: Handl
  * by arithmetic — "Offshore: 62% → 45%" (review of #1857, B5). The sensitivity science
  * (driver influence) is NOT in this class; confinement keeps it.
  *
- * Read by `buildRunDelta` (no `run_delta` at all for a pair with an unrequested run)
+ * Read by `buildRunDelta` to confine unrecorded pairs (bound input history and separately licensed chances may travel),
  * and the "What changed?" gate (no band-movement sentence), and by
  * {@link mayPresentComparedRunLeader} as its third conjunct.
  */

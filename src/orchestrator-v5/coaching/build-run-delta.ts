@@ -113,8 +113,8 @@ export type RunDeltaRefusal =
   /**
    * One of the two runs was started by the server, not asked for by the user
    * ({@link mayPresentComparedRunVerdicts}). Its leader, per-option scores and
-   * trust verdict are confined, and a comparison would re-ship them (review of
-   * #1857, B5) — so there is no honest `run_delta` for this pair. Ordinary absence,
+   * trust verdict are confined (review of #1857, B5). Without a bound recorded
+   * input pair there is nothing independently licensed to carry. Ordinary absence,
    * not a producer defect.
    */
   | 'unrequested_run_in_pair'
@@ -733,10 +733,11 @@ export function buildRunDelta(input: {
     ? selectTwoNewestRunAnalysisFacts(input.priorFacts)
     : selectRecordedPair(input.priorFacts, input.selectedPair);
   if (pair === null) return { kind: 'none', reason: 'insufficient_runs' };
-  // ⛔ A pair with a run nobody asked for has no honest delta: its scores and trust verdict are
-  // confined (review of #1857, B5), and withholding only its leader id still lets
-  // `win_probabilities` name it by arithmetic. Fail closed on the whole block.
-  if (!mayPresentComparedRunVerdicts(pair.prior) || !mayPresentComparedRunVerdicts(pair.current)) {
+  const inputs = pairInputs(pair.prior, pair.current);
+  // Automatic Runs keep their leader/share confinement. A bound input pair can still carry its
+  // recorded changes and independently licensed goal chances; an unrecorded legacy pair cannot.
+  if ((!mayPresentComparedRunVerdicts(pair.prior) || !mayPresentComparedRunVerdicts(pair.current))
+    && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'unrequested_run_in_pair' };
   }
 
@@ -759,7 +760,6 @@ export function buildRunDelta(input: {
     n_equal: priorEchoes.nSamples === currentEchoes.nSamples,
   } as const;
 
-  const inputs = pairInputs(pair.prior, pair.current);
   if (inputs.kind === 'same_run') return { kind: 'none', reason: 'same_run_replayed' };
 
   // SC-24: a pair the §b table names no case for (builds unverifiable, nothing else diverged) used to emit NOTHING,

@@ -12,9 +12,12 @@ const rounding = (v: unknown): v is 'whole' | 'nearest_5' => v === 'whole' || v 
 
 /** Each Run keeps its own stored display licence; raw probabilities never re-license an older Run. */
 export function goalChanceSideOf(result: unknown, optionId: string): RunDeltaGoalChanceSide {
-  // Complete Run facts carry the selected question; bare warning fragments remain format-reader inputs.
+  // Route an attempted display through the selected permission; absence of a recorded display stays absence.
   const selected = rec(result);
-  if (selected !== undefined && ('run_id' in selected || 'computed_at' in selected || 'input_snapshot' in selected)) {
+  const hasDisplay = runHasGoalChanceLicenceRecord(result)
+    || [rec(selected?.enrichment)?.inference_warnings, selected?.inference_warnings]
+      .flatMap(value => Array.isArray(value) ? value : []).some(value => rec(value)?.code === GOAL_CHANCE_RANGE);
+  if (hasDisplay && selected !== undefined && ('run_id' in selected || 'computed_at' in selected || 'input_snapshot' in selected)) {
     result = withGoalChanceReadback(result);
   }
   const licence = agentLicenceRecordOf(result);
