@@ -556,6 +556,13 @@ const dependentOf = (v: unknown): boolean => v === undefined || (isRec(v) && typ
   && ((v.action === 'link_unsized' && isRec(v.expected_edge)) || (v.action === 'level_unavailable' && v.expected_edge === undefined)));
 
 /** All changes are existing record/source members. The complete old/new bytes are available before approval. */
+/**
+ * ⭐ GATE → LABEL (change 1): the ONE label line for words the host's binder does not bind to the item they are applied to: which item
+ * they concern is Olumi's reading, and the press confirms it (`bound_label`: the item the binder read them as naming instead).
+ */
+export const bindingReadingWords = (selected: string, boundLabel?: string): string => `Olumi’s reading: these words concern “${selected}”.`
+  + (boundLabel === undefined ? '' : ` Olumi’s item reader matched them to “${boundLabel}” instead; approve only if “${selected}” is the item you mean.`);
+
 export function statementCorrectionWords(c: StatementCorrection | { readonly selected_label: string; readonly bound_label?: string }
   | { readonly readings: readonly string[]; readonly source_state: 'missing' | 'partial' | 'reported' | 'unknown';
     readonly source_words?: string; readonly excerpt_words?: string }, legacy = false): string {
@@ -602,8 +609,7 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
     : `Review Olumi’s proposed correction\n${sourceWords}`,
     ...c.edits.flatMap(e => [
       `For ${String(e.expected_node.label)}, correct the ${fieldWords[e.subject.field] ?? 'account'}.`,
-      ...(e.labels?.binding === 'olumi_reading' ? [`Olumi’s reading: these words concern “${String(e.expected_node.label)}”.${e.labels.bound_label === undefined ? ''
-        : ` Olumi’s item reader matched them to “${e.labels.bound_label}” instead; approve only if “${String(e.expected_node.label)}” is the item you mean.`}`] : []),
+      ...(e.labels?.binding === 'olumi_reading' ? [bindingReadingWords(String(e.expected_node.label), e.labels.bound_label)] : []),
       ...(e.labels?.unheld === undefined ? [] : [`Olumi could not find ${e.labels.unheld.map(q => `“${q}”`).join(' or ')} in the recorded source; what is withdrawn or kept here is Olumi’s reading.`]),
       ...(e.labels?.approved === true ? ['This replaces a record you approved on its card. That approval stays in its history and no longer applies once this correction is approved.'] : []),
       ...(e.dependent?.action === 'link_unsized' ? [`The size of the link “${e.dependent.label}” rests on the withdrawn words, so it is withdrawn too: the link becomes unsized, and the analysis cannot use it until it is sized again.`] : []),
@@ -709,7 +715,7 @@ function correctionSource(request: StatementCorrectionRequest, quote: string, li
     checks: { words_found: found, figure_found: true, unit_found: true } };
 }
 
-const labelOfSubject = (graph: unknown, subject: DoorSubject | undefined): string | undefined => {
+export const labelOfSubject = (graph: unknown, subject: DoorSubject | undefined): string | undefined => {
   if (subject === undefined) return undefined;
   const from = nodeOf(graph, subject.id), to = subject.to_id === undefined ? undefined : nodeOf(graph, subject.to_id);
   if (typeof from?.label !== 'string' || (subject.kind === 'link' && typeof to?.label !== 'string')) return undefined;

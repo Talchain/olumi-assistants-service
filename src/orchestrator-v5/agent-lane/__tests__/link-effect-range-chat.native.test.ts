@@ -17,7 +17,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { __setUseAppendV6ForTest } from '../../append-v6-flag.js';
 import type { SessionTurnWrite } from '../../session/store.js';
-import { linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
+import { claimRecordFor, linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { selectStrengthenPlaceholder } from '../guidance/select-strengthen-placeholder.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -251,10 +251,27 @@ describe('a link\'s effect stated as a range in chat: Olumi\'s reading of the us
     expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
   }, 60_000);
 
-  it('NEGATIVE: words the user never typed are never the source (statement_not_found): no card', async () => {
+  // ⭐ GATE → LABEL (change 1; Codex co-design §1 "missing source says Olumi's proposed reading — source unverified"): words the user
+  // never typed are never their source. The card says so, its press records an UNRESOLVED claim (never "you said"), and sizes nothing.
+  it('NEGATIVE → LABEL: words the user never typed are never the source: an unverified-source card; its press records them unresolved, never theirs', async () => {
     const g = await builtGraph();
-    const w = await answered(g, 'Somewhere between 4 and 7 points, I think.', 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.');
-    expect(toolResults).toContainEqual(expect.objectContaining({ ok: false, refusal: 'statement_not_found' }));
-    expect(w.card).toBeUndefined();
+    const quote = 'The corporate deal could lift weekday attendance by somewhere between 4 and 7 points.';
+    const w = await answered(g, 'Somewhere between 4 and 7 points, I think.', quote);
+    const { from, to } = w;
+    const label = toolResults.map((r) => String(r.public_label ?? '')).join(' ');
+    expect(label).toContain(`Olumi’s proposed reading — source unverified: “${quote}”`);
+    expect(label).not.toContain('From your message');
+    expect(toolResults).toContainEqual(expect.objectContaining({ ok: true, statement: expect.objectContaining({ your_words: false }) }));
+    expect(w.card.label).toBe('Use this reading');
+    expect(writes.filter((x) => x.graph !== undefined)).toHaveLength(0);
+    const approved = await w.turn(w.card.message, w.card); expect(approved.statusCode, approved.body).toBe(200);
+    const read = await w.app.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    const cold = clone(read.json().graph);
+    const subject = { kind: 'link' as const, id: from, to_id: to, field: 'effect' as const };
+    expect(userStatementFor(cold, subject)).toBeUndefined();
+    expect(claimRecordFor(cold, subject)?.statements).toEqual([expect.objectContaining({ said_by: 'unknown', quote, low: 4, high: 7, unit: 'points',
+      checks: { words_found: false, figure_found: true, unit_found: true } })]);
+    expect(JSON.stringify(approved.json())).toContain('Olumi could not find the quoted words in your messages, so their source stays unverified.');
+    expect(edgeOf(cold, from, to)).toEqual(edgeOf(g, from, to));
   }, 60_000);
 });

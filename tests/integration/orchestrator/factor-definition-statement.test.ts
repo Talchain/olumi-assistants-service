@@ -178,22 +178,36 @@ describe('what a factor covers, in the user\'s words: kept on its node, changing
   it.each([
     ['the question is not in Olumi\'s last reply', 'Yes, it covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
       'Something else entirely.', 'not_this_subject', 'is not in Olumi’s last reply'],
-    ['Olumi\'s question names ANOTHER factor', 'Yes, it covers both.', { answering: 'Does ‘Sales headcount’ include the contractors as well as the employees?',
-      reading_words: 'the contractors as well as the employees' }, 'Does ‘Sales headcount’ include the contractors as well as the employees?', 'not_this_subject', 'is not clearly about'],
-    ['nothing names it and it answers nothing', 'It covers both.', { reading_words: 'covers both' }, undefined, 'not_this_subject', 'is not clearly about'],
     ['the reading words are in neither the quote nor the question', 'Our marketing budget covers both the agency fees and the media spend.',
       { reading_words: 'the events budget too' }, undefined, 'not_this_field', 'Give reading_words'],
-    // BUDDY-A 05:30Z: the AI's choice of one question does not say which factor a bare "both" is about.
-    ['Olumi\'s last reply asks about TWO factors', 'It covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
-      `${ASK} And does ‘Sales headcount’ include the contractors as well as the employees?`, 'not_this_subject', 'does not ask about ‘Marketing budget’ alone'],
-    // Precedence: words that name ANOTHER factor are that factor's, whatever question the AI says they answer.
-    ['the words name another factor', 'Sales headcount covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
-      `Thanks. ${ASK}`, 'not_this_subject', 'is not clearly about'],
   ])('⛔ %s: nothing prepared, nothing written', async (_why, typed, extra, preceding, refusal, detail) => {
     const before = structuredClone(persisted);
     const p = await propose(typed, { quote: typed, ...extra }, preceding) as Json;
     expect(p, JSON.stringify(p)).toMatchObject({ ok: false, refusal });
     expect(String(p.detail)).toContain(detail);
+    expect(persisted).toEqual(before);
+    expect(rows.size).toBe(0);
+  });
+
+  // ⭐ GATE → LABEL (change 1; Codex co-design §1): words nothing binds to ‘Marketing budget’ alone are never its account by themselves.
+  // The card says WHICH item they concern is Olumi's reading (and the item its reader matched instead), its button is the reading's, and
+  // nothing is written before the press. The protection these rows guarded (never "you said" about an item Olumi chose) is the label.
+  it.each([
+    ['Olumi\'s question names ANOTHER factor', 'Yes, it covers both.', { answering: 'Does ‘Sales headcount’ include the contractors as well as the employees?',
+      reading_words: 'the contractors as well as the employees' }, 'Does ‘Sales headcount’ include the contractors as well as the employees?', 'Sales headcount'],
+    ['nothing names it and it answers nothing', 'It covers both.', { reading_words: 'covers both' }, undefined, undefined],
+    // BUDDY-A 05:30Z: the AI's choice of one question does not say which factor a bare "both" is about.
+    ['Olumi\'s last reply asks about TWO factors', 'It covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
+      `${ASK} And does ‘Sales headcount’ include the contractors as well as the employees?`, undefined],
+    // Precedence: words that name ANOTHER factor are that factor's, whatever question the AI says they answer.
+    ['the words name another factor', 'Sales headcount covers both.', { answering: ASK, reading_words: 'the agency fees as well as the media spend' },
+      `Thanks. ${ASK}`, 'Sales headcount'],
+  ])('⛔ %s: a labelled card, Olumi’s reading of the item; nothing written', async (_why, typed, extra, preceding, boundLabel) => {
+    const before = structuredClone(persisted);
+    const p = await propose(typed, { quote: typed, ...extra }, preceding) as Json;
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, mutated: false, statement: { quotes: [typed], item_is_olumis_reading: true } });
+    expect(String(p.public_label)).toContain('Olumi’s reading: these words concern “Marketing budget”.' + (boundLabel === undefined ? ' Record this reading?'
+      : ` Olumi’s item reader matched them to “${boundLabel}” instead; approve only if “Marketing budget” is the item you mean. Record this reading?`));
     expect(persisted).toEqual(before);
     expect(rows.size).toBe(0);
   });
