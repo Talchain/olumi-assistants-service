@@ -94,7 +94,7 @@ function provider(id: string, card: { id?: string }): Respond {
     }
     if (card.id !== undefined) cardAtRecord[id] = card.id;
     providerCalls += 1;
-    const res = await realFetch(url, init as RequestInit);
+    const res = await realFetch(url, init as Parameters<typeof fetch>[1]);
     const body = await res.text();
     if (res.status === 429) throw new Error(`${id}: provider 429 — the recording run aborts on the first one`);
     (recording[id] ??= []).push({ name, status: res.status, body });
