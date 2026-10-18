@@ -573,11 +573,14 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(count(b.assistant_text, NARRATOR_BULLETS[0]!)).toBe(1);
   });
 
-  it('W22 contrast: on a fragile Run the same AI text keeps exactly one caveat (the rule follows the Run, not the words)', async () => {
+  it('W22 contrast: on a fragile Run the IDENTICAL AI text keeps exactly one Olumi caveat (the rule follows the Run, not the words)', async () => {
     const sentence = NOT_ROBUST_SENTENCE.trim();
-    narrator = `${NARRATOR} ${sentence}\n- ${NARRATOR_BULLETS[0]}`;
+    const noFlip = NO_FLIP_SENTENCE;
+    // Byte-identical to W22's narrator: both of Olumi's fixed sentences (Codex #3409 r2 P1: a fragile Run kept both).
+    narrator = `${NARRATOR} ${sentence}\n- ${NARRATOR_BULLETS[0]}\n${noFlip}`;
     const b = await press(await run());
-    expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(1);
+    expect(countSentenceCopies(b.assistant_text, sentence) + count(b.assistant_text, noFlip), b.assistant_text).toBe(1);
+    expect(count(b.assistant_text, NARRATOR)).toBe(1);
     expect(count(b.assistant_text, NARRATOR_BULLETS[0]!)).toBe(1);
   });
 

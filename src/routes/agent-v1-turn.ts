@@ -5364,10 +5364,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S7 PoC: the AI wrote this reply, so the host adds no Run-turn prose below (`ai-writes-run-turn.ts`); checks still run.
     const aiRunTurn = AI_WRITES_RUN_TURN && aiWroteReply && noDirectLink === null
       && (fastPath === 'run' || fastPath === 'explain' || result.tool_calls.some(c => c.name === 'run_analysis'));
-    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat !== null
-      ? placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat, aiRunTurn)
-      : explainRobustRun ? [NOT_ROBUST_SENTENCE, NOT_ROBUST_NO_FLIP_SENTENCE].reduce((t, s) => withoutSentenceCopies(t, s), scopedNarrationRaw)
-        : scopedNarrationRaw);
+    // Olumi's two fixed variants: the Run's fact selects at most one (Codex #3409 r2: a fragile Run kept both). Every
+    // other copy of Olumi's own words goes; the AI's other narration stays.
+    const ownedNarration = [NOT_ROBUST_SENTENCE, NOT_ROBUST_NO_FLIP_SENTENCE].map((x) => x.trim())
+      .filter((x) => (explainRobustnessCaveat !== null ? x !== explainRobustnessCaveat.trim() : explainRobustRun))
+      .reduce((t, x) => withoutSentenceCopies(t, x), scopedNarrationRaw);
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? ownedNarration
+      : placeExplainCaveat(withDecisionInputAskDisplay(ownedNarration, readbackGraph), explainRobustnessCaveat, aiRunTurn));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     // BYPASS1: host prose stays on a host-written reply, including the no-direct-link figure reply that replaces the AI's.
     const hostProse = !aiWroteReply || noDirectLink !== null;
