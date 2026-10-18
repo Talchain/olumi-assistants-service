@@ -69,10 +69,21 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
 
 /**
  * THE ONE CHECK, both forms: the written amount `a` is `value` in `unit` (`amountIs`, its unit and kind rules), in the user's own
- * words, never inside another speaker's quotation (the ONE speech reader, `speechReading`). Presence only: never which quantity.
+ * words, never inside another speaker's quotation (the ONE speech reader, `speechReading`); a word must count something
+ * (`countsSomething`). Presence only: never which quantity.
  */
 export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string): boolean {
-  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length);
+  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && (a.kind !== 'words' || countsSomething(text, a))
+    && !speechReading(text).inSpeech(speechReading(text.slice(0, a.index)).text.length);
+}
+
+/**
+ * A word is a figure the user wrote only where it COUNTS something: a word follows it that is no phrase break. "One OF them", "the one
+ * WHO" and the old figure in "not twelve." are no figures; a digit is a figure by its form.
+ */
+function countsSomething(text: string, a: WrittenAmount): boolean {
+  const counted = nounUnitsAt(text.slice(a.index + a.matchedText.length))[0];
+  return counted !== undefined && !PHRASE_BREAK.has(counted);
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
@@ -850,16 +861,13 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
 
 /**
  * ⭐ A COUNT WRITTEN IN WORDS ("one senior and two juniors"), read by the repo's one cardinal grammar (no articles, fractions or
- * ordinals), for every consumer through `amountsWrittenIn`. A word is a number only where it COUNTS something: a word follows it
- * that is not a phrase break ("one OF them", "the one WHO") and not punctuation or nothing ("not twelve."); a digit is a number by
- * its form. Served journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
+ * ordinals), for every consumer through `amountsWrittenIn`: it then binds clause by clause exactly as its digits would. Served
+ * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
 export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
     const v = parseCardinalAmount(m[0]);
-    const counted = m.index === undefined ? undefined : nounUnitsAt(text.slice(m.index + m[0].length))[0];
-    return v === null || m.index === undefined || counted === undefined || PHRASE_BREAK.has(counted) ? []
-      : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
+    return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
   });
 }
 
