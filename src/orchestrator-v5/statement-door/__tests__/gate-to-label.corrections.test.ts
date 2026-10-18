@@ -9,6 +9,7 @@ import { correctionWorld, type Rec } from '../../agent-lane/__tests__/correction
 import { applyStatementCorrection, claimRecordFor, userStatementFor, userStatementRecord } from '../statements.js';
 import { saidByOf } from '../../agent-lane/user-statements.js';
 import { linkSizing } from '../../../cee/provenance/provenance-of.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const SAID = 'Each extra tutor hour per pupil lifts the exam pass rate by about 3 points.';
 const LINK = { kind: 'link' as const, id: 'tutor_hours', to_id: 'pass_rate', field: 'effect' as const };
@@ -142,6 +143,22 @@ describe('R09 (converged plan): a correction never changes the note while leavin
     expect(claimRecordFor(w.graph(), LEVEL)!.history?.map((st) => [st.low, st.status])).toEqual([[3, 'withdrawn']]);
     const cold = await w.cold();
     expect(cold.body.graph.nodes.find((n: Rec) => n.id === 'late_deliveries')).not.toHaveProperty('observed_state');
+  });
+
+  // ⭐ DL-3 amendment 4 row 2 (Codex co-design §1 L4): a SAME-SCALAR period correction ("three … last week" → "three over the month")
+  // must stale the Run made on the old meaning. The analysis revision is the Run's freshness basis (`deriveAnalysisFreshness`,
+  // `analysis_graph_hash_interim`), so the corrected commit must move it, and the cold read must hold the moved revision.
+  it('PERIOD STALENESS: per week → over the month, same figure → the analysis revision moves, so the old Run reads stale', async () => {
+    const before = computeAnalysisAffectingGraphHash(levelGraph() as never);
+    expect(before).not.toBeNull();
+    const w = await correctionWorld(levelGraph(), FIX);
+    const card = await w.offer('propose_statement', retract) as Rec;
+    expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
+    const after = computeAnalysisAffectingGraphHash(w.graph() as never);
+    expect(after).not.toBeNull();
+    expect(after).not.toBe(before);
+    const cold = await w.cold();
+    expect(computeAnalysisAffectingGraphHash(cold.body.graph as never)).toBe(after);
   });
 
   it('CONTRAST: a correction that keeps the figure\'s own statement keeps the figure', async () => {
