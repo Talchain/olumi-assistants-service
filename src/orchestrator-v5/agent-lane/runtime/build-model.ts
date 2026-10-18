@@ -825,7 +825,7 @@ export const OPEN_AIM_GOAL_LABEL = 'Olumi’s provisional framing — aim still 
  * being weighed: it becomes an option (Olumi's) unless the draft already offers a choice. The goal is an open question:
  * Olumi's reading, no kind, no figure, no deliverable, so the existing readiness ask asks the user for their aim.
  */
-export function withOpenAim(c: CandidateModel, u: UnattestedEventGoal): CandidateModel {
+function withOpenAim(c: CandidateModel, u: UnattestedEventGoal): CandidateModel {
   const action = u.event.trim();
   // The action becomes an option when the draft has no choice of its own to weigh (fewer than two options); options the
   // drafter already wrote for it are kept as they are, never doubled.
@@ -1882,7 +1882,9 @@ export async function buildModelFromBrief(
     if (!answered) { answered = true; return { text: drafted, status: 'completed' }; }
     return callStructured(req, deadline);
   };
-  const second = await buildModelFromBriefOnce(scenarioId, brief, dispatch, openAimFirst, observeConstruction, deadlineAt, wideningCallStructured,
+  // No widening on the open-aim draft (Codex on #3426 @a36d8e6b: it made a third provider call): there is no aim yet to widen
+  // toward, and the draft keeps the supplied facts with what is missing left unknown (AIE K6_bounds). Two calls, as the refusal.
+  const second = await buildModelFromBriefOnce(scenarioId, brief, dispatch, openAimFirst, observeConstruction, deadlineAt, undefined,
     observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted);
   return second.ok === true ? { ...second, open_aim: true } : first;
 }

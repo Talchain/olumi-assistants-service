@@ -38,7 +38,7 @@ const cafeDraft = (): Rec => ({
   identities: [], unknowns: [], decision_question: BRIEF, unknown_concerns: [],
 });
 
-async function construct(answers: readonly string[], brief: string, draftNow?: boolean): Promise<{ graph: Rec | undefined; result: Rec; calls: number }> {
+async function construct(answers: readonly string[], brief: string, draftNow?: boolean, widen = false): Promise<{ graph: Rec | undefined; result: Rec; calls: number }> {
   let graph: Rec | undefined; let calls = 0;
   const dispatch = async (path: string, body: unknown) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: Rec }).graph);
@@ -48,7 +48,7 @@ async function construct(answers: readonly string[], brief: string, draftNow?: b
   };
   const drafter = async () => { calls += 1; return { text: answers[Math.min(calls, answers.length) - 1]!, status: 'completed' }; };
   const result = await buildModelFromBrief('00000000-0000-4000-8000-0000000000k6', brief, dispatch as never, drafter as never,
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, draftNow) as Rec;
+    undefined, undefined, widen ? drafter as never : undefined, undefined, undefined, undefined, undefined, undefined, draftNow) as Rec;
   return { graph, result, calls };
 }
 const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
@@ -67,6 +67,12 @@ describe('K6: an explicit "draft it now" on a brief with no stated aim gets a la
     expect(labels(graph!, 'goal')).not.toContain(EVENT);
     // The draft already weighs the action (two options): kept as drafted, never doubled.
     expect(labels(graph!, 'option').sort()).toEqual(['Keep one café', 'Open in Bristol next spring']);
+  }, 60_000);
+
+  it('⛔ Codex on #3426 @a36d8e6b: with the capability path\'s widening provider passed, the open-aim draft still makes exactly the two calls (draft, goal retry) — no widening on an open aim', async () => {
+    const { result, calls } = await construct([JSON.stringify(cafeDraft()), JSON.stringify(cafeDraft())], BRIEF, true, true);
+    expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, mutated: true, open_aim: true });
+    expect(calls, 'draft + goal retry; the open-aim pass answers its own first call and does not widen').toBe(2);
   }, 60_000);
 
   it('a draft with no choice of its own: the action becomes the option beside it', async () => {
