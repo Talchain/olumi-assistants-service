@@ -99,6 +99,15 @@ async function registered(model: Rec, brief = BRIEF): Promise<Rec> {
   return graph!;
 }
 
+/** What the build SAYS once on its turn (`not_represented`), through the real build and register. */
+async function said(model: Rec, brief = BRIEF): Promise<string[]> {
+  const r = await buildModelFromBrief('5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a', brief, (async (path: string) => (path.endsWith('/graph/register')
+    ? { status: 200, json: { registered: true, model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } })) as never,
+    (async () => ({ text: JSON.stringify(model), status: 'completed' })) as never) as Rec;
+  expect(r.ok, JSON.stringify(r).slice(0, 1200)).toBe(true);
+  return r.not_represented as string[];
+}
+
 const BASIS = 'Uses the stated lower end as a provisional planning effect.';
 /** The sentence beside Olumi's estimate: the user's whole words as theirs, the figure used named as Olumi's separate approximation. */
 const beside = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_beside_estimate'));
@@ -286,5 +295,20 @@ describe('a stated effect range stays the user\'s, on its link, beside Olumi\'s 
     const graph = await registered(draft({ metres: 'metres' }), inMetres(BRIEF, 'metres'));
     expect(savedEdge(graph).provenance).toMatchObject({ magnitude: 'olumi_estimate', basis: BASIS });
     expect(recordOn(graph)?.statements).toEqual([expect.objectContaining({ form: 'range', low: 4, high: 6, unit: 'metres' })]);
+  });
+
+  /**
+   * ⭐ A3 (T01, G3 unseen 8e9132fc: "the engineers' 6–10 saving held at its low end as Olumi's; the user was never told"). The
+   * sentences above were computed at admission and never said: the build's one list of what it says (`not_represented`) left out
+   * both codes. The build now says them, once, in the AIE's words.
+   */
+  it('⭐ A3: the build SAYS the user\'s range beside Olumi\'s estimate, and why an estimate in another unit was set aside', async () => {
+    expect(await said(draft())).toContain(beside(admitted(draft()))!.reason);
+    expect(await said(draft({ pounds: true }), BRIEF_LB)).toContain(otherUnitWords(RANGE_LB, 'kg'));
+  });
+
+  it('A3 CONTRAST: a denied range, and a range stated for another link, say nothing beside this estimate', async () => {
+    expect((await said(draft({ negated: true }))).filter((x) => x.includes(`"${PRE}" → "${WASTE}"`) && x.includes('as the brief puts it'))).toEqual([]);
+    expect((await said(draft({ on: DEL }))).filter((x) => x.includes(`"${PRE}" → "${WASTE}"`) && x.includes('as the brief puts it'))).toEqual([]);
   });
 });

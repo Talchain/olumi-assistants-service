@@ -3296,7 +3296,7 @@ export function admitStatedGoalChange(
  */
 function withGoalTargetRows(
   result: ConstraintAdmissionResult, model: CandidateModel, nodes: readonly Partial<AdmittedNode>[],
-  nodeIdFor: (metric: string) => string | undefined,
+  nodeIdFor: (metric: string) => string | undefined, goalProvenance: string = model.goal.provenance,
 ): ConstraintAdmissionResult {
   const goal = nodes.find((n) => n.kind === 'goal');
   // AIE C clause 3 (12 Oct): a target keeps its OWN frame. A change-frame target row is still one of the goal's targets
@@ -3321,7 +3321,7 @@ function withGoalTargetRows(
     constraint_id: id, node_id: goal.id, operator: held, ...(stated !== undefined ? { operator_as_stated: stated } : {}),
     value: raw, label: model.goal.metric,
     ...(typeof goal.goal_threshold_unit === 'string' ? { unit: goal.goal_threshold_unit } : {}),
-    provenance: canonicalProvenance(model.goal.provenance), value_frame: 'level', role: 'goal_target',
+    provenance: canonicalProvenance(goalProvenance), value_frame: 'level', role: 'goal_target',
   };
   return { ...result, constraints: [own, ...marked] };
 }
@@ -3919,6 +3919,11 @@ function admitOnce(
   // The total of the user's own sum is the user's level today (`goalLevelOfStatedSum`), read on the verified factors.
   const model = goalLevelOfStatedSum({ ...draftedModel, factors: draftedModel.factors.map(f => verifiedFactorLevelValue(draftedModel, f, brief) ?? f) }, brief);
   const levelReading = { value: null as BriefGoalLevel | null };
+  // ⭐ A3 (D2, proof 1: "at least 20 new customers" saved as Olumi's): the goal's target is the user's when the AI's own
+  // statement of it verifies against the brief (`goalTargetStatements`, the one authorship owner), never the draft's own
+  // flag. Read by the goal's record and its own target row; every other reading of the goal is unchanged.
+  const goalProvenance = typeof brief === 'string' && typeof model.goal.value === 'number'
+    && (goalTargetStatements(model, brief, model.goal.value)?.length ?? 0) > 0 ? 'explicit' : model.goal.provenance;
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -4129,7 +4134,7 @@ function admitOnce(
     {
       label: model.goal.metric,
       kind: 'goal',
-      provenance: model.goal.provenance,
+      provenance: goalProvenance,
       node: (() => {
         // ⭐ `goal_threshold` is NORMALISED 0-1 (`raw / cap`), not the stated
         // number. Writing 20000 into it was out of range by four orders of
@@ -5307,7 +5312,7 @@ function admitOnce(
         ...(typeof n.label === 'string' ? { label: n.label } : {}),
       };
     },
-  ), model, nodes, nodeIdForMetric);
+  ), model, nodes, nodeIdForMetric, goalProvenance);
 
   /**
    * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on

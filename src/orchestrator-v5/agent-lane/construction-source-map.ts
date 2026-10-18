@@ -366,7 +366,7 @@ export function goalTargetStatements(model: unknown, brief: string, figure: numb
   const metric = typeof m.goal?.metric === 'string' ? m.goal.metric : '';
   if (metric.trim() === '' || !Number.isFinite(figure)) return [];
   const states = (n: number | undefined): boolean => typeof n === 'number' && Math.abs(n) === Math.abs(figure);
-  const map = sourceMapOf(m.statements, brief);
+  const map = sourceMapOf(draftStatements(model), brief);
   const key = subjectKey({ kind: 'goal', label: metric }, 'target');
   // TL 09:18Z (2), AMENDED 10:49Z: a rival is ONLY another of the AI's own verified statements on the same sentence that gives
   // that figure to another subject or field ("We have a budget of £40,000." as the budget's level and the goal's target). No
@@ -437,6 +437,10 @@ const BOUND_FORM: Readonly<Record<string, StatementForm>> = { '<=': 'upper_bound
  * reads it (`linkEffectRangeEnd`, `linkEffectStatedRange`). Served: the AI wrote "would cut leakage by between 3 and 5" as −5 to −3,
  * the verifier (ends as written, positive) refused it whole, and the user's range reached no record and no reader. A range signed
  * against its own link's direction, on no drawn link, or across zero is returned as given (and refused, as before).
+ * ⭐ A3 (proof 1 D4, the same contract for a goal): the goal's TARGET written as a change the SAME draft frames on the goal itself
+ * (`frame` change_rel / change_abs, a negative `value`: "reduce it by at least 15%" as −15) carries the change's sign on the goal.
+ * The target statement repeating that signed figure is the size its words write (−15 → 15). Served: the verifier (a negative is
+ * never the Agent's sign) refused it whole, the target went unbound, and the goal was saved as a "%" level with no target.
  * Every other entry is returned as given. Pure.
  */
 export function draftStatements(model: unknown): unknown {
@@ -453,10 +457,15 @@ export function draftStatements(model: unknown): unknown {
     const r = l !== null && typeof l === 'object' ? l as Record<string, unknown> : {};
     return r['direction'] === 'negative' && typeof r['from'] === 'string' && typeof r['to'] === 'string' ? [`${norm(r['from'])}|${norm(r['to'])}`] : [];
   }));
-  if (limits.length === 0 && drawnNegative.size === 0) return raw;
+  const goal = m['goal'] !== null && typeof m['goal'] === 'object' && !Array.isArray(m['goal']) ? m['goal'] as Record<string, unknown> : {};
+  const cut = (goal['frame'] === 'change_rel' || goal['frame'] === 'change_abs') && typeof goal['metric'] === 'string'
+    && typeof goal['value'] === 'number' && goal['value'] < 0 ? { metric: norm(goal['metric']), value: goal['value'] } : undefined;
+  if (limits.length === 0 && drawnNegative.size === 0 && cut === undefined) return raw;
   return raw.map((entry: unknown) => {
     const r = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
     const subject = subjectOf(r?.['subject']);
+    if (r !== undefined && cut !== undefined && subject?.kind === 'goal' && norm(subject.label) === cut.metric && r['field'] === 'target'
+      && (r['form'] === 'lower_bound' || r['form'] === 'upper_bound') && r['value'] === cut.value) return { ...r, value: -cut.value };
     if (r !== undefined && subject?.kind === 'link' && subject.to_label !== undefined && r['field'] === 'effect' && r['form'] === 'range'
       && drawnNegative.has(`${norm(subject.label)}|${norm(subject.to_label)}`)) {
       const ends = writtenEndsOfNegativeRange(r['low'], r['high']);

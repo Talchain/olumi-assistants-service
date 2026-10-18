@@ -2463,7 +2463,7 @@ export async function buildModelFromBrief(
     // ⭐ The goal's own verified target statements (the one statement contract, `construction-source-map.ts`): with no deadline
     // claimed, a period is the goal's deadline only inside one of them (AIE 6184383302).
     const goalMetric = typeof candidate.goal?.metric === 'string' ? candidate.goal.metric : '';
-    const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf((candidate as { statements?: unknown }).statements, brief)
+    const goalTargetQuotes = goalMetric.trim() === '' ? [] : (sourceMapOf(draftStatements(candidate), brief)
       .verified.get(subjectKey({ kind: 'goal', label: goalMetric }, 'target')) ?? []).map((st) => st.quote);
     const goalValue = candidate.goal?.value;
     let heldGoal = holdStatedGoalAttributes(admitted.nodes, candidate.goal, brief, goalTargetQuotes,
@@ -2921,8 +2921,11 @@ export async function buildModelFromBrief(
         // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
         // `stated_range_unsized`: a link whose effect the user stated as a range, which nobody sized: Olumi's provisional size
         // said against the user's recorded source (AIE 16 Oct), once, never asked again.
+        // `stated_range_beside_estimate` / `stated_range_other_unit`: the user's range said as theirs beside Olumi's separate
+        // estimate, or why an estimate in another unit was set aside (G3 a735; AIE A3 13:11Z, AIE unit wording 16:04Z). Computed
+        // at admission and, until A3 (T01, unseen 8e9132fc), never said: the user was not told their range was not the size used.
         // `retained_later_ambition`: a later aim the user named, kept as Olumi's reading and never a target this model tests (G1).
-        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|stated_range_beside_estimate|stated_range_other_unit|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
