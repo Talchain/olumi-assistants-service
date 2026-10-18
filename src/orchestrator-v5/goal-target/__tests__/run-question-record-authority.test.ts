@@ -78,6 +78,8 @@ describe('the evaluated-question producer survives the actual Run-fact writer an
     expect(rows[0]?.evaluated_scenario_revision).toBe(5);
     const [cold] = await new SupabaseSessionStore(client as never, cache(), { defaultReadLimit: 20 }).readFactsFor(['question-turn']);
     if (cold?.fact_type !== 'run_analysis') throw new Error('Expected cold Run fact');
+    expect(cold.result.summary).toBe(fact.result.summary);
+    if (hasThreshold) expect(cold.result.summary).toMatch(/^‘Add one specialist’: about 40% chance of/u);
     expect(cold.result.enrichment?.[key]).toEqual(retained);
     const runEvidence = readRunEvidence(runEvidenceWireOf(cold));
     expect(runEvidence?.evaluatedQuestion).toEqual(retained);

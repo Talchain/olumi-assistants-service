@@ -619,6 +619,12 @@ export function withReadTimeHorizonGate<R>(result: R, currentGraph: unknown, sto
   if (hasRecordedLevelCalculation(result)) return withGoalChanceReadback(result);
   const envelope = isRec(result.enrichment) ? result.enrichment : result;
   const warnings = [result.inference_warnings, envelope.inference_warnings].flatMap(v => Array.isArray(v) ? v : []);
+  // Legacy range records are attempted displays too; the same selected-Run reader owns their permission.
+  if (('run_id' in result || 'computed_at' in result || 'input_snapshot' in result)
+    && warnings.some(w => isRec(w) && ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(w.code)))) {
+    const selected = withGoalChanceReadback(result);
+    if (selected !== result) return selected;
+  }
   return warnings.some(w => isRec(w) && w.code === 'GOAL_FIGURES_HORIZON_NOT_TESTED')
     || goalHorizonVerdict(currentGraph, storedEnvelope ?? envelope) !== 'withhold'
     ? result : withChanceReadbackWithheld(result, currentGraph, false);

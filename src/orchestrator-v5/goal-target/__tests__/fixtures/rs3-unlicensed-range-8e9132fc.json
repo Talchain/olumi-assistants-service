@@ -1162,5 +1162,6 @@
     "requires_rerun": false,
     "blocked_unusable": false,
     "contradictions": []
-  }
+  },
+  "brief": "Synthetic test: our warehouse currently picks 400 orders a day. We need to reach at least 500 orders a day within three months. Option one is adding a second evening shift, which adds 120 orders a day. Option two is buying faster handheld scanners, which adds 60 orders a day. Keep carrying on as now as the baseline."
 }
