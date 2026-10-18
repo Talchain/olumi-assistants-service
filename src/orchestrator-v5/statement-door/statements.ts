@@ -43,18 +43,26 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
     const same = nodes.filter((n) => n.kind === subject.kind && typeof n.id === 'string' && typeof n.label === 'string');
     let named = same.filter((n) => isFactorNamedByUser(String(n.label), quote));
     if (correction !== undefined) {
-      // Corrections opt in. Old sentences are never names; quoted bytes identify only a node that uniquely holds them across the model.
+      // Corrections opt in. Old sentences are never names; held bytes identify only a node that uniquely holds them across the model.
       const speech = speechReading(quote), retired = speechReading(correction.retirement.quote).text;
       const outside = speech.text.split('').map((ch, at) => speech.inSpeech(at) ? ' ' : ch).join('');
       const labelled = same.filter(n => isFactorNamedByUser(String(n.label), outside));
-      const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
-      const holders = cited ? nodes.filter(n => [
+      // Every saved text a node holds: its records, whoever spoke (the user's and speaker-unknown words), and its legacy fields.
+      const heldOn = (n: Rec): string[] => [
+        ...userStatementsOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
-      ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
-      // ⭐ QBC row 12 (#3400 RES1): a label inside quoted words never NAMES the item being corrected (another item's held words may
-      // contain it); quoted words only subtract. Outside them, or the cited bytes' one holder; else nothing is named here.
-      named = labelled.length > 0 ? labelled : cited && holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : [];
+      ];
+      const holds = (n: Rec, words: string): boolean => words.trim() !== '' && heldOn(n).some(held => quoteSpansIn(speechReading(held).text, words).length > 0);
+      const holders = nodes.filter(n => holds(n, retired));
+      // ⭐ QBC row 12 (#3400 RES1): the user's own QUOTED words only subtract. Where they cite saved words that a node other than the
+      // retired words' holder holds, they point elsewhere, so the retired words name nothing here.
+      const quotedRuns = speech.text.split('').map((ch, at) => speech.inSpeech(at) ? ch : '\n').join('').split('\n')
+        .map(run => run.replace(/^[\s"'“”‘’«»]+|[\s"'“”‘’«».,;:!?]+$/gu, '')).filter(run => run !== '');
+      const citesElsewhere = quotedRuns.some(run => nodes.some(n => !holders.includes(n) && holds(n, run)));
+      // ⭐ P1 (DL-3; C2 dev §0, 4/6 briefs): a correction binds its item by IDENTITY, not words: the edit's retired words held verbatim
+      // in exactly one item's saved record (any speaker). Held in more than one: ambiguous, nothing is named; the press still authors.
+      named = labelled.length > 0 ? labelled : !citesElsewhere && holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : [];
     }
     if (named.length === 1) {
       if (found !== undefined) found.subject = { ...subject, id: String(named[0]!.id) };
@@ -489,7 +497,11 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
   // Recover ONLY the same complete line in the existing quote reader's spelling, never an omitted remainder or another speaker.
   const line = verbatimSourceLine({ now: texts.now }, request.quote);
   const quote = line !== undefined && plainQuoteWords(line) === plainQuoteWords(request.quote) ? line : request.quote;
-  if (!wholeStatementIn(texts.now ?? '', quote)) {
+  // ⭐ P1 T3 (DL-3): a correction the user typed in an EARLIER turn, verbatim and whole, may be prepared now if it was never applied
+  // (no record holds it as a correction's source); otherwise only this turn's own words are a correction's source.
+  const earlierUnapplied = (texts.conversation ?? '') !== (texts.now ?? '') && wholeStatementIn(texts.conversation ?? '', quote)
+    && !graph.nodes.some(n => userStatementsOn(n).some(r => r.attest?.recorded_by === 'correction' && r.statements.some(st => st.quote === quote)));
+  if (!wholeStatementIn(texts.now ?? '', quote) && !earlierUnapplied) {
     // Display only facts from the existing literal/whole-statement and paired-speech readers; no source permission changes.
     const speech = speechReading(texts.now ?? ''), said = speechReading(request.quote).text;
     const spans = quoteSpansIn(speech.text, said);
