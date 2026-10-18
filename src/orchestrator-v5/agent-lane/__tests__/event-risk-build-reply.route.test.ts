@@ -168,10 +168,17 @@ describe('event-risk disclosure through the served build reply', () => {
     const objectiveAsk = 'I used "Delivery" as a provisional objective. What should this model help you explore?';
     expect(buildOutput?.next_step_blocker).toMatchObject({ kind: 'missing_input', cause: 'objective_provisional', ask: objectiveAsk });
     expect(body.assistant_text).not.toContain(objectiveAsk);
-    // S6 (#3237): the AI wrote this reply, so the host adds no build questions line; the server's own facts stay.
+    // S6 (#3237): the AI wrote this reply, so the host adds no build questions line.
     expect(body.assistant_text).not.toContain('Questions this model does not answer yet:');
-    expect(body.assistant_text).toContain('Without a current level the analysis would treat it as zero.');
-    expect(body.assistant_text).toContain('Olumi can’t run the numbers until this risk has a figure.');
+    // PR 4: nor, after the refused first analysis, the readiness line ("The analysis can't run yet. …"): the AI holds each
+    // need by identity in the SENT build output (`readiness.needs_from_user`), beside the `first_analysis` that did not run.
+    expect(buildOutput?.first_analysis).toMatchObject({ ran: false });
+    const needs = ((buildOutput?.readiness as { needs_from_user?: { message?: unknown }[] } | undefined)?.needs_from_user ?? [])
+      .map((i) => String(i.message));
+    for (const words of ['Without a current level the analysis would treat it as zero.', 'Olumi can’t run the numbers until this risk has a figure.']) {
+      expect(body.assistant_text).not.toContain(words);
+      expect(needs.some((m) => m.includes(words)), words).toBe(true);
+    }
   });
   it.each([
     ['question', 'Which source of evidence could help test the productivity assumption?', false, 'Which source of evidence could help test the productivity assumption?'],

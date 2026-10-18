@@ -109,6 +109,14 @@ describe('the build line says what approval changes', () => {
     expect(n.status).not.toMatch(/\bsaved\b/i);
   });
 
+  it('PR 4 CONTRAST: the same link on the AI\'s reply (aiAsks) adds no reminder; the host\'s reply keeps it', () => {
+    const calls = [{ name: 'build_model_from_brief' }, { name: 'propose_model_change' }];
+    const results = [BUILT, { ok: true, mutated: false, proposal_id: 'prop_dddddd' }];
+    expect(narrateWriteOutcome('', calls, results, { aiAsks: true }).status, 'AI-written reply').toBeNull();
+    expect(narrateWriteOutcome('', calls, results, { aiAsks: false }).status, 'host-written reply')
+      .toBe('What I proposed above is not made until you approve it.');
+  });
+
   it('CONTRAST: a build with NO pending proposal has no status', () => {
     expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [BUILT]).status).toBeNull();
     expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ...BUILT, open_questions: ['Who covers holidays?'] }]).status)
@@ -514,6 +522,27 @@ describe('the real route: build + proposal in one turn', () => {
     const b = await turn();
     const pid = proposalOf(b, 'propose_option_interventions');
     expect(b.suggested_actions[0]).toEqual({ id: approvalChipIdFor(pid!), label: 'Use as starting option levels', message: 'Yes, use those.' });
+  });
+
+  it('PR 4 (real route, AI-written reply): a change proposed after the build has no host reminder; the AI holds it as its tool result', async () => {
+    script = [
+      callTool('build_model_from_brief', { brief: BRIEF }),
+      callTool('propose_model_change', { from_label: 'Recruitment fee', to_label: 'Annual PA salary', direction: 'positive', strength: 'strong', rationale: 'A higher fee raises the first-year cost.' }),
+      say('I have proposed linking the recruitment fee to the PA salary; approve it if that is right.'),
+    ];
+    // The user's own band for the link is in their words (a band they did not say is refused).
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID,
+      message: `${BRIEF} The recruitment fee strongly drives the PA salary, so connect them.` } });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    const b = r.json() as Body;
+    const pid = proposalOf(b, 'propose_model_change');
+    expect(pid, JSON.stringify(b._agent.tool_calls)).toMatch(/^prop_/);
+    expect(b.assistant_text).not.toContain('What I proposed above is not made until you approve it.');
+    // The card carries the ask, and the fact the line restated is in the AI's own input, by identity: the propose call's output.
+    expect(b.suggested_actions.some((c) => c.id === approvalChipIdFor(pid!))).toBe(true);
+    const outputs = modelBodies.flatMap((body) => (Array.isArray(body.input) ? body.input : []) as { type?: string; output?: unknown }[])
+      .filter((i) => i?.type === 'function_call_output').map((i) => { try { return JSON.parse(String(i.output)) as Record<string, unknown>; } catch { return {}; } });
+    expect(outputs).toContainEqual(expect.objectContaining({ ok: true, mutated: false, proposal_id: pid }));
   });
 
   it('CONTRAST: a build with nothing proposed omits the saved sentence and offers no approve chip', async () => {

@@ -105,7 +105,7 @@
         }
       ]
     },
-    "reply": "Here is where the model stands.\n\nThe first analysis could not run yet: The model has fewer than two options.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
+    "reply": "Here is where the model stands.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
     "frames": [
       {
         "kind": "GRAPH_READY",
@@ -445,7 +445,7 @@
         }
       ]
     },
-    "reply": "Here is where the model stands.\n\nThe first analysis could not run yet: The model has fewer than two options.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
+    "reply": "Here is where the model stands.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
     "frames": [
       {
         "kind": "GRAPH_READY",
@@ -785,7 +785,7 @@
         }
       ]
     },
-    "reply": "Here is where the model stands.\n\nThe first analysis could not run yet: The model has fewer than two options.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
+    "reply": "Here is where the model stands.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
     "frames": [
       {
         "kind": "GRAPH_READY",
@@ -1125,7 +1125,7 @@
         }
       ]
     },
-    "reply": "Here is where the model stands.\n\nThe first analysis could not run yet: The model has fewer than two options.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
+    "reply": "Here is where the model stands.\n\nThis model doesn't yet say whether any option gets there within 6 months.",
     "frames": [
       {
         "kind": "GRAPH_READY",

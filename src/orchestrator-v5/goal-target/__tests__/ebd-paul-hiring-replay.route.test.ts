@@ -346,12 +346,13 @@ describe("EBD: Paul's hiring conversation reaches a labelled chance per option b
     // No "% today" question ever reached the user, on any surface of any turn.
     for (const body of seen) expect(JSON.stringify(body)).not.toMatch(LEVEL_ASK);
     // ⭐ EACH ASK ONCE PER REPLY (DL, 12 Oct: reply 1 said the deadline question 3×): every question the model asks on any
-    // turn (readiness, the coach) is said at most once in each reply; the deadline ask IS said, once, on the build turn.
+    // turn (readiness, the coach) is said at most once in each reply.
     const asks = [...new Set([ask1, ask2, ...seen.flatMap(b => readinessAsks(b.analysis_ready))])];
     for (const [k, body] of seen.entries()) for (const ask of asks) expect(timesSaid(body, ask), `turn ${k + 1}: ${ask}`).toBeLessThanOrEqual(1);
-    expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(1);
-    // ⭐ BYPASS1 (DL, 14 Oct): the reply is the AI's own; the first analysis's server sentence still carries the question, and
-    // the AI holds it, by its exact words, as the ONE next step of the model it just built (never a "today's level").
+    // PR 4 (was 1: the host's first-analysis sentence carried the question): the reply is the AI's own, so the host adds no
+    // first-analysis sentence and no copy of the question (this scripted reply does not ask it). ⭐ BYPASS1 (DL, 14 Oct): the
+    // AI holds it, by its exact words, as the ONE next step of the model it just built (never a "today's level").
+    expect(timesSaid(t1, ask1), String(t1.assistant_text)).toBe(0);
     expect(t1._diagnostic_trace.reply_author).toBe('ai');
     expect(builtNextStep).toEqual({ kind: 'missing_input', ask: ask1 });
 
