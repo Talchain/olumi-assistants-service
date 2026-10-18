@@ -102,13 +102,26 @@ export async function route(w: ReturnType<typeof world>, fallback?: Respond): Pr
   app.post('/assist/v1/scenarios/:id/versions', async () => w.versions());
   app.post('/orchestrate/v2/turn', async (_req, reply) => reply.code(500).send({}));
   await app.register(agentV1TurnRoute); await app.ready();
-  return async (over: Rec, steps: Rec[] = []): Promise<Rec> => {
+  // As the client does: a typed turn sends the cards its last reply showed (`shownBy`), unless the turn names its own set.
+  // `lost: true` is a reply lost in transport: the client never saw it, so what it shows does not change.
+  let shown: Rec[] = [];
+  return async ({ lost, ...over }: Rec, steps: Rec[] = []): Promise<Rec> => {
     script = [...steps];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', turn_id: randomUUID(), scenario_id: w.sid, ...over } });
+    const displayed = over.source === 'composer' && !('displayed_proposals' in over) ? { displayed_proposals: shown } : {};
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', turn_id: randomUUID(), scenario_id: w.sid, ...displayed, ...over } });
     expect(r.statusCode, r.body.slice(0, 2000)).toBe(200);
-    return r.json() as Rec;
+    const body = r.json() as Rec;
+    if (lost !== true) shown = shownBy(body);
+    return body;
   };
 }
+/** What the client shows after a reply (DGAI `displayedProposals`): each listed card at its revision, and any other approve button. */
+export const shownBy = (body: Rec): Rec[] => {
+  const listed = ((body._proposal_fields?.proposals ?? []) as Rec[]).map((p) => ({ proposal_id: p.proposal_id, revision: p.revision }));
+  const buttons = chips(body).filter((id) => id.startsWith('agent-approve-proposal:')).map((id) => id.slice('agent-approve-proposal:'.length))
+    .filter((id) => !listed.some((p) => p.proposal_id === id)).map((id) => ({ proposal_id: id }));
+  return [...listed, ...buttons];
+};
 export const idOf = (body: Rec, tool: string): string => {
   const made = (body._agent.tool_calls as Rec[]).filter((c) => c.name === tool);
   expect(made, JSON.stringify(body._agent.tool_calls)).toEqual([expect.objectContaining({ ok: true })]);

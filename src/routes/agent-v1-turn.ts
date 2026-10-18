@@ -96,7 +96,7 @@ import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analy
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionRenameInProcess, commitOptionStatusInProcess, commitStructuralDeleteInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, declineChipIdFor, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, declineChipIdFor, displayedProposalsOf, shownAsHeldNow, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { heldCardStillApplies, heldCardSubjectMoved } from '../orchestrator-v5/agent-lane/proposal-object/still-applies.js';
@@ -3323,11 +3323,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⭐ AN APPROVAL IS ONE ACTION (DL-3 18 Oct; Codex co-design §2; assessment K5 L2: "Yes, I approve the proposed 10%" was
      * refused while its card waited). The cards held at turn start, in both dialects, joined with this process's outstanding
      * proposals: a durable union, never one remembered chip.
+     *  · ONLY A CARD THE USER IS SHOWN (Codex BLOCK 18 Oct, P1): the client sends the cards it displays at the revisions it
+     *    rendered (`displayed_proposals`). A card it does not show, or shows at another revision (a replacement whose reply
+     *    was lost), binds nothing, and its own button is offered; so does a turn that sends no displayed set.
      *  · Words EXACTLY equal to the ONE waiting card's button words ARE its press (R2 T1: the UI's chip sends those words).
      *  · Otherwise, with exactly ONE card waiting, the user's typed words reach the Agent bound to that card, as its press would
      *    be: the host picks the card (its id and the button words every per-family gate checks), and the Agent's own reading of
      *    the words decides — approve (the approve tool on THAT id), amend, decline or discuss. Nothing is written unless it calls
      *    the approve tool on it, and no other id is bound. A card made during this turn is never in this set.
+     *  · Either way the write keeps the user's exact typed words as its consent (`typed_assent`), quoted in the receipt.
      *  · Two or more waiting: nothing is bound — never the newest, the oldest or the one the Agent names. The reply offers every
      *    card with its own button, the one the Agent took the words to mean first (`heldCardOffer`).
      */
@@ -3341,10 +3345,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Its card as the user was shown it: the durable carrier, or this subject's last offer (the store may hold no carrier).
     const soleCard = soleId === undefined ? undefined : [heldCardIds.find(([id]) => id === soleId)?.[1], lastApproveOffer.get(approveKey),
       carriedProposals.get(approveKey)?.chip].find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === soleId);
-    if (approvedProposal === undefined && typedNow !== null && soleId !== undefined && soleCard !== undefined) {
+    const shown = displayedProposalsOf(body['displayed_proposals']);
+    const revisionAtStart = new Map(heldAtStart.flatMap((h) => { const r = proposalRecord(h, undefined); return r === undefined ? [] : [[r.proposal_id, r.revision] as const]; }));
+    if (approvedProposal === undefined && typedNow !== null && soleId !== undefined && soleCard !== undefined
+      && shownAsHeldNow(shown, soleId, revisionAtStart.get(soleId))) {
       if (soleCard.message === typedNow) approvedProposal = soleId;
-      pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message,
-        ...(soleCard.message === typedNow ? {} : { typed_assent: typedNow }) };
+      pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message, typed_assent: typedNow };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.

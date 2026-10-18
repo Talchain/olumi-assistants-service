@@ -22,7 +22,7 @@ vi.mock('../../../orchestrator/user-identity.js', async original => ({ ...await 
 import { approvalChipIdFor } from '../approval-chips.js';
 import { declineChipIdFor } from '../proposal-object/record.js';
 import { authorised, bothCards, call, chipFor, chips, closeApps, hash, idOf, LAPSE, MIXER, MIXER_WORDS, mixerSaved, node, route as routeOver, say,
-  world as worldOver } from './fixtures/approval-world.js';
+  world as worldOver, type Rec } from './fixtures/approval-world.js';
 
 const world = () => worldOver(live);
 const route = (w: ReturnType<typeof world>) => routeOver(w);
@@ -117,4 +117,78 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     expect(authorised(pressedB), JSON.stringify(authorised(pressedB)) + String(pressedB.assistant_text)).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     expect(mixerSaved(w.read())).toBe(true);
   }, 150_000);
+});
+
+// ⭐ THE DISPLAYED-OPERATION CONTRACT (Codex BLOCK on #3420@42e08cdc, 18 Oct: its three CEE probes, adopted as rows). Typed
+// assent binds only to a card the client SHOWS, at the revision it shows, and it always keeps the user's exact words.
+describe('typed assent binds only to what the user was shown, and always keeps their words', () => {
+  it('⭐ exact button words TYPED into the composer: saved as the card, and still a typed approval quoting them', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions'); const chip = chipFor(first, b);
+    const reply = await turn({ message: chip.message, source: 'composer', agent_session_id: first._agent.session_id });
+    expect(mixerSaved(w.read())).toBe(true);
+    expect(reply._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: chip.message }]);
+    expect(String(reply.assistant_text)).toContain(`Saved on your typed approval: \u201c${chip.message}\u201d`);
+  }, 120_000);
+
+  const corrected = 'The faster mixer cuts prep time by 12%.';
+  const replacement = { interventions: (MIXER.interventions as Rec[]).map((x) => ({ ...x, value: 12, basis: corrected })) };
+  /** Card A (15%) shown; the user's correction makes replacement B (12%), whose reply is `lost` or delivered. */
+  async function replaced(lost: boolean) {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is the 15% reading.')]);
+    const a = idOf(first, 'propose_option_interventions');
+    const second = await turn({ message: corrected, source: 'composer', agent_session_id: first._agent.session_id, lost },
+      [call('propose_option_interventions', replacement), say('Here is the replacement reading.')]);
+    const b = idOf(second, 'propose_option_interventions'); expect(b).not.toBe(a);
+    expect(w.onLatestRow(approvalChipIdFor(a)), 'the replacement discards card A').toBe(false);
+    return { w, turn, a, b, session: first._agent.session_id };
+  }
+
+  it('⭐ a replacement whose reply was LOST never inherits the assent given while the client still showed card A: nothing written, B offered', async () => {
+    const { w, turn, b, session } = await replaced(true);
+    const before = hash(w.read());
+    const reply = await turn({ message: 'Approved.', source: 'composer', agent_session_id: session }, [call('authorise_change', { proposal_id: b }), say('Done.')]);
+    expect(authorised(reply).some((c) => c.mutated === true), JSON.stringify(authorised(reply))).toBe(false);
+    expect(hash(w.read())).toBe(before);
+    expect(mixerSaved(w.read())).toBe(false);
+    expect(reply._agent.typed_approvals).toBeUndefined();
+    expect(chips(reply), 'the card the user has not seen is offered with its own button').toContain(approvalChipIdFor(b));
+  }, 120_000);
+
+  it('CONTRAST: the same replacement, its reply DELIVERED (the client shows B) → "Approved." saves B, quoting the words', async () => {
+    const { w, turn, b, session } = await replaced(false);
+    const reply = await turn({ message: 'Approved.', source: 'composer', agent_session_id: session }, [call('authorise_change', { proposal_id: b }), say('Done.')]);
+    expect(authorised(reply)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
+    expect(node(w.read(), 'buy_faster_mixer').interventions.prep_time_cut.raw_value).toBe(12);
+    expect(reply._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: 'Approved.' }]);
+  }, 120_000);
+
+  it('a typed turn that sends NO displayed set binds nothing (fail-safe): the card keeps its button', async () => {
+    const w = world(); const turn = await route(w);
+    const first = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
+    const b = idOf(first, 'propose_option_interventions');
+    const before = hash(w.read());
+    const reply = await turn({ message: 'Approved.', source: 'composer', agent_session_id: first._agent.session_id, displayed_proposals: undefined },
+      [call('authorise_change', { proposal_id: b }), say('Done.')]);
+    expect(authorised(reply).some((c) => c.mutated === true)).toBe(false);
+    expect(hash(w.read())).toBe(before);
+    expect(chips(reply)).toContain(approvalChipIdFor(b));
+  }, 120_000);
+
+  it('a same-turn proposal cannot approve itself', async () => {
+    const w = world(); let attempts = 0; let attemptedId: string | undefined;
+    const turn = await routeOver(w, (req) => {
+      const ids = [...JSON.stringify(req).matchAll(/prop_[0-9a-f]{32}/g)].map((x) => x[0]);
+      if (attempts === 0) attemptedId = ids[ids.length - 1];
+      return new Response(JSON.stringify(attempts++ === 0 ? call('authorise_change', { proposal_id: attemptedId }) : say('Waiting for approval.')), { status: 200 });
+    });
+    const before = hash(w.read());
+    const reply = await turn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER)]);
+    expect(authorised(reply)).toHaveLength(1);
+    expect(attemptedId).toBe(idOf(reply, 'propose_option_interventions'));
+    expect(authorised(reply)[0]!.refusal).toBe('not_on_narration');
+    expect(authorised(reply).some((c) => c.mutated)).toBe(false); expect(hash(w.read())).toBe(before);
+  }, 120_000);
 });
