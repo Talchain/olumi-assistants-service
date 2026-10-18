@@ -218,7 +218,10 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     const w = world(SERVED);
     const turn = await route(w);
     const { offer, pid } = await offerCard(turn);
-    const typed = await turn({ message: 'Yes, go ahead.', source: 'composer', agent_session_id: offer._agent.session_id },
+    // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct): with ONE card waiting, the user's TYPED words reach the Agent bound to it and its
+    // reading is the consent (held to account by approval-consent-gate.replay.test.ts; the write quotes the words). What this row
+    // still pins: a model-only approval on words the user did NOT type (a control's words) never writes.
+    const typed = await turn({ message: 'Yes, go ahead.', source: 'chip_click', agent_session_id: offer._agent.session_id },
       [call('authorise_change', { proposal_id: pid }), say('Done.')]);
     expect((typed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'))
       .toEqual([expect.objectContaining({ ok: false, mutated: false })]);

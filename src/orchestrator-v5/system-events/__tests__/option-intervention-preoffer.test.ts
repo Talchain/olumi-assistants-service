@@ -372,7 +372,8 @@ describe('S5 complete native preparation before an offer', () => {
     if (!offered.offer) throw new Error('expected savable offered card');
     const unapproved = await caps.authoriseChange({ ...ctx, user_turn_text: 'Yes, use those.' } as never,
       { proposal_id: card.proposal_id });
-    expect(unapproved).toEqual({ ok: false, mutated: false, refusal: 'approval_required' });
+    // The refusal names the card it waits on (one approval action: the reply offers that card's button first).
+    expect(unapproved).toEqual({ ok: false, mutated: false, refusal: 'approval_required', proposal_id: card.proposal_id });
     expect(rows.size).toBe(0);
     const approved = await caps.authoriseChange({ ...ctx, user_turn_text: 'Yes, use those.', typed_approval_of: card.proposal_id } as never,
       { proposal_id: card.proposal_id });

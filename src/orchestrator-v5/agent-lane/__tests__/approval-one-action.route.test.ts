@@ -81,8 +81,10 @@ describe('an approval is ONE action: typed words with one card waiting are its p
     const pressed = await turn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: session });
     expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: b })]);
     expect(mixerSaved(w.read())).toBe(true);
-    expect(chips(pressed)).toContain(approvalChipIdFor(a));
-    expect(w.onLatestRow(approvalChipIdFor(a))).toBe(true);
+    // Olumi's starting value was made on the model as it was (its basis may read what just changed: the values-only stale
+    // negative), so it does not survive this approval silently: it is SAID. (PR-2 keeps it visible for review instead.)
+    expect(String(pressed.assistant_text)).toMatch(LAPSE);
+    expect(w.onLatestRow(approvalChipIdFor(a))).toBe(false);
   }, 120_000);
 
   it('A2 ambiguous: two cards waiting, a bare typed "yes" → never bound (even when the Agent picks one), both buttons offered', async () => {

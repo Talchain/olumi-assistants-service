@@ -16,7 +16,6 @@
  *    is continued by the press and the writer from that proposal's own write identity, never from an equal date. A card made
  *    before its subject was recorded keeps the whole-model rule.
  *  · a new link with its level: the link is still absent and the option still sets nothing on that factor (`newLinkLevelsStillApply`);
- *  · first values: each factor still has no value (`firstValuesStillApply`);
  * Initial build: session 4's staged work (`/private/tmp/b-lapse`, 14 Oct), extended to the complete goal subject.
  * Any other card keeps the whole-model rule.
  */
@@ -108,26 +107,10 @@ function newLinkLevelsStillApply(ops: StructuredProposal['operations'], graph: u
   });
 }
 
-/**
- * ⭐ FIRST VALUES (a starting value for a factor that has none) read only those factors: the card still applies while each
- * factor exists and still has no value, so approving the user's new link on that factor never lapses it (the same K5 pair,
- * the other way round). Once anyone has given one of them a value: `undefined`, and the whole-model rule decides.
- */
-function firstValuesStillApply(ops: StructuredProposal['operations'], graph: unknown): true | undefined {
-  if (ops.length === 0 || !ops.every((o) => o.op === 'set_factor_value')) return undefined;
-  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
-  return ops.every((o) => {
-    const factor = nodes.filter((n) => n.id === o.path);
-    return factor.length === 1 && factor[0]!.kind === 'factor'
-      && !(isRec(factor[0]!.observed_state) && typeof factor[0]!.observed_state.value === 'number');
-  }) ? true : undefined;
-}
-
 export function heldCardStillApplies(p: Pick<StructuredProposal, 'operations'>, graph: unknown): boolean {
   if (teamTimeReadHolds(p, graph)) return true;
   const newLink = newLinkLevelsStillApply(p.operations, graph);
   if (newLink !== undefined) return newLink;
-  if (firstValuesStillApply(p.operations, graph) === true) return true;
   if (p.operations.length !== 1) return false;
   // A card through the ONE statement door is judged by its carrier member's own rule (`asMemberOp`).
   const op = asMemberOp(p.operations[0]!) ?? p.operations[0]!;
