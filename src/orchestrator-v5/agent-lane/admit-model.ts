@@ -4623,19 +4623,22 @@ function admitOnce(
    * measurement, which is what the served factor-kind node carries); no starting value is written — the slot stays
    * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
    */
-  const limitedLevelFrames = new Map<string, number>();
+  const limitedLevelFrames = new Map<string, { frame: number; unit?: string }>();
+  /** The user's unit that pinned a re-kinded node's frame: that node stores no observed state, so its limit reads it here. */
+  const limitedLevelUnits = new Map<string, string>();
   for (const c of model.constraints) {
     const frame = limitedOutcomeFrame(c);
     if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
-    if (id !== undefined) limitedLevelFrames.set(id, frame);
+    if (id !== undefined) limitedLevelFrames.set(id, { frame, ...(c.unit !== undefined ? { unit: c.unit } : {}) });
   }
   for (const n of nodes) {
-    const frame = limitedLevelFrames.get(n.id);
-    if (frame === undefined || n.kind !== 'outcome') continue;
+    const pinned = limitedLevelFrames.get(n.id);
+    if (pinned === undefined || n.kind !== 'outcome') continue;
     n.kind = 'factor';
     n.category = 'observable';
-    n.scale_frame = frame;
+    n.scale_frame = pinned.frame;
+    if (pinned.unit !== undefined) limitedLevelUnits.set(n.id, pinned.unit);
   }
 
   const allLinks: CandidateLink[] = [...model.links, ...(widened.proposed_links ?? [])];
@@ -5298,12 +5301,16 @@ function admitOnce(
   const constraintResult = withGoalTargetRows(admitCandidateConstraints(
     model.constraints,
     nodeIdForMetric,
-    // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
+    // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against. A level-less
+    // node stores no observed state, so its unit is the declared one (`unitById`) or the user's unit that pinned its
+    // frame (`limitedLevelUnits`): a frame of 100 is a percent only beside a percent unit (18 Oct, A).
     (nodeId) => {
       const n = nodeById.get(nodeId);
       if (n === undefined) return undefined;
+      const unit = n.observed_state?.unit ?? unitById.get(nodeId) ?? limitedLevelUnits.get(nodeId);
       return {
-        ...(n.observed_state ?? {}), ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}),
+        ...(n.observed_state ?? {}), ...(unit !== undefined ? { unit } : {}),
+        ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}),
         ...(typeof n.label === 'string' ? { label: n.label } : {}),
       };
     },

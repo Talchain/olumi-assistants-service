@@ -290,6 +290,9 @@ describe('admitCandidateModel hands each limit its target node', () => {
     const c = admittedLimit({ unit: '', baseline_value: 7, plausible_max: 100, baseline_known: false }, { value: 10, unit: 'percent per month' });
     expect(c).toMatchObject({ unit: 'percent per month', value: 10 });
     expect(stampKeys(c)).toEqual([]);
+    // CONTRAST: a level-less factor stores no observed state; its declared "%" still makes the 100 its encoding.
+    const levelLess = { unit: '%', baseline_value: null as unknown as number, plausible_max: 100, baseline_known: false };
+    expect(admittedLimit(levelLess, { value: 10, unit: 'percent per month' })).toMatchObject({ unit: '%', value: 10 });
   });
 
   it('a "£" factor turns a "£k" limit into £', () => {
