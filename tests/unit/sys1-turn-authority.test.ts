@@ -192,15 +192,16 @@ const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })), re
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../src/orchestrator/user-identity.js', async original => ({ ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }) }));
 describe('SYS1 ordinary Responses transport', () => {
-  let app: FastifyInstance; let routeWrites = 0; let sent: string[] = []; let script: Array<Response | Error> = [];
+  let app: FastifyInstance; let routeWrites = 0; let written: unknown; let sent: string[] = []; let script: Array<Response | Error> = [];
   const payload = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is where the model stands.' }] }], usage: { input_tokens: 12, output_tokens: 4 }, status: 'completed' };
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u, init) => { sent.push(String(init?.body)); const next = script.shift(); if (next instanceof Error) throw next; return next ?? new Response(JSON.stringify(payload), { status: 200 }); }));
     process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
     const { agentV1TurnRoute } = await import('../../src/routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/orchestrate/v2/turn', async () => { routeWrites++; return { assistant_text: 'Added.' }; });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes, edges: [] }, graph_hash: 'h0' }));
+    // A write lands as the ordinary writer's own event (as `writer()` above), so a confirmed approval reads back.
+    app.post('/orchestrate/v2/turn', async (req) => { routeWrites++; written = (req.body as { event?: unknown }).event; return { assistant_text: 'Added.', graph_hash: 'h1' }; });
+    app.post('/assist/v1/scenarios/:id/graph', async () => (routeWrites > 0 ? { graph: { nodes, edges: [written] }, graph_hash: 'h1' } : { graph: { nodes, edges: [] }, graph_hash: 'h0' }));
     await app.register(agentV1TurnRoute); await app.ready();
   });
   beforeEach(() => { sent = []; script = []; routeWrites = 0; });
@@ -275,7 +276,13 @@ describe('SYS1 ordinary Responses transport', () => {
     });
     expect(sent).toHaveLength(0); expect(rows[0].outcome).toBe('refused_before_network');
   });
-  it('RED route authority: model-emitted approval cannot bypass the ordinary writer', async () => {
+  // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct; approval is ONE action): this row asserted that the Agent's approval on a later
+  // typed turn never writes. With exactly ONE card waiting, the user's typed words are now offered to the Agent bound to that
+  // card, and the Agent's reading of them is the consent (no host word list). The protection is the real-AI consent gate
+  // (approval-consent-gate.replay.test.ts: zero false approvals) plus provenance: the write is recorded as a typed approval
+  // read by Olumi, with the user's exact words quoted in the receipt (an Undo beside it where the save is versioned).
+  // The SAME-turn approval of a card the Agent just made still never writes.
+  it('route authority: a same-turn approval never writes; a later typed-turn approval writes ONLY as a typed approval, quoting the words', async () => {
     const args = { from_label: 'Competitive pricing', to_label: 'Monthly churn', direction: 'negative', strength: 'strong', rationale: 'competitor discounts raise churn' };
     const call = (name: string, arguments_: unknown, id: string) => new Response(JSON.stringify({ output: [{ type: 'function_call', name, call_id: id, arguments: JSON.stringify(arguments_) }] }), { status: 200 });
     script = [call('propose_model_change', args, 'provider-a'), call('authorise_change', { proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28' }, 'provider-b')];
@@ -283,7 +290,12 @@ describe('SYS1 ordinary Responses transport', () => {
     expect(res.statusCode).toBe(200); expect(routeWrites).toBe(0);
     script = [call('authorise_change', { proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28' }, 'provider-changed-id')];
     const next = await turn();
-    expect(next.statusCode).toBe(200); expect(next.json()._agent.tool_calls.find((c: { name: string }) => c.name === 'authorise_change')?.refusal).toBe('approval_required'); expect(routeWrites).toBe(0);
+    expect(next.statusCode).toBe(200);
+    const body = next.json();
+    expect(body._agent.tool_calls.find((c: { name: string }) => c.name === 'authorise_change'), JSON.stringify(body._agent.tool_calls) + body.assistant_text).toMatchObject({ mutated: true });
+    expect(routeWrites).toBe(1);
+    expect(body._agent.typed_approvals).toEqual([{ proposal_id: 'prop_101a74076f0180f73fb32e03b0aadc28', approval: 'typed_approval_read_by_olumi', words: 'Explain the current model.' }]);
+    expect(body.assistant_text).toContain('Saved on your typed approval: \u201cExplain the current model.\u201d');
   });
 
   it('RED carrier fallback: the existing breakpoint fallback has a per-attempt retry receipt', async () => {

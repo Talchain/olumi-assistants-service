@@ -154,12 +154,17 @@ describe('an approval is ONE action: typed words with one card waiting are its p
       [call('authorise_change', { proposal_id: b }), say('Done.')]);
     expect(authorised(typed), JSON.stringify(authorised(typed))).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
     expect(mixerSaved(typedWorld.read())).toBe(true);
+    // Consent provenance (ruling A): recorded as a typed approval read by Olumi, the user's exact words quoted.
+    expect(typed._agent.typed_approvals).toEqual([{ proposal_id: b, approval: 'typed_approval_read_by_olumi', words: 'Yes, go ahead with the 15% mixer change.' }]);
+    expect(String(typed.assistant_text)).toContain('Saved on your typed approval: \u201cYes, go ahead with the 15% mixer change.\u201d');
     // CONTRAST: the same card pressed in its own world — the saved model is the same.
     const pressWorld = world(); const pressTurn = await route(pressWorld);
     const offered = await pressTurn({ message: MIXER_WORDS, source: 'composer' }, [call('propose_option_interventions', MIXER), say('Here is that change.')]);
     const chip = chipFor(offered, idOf(offered, 'propose_option_interventions'));
     const pressed = await pressTurn({ message: chip.message, source: 'chip_click', chip: { id: chip.id }, agent_session_id: offered._agent.session_id });
     expect(authorised(pressed)).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    expect(pressed._agent.typed_approvals, 'a press is not a typed approval').toBeUndefined();
+    expect(String(pressed.assistant_text)).not.toContain('typed approval');
     expect(typedWorld.read().edges).toEqual(pressWorld.read().edges);
     expect(node(typedWorld.read(), 'buy_faster_mixer')).toEqual(node(pressWorld.read(), 'buy_faster_mixer'));
   }, 120_000);

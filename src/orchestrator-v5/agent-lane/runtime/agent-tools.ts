@@ -141,6 +141,12 @@ export interface AgentToolContext {
   /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
   readonly typed_approval_words?: string;
   /**
+   * ⭐ ONE APPROVAL ACTION (DL-3 18 Oct, ruling A): the user's OWN typed words, when the route bound the ONE waiting card to
+   * them (not a press, not the card's exact words). Olumi's reading of them is the consent; a write it authorises records
+   * them as a typed approval, read by Olumi, and the receipt quotes them with an Undo.
+   */
+  readonly typed_assent?: string;
+  /**
    * ⭐ S-D: the values the user set in the change's panel, sent WITH that card's press and bound by the route to it —
    * never model output. Only a held product proposal (`gmh_`) takes them in slice 1.
    */

@@ -392,7 +392,7 @@ import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../sa
 import { rangeApproximationWords, rangeLawAdopted } from '../../intervention-range.js';
 import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, isUnverifiedUserMaterial, linkDrawnByOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
+import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, TYPED_APPROVAL_READ_BY_OLUMI, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -12519,7 +12519,10 @@ export function createAgentCapabilities(
         let after: GraphRead | null = null;
         try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
         // A result that set its own readiness keeps it (an unconfirmed save says "not checked", never the stored graph's `may_run`).
-        return { ...r, readiness_after: 'readiness_after' in r ? r.readiness_after : readinessViewOf(after?.raw), ...nextStepFactOf(after) };
+        return { ...r, readiness_after: 'readiness_after' in r ? r.readiness_after : readinessViewOf(after?.raw), ...nextStepFactOf(after),
+          // ⭐ CONSENT PROVENANCE (DL-3 ruling A): a write on the user's typed words, read by Olumi, says so, apart from a press.
+          ...(ctx.typed_assent !== undefined && ctx.typed_approval_of === args.proposal_id
+            ? { approval: { kind: TYPED_APPROVAL_READ_BY_OLUMI, words: ctx.typed_assent } } : {}) };
       }
       return r;
     },

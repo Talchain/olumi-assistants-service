@@ -115,7 +115,7 @@ import { budgetFor, callEffortFor, conversationBudgetFor, type CallBudget, INTER
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { agentFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
 import { OLUMI_PURPOSE_INSTRUCTION } from '../orchestrator-v5/agent-lane/olumi-purpose.js';
-import { APPROVAL_REQUIRED_WORDS, approvalChoiceWords, narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { APPROVAL_REQUIRED_WORDS, approvalChoiceWords, narrateWriteOutcome, TYPED_APPROVAL_READ_BY_OLUMI, notAdoptedLine, openQuestionsForReply, staleOnlyByRangeReading, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, isDecisionInputAsk, risksSaidLeftOutOfTheChance, untestedHorizonLine, untestedHorizonLineForCells, CHANCE_FREE_HORIZON_PREFIX, UNTESTED_HORIZON_PREFIXES, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { whatChangesFaceLine } from '../orchestrator-v5/goal-target/goal-chance-range-agent.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
@@ -3343,7 +3343,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       carriedProposals.get(approveKey)?.chip].find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === soleId);
     if (approvedProposal === undefined && typedNow !== null && soleId !== undefined && soleCard !== undefined) {
       if (soleCard.message === typedNow) approvedProposal = soleId;
-      pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message };
+      pressedApproval = { typed_approval_of: soleId, typed_approval_words: soleCard.message,
+        ...(soleCard.message === typedNow ? {} : { typed_assent: typedNow }) };
     }
     // Client turn_id controls durable replay when supplied. Every request also has a host
     // identity for the writer, including valid approvals from clients that omit turn_id.
@@ -6544,6 +6545,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * empty list is reported honestly rather than filled in.
          */
         receipts: collectTurnReceipts(result.tool_results),
+        // ⭐ CONSENT PROVENANCE (DL-3 ruling A): each write made on the user's typed approval, read by Olumi, with their words.
+        ...((): Record<string, unknown> => {
+          const typed = result.tool_calls.flatMap((c, i) => {
+            const a = (result.tool_results[i] as { approval?: { kind?: unknown; words?: unknown } } | undefined)?.approval;
+            return c.name === 'authorise_change' && c.mutated && a?.kind === TYPED_APPROVAL_READ_BY_OLUMI && typeof a.words === 'string'
+              ? [{ proposal_id: c.proposal_id ?? null, approval: TYPED_APPROVAL_READ_BY_OLUMI, words: a.words }] : [];
+          });
+          return typed.length > 0 ? { typed_approvals: typed } : {};
+        })(),
         // ⭐ AX2: the reply shows two of the build's open questions; the whole list, in the producer's order, is here.
         ...(() => {
           const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');

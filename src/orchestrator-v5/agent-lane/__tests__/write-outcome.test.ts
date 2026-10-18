@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { approvalChoiceWords, assertsCompletedWrite, narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
+import { approvalChoiceWords, assertsCompletedWrite, narrateWriteOutcome, TYPED_APPROVAL_READ_BY_OLUMI, withWriteOutcome } from '../write-outcome.js';
 
 // Served success claims (each must be caught when nothing landed).
 const CLAIMS = [
@@ -64,6 +64,17 @@ describe('the write-status line is composed from the tool results', () => {
     expect(n.status).toBe(said);
     expect(n.status).not.toContain('type its words');
     expect(n.status).not.toContain('could not be made this time');
+  });
+  // ⭐ CONSENT PROVENANCE (DL-3 ruling A): a write on the user's typed approval, read by Olumi, quotes their words; a versioned
+  // save points to the reply's Undo; a press (no typed approval) says neither.
+  it('a typed-approval write quotes the user\u2019s words and offers Undo where the save is versioned; a press does not', () => {
+    const typed = { ...APPLIED, approval: { kind: TYPED_APPROVAL_READ_BY_OLUMI, words: 'Yes, go ahead with that' } };
+    const signedIn = narrateWriteOutcome('', [{ name: 'authorise_change' }], [typed], { versioned: true });
+    expect(signedIn.status).toBe('Saved on your typed approval: \u201cYes, go ahead with that\u201d. Saved as version 11. If that is not what you meant, press \u201cUndo this change\u201d.');
+    const guest = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ...typed, receipts: [] }], { versioned: false });
+    expect(guest.status).toBe('Saved on your typed approval: \u201cYes, go ahead with that\u201d. Saved.');
+    const pressed = narrateWriteOutcome('', [{ name: 'authorise_change' }], [APPLIED], { versioned: true });
+    expect(pressed.status).toBe('Saved as version 11.');
   });
   it('R2 T1 CONTRAST: an unworded refusal keeps the generic line', () => {
     const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'some_new_code' }]);

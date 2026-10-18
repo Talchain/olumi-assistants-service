@@ -451,8 +451,26 @@ export function partialRangeLevelsWarning(ranges: readonly { factor: string; ran
   return `Partly saved: this approval attached a range (${rangesText}), but none of the levels were recorded. Read the model again before describing it.`;
 }
 
-/** One authoritative line per write the turn attempted. */
+/** A write on the user's typed words, read by Olumi as approval of the one waiting card (apart from a press). */
+export const TYPED_APPROVAL_READ_BY_OLUMI = 'typed_approval_read_by_olumi';
+/** The DGAI reply button that takes back the change the reply made (`AiChangeUndoButton`, signed-in models only). */
+export const UNDO_THIS_CHANGE = 'Undo this change';
+
+/**
+ * ⭐ CONSENT PROVENANCE (DL-3 ruling A, 18 Oct): a write on the user's typed approval quotes their exact words before its
+ * status, and, where the reply can take it back (a versioned save), points to Undo — so a misread is seen and reversed at once.
+ */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', approvalRequiredWords = APPROVAL_REQUIRED_WORDS, aiAsks = false): string {
+  const line = writeStatusLine(name, r, pending, versioned, alreadySaid, approvalRequiredWords, aiAsks);
+  const approval = r.approval as { kind?: unknown; words?: unknown } | undefined;
+  if (name !== 'authorise_change' || r.mutated !== true || approval?.kind !== TYPED_APPROVAL_READ_BY_OLUMI || typeof approval.words !== 'string') return line;
+  const words = approval.words.trim();
+  const quoted = `Saved on your typed approval: \u201c${words}\u201d${/[.!?]$/.test(words) ? '' : '.'}`;
+  const undo = versioned && versionsOf(r).length > 0 ? ` If that is not what you meant, press \u201c${UNDO_THIS_CHANGE}\u201d.` : '';
+  return `${quoted} ${line}${undo}`.trim();
+}
+
+function writeStatusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true, alreadySaid = '', approvalRequiredWords = APPROVAL_REQUIRED_WORDS, aiAsks = false): string {
   const partialMessage = r.mutated === true ? PARTIAL_WRITE_MESSAGES[String(r.outcome)] : undefined;
   if (isPartialWriteResult(r)) {
     if ((r.outcome === 'link_saved_estimate_refused' || r.outcome === 'link_saved_estimate_not_saved')
