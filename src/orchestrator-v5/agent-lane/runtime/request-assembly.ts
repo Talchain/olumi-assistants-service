@@ -28,7 +28,7 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import { AGENT_TOOLS, toolsFor, type AgentLaneMode, type ToolDefinition } from './agent-tools.js';
+import { toolsFor, type AgentLaneMode, type ToolDefinition } from './agent-tools.js';
 
 /**
  * The authenticated canonical context packet.
@@ -114,7 +114,7 @@ export interface ActivePromptResult {
  * NO version. Caching it under a governed key would serve ungoverned text and
  * would look like a cache HIT rather than an outage. It is admitted — refusing
  * it would take the product down whenever the PMS blinked — but marked
- * `governed: false, cacheable: false`, and `assembleRequest` reports that.
+ * `governed: false, cacheable: false`, and the snapshot reports that.
  *
  * `source: 'cache'` is NOT a downgrade: the repository's cache holds text that
  * came from the PMS, so it is still governed. Cache is a transport.
@@ -158,10 +158,6 @@ function canonicalise(value: unknown): unknown {
     return out;
   }
   return value;
-}
-
-function hash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(canonicalise(value))).digest('hex');
 }
 
 /** The exact fields the binding covers. Order is fixed by `canonicalise`. */
@@ -379,7 +375,7 @@ export function eligibleTools(input: {
    */
   readonly claimedGrants?: readonly string[];
 }): ToolEligibility {
-  // ⛔ THE VERDICT IS DERIVED HERE TOO, NOT ONLY IN `assembleRequest`.
+  // ⛔ THE LIVE TOOL ELIGIBILITY BOUNDARY DERIVES ITS OWN VERDICT.
   //
   // This function used to take a `freshness` verdict. Assembly was fixed to
   // derive its own, which closed the reachable hole — but leaving a verdict
@@ -395,7 +391,7 @@ export function eligibleTools(input: {
   if (freshness.kind !== 'fresh') return { tools: allowed, omitted: [], freshness };
 
   // ⛔ A VERIFIED PACKET IS NOT AUTOMATICALLY A SUFFICIENT ONE. The packet still
-  // becomes authoritative context in `assembleRequest` — a thin packet is real
+  // is carried as canonical context by the Agent loop — a thin packet is real
   // canonical state, just sparse. What is withheld here is only the OMISSION:
   // the tool stays on the list so the Agent can fetch the carriers itself.
   // Fails safe by construction; see `carriesAddressableEntities`.
@@ -410,108 +406,3 @@ export function eligibleTools(input: {
   ];
   return { tools, omitted, freshness };
 }
-
-export interface AssembledRequest {
-  /** Prompt + tools. Identical across turns while neither changes — cacheable. */
-  readonly stablePrefix: {
-    readonly instructions: string;
-    readonly tools: readonly ToolDefinition[];
-  };
-  /** State + history. Different every turn by nature — never in the prefix. */
-  readonly dynamic: {
-    readonly context: CanonicalContextPacket | null;
-    readonly history: readonly unknown[];
-  };
-  readonly hashes: {
-    readonly prompt: string;
-    readonly tools: string;
-    readonly prefix: string;
-    readonly context: string;
-  };
-  readonly diagnostics: {
-    readonly prompt_id: string;
-    readonly prompt_version: number | null;
-    readonly prompt_governed: boolean;
-    /** False => this prefix must not be cached, however stable it looks. */
-    readonly prefix_cacheable: boolean;
-    readonly context_freshness: ContextFreshness['kind'];
-    readonly context_reason: string | null;
-    /** True only when a verified, current packet was carried to the model. */
-    readonly context_admitted: boolean;
-    readonly tool_count: number;
-    readonly omitted_tools: readonly string[];
-  };
-}
-
-/**
- * Split a request into the part that can be cached and the part that cannot,
- * and report the hashes that make a cache hit verifiable rather than assumed.
- *
- * The prefix hash covers the prompt AND the tool set deliberately: serving a
- * cached prefix built with a different tool set would offer the model a
- * capability this turn did not grant, which is the same failure the subset
- * invariant exists to prevent — just arriving via the cache instead.
- */
-export function assembleRequest(input: {
-  readonly promptSnapshot: PromptSnapshot;
-  readonly mode: AgentLaneMode;
-  readonly context?: CanonicalContextPacket | null;
-  /** What the server believes right now. Freshness is DERIVED against this. */
-  readonly expectation: ContextExpectation;
-  readonly history: readonly unknown[];
-}): AssembledRequest {
-  // ⛔ FRESHNESS IS DERIVED HERE, NEVER SUPPLIED.
-  //
-  // This function used to accept a `freshness` verdict as a parameter,
-  // independently of the packet. Every piece around it was sound — the binding
-  // verified, the subject checks were right, eligibility could only narrow —
-  // and the bypass sat in the JOIN: a caller could pass `{kind: 'fresh'}` with
-  // no packet, or a forged or stale one, and assembly would suppress the
-  // canonical reread and hand that packet to the model. The verification lived
-  // in a function assembly never called. Found by independent review, not by
-  // this module's own tests.
-  //
-  // A doc comment telling callers to verify first would not close it, for the
-  // same reason a prompt sentence is not a safety boundary.
-  const { tools, omitted, freshness } = eligibleTools({
-    mode: input.mode,
-    context: input.context,
-    expectation: input.expectation,
-  });
-
-  const promptHash = hash({ id: input.promptSnapshot.id, version: input.promptSnapshot.version, text: input.promptSnapshot.text });
-  const toolsHash = hash(tools.map((t) => ({ name: t.name, parameters: t.parameters })));
-  const prefixHash = hash({ prompt: promptHash, tools: toolsHash });
-  // ⛔ ONLY A VERIFIED, CURRENT PACKET BECOMES AUTHORITATIVE CONTEXT. Anything
-  // else is dropped outright rather than passed along unused: an unverified
-  // packet in the model's context is attacker-controlled text sitting where
-  // canonical state is supposed to be, whether or not a tool was omitted.
-  const admitted = freshness.kind === 'fresh' ? (input.context ?? null) : null;
-  // Hashed on what was ACTUALLY carried, so the diagnostic describes the
-  // request that was sent rather than the one that was offered.
-  const contextHash = hash(admitted);
-
-  return {
-    stablePrefix: { instructions: input.promptSnapshot.text, tools },
-    dynamic: { context: admitted, history: input.history },
-    hashes: { prompt: promptHash, tools: toolsHash, prefix: prefixHash, context: contextHash },
-    diagnostics: {
-      prompt_id: input.promptSnapshot.id,
-      prompt_version: input.promptSnapshot.version,
-      prompt_governed: input.promptSnapshot.governed !== false,
-      // Defaults are chosen so an under-specified snapshot cannot silently
-      // become cacheable: a snapshot with no version never is.
-      prefix_cacheable:
-        input.promptSnapshot.cacheable ??
-        (input.promptSnapshot.governed !== false && input.promptSnapshot.version !== null),
-      context_freshness: freshness.kind,
-      context_reason: 'reason' in freshness ? freshness.reason : null,
-      context_admitted: admitted !== null,
-      tool_count: tools.length,
-      omitted_tools: omitted.map((o) => o.name),
-    },
-  };
-}
-
-/** Exported for a test that pins the full catalogue size. */
-export const TOTAL_TOOL_COUNT = AGENT_TOOLS.length;

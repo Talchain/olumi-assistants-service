@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
 import type { CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { BRIEF_LABEL } from '../turn-context.js';
 
 const SCENARIO = '55555555-5555-4555-8555-555555555555';
 const BRIEF = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3?';
@@ -65,7 +66,8 @@ describe('a size retry EDITS its own first draft', () => {
     expect(out['size_retried'], 'PRECONDITION: the first draft was oversized').toBe(true);
     expect(s.reqs).toHaveLength(2);
     const retry = s.reqs[1]!;
-    expect(retry.input.startsWith(BRIEF), 'the brief still leads').toBe(true);
+    expect(s.reqs[0]!.input.split('\n\n')[1], 'the shared input carries the exact labelled brief').toBe(`${BRIEF_LABEL}\n${BRIEF}`);
+    expect(retry.input.slice(0, s.reqs[0]!.input.length), 'the retry keeps the whole first-pass context unchanged').toBe(s.reqs[0]!.input);
     expect(retry.input, 'the first draft itself, so kept labels can be copied').toContain(JSON.stringify(first));
     expect(retry.instructions).toMatch(/Copy every item you keep EXACTLY/);
     // The budget and the protect-the-brief rule still travel (construction-compact-first-model.test.ts pins those).

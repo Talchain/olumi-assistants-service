@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { turnContextItems, runFactsContext, REASONING_CONTEXT_LABEL } from '../turn-context.js';
+import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
+import { answeredEarlierItem, ANSWERED_EARLIER_LABEL } from '../history-store.js';
 
 const item = (role: string, text: string) => ({ role, content: [{ type: role === 'assistant' ? 'output_text' : 'input_text', text }] });
 const contextOf = (items: unknown[]) => {
@@ -44,5 +46,61 @@ describe('S1 shared context: origin belongs to the occurrence', () => {
     expect(projected.facts).toEqual({ ok: true, run_facts: { per_option: before.run_facts.per_option, source: before.run_facts.source }, other: before.other });
     expect(read).toEqual(before);
     expect(runFactsContext(projected.facts)).toEqual({ facts: projected.facts });
+  });
+});
+
+describe('construction uses the shared source-labelled context', () => {
+  const cases = [
+    { name: 'distribution', brief: 'Review depot throughput while retaining the safety constraint.', reply: 'Only on the night shift, if staffing stays unchanged.' },
+    { name: 'laboratory', brief: 'Review sample turnaround while retaining the quality constraint.', reply: 'Only for refrigerated samples, if the assay remains unchanged.' },
+  ];
+  const textsOf = (items: unknown[]) => items.flatMap(i => (i as ReturnType<typeof item>).content.map(c => c.text));
+  it.each([false, true])('keeps older-word items and answered-pair sources at the constructor boundary; request supplied=%s', supplied => {
+    const legacy = answeredEarlierItem([{ olumi: 'Which unit?', reply: 'Tickets per week.', reply_source: 'unknown' }])!;
+    const typed = 'Only the night team, conditional on the current checks.';
+    const texts = textsOf(turnContextItems({ now: new Date('2026-10-18T00:00:00Z'), briefText: 'Review throughput.', request: supplied ? 'Revise the model.' : undefined,
+      recentTurns: 0, verifiedUserMessages: [typed], conversation: [legacy, item('assistant', 'Which team and conditions?'), item('user', typed)], construction: {} }));
+    const shared = JSON.parse(texts.find(t => t.startsWith(`${REASONING_CONTEXT_LABEL}\n`))!.slice(REASONING_CONTEXT_LABEL.length));
+    expect(shared.find((i: ReturnType<typeof item>) => i.content[0]!.text.startsWith(ANSWERED_EARLIER_LABEL))).toEqual(legacy);
+    const reasoningText = shared.find((i: ReturnType<typeof item>) => i.content[0]!.text.startsWith(REASONING_CONTEXT_LABEL)).content[0].text;
+    const reasoning = JSON.parse(reasoningText.slice(REASONING_CONTEXT_LABEL.length));
+    expect(reasoning.verified_user_statements).toEqual([{ speaker: 'user', source: 'typed', text: typed }]);
+    expect(reasoning.answered_pairs).toEqual([{ olumi: { speaker: 'olumi', source: "Olumi's reply, not a user statement", text: 'Which team and conditions?' },
+      response: { speaker: 'unknown', source: 'stored conversation; typed or chip origin not verified here', text: typed } }]);
+  });
+  it.each(cases)('$name retains the full model, objections, source occurrences and question/answer context without changing its inputs', row => {
+    const unknown = 'Advertising spend is £100000.';
+    const typed = 'Revenue was £100000 as of 2026-09-01. Keep the original condition.';
+    const args = { now: new Date('2026-10-18T00:00:00Z'), briefText: row.brief,
+      conversation: [item('assistant', 'Under which conditions does that hold?'), item('user', row.reply)],
+      construction: { current_model: { recorded_reasoning: [{ id: 'retained', quote: row.reply, disposition: 'retracted' }],
+        current_retained: [{ id: 'current-aim', text: 'The current aim is separate from the eventual ambition.' }] },
+      retained: { brief: row.brief, conversation: [
+        { speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: unknown },
+        { speaker: 'user' as const, source: 'typed' as const, text: typed },
+      ] }, objections: ['Do not revive the withdrawn assumption.'] } };
+    const before = structuredClone(args);
+    const texts = textsOf(turnContextItems(args));
+    expect(texts.some(t => t.includes(JSON.stringify(args.construction.current_model))), 'the complete retained model reaches construction').toBe(true);
+    expect(texts.some(t => t.includes(JSON.stringify(args.construction.objections)))).toBe(true);
+    for (const occurrence of args.construction.retained.conversation) {
+      const { text, ...origin } = occurrence;
+      expect(texts.some(t => t.includes(`${JSON.stringify(origin)}\n${text}`)), 'source and complete words stay together').toBe(true);
+    }
+    expect(texts.some(t => t.includes('Under which conditions does that hold?'))).toBe(true);
+    expect(texts.some(t => t.includes(row.reply))).toBe(true);
+    expect(args).toEqual(before);
+  });
+  it.each(cases)('$name does not use JSON quotation as an authorship defence', row => {
+    const quote = 'Advertising spend is £100000.';
+    const brief = `${row.brief} Revenue was £100000 as of 2026-09-01.`;
+    const args = { now: new Date('2026-10-18T00:00:00Z'), briefText: brief, conversation: [], construction: {
+      retained: { brief, conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: quote }] },
+    } };
+    const reference = textsOf(turnContextItems(args)).join('\n\n');
+    expect(wholeStatementIn(reference, quote), 'a wrong attestation input must encounter a genuinely readable whole statement').toBe(true);
+    expect(wholeStatementIn(brief, quote), 'the unrelated equal amount cannot supply this statement').toBe(false);
+    expect(wholeStatementIn(`${brief}\n${quote}`, quote), 'the identical statement is readable when actually typed').toBe(true);
+    expect(reference).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${quote}`);
   });
 });

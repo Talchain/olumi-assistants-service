@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, firstConstructInput, CURRENT_MODEL_CONTEXT_LEAD, type ConstructionContext } from '../runtime/build-model.js';
+import { BRIEF_LABEL, todayLine } from '../turn-context.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/capacity-c85817f2-construction.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
@@ -32,10 +33,10 @@ async function construct(brief: string, context?: ConstructionContext): Promise<
 const existingTeam = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.label === 'Existing team capacity')!;
 
 describe('the current saved model is the drafter\'s context, never the user\'s words', () => {
-  it('without a context the first-pass input is today\'s, byte for byte; with one, the context follows it under its lead', () => {
+  it('the shared first-pass input carries the exact brief; saved-model context follows it under its existing lead', () => {
     expect(BRIEF_WITHOUT).not.toContain(SENTENCE);
-    expect(firstConstructInput(FX.brief)).toBe(FX.brief);
-    expect(firstConstructInput(BRIEF_WITHOUT, CONTEXT)).toBe(`${BRIEF_WITHOUT}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(CONTEXT.current_model)}`);
+    expect(firstConstructInput(FX.brief)).toBe(`${todayLine(new Date())}\n\n${BRIEF_LABEL}\n${FX.brief}`);
+    expect(firstConstructInput(BRIEF_WITHOUT, CONTEXT)).toBe(`${todayLine(new Date())}\n\n${BRIEF_LABEL}\n${BRIEF_WITHOUT}\n\n${CURRENT_MODEL_CONTEXT_LEAD} ${JSON.stringify(CONTEXT.current_model)}`);
   });
 
   it('⭐ the context reaches the drafter, and a level written only in the saved model is not saved as the user\'s', async () => {

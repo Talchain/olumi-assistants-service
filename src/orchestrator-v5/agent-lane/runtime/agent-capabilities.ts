@@ -18,10 +18,8 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { currentStatementRetention, userStatementsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { currentStatementRetention, userStatementsOn, recordsWithUnknownSpeakerOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
-import { REASONING_CONTEXT_LABEL, turnContextItems } from '../turn-context.js';
-import { ANSWERED_EARLIER_LABEL } from '../history-store.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP,
@@ -1805,8 +1803,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
   const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   const recordedReasoning = (Array.isArray(g.raw.nodes) ? g.raw.nodes : []).filter(isPlainRecord).flatMap(n => {
-    const records = userStatementsOn(n);
-    const current = records.flatMap(r => {
+    const records = recordsWithUnknownSpeakerOn(n);
+    const current = userStatementsOn(n).flatMap(r => {
       const retained = currentStatementRetention(r);
       return retained === undefined ? [] : [{ field: r.field, ...retained }];
     });
@@ -4071,12 +4069,10 @@ export function createAgentCapabilities(
     const typed = [...new Set(ctx.verified_user_messages)];
     const source = revisedDraftBrief(before.brief_text, typed);
     const context = { current_model: projectModelContext(before), objections: objections.map(o => o.statement),
+      history: opts.readTurnHistory?.() ?? [], request: currentRequest, current_request_origin: 'typed' as const,
       retained: { brief: before.brief_text,
-        items: turnContextItems({ now: new Date(), briefText: before.brief_text, conversation: opts.readTurnHistory?.() ?? [],
-          recentTurns: 0, request: currentRequest, verifiedUserMessages: typed, currentRequestOrigin: 'typed' }).filter(item =>
-          isPlainRecord(item) && Array.isArray(item.content) && item.content.some(part =>
-            isPlainRecord(part) && typeof part.text === 'string' && (part.text.startsWith(ANSWERED_EARLIER_LABEL) || part.text.startsWith(REASONING_CONTEXT_LABEL)))),
-        conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: "Olumi’s proposed replacement framing (context only, not user source or a saved model):\n" + framing }, ...history.messages.filter(m => !typed.includes(m)).map(text => ({ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text })),
+        conversation: [{ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text: "Olumi’s proposed replacement framing (context only, not user source or a saved model):\n" + framing },
+          ...history.messages.filter(m => !typed.includes(m)).map(text => ({ speaker: 'unknown' as const, source: 'stored, origin not verified' as const, text })),
           ...typed.map(text => ({ speaker: 'user' as const, source: 'typed' as const, text }))] } };
     const built = await runPreparingDraftReplacement(ctx.scenario_id, () => buildWithDrafterRawRecord(ctx, source,
       constructionOperationId(ctx.scenario_id, source), callStructured!, drafter => buildModelFromBrief(ctx.scenario_id, source,
@@ -10479,8 +10475,10 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
+        const constructionContext = { history: opts.readTurnHistory?.() ?? [], verified_user_messages: ctx.verified_user_messages,
+          request: ctx.user_turn_text ?? brief };
         built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured,
-          undefined, undefined, undefined, undefined, opts.onDraftAdmitted));
+          undefined, constructionContext, undefined, undefined, opts.onDraftAdmitted));
         if (built.ok !== true) return built;
       }
 

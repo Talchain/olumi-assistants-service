@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, firstConstructInput, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { BRIEF_LABEL, todayLine } from '../turn-context.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Prov = 'explicit' | 'inferred' | 'ai_proposed';
@@ -287,7 +288,7 @@ describe('A4 first pass: the written range is asked of the FIRST construct', () 
     expect(inputs).toHaveLength(1);
     // CODEX CEE BUDDY 5944923532: the notes ride the drafter's input ONLY — the persisted brief is the user's words, verbatim.
     expect(registeredBrief).toBe(BRIEF);
-    expect(inputs[0]).toBe(`${BRIEF}\n\nConstruction notes: ${JSON.stringify([`The brief writes "£1-2 million". ${PER_ONE} If it is not a size per one of anything, draw it as you otherwise would.`])}`);
+    expect(inputs[0]).toBe(`${todayLine(new Date())}\n\n${BRIEF_LABEL}\n${BRIEF}\n\nConstruction notes: ${JSON.stringify([`The brief writes "£1-2 million". ${PER_ONE} If it is not a size per one of anything, draw it as you otherwise would.`])}`);
     expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
   });
 
@@ -297,12 +298,12 @@ describe('A4 first pass: the written range is asked of the FIRST construct', () 
     expect(inputs[1]).toContain(JSON.stringify([`The brief writes "£1-2 million" and no link in the model carries it. ${PER_ONE} If it is not a size per one of anything, change nothing for it.`]));
   });
 
-  it('CONTROL (DL condition 1): T2 briefs A and C write "from £49 to £59" inside a QUESTION, and D1 writes no range → sent byte for byte as before', () => {
-    for (const brief of [T2_A, T2_C, T2_D1]) expect(firstConstructInput(brief)).toBe(brief);
+  it('CONTROL (DL condition 1): questions about a price move and D1\'s no-range brief get the exact shared frame without range notes', () => {
+    for (const brief of [T2_A, T2_C, T2_D1]) expect(firstConstructInput(brief)).toBe(`${todayLine(new Date())}\n\n${BRIEF_LABEL}\n${brief}`);
   });
 
   it('CONTROL: a range asked as a question ("Should we focus on firms that do deals between £1-2m?") is no note', () => {
     const asked = 'We need to raise at least £1.2m in 2 months. Should we focus on firms that do deals between £1-2m?';
-    expect(firstConstructInput(asked)).toBe(asked);
+    expect(firstConstructInput(asked)).toBe(`${todayLine(new Date())}\n\n${BRIEF_LABEL}\n${asked}`);
   });
 });

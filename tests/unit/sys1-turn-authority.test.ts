@@ -378,6 +378,7 @@ describe('S1T2 residual Responses sites', () => {
   });
   afterAll(async () => { await app.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { attempts = []; consumed = []; discovery = false; failure = undefined; });
+  afterEach(() => { vi.useRealTimers(); });
   const drive = async (site: ResidualSite, refuse = false) => {
     active = site;
     const sid = `22222222-2222-4222-8222-${String(++sequence).padStart(12, '0')}`;
@@ -402,9 +403,11 @@ describe('S1T2 residual Responses sites', () => {
     } finally { policySpy?.mockRestore(); }
   };
   it.each(residualSites)('%s happy-path bytes equal the BEFORE golden', async site => {
+    // The shared context carries the real server day; pin only Date so this byte fixture remains stable tomorrow.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-18T00:00:00Z'));
     const { response } = await drive(site);
     // A build sends the drafter's structured call, then the two draft-time widening passes (risks, options): restored (Paul
-    // #94 6166259456) after E6 parked them; the drafter's entry is byte-unchanged.
+    // #94 6166259456) after E6 parked them; all three calls retain their schemas and consume the same responses.
     expect(response.statusCode, response.body).toBe(200); expect(attempts).toHaveLength(site === 'callStructured' ? 3 : 1); expect(consumed).toHaveLength(attempts.length);
     const proof = attempts.map((bytes, i) => {
       const body = JSON.parse(bytes);

@@ -32,6 +32,7 @@ import { Ajv } from 'ajv';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate, retainsRiskHypotheses, retrySchemaPinningGoal } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { BRIEF_LABEL } from '../turn-context.js';
 import { COMPACT_LIMITS, assessConstructionSize, retryInstruction } from '../construction-size-gate.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -363,7 +364,8 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     expect(retry.instructions).toContain('Keep every risk the brief states; a risk you added may go.');
     // Byte for byte: the base rules, the budget, the copy rule, its one exception, then the compaction's repair rule.
     expect(retry.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(first))} ${COPY_RULE_TEXT} ${ONLY_REPAIRS} ${COMPACTION_REPAIR_RULE}`);
-    expect(retry.input.startsWith(BRIEF)).toBe(true);
+    expect(reqs[0]!.input.split('\n\n')[1], 'the shared input carries the exact labelled brief').toBe(`${BRIEF_LABEL}\n${BRIEF}`);
+    expect(retry.input.slice(0, reqs[0]!.input.length), 'the retry keeps the whole first-pass context unchanged').toBe(reqs[0]!.input);
     expect(retry.input).toContain(issue);
     expect(retry.input, 'the first draft itself, so kept items can be copied').toContain(JSON.stringify(first));
     expect(retry.input, 'named as the model the copy rule means').toContain(`Candidate to repair (your previous model, to shrink): ${JSON.stringify(first)}`);
