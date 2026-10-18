@@ -12011,10 +12011,20 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'limit_unit_mismatch',
           detail: `The limit on "${node.label}" is in ${String(unit)}, and the figure given is a different kind of figure, so nothing was prepared. Ask the user for the limit in its own units.` };
       }
-      // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
-      // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (interpretation === null && (!figureTheUserWrote(value, unit, ctx.user_text)
-        || !figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label)))) {
+      // ⭐ LEAN CORE (#3392, W19; proof-1 dev P05): recorded as the user's own figure, so it is theirs only by THE ONE RULE
+      // (`userStated`): the AI's cited span of the user's words, the figure, unit and bound read from it ("300 Pro paying
+      // subscribers" is never £300: the unit check). WHICH limit it is stays the AI's reading of a limit the model holds (checked
+      // by identity above), never a host match of the user's words against the limit's label (P05: "the remote-village
+      // constraint should be at least 85%" was refused against "Remote requests served within 30 days").
+      const limitSaid = interpretation !== null ? undefined : userStated({ quote: args?.quote, value, unit: unit ?? undefined }, chatTexts(ctx, g.brief_text),
+        { quantity: 'limit', node_id: node.id }, { form: operator === '>=' ? 'lower_bound' : 'upper_bound' });
+      // The binding stays the AI's reading; the cited words only must not give the figure to ANOTHER quantity of the model instead of this
+      // limit (DL #72: "£30,000 of Advertising spend" is never the decision budget's figure). Naming this limit too is enough.
+      const limitScope = limitScopeIn(g, node.label);
+      const namedIn = (q: string, label: string, rest: readonly string[]): boolean => factorTheUserNamed(label, q, { options: [], others: rest });
+      const givenToAnother = limitSaid?.origin === 'human' && !namedIn(limitSaid.statement.quote, node.label, limitScope.others)
+        && limitScope.others.some((o) => namedIn(limitSaid.statement.quote, o, [node.label, ...limitScope.others.filter((x) => x !== o)]));
+      if (limitSaid !== undefined && (limitSaid.origin !== 'human' || givenToAnother)) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

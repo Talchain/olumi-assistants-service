@@ -16,6 +16,7 @@
  * The producer rows run the REAL capabilities on the SERVED graphs, with the user's words verbatim; the two served
  * unit spellings ("GBP …" and "£ …") are each a row.
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { sayFigure, sayFigureExactly, sayFigureRead } from '../say-figure.js';
@@ -40,7 +41,9 @@ async function produce(s: Served, tool: string, args: Record<string, unknown>, m
     : { status: 500, json: {} });
   const caps = createAgentCapabilities(d, new ProposalStore());
   const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: message, user_turn_text: message };
-  return (await dispatchTool(tool, JSON.stringify(args), ctx as never, caps)) as Record<string, unknown>;
+  // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+  const quote = tool === 'propose_limit_change' && args.quote === undefined ? quoteOfFigure(Number(args.new_value), String(args.unit ?? ''), message) : null;
+  return (await dispatchTool(tool, JSON.stringify(quote !== null ? { ...args, quote } : args), ctx as never, caps)) as Record<string, unknown>;
 }
 
 /** The served graph with every use of one unit spelled another way (served run 1 spelled "GBP" as "£"). */

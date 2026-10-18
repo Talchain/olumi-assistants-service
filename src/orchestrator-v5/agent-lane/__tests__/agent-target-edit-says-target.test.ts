@@ -10,6 +10,7 @@
  *     figure and the user's strict comparator, stays a target, in ONE commit; the goal's own target is untouched;
  *   - CONTROL, byte-unchanged: a real limit's card, note and button (captured before this change at CEE 4806cefb).
  */
+import { quoteOfFigure } from '../stated-by-user.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
@@ -175,7 +176,9 @@ describe('B (3) — a later edit of one of the goal\'s targets says "target" and
   const approveChipOf = (b: Body) => b.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:'));
   const proposeLimitChange = async (message: string, args: Record<string, unknown>) => {
     let out: Record<string, unknown> = {};
-    script = [() => fnCall('propose_limit_change', args), (body) => { out = toolOutputIn(body); return say('Shall I?'); }];
+    // LEAN CORE (#3392, W19): the AI cites the user's sentence that writes the new figure (USER_QUOTE); none where it is unwritten.
+    const quote = args.quote === undefined ? quoteOfFigure(Number(args.new_value), String(args.unit ?? ''), message) : null;
+    script = [() => fnCall('propose_limit_change', quote !== null ? { ...args, quote } : args), (body) => { out = toolOutputIn(body); return say('Shall I?'); }];
     const body = await turn({ message });
     return { body, out };
   };

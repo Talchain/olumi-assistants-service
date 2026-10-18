@@ -359,7 +359,8 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
 function writtenInAnotherUnit(quote: string, claimed: readonly number[], unit: string, scale: number): boolean {
   const family = unitPhraseFamily(unit);
   const head = unitPhraseHead(unit) ?? unit;
-  const money = readCurrencyUnitWithQualifiers(unit).kind === 'currency';
+  // Money by either reader: the currency parser, or the unit-phrase family ("GBP over 6 months" is money over a period).
+  const money = readCurrencyUnitWithQualifiers(unit).kind === 'currency' || family === 'currency';
   return claimed.some((n) => {
     const size = Math.abs(n);
     const at = findStatedAmounts(quote).filter((a) => [size, size * scale].some((s) => Math.abs(Math.abs(a.magnitude) - s) <= 1e-9 * Math.max(1, s)));
