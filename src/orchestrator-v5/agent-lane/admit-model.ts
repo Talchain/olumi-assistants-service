@@ -4114,17 +4114,15 @@ function admitOnce(
   };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   /**
-   * ⭐ AIE W27 (17 Oct 22:03Z): a figure from the user's material with no unit, and no definition of what it measures (a verified
-   * `measure` statement on its factor), has no established scale. The figure is kept exactly as written, unresolved: no frame from
-   * any source (no cap, no `scale_frame`, nothing normalised) and never Olumi's stamp: unverified user material (no binder verifies
-   * a unitless level). The Run's scale gate holds it under its own rule (`baseline_scale_unresolved`), and the one missing meaning
-   * is asked (`.magnitude_question`, below). A figure within ±1 is read without a scale and is left as before.
+   * ⭐ AIE W27 (17 Oct 22:03Z, 23:45Z): a figure from the user's material with no unit has no established scale; a definition of
+   * what it measures gives its meaning, never its encoding. The figure is kept exactly as written, unresolved: no frame from any
+   * source (no cap, no `scale_frame`, nothing normalised) and never Olumi's stamp: unverified user material (no binder verifies
+   * a unitless level). The Run's scale gate holds it and every setting on it (`baseline_scale_unresolved`), and only what is
+   * missing is asked (`.magnitude_question`, below). A figure within ±1 is read without a scale and is left as before.
    */
-  const definitions = typeof brief === 'string' ? sourceMapOf((model as { statements?: unknown }).statements, brief).verified : undefined;
   const unscaled = new Set(model.factors.filter((f) => typeof f.baseline_value === 'number' && Math.abs(f.baseline_value) > 1
     && (f.unit ?? '').trim() === '' && (f.baseline_known || verifiedLevels.has(f) || quotesBrief(f))
-    && (verifiedLevels.has(f) || f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))
-    && definitions?.has(subjectKey({ kind: 'factor', label: f.label }, 'measure')) !== true).map((f) => f.label));
+    && (verifiedLevels.has(f) || f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))).map((f) => f.label));
   for (const label of unscaled) capByLabel.delete(label);
   /** `display`, when set, is what the node shows; `label` stays the key its id slugs from and links resolve by. */
   const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
@@ -4693,10 +4691,13 @@ function admitOnce(
     const id = ids.get(f.label);
     if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
   }
+  const definitions = typeof brief === 'string' ? sourceMapOf((model as { statements?: unknown }).statements, brief).verified : undefined;
   for (const f of model.factors.filter((x) => unscaled.has(x.label))) {
+    // The user's verified definition is reused: only the scale is then asked.
+    const defined = definitions?.has(subjectKey({ kind: 'factor', label: f.label }, 'measure')) === true;
     loss.push({ field_path: `nodes[${ids.get(f.label) ?? f.label}].observed_state.magnitude_question`, before: { value: f.baseline_value, unit: null },
-      after: null, severity: 'warn', reason: `"${f.label}" is recorded as ${sayFigureWithoutRounding(f.baseline_value as number, '')}. `
-        + 'What does this figure measure, and what scale, if any, does it use?' } as RepairEntry);
+      after: null, severity: 'warn', reason: `Olumi holds ${sayFigureWithoutRounding(f.baseline_value as number, '')} for \u201c${f.label}\u201d, with its `
+        + (defined ? 'scale unresolved. What scale, if any, does it use?' : 'meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?') } as RepairEntry);
   }
   for (const d of defaultedFrames.filter((x) => !unscaled.has(x.label))) {
     // "Your own figures" only when a figure the user stated fed the frame; when
