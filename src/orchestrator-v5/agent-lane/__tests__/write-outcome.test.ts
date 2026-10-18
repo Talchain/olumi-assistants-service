@@ -214,7 +214,7 @@ describe('the route states what was saved', () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Yes, apply it.' } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] }; _diagnostic_trace: { write_claims_removed?: number } };
-    expect(body._agent.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }]);
+    expect(body._agent.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal', arguments: { proposal_id: 'prop_nope' } }]);
     expect(body.assistant_text).not.toMatch(/Applied proposal/);
     expect(body.assistant_text).toMatch(/Not saved: that proposal is no longer available, so nothing was changed/);
     expect(body._diagnostic_trace.write_claims_removed).toBe(1);

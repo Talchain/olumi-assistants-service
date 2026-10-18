@@ -1528,7 +1528,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
    * then showed — `{1, 'binary'}`, `{1, 'enabled', estimate: true}` — are ON since switch-loop step 2, so the refused
    * shape here is a 1 in a QUANTITY unit with an estimate, which fires the same two fields.
    */
-  it('[R7] RED: a refused switch level → its _agent.tool_calls entry keeps what was sent (option, factor, value, unit, estimate), never the basis', async () => {
+  it('[R7] RED: a refused switch level → its _agent.tool_calls entry keeps what was sent (option, factor, value, unit, estimate), the basis only in the arguments as sent', async () => {
     graphOf.set(SCENARIO, structuredClone(PAUL));
     const t1 = await proposeTwoSwitchOptions({ value: 1, unit: 'GBP', estimate: true, basis: 'the user said grandfather them' });
     const call = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')!;
@@ -1537,7 +1537,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       { option: GRANDFATHER, factor: 'Existing customers grandfathered', value: 1, unit: 'GBP', estimate: true },
     ]));
     for (const r of call.rejected_levels!) expect(Object.keys(r).sort()).toEqual(['estimate', 'factor', 'option', 'unit', 'value']);
-    expect(JSON.stringify(call)).not.toContain('the user said grandfather them');
+    // The basis stays out of the record's own fields; it is present only in `arguments`, the AI's call as sent (bounded).
+    const { arguments: sentArgs, ...record } = call as Record<string, unknown>;
+    expect(JSON.stringify(record)).not.toContain('the user said grandfather them');
+    expect(JSON.stringify(sentArgs)).toContain('the user said grandfather them');
   }, 120_000);
 
   it('[R7] CONTRAST: a call that was not refused carries no rejected_levels', async () => {
@@ -1591,7 +1594,9 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(refused, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'switch_level_not_on', conflict_fields: fields }));
     // The figure is in ONE place only, `rejected_levels` (R7, DL #72 5862693164: the refused entry as sent); the rest of
     // the record stays identity only.
-    const { rejected_levels: sent, ...identity } = refused as Record<string, unknown>;
+    const { rejected_levels: sent, arguments: sentArgs, ...identity } = refused as Record<string, unknown>;
+    // The AI's call as sent is recorded apart (`arguments`, bounded): it carries the same refused level.
+    expect(JSON.stringify(sentArgs)).toContain(JSON.stringify((level as { unit: unknown }).unit));
     expect(JSON.stringify(identity)).not.toMatch(/"value"|"unit"\s*:|GBP|%/);
     expect(sent).toEqual([expect.objectContaining({ value: (level as { value: unknown }).value, unit: (level as { unit: unknown }).unit })]);
     expect(inner).toEqual([]);

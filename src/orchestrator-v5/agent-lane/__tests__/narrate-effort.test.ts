@@ -228,10 +228,11 @@ describe('narration recovery from the known held result', () => {
   const args = { label: 'Onboarding new hires takes longer than expected', affects: [{ target_label: 'G', direction: 'negative' }], rationale: 'r', whole_request: false };
   const call = { type: 'function_call', call_id: 'c1', name: 'propose_new_risk', arguments: JSON.stringify(args) };
   const base = { ctx: { scenario_id: 's', authenticated_user_id: 'u', request_id: 'r' }, history: [], message: 'Add a risk.', instructions: 'i', maxOutputTokens: 500 };
-  const recovered = (r: AgentTurnResult, held: typeof HELD | typeof HELD_RISK = HELD) => {
+  // `sent`: the arguments the scripted call carried, recorded on the call as the AI sent them (`toolArgumentsAsSent`).
+  const recovered = (r: AgentTurnResult, held: typeof HELD | typeof HELD_RISK = HELD, sent: unknown = args) => {
     expect(r.stopped_reason).toBe('answered');
     expect(r.assistant_text.trim()).not.toBe('');
-    expect(r.tool_calls).toEqual([{ name: 'propose_new_risk', ok: true, mutated: false, proposal_id: held.proposal_id }]);
+    expect(r.tool_calls).toEqual([{ name: 'propose_new_risk', ok: true, mutated: false, proposal_id: held.proposal_id, arguments: sent }]);
     expect(r.tool_results).toEqual([held]);
     expect(r.mutated).toBe(false);
     expect(approvalChipsFor(r.tool_calls).find((c) => c.id === `agent-approve-proposal:${r.tool_results[0]!.proposal_id}`)?.id)
@@ -255,7 +256,7 @@ describe('narration recovery from the known held result', () => {
     if (error !== undefined) callModel.mockRejectedValueOnce(error);
     else callModel.mockResolvedValueOnce(incomplete);
     const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
-    recovered(r, HELD_RISK);
+    recovered(r, HELD_RISK, riskArgs);
     expect(riskArgs.whole_request).toBe(false);
     expect(composeReply).toHaveBeenCalledTimes(2);
     expect(composeReply.mock.results.map((result) => result.value)).toEqual([null, null]);
@@ -287,7 +288,7 @@ describe('narration recovery from the known held result', () => {
       .mockResolvedValueOnce({ output: [{ ...call, arguments: JSON.stringify(riskArgs) }] })
       .mockRejectedValueOnce(new Error('openai_500'));
     const r = await runAgentTurn({ ...base, composeReply } as never, caps, callModel as never);
-    recovered(r, held);
+    recovered(r, held, riskArgs);
     expect(riskArgs.whole_request).toBe(false);
     expect(composeReply).toHaveBeenCalledTimes(2);
     expect(composeReply.mock.results.map((result) => result.value)).toEqual([null, null]);
@@ -329,7 +330,7 @@ describe('narration recovery from the known held result', () => {
     }
     expect(r.stopped_reason).toBe('answered');
     expect(callModel).toHaveBeenCalledTimes(2);
-    expect(r.tool_calls).toEqual([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: HELD_OPTION.proposal_id }]);
+    expect(r.tool_calls).toEqual([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: HELD_OPTION.proposal_id, arguments: optionArgs }]);
     expect(r.tool_results).toEqual([HELD_OPTION]);
     expect(r.mutated).toBe(false);
     expect(approvalChipsFor(r.tool_calls).map((chip) => chip.id)).toContain(`agent-approve-proposal:${HELD_OPTION.proposal_id}`);
