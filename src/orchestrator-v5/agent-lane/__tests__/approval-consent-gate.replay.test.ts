@@ -52,16 +52,22 @@ const CASES: readonly { id: string; kind: string; message: string; expect: Expec
   { id: 'n11', kind: 'yes, but change it', message: 'Yes, but only once the supplier confirms the delivery date.', expect: 'no_approval' },
   { id: 'n12', kind: 'assent to another topic', message: 'Yes, the oven figures look right to me.', expect: 'no_approval' },
   { id: 'n13', kind: 'assent to another topic', message: 'Yes, I agree the goal should stay at 90% of orders on time.', expect: 'no_approval' },
+  // The typed words of the six route rows that ruling A moved off the typed path (PL 18 Oct 17:33: typed-denial coverage
+  // stays on the production path, here): the refusal they typed, and the approvals they typed.
+  { id: 'n14', kind: "don't approve", message: 'Do not add anything.', expect: 'no_approval' },
   { id: 'p01', kind: 'genuine approval', message: 'Yes, go ahead with the 15% mixer change.', expect: 'approves' },
   { id: 'p02', kind: 'genuine approval', message: 'Approved.', expect: 'approves' },
   { id: 'p03', kind: 'genuine approval', message: "That's right, please apply it.", expect: 'approves' },
   { id: 'p04', kind: 'genuine approval', message: 'Please save that change.', expect: 'approves' },
   { id: 'p05', kind: 'genuine approval', message: 'Yes please, use the 15%.', expect: 'approves' },
   { id: 'p06', kind: 'genuine approval', message: 'Looks good, go for it.', expect: 'approves' },
+  { id: 'p07', kind: 'genuine approval', message: 'Yes, record that.', expect: 'approves' },
+  { id: 'p08', kind: 'genuine approval', message: 'Yes, go ahead.', expect: 'approves' },
+  { id: 'p09', kind: 'genuine approval', message: 'yes', expect: 'approves' },
 ];
 
 type Recorded = { name: string; status: number; body: string; request: string };
-type Fixture = { provider_calls: number; recorded_replies?: number; cases: Record<string, Recorded[]>; case_text: Record<string, string>; card_at_record: Record<string, string> };
+type Fixture = { provider_calls: number; calls_this_run?: number; cases: Record<string, Recorded[]>; case_text: Record<string, string>; card_at_record: Record<string, string> };
 const existing = (): Fixture | undefined => {
   try { return JSON.parse(readFileSync(FIXTURE, 'utf8')); } catch { return undefined; }
 };
@@ -74,8 +80,9 @@ let providerCalls = 0;
 afterAll(() => {
   if (!RECORD) return;
   mkdirSync(FIXTURE_DIR, { recursive: true });
-  writeFileSync(FIXTURE, `${JSON.stringify({ recorded_at: new Date().toISOString(), provider_calls: providerCalls,
-    recorded_replies: Object.values(recording).reduce((n, r) => n + r.length, 0),
+  // Each recorded reply is one real provider call: the calls behind this fixture, whichever runs recorded them.
+  const replies = Object.values(recording).reduce((n, r) => n + r.length, 0);
+  writeFileSync(FIXTURE, `${JSON.stringify({ recorded_at: new Date().toISOString(), provider_calls: replies, calls_this_run: providerCalls,
     note: 'Real provider replies for the consent gate, each with the normalised digest of the request it answered. Never re-record to turn a failure green.',
     cases: recording, case_text: caseText, card_at_record: cardAtRecord }, null, 1)}\n`);
 });
