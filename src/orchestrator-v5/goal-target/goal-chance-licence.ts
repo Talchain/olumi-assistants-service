@@ -608,7 +608,7 @@ export function goalChanceScopeOf(result: unknown, evidence?: SelectedRunEvidenc
 
 /** Remove-only projection. Public blocks can use their selected fact's evidence without inventing missing fields. */
 export function withGoalChanceReadback<R>(result: R, selectedResult: unknown = result, evidence?: SelectedRunEvidence): R {
-  const block = isRec(result) ? result : {};
+  const block: Rec = isRec(result) ? result : {};
   const displayed = [block.inference_warnings, isRec(block.enrichment) ? block.enrichment.inference_warnings : undefined]
     .flatMap(value => Array.isArray(value) ? value : [])
     .some(warning => isRec(warning) && ['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(String(warning.code)));

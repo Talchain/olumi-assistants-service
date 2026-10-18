@@ -49,9 +49,9 @@ const viewOf = (fact: ReturnType<typeof deniedRun>) => projectCanonicalAnalysisV
 describe('B0: the selected Run’s negative permission precedes every chance display', () => {
   it.each([['RS3', rs3.result], ['capacity', capacity.result]] as const)(
     'without an attempted display, %s retains its own figures, uncertainty and coaching byte-for-byte', (_brief, captured) => {
-      const result = structuredClone(captured);
-      result.enrichment.inference_warnings = result.enrichment.inference_warnings
-        .filter(warning => !['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(warning.code));
+      const clone = structuredClone(captured);
+      const result = { ...clone, enrichment: { ...clone.enrichment, inference_warnings: clone.enrichment.inference_warnings
+        .filter(warning => !['GOAL_CHANCE_LICENSED', 'GOAL_CHANCE_RANGE'].includes(warning.code)) } };
       expect(goalChanceScopeOf(result).can_show_goal_chance).toBe(false);
       const bytes = JSON.stringify(result);
       expect(withGoalChanceReadback(result)).toBe(result);
