@@ -789,8 +789,7 @@ export async function runAgentTurn(
                   ? await caps.withdrawProposal(input.ctx, earlierTurnWithdrawal(id)) : undefined;
                 return own?.ok === true ? own : {
                   ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
-                  detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
-                    + 'a change the user has already seen stays theirs to approve or decline.',
+                  detail: 'Nothing was withdrawn. This card is not eligible for withdrawal by Olumi; it remains unchanged.',
                 };
               })(proposalIdArg(call.arguments) ?? '')
             : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
