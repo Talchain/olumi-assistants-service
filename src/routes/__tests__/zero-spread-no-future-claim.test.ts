@@ -110,7 +110,7 @@ describe('capacity post3010 row 3: a zero-spread cell says no future event', () 
     add.probability_of_goal = 0;
     Object.assign(add.outcome, { p10: 0.1599999995, p50: 0.16, p90: 0.1600000005, mean: 0.16, std: 5e-10 });
     const licence = goalChanceLicenceOf(envelope, READ.graph, 'weekly_support_capacity', () => false, undefined, READ.graph, { sentRun: SENT_RUN })!;
-    const result = { type: 'analysis_result', enrichment: { ...envelope, inference_warnings: [licence] } };
+    const result = { type: 'analysis_result', run_id: READ.current_read.run_id, enrichment: { ...envelope, inference_warnings: [licence] } };
     const facts = runFactsOf(result, READ.graph, true);
     expect(facts.zero_spread).toEqual([{ option_id: KEEP, basis: 'fixed_baseline' }, { option_id: ADD, basis: 'measured_spread' }]);
     // A Run that is not current carries none (never read as this model's result).

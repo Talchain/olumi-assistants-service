@@ -56,7 +56,7 @@ describe('turnReadCache: one read per write epoch', () => {
       const canonicalAnalysisView = projectCanonicalAnalysisView({
         revision: version, graph,
         runFact: { fact_type: 'run_analysis', fact_version: 1, noop: false,
-          result: { scenario_id: 's1', summary: '', run_id: `run-${version}` } } as never,
+          result: { scenario_id: 's1', summary: '', run_id: `run-${version}`, enrichment: result.enrichment } } as never,
         analysisState: { run_state: { kind: 'complete_current' } } as never,
         currentResult: result as never,
       });
