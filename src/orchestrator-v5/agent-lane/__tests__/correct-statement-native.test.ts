@@ -105,8 +105,8 @@ describe.each(cases)('$name: sourced reading and subject review are separate', r
     expect(w.proposals.size()).toBe(0); expect(w.writes).toHaveLength(0); expect(w.graph()).toEqual(f.graph);
   });
 
-  // DL-3 01:53Z: inherited whole-line source defect, assigned to lean core C2; keep the exact failing contrast active.
-  it.fails('KNOWN BASE LIMITATION (lean core C2): another-speaker review cannot become a user-source card by requoting the whole reported line', async () => {
+  // DL-3 01:53Z; PL-P2-NEGATIVE-0205: inherited defect, lean core C2/#3392. Keep the real assertions runnable and report the failure.
+  it('KNOWN BASE DEFECT (lean core C2): another-speaker review cannot become a user-source card by requoting the whole reported line', async () => {
     const f = fixture(row), message = `A colleague said: “${f.message}”`;
     const w = await correctionWorld(f.graph, message);
     const review = await w.offer('propose_statement', { correction: f.request });
