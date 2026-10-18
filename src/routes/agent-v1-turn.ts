@@ -3332,11 +3332,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      *    the words decides — approve (the approve tool on THAT id), amend, decline or discuss. Nothing is written unless it calls
      *    the approve tool on it, and no other id is bound. A card made during this turn is never in this set.
      *  · Either way the write keeps the user's exact typed words as its consent (`typed_assent`), quoted in the receipt.
-     *  · Two or more waiting: nothing is bound — never the newest, the oldest or the one the Agent names. The reply offers every
-     *    card with its own button, the one the Agent took the words to mean first (`heldCardOffer`).
+     *  · Two or more waiting: the host binds none — never the newest or the oldest. An EXPLICIT selection is honoured (PL
+     *    amendment): the card the Agent names binds only if the client shows it (`typed_assent_cards`). An ambiguous yes
+     *    binds nothing; the reply offers every card with its own button, the one the words seemed to mean first.
      */
-    // A card kept for review is never bound by typed words (it cannot be applied as it stands).
+    // A card kept for review is never bound by typed words (it cannot be applied as it stands), nor by a stale press of the
+    // approve button it had before the model changed — not even once the model is back where it was (the review stands).
     const reviewIdsAtStart = new Set(heldAtStart.filter(heldCardUnderReview).map((h) => heldProposalId(h)));
+    const staleReviewPress = approvedProposal !== undefined && reviewIdsAtStart.has(approvedProposal) ? approvedProposal : undefined;
+    if (staleReviewPress !== undefined) { approvedProposal = undefined; pressedApproval = {}; }
     const heldCardIds = [...new Map(heldAtStart.filter((h) => !heldCardUnderReview(h)).flatMap((h) => {
       const card = proposalRecord(h, undefined)?.approve_action;
       const id = card === undefined ? undefined : typedApprovalOf({ chip: { id: card.id } });
@@ -4700,8 +4704,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           subjectMoved: (hold) => { const p = agentProposalOf(hold); return p !== undefined && heldCardSubjectMoved(p, readbackGraph); } });
         liveHolds = reconciled.carried;
         for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));
+        // A stale press of a card under review is answered with its review line again (nothing was applied).
+        const pressedForReview = staleReviewPress === undefined || reconciled.review.some((h) => heldProposalId(h) === staleReviewPress) ? []
+          : reconciled.carried.filter((h) => heldProposalId(h) === staleReviewPress && heldCardUnderReview(h));
         heldLapseLines = [...takeOwedHeldLapses(scenarioId), ...reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason)),
-          ...reconciled.review.map((h) => heldReviewSentence(heldChangeName(h)))];
+          ...[...reconciled.review, ...pressedForReview].map((h) => heldReviewSentence(heldChangeName(h)))];
         // An earlier turn's held proposal the Agent set aside on the user's typed decline is SAID (the press says its own).
         if (declinedHold === undefined) {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
@@ -4975,6 +4982,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (!runPress && fastPath !== 'explain' && (toTheCard.length === 0 || preparedNow)) return [];
       const id = executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph);
       if (id === undefined || (!runPress && fastPath !== 'explain' && !toTheCard.includes(id))) return [];
+      // A card kept for review is never carried as approvable (PR-2), even when the store would execute it again.
+      if (reviewIdsAtStart.has(id) || liveHolds.some((h) => heldProposalId(h) === id && heldCardUnderReview(h))) return [];
       const chip = [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];
@@ -6249,16 +6258,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
               // said at the start of this scenario's next reply (`owedHeldLapses`), never appended to this one.
               overCapSaid = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
-              // A card kept for review is held but not applicable: its "Review this change" and "Not now" stay while it is held.
+              // A card kept for review is held but not applicable: its "Review this change" and "Not now" stay while it is held,
+              // and it is never offered as approvable — not even when the model is back where it was (`approvable`).
               const underReviewNow = new Set((write.pending_actions ?? []).filter(heldCardUnderReview).map((p) => heldProposalId(p)));
+              const approvable = heldRecords.filter(r => !underReviewNow.has(r.proposal_id));
               const actions = (wireBeforeFloor.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
                 const approved = typedApprovalOf({ chip: { id: a.id } }); const declined = declinedProposalOf(a.id); const reviewed = reviewedProposalOf(a.id);
-                return approved !== undefined ? heldRecords.some(r => r.proposal_id === approved)
+                return approved !== undefined ? approvable.some(r => r.proposal_id === approved)
                   : declined !== undefined ? heldRecords.some(r => r.proposal_id === declined) || underReviewNow.has(declined)
                     : reviewed !== undefined ? underReviewNow.has(reviewed)
-                      : a.id !== AMEND_CHIP.id || heldRecords.length > 0;
+                      : a.id !== AMEND_CHIP.id || approvable.length > 0;
               });
-              const oldest = heldRecords.find(r => r.proposal_id === approvedProposal) ?? heldRecords[0];
+              const oldest = approvable.find(r => r.proposal_id === approvedProposal) ?? approvable[0];
               if (oldest !== undefined && !actions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
                 && !offeredNow.some(a => a.id === oldest.approve_action.id)
                 && fastPath !== 'method' && !decisionReviewRequested

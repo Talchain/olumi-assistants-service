@@ -25,7 +25,7 @@ import { heldAgentCardStillApplies, heldCardUnderReview } from '../proposal-obje
 import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
 import { threadHoldsThroughMutatingCommit } from '../../handlers/hold-thread-through.js';
 import { authorised, bothCards, call, chipFor, chips, closeApps, hash, idOf, LAPSE, MIXER, MIXER_WORDS, mixerSaved, node, route as routeOver, say,
-  world as worldOver, type Rec } from './fixtures/approval-world.js';
+  shownBy, world as worldOver, type Rec } from './fixtures/approval-world.js';
 
 const world = () => worldOver(live);
 const route = (w: ReturnType<typeof world>) => routeOver(w);
@@ -108,14 +108,16 @@ describe('an approval is ONE action: typed words with one card waiting are its p
 
   it('A2 host check: with several waiting, a card the user was never SHOWN is not bound by typed words (a shown one is), and the refusal names the choice', async () => {
     const w = world(); const turn = await route(w);
-    const { a, b, session } = await bothCards(w, turn);
-    w.neverShown(approvalChipIdFor(b));
+    const { a, b, session, second } = await bothCards(w, turn);
     const before = hash(w.read());
-    const unseen = await turn({ message: 'Yes, apply that.', source: 'composer', agent_session_id: session },
-      [call('authorise_change', { proposal_id: b }), say('Applied.')]);
+    // The client shows only card A (B's reply never reached it): B is not in its displayed set.
+    const unseen = await turn({ message: 'Yes, apply that.', source: 'composer', agent_session_id: session,
+      displayed_proposals: shownBy(second).filter((p) => p.proposal_id !== b) }, [call('authorise_change', { proposal_id: b }), say('Applied.')]);
     expect(authorised(unseen), JSON.stringify(authorised(unseen))).toEqual([expect.objectContaining({ ok: false, mutated: false, refusal: 'approval_required' })]);
     expect(hash(w.read()), 'nothing written for the unseen card').toBe(before);
-    expect(String(unseen.assistant_text)).toMatch(/two changes are waiting\. Press the button on the one you mean\./);
+    // The card it named is now SHOWN, with its own button (the user had not seen it).
+    expect(String(unseen.assistant_text)).toMatch(/two changes are waiting\. To apply "Buy a faster mixer[^"]*", press its button below\./);
+    expect(chips(unseen)).toEqual(expect.arrayContaining([approvalChipIdFor(a), approvalChipIdFor(b)]));
     const shown = await turn({ message: 'Yes, use the starting value.', source: 'composer', agent_session_id: session },
       [call('authorise_change', { proposal_id: a }), say('Saved.')]);
     expect(authorised(shown), JSON.stringify(authorised(shown))).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: a })]);

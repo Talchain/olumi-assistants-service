@@ -76,12 +76,10 @@ export function world(live: { store: unknown }) {
     creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, BRIEF)) } }] });
   const onLatestRow = (chipId: string): boolean => ((latest() as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
   /** A card the user was never shown: its carrier is taken off the latest row (the proposal stays in the process's store). */
-  const neverShown = (chipId: string): void => { const row = latest() as Rec | undefined;
-    if (row !== undefined) row.pending_actions = (row.pending_actions ?? []).filter((p: Rec) => p.chip_id !== chipId); };
   /** An edit outside the conversation (as a canvas edit lands): the stored model changes, no row is written. */
   const edit = (change: (g: Rec) => void): void => { const g = read(); change(g); bytes = JSON.stringify(g); };
   const latestPendings = (): Rec[] => structuredClone((latest() as Rec | undefined)?.pending_actions ?? []);
-  return { sid, read, graphWire, versions, onLatestRow, neverShown, edit, latestPendings };
+  return { sid, read, graphWire, versions, onLatestRow, edit, latestPendings };
 }
 
 /** The open apps, closed by the spec's `afterEach` (`closeApps`). */
@@ -149,6 +147,6 @@ export async function bothCards(w: ReturnType<typeof world>, turn: Turn) {
   const b = idOf(second, 'propose_option_interventions');
   expect(w.onLatestRow(approvalChipIdFor(a)), 'card A still held beside B').toBe(true);
   expect(w.onLatestRow(approvalChipIdFor(b))).toBe(true);
-  return { a, b, session, first };
+  return { a, b, session, first, second };
 }
 
