@@ -174,6 +174,20 @@ describe('PL-0048 (2): a span the user\'s correction retired is never re-credite
     expect(f.out.reconciliation?.current_level).toMatchObject({ value: 210, source: { quote: fresh } });
     expect(f.proposals).toHaveLength(1);
   });
+
+  // ⭐ P2 at the correction door (DL-3 18 Oct, integration hunk in statements.ts): the AI's own speaker reading of the correction's
+  // words reaches the ONE correction check (`verifyStatements`). The label only takes credit away; "user" still needs the literal span.
+  it('P2 correction door: a correction the AI reads as another speaker\'s ("other") or cannot place ("unknown") prepares nothing; "user" prepares', async () => {
+    const g = await saved(draft({ statements: [...(draft().statements as Rec[]), levelStatement] }));
+    const subject = { kind: 'goal' as const, id: String(goalOf(g).id), field: 'level' as const };
+    const ask = (quote: string, speaker: string) => prepareStatementCorrection(g, { quote, speaker, edits: [{ subject,
+      retirement: { quote: TODAY, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'The earlier weekly figure is withdrawn.' }] } as never,
+    { now: quote }, '2026-10-18T01:00:00Z');
+    const reported = 'My manager says we should ignore the weekly bookings figure of 180, there is no reliable count.';
+    for (const speaker of ['other', 'unknown']) expect(ask(reported, speaker), speaker).toMatchObject({ refused: 'statement_not_found' });
+    // CONTRAST: the user's own correction, read as theirs, prepares the card.
+    expect(ask(FIX, 'user')).toHaveProperty('candidate');
+  });
 });
 
 describe('check 3 (#3389 probe P2): a figure in another speaker\'s quoted words is never the user\'s, on the real build → register path', () => {

@@ -235,7 +235,7 @@ interface CorrectionEditRequest {
   readonly reading_words: string;
   readonly legacy?: { readonly field: 'already_true_quote' | 'dependency'; readonly expected: string; readonly replacement: string | null };
 }
-export interface StatementCorrectionRequest { readonly quote: string; readonly edits: readonly CorrectionEditRequest[] }
+export interface StatementCorrectionRequest { readonly quote: string; readonly edits: readonly CorrectionEditRequest[]; /** The AI's own speaker reading (`QUOTE_SPEAKER`, lean core P2). */ readonly speaker?: unknown }
 interface ApprovedCorrectionEdit extends CorrectionEditRequest {
   readonly expected_record: UserStatementRecord | null;
   readonly expected_node: Rec;
@@ -488,7 +488,7 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     if (!isRec(e) || !isRec(e.subject)) return refused('invalid_statement', 'correction.edit_subject_shape');
     const node = nodeOf(graph, e.subject?.id);
     if (node === undefined) return refused('node_not_found', 'correction.edit_subject_exists');
-    const verified = verifyStatements([{ quote, form: 'describes' }], texts,
+    const verified = verifyStatements([{ quote, form: 'describes', ...(request.speaker !== undefined ? { speaker: request.speaker } : {}) }], texts,
       { subject: { quantity: subjectKey(e.subject), node_id: e.subject.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
     if (verified.kind === 'refused') return refused(verified.refusal, `correction.source.${verified.refusal}`);
     source = verified.statements[0]!;
