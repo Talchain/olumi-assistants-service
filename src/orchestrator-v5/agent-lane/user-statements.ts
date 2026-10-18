@@ -47,7 +47,13 @@ export const SAID_BY: readonly SaidBy[] = ['user', 'party', 'unknown', 'olumi'];
 export type ClaimStatus = 'proposed' | 'confirmed' | 'superseded' | 'withdrawn';
 export const CLAIM_STATUSES: readonly ClaimStatus[] = ['proposed', 'confirmed', 'superseded', 'withdrawn'];
 /** The literal word checks, as labels the card shows: never a gate, never a reason to change `said_by` (AIE ORIGIN). */
-export interface ClaimChecks { readonly words_found: boolean; readonly figure_found: boolean; readonly unit_found: boolean }
+export interface ClaimChecks {
+  readonly words_found: boolean;
+  readonly figure_found: boolean;
+  readonly unit_found: boolean;
+  /** Whether the host proved the words are about THIS subject. `false`: Olumi's reading of the user's words, which their press may confirm. */
+  readonly subject_bound?: boolean;
+}
 
 export interface UserStatement {
   /**
@@ -565,9 +571,11 @@ function claimFieldsOf(r: Record<string, unknown>): Partial<Pick<UserStatement, 
   const a = r.approval, c = r.checks;
   const approval = a !== null && typeof a === 'object' && !Array.isArray(a) && id((a as Record<string, unknown>).proposal_id)
     ? { proposal_id: (a as Record<string, unknown>).proposal_id as string } : undefined;
-  const checks = c !== null && typeof c === 'object' && !Array.isArray(c)
-    && (['words_found', 'figure_found', 'unit_found'] as const).every((k) => typeof (c as Record<string, unknown>)[k] === 'boolean')
-    ? { words_found: (c as ClaimChecks).words_found, figure_found: (c as ClaimChecks).figure_found, unit_found: (c as ClaimChecks).unit_found } : undefined;
+  const cr = c !== null && typeof c === 'object' && !Array.isArray(c) ? c as Record<string, unknown> : undefined;
+  const checks = cr !== undefined && (['words_found', 'figure_found', 'unit_found'] as const).every((k) => typeof cr[k] === 'boolean')
+    && (cr.subject_bound === undefined || typeof cr.subject_bound === 'boolean')
+    ? { words_found: cr.words_found as boolean, figure_found: cr.figure_found as boolean, unit_found: cr.unit_found as boolean,
+      ...(typeof cr.subject_bound === 'boolean' ? { subject_bound: cr.subject_bound } : {}) } : undefined;
   if ((r.claim_id !== undefined && !id(r.claim_id)) || (r.status !== undefined && status === undefined)
     || (r.supersedes !== undefined && !(Array.isArray(r.supersedes) && r.supersedes.every(id)))
     || (a !== undefined && approval === undefined) || (c !== undefined && checks === undefined)) return undefined;

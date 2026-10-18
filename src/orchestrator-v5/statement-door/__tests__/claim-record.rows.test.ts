@@ -209,5 +209,30 @@ describe('claim record rows (spec §1–§4, §6): who asserts the figure is sav
     // Undo is the existing model-version restore: the prior version holds the earlier claim as current, byte for byte.
     expect(claimRecordsOn(fromNode(before))[0]!.statements.map((st: Rec) => [st.low, st.high, st.status])).toEqual([[4, 6, 'confirmed']]);
   });
+
+  it('N3 (authorship invariant): a press never makes a figure the user did not write "theirs"; it may confirm WHICH subject their words are about', () => {
+    const claim = (checks: Rec, approved: boolean): Rec => ({ speaker: 'user', quote: OWN, source: OWN, form: 'range', reading: 'olumi',
+      subject: { quantity: 'effect', node_id: 'pre_order' }, low: 4, high: 6, unit: 'kg', checks, ...(approved ? { status: 'confirmed', approval: { proposal_id: 'p-shown-card' } } : {}) });
+    const held = (st: Rec): Rec => {
+      const g = START();
+      g.nodes.find((n: Rec) => n.id === 'pre_order').user_statements = [{ subject_key: 'link|pre_order|daily_waste||effect', field: 'effect',
+        recorded_at: '2026-10-18T15:00:00.000Z', statements: [st] }];
+      return g;
+    };
+    const all = { words_found: true, figure_found: true, unit_found: true };
+    for (const [checks, approved, yours] of [
+      [{ ...all, figure_found: false }, true, false],   // the figure is not in their words: pressed or not, never theirs
+      [{ ...all, words_found: false }, true, false],    // the words are not in their messages: never theirs
+      [{ ...all, unit_found: false }, true, false],     // the unit is not the one they wrote: never theirs
+      [{ ...all, subject_bound: false }, false, false], // Olumi's reading of WHICH subject, not yet confirmed
+      [{ ...all, subject_bound: false }, true, true],   // ...confirmed by their press of the card that showed it
+      [all, false, true],                               // CONTROL: every check found
+    ] as const) {
+      const g = held(claim(checks, approved));
+      expect(userStatementFor(g, SUBJECT) !== undefined, JSON.stringify({ checks, approved })).toBe(yours);
+      // Every claim stays held and readable as what it is, whoever's it is.
+      expect(claimRecordsOn(fromNode(g))[0]?.statements[0]).toMatchObject({ checks, low: 4, high: 6 });
+    }
+  });
 });
 

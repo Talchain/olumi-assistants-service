@@ -141,11 +141,14 @@ const attestOf = (v: unknown): StatementAttest | undefined | null => {
 };
 
 /**
- * ⭐ CLAIM RECORD (spec v2 §4): a claim reads as "you said" only where the user asserts it (`said_by`), it is current, and its word
- * checks passed or the user pressed the card that showed them failing. A party's, an unresolved or an Olumi claim never does.
+ * ⭐ CLAIM RECORD (spec v2 §4; GATE-TO-LABEL-DESIGN, authorship invariant): a claim reads as "you said" only where the user asserts it
+ * (`said_by`), it is current, and their words, figure and unit were all found. A press approves the displayed operation only: it may
+ * confirm Olumi's reading of WHICH subject their words are about (`subject_bound: false`), but it never makes words or a figure the
+ * user did not write theirs (AIE 13:43Z). A party's, an unresolved or an Olumi claim never reads as theirs.
  */
 const youSaid = (s: UserStatement): boolean => saidByOf(s) === 'user' && s.status !== 'superseded' && s.status !== 'withdrawn'
-  && (s.checks === undefined || (s.checks.words_found && s.checks.figure_found && s.checks.unit_found) || s.approval !== undefined);
+  && (s.checks === undefined || (s.checks.words_found && s.checks.figure_found && s.checks.unit_found
+    && (s.checks.subject_bound !== false || s.approval !== undefined)));
 
 /** A stored record whole, or `undefined` if any part is malformed; `every` keeps every claim (each with its `said_by`), else "you said" only. */
 function recordOf(v: unknown, every: boolean): UserStatementRecord | undefined {
