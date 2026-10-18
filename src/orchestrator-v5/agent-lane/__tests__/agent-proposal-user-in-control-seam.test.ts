@@ -325,13 +325,15 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(await pending()).not.toContainEqual(expect.objectContaining({ chip_id: p.approve_action.id }));
     await turn(press(p)); expect(bytes()).toBe(before);
   }, 120_000);
-  it('D-08 RED: second Agent proposal keeps both carriers, approving one says the other lapse', async () => {
+  // ⛔ CHANGED CONTRACT (DL-3 18 Oct, PR-2, no silent lapse): the other card used to lapse ("has lapsed"); it is now kept for
+  // review and SAID. What this row still pins: approving one card never silently drops the other.
+  it('D-08 RED: second Agent proposal keeps both carriers, approving one says the other waits for review', async () => {
     seed(); const a = shown(await assumptions()); const b = await links(); const z = shown(b);
     expect(b._proposal_fields!.proposals.map(p => p.proposal_id)).toEqual([a.proposal_id, z.proposal_id]);
     const continuity = await turn({ message: 'Explain what is waiting.' });
     expect(approveChipOf(continuity)?.id).toBe(a.approve_action.id);
     const r = await turn(press(a));
-    expect(r.assistant_text).toContain('has lapsed'); expect(r.assistant_text).toContain('model');
+    expect(r.assistant_text).toContain('Model changed: review this change'); expect(r.assistant_text).toContain('waits for your review');
   }, 120_000);
   it('cap RED: offered fourth approval keeps its room and the overflow is said', async () => {
     seed(); await assumptions(true); await links();
@@ -802,7 +804,8 @@ describe('S-D slice 2 Agent proposals', () => {
     expect((await pending()).map(p => p.chip_id)).not.toContain(a.approve_action.id);
   }, 120_000);
 
-  it('R-lapse-words: a held removal lapses with its quoted public label and no to add', async () => {
+  // ⛔ CHANGED CONTRACT (PR-2): a held removal whose model moved is kept for review (it used to lapse), said with its quoted label.
+  it('R-lapse-words: a held removal kept for review says its quoted public label and no to add', async () => {
     seed();
     script = [() => fnCall('propose_option_status', { option_label: 'Keep £49', status: 'removed' }), () => say('Take this option out?')];
     const a = shown(await turn({ message: 'Take Keep £49 out of the comparison.' }));
@@ -810,7 +813,7 @@ describe('S-D slice 2 Agent proposals', () => {
     const label = agentProposals.get(a.proposal_id)!.public_label.replace(/\.$/, '');
     graphNow().nodes.find(n => n.id === 'goal_x')!.goal_threshold = 0.9;
     const r = await turn({ message: 'Explain what is waiting.' });
-    expect(r.assistant_text).toContain(`The held change "${label}" no longer fits the model as it now stands, so it has lapsed; say the word if you still want it.`);
+    expect(r.assistant_text).toContain(`Model changed: review this change. The held change "${label}" was prepared before the model changed, so it waits for your review; nothing was applied.`);
     expect(r.assistant_text).not.toContain('The held change to add');
   }, 120_000);
 
