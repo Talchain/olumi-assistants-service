@@ -37,6 +37,9 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import { ProposalStore } from '../proposal.js';
 import { userWordsOf } from '../stated-by-user.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { createSetFactorValueHandler } from '../../tools/handlers/set-factor-value.js';
+import { buildHandlerInvocation } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
+import type { ProposalAction } from '../../routing/types.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554408a8';
 const OWNER = '0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f18a8';
@@ -78,11 +81,11 @@ async function constructed(definitional: boolean): Promise<Rec> {
 }
 
 const apps: FastifyInstance[] = [];
-async function harness(initial: Rec) {
+async function harness(initial: Rec, said = 'We now make 50 widgets per hour.', stores: (g: Rec) => Rec = (g) => g) {
   const row = { graph: clone(initial) as unknown };
   const appends: unknown[] = [];
   storeRef.value = {
-    append: vi.fn(async (write: { graph: unknown }) => { appends.push(clone(write.graph)); row.graph = clone(write.graph); return { id: `turn-${appends.length}` }; }),
+    append: vi.fn(async (write: { graph: unknown }) => { appends.push(clone(write.graph)); row.graph = stores(clone(write.graph) as Rec); return { id: `turn-${appends.length}` }; }),
     loadGraph: vi.fn(async () => clone(row.graph)),
     loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(row.graph), briefText: null })),
     ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -107,7 +110,7 @@ async function harness(initial: Rec) {
     return { status: 500, json: {} };
   };
   const caps = createAgentCapabilities(dispatch, new ProposalStore());
-  const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-step8-edit', user_text: userWordsOf([BRIEF], 'We now make 50 widgets per hour.') };
+  const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-step8-edit', user_text: userWordsOf([BRIEF], said) };
   const call = (name: string, args: Record<string, unknown>): Promise<ToolResult> => dispatchTool(name, JSON.stringify(args), ctx, caps);
   return { appends, call, stored: () => row.graph as Rec };
 }
@@ -136,18 +139,57 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     expect(goal.nonlinear_identity).toMatchObject({ operation: 'sum', factor_ids: [TODAY, 'net_change_in_widgets_per_hour'] });
   });
 
-  it('CONTRAST: an ordinary sum part that merely equals the goal (not named as its level today) is never moved', async () => {
+  it('RED (Codex review of 04c63519): a today part another writer moved (40 → 50) is still written with the goal (→ 55), and read back', async () => {
     const initial = await constructed(true);
-    const renamed = clone(initial);
-    nodeOf(renamed, TODAY)!.label = 'Line A output';
-    const h = await harness(renamed);
+    const moved = clone(initial);
+    const os = nodeOf(moved, TODAY)!.observed_state;
+    nodeOf(moved, TODAY)!.observed_state = { ...os, raw_value: 50, value: 50 / os.cap, baseline: 50 / os.cap };
+    const h = await harness(moved, 'We now make 55 widgets per hour.');
+    const proposed = await h.call('propose_goal_current_level', { ...LEVEL, value: 55 }) as Proposed;
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed.public_label).toContain('"Widgets per hour today" changes with it');
+    const applied = await h.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
+    expect(applied.applied, JSON.stringify(applied)).toBe(true);
+    const goal = nodeOf(h.stored(), GOAL)!;
+    expect(goal.observed_state.raw_value).toBe(55);
+    expect(nodeOf(h.stored(), TODAY)!.observed_state).toStrictEqual(goal.observed_state);
+  });
+
+  it('RED (Codex review of 04c63519, 3): a store that keeps the today part at its old figure is never reported as written', async () => {
+    const initial = await constructed(true);
+    const old = clone(nodeOf(initial, TODAY)!.observed_state);
+    const h = await harness(initial, undefined, (g) => { nodeOf(g, TODAY)!.observed_state = clone(old); return g; });
+    const proposed = await h.call('propose_goal_current_level', LEVEL) as Proposed;
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const applied = await h.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
+    expect(applied).toMatchObject({ applied: false, refusal: 'not_verified' });
+  });
+
+  it('CONTRAST: an ordinary sum part (not the part construction minted for the goal\'s level today) is never moved', async () => {
+    const initial = await constructed(true);
+    const ordinary = JSON.parse(JSON.stringify(initial).replaceAll(`"${TODAY}"`, '"line_a_output"')) as Rec;
+    nodeOf(ordinary, 'line_a_output')!.label = 'Line A output';
+    expect(nodeOf(ordinary, GOAL)!.nonlinear_identity.factor_ids).toContain('line_a_output');
+    const h = await harness(ordinary);
     const proposed = await h.call('propose_goal_current_level', LEVEL) as Proposed;
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(proposed.public_label).not.toContain('changes with it');
     const applied = await h.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
     expect(applied.applied, JSON.stringify(applied)).toBe(true);
     expect(nodeOf(h.stored(), GOAL)!.observed_state.raw_value).toBe(50);
-    expect(nodeOf(h.stored(), TODAY)!.observed_state.raw_value).toBe(40);
+    expect(nodeOf(h.stored(), 'line_a_output')!.observed_state.raw_value).toBe(40);
+  });
+
+  it('RED: the factor writer never sets the today part on its own — it says where to change it, and writes nothing', async () => {
+    const g = await constructed(true);
+    const at = (id: string) => createSetFactorValueHandler()(buildHandlerInvocation({ graph: clone(g), proposal: {
+      handler_id: 'set_factor_value', entity: { id, kind: 'node', resolution_status: 'resolved', resolution_method: 'id_match' },
+      parameters: [{ name: 'value', value: { value: 45, unit: 'widgets/hour' }, operator: 'set', source: 'user_explicit' }],
+      cited_context_fields: [] } as ProposalAction }));
+    await expect(at(TODAY)).rejects.toMatchObject({ cause_kind: 'precondition_unmet_at_execute', details: { d1_code: 'PRECONDITION_UNMET',
+      target_id: TODAY, specific_issue: expect.stringContaining('Change the current level of "Widgets per hour" and this changes with it. Nothing was written.') } });
+    // Contrast: the option-set part is not the goal's level today, so this guard never stops it.
+    await expect(at('net_change_in_widgets_per_hour')).resolves.toBeDefined();
   });
 
   it('CONTRAST: with no sum (the drafter did not say definitional), the same edit writes the goal alone and names no today part', async () => {

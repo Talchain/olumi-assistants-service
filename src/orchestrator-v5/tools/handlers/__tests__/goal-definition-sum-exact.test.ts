@@ -143,6 +143,18 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     expectExactSum(await request(await build(candidate(REVENUE), REVENUE.say(REVENUE.a, REVENUE.b))), REVENUE, REVENUE.a, REVENUE.b);
   });
 
+  it('RED (Codex review of 04c63519): a today part another writer left at 41 is sent at the goal\'s own level today (40), never 41', async () => {
+    const stored = await build(candidate(WIDGETS), WIDGETS.say(30, 10));
+    const clean = await request(stored);
+    const moved = structuredClone(stored);
+    const os = node(moved, 'widgets_per_hour_today')!.observed_state;
+    node(moved, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    const p = await request(moved);
+    expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
+    expect(node(p.graph, 'widgets_per_hour_today')!.observed_state).toStrictEqual(node(clean.graph, 'widgets_per_hour_today')!.observed_state);
+    expectExactSum(p, WIDGETS, 30, 10);
+  });
+
   it('RED: the definition keeps every authorship tag and reads as a definition; the sum is Olumi\'s reading', async () => {
     const g = await build(candidate(WIDGETS), WIDGETS.say(30, 10));
     const e = edge(g, netId(WIDGETS), 'widgets_per_hour');

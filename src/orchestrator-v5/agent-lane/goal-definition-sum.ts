@@ -29,6 +29,7 @@ import { isPersonsOwnValue } from '../../cee/provenance/provenance-of.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { canonicalLabel } from './model-primitives.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -98,19 +99,30 @@ export function goalDefinitionSum<N extends NodeIn>(
 }
 
 /**
- * The compiled sum's today part on a stored goal, for a later edit of the goal's level today: an Olumi-read `sum` on the goal
- * (`stated_in_brief: false`) with exactly one part named as the goal's level today (`todayPartLabel`) and holding it (same
- * figure and unit) while every other part is 0 today. An ordinary sum's part that merely equals the goal is never bound. Today's total IS that part, so it changes with the goal's level (`goal-current-level.ts`); any other sum
- * is left to its own parts. `undefined` when there is none.
+ * The compiled sum's today part on a stored goal: the one part of the goal's Olumi-read `sum` (`stated_in_brief: false`)
+ * whose id construction minted from the goal's own (`<goal id>_today`, `_2`…, never renamed by an edit). It is bound by that
+ * identity, never by its figure (Codex review of 04c63519: a part edited away from the goal's level must stay bound), so the
+ * one goal-level writer always writes it with the goal (`goal-current-level.ts`) and the Run always sends it at the goal's own
+ * level today (`withTodayPartAtGoalLevel`). `undefined` when there is none.
  */
 export function goalSumTodayPart<N extends NodeIn>(nodes: readonly N[], goalId: string): N | undefined {
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   const identity = isRec(goal?.nonlinear_identity) ? goal!.nonlinear_identity : undefined;
   if (identity === undefined || identity.operation !== 'sum' || identity.stated_in_brief !== false || !Array.isArray(identity.factor_ids)) return undefined;
-  const raw = (n: N | undefined): unknown => (isRec(n?.observed_state) ? n!.observed_state.raw_value : undefined);
-  const unitOf = (n: N | undefined): unknown => (isRec(n?.observed_state) ? n!.observed_state.unit : undefined);
-  const parts = identity.factor_ids.map((id) => nodes.find((n) => n.id === id));
-  if (parts.some((p) => p === undefined || !finite(raw(p))) || !finite(raw(goal))) return undefined;
-  const today = parts.filter((p) => canonicalLabel(p!.label) === canonicalLabel(todayPartLabel(goal!.label)) && raw(p) === raw(goal) && unitOf(p) === unitOf(goal));
-  return today.length === 1 && parts.every((p) => p === today[0] || raw(p) === 0) ? today[0] : undefined;
+  const minted = (id: unknown): boolean => typeof id === 'string' && (id === `${goalId}_today` || (id.startsWith(`${goalId}_today_`) && /^[0-9]+$/.test(id.slice(goalId.length + 7))));
+  const ids = identity.factor_ids.filter(minted);
+  return ids.length === 1 ? nodes.find((n) => n.id === ids[0] && n.kind === 'factor') : undefined;
+}
+
+/**
+ * The goal's level today, on the compiled today part, exactly: the part IS that level, so whatever a writer left on it, the
+ * Run's wire copy (and the goal-level write) carries the goal's own `observed_state` there. The goal stays the one authority
+ * for its level today. The same graph when there is no part or nothing differs. Pure.
+ */
+export function withTodayPartAtGoalLevel<G>(graph: G, goalId: string): G {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : undefined;
+  const part = nodes === undefined ? undefined : goalSumTodayPart(nodes, goalId);
+  const level = nodes?.find((n) => n.id === goalId)?.observed_state;
+  if (part === undefined || !isRec(level) || stableStringify(part.observed_state) === stableStringify(level)) return graph;
+  return { ...graph, nodes: nodes!.map((n) => (n.id === part.id ? { ...n, observed_state: { ...level } } : n)) } as G;
 }

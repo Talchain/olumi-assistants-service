@@ -85,7 +85,7 @@ import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
-import { goalSumTodayPart } from './goal-definition-sum.js';
+import { goalSumTodayPart, withTodayPartAtGoalLevel } from './goal-definition-sum.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -1394,7 +1394,6 @@ export async function applyGoalCurrentLevel(
   const carriedOp = op.value as { reframed_cap?: unknown; level_reading?: unknown } | undefined;
   const reframedCap = num(carriedOp?.reframed_cap) ? carriedOp!.reframed_cap as number : undefined;
   const nodes = approved.nodes.map((n) => {
-    if (todayPart !== undefined && n.id === todayPart.id) return { ...n, observed_state: { ...kept, ...os } };
     if (n.id !== op.path) return part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n;
     const written: Record<string, unknown> = {
       ...(scope && withdrawal ? applyIdentityWithdrawalToGoal(n as Record<string, unknown>, scope, withdrawal)! : n), observed_state: { ...kept, ...os },
@@ -1437,7 +1436,8 @@ export async function applyGoalCurrentLevel(
   const frameAfter = frameOf(retiredOrSame.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
   const rederived = !retired && frameBefore !== undefined && frameAfter !== frameBefore
     ? rederiveGoalInLinksWithSetAside(retiredOrSame, op.path, frameBefore) : { graph: retiredOrSame, setAside: [] };
-  const graph = rederived.graph;
+  // STEP 8: the sum's today part carries the goal's level today exactly as this write leaves it (frame moves included).
+  const graph = todayPart === undefined ? rederived.graph : withTodayPartAtGoalLevel(rederived.graph, op.path);
   const setAside = [...retirement.setAside, ...rederived.setAside];
   const writtenGoal = (graph.nodes as readonly Record<string, unknown>[]).find((n) => n.id === op.path);
   const writtenOs = (writtenGoal?.observed_state ?? os) as { baseline?: unknown };
@@ -1467,6 +1467,9 @@ export async function applyGoalCurrentLevel(
   const after = await deps.readGraph(ctx.scenario_id);
   const held = after?.nodes.find((n) => n.id === op.path)?.observed_state;
   const partHeld = part === null ? undefined : after?.nodes.find((n) => n.id === part.node_id)?.observed_state;
+  // The sum's today part is read back too: it holds exactly the goal's level as stored (Codex review of 04c63519, 3).
+  const todayHeld = todayPart === undefined
+    || stableStringify(after?.nodes.find((n) => n.id === todayPart.id)?.observed_state) === stableStringify(held);
   // What THIS write carried for the goal: the proposal's level, re-read on the frame the F4 retirement left (a refit may
   // have widened it — `reframed` moves value, baseline, cap and threshold together). Unretired, that is `os` byte for byte.
   const capHeld = (reframedCap === undefined && !retired) ||
@@ -1489,7 +1492,7 @@ export async function applyGoalCurrentLevel(
   const pairWritten = writtenGoal as Pair | undefined;
   const pairHeld = !ceilingPaired || (pairNow !== undefined && pairWritten !== undefined
     && (['goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold', 'goal_direction', 'goal_threshold_frame'] as const).every((k) => pairNow[k] === pairWritten[k]));
-  const landed = readingHeld && changeHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  const landed = readingHeld && changeHeld && scopeHeld && pairHeld && todayHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {
