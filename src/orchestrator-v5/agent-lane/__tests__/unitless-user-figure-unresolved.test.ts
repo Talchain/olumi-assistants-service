@@ -170,8 +170,9 @@ describe('W27: a user figure with no unit or encoding stays unresolved, out of e
 
   it('a figure WITH a unit is admitted exactly as before, and nothing is asked', async () => {
     const { graph, out } = await build({ level: WITH_UNIT, unit: 'points' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only); every figure unchanged.
     expect(node(graph).observed_state).toEqual({ value: 0.45, raw_value: 45, cap: 100, declared_scale: 'unit_interval', unit: 'points',
-      source: 'brief_extraction', extractionType: 'explicit' });
+      source: 'brief_extraction', extractionType: 'explicit', frame_source: 'olumi_convention' });
     expect(findScaleIncoherentBaselineFactorIds(graph.nodes, [])).toEqual([]);
     expect(asked(out)).toEqual([]);
   });

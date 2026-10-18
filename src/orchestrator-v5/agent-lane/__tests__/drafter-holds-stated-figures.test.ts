@@ -46,7 +46,8 @@ describe('#2923 (b): every current figure the brief states is held as the user\'
     const held = (HIRING_DRAFT.factors as Rec[]).find((f) => f.label === 'Mid-weight developers')!;
     expect(held).toMatchObject({ baseline_value: 6, baseline_known: true, provenance: 'explicit', baseline_evidence: { quote: 'We currently have six mid-weight developers, so we\'re lacking leadership.' } });
     const { graph } = await build(HIRING_DRAFT);
-    expect(developers(graph).observed_state).toEqual({ value: 0.3, raw_value: 6, cap: 20, declared_scale: 'unit_interval', unit: 'developers', source: 'brief_extraction', extractionType: 'explicit' });
+    // CHANGED 18 Oct (A, D2): the drafter's 20 is Olumi's range (the brief does not write it), so it says so; figure unchanged.
+    expect(developers(graph).observed_state).toEqual({ value: 0.3, raw_value: 6, cap: 20, declared_scale: 'unit_interval', unit: 'developers', source: 'brief_extraction', extractionType: 'explicit', frame_source: 'olumi_convention' });
   });
 
   it('CONTRAST: the same figure without its quote stays an unverified claim, which is why the rule asks for the quote', async () => {

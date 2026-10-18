@@ -170,7 +170,8 @@ describe('a freshly built model is admissible for a provisional first analysis (
       willProceed: true, mode: 'quantified_provisional', blockers: [],
       ceeInference: ['tech_leads', 'developers', 'coordination_overhead'],
     });
-    expect(graph.nodes.find((n) => n.id === 'developers')?.observed_state).toStrictEqual({ value: 6 / 50, raw_value: 6, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only); every figure unchanged.
+    expect(graph.nodes.find((n) => n.id === 'developers')?.observed_state).toStrictEqual({ value: 6 / 50, raw_value: 6, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
   });
 
   it('PRICING ("Keep the current price"): refused, and says why — the label is not a status-quo idiom readiness recognises', async () => {
@@ -230,8 +231,9 @@ describe('a freshly built model is admissible for a provisional first analysis (
     });
     // Both retained levels keep their exact amounts and Olumi authorship.
     expect(resolveRunAdmission(graph).assessment.blockingIssues.map((i) => i.factor_id)).toEqual([]);
-    expect(graph.nodes.find((n) => n.id === 'courier_partners')?.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'partners', source: 'cee_inference', extractionType: 'inferred' });
-    expect(graph.nodes.find((n) => n.id === 'parcel_backlog')?.observed_state).toStrictEqual({ value: 0.12, raw_value: 1200, unit: 'parcels', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only); every figure unchanged.
+    expect(graph.nodes.find((n) => n.id === 'courier_partners')?.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'partners', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
+    expect(graph.nodes.find((n) => n.id === 'parcel_backlog')?.observed_state).toStrictEqual({ value: 0.12, raw_value: 1200, unit: 'parcels', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
     expect(graph.nodes.find((n) => n.id === 'parcel_backlog')?.scale_frame).toBe(10000);
   });
 

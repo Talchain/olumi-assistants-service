@@ -101,7 +101,8 @@ describe('an AI estimate is marked as Olumi’s on the canvas (extractionType: i
 
   it('RED: the served node, admitted now, carries extractionType "inferred" — and nothing else changed', () => {
     const n = byId(admitCandidateModel(candidate()), SERVED_ESTIMATE_NODE.id);
-    expect(n.observed_state).toStrictEqual({ ...SERVED_ESTIMATE_NODE.observed_state, extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): the served range is Olumi's, so it now says so (disclosure only).
+    expect(n.observed_state).toStrictEqual({ ...SERVED_ESTIMATE_NODE.observed_state, extractionType: 'inferred', frame_source: 'olumi_convention' });
     expect(n.scale_frame).toBe(SERVED_ESTIMATE_NODE.scale_frame);
     expect(n.observed_state).not.toHaveProperty('cap');
   });

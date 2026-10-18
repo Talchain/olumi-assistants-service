@@ -33,6 +33,7 @@ import type { EdgeProvenanceV3T } from '../../schemas/cee-v3.js';
 import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js';
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
+import { isProportionUnit } from '../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sayFigure, sayFigureExactly } from '../../orchestrator-v5/agent-lane/say-figure.js';
 import { isUsersLevelOrApproved } from '../provenance/provenance-of.js';
@@ -123,7 +124,7 @@ const UNIT_INTERVAL: LevelDomain = { lo: 0, hi: 1 };
  * The domain a target's level lives in, by unit class (design §4), or `null` when it is unbounded:
  *  · a percentage LEVEL (`isPercentWithPeriod`) on a pinned 100 frame (or already a proportion) → [0, 1];
  *  · a currency amount (the estate's one currency vocabulary) → [0, ∞);
- *  · anything else already on frame 1 (a fraction) → [0, 1];
+ *  · a unit stating a share, on frame 1 (a fraction) → [0, 1] (A, 18 Oct: never a frame of 1 alone);
  *  · percentage points, basis points, a "% change" or an unrecognised unit → unbounded (never questioned);
  *  · `percentLevel` (a level limit in "%" names the node, `MagnitudeNode.percent_level`): a percent-class unit whose
  *    wording alone does not read as a level ("% of Pro subscribers per month") is read as one → [0, 1].
@@ -143,7 +144,9 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
     return frame > 1 && frame < 100 ? { lo: 0, hi: 100 / frame } : null;
   }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
-  return frame === 1 ? UNIT_INTERVAL : null;
+  // A (18 Oct, AIE caution d): a frame of 1 is a [0, 1] domain only where the unit states a share. Olumi's default frame of
+  // 1 on a small estimate ("0.5 FTE", `defaultFrameFor`) is its reference, never the quantity's maximum.
+  return frame === 1 && isProportionUnit(unit) ? UNIT_INTERVAL : null;
 }
 
 /**

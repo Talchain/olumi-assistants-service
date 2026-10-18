@@ -1,4 +1,4 @@
-import { proposedFrameForLevels, levelOnFinalFrame, preserveSiblingQuantities, type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
+import { proposedFrameForLevels, levelOnFinalFrame, preserveSiblingQuantities, carryUntouchedLinkSizes, type ReencodedSibling } from '../agent-lane/level-batch-frame.js';
 import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
 import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
 import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
@@ -454,7 +454,11 @@ export function factorValuesPostimageIsScoped(storedBefore: unknown, after: unkn
   if (restored.edges.length !== before.edges.length) return false;
   let rederived: unknown = { ...structuredClone(after), edges: structuredClone(before.edges) };
   for (const id of factorIds) rederived = frameDefaultedLinks(rederived, id).graph;
-  const resized = (rederived as EditableGraph).edges;
+  // ⭐ BUDDY-A #3396 B1: then every other link carried to the new frames by the shared plan's own carry, in the writer's
+  // order. A carry it refuses was never written.
+  const derived = rederived as EditableGraph;
+  if (!carryUntouchedLinkSizes(before, derived, factorIds)) return false;
+  const resized = derived.edges;
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]!;
     const was = before.edges[i]!;

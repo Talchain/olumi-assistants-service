@@ -113,9 +113,13 @@ function statesShareOrUnitRange(unit: string, value: number | undefined): boolea
   return head === 'share' || head === 'fraction' || head === 'proportion' || words[0] === 'proportion' || words[0] === 'fraction';
 }
 export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
-  const unit = typeof f.unit === 'string' ? f.unit.trim().toLowerCase() : '';
-  const isProportionUnit = PROPORTION_UNIT_TOKENS.has(unit) || (unit !== '' && statesShareOrUnitRange(unit, f.value));
-  return f.cap === 1 || (isProportionUnit && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
+  return f.cap === 1 || (isProportionUnit(f.unit, f.value) && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
+}
+
+/** A unit that states a 0–1 share by the one rule above (a closed token, or a share/fraction/proportion head or a written 0–1). */
+export function isProportionUnit(rawUnit: unknown, value?: number): boolean {
+  const unit = typeof rawUnit === 'string' ? rawUnit.trim().toLowerCase() : '';
+  return PROPORTION_UNIT_TOKENS.has(unit) || (unit !== '' && statesShareOrUnitRange(unit, value));
 }
 
 export function canonicaliseUnitForDisplay(unit: string | undefined): string | undefined {
@@ -406,7 +410,8 @@ export interface UnconfirmedCapBound {
  * degrades to today's behaviour and never to a corrupt write.
  */
 export type FactorValueProposalEvaluation =
-  | { readonly ok: true }
+  /** `widen_cap_to`: the user's figure lies above Olumi's reference, which the writer widens to cover it (A, U2). */
+  | { readonly ok: true; readonly widen_cap_to?: number }
   | {
       readonly ok: false;
       readonly reason: ProposalRejectionReason;
@@ -432,6 +437,8 @@ export interface EvaluateFactorValueProposalInput {
   readonly proposalCap?: number;
   /** Cap stored on the factor's observed_state, if any. */
   readonly factorCap?: number;
+  /** That cap is Olumi's reference (`frame_source: 'olumi_convention'`; A, D2): widened to the user's figure, never enforced. */
+  readonly factorCapIsOlumiReference?: boolean;
   /**
    * The factor's stored unit, if any. Used as fallback when the proposal
    * parameter omits the unit.
@@ -712,6 +719,7 @@ function evaluateFactorValueProposalImpl(
     unit: rawUnit,
     proposalCap,
     factorCap,
+    factorCapIsOlumiReference,
     factorUnit: rawFactorUnit,
     factorExistingRaw,
     factorObservedValue,
@@ -1153,12 +1161,18 @@ function evaluateFactorValueProposalImpl(
 
     // 6b. CEILING.
     if (effectiveRaw > cap) {
-      if (!inputHasUnit) {
-        // A bare number asserts no scale, so the ceiling is the ONLY scale
-        // evidence in play. Widening on it would let a mistyped digit
-        // redefine what the factor measures — the "a bound absent admits
-        // nonsense" direction. Unchanged, and pinned as the opposite-direction
-        // twin of the founder's case.
+      // A (18 Oct, U2; AIE 00:27/00:37): a cap Olumi chose (`frame_source: 'olumi_convention'`) is its reference, never a
+      // bound on the user's figure. The figure is kept and the reference widened by the one policy (`suggestExtendedCap`).
+      if (factorCapIsOlumiReference === true && proposalCap === undefined) return { ok: true, widen_cap_to: suggestExtendedCap(effectiveRaw) };
+      // A bare number is held to a proportion's 1 (it could be a percent typed for a share) or to a cap the proposal
+      // states. Any other stored cap, a percentage's 100 included, is Olumi's reference or an encoding, never the
+      // factor's range (AIE 18 Oct 00:27/00:37, caution d): the user's figure takes the unconfirmed-limit remedy below.
+      if (!inputHasUnit && (cap === 1 || proposalCap !== undefined)) {
+        // A bare number asserts no scale, so a proportion's 1 or the
+        // proposal's own cap is the ONLY scale evidence in play. Widening on it
+        // would let a mistyped digit redefine what the factor measures — the
+        // "a bound absent admits nonsense" direction, pinned as the
+        // opposite-direction twin of the founder's case.
         return {
           ok: false,
           reason: 'bare_number_outside_cap',

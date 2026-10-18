@@ -15,7 +15,7 @@
  * reason, never dropped and never turned into Olumi's estimate. Figures come only from the quote's own words (`figuresIn`),
  * never from the drafter's value. `statements` is optional: a missing or malformed list never fails a draft. Pure.
  */
-import { findJoinedRanges } from '../../cee/provenance/stated-amounts.js';
+import { findJoinedRanges, findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { figuresWritten, STATEMENT_FORMS, unitWrittenAfter, unknownSpeakerWords, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
@@ -375,6 +375,25 @@ export function goalTargetStatements(model: unknown, brief: string, figure: numb
   const rivalled = (quote: string): boolean => [...map.verified.entries()].some(([other, statements]) => other !== key
     && statements.some((s) => s.quote === quote && (states(s.low) || states(s.high))));
   return (map.verified.get(key) ?? []).filter((s) => s.negated !== true && (states(s.low) || states(s.high)) && !rivalled(s.quote));
+}
+
+/** "… scored out of 10": the amount is the top of the scale the statement scores on. */
+const SCALE_TOP = /\bout\s+of\s*$/iu;
+/**
+ * ⭐ BUDDY-A #3396 B2 (R2; PL-A2-FRAME-0435): the user's own BOUND on a factor, through the one quantity/source binder: a verified
+ * statement about THIS factor (`sourceMapOf`: the subject the AI typed, the words the door verified) whose role is a bound, in the
+ * factor's unit. That is an upper limit (`upper_bound`: "cannot exceed £40 a month"), or the top of the scale that verified
+ * statement scores it on ("scored out of 10", inside its own quote). A stated RANGE is no bound: a historical or uncertain
+ * range keeps its own carrier and its high end is no maximum (AIE W3). Another quantity's words never count. Pure.
+ */
+export function factorBoundStated(model: unknown, brief: string | undefined, label: string, unit: string | null | undefined, bound: number): boolean {
+  if (typeof brief !== 'string' || !Number.isFinite(bound)) return false;
+  const prefix = `factor|${norm(label)}|`;
+  const said = [...sourceMapOf(draftStatements(model), brief).verified].filter(([key]) => key.startsWith(prefix))
+    .flatMap(([, statements]) => statements).filter((st) => st.negated !== true);
+  const inUnit = (st: UserStatement): boolean => st.unit === undefined || st.unit.trim() === '' || typeof unit !== 'string' || sameUnit(st.unit, unit);
+  return said.some((st) => (st.form === 'upper_bound' && st.high === bound && inUnit(st))
+    || findStatedAmounts(st.quote).some((a) => a.magnitude === bound && SCALE_TOP.test(st.quote.slice(0, a.index))));
 }
 
 /**

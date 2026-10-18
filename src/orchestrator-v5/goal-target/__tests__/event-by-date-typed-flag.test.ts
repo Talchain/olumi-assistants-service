@@ -1,5 +1,6 @@
 /** DL B3 086e4624, served 81b77b9f: event-prompt selection is the admission authority. No external I/O. */
 import { createHash } from 'node:crypto';
+import { withoutNewReferenceMarker } from '../../agent-lane/__tests__/fixtures/one-form-levels.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../../../utils/telemetry.js';
@@ -219,7 +220,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
       // #2425 (14 Oct, money said as the user writes it): the set-aside link reasons now read "£300 / month", not "300 £/month"
       // (loss[3], [16], [17], [21], [22], [24], measured against d443cf9b); with the title moved back, nothing else differs.
-      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(beforeQuestionTitle(admissionBase), sealed(), 'sealedR-d3'))).digest('hex')).toBe('f8ad516a4b97d73ccdbcaf84419aafd2f3fc76a4ca5a785ccd6df8e6e0280c1c');
+      // A (18 Oct): the recorded digest predates the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(beforeQuestionTitle(withoutNewReferenceMarker(admissionBase, undefined)), sealed(), 'sealedR-d3'))).digest('hex')).toBe('f8ad516a4b97d73ccdbcaf84419aafd2f3fc76a4ca5a785ccd6df8e6e0280c1c');
       expect(admitted.withheld.some(w => w.reason === 'event_goal_unadmitted')).toBe(false);
       expect(info.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'cee.event_by_date.fallback_kept')).toBe(false);
       const { result, registrations } = await built(sealed(), SEALED_BRIEF);
@@ -250,7 +252,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       // extractionType inferred + user_material_unverified, provenance from_brief->unverified_brief (and source brief_extraction->cee_inference where it was set).
       // Capacity row 7 re-pin (#3030): a drafter-`explicit` option setting the verifier cannot credit now also carries
       // `user_material_unverified` (UNKNOWN, never Olumi's). Proof: with only that stamp switched off, this pin and the row pass.
-      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(beforeQuestionTitle(registrationBase), sealed(), 'sealedR-d3'))).digest('hex'))
+      expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(beforeQuestionTitle(withoutNewReferenceMarker(registrationBase, undefined)), sealed(), 'sealedR-d3'))).digest('hex'))
         .toBe('09518fbbf287c255037d35406b01ad448c453732afa337de307c5620c5d6e60a');
       expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
       expect(eventAdmission).not.toHaveBeenCalled();
@@ -342,7 +344,8 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
       entries.splice(at === -1 ? entries.length : at, 0, ['goal_deadline_as_stated', 'by Q3']);
       return Object.fromEntries(entries);
     }) };
-    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(asBase, JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
+    // A (18 Oct): the recorded digest predates the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+    expect(createHash('sha256').update(JSON.stringify(beforeAiLevelTypes(withoutNewReferenceMarker(asBase, undefined), JSON.parse(B3_D2.output_text) as CandidateModel, 'B3-d2'))).digest('hex').slice(0, 16)).toBe('beb8fd537da68f6d');
     expect(resolveRunAdmission(registrations[0]).willProceed).toBe(true);
   });
 
@@ -482,6 +485,7 @@ describe('event-by-date typed prompt verdict (B3 086e4624; base 81b77b9f)', () =
     expect(JSON.stringify(explicitFalse)).toBe(JSON.stringify(a));
     // S7 PR-B re-record (field-by-field vs base 81b77b9f/staging cbf36b7a): ONLY the drafter-declared explicit factors with no verbatim brief quote differ —
     // source brief_extraction->cee_inference, extractionType absent->inferred, user_material_unverified true, provenance from_brief->unverified_brief. Nothing else moves.
-    expect(createHash('sha256').update(JSON.stringify(beforeQuestionTitle(a))).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
+    // A (18 Oct): the recorded digest predates the disclosure on Olumi's ranges (`withoutNewReferenceMarker`).
+    expect(createHash('sha256').update(JSON.stringify(beforeQuestionTitle(withoutNewReferenceMarker(a, undefined)))).digest('hex')).toBe('28e2aee7fbe6e85c468c897e27c181016d1efa53a7ab3d8888a01b9caa5056e0');
   });
 });

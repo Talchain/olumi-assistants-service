@@ -88,7 +88,8 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
   it('T1 RED: a finite estimate survives, framed on the node’s scale_frame and stamped cee_inference — capless', () => {
     const m = admitted(candidate());
     const n = byId(m, 'estimated_headcount');
-    expect(n.observed_state).toStrictEqual({ value: 10 / 100, raw_value: 10, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only).
+    expect(n.observed_state).toStrictEqual({ value: 10 / 100, raw_value: 10, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
     expect(n.scale_frame).toBe(100);
     expect(n.observed_state).not.toHaveProperty('cap');
     expect(n.observed_state).not.toHaveProperty('declared_scale');
@@ -105,7 +106,8 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
 
   it('T2 RED: an estimate of ZERO survives — no truthiness guard', () => {
     const n = byId(admitted(candidate()), 'zero_tech_leads');
-    expect(n.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only).
+    expect(n.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
     expect(n.scale_frame).toBe(10);
   });
 
@@ -120,6 +122,7 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     expect(n.observed_state).toStrictEqual({
       value: 49 / 200, raw_value: 49, cap: 200, declared_scale: 'unit_interval', unit: 'GBP', source: 'brief_extraction',
       extractionType: 'explicit', // S7: the verifier-credited quantity carries the existing explicit type; figures unchanged
+      frame_source: 'olumi_convention', // CHANGED 18 Oct (A, D2): the drafter's 200 is Olumi's range, disclosed as such
     });
     expect(n).not.toHaveProperty('scale_frame');
   });
@@ -128,7 +131,8 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     const withEstimate = await registered(candidate());
     const withoutEstimate = await registered(candidate({ unframeable: { baseline_value: null } }));
     const n = byId(withEstimate, 'unframeable_backlog');
-    expect(n.observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only).
+    expect(n.observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
     expect(n.scale_frame).toBe(1000);
     const blockers = (g: unknown) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}:${i.factor_id}`).sort();
     expect(blockers(withEstimate)).toEqual(['MISSING_FACTOR_LEVEL:absent_contractors',
@@ -177,6 +181,7 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     expect(entry?.reason).not.toContain('your own figures');
     expect(entry?.reason).toContain('Olumi');
     // …and with the frame now defined, the estimate is carried on it, as Olumi's.
-    expect(byId(m, 'unframeable_backlog').observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only).
+    expect(byId(m, 'unframeable_backlog').observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
   });
 });

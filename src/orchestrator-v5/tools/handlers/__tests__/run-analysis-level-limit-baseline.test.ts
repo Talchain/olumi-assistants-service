@@ -25,7 +25,7 @@ import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot, type ScenarioReader } from '../run-analysis.js';
-import { carryLevelLimitBaselines, levelLimitBaselineNodeIds, levelLimitReadsOnNodeLevel, levelLimitReadsOnNodeCap } from '../level-limit-baseline.js';
+import { carryLevelLimitBaselines, levelLimitBaselineNodeIds, levelLimitReadsOnNodeLevel, levelLimitReadsOnNodeCap, unprovablePercentFrameIds } from '../level-limit-baseline.js';
 import { deriveInferredValues } from '../../../coaching/inferred-value-disclosure.js';
 import { percentPeriodsDiffer } from '../../../agent-lane/admit-constraint.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
@@ -366,6 +366,23 @@ describe('a level limit on a non-root node is checked against that node\'s curre
     expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 20, source: 'cee_inference' } }), PCT10('n'), undefined, NO_OPTIONS).size).toBe(0);
     expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 20 }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS).size, 'capped on 20').toBe(0);
     expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100 }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS), 'PRESENT: capped on 100').toEqual(new Set(['n']));
+    // U1 (18 Oct, A): the same pair on a count or a score is framed on Olumi's reference, never encoded in percent.
+    for (const unit of ['customers', 'score']) {
+      for (const frame of [{ cap: 100 }, {}]) {
+        const node = hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', unit, ...frame } });
+        expect(levelLimitBaselineNodeIds(node, PCT10('n'), undefined, NO_OPTIONS).size, `${unit}, ${'cap' in frame ? 'cap' : 'scale_frame'} 100`).toBe(0);
+      }
+    }
+  });
+
+  it('U1 residual (18 Oct, A): on a unitless node framed at 100, Olumi\'s "%" limit is sent unframed; the user\'s own is read as a percent', () => {
+    const node = hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100 }, scale_frame: undefined });
+    const limit = (provenance: string) => [{ constraint_id: `c-${provenance}`, node_id: 'n', operator: '<=', value: 10, unit: '%', value_frame: 'level', provenance }];
+    expect(unprovablePercentFrameIds(node, limit('inferred'))).toEqual(['c-inferred']);
+    expect(unprovablePercentFrameIds(node, limit('explicit'))).toEqual([]);
+    // CONTRAST: a node in a percent unit reads either limit on its 100 (its encoding).
+    const pct = hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100, unit: '%' }, scale_frame: undefined });
+    expect(unprovablePercentFrameIds(pct, limit('inferred'))).toEqual([]);
   });
 
   it('FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten', () => {

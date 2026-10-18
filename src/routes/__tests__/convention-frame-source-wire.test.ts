@@ -183,7 +183,13 @@ it('carries the rescued convention frame through construction, registration, per
   expect(priceOf(armA).observed_state?.cap).toBe(98);
 
   const armB = await construct(structuredClone(candidate));
-  for (const node of armB.nodes) expect(node.observed_state ?? {}).not.toHaveProperty('frame_source');
+  // CHANGED 18 Oct (A, D2): the marker now also discloses the drafter's own ranges. With no rescue, a marked node keeps exactly
+  // the range the drafter wrote (nothing re-framed); the price keeps 200 below.
+  for (const node of armB.nodes) {
+    if (node.observed_state?.frame_source === undefined) continue;
+    const drafted = candidate.factors.find((f) => f.label === node.label)?.plausible_max;
+    expect(node.observed_state.cap ?? node.scale_frame, String(node.label)).toBe(drafted);
+  }
   expect(priceOf(armB).observed_state?.cap, 'Arm B: the unmodified recording keeps the original cap').toBe(200);
 
   const registration = await register(armA);

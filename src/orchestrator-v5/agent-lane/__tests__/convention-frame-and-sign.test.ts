@@ -267,9 +267,11 @@ describe('#2842 follow-up: a rescue needs its basis; a rescued factor says so on
   it('a rescued factor carries `frame_source: olumi_convention`; a byte-identical one carries nothing new', () => {
     const r = admit(candidate([CHURN(3), SUBS(1300, 2000)], [CHURN_TO_SUBS]));
     expect(nodeOf(r, 'Monthly churn').observed_state).toMatchObject({ frame_source: 'olumi_convention', cap: 13 });
-    expect(JSON.stringify(nodeOf(r, 'Pro paying subscribers'))).not.toContain('frame_source');
+    // CHANGED 18 Oct (A, D2): the drafter's 2000 is Olumi's range too, so it carries the same marker (unchanged frame).
+    expect(nodeOf(r, 'Pro paying subscribers').observed_state).toMatchObject({ frame_source: 'olumi_convention', cap: 2000 });
     const n = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, amount: -10 }]));
-    expect(JSON.stringify(n.nodes)).not.toContain('frame_source');
+    // No rescue: churn keeps its percent encoding (100), which is not Olumi's range, so it carries no marker.
+    expect(nodeOf(n, 'Monthly churn').observed_state).not.toHaveProperty('frame_source');
   });
 });
 
@@ -389,7 +391,8 @@ describe('§(u)(b) an OLUMI-drafted size takes its sign from the drawn direction
   it('Science option E: a sign-conflicted size (its basis dropped) never seeds a rescue in admission; the agreeing one does', () => {
     const c = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, amount: 24, basis: 'churn removes subscribers' }]));
     expect(frameOf(c, 'Monthly churn')).toBe(100);
-    expect(JSON.stringify(c.nodes)).not.toContain('frame_source');
+    // CHANGED 18 Oct (A, D2): the marker now also discloses the drafter's own ranges; no rescue = none on churn.
+    expect(nodeOf(c, 'Monthly churn').observed_state).not.toHaveProperty('frame_source');
     // CONTROL: the same size written with the agreeing sign is rescued (churn framed at 13).
     const ok = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, basis: 'churn removes subscribers' }]));
     expect(frameOf(ok, 'Monthly churn')).toBe(13);
@@ -398,7 +401,8 @@ describe('§(u)(b) an OLUMI-drafted size takes its sign from the drawn direction
   it('#2848 r2 #1: a link pair drawn TWICE never seeds a rescue (sizing and the basis are keyed by the pair)', () => {
     const twice = admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, amount: 3, basis: 'b1' }, { ...CHURN_TO_SUBS, basis: 'b2' }]));
     expect(frameOf(twice, 'Monthly churn')).toBe(100);
-    expect(JSON.stringify(twice.nodes)).not.toContain('frame_source');
+    // CHANGED 18 Oct (A, D2): the marker now also discloses the drafter's own ranges; no rescue = none on churn.
+    expect(nodeOf(twice, 'Monthly churn').observed_state).not.toHaveProperty('frame_source');
     // CONTROL: the same −24 link drawn once is rescued.
     expect(frameOf(admit(candidate([CHURN(3), SUBS(1300, 2000)], [{ ...CHURN_TO_SUBS, basis: 'b2' }])), 'Monthly churn')).toBe(13);
   });

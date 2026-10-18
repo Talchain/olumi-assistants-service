@@ -74,6 +74,7 @@ import {
   admitCandidateConstraints,
   canonicalProvenance,
   percentLevelFrame,
+  percentScaleUnit,
   type CandidateConstraint,
   type AdmittedConstraint,
   type ConstraintAdmissionResult,
@@ -82,7 +83,7 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { factorBoundStated, figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -4046,6 +4047,20 @@ function admitOnce(
       capByLabel.set(iv.factor_label, frame);
     }
   }
+  // ⭐ A U3 (18 Oct): a level limit in the factor's own unit above Olumi's range widens the range the same way, so the
+  // user's limit is never read outside it. A bound the brief states for THIS factor is the user's (`factorBoundStated`,
+  // BUDDY-A B2: a verified limit or scale top on it; a stated range or another quantity's figure is none), and a percentage's 100 is its encoding: both are left alone.
+  const limitWidened = new Set<string>();
+  for (const c of model.constraints) {
+    const f = model.factors.find((x) => canonicalLabel(x.label) === canonicalLabel(c.metric));
+    const stated = f === undefined ? undefined : capByLabel.get(f.label);
+    if (f === undefined || stated === undefined || (c.frame !== undefined && c.frame !== 'level') || !Number.isFinite(c.value)
+      || percentScaleUnit(f.unit ?? undefined)
+      || c.value <= stated || (c.unit ?? '').trim().toLowerCase() !== (f.unit ?? '').trim().toLowerCase()
+      || factorBoundStated(model, brief, f.label, f.unit, stated)) continue;
+    capByLabel.set(f.label, defaultFrameFor(c.value));
+    limitWidened.add(f.label);
+  }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
     const unframedEstimate = model.factors.some((f) => f.label === label && !f.baseline_known
@@ -4575,9 +4590,17 @@ function admitOnce(
   }
 
   // #2842 follow-up: a factor framed by Olumi's rescue convention says so on its own record, so a surface can disclose it.
-  for (const cf of conventionFrames) {
-    const node = nodes.find((n) => n.id === ids.get(cf.label)) as { observed_state?: Record<string, unknown> } | undefined;
-    if (node?.observed_state !== undefined) node.observed_state = { ...node.observed_state, frame_source: 'olumi_convention' };
+  // ⭐ A (18 Oct, D2): every frame Olumi chose says so the same way — a defaulted or widened frame, and the drafter's range
+  // that the brief does not state as this factor's bound (`factorBoundStated`, BUDDY-A B2) and the unit does not
+  // encode. Disclosure only: never a bound, an encoding or a licence.
+  const draftedReference = (f: CandidateModel['factors'][number]): boolean => typeof f.plausible_max === 'number'
+    && capByLabel.get(f.label) === f.plausible_max && !(f.plausible_max === 100 && percentScaleUnit(f.unit ?? undefined))
+    && !factorBoundStated(model, brief, f.label, f.unit, f.plausible_max);
+  const olumiFrameLabels = new Set([...conventionFrames.map((c) => c.label), ...defaultedFrames.map((d) => d.label),
+    ...widenedFrames.map((w) => w.label), ...limitWidened, ...model.factors.filter(draftedReference).map((f) => f.label)]);
+  for (const label of olumiFrameLabels) {
+    const node = nodes.find((n) => n.id === ids.get(label)) as { observed_state?: Record<string, unknown> } | undefined;
+    if (node?.observed_state !== undefined && !unscaled.has(label)) node.observed_state = { ...node.observed_state, frame_source: 'olumi_convention' };
   }
 
   // The scope choice, recorded with both readings: its `after` IS the assumption the build says, and
@@ -4624,11 +4647,14 @@ function admitOnce(
    * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
    */
   const limitedLevelFrames = new Map<string, number>();
+  /** The percent unit of a level limit the USER stated on a node: it supports that node's frame of 100 as its encoding. */
+  const userPercentLimitUnits = new Map<string, string>();
   for (const c of model.constraints) {
     const frame = limitedOutcomeFrame(c);
     if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) limitedLevelFrames.set(id, frame);
+    if (id !== undefined && c.unit !== undefined) userPercentLimitUnits.set(id, c.unit);
   }
   for (const n of nodes) {
     const frame = limitedLevelFrames.get(n.id);
@@ -5298,12 +5324,16 @@ function admitOnce(
   const constraintResult = withGoalTargetRows(admitCandidateConstraints(
     model.constraints,
     nodeIdForMetric,
-    // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
+    // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against. A frame of 100
+    // is a percent only beside a percent unit (18 Oct, A): the node's own (a level-less node stores no observed state, so
+    // its declared one), else the unit of a percent level limit the user stated on it. Olumi's 100 alone is no encoding.
     (nodeId) => {
       const n = nodeById.get(nodeId);
       if (n === undefined) return undefined;
+      const unit = [n.observed_state?.unit, unitById.get(nodeId), userPercentLimitUnits.get(nodeId)].find((u) => u !== undefined && u.trim() !== '');
       return {
-        ...(n.observed_state ?? {}), ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}),
+        ...(n.observed_state ?? {}), ...(unit !== undefined ? { unit } : {}),
+        ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}),
         ...(typeof n.label === 'string' ? { label: n.label } : {}),
       };
     },

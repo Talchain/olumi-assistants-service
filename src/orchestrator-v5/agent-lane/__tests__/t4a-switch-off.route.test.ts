@@ -126,7 +126,8 @@ describe('T4 admission through the real route', () => {
     draft.links[0].from = 'Engineers';
     brief += ' We currently have 6 engineers.';
     await construct();
-    expect(node('Engineers').observed_state).toEqual({ value: 0.6, raw_value: 6, cap: 10, declared_scale: 'unit_interval', unit: 'engineers', source: 'brief_extraction', extractionType: 'explicit' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only); every figure unchanged.
+    expect(node('Engineers').observed_state).toEqual({ value: 0.6, raw_value: 6, cap: 10, declared_scale: 'unit_interval', unit: 'engineers', source: 'brief_extraction', extractionType: 'explicit', frame_source: 'olumi_convention' });
     expect(valueClassOf(node('Engineers').observed_state)).toBe('user_stated');
   });
 
@@ -145,7 +146,8 @@ describe('T4 admission through the real route', () => {
     draft.links.push({ from: 'Demand', to: 'Output', direction: 'positive', provenance: 'ai_proposed', effect_amount: 0.1, effect_per_source_change: 1, effect_provenance: 'ai_proposed' });
     await construct();
     expect(node('Demand').scale_frame).toBe(100);
-    expect(node('Demand').observed_state).toEqual({ value: 0.25, raw_value: 25, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
+    // CHANGED 18 Oct (A, D2): Olumi chose this range, so it says so (disclosure only); every figure unchanged.
+    expect(node('Demand').observed_state).toEqual({ value: 0.25, raw_value: 25, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred', frame_source: 'olumi_convention' });
   });
   it('A5: target-gap equality keeps the convertible size, labelled Olumi\'s', async () => {
     draft.goal.baseline_known = true; draft.goal.baseline_provenance = 'explicit';
