@@ -8,11 +8,19 @@
  *
  * Real path: strict candidate schema → `buildModelFromBrief` → the `/graph/register` body → `GraphV3.parse` → the goal.
  */
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe, expect, it, vi } from 'vitest';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import type { HandlerInvocation } from '../../tools/registry.js';
+import type { PLoTClient } from '../../../orchestrator/plot-client.js';
+import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
+import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
 type Edge = Record<string, unknown> & { from: string; to: string; strength: { mean: number; std: number }; provenance?: { magnitude?: string } };
 type Graph = { nodes: (Record<string, unknown> & { id: string; kind: string })[]; edges: Edge[] };
@@ -95,6 +103,43 @@ async function build(wire: Record<string, unknown>, brief: string = BRIEF): Prom
   return { graph: GraphV3.parse(body) as unknown as Graph, out };
 }
 
+const SID = '76767676-7676-4767-8767-767676767677';
+/** The real build with the drafter's request captured: the SENT instructions, the cold read and the raw register body. */
+async function buildSent(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ sent: string; graph: Graph; raw: Record<string, unknown> }> {
+  expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
+  let body: unknown = null;
+  let sent = '';
+  const call = (async (req: { instructions?: string }) => { sent ||= String(req.instructions); return { text: JSON.stringify(wire) }; }) as unknown as CallStructuredModel;
+  const d: InternalDispatch = async (path, b) => {
+    if (path.endsWith('/graph/register')) { body = structuredClone((b as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+    return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+  };
+  const out = await buildModelFromBrief(SID, brief, d, call) as Record<string, unknown>;
+  expect(out.ok, JSON.stringify(out)).toBe(true);
+  return { sent, graph: GraphV3.parse(body) as unknown as Graph, raw: body as Record<string, unknown> };
+}
+
+/** The request PLoT receives: the stored model loaded cold for the Run, the REAL Run handler, PLoT faked. */
+async function preparedRequest(raw: Record<string, unknown>, brief: string = BRIEF): Promise<Record<string, any>> {
+  const stored = GraphV3.parse(projectGraphForPersistence(raw)) as unknown as Record<string, unknown>;
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', {
+    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: structuredClone(stored), briefText: brief }),
+    loadGraph: async () => structuredClone(stored),
+  } as never);
+  let request: Record<string, any> = {};
+  const plotRun = vi.fn(async (payload: Record<string, any>) => {
+    request = structuredClone(payload);
+    return { ...structuredClone(minimalFixture), inference_warnings: [],
+      results: payload.options.map((o: Record<string, any>) => ({ option_id: o.id ?? o.option_id, option_label: o.label, win_probability: 1 / payload.options.length })),
+    } as unknown as V2RunResponseEnvelope;
+  });
+  const handler = createRunAnalysisHandler({ plotClient: { run: plotRun, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient,
+    scenarioReader: async () => snapshot });
+  await handler({ payload: { kind: 'message', scenario_id: SID, turn_id: 't-run' }, requestId: 'req-run', signal: new AbortController().signal,
+    context: {}, orientationText: '' } as unknown as HandlerInvocation);
+  expect(plotRun, 'PLoT was called exactly once').toHaveBeenCalledOnce();
+  return request;
+}
 const goalOf = (g: Graph) => g.nodes.find((n) => n.kind === 'goal') as Record<string, unknown>;
 const OLUMIS_75K = { amount: 75000, per: 1, by: 'ai_proposed' as Prov };
 
@@ -128,13 +173,36 @@ describe("the funding goal's unit is Olumi's reading, quoting the brief's senten
     expect(goalOf(graph).unit_reading).toBeUndefined();
   });
 
-  // AIE item 6 (UNITS, 18 Oct): "leave unsupported units unknown, using null only where the actual schema permits null". goal.unit
-  // is a REQUIRED string in the sent schema, so its one absence form is "": the strict schema takes it and admission saves no unit.
-  it('AIE item 6: an unsupported goal unit left unknown ("", the required string\'s absence) is accepted and saves no unit and no reading', async () => {
+  // AIE item 6 (UNITS, 18 Oct) with its v3 absence clause: "When no unit is supported for that claim, set goal.unit to "" …". goal.unit
+  // is a REQUIRED string in the sent schema, so "" is its one absence form: the strict schema takes it and admission saves no unit.
+  it('AIE item 6 v3: the SENT instructions carry the absence clause once (the v2 clause it replaces is gone)', async () => {
+    const T1 = JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { goal_unit_absence: { find: string; replace: string } };
+    const { sent } = await buildSent(funding(OLUMIS_75K));
+    expect(sent.split(T1.goal_unit_absence.replace)).toHaveLength(2);
+    expect(sent).not.toContain(T1.goal_unit_absence.find);
+  });
+
+  it('AIE item 6 v3: a goal unit left "" is accepted, and neither the cold read nor the prepared Run request holds a unit or a unit reading', async () => {
     const wire = funding(OLUMIS_75K);
-    const { graph } = await build({ ...wire, goal: { ...wire.goal, unit: '' } });
-    expect(goalOf(graph).label).toBe('securing funding');
-    expect(goalOf(graph)).not.toHaveProperty('goal_threshold_unit');
-    expect(goalOf(graph).unit_reading).toBeUndefined();
+    const { graph, raw } = await buildSent({ ...wire, goal: { ...wire.goal, unit: '' } });
+    const goal = goalOf(graph);
+    expect(goal.label).toBe('securing funding');
+    expect(goal).not.toHaveProperty('goal_threshold_unit');
+    expect(goal.unit_reading).toBeUndefined();
+    // The prepared request: the stored model, loaded cold by the real Run handler (PLoT faked); the SAME goal, by id.
+    const request = await preparedRequest(raw);
+    const sentGoal = (request.graph.nodes as Record<string, unknown>[]).find((n) => n.id === goal.id);
+    expect(sentGoal, 'PRECONDITION: the goal is in the request').toBeDefined();
+    expect(sentGoal).not.toHaveProperty('goal_threshold_unit');
+    expect(sentGoal).not.toHaveProperty('unit_reading');
+    expect(JSON.stringify(sentGoal)).not.toMatch(/"unit"\s*:\s*"[^"]/u);
+  });
+
+  it('CONTRAST (the probe sees a unit): the same draft with goal.unit "£" carries it to the cold read and the prepared request', async () => {
+    const { graph, raw } = await buildSent(funding(OLUMIS_75K));
+    const goal = goalOf(graph);
+    expect(goal.goal_threshold_unit).toBe('£');
+    const sentGoal = ((await preparedRequest(raw)).graph.nodes as Record<string, unknown>[]).find((n) => n.id === goal.id);
+    expect(JSON.stringify(sentGoal)).toMatch(/"(goal_threshold_)?unit"\s*:\s*"[^"]/u);
   });
 });

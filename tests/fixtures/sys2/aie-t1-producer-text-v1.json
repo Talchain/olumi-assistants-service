@@ -3,6 +3,12 @@
   "source_sha256": "21e7a8a5f7ed0e9a21627d972a665583aba79e4af5050023357afb418d7b63c1",
   "goal_unit_source_ref": "AIE-GOAL-UNIT-AND-DRAFTER-SCREEN-20261018-v2 (created 2026-10-18T07:43:57Z), goal_unit.instruction_exact (DL-3 item 6)",
   "goal_unit_source_sha256": "71da522c43729be7f53d8213c9106c9edb28ae8a7cf58ddae47a00feee74b474",
+  "goal_unit_absence_source_ref": "AIE-GOAL-UNIT-ABSENCE-20261018-v3 (created 2026-10-18T08:39:39Z): find_exact → replace_exact inside goal_unit",
+  "goal_unit_absence_source_sha256": "739b6a35f037daaa8eef2deeff136fa84c40efb4db799ef3081abff3001fe26b",
+  "goal_unit_absence": {
+    "find": "Leave unsupported units unknown, using null only where the actual schema permits null; never fabricate a unit to satisfy the schema.",
+    "replace": "When no unit is supported for that claim, set goal.unit to \"\" and the goal statement’s unit to null; do not invent a unit or unit reading."
+  },
   "excluded": [
     "unit_unresolved_bound: owed to #3396 (nullable plausible_max contract); the staging sent schema types factor plausible_max as a required number",
     "withdrawal: the UI/withdrawal owner applies it",
@@ -24,7 +30,7 @@
     {
       "id": "goal_unit",
       "old": "Never model only the change from today when the brief states today’s operands, and never put a stated figure only in a question.",
-      "replacement": "Never model only the change from today when the brief states today’s operands, and never put a stated figure only in a question. UNITS. For goal.unit and each goal statement’s unit, use only a unit supported by the complete applicable source for that claim’s own quantity and figure. A written unit may precede or follow its figure, or be established by an explicit definition of that same measure. Preserve its actual currency, counted thing, denominator, period, reference and change-versus-level meaning. Canonicalise equivalent notation without changing meaning: £ may be recorded as GBP, and an explicitly quarterly money rate keeps its quarterly period. The canonical spelling need not appear verbatim in the quote; the complete original quote still does. Do not borrow a nearby unit, another quantity’s identical numeral, a budget’s unit or a different time period to fill the field. A qualitative aim or tentative metric does not establish score points, a numeric scale or a target. Leave unsupported units unknown, using null only where the actual schema permits null; never fabricate a unit to satisfy the schema. Preserve supported dimensionless definitions and all source, speaker, qualifications, uncertainty and conditions. An Olumi-proposed measurement convention remains separately identified as Olumi’s proposal, not a unit the user supplied."
+      "replacement": "Never model only the change from today when the brief states today’s operands, and never put a stated figure only in a question. UNITS. For goal.unit and each goal statement’s unit, use only a unit supported by the complete applicable source for that claim’s own quantity and figure. A written unit may precede or follow its figure, or be established by an explicit definition of that same measure. Preserve its actual currency, counted thing, denominator, period, reference and change-versus-level meaning. Canonicalise equivalent notation without changing meaning: £ may be recorded as GBP, and an explicitly quarterly money rate keeps its quarterly period. The canonical spelling need not appear verbatim in the quote; the complete original quote still does. Do not borrow a nearby unit, another quantity’s identical numeral, a budget’s unit or a different time period to fill the field. A qualitative aim or tentative metric does not establish score points, a numeric scale or a target. When no unit is supported for that claim, set goal.unit to \"\" and the goal statement’s unit to null; do not invent a unit or unit reading. Preserve supported dimensionless definitions and all source, speaker, qualifications, uncertainty and conditions. An Olumi-proposed measurement convention remains separately identified as Olumi’s proposal, not a unit the user supplied."
     }
   ],
   "coverage_templates": [
