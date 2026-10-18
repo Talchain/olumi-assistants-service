@@ -1,0 +1,67 @@
+{
+  "at": "2026-10-18T14:29:28.228261+00:00",
+  "rung": "LOCAL_CONFIG_CONTROLS_ONLY",
+  "network_requests": 0,
+  "provider_calls": 0,
+  "credentials_loaded": false,
+  "served_runs": 0,
+  "stock_runner_unchanged": "58711968f70d8cb56e4b233ecc2d7078f5f37f5e03c15fc53999ced066beb53c",
+  "files_sha256": {
+    "claim-witness.mjs": "be9000cf7e5b47e8e92d7a2dc4c05b729272a5a88710bdf654440832f819a1a1",
+    "claim-witness.config.json": "209dcca4c05f5ddb425b0d58cdcf97b42902a9d7743e96dae800d04a1d7fabc2",
+    "claim-witness.README.md": "61c43f1db4f658f79fdb2ec4030dd804b14bbfe2d2fe0858bc82aa94e847a269"
+  },
+  "checks": [
+    {
+      "command": [
+        "node",
+        "--check",
+        "/Users/paulslee/olumi-work/recovery/pilot/runner/claim-witness.mjs"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "elapsed_ms": 191.77,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "/Users/paulslee/olumi-work/recovery/pilot/runner/claim-witness.mjs",
+        "--selfcheck"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "elapsed_ms": 108.74,
+      "stdout": "{\n  \"rung\": \"LOCAL_CONTROLS_ONLY\",\n  \"served\": false,\n  \"network_requests\": 0,\n  \"provider_calls\": 0,\n  \"result\": \"PASS\",\n  \"note\": \"Config/observer/wire controls only; no app or served witness PASS.\"\n}\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "/Users/paulslee/olumi-work/recovery/pilot/runner/claim-witness.mjs",
+        "--offline"
+      ],
+      "expected_exit": 0,
+      "exit": 0,
+      "elapsed_ms": 68.33,
+      "stdout": "OFFLINE only; zero service/provider/credential access. /Users/paulslee/olumi-work/recovery/pilot/runner/claim-witness-offline\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "/Users/paulslee/olumi-work/recovery/pilot/runner/claim-witness.mjs",
+        "--execute"
+      ],
+      "expected_exit": 1,
+      "exit": 1,
+      "elapsed_ms": 67.05,
+      "stdout": "",
+      "stderr": "Execution requires a DL-verified call allowance and per-turn reserve; no default allowance\n"
+    }
+  ],
+  "served_allowance": "UNVERIFIED; no old proof budget is inherited",
+  "actual_served_runtime_ms": null,
+  "booking": "NONE; DL owns GO/operator/judges"
+}

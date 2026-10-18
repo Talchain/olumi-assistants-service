@@ -1,0 +1,54 @@
+{
+  "kit": "S1e-attributed-claims-20261018",
+  "authored": "2026-10-18",
+  "scope": "Fresh synthetic integration witnesses only; no journey, exam or held-out case supplies these words.",
+  "spec": "/Users/paulslee/olumi-work/recovery/outbox/CLAIM-RECORD-SPEC.md",
+  "aie": "/Users/paulslee/olumi-work/recovery/prompt/AIE-CLAIM-CONTRACT-AND-PRODUCER-TEXT-20261018-v1.json",
+  "max_presses_per_stage": 2,
+  "proposal_tools": ["propose_statement", "propose_link_effect", "propose_link_strength", "propose_link_strengths"],
+  "cases": [
+    {
+      "id": "CW1-own",
+      "source": "user",
+      "link": {"from": "Badge printing hours", "to": "Badges printed per day"},
+      "claim": "I estimate that each additional badge-printing hour adds 12 badges per day, with a normal effect distribution of mean 12 and standard deviation 2, while the printer is available.",
+      "brief": "Fresh synthetic bench scenario. We currently print 24 badges per day using two badge-printing hours per day. Our goal is 48 badges printed per day. Compare keeping two hours, allocating three hours, and allocating four hours per day. I estimate that each additional badge-printing hour adds 12 badges per day, with a normal effect distribution of mean 12 and standard deviation 2, while the printer is available. Treat these as my estimates and keep the printer-availability condition visible.",
+      "offer": "Please show a review card for my stated effect from Badge printing hours to Badges printed per day. Keep my complete source, units, normal-law assumption and printer-availability condition. Approval should authorise only the displayed operation.",
+      "expected": {"said_by": "user", "mean": 12, "std": 2, "unit": "badges/day per additional printing hour", "condition": "while the printer is available"},
+      "cold": "Read the saved badge-printing model from this fresh session. State the current per-hour effect, who asserted it, its approval status and its conditions. Describe missing information plainly. Do not change the model or prepare another card."
+    },
+    {
+      "id": "CW2-party",
+      "source": "party",
+      "party": "the cleaning engineers",
+      "link": {"from": "Cleaning operators on duty", "to": "Clean bead trays per hour"},
+      "claim": "The cleaning engineers estimate that one additional operator adds between 5 and 9 clean bead trays per hour, most likely 7, while the washing unit is unchanged.",
+      "brief": "Fresh synthetic glass-bead cleaning scenario. Two cleaning operators currently produce 14 clean bead trays per hour. Our goal is 21 clean bead trays per hour. Compare keeping two operators, using three, and using four. The cleaning engineers estimate that one additional operator adds between 5 and 9 clean bead trays per hour, most likely 7, while the washing unit is unchanged. I am relaying their estimate; I have not independently verified it. They supplied no probability distribution or expected mean.",
+      "offer": "Please show the attributed effect claim from Cleaning operators on duty to Clean bead trays per hour. Preserve the cleaning engineers as the asserting party and me as the relay. Keep 5 to 9 and the stated most-likely 7 distinct from an expected mean. If a calculation needs another assumption, show it separately through the existing law or working-point card.",
+      "expected": {"said_by": "party", "party": "the cleaning engineers", "relayed_by": "user", "low": 5, "high": 9, "stated_centre": 7, "mean_supplied": false, "law_supplied": false, "condition": "while the washing unit is unchanged"},
+      "cold": "From the saved bead-cleaning model, report the effect claim, its named source, its relay, bounds, stated centre and conditions. Distinguish any separately adopted modelling assumption from the engineers' claim. Do not change the model."
+    },
+    {
+      "id": "CW3-unknown",
+      "source": "unknown",
+      "link": {"from": "Inspectors on duty", "to": "Seals inspected per hour"},
+      "claim": "One additional inspector adds between 6 and 14 seals inspected per hour at unchanged air pressure.",
+      "brief": "Fresh synthetic seal-inspection scenario. One inspector currently inspects 10 seals per hour. Our goal is 24 seals inspected per hour. Compare one, two and three inspectors. An unsigned note reads: One additional inspector adds between 6 and 14 seals inspected per hour at unchanged air pressure. I do not know who wrote the note and am not asserting its estimate myself. No centre, spread or distribution is supplied.",
+      "offer": "Please retain the unsigned note as an unresolved-source claim for Inspectors on duty to Seals inspected per hour. Show the existing claim review card if supported. Do not turn it into my own assertion or Olumi's estimate just because the author is unknown. Keep the range and air-pressure condition; do not infer a midpoint, law or chance from the range alone.",
+      "expected": {"said_by": "unknown", "party_absent": true, "low": 6, "high": 14, "centre_supplied": false, "law_supplied": false, "condition": "at unchanged air pressure"},
+      "cold": "Read the saved seal-inspection model in this new session. Say what range and condition are retained, whether the asserting source is known, and whether a separate approximation was actually adopted. Do not invent an author or change the model."
+    },
+    {
+      "id": "CW4-correct-undo",
+      "source": "party",
+      "party": "the index operators",
+      "link": {"from": "Indexing hours per day", "to": "Documents indexed per day"},
+      "claim": "The index operators estimate that one extra indexing hour adds 20 documents per day, with a normal effect distribution of mean 20 and standard deviation 3, for English files.",
+      "brief": "Fresh synthetic archive-indexing scenario, currently handling English files. Two indexing hours produce 40 documents indexed per day. Our goal is 80 documents indexed per day. Compare two, three and four indexing hours per day. The index operators estimate that one extra indexing hour adds 20 documents per day, with a normal effect distribution of mean 20 and standard deviation 3, for English files. I am relaying their estimate. Separately, the catalogue volunteers estimate 9 extra documents per day for French files; retain that different conditional view, but do not average it into this English-file calculation.",
+      "offer": "Please show the attributed claim review card for the index operators' English-file effect from Indexing hours per day to Documents indexed per day. Keep their authorship and my relay separate from approval. Retain the catalogue volunteers' French-file view as a different condition.",
+      "correction": "The index operators have withdrawn their earlier English-file estimate: “The index operators estimate that one extra indexing hour adds 20 documents per day, with a normal effect distribution of mean 20 and standard deviation 3, for English files.” Their replacement estimate is a normal effect with mean 16 documents per day and standard deviation 2 per additional indexing hour, for English files. Please propose only that correction on the existing link. Keep the catalogue volunteers' 9-document French-file claim and its source intact. Do not treat the newer date as a reason to erase that different conditional view.",
+      "expected": {"said_by": "party", "party": "the index operators", "relayed_by": "user", "mean": 20, "std": 3, "corrected_mean": 16, "corrected_std": 2, "scope": "English files", "retained_other_party": "the catalogue volunteers", "retained_other_value": 9, "retained_other_condition": "French files", "correction": "supersedes exact prior English claim; prior source/history preserved; Undo restores prior current claim"},
+      "cold": "Read the saved archive-indexing model in this new session after the version restore. State the current English-file effect and source, the retained French-file view and source, and what the available record proves about approval and history. Do not change the model or re-ask for figures already retained."
+    }
+  ]
+}
