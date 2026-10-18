@@ -132,7 +132,7 @@ describe('the lost £10: the user\'s figure survives propose → ONE approval �
     const before = currentHash();
 
     const proposed = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 10, unit: '£ per month', basis: 'the user: £10 per month', user_stated: true },
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 10, quote: ctx.user_text, unit: '£ per month', basis: 'the user: £10 per month', user_stated: true },
     ] });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });

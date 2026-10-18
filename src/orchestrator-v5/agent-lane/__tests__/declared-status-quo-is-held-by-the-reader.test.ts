@@ -209,7 +209,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, basis: 'the user: it stays at £49', user_stated: true }],
+      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 49, quote: ctx.user_text, basis: 'the user: it stays at £49', user_stated: true }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(r.refusal).toBe('nothing_to_set');
@@ -227,7 +227,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeOptionInterventions(ctx, {
-      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 45, basis: 'the user: carrying on means a £45 promo', user_stated: true }],
+      interventions: [{ option_label: KEEP_LABEL, factor_label: 'Pro plan price', value: 45, quote: ctx.user_text, basis: 'the user: carrying on means a £45 promo', user_stated: true }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('levels_not_accepted');

@@ -23,6 +23,11 @@ import { log } from '../../../utils/telemetry.js';
 
 // AIE 6141593167: exact option-level authorship contract at both entry points.
 const OPTION_LEVEL_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a level the user supplied for this option and factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact. On an option in `status_quo_held`, a level is permitted only with true and verified user words saying that carrying on changes this factor and giving that level. Never restate the factor's starting value: carrying on as now already keeps that, so such a level is not recorded."} as const;
+/**
+ * ⭐ LEAN CORE (DL-3 18 Oct 2026; PL-0048): THE ONE AUTHORSHIP RULE's citation (`userStated`, user-statements.ts), ONE fragment for every
+ * tool that carries a figure of the user's. A figure is the user's only when this quotes their own typed words that state it. AIE sign-off.
+ */
+const USER_QUOTE = { type: 'string', maxLength: 400, description: 'Only when the figure is the user\u2019s: their exact words that state it, copied character for character from one of their messages, with its unit and any words that qualify it. Without it, the figure\u2019s source is recorded as not verified.' } as const;
 const ASSUMPTION_USER_STATED = {"type": "boolean", "description": "Set true ONLY for a figure the user supplied for this factor, with its actual source; the host must verify that source before recording it as theirs. A verified retained human statement counts. Set false ONLY when explicitly proposing a new Olumi estimate now, with its own basis; for keep: true, false identifies the existing recorded Olumi estimate being retained. Never infer false from missing, truncated or unmatched source, or from the absence of a user-authorship claim. Do not use false to relabel an old quoted, copied or recorded figure. Keep the original statement, subject and qualifications separate from any new interpretation. This flag is a claim to check, not proof of authorship; accepting an Olumi estimate does not turn it into a user-supplied fact."} as const;
 
 /**
@@ -190,6 +195,7 @@ const ACTS_ON = {
       ...obj({
         value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
         unit: { type: 'string', description: 'The unit the user stated, if any.' },
+        quote: USER_QUOTE,
         estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
         basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
       }, ['value']),
@@ -296,6 +302,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           user_stated: ASSUMPTION_USER_STATED,
           factor_label: { type: 'string' },
           value: { type: 'number' },
+          quote: USER_QUOTE,
           unit: { type: 'string' },
           basis: { type: 'string', description: 'Why this is a reasonable starting point, in the user\u2019s terms.' },
           revise: {
@@ -381,6 +388,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             ...obj({
               value: { type: 'number', description: 'The figure the user stated for this factor TODAY, in their own units (e.g. 49 for \u201cfrom \u00a349 to \u00a359\u201d on a price).' },
               unit: { type: 'string', description: 'The unit the user stated it in.' },
+              quote: USER_QUOTE,
             }, ['value']),
             description: 'For a factor you add, give today\u2019s level ONLY if the user stated it in their own words (e.g. a price '
               + 'they said moves "from \u00a349" is \u00a349 today). Never your own estimate, never a placeholder or 0: with no figure '
@@ -749,7 +757,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         items: obj({
           label: { type: 'string' },
           unit: { type: 'string', description: 'The actual known quantity\'s unit, from the model or verified source, for example GBP/year per engineer. Preserve its physical meaning; never invent a unit or silently change it.' },
-          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' },
+          today: obj({ value: { type: 'number', description: 'Whole units: 120000 for \u00a3120k.' }, unit: { type: 'string' }, quote: USER_QUOTE,
             range_low: { type: 'number', description: 'Only when the user also gave a range for this figure, both ends in one sentence of theirs ("between 20% and 30%"): its low end, in the same unit as value. value stays the one figure they chose; never a midpoint.' },
             range_high: { type: 'number', description: 'The high end of that same range. Send it with range_low.' } }, ['value']),
           affects: { type: 'string', description: 'ONE existing outcome, the goal, or a factor no option sets, that it drives, as the CURRENT MODEL STATE labels it.' },
@@ -821,6 +829,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
           user_stated: OPTION_LEVEL_USER_STATED,
+          quote: USER_QUOTE,
           likely_low: {
             type: 'number',
             description:
@@ -870,6 +879,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           user_stated: ASSUMPTION_USER_STATED,
           factor_label: { type: 'string' },
           value: { type: 'number' },
+          quote: USER_QUOTE,
           unit: { type: 'string' },
           basis: { type: 'string' },
         }, ['factor_label', 'value', 'unit', 'basis', 'user_stated']),
@@ -884,6 +894,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
           user_stated: OPTION_LEVEL_USER_STATED,
+          quote: USER_QUOTE,
         }, ['option_label', 'factor_label', 'value', 'basis', 'user_stated']),
       },
     }, ['assumptions', 'option_levels']),
@@ -1041,7 +1052,7 @@ export interface ProposeLevelsInternal {
 export type NewOptionActsOn = {
   factor_label: string;
   direction: 'positive' | 'negative';
-  level?: { value: number; unit?: string; estimate?: boolean; basis?: string } | null;
+  level?: { value: number; unit?: string; quote?: string; estimate?: boolean; basis?: string } | null;
 };
 
 export interface AgentCapabilities {
@@ -1148,7 +1159,7 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string; explicit_rebuild_request?: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; revise?: boolean; keep?: boolean }[];
+    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; quote?: string; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
@@ -1158,14 +1169,14 @@ export interface AgentCapabilities {
     new_factors?: readonly {
       label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[];
       /** Today's level, ONLY as the user stated it (PJ-A1 £49); taken only when their own words write it. */
-      today?: { value: number; unit?: string };
+      today?: { value: number; unit?: string; quote?: string };
     }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
-    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
+    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean; quote?: string; unmodelled_mechanisms?: readonly string[] }[];
   }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; user_stated: boolean }[];
-    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; user_stated: boolean; quote?: string }[];
+    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean; quote?: string; unmodelled_mechanisms?: readonly string[] }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
   reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;

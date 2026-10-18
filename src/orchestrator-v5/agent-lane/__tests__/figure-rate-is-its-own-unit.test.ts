@@ -63,7 +63,7 @@ describe('the consumer: the level the user wrote is proposed as THEIRS (where th
     const store = new ProposalStore();
     const caps = createAgentCapabilities(d, store);
     const r = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: 'Keep £49 and add a paid AI add-on', factor_label: 'Paid AI add-on price', value: 10, basis: 'the user: £10 per month', user_stated: true },
+      { option_label: 'Keep £49 and add a paid AI add-on', factor_label: 'Paid AI add-on price', value: 10, quote: ctx.user_text, basis: 'the user: £10 per month', user_stated: true },
     ] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect((r as { not_the_users_figure?: unknown }).not_the_users_figure).toBeUndefined();

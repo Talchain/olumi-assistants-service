@@ -123,7 +123,7 @@ describe('R1/R2 — a new switch at exactly 0 under an option, turned on by anot
 
   it('CONTRAST: an option that names the switch twice (bare AND at 0) is two answers — refused as before, nothing sent, never resolved by dropping one', async () => {
     const { caps, sent } = setup();
-    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{}, { level: { value: 0 } }]), retention()], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{}, { level: { value: 0, quote: ctx.user_text } }]), retention()], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
     expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
     expect(r.detail).toContain(`keep ONE acts_on entry for "${SWITCH}" in "${CONV}", with no "level"`);
     expect(sent).toEqual([]);
@@ -176,7 +176,7 @@ describe('R3 — no option in the change turns the switch on → refused, and th
   // (`agent-switch-placeholder-zero.test.ts`), so these rows bind a 0 that says more, which keeps this refusal.
   it('RED (one-option change): the only option lists it at { 0, "binary" } → the detail names that entry with NO "level" key, not 0', async () => {
     const { caps, sent } = setup();
-    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, unit: 'binary' } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, quote: ctx.user_text, unit: 'binary' } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
     expect(r.refusal, JSON.stringify(r)).toBe('switch_level_not_on');
     expect(sent).toEqual([]);
     expect(r.detail).toContain(`NEXT CALL: call propose_new_option again with exactly the same arguments, except send the acts_on entry for "${SWITCH}" in "${CONV}" with NO "level" key at all`);
@@ -186,7 +186,7 @@ describe('R3 — no option in the change turns the switch on → refused, and th
 
   it('the single-option refusal keeps its conflict_fields (names only)', async () => {
     const { caps } = setup();
-    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, unit: 'binary' } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, quote: ctx.user_text, unit: 'binary' } }])], new_factors: NEW_SWITCH, rationale: 'x' } as never) as Result;
     expect(r.conflict_fields).toEqual(['unit', 'not_one']);
   });
 
@@ -209,7 +209,7 @@ describe('R4 — a factor the MODEL ALREADY HAS (an existing switch) listed at 0
   };
   it('BASE BEHAVIOUR: conversion at { value: 0 }, retention bare → not refused; conversion is still LINKED to it with its level unset (said in levels_not_set); nothing said as dropped', async () => {
     const { caps, sent } = setup(withExistingSwitch);
-    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0 } }]), retention()], rationale: 'x' } as never) as Result;
+    const r = await caps.proposeNewOption(ctx as never, { options: [conversion([{ level: { value: 0, quote: ctx.user_text } }]), retention()], rationale: 'x' } as never) as Result;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     // Base: the 0 is not the user's figure, so its level is left unset and the link is Olumi's (U3 link author).
     expect(sentOption(sent, CONV)?.interventions?.filter((i) => i.factor_id === EXISTING)).toEqual([{ factor_id: EXISTING, value: null, source: 'cee_hypothesis' }]);

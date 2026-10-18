@@ -206,7 +206,7 @@ describe('the answer to the ask lands as the user\'s level and the Run proceeds 
     const caps = createAgentCapabilities(dispatch, proposals, undefined, 'full');
     const said = `${factor.label} is about ${answer} ${unit}.`;
     const ctx = { scenario_id: SID, authenticated_user_id: null, request_id: 'req-answer', turn_id: 'answer-turn-0001', user_turn_text: said, user_text: said };
-    const card = await caps.proposeAssumptions(ctx as never, { assumptions: [{ user_stated: true, factor_label: factor.label, value: answer, unit,
+    const card = await caps.proposeAssumptions(ctx as never, { assumptions: [{ user_stated: true, factor_label: factor.label, value: answer, quote: ctx.user_text, unit,
       basis: 'the user\'s answer to the ask', revise: true }] } as never) as Rec;
     expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false });
     expect(card.assumptions[0]).toMatchObject({ value: answer, your_figure: true });

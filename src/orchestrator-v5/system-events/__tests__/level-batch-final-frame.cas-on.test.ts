@@ -224,7 +224,7 @@ describe('native cohort on its final factor frame, CAS ON', () => {
       commitOptionLevels: input => { calls.push(input); return commitOptionLevelsInProcess(input, 'sfr'); },
     });
     const proposal = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: 'Trial', factor_label: 'Duration', value: 0.3, user_stated: true, basis: 'the user’s stated duration',
+      { option_label: 'Trial', factor_label: 'Duration', value: 0.3, quote: ctx.user_text, user_stated: true, basis: 'the user’s stated duration',
         ...(likely ? { likely_low: 0.1, likely_high: 0.5, range_meaning: 'likely_range' as const, range_user_stated: true } : {}) },
       { option_label: 'Full', factor_label: 'Duration', value: 20, basis: 'an estimate for approval' },
     ] });

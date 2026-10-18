@@ -332,7 +332,7 @@ export function namesBothEnds(text: string, nodes: readonly Entity[], from: stri
  * - agreed by its whole message's reading (attribution, framing, dispute and disowning still reject it), and not superseded
  *   by a later verified message.
  * `copied`: no verified quote, yet the conversation (verified or not) reads THIS band for THIS link, so the band is copied
- * or unknown material, never Olumi's own new estimate (`statementOrigin` makes it unknown).
+ * or unknown material, never Olumi's own new estimate (the link-set writer keeps it unknown).
  */
 export function linkBandSource(quote: unknown, band: InfluenceBand, conversation: {
   readonly messages: readonly string[]; readonly thisMessage?: string; readonly unverified?: string;

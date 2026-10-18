@@ -138,7 +138,7 @@ describe('the build line says what approval changes', () => {
 describe('the approve chip is labelled from the stored proposal it approves', () => {
   it('RED: one option level → "Save £50,000 for Hire PA"; id and message exactly as before', async () => {
     const { store, caps } = capsOver();
-    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, user_stated: true, basis: 'the figure the user gave' }] });
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [{ option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 50000, quote: ctx.user_text, user_stated: true, basis: 'the figure the user gave' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const chips = chipsFor(store, [{ name: 'propose_option_interventions', result: r }]);
     expect(chips.map((c) => [c.id, c.label, c.message])).toEqual([
@@ -281,7 +281,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('RED: one starting value → "Set Recruitment fee to £5,000"', async () => {
     const { store, caps } = capsOver();
-    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'a consultant’s one-off fee' }] });
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'a consultant’s one-off fee' }] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(chipsFor(store, [{ name: 'propose_assumptions', result: r }])[0]!.label).toBe('Set Recruitment fee to £5,000');
   });
@@ -289,7 +289,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
   it('RED: several figures in one starting point → "Use these 3 starting figures"', async () => {
     const { store, caps } = capsOver();
     const r = await caps.proposeStartingPoint(ctx, {
-      assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'one-off' }],
+      assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'one-off' }],
       option_levels: [
         { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, user_stated: false, basis: 'market rate' },
         { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 0, user_stated: false, basis: 'no salary; agency fees instead' },
@@ -338,7 +338,7 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('CONTROL: a name that fits is never shortened; a cut that leaves under 6 characters keeps the tool\u2019s own label', async () => {
     const fits = capsOver();
-    const a = await fits.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'x' }] });
+    const a = await fits.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'x' }] });
     expect(chipsFor(fits.store, [{ name: 'propose_assumptions', result: a }])[0]!.label).toBe('Set Recruitment fee to £5,000');
     const tiny = 'All subscriptions per month'; // the room is 10: the cut at a word leaves "All"
     const graph = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, label: tiny } : n)) };
@@ -365,8 +365,8 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
     const valued = { ...PA_GRAPH, nodes: PA_GRAPH.nodes.map((n) => (n.id === 'fac_fee' ? { ...n, observed_state: { value: 0.2, raw_value: 4000, cap: 20000, unit: 'GBP' } } : n)) };
     const s3 = capsOver(valued);
     const revise = await s3.caps.proposeAssumptions(ctx, { assumptions: [
-      { factor_label: 'Recruitment fee', value: 5000, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
-      { factor_label: 'Annual PA salary', value: 45000, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
+      { factor_label: 'Recruitment fee', value: 5000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
+      { factor_label: 'Annual PA salary', value: 45000, quote: ctx.user_text, unit: 'GBP', user_stated: true, basis: 'the user’s figure', revise: true },
     ] });
     expect(revise.ok, JSON.stringify(revise)).toBe(true);
     // Re-recorded (AIQ 5909998288, R2): both values are ones the USER wrote (`user_stated`), so the button records them as

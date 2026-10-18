@@ -242,7 +242,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const caps = createAgentCapabilities(p.d, store);
       const r = await caps.proposeOptionInterventions(ctx, {
         interventions: [{
-          option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1,
+          option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1, quote: ctx.user_text,
           basis: 'carrying on still backfills one developer', user_stated: true,
         }],
       });
@@ -276,7 +276,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
         assumptions: VALUES,
         option_levels: [
           ...ORDINARY_LEVELS,
-          { option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1, basis: 'the user: carrying on backfills one', user_stated: true },
+          { option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1, quote: ctx.user_text, basis: 'the user: carrying on backfills one', user_stated: true },
         ],
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -340,8 +340,8 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
         assumptions: VALUES,
         option_levels: [
           ...ORDINARY_LEVELS,
-          { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'a settled team of five', user_stated: true },
-          { option_label: statusQuoLabel, factor_label: 'Tech leads hired', value: 0, basis: 'no hires', user_stated: true },
+          { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, quote: ctx.user_text, basis: 'a settled team of five', user_stated: true },
+          { option_label: statusQuoLabel, factor_label: 'Tech leads hired', value: 0, quote: ctx.user_text, basis: 'no hires', user_stated: true },
         ],
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -365,7 +365,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const caps = createAgentCapabilities(p.d, store);
       const sp = await caps.proposeStartingPoint(ctx, {
         assumptions: VALUES,
-        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'as now', user_stated: true }],
+        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, quote: ctx.user_text, basis: 'as now', user_stated: true }],
       });
       expect((await caps.authoriseChange(ctx, { proposal_id: String(sp.proposal_id) })).ok).toBe(true);
       expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
@@ -378,11 +378,11 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       // Carrying on as now reads the NEW figure: restating 40 is nothing, and the OLD 30 would be a change.
       const caps2 = createAgentCapabilities(p.d, new ProposalStore());
       const again = await caps2.proposeOptionInterventions(ctx, {
-        interventions: [{ option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 40, basis: 'as now', user_stated: true }],
+        interventions: [{ option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 40, quote: ctx.user_text, basis: 'as now', user_stated: true }],
       });
       expect(again.levels_not_accepted).toEqual([expect.objectContaining({ factor: 'Onboarding workload', value: 40, reason: expect.stringContaining('at its starting value, 40.') })]);
       const old = await caps2.proposeOptionInterventions(ctx, {
-        interventions: [{ option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'the user: carrying on stays at 30', user_stated: true }],
+        interventions: [{ option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, quote: ctx.user_text, basis: 'the user: carrying on stays at 30', user_stated: true }],
       });
       expect(old.ok, JSON.stringify(old)).toBe(true);
       expect(old).not.toHaveProperty('levels_not_accepted');
@@ -395,7 +395,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const caps = createAgentCapabilities(p.d, new ProposalStore());
       const r = await caps.proposeStartingPoint(ctx, {
         assumptions: VALUES,
-        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 31, basis: 'the user: carrying on adds one', user_stated: true }],
+        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 31, quote: ctx.user_text, basis: 'the user: carrying on adds one', user_stated: true }],
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r).not.toHaveProperty('levels_not_accepted');
