@@ -163,8 +163,9 @@ export function latestLinkBands(
         const after = whole.slice(said.index + said[0].length);
         const own = CONTRAST_THEN_OWN.exec(after);
         if (own === null && namedIn(whole).length === 0) framedAsOlumis = true;
-        // (5) A contrast still inside Olumi's own quotation is Olumi's: an odd count of quote marks before it.
-        const quoted = own !== null && ((after.slice(0, own.index).match(/["\u201C\u201D]/g) ?? []).length % 2 === 1);
+        // (5) A contrast still inside Olumi's own quotation (opened after the attribution) is Olumi's, read by the ONE speech reader's
+        // double marks (`speechRegions`; was a parity count of quote marks).
+        const quoted = own !== null && speechAt(speechRegions(after, false))(own.index);
         const before = whole.slice(0, said.index);
         // "Price has a weak effect on MRR, according to Olumi." is Olumi's claim; "…, while Olumi says …" sets Olumi's beside it.
         parts = [...(/\b(?:while|whereas|but|although|though|however)\s*$/i.test(before) ? [before] : []),
