@@ -11,10 +11,6 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import {
-  SSE_DEGRADED_HEADER_NAME,
-  SSE_DEGRADED_REDIS_REASON,
-} from "../../src/utils/degraded-mode.js";
 
 // Use fixtures provider for deterministic graphs and zero cost
 vi.stubEnv("LLM_PROVIDER", "fixtures");
@@ -55,7 +51,7 @@ describe.skip("CEE hero journey: engine degraded mode", () => {
       url: "/assist/v1/draft-graph?schema=v1", // Explicitly request V1 for trace/validation_issues tests
       headers: {
         "X-Olumi-Assist-Key": "cee-hero-degraded-key",
-        [SSE_DEGRADED_HEADER_NAME]: SSE_DEGRADED_REDIS_REASON,
+        "X-Olumi-Degraded": "redis",
       },
       payload: {
         brief: `Degraded journey decision with secret marker ${SECRET}`,

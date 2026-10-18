@@ -6,7 +6,6 @@ import type { SessionStore } from '../session/store.js';
 import { createMockSessionStore } from '../../../tests/utils/mock-session-store.js';
 import { installOwnershipHarness, verifyFixtureIdentity } from '../../../tests/utils/ownership-route-harness.js';
 import { ceeOrchestratorRouteV2 } from '../../orchestrator/route-v2.js';
-import streamRoute from '../../routes/orchestrate.v2.turn-stream.js';
 import proxyStreamRoute from '../../routes/proxy-v5-turn-stream.js';
 
 const state = vi.hoisted(() => ({ store: undefined as SessionStore | undefined }));
@@ -43,7 +42,7 @@ const GRAPH = { nodes: [{ id: 'goal', kind: 'goal', label: 'Growth' }, { id: 'fa
 const REFUSAL = { error: 'model_write_ownership_refused', message: "Nothing was saved. You don't have access to change this model." };
 beforeEach(() => vi.clearAllMocks());
 
-const ROUTES = ['/orchestrate/v2/turn', '/orchestrate/v2/turn/stream', '/proxy/v5/turn/stream'];
+const ROUTES = ['/orchestrate/v2/turn', '/proxy/v5/turn/stream'];
 it.each(ROUTES.flatMap(route => (['not_owner', 'owner_unreadable'] as const).map(reason => ({ route, reason }))))(
   'door refusal $reason on $route is honest, terminal, and distinct from a revision conflict', async ({ route, reason }) => {
     const append = vi.fn(async () => ({ id: 'must-not-write' }));
@@ -64,7 +63,7 @@ it.each(ROUTES.flatMap(route => (['not_owner', 'owner_unreadable'] as const).map
     const app = Fastify();
     try {
       await installOwnershipHarness(app, () => ({ mode: 'verified', userId: OWNER }));
-      await ceeOrchestratorRouteV2(app); await streamRoute(app); await proxyStreamRoute(app);
+      await ceeOrchestratorRouteV2(app); await proxyStreamRoute(app);
       const response = await app.inject({ method: 'POST', url: route,
         headers: { 'x-request-id': 'door-r2', origin: 'https://staging--olumi.netlify.app' },
         payload: { kind: 'system_event', scenario_id: SID, turn_id: 'b1111111-1111-4111-8111-111111111111',

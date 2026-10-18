@@ -55,7 +55,7 @@ vi.mock('../collab/store.js', () => ({ getCollabStore: () => collab }));
 vi.mock('../orchestrator-v5/decision-records/index.js', () => ({ getDecisionRecordStore: () => records }));
 
 const routes = [
-  ['POST', '/orchestrate/v2/turn', 422], ['POST', '/orchestrate/v2/turn/stop', 404], ['POST', '/orchestrate/v2/turn/stream', 422],
+  ['POST', '/orchestrate/v2/turn', 422], ['POST', '/orchestrate/v2/turn/stop', 404],
   ['POST', '/proxy/v5/turn', 422], ['POST', '/proxy/v5/turn/stop', 404], ['POST', '/proxy/v5/turn/stream', 422], ['POST', '/agent/v1/turn', 404],
   ['POST', '/assist/v1/scenarios/:scenario_id/graph', 404], ['POST', '/assist/v1/scenarios/:scenario_id/graph/register', 404],
   ['POST', '/assist/v1/scenarios/:scenario_id/versions', 404], ['POST', '/assist/v1/scenarios/:scenario_id/versions/compare', 404],
@@ -80,7 +80,7 @@ async function ownership(app: FastifyInstance) {
   }
 }
 async function mount(app: FastifyInstance) {
-  const files = ['assist.v1.graph-readiness', 'assist.v1.scenario-graph', 'assist.v1.scenario-graph-register', 'assist.v1.scenario-versions', 'assist.v1.scenario-copy', 'assist.v1.decision-records', 'collab.v1.rounds', 'orchestrate.v2.turn-stream', 'proxy-v5-turn', 'proxy-v5-turn-stream', 'agent-v1-turn'];
+  const files = ['assist.v1.graph-readiness', 'assist.v1.scenario-graph', 'assist.v1.scenario-graph-register', 'assist.v1.scenario-versions', 'assist.v1.scenario-copy', 'assist.v1.decision-records', 'collab.v1.rounds', 'proxy-v5-turn', 'proxy-v5-turn-stream', 'agent-v1-turn'];
   for (const name of files) { const mod = await import(`../routes/${name}.ts`); await (mod.default ?? mod.agentV1TurnRoute ?? mod.proxyV5TurnRoute)(app); }
   const { ceeOrchestratorRouteV2 } = await import('../orchestrator/route-v2.js');
   await ceeOrchestratorRouteV2(app);

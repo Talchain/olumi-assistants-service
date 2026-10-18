@@ -32,15 +32,6 @@ vi.mock("../../src/config/index.js", () => ({
 
 describe("Streaming / Non-Streaming Parity", () => {
   describe("route import parity", () => {
-    it("streaming route imports runUnifiedPipeline (not finaliseCeeDraftResponse)", () => {
-      const streamingRoute = fs.readFileSync(
-        path.resolve("src/routes/assist.v1.draft-graph-stream.ts"),
-        "utf-8",
-      );
-      expect(streamingRoute).toContain("runUnifiedPipeline");
-      expect(streamingRoute).not.toContain("finaliseCeeDraftResponse");
-    });
-
     it("non-streaming route imports runUnifiedPipeline", () => {
       const syncRoute = fs.readFileSync(
         path.resolve("src/routes/assist.v1.draft-graph.ts"),
