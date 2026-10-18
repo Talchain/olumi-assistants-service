@@ -105,6 +105,9 @@ describe('the one rule: whose value it is', () => {
     // CONTRAST: a bound on the SAME figure in another sentence of the line is not this span's bound.
     const line = texts('We need attendance of at least 55% by March. A manager thinks more staff could add between 40 and 55 points.');
     expect(userStated({ quote: 'A manager thinks more staff could add between 40 and 55 points.', low: 40, high: 55 }, line, SUBJECT).origin).toBe('human');
+    // CONTRAST: a comparator on a LATER writing of the same figure in the sentence is that writing's, not this span's.
+    const twice = texts('Set the new price to £59 under “£59 for new customers”.');
+    expect(userStated({ quote: 'to £59 under', value: 59, unit: '£' }, twice, SUBJECT).origin).toBe('human');
   });
 
   it('sign reads from the span: a net loss states its negative; a gross count never does', () => {

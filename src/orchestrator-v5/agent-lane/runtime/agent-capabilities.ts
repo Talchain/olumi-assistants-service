@@ -8069,10 +8069,10 @@ export function createAgentCapabilities(
         const said = userStated({ quote: i?.quote, value: raw, unit: declaredUnit ?? statedUnit }, chatTexts(ctx, g.brief_text),
           { quantity: 'level', node_id: factor.id, option_id: option.id },
           { form: 'point', ownEstimate: i.user_stated === false, ...correctionOn(g.raw, { kind: 'factor', id: factor.id, option_id: option.id, field: 'level' }) });
-        // The binding half (Olumi's reading, never authorship): the credited figure is THIS factor's only where its own line does not give
-        // it to another quantity of the model (`figureTheUserWroteFor` with this pair's scope, on the cited line only).
+        // The binding half (Olumi's reading, never authorship), unchanged: the credited figure is THIS factor's only where the user's words
+        // do not give it to another quantity of the model (`figureTheUserWroteFor` with this pair's scope, as before).
         const boundHere = said.origin === 'human'
-          && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), said.statement.source, scopeIn(g, factor.label, option.label));
+          && figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         const userWrote = claimedByUser && (likelyRange !== undefined || boundHere);
         if (!userWrote && said.origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
@@ -10990,9 +10990,9 @@ export function createAgentCapabilities(
           // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
           const lvlSaid = userStated({ quote: lvl.quote, value: lvl.value, unit: lvl.unit ?? factorUnit }, chatTexts(ctx, g.brief_text),
             { quantity: 'level', node_id: f.id }, { form: 'point', ownEstimate: lvl.estimate !== undefined });
-          // The binding half: on the cited line, the figure is about THIS factor (`figureTheUserWroteFor`, this pair's scope).
+          // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
           const wrote = lvlSaid.origin === 'human'
-            && figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, lvlSaid.statement.source, scopeIn(g, f.label, plan.label));
+            && figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
           if (lvlSaid.origin === 'unknown') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: UNKNOWN_ORIGIN_DETAIL });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
@@ -11113,8 +11113,8 @@ export function createAgentCapabilities(
           // ⭐ LEAN CORE: THE ONE RULE (`userStated`): the user's only on their cited words; Olumi's only as its declared estimate.
           const lvSaid = userStated({ quote: lv.quote, value: asked, unit: levelUnit }, chatTexts(ctx, g.brief_text), { quantity: 'level' },
             { form: 'point', ownEstimate: lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' });
-          // The binding half: on the cited line, the figure is about THIS factor (`figureTheUserWroteFor`, this pair's scope).
-          const wrote = lvSaid.origin === 'human' && figureTheUserWroteFor(asked, levelUnit, lvSaid.statement.source, scopeIn(g, a.label, plan.label));
+          // The binding half (Olumi's reading), unchanged: the user's words give the figure to THIS factor (this pair's scope).
+          const wrote = lvSaid.origin === 'human' && figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
           if (lvSaid.origin === 'unknown') { notSet(UNKNOWN_ORIGIN_DETAIL); continue; }
           const basis = lv.estimate === true && typeof lv.basis === 'string' && lv.basis.trim() !== '' ? lv.basis.trim() : undefined;
           if (!wrote && basis === undefined) { notSet(notWrittenReason(asked, a.label)); continue; }

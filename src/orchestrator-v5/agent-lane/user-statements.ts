@@ -277,11 +277,13 @@ export type StatedRefusal = Extract<StatementsVerdict, { kind: 'refused' }>['ref
 export function userStated(claim: StatedClaim | null | undefined, texts: StatementTexts, subject: StatementSubject,
   opts: { readonly form?: StatementForm; readonly ownEstimate?: boolean; readonly current?: CurrentCorrection } = {}): StatedVerdict {
   // The one label authority (`authorshipOf`): not verified is unknown, unless Olumi's own estimate is positively declared.
-  // ⛔ K3 (kept): a declared own estimate never relabels a figure the retained words of unknown origin write (reseeded history, the
-  // saved brief): that figure's source is unknown, never Olumi's. The stated-figure rule reads it there, in the AI's unit.
-  const retainedFigure = (): boolean => typeof texts.unverified === 'string' && texts.unverified !== ''
+  // ⛔ K3 (kept, and PL-0048 1): a declared own estimate never relabels a figure the user's words write, typed or retained (reseeded
+  // history, the saved brief): without the AI's citation its source is unknown, never Olumi's. The stated-figure rule reads it, in the
+  // AI's unit. This search never credits the user; only a cited span does.
+  const userWords = [texts.unverified, texts.conversation, texts.now, ...(texts.messages ?? [])].filter((t): t is string => typeof t === 'string' && t !== '').join('\n');
+  const retainedFigure = (): boolean => userWords !== ''
     && [claim?.value, claim?.low, claim?.high].some((n) => typeof n === 'number' && Number.isFinite(n)
-      && figureTheUserWroteSpan(Math.abs(n), trimmed(claim?.unit, 60), texts.unverified as string) !== null);
+      && figureTheUserWroteSpan(Math.abs(n), trimmed(claim?.unit, 60), userWords) !== null);
   const notTheirs = (refusal: StatedRefusal, detail: string): StatedVerdict =>
     ({ origin: authorshipOf({ words: { verified: false, unknown: opts.ownEstimate !== true || retainedFigure() } }).origin === 'ai' ? 'ai' : 'unknown', refusal, detail });
   const quote = trimmed(claim?.quote, QUOTE_MAX);
@@ -377,7 +379,15 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   // ⛔ A span cut from inside a line never drops the bound the user wrote on its own figure (the confirmed widening's limit; ebd S2 row):
   // "7 months" out of "At least 7 months" is not their point. The estate's one comparator reader reads the line and the span alike.
   // Read in the span's own sentence of its line only: the same figure elsewhere on the line ("at least 55%" in another sentence) is not its bound.
-  const spanSentence = sentenceAroundSpan(source, quote);
+  // …and only up to the next figure after the span: a comparator on a LATER writing of the same figure ("to £59 under “£59 for …”") is
+  // that writing's bound, not this span's.
+  const spanSentence = ((): string | undefined => {
+    const whole = sentenceAroundSpan(source, quote);
+    const at = whole === undefined ? -1 : plainQuoteWords(whole).indexOf(plainQuoteWords(quote));
+    if (whole === undefined || at < 0) return whole;
+    const plain = plainQuoteWords(whole), end = at + plainQuoteWords(quote).length, next = plain.slice(end).search(/\d/u);
+    return next < 0 ? plain : plain.slice(0, end + next);
+  })();
   const dropsBound = (figure: number): boolean => spanSentence !== undefined && comparatorTheUserWroteFor(spanSentence, Math.abs(figure)) !== null
     && comparatorTheUserWroteFor(quote, Math.abs(figure)) === null;
   const boundDropped = (figureWords: string): StatementVerdict => ({ kind: 'refused', refusal: 'statement_not_found',
