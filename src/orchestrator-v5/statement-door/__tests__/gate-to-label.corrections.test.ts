@@ -750,8 +750,8 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
       'night shifts take 45 hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['another speaker’s quoted words (digits, straight marks)', 'Correction: our matron said "night shifts take 45 hours per week", not 40.',
       'night shifts take 45 hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
-    ['another speaker’s quoted words (a count in words)', 'Correction: our matron said “night shifts take forty-five hours per week”, not 40.',
-      'night shifts take forty-five hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    // The count-in-words variant returns WITH its own-words positive when the shared located-amount reader lands (#3429): until then
+    // this branch reads no words, so a words negative would pass vacuously (Codex R3 §1).
     ['a denied figure', 'Night shifts do not take 45 hours per week.', 'Night shifts do not take 45 hours per week', 45, true,
       'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['a bound, not a point', 'Night shifts take at least 45 hours per week.', 'Night shifts take at least 45 hours per week', 45, true,
@@ -838,6 +838,19 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
       expect(nodeOf(r.g, 'night').observed_state).toEqual(nodeOf(g, 'night').observed_state);
       expect(r.card.public_label).toContain('40 hours per week stays as stated for “Night shift hours”. If it no longer holds, say so.');
       expect(nodeOf(r.g, 'total').observed_state).toEqual(nodeOf(g, 'total').observed_state);
+    });
+
+    it('AN EXPLICIT KEEP WINS OVER THE SAME RETIRED WORDS (Codex R3 §3): "Keep explicitly" never saves that figure as withdrawn', async () => {
+      const g = graph();
+      const r = await run(g, 'Keep the 40 hours per week; only the rest of the note was last month.', [{ subject: NIGHT,
+        retirement: { quote: OLD, scope: 'whole', disposition: 'historical' }, retained: [OLD], reading_words: 'keep 40 hours per week' }]);
+      expect(nodeOf(r.g, 'night').observed_state).toEqual(nodeOf(g, 'night').observed_state);
+      expect(nodeOf(r.g, 'total').observed_state).toEqual(nodeOf(g, 'total').observed_state);
+      expect(r.card.public_label).toContain(`Keep explicitly: “${OLD}”`);
+      expect(r.card.public_label).toContain('40 hours per week stays as stated for “Night shift hours”.');
+      expect(r.card.public_label).not.toContain('will no longer use');
+      expect(r.card.public_label).not.toContain(`Keep “${OLD}” only as earlier context.`);
+      expect(claimRecordFor(r.g, NIGHT)!.statements.some((st) => st.quote === OLD && st.low === 40)).toBe(true);
     });
 
     it('NOT A BLANKET EXEMPTION: a retraction of the same bundled sentence withdraws the user’s 60 (explicit), and Olumi’s figure is never kept by default', async () => {

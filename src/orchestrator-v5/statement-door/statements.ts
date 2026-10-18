@@ -414,17 +414,24 @@ function replacementStatements(graph: unknown, source: UserStatement, e: Correct
  *  - its condition, where the condition IS withdrawn words (byte identity, as for every retired and kept span); a condition the
  *    withdrawn words do not hold is kept exactly as stated (N2);
  *  - its figure, unit and period, where the claim door's own figure reader places that figure inside the withdrawn words.
- * The earlier claim stays whole in history as superseded (`retiredHistory`), so nothing is lost.
+ * The earlier claim stays whole in history as superseded (`retiredHistory`), so nothing is lost. ⭐ An EXPLICIT keep wins over a
+ * retirement of the same words (Codex R3 §3, PL 22:35: "Keep explicitly: X" never saves X's figure as withdrawn): only what the
+ * retired words hold OUTSIDE every kept span goes.
  */
-function keptClaim(earlier: UserStatement, e: Pick<CorrectionEditRequest, 'retirement'>): UserStatement {
+function keptClaim(earlier: UserStatement, e: Pick<CorrectionEditRequest, 'retirement' | 'retained'>): UserStatement {
   const at = e.retirement.quote.trim() === '' ? -1 : earlier.quote.indexOf(e.retirement.quote);
   if (at < 0) return { ...earlier };
   const end = at + e.retirement.quote.length;
+  const keptAt = (from: number, to: number): boolean => e.retained.some((span) => {
+    const k = earlier.quote.indexOf(span);
+    return k >= 0 && k <= from && to <= k + span.length;
+  });
   const { conditions, ...rest } = earlier;
-  const kept: UserStatement = conditions === undefined || e.retirement.quote.includes(conditions) ? rest : earlier;
+  const kept: UserStatement = conditions === undefined
+    || (e.retirement.quote.includes(conditions) && !e.retained.some((span) => span.includes(conditions))) ? rest : earlier;
   const withdrawn = [earlier.low, earlier.high].some((x) => {
     const span = x === undefined ? null : figureTheUserWroteSpan(x, earlier.unit, earlier.quote);
-    return span !== null && span.start < end && span.end > at;
+    return span !== null && span.start < end && span.end > at && !keptAt(span.start, span.end);
   });
   if (!withdrawn) return kept;
   const { low: _l, high: _h, value: _v, unit: _u, period: _p, negated: _n, qualifier: _q, qualifier_in_quote: _qi, ...words } = kept;
@@ -901,8 +908,9 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly rea
       ...(e.dependent?.action === 'link_unsized' ? [`If you approve, the size of the relationship “${e.dependent.label}” will become unavailable because this correction removes the source it rests on.`] : []),
       ...levelWords(e, withdrawn, shown),
       ...(legacy ? [] : [`Olumi’s reading: ${e.reading_words}. Proposed change to “${String(e.expected_node.label)}” — ${fieldWords[e.subject.field] ?? 'account'}:`]),
-      e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
-        : `Keep “${e.retirement.quote}” only as earlier context.`,
+      // A retirement wholly inside an explicitly kept span retires nothing (the keep wins, `keptClaim`): no line says otherwise.
+      ...(e.retained.some((span) => span.includes(e.retirement.quote)) ? [] : [e.retirement.disposition === 'retracted'
+        ? `Withdraw “${e.retirement.quote}” from the current account.` : `Keep “${e.retirement.quote}” only as earlier context.`]),
       `Keep explicitly: ${e.retained.length ? e.retained.map(q => `“${q}”`).join('; ') : 'nothing from the retired record'}.`,
       ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
         .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
