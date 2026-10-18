@@ -594,8 +594,9 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
   // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
   // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general
-  // rule, no domain example: the countable the size is per becomes a quantity, and a stated range gives its LOW end.
-  'A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as "Deals closed", unit "deals", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` "explicit"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, use its LOW end. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never "explicit", and ask it in `unknowns`.',
+  // rule, no domain example: the countable the size is per becomes a quantity. A stated range is kept whole on its link, never an
+  // end or a middle as the size (AIE A3, prompt/AIE-A3-COMMON-20261017-v1.json, exact).
+  'A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as "Deals closed", unit "deals", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` "explicit"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, retain its complete signed endpoints, unit, reference, period, conditions and source in statements on that directed link. Do not choose an endpoint or calculate a midpoint to fill a missing point size; leave that size null when no separately supported point size is supplied. If the user explicitly supplies a central figure for this same quantity, unit, reference, window and conditions, retain that figure with its stated qualifier and range; it is not automatically an expected mean or a calibrated distribution. Keep any proposed operative Olumi approximation separate from the original range, with its own supported basis, disclosed assumptions and required approval. A plain or likely range does not establish inner quartiles, a Normal law or a hard bound. Do not re-ask a range already supplied. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never "explicit", and ask it in `unknowns`.',
   // ⛔ R-c (AI Quality 5881541947 / 5882087383): a limit is checked only when every link from what an option changes to
   // the limited quantity carries a size in that quantity's own unit, and a risk has no unit. Measured (MG 7×3, 29 Sep):
   // 10 of 12 A/C churn limits reached churn only through a risk, so none of them could be checked. The first wording
@@ -1188,8 +1189,15 @@ export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel
   const holdsAt = (label: string, end: { readonly index: number }) => held.some((h) => h.label === label
     && figureTheUserWroteFor(h.value, h.unit, brief, { target: [label], others: quantities.filter((q) => q !== label), strict: true, at: end.index }));
   const heldAsOne = (r: StatedRange) => [...new Set(held.map((h) => h.label))].some((label) => holdsAt(label, r.low) && holdsAt(label, r.high));
+  // ⭐ A3 (AIE A3 text; Lane A's host change): the producer keeps a written range WHOLE in `statements` on its link, its size null.
+  // A range the AI's own verified link-effect statement records (both ends, in the sentence that writes it) is carried: the retry
+  // is never asked for what the draft already holds.
+  const recorded = [...sourceMapOf(draftStatements(drafted), brief).verified].filter(([key]) => key.startsWith('link|') && key.endsWith('|effect'))
+    .flatMap(([, said]) => said).filter((st) => st.form === 'range' && st.negated !== true && typeof st.low === 'number' && typeof st.high === 'number');
+  const recordedWhole = (r: StatedRange) => recorded.some((st) => st.quote.includes(r.text)
+    && Math.min(Math.abs(st.low!), Math.abs(st.high!)) === r.low.magnitude && Math.max(Math.abs(st.low!), Math.abs(st.high!)) === r.high.magnitude);
   return [...new Map(findStatedRanges(brief).map((r) => [r.text, r] as const)).values()]
-    .filter((r) => !carried.has(r.text) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
+    .filter((r) => !carried.has(r.text) && !recordedWhole(r) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
     // `written`, never a one-letter name: a quoted `"${t}"` reads as a currency token to the currency-vocabulary guard.
     .map((r) => r.text).map((written) =>
     `The brief writes "${written}" and no link in the model carries it. ${perOneRangeRule(written)} If it is not a size `
@@ -1198,9 +1206,7 @@ export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel
 
 /** What the per-one rule asks of ONE written range: the same words for the first construct and the repair retry. */
 function perOneRangeRule(written: string): string {
-  return 'If it is a money size PER ONE of something the brief names '
-    + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
-    + `money goal, and size that link per one at the LOW end of "${written}" (effect_provenance "explicit").`;
+  return `If it is a money size PER ONE of something the brief names (per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the money goal per one (effect_per_source_change 1), and retain "${written}" as the complete stated effect range in statements on that directed link, with its signed endpoints, actual unit, reference, period, conditions and source. Leave the point size null unless a separately supported point size is supplied. Retain any explicitly stated central figure with its qualifier and range, without interpreting it as an expected mean or inferring a distribution. Any operative Olumi approximation stays separate, with its own supported basis, disclosed assumptions and required approval. Do not substitute a chosen endpoint, midpoint, zero or a guessed spread for the source, and do not re-ask a range already supplied.`;
 }
 
 /**
