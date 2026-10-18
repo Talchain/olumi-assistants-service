@@ -18,6 +18,9 @@ const BRIEF = 'Should we switch our cloud provider from AWS to GCP? Monthly spen
 const YES = 'Yes, use 25%.';
 const LABEL = 'GCP unit-cost saving';
 
+/** The AI's citation (lean core USER_QUOTE): the latest of the user's messages that writes the 25%. */
+const citing25 = (typed: readonly string[]): string => [...typed].reverse().find((m) => /25\s*%/.test(m)) ?? typed.join('\n');
+
 /** The revise door as the served Agent called it: 25 "%" on the share factor, `revise: true`. */
 async function revise(typed: readonly string[], turnText: string | undefined) {
   const graph = structuredClone(R2.graph);
@@ -26,7 +29,7 @@ async function revise(typed: readonly string[], turnText: string | undefined) {
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-446655440c03', authenticated_user_id: null, request_id: 'r', user_text: typed.join('\n'), verified_user_messages: typed,
       ...(turnText !== undefined ? { user_turn_text: turnText } : {}) } as never,
-    { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, quote: typed.join('\n'), unit: '%', basis: "your team's quote", revise: true }] } as never) as Json;
+    { assumptions: [{ user_stated: true, factor_label: LABEL, value: 25, quote: citing25(typed), unit: '%', basis: "your team's quote", revise: true }] } as never) as Json;
   expect(r.proposal_id, 'a proposal is prepared').toEqual(expect.any(String));
   const op = store.get(r.proposal_id)!.operations[0] as Json;
   const chip = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: r.proposal_id }],
@@ -109,7 +112,7 @@ async function cardThenPress(cardTurn: { typed: readonly string[]; turn?: string
   const caps = createAgentCapabilitiesWithLevelsPort(p.d, store);
   const base = { scenario_id: p.SID, authenticated_user_id: null, request_id: 'r' };
   const r = await caps.proposeAssumptions({ ...base, user_text: cardTurn.typed.join('\n'), verified_user_messages: cardTurn.typed, ...(cardTurn.turn !== undefined ? { user_turn_text: cardTurn.turn } : {}) } as never,
-    { assumptions: [{ user_stated: userStated, factor_label: LABEL, value: 25, unit: '%', basis: userStated ? "your team's quote" : 'An explicitly new Olumi estimate', revise: true }] } as never) as Json;
+    { assumptions: [{ user_stated: userStated, factor_label: LABEL, value: 25, ...(userStated ? { quote: citing25(cardTurn.typed) } : {}), unit: '%', basis: userStated ? "your team's quote" : 'An explicitly new Olumi estimate', revise: true }] } as never) as Json;
   expect(r.proposal_id, JSON.stringify(r)).toEqual(expect.any(String));
   const shown = (store.get(r.proposal_id)!.operations[0] as Json).value.authored_by as string;
   // The press: a chip, so no typed text this turn; the session's words now end with a figure-less yes.

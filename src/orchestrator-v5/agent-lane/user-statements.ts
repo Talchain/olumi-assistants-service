@@ -15,6 +15,7 @@ import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { quoteIsNotTheUsersClaim, sentenceAroundSpan, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
 import { comparatorTheUserWroteFor, figureTheUserWroteSpan } from './stated-by-user.js';
+import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { unitPhraseFamily, unitPhraseHead } from './unit-conflict.js';
 import { classifyValueUnitAgainstFactor } from '../routing/value-unit-resolution.js';
 
@@ -291,7 +292,9 @@ export function userStated(claim: StatedClaim | null | undefined, texts: Stateme
   const unit = trimmed(claim?.unit, 60);
   // The unit's own scale: a money unit's magnitude letter ("£k": ×1000), or a 0–1 share unit, which reads a written PERCENTAGE ("30%" is
   // 0.3 of a proportion; never a plain "30 people").
-  const share = unit !== undefined && SHARE_UNITS.has(unit.toLowerCase());
+  // A 0–1 share unit, by the estate's one share-unit rule (`isProportionScaledFactor`: "proportion", "share (0-1)", …).
+  const share = unit !== undefined && (SHARE_UNITS.has(unit.toLowerCase())
+    || isProportionScaledFactor({ unit, cap: undefined, value: typeof claim?.value === 'number' ? claim.value : undefined, raw_value: undefined }));
   const scale = share ? 100 : unit === undefined ? 1 : readCurrencyUnitWithQualifiers(unit).multiplier ?? 1;
   const percentAt = (q: string, n: number): boolean => findStatedAmounts(q).some((a) => a.kind === 'percent' && Math.abs(a.magnitude - n) <= 1e-9 * Math.max(1, Math.abs(n)));
   const v = verifyStatement({ ...claim, quote, form }, texts, { subject, unit: unit ?? '', forms: STATEMENT_FORMS, figuresIn: figuresWritten,

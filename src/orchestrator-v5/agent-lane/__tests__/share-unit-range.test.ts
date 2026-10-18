@@ -24,13 +24,14 @@ type Json = Record<string, any>;
 const R2 = JSON.parse(readFileSync(new URL('./fixtures/served-share-unit-r2-20260930.json', import.meta.url), 'utf8')) as { sentence: string; graph: Json };
 const LABEL = 'GCP unit-cost saving';
 
-async function propose(value: number, unit: string, said = R2.sentence) {
+// The AI's claim (lean core): the user's figure cites their words (USER_QUOTE); Olumi's own estimate is declared `user_stated: false`.
+async function propose(value: number, unit: string, said = R2.sentence, claim: 'user' | 'olumi' = 'user') {
   const graph = structuredClone(R2.graph);
   const d: InternalDispatch = async (path) => { if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: 'h0' } }; throw new Error(path); };
   const store = new ProposalStore();
   const r = await createAgentCapabilities(d, store).proposeAssumptions(
     { scenario_id: '550e8400-e29b-41d4-a716-446655440c02', authenticated_user_id: null, request_id: 'r', user_text: said } as never,
-    { assumptions: [{ user_stated: true, factor_label: LABEL, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
+    { assumptions: [{ ...(claim === 'user' ? { user_stated: true, quote: said } : { user_stated: false }), factor_label: LABEL, value, unit, basis: "the team's quote", revise: true }] } as never) as Json;
   const op = r.proposal_id ? (store.get(r.proposal_id)!.operations[0] as Json).value : null;
   const chips = r.proposal_id ? approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: r.proposal_id }],
     (id) => ({ proposal: store.get(id), result: id === r.proposal_id ? (r as ToolResult) : undefined })) : [];
@@ -130,7 +131,7 @@ describe('R2: the approval of the user\'s own figure says it is theirs', () => {
   });
 
   it('CONTROL: a value the user did NOT write stays Olumi\'s — its card shows Olumi\'s basis, and the note says an assumption to adopt', async () => {
-    const { r, op, chip } = await propose(0.3, 'share (0-1)', 'Can you tighten the GCP saving assumption?');
+    const { r, op, chip } = await propose(0.3, 'share (0-1)', 'Can you tighten the GCP saving assumption?', 'olumi');
     expect(op?.authored_by).toBe('model_proposed');
     // A2i9 B4 (AIE 6141593167): an Olumi estimate now shows its basis on the consent card, verbatim, as Olumi's.
     expect(chip?.detail).toBe('Revise 1 value you asked to change: GCP unit-cost saving: 0.2 share (0-1) \u2192 0.3 share (0-1)\n'

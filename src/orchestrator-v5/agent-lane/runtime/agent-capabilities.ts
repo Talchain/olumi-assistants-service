@@ -7487,9 +7487,11 @@ export function createAgentCapabilities(
         const said = userStated({ quote: typeof a?.quote === 'string' ? a.quote : point?.quote, value: Number(a.value), unit: a?.unit ?? nodeUnit,
           ...(reading?.speaker !== undefined ? { speaker: reading.speaker } : {}) },
           chatTexts(ctx, g.brief_text), { quantity: 'level_today', node_id: node.id },
-          { form: 'point', ownEstimate: explicitEstimate, ...correctionOn(g.raw, { kind: 'factor', id: node.id, field: 'level' }) });
+          // Positive evidence of Olumi's own figure: the AI's declared `user_stated: false` (K3: never a revise on incomplete source).
+          { form: 'point', ownEstimate: a.user_stated === false && (a.revise !== true || ctx.user_text_complete !== false),
+            ...correctionOn(g.raw, { kind: 'factor', id: node.id, field: 'level' }) });
         const origin = said.origin;
-        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && said.origin !== 'human' && said.refusal === 'figure_not_in_quote') {
+        if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && said.origin !== 'human' && ctx.user_text_complete !== false) {
           return { ok: false, mutated: false, refusal: 'figure_not_in_users_words',
             detail: 'That is not the percentage the user wrote in this unit. Use the number in their percentage unit, not the 0–1 model coordinate. Nothing was proposed.' };
         }

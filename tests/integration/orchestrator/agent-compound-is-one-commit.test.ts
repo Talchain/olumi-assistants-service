@@ -209,7 +209,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     if (where !== 'node') Object.assign(rows[1]!, structuredClone(GAP));
     expect(projectGraphForPersistence(persisted)).toEqual(persisted);
   }
-  const clearLevel = () => ({ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 49, basis: 'Keep the same level; resolve the stated gap', unmodelled_mechanisms: [] as string[] });
+  const clearLevel = () => ({ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 49, basis: 'Keep the same level; resolve the stated gap', user_stated: false, unmodelled_mechanisms: [] as string[] });
 
   it.each([
     ['81 characters', ['x'.repeat(81)]], ['six entries', ['a', 'b', 'c', 'd', 'e', 'f']],

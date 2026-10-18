@@ -149,8 +149,8 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
 
   it('A2i6 K3: starting-point estimates require explicit false in incomplete source', async () => {
     const levels = [
-      { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, basis: 'market rate', user_stated: false },
-      { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 30000, basis: 'agency day rate over a year', user_stated: false },
+      { option_label: 'Hire PA', factor_label: 'Annual PA salary', value: 45000, basis: 'market rate' },
+      { option_label: 'Use an agency', factor_label: 'Annual PA salary', value: 30000, basis: 'agency day rate over a year' },
     ];
     const context = { ...ctx, user_text: 'Suggest starting figures.', user_turn_text: 'Suggest starting figures.', user_text_complete: false };
     for (const explicit of [false, true]) {
