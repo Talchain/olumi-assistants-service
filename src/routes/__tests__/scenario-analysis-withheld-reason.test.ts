@@ -194,7 +194,10 @@ describe('C6: the cold read keeps recorded inputs and licensed chances beside au
                 option_comparison: [{ option_id: 'option-a', option_label: `Add ${factor.toLowerCase()}`, win_probability: 0.65 },
                   { option_id: 'option-b', option_label: 'Hold current setting', win_probability: 0.35 }],
                 inference_warnings: deniedChance && side === automatic
-                  ? [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stored range without its selected-Run licence.',
+                  // A missing point licence alone does not invalidate a conditional pair (AIE A); record an independent hold.
+                  ? [{ code: 'GOAL_FIGURES_PROBABILITY_UNUSABLE', severity: 'warning', option_ids: ['option-a'],
+                    message: 'This Run could not evaluate this option’s goal test.' },
+                  { code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stored range without its selected-Run licence.',
                     option_ids: ['option-a'], range_by_option: { 'option-a': { low_pct: 0, high_pct: 7,
                       low_rounding: 'whole', high_rounding: 'whole', kind: 'link_existence', from: 'setting', to: 'goal', among: 'all' } } }]
                   : [{ code: 'GOAL_CHANCE_LICENSED', severity: 'info', form: 'each',
