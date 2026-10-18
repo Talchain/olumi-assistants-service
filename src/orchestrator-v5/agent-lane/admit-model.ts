@@ -82,7 +82,8 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { draftStatements, figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectKey, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { combineStatementEnds } from './user-statements.js';
 import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -5300,8 +5301,20 @@ function admitOnce(
     ),
   ];
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+  // ⛔ QBC row 10 (#3396 B2): a declared limit is a HARD bound only where the AI's own verified bound statement on that quantity is
+  // unqualified (`combineStatementEnds`: a qualified end is held, never a hard end). Its words stay recorded on the node; with no
+  // bound statement the declared limit stands as before. Reads the AI's qualifier only: no word list.
+  const qualifiedLimit = (c: CandidateModel['constraints'][number]): boolean => {
+    if (c.role !== 'limit' || typeof brief !== 'string') return false;
+    const said = sourceMapOf(draftStatements(model), brief).verified.get(subjectKey({ kind: 'factor', label: c.metric }, 'level')) ?? [];
+    const upper = c.operator === '<=' || c.operator === '<';
+    const bounds = said.filter((st) => st.form === (upper ? 'upper_bound' : 'lower_bound') && (upper ? st.high : st.low) === c.value);
+    if (bounds.length === 0) return false;
+    const ends = combineStatementEnds(bounds);
+    return ends.kind === 'held' && ends.hard_end === undefined;
+  };
   const constraintResult = withGoalTargetRows(admitCandidateConstraints(
-    model.constraints,
+    model.constraints.filter((c) => !qualifiedLimit(c)),
     nodeIdForMetric,
     // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
     (nodeId) => {

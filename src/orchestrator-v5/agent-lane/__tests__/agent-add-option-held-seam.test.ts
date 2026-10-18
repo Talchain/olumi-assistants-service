@@ -1839,10 +1839,11 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const option = g.nodes.find((x) => x.kind === 'option' && x.label === OPT_A)!;
     expect(option.interventions[GF_FAC]).toEqual(ON_LEVEL(GF_FAC));
     // ⭐ A1 £59 (DL 5861782245; was `toBeUndefined()`, "set by its own write"): the option's own £59 lands in this SAME
-    // commit, on today's frame (0–100). The user wrote it ("from £49 to £59", and the option's own name typed in this turn),
-    // so it is theirs (no estimate stamp) although the Agent flagged it as its estimate — as for an existing factor.
-    expect(option.interventions[NEW_PRICE_FAC]).toEqual({ value: 0.59, raw_value: 59, unit: 'GBP/month', source: 'user_specified',
-      target_match: { node_id: NEW_PRICE_FAC, match_type: 'exact_id', confidence: 'high' } });
+    // commit, on today's frame (0–100). ⭐ QBC PR-B row 9 (DL ruling A07 (a), the one disclosed base flip): the turn writes £59
+    // only inside the user's own QUOTED option title, which is ambiguous, so it is recorded with its origin unverified (the option
+    // cell's existing carrier, read as unknown): kept and disclosed, never lost, never Olumi's estimate, never "you said".
+    expect(option.interventions[NEW_PRICE_FAC]).toEqual({ value: 0.59, raw_value: 59, unit: 'GBP/month', source: 'cee_hypothesis',
+      user_material_unverified: true, target_match: { node_id: NEW_PRICE_FAC, match_type: 'exact_id', confidence: 'high' } });
     // The approval says what was committed: today's £49 is the user's, and it is not asked for again.
     expect(t2.assistant_text).toContain(`"${NEW_PRICE}"`);
     expect(t2.assistant_text).toMatch(/today is 49 GBP\/month, as you said/);
@@ -2007,7 +2008,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const heldOptionOf = (ip: Awaited<ReturnType<typeof heldPatch>>, label: string) =>
     ip.operations.find((o) => o.op === 'add_node' && o.value?.['kind'] === 'option' && o.value?.['label'] === label)!.value as { interventions: Record<string, unknown> };
 
-  it('[A1-59 R1] RED (A05 served shape): today\'s £49 AND the option\'s £59 in ONE call → one hold → one approval → the option holds 59 user_specified on the SAME frame as the £49, and the Run reaches PLoT (never MISSING_OPTION_VALUE)', async () => {
+  it('[A1-59 R1] RED (A05 served shape): today\'s £49 AND the option\'s £59 in ONE call → one hold → one approval → the option holds 59 (origin unverified: the user\'s own quoted title, A07 (a)) on the SAME frame as the £49, and the Run reaches PLoT (never MISSING_OPTION_VALUE)', async () => {
     graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
     const t1 = await proposeJourneyA({ value: 49, unit: 'GBP per month' }, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month' }, message: A05_SERVED });
     expect(t1._agent.tool_calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual([expect.objectContaining({ ok: true })]);
@@ -2016,11 +2017,12 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     // The Agent is told the level IS set, and by the user — never "no range yet", never asked again.
     expect(toolOutputSeen).not.toMatch(/no range yet/);
     expect(toolOutputSeen, 'no level left unset (the readiness view\'s own list is empty)').not.toMatch(/levels_not_set\\*":\[\{/);
-    expect(toolOutputSeen).toMatch(/\\"factor\\":\\"New Pro customer price\\",\\"value\\":59,\\"unit\\":\\"GBP per month\\",\\"stated_by\\":\\"user\\"/);
+    // QBC PR-B row 9 (A07 (a)): £59 is written only inside the user's own quoted title → set, with its origin unverified, said so.
+    expect(toolOutputSeen).toMatch(/\\"factor\\":\\"New Pro customer price\\",\\"value\\":59,\\"unit\\":\\"GBP per month\\",\\"stated_by\\":\\"origin_unverified\\"/);
     // ONE hold carries both: today's £49 (CEE's member) and the option's £59 (in the option's own add_node).
     const ip = await heldPatch();
     expect(ip['graded_today'], JSON.stringify(ip)).toEqual([{ factor_id: NEW_PRICE_FAC, observed_state: STATED_49_SERVED }]);
-    expect(heldOptionOf(ip, OPT_A).interventions[NEW_PRICE_FAC]).toEqual(levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'user_specified'));
+    expect(heldOptionOf(ip, OPT_A).interventions[NEW_PRICE_FAC]).toEqual({ ...levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'cee_hypothesis'), user_material_unverified: true });
 
     const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
@@ -2028,8 +2030,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const factor = g.nodes.find((x) => x.id === NEW_PRICE_FAC)!;
     expect(factor.observed_state).toEqual(STATED_49_SERVED);
     const option = g.nodes.find((x) => x.kind === 'option' && x.label === OPT_A)!;
-    // Bound by the option's label and the factor's id: 59, the user's (no estimate stamp), framed.
-    expect(option.interventions[NEW_PRICE_FAC]).toEqual(levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'user_specified'));
+    // Bound by the option's label and the factor's id: 59, framed, with its origin unverified (A07 (a)), never Olumi's estimate.
+    expect(option.interventions[NEW_PRICE_FAC]).toEqual({ ...levelOn(NEW_PRICE_FAC, 0.59, 59, 'GBP per month', 'cee_hypothesis'), user_material_unverified: true });
     expect(option.interventions[GF_FAC]).toEqual(ON_LEVEL(GF_FAC));
     // ONE frame for both, and no clamp: the frame is built over the largest figure (59), so 59 and 49 both sit inside it.
     const iv = option.interventions[NEW_PRICE_FAC] as { value: number; raw_value: number };

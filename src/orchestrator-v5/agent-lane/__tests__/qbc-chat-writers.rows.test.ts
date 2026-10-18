@@ -42,7 +42,9 @@ async function proposeLimit(said: string, quote: string | undefined) {
   return { r, author: typeof r.proposal_id === 'string' ? store.get(r.proposal_id)?.provenance.authored_by : undefined };
 }
 describe('row 6 (W19): a limit\'s figure is the user\'s only where the clause that writes it names this limit or no other quantity', () => {
-  it('RED (P05 class): the user\'s own name for the limit shares a word with another factor → prepared as theirs', async () => {
+  // OWED (DL-3 ruling, PR-B): "coastal-harbour constraint" names the limit AND a rival ("Harbour packing service time"), so the clause
+  // licenses neither today (the safe failure). The 3 rival GUARDs below stay GREEN; this row flips when per-occurrence ownership lands.
+  it.fails('OWED (P05 class): the user\'s own name for the limit shares a word with another factor → prepared as theirs', async () => {
     const said = 'The coastal-harbour constraint should be at least 85%, not 90%; I copied the wrong line.';
     expect(await proposeLimit(said, said)).toMatchObject({ r: { ok: true }, author: 'user_stated' });
   });
@@ -61,7 +63,9 @@ describe('row 6 (W19): a limit\'s figure is the user\'s only where the clause th
   ])('GUARD (%s): the valid limit binds → prepared as theirs', async (_name, said) => {
     expect(await proposeLimit(said, said)).toMatchObject({ r: { ok: true }, author: 'user_stated' });
   });
-  it('RED (B3, no unknown carrier for a limit): an uncited figure the user wrote is never prepared as theirs; refused with the existing disclosure', async () => {
+  // OWED to the USER_QUOTE fold (DL-3 ruling, PR-B): `propose_limit_change` has no quote field; refusing an uncited figure needs one
+  // (tool schema = prompt text + AIE), and must not refuse today's working "the budget is now £30k" turns.
+  it.fails('OWED (B3, no unknown carrier for a limit): an uncited figure the user wrote is never prepared as theirs; refused with the existing disclosure', async () => {
     const { r, author } = await proposeLimit('Coastal orders shipped within 2 days should be at least 85%.', undefined);
     expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'figure_not_stated' });
     expect(author).toBeUndefined();

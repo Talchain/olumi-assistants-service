@@ -8151,12 +8151,15 @@ export function createAgentCapabilities(
           } else {
             // C2 (DL 15 Oct): the press adopts Olumi's approximation of THEIR range, so the card keeps their words for it.
             rangeQuote = rangeWordsIn(ctx.user_turn_text, ctx.user_text, low, high);
-            // ⭐ QBC row 7 (W14): the range is the user's only by THE ONE RULE (`verifyStatements`): their own span writes both ends as
-            // one range, never another speaker's quoted words. `rangeWordsIn` keeps only its source-quote and card work.
-            const theirs = rangeQuote !== undefined && verifyStatements([{ quote: rangeQuote, form: 'range', low, high }],
-              chatTexts(ctx, g.brief_text),
-              { subject: { quantity: 'option_level', node_id: factor.id, option_id: option.id }, unit: declaredUnit ?? '', forms: ['range'],
-                figuresIn: figuresWritten }).kind === 'verified';
+            // ⭐ QBC row 7 (W14): the range is the user's only by THE ONE RULE (`verifyStatements`): their own span writes it, as one
+            // joined range or as both located ends (however worded: "five to twenty days"), never another speaker's quoted words.
+            // `rangeWordsIn` keeps only its source-quote and card work.
+            const rangeRules = (form: 'range' | 'point') => ({ subject: { quantity: 'option_level', node_id: factor.id, option_id: option.id },
+              unit: declaredUnit ?? '', forms: [form], figuresIn: figuresWritten });
+            const theirs = rangeQuote !== undefined
+              && (verifyStatements([{ quote: rangeQuote, form: 'range', low, high }], chatTexts(ctx, g.brief_text), rangeRules('range')).kind === 'verified'
+                || verifyStatements([{ quote: rangeQuote, form: 'point', value: low }, { quote: rangeQuote, form: 'point', value: high }],
+                  chatTexts(ctx, g.brief_text), rangeRules('point')).kind === 'verified');
             if (theirs) likelyRange = { low, high };
             else rangesNotRecorded.push({ option: option.label, factor: factor.label,
               reason: 'No likely range was recorded: there are no words of the user’s to record it from. '
