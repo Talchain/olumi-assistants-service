@@ -90,7 +90,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { draftStatements, figureSource, goalTargetStatements, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { draftStatements, figureSource, goalTargetStatements, keepsTheFirstVerifiedTarget, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
 import { QUOTE_SPEAKER, QUOTE_SPEAKER_WORDS } from '../user-statements.js';
 
 /**
@@ -2216,6 +2216,9 @@ export async function buildModelFromBrief(
         (needsSizeRetry ? retrySize.nodes <= first.size.nodes && retrySize.edges <= first.size.edges
           : retrySize.within || retrySize.user_material_exceeds_limit || (revisedDraftOverLinksOnly && retrySize.nodes <= retrySize.limits.maxNodes)) &&
         keepsUserMaterial && keepsEveryUserNumber(firstCandidate, first.candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
+        // ⭐ QBC rows 3–4: the user's FIRST verified target is kept whole (figure, sign, comparator, unit) by a re-choice and by a
+        // range/link retry alike, by the one binder (`keepsTheFirstVerifiedTarget`); a retry that changes it is not adopted.
+        keepsTheFirstVerifiedTarget(firstCandidate, retryCandidate, brief) &&
         // Every goal condition, by identity (C-cee r1 item 5): the grammar cannot tell [A, B] from [A, A].
         // A redraft of an unattested event goal re-chooses the goal: adopted only when it is no longer one, losing no condition.
         (unattested === null ? keepsEveryGoalCondition(first.candidate.goal, retryCandidate.goal)
