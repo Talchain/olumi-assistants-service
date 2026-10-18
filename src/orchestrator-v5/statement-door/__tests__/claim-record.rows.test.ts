@@ -198,6 +198,22 @@ describe('claim record rows (spec §1–§4, §6): who asserts the figure is sav
     expect(userStatementFor(w.graph(), SUBJECT)?.statements.map((st) => [st.low, st.high])).toEqual([[5, 7]]);
   });
 
+  it('COEXIST NEGATIVE: one record never holds two current claims of ONE source (the writer refuses it; supersession is the only route)', async () => {
+    const { applyStatementRecordEdit } = await import('../../goal-target/cohort-forecast-write.js');
+    const g = START();
+    const node = g.nodes.find((n: Rec) => n.id === 'pre_order');
+    const range = (low: number, high: number): Rec => ({ speaker: 'user', quote: OWN, source: OWN, form: 'range', reading: 'olumi',
+      subject: { quantity: 'effect', node_id: 'pre_order' }, low, high, unit: 'kg' });
+    const key = 'link|pre_order|daily_waste||effect';
+    const subject = { kind: 'link' as const, id: 'pre_order', to_id: 'daily_waste', field: 'effect' as const };
+    const record = (sts: Rec[]): Rec => ({ subject_key: key, field: 'effect', recorded_at: '2026-10-18T15:00:00.000Z', statements: sts });
+    const write = (sts: Rec[]) => applyStatementRecordEdit(g, { node_id: 'pre_order', expected_node: structuredClone(node),
+      user_statement: { subject, record: record(sts) } } as never);
+    expect(write([range(4, 6), range(5, 7)])).toEqual({ kind: 'refused', reason: 'invalid_statement' });
+    // CONTROL: one claim of that source is written.
+    expect(write([range(4, 6)]).kind).toBe('mutated');
+  });
+
   it('SUPERSEDE + UNDO: the same source\'s later view supersedes its earlier one (kept in history); restoring the prior version restores it', async () => {
     const w = world();
     await pressOn(w, OWN, 'user');

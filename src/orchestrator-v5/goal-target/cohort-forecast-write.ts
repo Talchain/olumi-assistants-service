@@ -22,7 +22,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
+import { saidByOf, userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
 import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, claimRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
@@ -269,9 +269,13 @@ function recordable(subject: DoorSubject, record: UserStatementRecord): boolean 
       && typeof record.attest.low === 'number' && typeof record.attest.high === 'number';
   }
   // G3 (TL 21:18Z): a link's effect the user stated as a range in chat (`LINK_EFFECT_RANGE_ROW`): their range, kept as words and
-  // ends only. It sizes nothing, so it carries no attest (no law, no adoption) and is never read as a size.
+  // ends only. It sizes nothing, so it carries no attest (no law, no adoption) and is never read as a size. ⭐ CLAIM RECORD (spec v2
+  // rule 1; AIE DISSENT): another source's view of the same link stays current beside it (`withClaimsKept`, one per source), so the
+  // record holds one range claim per source, never a second claim of one source.
   if (subject.kind === 'link' && subject.field === 'effect' && subject.to_id !== undefined && subject.option_id === undefined) {
-    return record.statements.length === 1 && record.statements[0]!.form === 'range' && record.attest === undefined;
+    const source = (st: UserStatementRecord['statements'][number]): string => JSON.stringify([saidByOf(st), st.party ?? null, st.conditions ?? null]);
+    return record.statements.length >= 1 && record.statements.every((st) => st.form === 'range') && record.attest === undefined
+      && new Set(record.statements.map(source)).size === record.statements.length;
   }
   // DL-3 05:21Z (AIE 6183352754): what a factor's quantity covers, in the user's words (`FACTOR_DEFINITION_ROW`). It changes no
   // figure, so it carries no attest (no law, no adoption) and is never read as a value, a limit or a size.
