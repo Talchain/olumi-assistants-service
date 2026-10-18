@@ -278,9 +278,8 @@ describe('A4 guarantee: every other shape keeps the first draft', () => {
 const T2_A = "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?";
 const T2_C = "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?";
 const T2_D1 = "I need some help framing a prioritisation conflict for our sprint planning on Monday.\nSales is breathing down my neck because they have this huge enterprise prospect—like potentially our biggest deal of the quarter—but the prospect is saying they won’t sign unless we can promise an AI reporting module by next month. The sales rep is saying it's a \"make or break\" thing.\nBut my lead engineer just showed me the data on our new trial signup flow and it’s a total mess. We're losing like 15% of people before they even finish setting up their profile because of a bug in the integration step. If we don't fix that now, we're basically burning marketing budget.\nEngineering says they only have bandwidth to tackle one of these properly in the upcoming sprint. I need to write an update for the leadership team explaining what we're going to do, but honestly, I'm stuck. How should I approach this trade-off? What am I missing here?";
-const PER_ONE = 'If it is a money size PER ONE of something the brief names (per deal, per contract, per customer), apply the '
-  + 'per-one rule: keep that countable as its own quantity, link it to the money goal, and size that link per one at the LOW '
-  + 'end of "£1-2 million" (effect_provenance "explicit").';
+// A3 (AIE-approved text, prompt/AIE-A3-COMMON-20261017-v1.json, exact): the range is kept whole on its link, never an end.
+const PER_ONE = 'If it is a money size PER ONE of something the brief names (per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the money goal per one (effect_per_source_change 1), and retain "£1-2 million" as the complete stated effect range in statements on that directed link, with its signed endpoints, actual unit, reference, period, conditions and source. Leave the point size null unless a separately supported point size is supplied. Retain any explicitly stated central figure with its qualifier and range, without interpreting it as an expected mean or inferring a distribution. Any operative Olumi approximation stays separate, with its own supported basis, disclosed assumptions and required approval. Do not substitute a chosen endpoint, midpoint, zero or a guessed spread for the source, and do not re-ask a range already supplied.';
 
 describe('A4 first pass: the written range is asked of the FIRST construct', () => {
   it('RED: Paul\'s brief → the FIRST call already asks the per-one rule of "£1-2 million"; a draft that carries it is ONE call', async () => {
@@ -307,3 +306,51 @@ describe('A4 first pass: the written range is asked of the FIRST construct', () 
     expect(firstConstructInput(asked)).toBe(`${todayLine(new Date())}\n\n${BRIEF_LABEL}\n${asked}`);
   });
 });
+
+// ⭐ A3 (AIE-approved text, exact; DL-3 ruling 2): the producer keeps a written range WHOLE on its link, size null, and records it in
+// `statements`. SYNTHETIC brief (never the served one): the range keeps both ends with its provenance, no retry is asked for what the
+// draft holds, and the size stays Olumi's placeholder, said once against the user's range (ITEM 3); only claims resting on it wait.
+const SYN_RANGE = 'Each new clinic contract is worth between £20-40k a year to us.';
+const SYN_BRIEF = `We sell booking software to clinics. ${SYN_RANGE} We need at least £120k of new annual contract value within 3 months.`;
+function wholeRangeDraft(recorded = true): Record<string, unknown> {
+  return {
+    goal: { metric: 'new annual contract value', operator: '>=', target_stated: true, frame: 'level', value: 120000, unit: '£', horizon_months: 3,
+      provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
+    constraints: [],
+    options: [
+      { label: 'Carry on as now', provenance: 'ai_proposed', changes: [], is_status_quo: true, interventions: [] },
+      { label: 'Add a sales hire', provenance: 'ai_proposed', changes: [], is_status_quo: null, interventions: [
+        { factor_label: 'Sales calls per week', value: 40, value_kind: 'absolute', unit: 'calls/week', provenance: 'ai_proposed' }] },
+    ],
+    factors: [{ label: 'Sales calls per week', role: 'controllable', baseline_known: true, baseline_value: 20, unit: 'calls/week', provenance: 'ai_proposed', plausible_max: 100 }],
+    risks: [],
+    outcomes: [{ label: 'Clinic contracts signed', provenance: 'inferred', unit: 'contracts', plausible_max: 10 }],
+    links: [link('Sales calls per week', 'Clinic contracts signed'), link('Clinic contracts signed', 'new annual contract value', { amount: null as never, per: 1, by: null as never })],
+    identities: [], unknowns: [], decision_question: null,
+    statements: recorded ? [{ quote: SYN_RANGE, subject: { kind: 'link', label: 'Clinic contracts signed', to_label: 'new annual contract value', factor_label: null },
+      field: 'effect', form: 'range', value: null, low: 20000, high: 40000, unit: '£', qualifier: null, conditions: null }] : [],
+  };
+}
+
+describe('A3: a written range is kept whole on its link, never an end as the size', () => {
+  it('RED → GREEN: the recorded range keeps both ends, as the user\'s; no retry is asked for it; the size stays Olumi\'s placeholder, said once', async () => {
+    const { graph, inputs, out } = await build([wholeRangeDraft()], SYN_BRIEF);
+    expect(inputs, 'a range the draft records is never asked again').toHaveLength(1);
+    const g = graph as unknown as { nodes: Array<Record<string, any>>; edges: Array<Record<string, any>> };
+    const from = g.nodes.find((n) => n.label === 'Clinic contracts signed')!;
+    const to = g.nodes.find((n) => n.label === 'new annual contract value')!;
+    const edge = g.edges.find((e) => e.from === from.id && e.to === to.id)!;
+    expect(edge.provenance?.natural_effect, 'no end of the range is the size').toBeUndefined();
+    expect(edge.provenance?.magnitude ?? 'placeholder').not.toBe('user_stated');
+    const record = from.user_statements?.find((r: Record<string, any>) => r.subject_key === `link|${from.id}|${to.id}||effect`);
+    expect(record, JSON.stringify(from.user_statements ?? null)).toMatchObject({ statements: [expect.objectContaining({ speaker: 'user', quote: SYN_RANGE, form: 'range', low: 20000, high: 40000 })] });
+    expect((out.not_represented as string[]).some((x) => x.includes(SYN_RANGE) && x.includes('Olumi')), JSON.stringify(out.not_represented)).toBe(true);
+  });
+
+  it('CONTRAST: a draft that neither sizes nor records the written range is still asked about it by the retry (the backstop stands)', async () => {
+    const { inputs } = await build([wholeRangeDraft(false), wholeRangeDraft(false)], SYN_BRIEF);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain(JSON.stringify('The brief writes "£20-40k" and no link in the model carries it.').slice(1, -1));
+  });
+});
+

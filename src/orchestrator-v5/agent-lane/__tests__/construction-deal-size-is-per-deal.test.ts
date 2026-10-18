@@ -103,11 +103,13 @@ const said = (out: Record<string, unknown>) => (out.not_represented as string[] 
 const LOW: Size = { amount: 1000000, per: 1, by: 'explicit' };
 
 describe('A4: "deals between £1-2 million" is £1,000,000 per deal, the low end of the range, said with it as a floor', () => {
-  it('the drafter is told to put a per-one money size on the countable → goal link, at the LOW end of a range', async () => {
+  it('the drafter is told to put a per-one money size on the countable → goal link, and to keep a range WHOLE, never an end (A3)', async () => {
     const { instructions } = await build(deals({ deals: LOW }));
     expect(instructions.length).toBeGreaterThanOrEqual(1);
     expect(instructions[0]).toContain('A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING');
-    expect(instructions[0]).toContain('When the brief gives a RANGE for that size, use its LOW end.');
+    // A3 (AIE-approved text, prompt/AIE-A3-COMMON-20261017-v1.json, exact): the LOW-end instruction is gone.
+    expect(instructions[0]).toContain('When the brief gives a RANGE for that size, retain its complete signed endpoints, unit, reference, period, conditions and source in statements on that directed link. Do not choose an endpoint or calculate a midpoint to fill a missing point size; leave that size null when no separately supported point size is supplied. If the user explicitly supplies a central figure for this same quantity, unit, reference, window and conditions, retain that figure with its stated qualifier and range; it is not automatically an expected mean or a calibrated distribution. Keep any proposed operative Olumi approximation separate from the original range, with its own supported basis, disclosed assumptions and required approval. A plain or likely range does not establish inner quartiles, a Normal law or a hard bound. Do not re-ask a range already supplied.');
+    expect(instructions[0]).not.toContain('use its LOW end');
   });
 
   it('RED: deals → goal at £1,000,000 per deal, tagged explicit → the user\'s size, carrying the range it is the low end of', async () => {
