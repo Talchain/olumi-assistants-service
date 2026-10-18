@@ -76,7 +76,7 @@ import { admitAccumulationIdentities, withAdmittedAccumulations, admitStructural
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
-import { clampForPersist, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
+import { clampForPersist, frameOf, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
@@ -131,7 +131,7 @@ const QUANTITY_FRAME = {
     + 'bears on a money goal is drafted as its money EXPOSURE (for example "Funding lost to distraction"), with the money unit. '
     + 'null for an outcome or risk that is not a quantity.' },
   plausible_max: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
-    'With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit.' },
+    'For this risk or outcome, give plausible_max only for a supported upper domain bound in its actual unit and encoding, using the same rule as for a factor; otherwise null. A unit alone does not establish a bound, and an ordinary uncertain range’s high end is not a hard maximum. Retain its source, speaker, conditions, uncertainty and qualitative meaning. Do not invent a round scale; a separately disclosed computational reference does not establish a scientific bound or make an impact quantity an occurrence probability.' },
 } as const;
 
 /**
@@ -336,8 +336,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
       baseline_evidence: { anyOf: [{ type: 'null' }, obj({ quote: { type: 'string' } }, ['quote'])], description: 'Complete verbatim brief sentence stating this factor’s current level; null otherwise.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'The unit of baseline_value, as the brief writes it ("%", a count such as "subscribers", "<currency>/<period>"). ONLY a money amount charged, paid or earned PER ITEM names that item: "<currency> per <item> per <period>", where <item> is what another factor counts.' }, provenance: introducedBy,
-      plausible_max: { type: 'number',
-        description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
+      plausible_max: { anyOf: [{ type: 'number' }, { type: 'null' }],
+        description: 'Use a numerical plausible_max only for a supported upper domain bound in this factor\u2019s actual unit and encoding. A percentage unit alone does not imply a maximum of 100: percentage change can exceed 100. Use 100 or 1 as a bound only for an established bounded part-of-whole percentage or proportion with that encoding; use a score maximum only where its actual domain is specified. An ordinary uncertain range\u2019s upper end is not a hard maximum. Otherwise return null, never a round or typical maximum or a cap inferred from the current value. Retain the factor, stated figure, actual unit/encoding, full source, speaker, conditions and uncertainty. Null means the upper bound is unsupported; it does not supply an encoding, computational reference or effect law.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
     // ⭐ THE FRAME A FACTOR HAS (DL #75 5916155976 (a); R3 5916156932 (b)): without `unit` + `plausible_max` no size into or
     // out of an outcome or a risk can be read, so a goal they feed could never be sized in its own unit.
@@ -613,7 +613,7 @@ export const BUILD_INSTRUCTIONS = [
   // techlead-1): the same loss counted twice. No domain example: a worked example steers every brief. A first wording
   // ("keep a risk only for a separate harm … otherwise leave it out") also dropped separate harms: risks 23 → 10 (lsD).
   'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already carries the limited quantity moving the wrong way, so do not size that loss a second time: keep that risk as a node, linked to the goal metric with all three size fields null. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
-  'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
+  'GIVE `plausible_max` ONLY FOR A SUPPORTED UPPER DOMAIN BOUND in the quantity\u2019s actual unit and encoding; otherwise give null. A percentage unit alone is not a 100 maximum, and a value between 0 and 1 alone is not a bounded proportion. Preserve an explicitly supported part-of-whole domain or score maximum, but never treat an ordinary uncertain range\u2019s high end as a hard bound. Keep source, speaker, conditions, uncertainty, factor and stated figure regardless; do not invent a round or typical maximum or a cap from that figure. A computational reference is separate from a bound, a prediction and an adopted scientific assumption.',
   // ⭐⭐ RECOVERY BATCH C — THE PROMPT HUNK FOR SCIENCE SIGN-OFF (rulings 1–5, 11, 15; amendments 2–5). ONE instruction.
   // AIE C drafter changeset (12 Oct), three clauses verbatim: the additive hiring assumption is disclosed, effect timing
   // matches period_kind, and each secondary target keeps its own frame/reference/period (unsupported ones are retained).
@@ -1542,7 +1542,7 @@ function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: re
     ...p.baseline_gaps.map((g) => (g.outcome === true
       // An outcome has no level of its own to carry, so a today-level the BRIEF states was dropped with it: the retry may
       // give THAT figure as the user's (verifier FIX_FIRST (2) on f773a217), never the limit's (`neverTheLimitAsTodaysLevel`).
-      ? `${g.factor}: declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits its level, and the limit cannot be checked without today's level. If the brief itself states today's level of ${g.factor} (never the limit's own figure), give that figure instead, with baseline_known:true, provenance explicit`
+      ? `${g.factor}: declare it in factors, not outcomes (role observable; plausible_max only for a supported upper domain bound in its actual unit and encoding, else null), and give it a baseline_value only with its own separately grounded meaning and basis (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits its level, and the limit cannot be checked without today's level. If the brief itself states today's level of ${g.factor} (never the limit's own figure), give that figure instead, with baseline_known:true, provenance explicit`
       : g.because === 'limit'
       ? `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed \u2014 never the user's) \u2014 the user limits it, and the limit cannot be checked without today's level`
       : g.because === 'identity'
@@ -2828,6 +2828,12 @@ export async function buildModelFromBrief(
   if (finalRefusal !== null) return finalRefusal;
   admitted = final.admitted;
   const { graph, goalNodes, openQuestions, levelAsks, setAside, withheldOptions, scopeAsked, untypedScopeWords } = final;
+  /** A defaulted-frame disclosure (`admit-model.ts`) still describes the registered node: the frame it names is the frame the node
+   * is read on (`frameOf`, CEE's one reading order: scale_frame → cap → …), so a frame moved after admission is never mis-said. */
+  const defaultedFrameHeld = (l: { readonly field_path: string; readonly after?: unknown }): boolean => {
+    const id = /^nodes\[(.+)\]\.observed_state\.cap$/.exec(l.field_path)?.[1];
+    return frameOf((graph.nodes as Record<string, unknown>[]).find((n) => n.id === id) as never) === l.after;
+  };
 
   // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated. The event's hold is
   // no link whose direction is unknown.
@@ -2964,7 +2970,11 @@ export async function buildModelFromBrief(
         // estimate, or why an estimate in another unit was set aside (G3 a735; AIE A3 13:11Z, AIE unit wording 16:04Z). Computed
         // at admission and, until A3 (T01, unseen 8e9132fc), never said: the user was not told their range was not the size used.
         // `retained_later_ambition`: a later aim the user named, kept as Olumi's reading and never a target this model tests (G1).
-        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|stated_range_beside_estimate|stated_range_other_unit|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => l.after === 'retained_later_ambition' || /\.(event_risk|event_forecast_not_modelled|added_capacity|horizon_months|stated_range_end|stated_range_unsized|stated_range_beside_estimate|stated_range_other_unit|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|goal_target_unbound|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path)
+          // ⛔ QBC row 10 (#3413 Codex r1): a factor with no supported range (`plausible_max` null) is read on admission's DEFAULTED
+          // frame; its own warn-level disclosure ("… a unit of measurement, not a forecast or a limit …") is said, never dropped here,
+          // and only while the registered node still holds that frame.
+          || (l.severity === 'warn' && /\.observed_state\.cap$/.test(l.field_path) && defaultedFrameHeld(l)))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
