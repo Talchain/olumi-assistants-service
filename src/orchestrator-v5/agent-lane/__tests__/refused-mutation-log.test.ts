@@ -49,9 +49,9 @@ beforeEach(() => { info = spyInfo().mockImplementation(() => undefined as never)
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('refused mutation diagnostics stay in the server log', () => {
-  it('logs exactly once at the projection hop and preserves the witnessed four-key wire row', async () => {
+  it('logs exactly once at the projection hop and preserves the witnessed four-key wire row, plus the arguments the AI sent', async () => {
     const result = await run();
-    expect(result.tool_calls).toEqual([witnessedRow]);
+    expect(result.tool_calls).toEqual([{ ...witnessedRow, arguments: args }]);
     expect(events()).toEqual([{
       event: 'v5.agent.tool_refused', request_id: 'req-r4', tool: witnessedRow.name,
       refusal: witnessedRow.refusal, detail, proposed: args,
@@ -62,13 +62,13 @@ describe('refused mutation diagnostics stay in the server log', () => {
   it('successful mutation produces no new event and keeps its row', async () => {
     const result = await run(JSON.stringify(args), { ok: true, mutated: false, proposal_id: 'p1' });
     expect(events()).toEqual([]);
-    expect(result.tool_calls).toEqual([{ name: witnessedRow.name, ok: true, mutated: false, proposal_id: 'p1' }]);
+    expect(result.tool_calls).toEqual([{ name: witnessedRow.name, ok: true, mutated: false, proposal_id: 'p1', arguments: args }]);
   });
 
   it('a non-mutation refusal produces no new event and keeps its row', async () => {
     const result = await run('{}', refused, 'get_canonical_state');
     expect(events()).toEqual([]);
-    expect(result.tool_calls).toEqual([{ ...witnessedRow, name: 'get_canonical_state' }]);
+    expect(result.tool_calls).toEqual([{ ...witnessedRow, name: 'get_canonical_state', arguments: {} }]);
   });
 
   it('excludes free text, quoted messages, nested payloads and credential-like values', async () => {
@@ -130,7 +130,7 @@ describe('refused mutation diagnostics stay in the server log', () => {
     const result = await run('{"proposal_id":"prop_nope"}', {
       ok: false, mutated: false, refusal: 'unknown_proposal',
     }, 'authorise_change');
-    expect(result.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }]);
+    expect(result.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal', arguments: { proposal_id: 'prop_nope' } }]);
     expect(events()).toHaveLength(1);
     expect(events()[0].proposed).toEqual({ proposal_id: 'prop_nope' });
   });

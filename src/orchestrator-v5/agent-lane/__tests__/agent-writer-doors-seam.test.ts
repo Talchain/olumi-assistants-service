@@ -238,8 +238,11 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     const t1 = await proposeRisk();
     const approve = approveChipOf(t1)!;
     const ref = approve.id.slice('agent-approve-proposal:'.length);
+    // ⛔ CHANGED CONTRACT (DL-3 ruling A, 18 Oct): with ONE card waiting, the user's TYPED words reach the Agent bound to it and its
+    // reading is the consent (held to account by approval-consent-gate.replay.test.ts; the write quotes the words). What this row
+    // still pins: a model-only approval on words the user did NOT type (a control's words) never writes.
     script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Nothing changed.')];
-    const refused = await turn({ message: 'Do not add anything.' });
+    const refused = await turn({ message: 'Do not add anything.', source: 'chip_click' });
     expect(refused._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
       mutated: false, refusal: 'approval_required', proposal_id: ref }));
     expect(bytes()).toBe(before);

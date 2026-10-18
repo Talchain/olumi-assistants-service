@@ -479,6 +479,7 @@ describe('R1: one explicit Run press is one reasoning loop turn', () => {
     behavior = 'run'; bodies = [];
     const retry = await press({ chip: replay.json().suggested_actions.find((a: Rec) => a.action_type === 'run_analysis') });
     expect(retry.statusCode).toBe(200); expect(runs).toHaveLength(1);
-    expect(retry.json()._agent.tool_calls).toEqual([{ name: 'run_analysis', ok: true, mutated: false }]);
+    expect(retry.json()._agent.tool_calls).toEqual([{ name: 'run_analysis', ok: true, mutated: false,
+      arguments: { reason: 'Productivity up at least 10% from today by month three; reading the current held model and brief.', effects_timing: timing } }]);
   });
 });

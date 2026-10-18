@@ -316,6 +316,8 @@ export interface AgentTurnResult {
     rejected_levels?: readonly RejectedLevel[];
     /** Why a construction ended without an answer (`max_output_tokens`, `construction_timeout`) — for exports. */
     incomplete_reason?: string;
+    /** The AI's own arguments for this call, bounded and redacted (`toolArgumentsAsSent`). Host-issued entries have none. */
+    arguments?: Readonly<Record<string, unknown>>;
   }[];
   /** Full results, so Olumi can decide what it owes the user this turn. */
   readonly tool_results: readonly ToolResult[];
@@ -476,6 +478,81 @@ const conflictFieldsOf = (result: ToolResult): { conflict_fields?: readonly stri
   return names.length > 0 ? { conflict_fields: names } : {};
 };
 
+/** Bounds on the arguments a reply's `_agent.tool_calls[]` carries (`toolArgumentsAsSent`). */
+export const TOOL_ARGUMENTS_MAX_CHARS = 1500;
+export const TOOL_ARGUMENT_STRING_MAX = 160;
+const TOOL_ARGUMENT_LIST_MAX = 6;
+const TOOL_ARGUMENT_DEPTH_MAX = 6;
+/** Marks a string that carried the user's whole message: the request already holds it, so it is never copied again. */
+export const USER_MESSAGE_MARK = '[the user’s message]';
+const secretKey = /^(?:authorization|cookies?|set[_-]?cookie|headers?|password|passphrase|secret|client[_-]?secret|(?:access|refresh|auth|id)?[_-]?token|api[_-]?key|private[_-]?key|credentials?)$/i;
+const secretValue = /\bbearer\s+\S|\bsk-[\w-]{8,}|\bAKIA[0-9A-Z]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----/i;
+
+/** An id names the item a call aims at, so it is cut last: never below this, whatever the text bound. */
+const TOOL_ARGUMENT_ID_MAX = 120;
+const idKey = /(?:^|_)ids?$/;
+
+const boundArgument = (v: unknown, depth: number, userMessages: readonly string[], max = TOOL_ARGUMENT_STRING_MAX, key = ''): unknown => {
+  if (typeof v === 'string') {
+    if (secretValue.test(v)) return '[redacted]';
+    if (userMessages.some((m) => v.includes(m))) return USER_MESSAGE_MARK;
+    const cut = idKey.test(key) ? Math.max(max, TOOL_ARGUMENT_ID_MAX) : max;
+    return v.length > cut ? `${v.slice(0, cut)}…(+${v.length - cut})` : v;
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : String(v);
+  if (typeof v === 'boolean' || v === null) return v;
+  if (depth >= TOOL_ARGUMENT_DEPTH_MAX) return Array.isArray(v) ? `[list of ${v.length}]` : '[nested]';
+  if (Array.isArray(v)) {
+    const kept = v.slice(0, TOOL_ARGUMENT_LIST_MAX).map((x) => boundArgument(x, depth + 1, userMessages, max, key));
+    return v.length > TOOL_ARGUMENT_LIST_MAX ? [...kept, `…+${v.length - TOOL_ARGUMENT_LIST_MAX} more`] : kept;
+  }
+  if (typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      out[k] = secretKey.test(k) ? '[redacted]' : boundArgument(x, depth + 1, userMessages, max, k);
+    }
+    return out;
+  }
+  return typeof v;
+};
+
+/**
+ * ⭐ WHAT THE AI SENT, SO A JUDGE CAN SEE WHICH ITEM A CORRECTION WAS AIMED AT (honest scoreboard, step 0, 18 Oct). The served
+ * reply kept only name, ok and refusal, so a refused or mis-aimed correction could not be told from the record. The AI's own
+ * call arguments are kept, bounded: each string cut to 160 characters (then 60, then 24 when the whole would not fit; an
+ * id never below 120), lists to 6 entries, nesting to 6 levels (a correction's
+ * `edits[].subject` sits at 4), and the whole to 1,500 characters (top-level keys that do not fit are named in `_omitted`).
+ * Secret-named keys and credential-shaped values
+ * are redacted; a string carrying the user's whole message is marked, never copied a second time. Not a JSON object → nothing.
+ * ⛔ A view the route gates before the user sees it (`give_provisional_view`, `sanitiseProvisionalView`: a raw code or a
+ * ranking refuses it) keeps its shape only — each text as its length — so a refused view never leaves by this record.
+ */
+const GATED_PROSE_TOOLS: ReadonlySet<string> = new Set(['give_provisional_view']);
+export const toolArgumentsAsSent = (name: string, raw: unknown, userMessages: readonly string[]): { arguments?: Readonly<Record<string, unknown>> } => {
+  if (typeof raw !== 'string') return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return {}; }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const whole = userMessages.map((m) => m.trim()).filter((m) => m.length >= 24);
+  // Text is cut harder before any key is left out (replay 18 Oct: a long correction lost its `edits[].subject` ids whole).
+  let out: Record<string, unknown> = {};
+  let omitted: string[] = [];
+  for (const max of [TOOL_ARGUMENT_STRING_MAX, 60, 24]) {
+    out = {};
+    omitted = [];
+    for (const [k, x] of Object.entries(parsed as Record<string, unknown>)) {
+      const value = secretKey.test(k) ? '[redacted]'
+        : GATED_PROSE_TOOLS.has(name) && typeof x === 'string' ? `[text, ${x.length} characters]` : boundArgument(x, 1, whole, max, k);
+      // Room is kept for the `_omitted` list itself, so the bound holds for the whole field.
+      if (JSON.stringify({ ...out, [k]: value }).length <= TOOL_ARGUMENTS_MAX_CHARS - 200) out[k] = value;
+      else omitted.push(k.slice(0, 40));
+    }
+    if (omitted.length === 0) break;
+  }
+  if (omitted.length > 0) out._omitted = omitted.slice(0, 8);
+  return { arguments: out };
+};
+
 /**
  * Opens the state item a fresh packet puts into a turn's input (and marks it, so history never keeps one).
  *
@@ -551,7 +628,7 @@ export async function runAgentTurn(
   ];
   /** Turn-local context never becomes a second historical source on the next turn. */
   const handedOn = (): unknown[] => items.filter((i) => !contextItems.includes(i) && i !== selectionItem);
-  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
+  const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string; arguments?: Readonly<Record<string, unknown>> }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
   let providerMs = 0;
@@ -856,7 +933,7 @@ export async function runAgentTurn(
         name: String(call.name),
         ok: result.ok,
         mutated: result.mutated,
-        // Identity only — never the tool's payload.
+        // Identity, then the AI's arguments as sent (bounded, `toolArgumentsAsSent`) — never the tool's result payload.
         ...(typeof result.proposal_id === 'string' ? { proposal_id: result.proposal_id } : {}),
         ...(typeof result.outcome === 'string' ? { outcome: result.outcome } : {}),
         ...(typeof result.refusal === 'string' ? { refusal: result.refusal } : {}),
@@ -865,6 +942,7 @@ export async function runAgentTurn(
         ...conflictFieldsOf(result),
         ...rejectedLevelsOf(result),
         ...(typeof result.incomplete_reason === 'string' ? { incomplete_reason: result.incomplete_reason } : {}),
+        ...toolArgumentsAsSent(String(call.name), call.arguments, [input.message, ...(input.ctx.verified_user_messages ?? [])]),
       });
       toolResults.push(result);
       const toolContext = runFactsContext(modelFacingToolResult(String(call.name), result));

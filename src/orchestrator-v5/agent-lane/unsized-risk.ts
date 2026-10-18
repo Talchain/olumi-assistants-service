@@ -86,23 +86,35 @@ export function withoutUnsizedOlumiRisks<T>(graph: T, identityGraph: unknown = g
   return withoutUnsizedOlumiRisksRecorded(graph, identityGraph).graph;
 }
 
-/** One risk THIS Run left out of its calculation, as the Run recorded it: its id, its label then, and why. */
+/**
+ * One risk THIS Run left out of its calculation, as the Run recorded it: its id, its label then, and why. `reason` is the risk's
+ * CLASS (Olumi's unsized suggestion, the {@link unsizedOlumiRiskIds} rule), never who kept it out or why (STEP8B pair, Codex).
+ */
 export interface RunOmittedRisk {
   readonly node_id: string;
   readonly label?: string;
   readonly reason: 'unsized_olumi_risk';
 }
 
-/** The same projection, with exactly the risks it removed from the copy it sends (present in it, then removed). */
-export function withoutUnsizedOlumiRisksRecorded<T>(graph: T, identityGraph: unknown = graph): { graph: T; omitted: RunOmittedRisk[] } {
+/**
+ * The same projection, with exactly the risks THIS Run leaves out under the rule: those it removes from the copy it sends (present
+ * in it, then removed), and those an earlier step already withheld (`withheldUpstream`: the participation guard's own
+ * `excludedNodeIds`). ⭐ STEP 8b (AIE R2 `step8_science.unfigured_risk`): admission persists the omission (`retainUnsizedOlumiRisks`),
+ * so the guard drops the risk first and this projection alone saw nothing to remove; the Run recorded only a count.
+ */
+export function withoutUnsizedOlumiRisksRecorded<T>(graph: T, identityGraph: unknown = graph, withheldUpstream: readonly string[] = []):
+  { graph: T; omitted: RunOmittedRisk[] } {
   const leftOut = unsizedOlumiRiskIds(identityGraph);
   if (leftOut.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return { graph, omitted: [] };
   const removed = graph.nodes.filter((n): n is Rec => isRec(n) && leftOut.has(n.id as string));
+  const removedIds = new Set(removed.map((n) => n.id));
+  const savedNodes = isRec(identityGraph) && Array.isArray(identityGraph.nodes) ? identityGraph.nodes.filter(isRec) : [];
+  const withheld = savedNodes.filter((n) => leftOut.has(n.id as string) && withheldUpstream.includes(n.id as string) && !removedIds.has(n.id));
   const touches = (e: unknown): boolean => isRec(e) && (leftOut.has(e.from as string) || leftOut.has(e.to as string));
   return {
     graph: { ...graph, nodes: graph.nodes.filter((n) => !(isRec(n) && leftOut.has(n.id as string))),
       ...(Array.isArray(graph.edges) ? { edges: graph.edges.filter((e) => !touches(e)) } : {}) } as T,
-    omitted: removed.map((n) => ({ node_id: n.id as string,
+    omitted: [...removed, ...withheld].map((n) => ({ node_id: n.id as string,
       ...(typeof n.label === 'string' && n.label.trim() !== '' && !/[\r\n]/.test(n.label) ? { label: n.label.trim() } : {}), reason: 'unsized_olumi_risk' as const })),
   };
 }
