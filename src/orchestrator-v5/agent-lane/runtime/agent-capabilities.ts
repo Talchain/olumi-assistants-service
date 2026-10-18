@@ -348,6 +348,7 @@ import { goalChancePointForAgent, nearestFiveGoalChancesForAgent } from '../../g
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { getModelManagementService } from '../../model-management/index.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { isRevisionConflict } from '../../graph-revision-conflict.js';
@@ -1313,11 +1314,14 @@ interface GraphRead {
  * where none is licensed or its C1 was checked down, Olumi's own leader-free record of what changed (`rerunRecordForModel`).
  * Both undefined for a first Run.
  */
-async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel>;
+async function runComparisonFacts(scenarioId: string, requestId: string, g: GraphRead, readRestore: boolean): Promise<{ delta: Awaited<ReturnType<typeof selectedRunDeltaForModel>>; rerunRecord: ReturnType<typeof rerunRecordForModel>;
   /** S9: the goal chances both Runs showed, beside a licensed delta (whose projection drops `goal_chances`); in `rerunRecord` otherwise. */
-  goalChanceChanges: readonly RunGoalChanceChange[] }> {
+  goalChanceChanges: readonly RunGoalChanceChange[];
+  /** C5: the saved restore between the two Runs, bound to this pair (`restoreBetweenRunsOf`); read only for a Run's coaching. */
+  restoreBetweenRuns: RestoreBetweenRuns | undefined }> {
   const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
-  const delta = await selectedRunDeltaForModel(scenarioId, g, g.run_delta);
+  const [delta, restoreBetweenRuns] = await Promise.all([selectedRunDeltaForModel(scenarioId, g, g.run_delta),
+    readRestore ? restoreBetweenRunsOf(scenarioId, g, SELECTED_RUN_DELTA_DEADLINE_MS) : undefined]);
   const optionNames = optionNameAliasesForCurrentRun(g);
   // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
   // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
@@ -1337,7 +1341,55 @@ async function runComparisonFacts(scenarioId: string, requestId: string, g: Grap
   // ⭐ S9 (capacity e2e R2e): the model-facing projection strips `goal_chances`, so beside a licensed delta they travel typed here.
   const goalChanceChanges = rerunRecord !== undefined || delta === undefined ? []
     : goalChanceChangesOf(g.run_delta, (id) => g.nodes.find((n) => n.id === id)?.label);
-  return { delta, rerunRecord, goalChanceChanges };
+  return { delta, rerunRecord, goalChanceChanges, restoreBetweenRuns };
+}
+
+/** The saved version record of a restore between the preceding Run and this Run, as the model-management reader holds it. */
+interface RestoreBetweenRuns {
+  readonly version_id: string;
+  readonly version_number: number;
+  readonly mutation_id: string;
+  /** The earlier saved version whose model the restore copied. */
+  readonly restored_version_id: string;
+  /** The version record's own label, verbatim: the only evidence of an Undo or Redo gesture. Absent when it has none. */
+  readonly label?: string;
+  readonly run_id: string;
+  readonly preceding_run_id: string;
+}
+
+/**
+ * ⭐ C5 (measured G2 Undo, 18 Oct): THE RESTORE BETWEEN THE TWO RUNS, from the saved version record, never inferred. The
+ * automatic Run after an Undo analysed the restored model, but nothing told its coaching that the model had been restored,
+ * so it asked the user to reconcile the result with the value they had just undone. The existing model-management reader's
+ * current head is carried ONLY when it is bound to THIS pair: a restore of this scenario with its own mutation and source
+ * version; its graph is the graph this read returns; the selected Run is current and is the delta's own current endpoint;
+ * and it was saved after the preceding Run and before this one. ⛔ A matching graph hash alone never proves a restore: an
+ * ordinary edit back to an earlier value has the same hash. Any read failure or deadline carries nothing.
+ */
+async function restoreBetweenRunsOf(scenarioId: string, g: GraphRead, deadlineMs: number): Promise<RestoreBetweenRuns | undefined> {
+  const endpoints = g.run_delta?.endpoints;
+  const runState = (g.analysis_state as { run_state?: { kind?: unknown; computed_at?: unknown } } | undefined)?.run_state;
+  if (endpoints === undefined || runState?.kind !== 'complete_current' || runState.computed_at !== endpoints.current.computed_at) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const head = await Promise.race([getModelManagementService().getCurrentVersion(scenarioId),
+      new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), deadlineMs); })]);
+    if (head?.status !== 'ok' || head.value === null) return undefined;
+    const v = head.value;
+    const restored = v.source_version_id ?? v.restored_from_version_id;
+    const [priorAt, savedAt, runAt] = [endpoints.prior.computed_at, v.created_at, endpoints.current.computed_at].map((t) => Date.parse(String(t)));
+    if (v.scenario_id !== scenarioId || v.creation_kind !== 'restore' || typeof restored !== 'string' || restored === ''
+      || typeof v.mutation_id !== 'string' || v.mutation_id === ''
+      || computeAnalysisAffectingGraphHash(v.graph as never) !== g.graph_hash
+      || !(priorAt < savedAt && savedAt < runAt)) return undefined;
+    return { version_id: v.id, version_number: v.version_number, mutation_id: v.mutation_id, restored_version_id: restored,
+      ...(v.label === null || v.label === '' ? {} : { label: v.label }),
+      run_id: endpoints.current.run_id, preceding_run_id: endpoints.prior.run_id };
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** What a Run's output tells the model to do with its comparison facts (Paul #94 6166259456). */
@@ -5180,7 +5232,9 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const { delta, rerunRecord, goalChanceChanges } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g);
+      // C5: the head is read for the interpreter's Run coaching only, never on every ordinary chat read.
+      const { delta, rerunRecord, goalChanceChanges, restoreBetweenRuns } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, g,
+        options?.section === 'run_explanation');
       // S8: what the user has said they do not accept, in their words. An unreadable list never fails the turn, but it is
       // UNKNOWN, never "none": the model is told the list could not be read (the `receipt_unreadable` convention).
       let statedObjectionsUnreadable = false;
@@ -5245,6 +5299,7 @@ export function createAgentCapabilities(
         ...nextStepFactOf(g),
         ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
         ...(goalChanceChanges.length === 0 ? {} : { goal_chance_changes: goalChanceChanges }),
+        ...(restoreBetweenRuns === undefined ? {} : { restore_between_runs: restoreBetweenRuns }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
@@ -12269,10 +12324,11 @@ export function createAgentCapabilities(
         };
         if (postRunRead && postRunRead.run_delta !== undefined
           && compareAnalysisRunFactIdentity(runIdentity, readRun).status === 'match') {
-          const { delta, rerunRecord, goalChanceChanges } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead);
-          if (delta !== undefined || rerunRecord !== undefined) {
+          const { delta, rerunRecord, goalChanceChanges, restoreBetweenRuns } = await runComparisonFacts(ctx.scenario_id, ctx.request_id, postRunRead, true);
+          if (delta !== undefined || rerunRecord !== undefined || restoreBetweenRuns !== undefined) {
             runComparison = { ...(delta !== undefined ? { run_delta: delta } : {}), ...(rerunRecord !== undefined ? { rerun_record: rerunRecord } : {}),
               ...(goalChanceChanges.length === 0 ? {} : { goal_chance_changes: goalChanceChanges }),
+              ...(restoreBetweenRuns === undefined ? {} : { restore_between_runs: restoreBetweenRuns }),
               note: RUN_COMPARISON_NOTE };
           }
         }
