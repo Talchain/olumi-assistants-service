@@ -85,6 +85,7 @@ import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { hasUserStatedSize, heldFigureOwnerOf } from '../../cee/provenance/provenance-of.js';
+import { goalSumTodayPart } from './goal-definition-sum.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -250,6 +251,11 @@ export function rederivedEstimatedPart(nodes: GoalLevelRead['nodes'], goalId: st
     from: given,
     observed_state: { ...os, raw_value: now, value: now / frame, ...(num(os.baseline) ? { baseline: now / frame } : {}) },
   };
+}
+
+/** STEP 8: the goal's level today held as a part of Olumi's sum moves with the goal (`goalSumTodayPart`); said on the card. */
+function sayTodayPart(goalLabel: string, partLabel: string): string {
+  return `"${partLabel}" changes with it: Olumi works out "${goalLabel}" as its level today plus each option's change`;
 }
 
 /** "about 1,469 subscribers" — a whole figure from 100 up, two decimals below. */
@@ -938,10 +944,11 @@ export async function proposeGoalCurrentLevel(
   const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
   if (!scope && identityConflictsWithScope(goal as Record<string, unknown>)) return refuse('goal_scope_unresolved', 'Resolve the goal’s scope before changing its current level. Nothing was prepared.');
   const rederived = withdrawal ? null : rederivedEstimatedPart(g.nodes, goal.id, raw);
+  const todayPart = withdrawal ? undefined : goalSumTodayPart(g.nodes, goal.id);
   // A figure recorded BEFORE this card is said, and matched on other nodes, in the unit it was recorded in (the stored one).
   const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;
   const earlierHeld = replaces === undefined ? null
-    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit), withStoredUnit(replaces));
+    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit, todayPart?.id), withStoredUnit(replaces));
   const proposal = createProposal({
     scenario_id: ctx.scenario_id,
     user_id: ctx.authenticated_user_id,
@@ -953,6 +960,7 @@ export async function proposeGoalCurrentLevel(
         ...(scope ? { goal_scope: scope, reconciliation_key: args.reconciliation_key } : {}),
         ...(withdrawal ? { identity_withdrawal: withdrawal } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
+        ...(todayPart !== undefined ? { today_part: todayPart.id } : {}),
         ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
         ...(unitReading !== undefined ? { unit_reading: unitReading } : {}),
       },
@@ -967,6 +975,7 @@ export async function proposeGoalCurrentLevel(
       sayAdoptedUnit(goal.label, adoptedUnit) +
       (unitReading !== undefined ? `, read as ${unitReading.unit}, as you wrote it` : '') +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
+      (todayPart !== undefined ? `. ${sayTodayPart(goal.label, todayPart.label)}` : '') +
       (earlierHeld !== null ? earlierHeld.label : '') +
       (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
       (withdrawal ? ` ${withdrawal.words}` : ''),
@@ -1045,13 +1054,15 @@ function nodesHoldingEarlierFigure(
   goalId: string,
   earlier: number,
   goalUnit: string | undefined,
+  /** The goal's own level today as a sum's part (`goalSumTodayPart`): it moves with the goal, so it is never "still held". */
+  todayPartId?: string,
 ): { label: string; options: string[]; fromBrief: boolean }[] {
   if (goalUnit === undefined) return [];
   const users = (observed: unknown): boolean => valueClassOf(observed) === 'user_stated';
   const rawNodes = Array.isArray((g.raw as { nodes?: unknown }).nodes) ? (g.raw as { nodes: Record<string, unknown>[] }).nodes : [];
   const options = rawNodes.filter((n) => n?.kind === 'option');
   return g.nodes
-    .filter((n) => n.id !== goalId && n.kind !== 'goal' && n.kind !== 'option' && n.kind !== 'decision')
+    .filter((n) => n.id !== goalId && n.id !== todayPartId && n.kind !== 'goal' && n.kind !== 'option' && n.kind !== 'decision')
     .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state)
       && typeof n.observed_state?.unit === 'string' && unitComparisonKey(n.observed_state.unit) === unitComparisonKey(goalUnit))
     .map((n) => ({
@@ -1172,6 +1183,7 @@ function changeGoalLevel(
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;
   const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
+  const todayPart = goalSumTodayPart(g.nodes, goal.id);
   /**
    * ⭐ AIQ 5902364862: the NUMBER is now the user's; the JOIN is not. Where Olumi read the brief's figure as this goal's
    * level (a `goal_level_reading`: the goal's words differ from the user's, the r0 "costs" shape), the reading is
@@ -1194,7 +1206,7 @@ function changeGoalLevel(
   // `identity_inconsistent`) — never scored silently on the old figure.
   const product = rederived === null ? productStillGives(g.nodes, goal) : null;
   const earlierHeld = replaces === undefined ? null
-    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit), withStoredUnit(replaces));
+    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit, todayPart?.id), withStoredUnit(replaces));
   const productSaid = product === null ? '' : `"${goal.label}" is worked out as ${product.parts}, and those figures still give ` +
     `${withUnit(product.value)}, so the Run cannot use your ${withUnit(raw)} until one of them changes`;
   const proposal = createProposal({
@@ -1208,6 +1220,7 @@ function changeGoalLevel(
         ...(reframed !== null && reframed.cap !== cap ? { reframed_cap: reframed.cap } : {}),
         ...(prior !== undefined ? { level_reading: levelReading } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
+        ...(todayPart !== undefined ? { today_part: todayPart.id } : {}),
         ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
         // ⭐ A1: the goal's first frame and Olumi's reading of the adopted unit, written with the level (re-derived at apply).
         ...(firstFrame !== null
@@ -1226,6 +1239,7 @@ function changeGoalLevel(
       (change !== '' ? ` (your target: ${change})` : '') +
       sayAdoptedUnit(goal.label, adoptedUnit, fromChange) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
+      (todayPart !== undefined ? `. ${sayTodayPart(goal.label, todayPart.label)}` : '') +
       (productSaid !== '' ? `. ${productSaid}` : '') +
       (earlierHeld !== null ? earlierHeld.label : ''),
   });
@@ -1359,6 +1373,11 @@ export async function applyGoalCurrentLevel(
   const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
   if (stableStringify(withdrawal) !== stableStringify(scoped.identity_withdrawal)) return notApplied('The identity changed after this reading was offered. Nothing was written.');
   const part = withdrawal ? null : rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);
+  // STEP 8: the goal's level today held as a sum's part is written with the goal, exactly as the card said, or nothing is.
+  const todayPart = withdrawal ? undefined : goalSumTodayPart(approved.nodes, goal.id);
+  if (todayPart?.id !== (op.value as { today_part?: unknown } | undefined)?.today_part) {
+    return notApplied(`How "${goal.label}" is worked out changed after this was prepared, so nothing was written. Read the model again and propose afresh.`);
+  }
   if (JSON.stringify(part) !== JSON.stringify(carried)) {
     return {
       ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
@@ -1375,6 +1394,7 @@ export async function applyGoalCurrentLevel(
   const carriedOp = op.value as { reframed_cap?: unknown; level_reading?: unknown } | undefined;
   const reframedCap = num(carriedOp?.reframed_cap) ? carriedOp!.reframed_cap as number : undefined;
   const nodes = approved.nodes.map((n) => {
+    if (todayPart !== undefined && n.id === todayPart.id) return { ...n, observed_state: { ...kept, ...os } };
     if (n.id !== op.path) return part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n;
     const written: Record<string, unknown> = {
       ...(scope && withdrawal ? applyIdentityWithdrawalToGoal(n as Record<string, unknown>, scope, withdrawal)! : n), observed_state: { ...kept, ...os },
