@@ -355,6 +355,64 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
       expect(nodeIn((await w2.cold()).body.graph, 'total_hours').observed_state).toMatchObject({ raw_value: 100, source: 'user_override' });
     });
 
+    // ⭐ Buddy-A 18:54Z: an exemption comes only from an actual write or a kept figure, never from a replacement the host rejects.
+    it('REJECTED FIGURE: night 45 written, day kept as context, a total of 999 not in the words → Olumi\'s old total still goes', async () => {
+      const FIX = 'Correction: night shifts take 45 hours per week, not 40; day shifts stay at 60.';
+      const TOTAL = { kind: 'factor' as const, id: 'total_hours', field: 'level' as const };
+      const before = withTotal();
+      const w = await correctionWorld(withTotal(), FIX);
+      const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [
+        edit(NIGHT, NIGHT_SAID, 'historical', 'night shifts take 45 hours per week', { value: 45, unit: 'hours per week' }),
+        edit(DAY, DAY_SAID, 'historical', 'day shifts stay at 60'),
+        edit(TOTAL, 'total', 'historical', 'total shift hours are 999 hours per week', { value: 999, unit: 'hours per week' })] } }) as Rec;
+      expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
+      expect(card.public_label).toContain('Olumi could not find 999 hours per week in your correction’s own words, so it is not written as the figure for “Total shift hours”.');
+      expect(card.public_label).toContain(LINE);
+      expect(card.public_label).not.toContain('The current figure for “Total shift hours” stays as it is.');
+      expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
+      for (const g of [w.writes[0]!.graph, (await w.cold()).body.graph]) {
+        expect(nodeIn(g, 'total_hours')).not.toHaveProperty('observed_state');
+        expect(nodeIn(g, 'night_hours').observed_state).toMatchObject({ raw_value: 45, source: 'user_override' });
+        expect(nodeIn(g, 'day_hours').observed_state).toEqual(nodeIn(before, 'day_hours').observed_state);
+      }
+    });
+
+    it('CONTRAST: a total the user explicitly keeps (a kept figure of theirs) is not withdrawn as a dependent', async () => {
+      const KEPT = 'We run 100 hours per week in total.';
+      const TOTAL = { kind: 'factor' as const, id: 'total_hours', field: 'level' as const };
+      const g = withTotal();
+      nodeIn(g, 'total_hours').user_statements = [userStatementRecord(TOTAL, [{ speaker: 'user', quote: KEPT, source: KEPT, form: 'point', low: 100, high: 100,
+        unit: 'hours per week', reading: 'olumi', subject: { quantity: 'level', node_id: 'total_hours' } }], '2026-10-10T09:00:00.000Z', { recorded_by: 'construction' })];
+      const FIX = 'Correction: night shifts take 45 hours per week, not 40; keep the 100 hours per week in total.';
+      const w = await correctionWorld(g, FIX);
+      const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [
+        edit(NIGHT, NIGHT_SAID, 'historical', 'night shifts take 45 hours per week', { value: 45, unit: 'hours per week' }),
+        { subject: TOTAL, retirement: { quote: 'not 40', scope: 'part', disposition: 'historical' }, retained: [KEPT], reading_words: 'keep the total' }] } }) as Rec;
+      expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
+      expect(card.public_label).not.toContain(LINE);
+      expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
+      expect(nodeIn((await w.cold()).body.graph, 'total_hours').observed_state).toMatchObject({ raw_value: 100 });
+    });
+
+    // ⭐ Buddy-A 19:08Z: kept qualitative words beside an UNKEPT figure, or kept words the record does not hold, decide no level.
+    it.each([['qualitative words of the figure\'s own statement', 'mostly on nights'], ['words the record does not hold', 'the total we agreed']] as const)(
+      'KEPT TEXT IS NOT A KEPT FIGURE (%s): Olumi\'s old total still goes', async (_kind, span) => {
+        const SAID = 'We run 100 hours per week in total, mostly on nights.';
+        const TOTAL = { kind: 'factor' as const, id: 'total_hours', field: 'level' as const };
+        const g = withTotal();
+        nodeIn(g, 'total_hours').user_statements = [userStatementRecord(TOTAL, [{ speaker: 'user', quote: SAID, source: SAID, form: 'point', low: 100, high: 100,
+          unit: 'hours per week', reading: 'olumi', subject: { quantity: 'level', node_id: 'total_hours' } }], '2026-10-10T09:00:00.000Z', { recorded_by: 'construction' })];
+        const FIX = `Correction: night shifts take 45 hours per week, not 40; keep ${span}.`;
+        const w = await correctionWorld(g, FIX);
+        const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [
+          edit(NIGHT, NIGHT_SAID, 'historical', 'night shifts take 45 hours per week', { value: 45, unit: 'hours per week' }),
+          { subject: TOTAL, retirement: { quote: 'not 40', scope: 'part', disposition: 'historical' }, retained: [span], reading_words: 'keep the wording' }] } }) as Rec;
+        expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
+        expect(card.public_label).toContain(LINE);
+        expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
+        expect(nodeIn((await w.cold()).body.graph, 'total_hours')).not.toHaveProperty('observed_state');
+      });
+
     it('STALE: Olumi\'s worked-out figure changed after the card → nothing written (node_changed)', async () => {
       const FIX = 'Correction: night shifts take 45 hours per week, not 40.';
       const w = await correctionWorld(withTotal(), FIX);

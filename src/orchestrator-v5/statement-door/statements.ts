@@ -517,7 +517,7 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     if (!isDeepStrictEqual(e.record.statements, JSON.parse(JSON.stringify(replacementStatements(approved.source, e))))
       || !isDeepStrictEqual(e.record.attest, correctionAttest(e))
       || !isDeepStrictEqual(e.record.history ?? [], JSON.parse(JSON.stringify(retiredHistory(e))))
-      || !isDeepStrictEqual(e.dependent, dependentAction(graph, e, approved.source, levelIdsOf(approved.edits)))) return { refused: 'invalid_statement' };
+      || !isDeepStrictEqual(e.dependent, dependentAction(graph, e, approved.source, levelIdsOf(graph, approved.edits, approved.source)))) return { refused: 'invalid_statement' };
   }
   let candidate = structuredClone(graph) as Rec & { nodes: unknown[] };
   for (const e of approved.edits) {
@@ -559,12 +559,34 @@ function writtenRecord(e: ApprovedCorrectionEdit): UserStatementRecord {
 const definedOf = (e: Pick<ApprovedCorrectionEdit, 'dependent'>): readonly DefinedFigure[] =>
   (e.dependent?.action === 'level_replaced' || e.dependent?.action === 'level_unavailable' ? e.dependent.defined ?? [] : []);
 /**
- * The factors whose figure an edit of this same correction gives (`replacement`) or explicitly keeps (`retained`): that edit decides
- * its level, so it is never withdrawn as another edit's dependent. An edit that only retires words decides nothing about Olumi's figure.
+ * The factors whose figure an edit of this same correction ACTUALLY decides, read by the same rules that write it: a corrected figure
+ * that is written (the user's own words, held in the model's unit: `level_replaced`), or an earlier figure of theirs they EXPLICITLY
+ * keep (the claim door's figure reader places it inside a span they keep, and `keptClaim` still holds it). Such a factor is never
+ * withdrawn as another edit's dependent. Field or text presence decides nothing (Buddy-A 18:54Z, 19:08Z): a replacement that is not
+ * written (a rejected "999"), kept qualitative words beside an unkept figure, or kept words the record does not hold.
  */
-const levelIdsOf = (edits: readonly Pick<CorrectionEditRequest, 'subject' | 'replacement' | 'retained'>[]): string[] =>
-  edits.flatMap((x) => (x.subject?.kind === 'factor' && x.subject.option_id === undefined && x.subject.field === 'level'
-    && (x.replacement !== undefined || (Array.isArray(x.retained) && x.retained.length > 0)) ? [x.subject.id] : []));
+function levelIdsOf(graph: unknown, edits: readonly CorrectionEditRequest[], source: UserStatement): string[] {
+  return edits.flatMap((x) => {
+    if (x.subject?.kind !== 'factor' || x.subject.option_id !== undefined || x.subject.field !== 'level') return [];
+    const node = nodeOf(graph, x.subject.id);
+    if (node === undefined) return [];
+    const replaced = verifiedReplacement(source, x);
+    if (replaced !== undefined && replacedObservedState(node, replaced) !== undefined) return [x.subject.id];
+    const held = x.expected_record === undefined ? userStatementFor(graph, x.subject) ?? null : x.expected_record;
+    const retained = Array.isArray(x.retained) ? x.retained : [];
+    const keptFigure = (held?.statements ?? []).some((st) => {
+      const k = keptClaim(st, x);
+      return [k.low, k.high].some((v) => {
+        const at = v === undefined ? null : figureTheUserWroteSpan(v, k.unit, st.quote);
+        return at !== null && retained.some((span) => {
+          const from = st.quote.indexOf(span);
+          return from >= 0 && from <= at.start && at.end <= from + span.length;
+        });
+      });
+    });
+    return keptFigure ? [x.subject.id] : [];
+  });
+}
 
 /** The user's earlier claims this correction retires (all but the explicitly kept), kept whole in history: withdrawn or superseded. */
 function retiredHistory(e: Pick<ApprovedCorrectionEdit, 'expected_record' | 'retained' | 'retirement'>): UserStatement[] {
@@ -854,7 +876,7 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     const labels = { ...(binding === 'bound' ? {} : { binding: 'olumi_reading' as const, ...(boundLabel === undefined ? {} : { bound_label: boundLabel }) }),
       ...(unheld.length > 0 ? { unheld } : {}), ...(protectedAttestation(expected) ? { approved: true as const } : {}) };
     if (draft.replacement !== undefined && replacementOf(draft.replacement) === undefined) return refused('invalid_statement', 'correction.replacement_shape');
-    const dependent = dependentAction(graph, draft, source!, levelIdsOf(requested));
+    const dependent = dependentAction(graph, draft, source!, levelIdsOf(graph, requested, source!));
     const history = retiredHistory(draft);
     edits.push({ ...draft, expected_node: structuredClone(node),
       record: { ...userStatementRecord(e.subject, replacementStatements(source, draft), at, correctionAttest(draft)), ...(history.length > 0 ? { history } : {}) },
