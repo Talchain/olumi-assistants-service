@@ -608,8 +608,9 @@ export function goalChanceScopeOf(result: unknown, evidence?: SelectedRunEvidenc
 
 /** Remove-only projection. Public blocks can use their selected fact's evidence without inventing missing fields. */
 export function withGoalChanceReadback<R>(result: R, selectedResult: unknown = result, evidence?: SelectedRunEvidence): R {
-  return hasRecordedLevelCalculation(result) && !goalChanceScopeOf(selectedResult, evidence).can_show_goal_chance
-    ? withChanceReadbackWithheld(result, undefined, true) : result;
+  const scope = goalChanceScopeOf(selectedResult, evidence);
+  return scope.can_show_goal_chance ? result : withChanceReadbackWithheld(result, undefined, true,
+    hasRecordedLevelCalculation(result) ? undefined : scope.reasons);
 }
 
 /** Deadline edits omitted from legacy hashes may only remove a chance, never reopen a withheld Run. */

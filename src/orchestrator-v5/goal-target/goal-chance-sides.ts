@@ -1,6 +1,6 @@
 import type { RunDeltaGoalChanceSide } from '@talchain/schemas/boundary';
 import { GOAL_FIGURES_WITHHELD_CODES } from '../../orchestrator/context/option-result-source.js';
-import { agentLicenceRecordOf } from './goal-chance-licence.js';
+import { agentLicenceRecordOf, withGoalChanceReadback } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
 import { goalChanceRangeBarredForAgent, runHasGoalChanceLicenceRecord } from './goal-chance-range-agent.js';
@@ -12,6 +12,11 @@ const rounding = (v: unknown): v is 'whole' | 'nearest_5' => v === 'whole' || v 
 
 /** Each Run keeps its own stored display licence; raw probabilities never re-license an older Run. */
 export function goalChanceSideOf(result: unknown, optionId: string): RunDeltaGoalChanceSide {
+  // Complete Run facts carry the selected question; bare warning fragments remain format-reader inputs.
+  const selected = rec(result);
+  if (selected !== undefined && ('run_id' in selected || 'computed_at' in selected || 'input_snapshot' in selected)) {
+    result = withGoalChanceReadback(result);
+  }
   const licence = agentLicenceRecordOf(result);
   const shown = rec(licence?.pct_by_option)?.[optionId];
   if (pct(shown)) {
