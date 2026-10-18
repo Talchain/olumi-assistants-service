@@ -96,7 +96,8 @@ describe('v6.0 PR-2: a link\'s size is derived from its current claim', () => {
     ['a unit that is not per one of the source', { ...CLAIM, unit: 'faults per week' }],
   ] as const)('NEGATIVE (%s): the link stays Olumi\'s placeholder, never the user\'s size', async (_n, effect) => {
     const edge = await edgeOf(draft(effect as Effect));
-    expect(edge.provenance?.magnitude).not.toBe('user_stated');
-    expect(edge.provenance?.natural_effect?.amount).not.toBe(12);
+    // No size from the claim at all: neither the user's nor a figure passed to Olumi's estimate path.
+    expect(edge.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(edge.provenance?.natural_effect).toBeUndefined();
   });
 });
