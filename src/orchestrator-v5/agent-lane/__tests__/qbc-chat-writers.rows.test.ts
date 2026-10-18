@@ -175,8 +175,9 @@ describe('row 9: the user\'s credit for a figure inside quotation marks never co
     const entry = (p?.options ?? (p !== undefined ? [p] : [])).find((o: Rec) => o.label === 'Extend coverage') as Rec | undefined;
     const cell = (entry?.interventions as Rec[] | undefined)?.find((i) => i.factor_id === 'price');
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(cell, JSON.stringify({ r, cell })).toBeDefined();
+    expect(cell, JSON.stringify({ r, cell })).toMatchObject({ raw_value: 25 });
     expect(cell).not.toHaveProperty('user_material_unverified');
+    expect(cell, 'the user\'s own figure: no estimate stamp').not.toHaveProperty('source');
   });
   it('GUARD: the same figure in the user\'s own unquoted words, cited, stays theirs (no stamp)', async () => {
     const said = 'Add an option: charge £25 for new members and keep current members.';
