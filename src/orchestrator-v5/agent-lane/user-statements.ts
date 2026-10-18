@@ -154,15 +154,19 @@ export type StatementVerdict =
 function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentCorrection): 'theirs' | 'retained' | 'not_their_claim' | 'absent' {
   const messages = texts.messages !== undefined && texts.messages.length > 0
     ? texts.messages : [texts.conversation, texts.now].filter((t): t is string => typeof t === 'string' && t !== '');
-  // ⛔ PL-0048 (2): the subject's account as the user last CORRECTED it (the correction door's record, read, never re-derived). A span
-  // from a message before that correction is current only inside a span the correction explicitly kept.
+  // ⛔ PL-0048 (2): the subject's account as the user last CORRECTED it: the correction door's PERSISTED record (read, never re-derived),
+  // in force whether or not its chat message is in this history (cold read, partial history, aggregated turn). Under it a span is
+  // current only inside a span the correction explicitly kept, or in words typed AFTER it: a message later than the last one holding
+  // the correction's words or, that message not in this history, this turn's own words. Never its own message or anything before.
   const correctedAt = current === undefined ? -1 : messages.reduce((at, m, i) => (usersSpanIn(m, current.correction) >= 0 ? i : at), -1);
   const keptByCorrection = current !== undefined && current.kept.some((k) => plainQuoteWords(k).includes(plainQuoteWords(quote)));
+  const typedAfterCorrection = (i: number): boolean => current === undefined || keptByCorrection
+    || (correctedAt >= 0 ? i > correctedAt : messages[i] === texts.now);
   let found = false;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (usersSpanIn(messages[i]!, quote) < 0) continue;
     found = true;
-    if (current !== undefined && i < correctedAt && !keptByCorrection) continue;
+    if (!typedAfterCorrection(i)) continue;
     if (!quoteIsNotTheUsersClaim(messages[i]!, quote) && !withdrawnLater(messages.slice(i + 1))) return 'theirs';
   }
   if (found) return 'not_their_claim';

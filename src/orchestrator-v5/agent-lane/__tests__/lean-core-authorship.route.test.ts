@@ -9,6 +9,8 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { userStated } from '../user-statements.js';
 import { currentCorrectionOf } from '../../statement-door/read.js';
 import { prepareStatementCorrection, recordsWithUnknownSpeakerOn, userStatementFor, userStatementsOn } from '../../statement-door/statements.js';
+import { reconcileGoalScope } from '../reconcile-goal-scope.js';
+import { ProposalStore } from '../proposal.js';
 
 type Rec = Record<string, any>;
 const AIM = 'We want to grow weekly bookings to at least 300 within 12 months.';
@@ -75,15 +77,30 @@ describe('PL-0048 (2): a span the user\'s correction retired is never re-credite
   const levelStatement = { quote: TODAY, subject: { kind: 'goal', label: GOAL, to_label: null, factor_label: null }, field: 'level', form: 'point',
     value: 180, low: null, high: null, unit: 'bookings a week', qualifier: null, conditions: null };
   const FIX = 'Ignore the weekly bookings figure of 180 I gave, I have no reliable count.';
-  async function corrected(): Promise<{ graph: Rec; subject: Rec }> {
+  async function corrected(edit: Rec = { retirement: { quote: TODAY, scope: 'whole', disposition: 'retracted' }, retained: [] }):
+  Promise<{ graph: Rec; live: Rec; subject: Rec }> {
     const g = await saved(draft({ statements: [...(draft().statements as Rec[]), levelStatement] }));
     const subject = { kind: 'goal' as const, id: String(goalOf(g).id), field: 'level' as const };
     expect(userStatementFor(g, subject)?.statements.map((st) => st.quote), 'construction recorded the user\'s level').toEqual([TODAY]);
-    const result = prepareStatementCorrection(g, { quote: FIX, edits: [{ subject, retirement: { quote: TODAY, scope: 'whole', disposition: 'retracted' },
-      retained: [], reading_words: 'The earlier weekly figure is withdrawn.' }] } as never, { now: FIX }, '2026-10-18T01:00:00Z');
+    const result = prepareStatementCorrection(g, { quote: FIX, edits: [{ subject, ...edit, reading_words: 'The earlier weekly figure is withdrawn.' }] } as never,
+      { now: FIX }, '2026-10-18T01:00:00Z');
     if ('refused' in result) throw new Error(String(result.refused));
-    // The register route's persistence: the saved bytes, read back cold.
-    return { graph: JSON.parse(JSON.stringify(result.candidate)) as Rec, subject };
+    // The register route's persistence: the saved bytes, read back cold (`graph`); `live` is the in-memory candidate the press wrote.
+    return { graph: JSON.parse(JSON.stringify(result.candidate)) as Rec, live: result.candidate as Rec, subject };
+  }
+  const SCENARIO = '7b7b7b7b-0000-4b7b-8b7b-7b7b7b7b7b7b';
+  const LATER = 'Keep the existing goal scope and set today\'s level from the earlier brief.';
+  /** The migrated consumer, unchanged: `reconcileGoalScope` reads the goal's PERSISTED correction and asks THE ONE RULE whose level it is. */
+  async function reconcileLevel(graph: Rec, typed: { now: string; conversation: string; messages?: string[]; complete?: boolean },
+    level: { value: number; quote: string } = { value: 180, quote: TODAY }): Promise<{ out: Rec; proposals: readonly unknown[] }> {
+    const scope = { modelled: 'weekly bookings', alternative: 'weekly bookings', extent: 'total', stated_in_brief: true, source: { quote: AIM } };
+    goalOf(graph).goal_scope = scope;
+    const proposals = new ProposalStore();
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'lean-core-b1', turn_id: 'lean-core-b1', user_turn_text: typed.now,
+      user_text: typed.conversation, ...(typed.messages !== undefined ? { verified_user_messages: typed.messages } : {}), user_text_complete: typed.complete ?? true };
+    const out = await reconcileGoalScope({ readGraph: async () => ({ nodes: graph.nodes, edges: graph.edges, raw: graph, graph_hash: 'h', brief_text: BRIEF } as never),
+      readPending: async () => [], proposals }, ctx as never, { goal_label: GOAL, scope, current_level: { ...level, unit: 'bookings a week' } }) as unknown as Rec;
+    return { out, proposals: proposals.outstanding(SCENARIO, null) };
   }
   const chat = (...messages: string[]) => ({ now: messages[messages.length - 1], conversation: messages.join('\n'), messages });
 
@@ -102,6 +119,60 @@ describe('PL-0048 (2): a span the user\'s correction retired is never re-credite
     const fresh = 'Bookings are 210 a week now.';
     expect(userStated({ quote: fresh, value: 210, unit: 'bookings a week' }, chat(BRIEF, FIX, fresh), { quantity: 'goal_level' },
       { current: currentCorrectionOf(graph, subject as never) }).origin).toBe('human');
+  });
+
+  // ⛔ BUDDY-A B1 (#3391 @ec39bf01): the persisted correction holds whether or not its chat message is in this history.
+  it('B1 missing chat message: the correction is not in this history, yet the withdrawn 180 is NOT the user\'s; no card', async () => {
+    const { live } = await corrected();
+    const r = await reconcileLevel(live, { now: LATER, conversation: [BRIEF, LATER].join('\n'), messages: [BRIEF, LATER] });
+    expect(r.out).toMatchObject({ ok: false, refusal: 'level_not_stated' });
+    expect(r.proposals).toHaveLength(0);
+  });
+
+  it('B1 aggregated message: the brief and the correction in ONE message (and the no-messages fallback) never re-credit the 180', async () => {
+    const { live } = await corrected();
+    const together = `${BRIEF}\n${FIX}`;
+    for (const typed of [{ now: LATER, conversation: [together, LATER].join('\n'), messages: [together, LATER] },
+      { now: LATER, conversation: [together, LATER].join('\n') }]) {
+      const r = await reconcileLevel(structuredClone(live), typed);
+      expect(r.out, JSON.stringify(typed.messages ?? 'fallback')).toMatchObject({ ok: false, refusal: 'level_not_stated' });
+      expect(r.proposals).toHaveLength(0);
+    }
+  });
+
+  it('B1 cold read: the saved bytes read back after a reopen with partial history never re-credit the 180', async () => {
+    const { graph } = await corrected();
+    const r = await reconcileLevel(graph, { now: LATER, conversation: [BRIEF, LATER].join('\n'), messages: [BRIEF, LATER], complete: false });
+    expect(r.out).toMatchObject({ ok: false, refusal: 'level_not_stated' });
+    expect(r.proposals).toHaveLength(0);
+  });
+
+  it('CONTRAST (B1 rows are not vacuous): with NO correction on record each of those histories credits the 180 and prepares the card', async () => {
+    const g = await saved(draft({ statements: [...(draft().statements as Rec[]), levelStatement] }));
+    const together = `${BRIEF}\n${FIX}`;
+    for (const typed of [{ now: LATER, conversation: [BRIEF, LATER].join('\n'), messages: [BRIEF, LATER] },
+      { now: LATER, conversation: [together, LATER].join('\n'), messages: [together, LATER] },
+      { now: LATER, conversation: [together, LATER].join('\n') },
+      { now: LATER, conversation: [BRIEF, LATER].join('\n'), messages: [BRIEF, LATER], complete: false }]) {
+      const r = await reconcileLevel(structuredClone(g), typed);
+      expect(r.out, JSON.stringify(typed)).toMatchObject({ ok: true });
+      expect(r.out.reconciliation?.current_level).toMatchObject({ value: 180, source: { quote: TODAY } });
+      expect(r.proposals).toHaveLength(1);
+    }
+  });
+
+  it('CONTRAST (positives kept): a span the correction KEPT, and a figure typed THIS turn, stay the user\'s with the correction\'s message missing', async () => {
+    const kept = 'Bookings are 180 a week';
+    const { graph: keptGraph } = await corrected({ retirement: { quote: 'today', scope: 'part', disposition: 'historical' }, retained: [kept] });
+    const k = await reconcileLevel(keptGraph, { now: LATER, conversation: [BRIEF, LATER].join('\n'), messages: [BRIEF, LATER] }, { value: 180, quote: kept });
+    expect(k.out).toMatchObject({ ok: true });
+    expect(k.proposals).toHaveLength(1);
+    const fresh = 'Bookings are 210 a week now.';
+    const { graph } = await corrected();
+    const f = await reconcileLevel(graph, { now: fresh, conversation: [BRIEF, fresh].join('\n'), messages: [BRIEF, fresh] }, { value: 210, quote: fresh });
+    expect(f.out).toMatchObject({ ok: true });
+    expect(f.out.reconciliation?.current_level).toMatchObject({ value: 210, source: { quote: fresh } });
+    expect(f.proposals).toHaveLength(1);
   });
 });
 
