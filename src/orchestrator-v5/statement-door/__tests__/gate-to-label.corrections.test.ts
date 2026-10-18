@@ -43,7 +43,7 @@ describe('R4 + L1: an approved retraction withdraws the size that rested on the 
   it.each([['literal', LITERAL], ['paraphrase', PARAPHRASE]])('%s: card → press → claim withdrawn, link unsized, said, receipted', async (_kind, message) => {
     const { w, card, res } = await retracted(message);
     // The card shows the dependent action before the press.
-    expect(card.public_label).toContain('If you approve, the size of the link “Tutor hours per pupil → Exam pass rate”, which rests on the words you are withdrawing, will be withdrawn too');
+    expect(card.public_label).toContain('If you approve, the size of the relationship “Tutor hours per pupil → Exam pass rate” will become unavailable because this correction removes the source it rests on.');
     // Codex BLOCK P2: no change line is unconditional before approval.
     expect(card.public_label).not.toContain('so it is withdrawn too: the link becomes unsized');
     expect(res, JSON.stringify(res).slice(0, 600)).toMatchObject({ ok: true, mutated: true, applied: true });
@@ -68,7 +68,7 @@ describe('R4 + L1: an approved retraction withdraws the size that rested on the 
       reading_words: 'the stated tutoring effect is withdrawn' }] } }) as Rec;
     expect(card, JSON.stringify(card).slice(0, 400)).toMatchObject({ ok: true, mutated: false });
     expect(card.public_label).toContain('Olumi could not find “tutoring lifting results by three points” in the recorded source; what is withdrawn or kept here is Olumi’s reading.');
-    expect(card.public_label).toContain('If you approve, this card will save the source corrections, corrected figures and withdrawals explicitly listed above.');
+    expect(card.public_label).toContain('If you approve, this card will save only the changes listed above. Your original source remains in the history, and Olumi’s interpretation stays separate from it.');
     expect(card.public_label).not.toContain('Unknowns, figures, link strengths');
   });
 
@@ -151,8 +151,8 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
     const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [edit(NIGHT, NIGHT_SAID, 'retracted',
       'night shifts take 45 hours per week', { value: 45, unit: 'hours per week', span: 'night shifts take 45 hours per week' })] } }) as Rec;
     expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
-    expect(card.public_label).toContain('If you approve, the current figure for “Night shift hours” will become 45 hours per week, your corrected figure, in the same change.');
-    expect(card.public_label).not.toContain('which is the one you are withdrawing');
+    expect(card.public_label).toContain('If you approve, “Night shift hours” will no longer use 40 hours per week, because this correction removes the source it rests on. It will use 45 hours per week, your corrected figure, instead. The earlier source remains in the history.');
+    expect(card.public_label).not.toContain('It will have no current figure until one is given.');
     const res = await w.press(card.proposal_id) as Rec;
     expect(res, JSON.stringify(res).slice(0, 500)).toMatchObject({ ok: true, applied: true });
     expect(res.follow_up).toContain('“Night shift hours” now has your corrected figure, 45 hours per week.');
@@ -177,8 +177,8 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
       // "Keep X" is an EXPLICIT keep (`retained`): the day figure's own words kept, only the note about it retired (Codex P1-4 contract).
       { subject: DAY, retirement: { quote: 'keep the day shifts at 60 hours', scope: 'part', disposition: 'historical' }, retained: [DAY_SAID], reading_words: 'keep the day shifts at 60 hours' }] } }) as Rec;
     expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
-    expect(card.public_label).toContain('The current figure for “Day shift hours” stays as it is.');
-    expect(card.public_label).not.toContain('the current figure for “Day shift hours”, which is the one you are withdrawing');
+    expect(card.public_label).toContain('60 hours per week stays as stated for “Day shift hours”.');
+    expect(card.public_label).not.toContain('“Day shift hours” will no longer use');
     expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
     expect(nodeIn(w.graph(), 'day_hours').observed_state).toEqual(nodeIn(before, 'day_hours').observed_state);
     expect(nodeIn(w.graph(), 'night_hours').observed_state).toMatchObject({ raw_value: 45 });
@@ -191,8 +191,7 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
     const w = await correctionWorld(shifts(), FIX);
     const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [edit(NIGHT, NIGHT_SAID, 'retracted',
       'night shifts take 50 hours per week', { value: 50, unit: 'hours per week', span: 'night shifts take 45 hours per week' })] } }) as Rec;
-    expect(card.public_label).toContain('Olumi could not find your words stating only 50 hours per week for “Night shift hours”, so it will not be written as the figure for “Night shift hours”.');
-    expect(card.public_label).toContain('If you approve, the current figure for “Night shift hours”, which is the one you are withdrawing, will be withdrawn too');
+    expect(card.public_label).toContain('I could not confirm that 50 hours per week describes “Night shift hours” in this source, so this card will not save it there. If you approve, “Night shift hours” will no longer use 40 hours per week, because this correction removes the source it rests on. It will have no current figure until one is given.');
     expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
     expect(nodeIn(w.graph(), 'night_hours')).not.toHaveProperty('observed_state');
     expect(claimRecordFor(w.graph(), NIGHT)!.statements[0]).toMatchObject({ low: 50, checks: { words_found: true, figure_found: false, unit_found: false } });
@@ -204,8 +203,8 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
     const w = await correctionWorld(shifts(), FIX);
     const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [edit(NIGHT, NIGHT_SAID, 'historical',
       'night shifts take 180 hours per month', { value: 180, unit: 'hours per month', span: 'Night shifts take 180 hours per month' })] } }) as Rec;
-    expect(card.public_label).toContain('If you approve, your corrected figure for “Night shift hours”, 180 hours per month, will be kept with your words, but the model measures '
-      + '“Night shift hours” in hours per week, so this correction will be incomplete: the figure it used will be withdrawn, and the analysis cannot use a figure for it until one is given in hours per week.');
+    expect(card.public_label).toContain('Your corrected figure, 180 hours per month, stays with your words, but the model measures “Night shift hours” in hours per week, '
+      + 'so this correction is incomplete: it will have no current figure until one is given in hours per week.');
     const res = await w.press(card.proposal_id) as Rec;
     expect(res).toMatchObject({ ok: true, applied: true });
     expect(res.follow_up).toContain('this correction is incomplete');
@@ -227,10 +226,10 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
     expect(res).toMatchObject({ ok: true, applied: true });
     const night = nodeIn((await w.cold()).body.graph, 'night_hours');
     if (outcome === 'written') {
-      expect(card.public_label).toContain(`will become ${figure} ${unit}, your corrected figure`);
+      expect(card.public_label).toContain(`It will use ${figure} ${unit}, your corrected figure, instead.`);
       expect(night.observed_state).toMatchObject({ raw_value: figure, unit: 'hours per week', source: 'user_override' });
     } else {
-      expect(card.public_label).toContain('so this correction will be incomplete');
+      expect(card.public_label).toContain('so this correction is incomplete');
       expect(res.follow_up).toContain('this correction is incomplete');
       expect(night).not.toHaveProperty('observed_state');
     }
@@ -273,10 +272,10 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
     expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
     const night = nodeIn((await w.cold()).body.graph, 'night_hours');
     if (outcome === 'withdrawn') {
-      expect(card.public_label).toContain('If you approve, the current figure for “Night shift hours”, which is the one you are withdrawing, will be withdrawn too');
+      expect(card.public_label).toContain('If you approve, “Night shift hours” will no longer use 40 hours per week, because this correction removes the source it rests on. It will have no current figure until one is given.');
       expect(night).not.toHaveProperty('observed_state');
     } else {
-      expect(card.public_label).toContain('The current figure for “Night shift hours” stays as it is.');
+      expect(card.public_label).toContain('40 hours per week stays as stated for “Night shift hours”.');
       expect(night.observed_state).toEqual(nodeIn(before, 'night_hours').observed_state);
     }
     expect(claimRecordFor(w.graph(), NIGHT)!.history?.map((st) => [st.low, st.unit, st.status])).toEqual([[40, unit, 'withdrawn']]);
@@ -294,7 +293,7 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
       return g;
     };
     // AIE 19:00 (1eae2474): conditional on approval; withdrawn because its derivation used the corrected input, never "proved false".
-    const LINE = 'If you approve, Olumi’s previous figure for “Total shift hours” will be withdrawn from current analysis because it was derived from the input you are correcting. No replacement value has been calculated.';
+    const LINE = 'If you approve, the calculation for “Total shift hours” will become unavailable because its inputs have changed. This does not establish that the earlier result was false; its source remains in the history.';
 
     it.each([['replace', 'retracted', { value: 45, unit: 'hours per week', span: 'night shifts take 45 hours per week' }], ['retract', 'retracted', undefined]] as const)(
       '%s: displayed → approved → persisted → cold readback; an ordinary Olumi child and the other item untouched; no zero invented', async (_kind, disposition, replacement) => {
@@ -308,7 +307,7 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
         expect(w.writes).toHaveLength(0);
         const res = await w.press(card.proposal_id) as Rec;
         expect(res, JSON.stringify(res).slice(0, 500)).toMatchObject({ ok: true, applied: true });
-        expect(res.follow_up).toContain('“Total shift hours” now has no current figure: Olumi’s figure for it was worked out from the figure you corrected.');
+        expect(res.follow_up).toContain('The calculation for “Total shift hours” is now unavailable because its inputs have changed.');
         expect(w.writes).toHaveLength(1);
         for (const g of [w.writes[0]!.graph, (await w.cold()).body.graph]) {
           expect(nodeIn(g, 'total_hours')).not.toHaveProperty('observed_state');
@@ -347,7 +346,7 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
         edit(TOTAL, 'the total was only ever your guess', 'historical', 'the total is Olumi\'s guess')] } }) as Rec;
       expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
       expect(card.public_label).toContain(LINE);
-      expect(card.public_label).not.toContain('The current figure for “Total shift hours” stays as it is.');
+      expect(card.public_label).not.toContain('The current figure for “Total shift hours”, 100 hours per week, stays as it is.');
       expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
       expect(nodeIn((await w.cold()).body.graph, 'total_hours')).not.toHaveProperty('observed_state');
       const FIX2 = 'Scrap the night shift figure, I do not know it; total shift hours are 100 hours per week.';
@@ -371,9 +370,9 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
         { subject: DAY, retirement: { quote: 'day shifts stay at 60', scope: 'part', disposition: 'historical' }, retained: [DAY_SAID], reading_words: 'day shifts stay at 60' },
         edit(TOTAL, 'total', 'historical', 'total shift hours are 999 hours per week', { value: 999, unit: 'hours per week' })] } }) as Rec;
       expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
-      expect(card.public_label).toContain('Olumi could not find your words stating only 999 hours per week for “Total shift hours”, so it will not be written as the figure for “Total shift hours”.');
+      expect(card.public_label).toContain('I could not confirm that 999 hours per week describes “Total shift hours” in this source, so this card will not save it there.');
       expect(card.public_label).toContain(LINE);
-      expect(card.public_label).not.toContain('The current figure for “Total shift hours” stays as it is.');
+      expect(card.public_label).not.toContain('The current figure for “Total shift hours”, 100 hours per week, stays as it is.');
       expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
       for (const g of [w.writes[0]!.graph, (await w.cold()).body.graph]) {
         expect(nodeIn(g, 'total_hours')).not.toHaveProperty('observed_state');
@@ -486,7 +485,7 @@ describe('RETAIN / REPLACE / RETRACT: a factor\'s level follows only what the co
       const card = await w.offer('propose_statement', { correction: { quote: FIX, edits: [part('We staff 40 hours per week',
         'two of them already covered by agency staff')] } }) as Rec;
       expect(card, JSON.stringify(card).slice(0, 500)).toMatchObject({ ok: true, mutated: false });
-      expect(card.public_label).toContain('If you approve, the current figure for “Night shift hours”, which is the one you are withdrawing, will be withdrawn too');
+      expect(card.public_label).toContain('If you approve, “Night shift hours” will no longer use 40 hours per week, because this correction removes the source it rests on. It will have no current figure until one is given.');
       expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
       for (const g of [w.graph(), (await w.cold()).body.graph]) {
         const record = claimRecordFor(g, NIGHT)!;
@@ -531,7 +530,7 @@ describe('R09 (converged plan): a correction never changes the note while leavin
     const w = await correctionWorld(levelGraph(), FIX);
     const card = await w.offer('propose_statement', retract) as Rec;
     expect(card, JSON.stringify(card).slice(0, 400)).toMatchObject({ ok: true, mutated: false });
-    expect(card.public_label).toContain('If you approve, the current figure for “Late deliveries by the night crew”, which is the one you are withdrawing, will be withdrawn too');
+    expect(card.public_label).toContain('If you approve, “Late deliveries by the night crew” will no longer use 3 late deliveries per week, because this correction removes the source it rests on. It will have no current figure until one is given.');
     const res = await w.press(card.proposal_id) as Rec;
     expect(res, JSON.stringify(res).slice(0, 400)).toMatchObject({ ok: true, applied: true });
     expect(res.follow_up).toContain('“Late deliveries by the night crew” now has no current figure');
@@ -566,7 +565,8 @@ describe('R09 (converged plan): a correction never changes the note while leavin
       retirement: { quote: 'by the night crew', scope: 'part', disposition: 'retracted' }, retained: ['I counted three late deliveries'],
       reading_words: 'three late deliveries, crew unknown' }] } }) as Rec;
     expect(card, JSON.stringify(card).slice(0, 400)).toMatchObject({ ok: true });
-    expect(card.public_label).not.toContain('which is the one you are withdrawing');
+    expect(card.public_label).not.toContain('will no longer use');
+    expect(card.public_label).toContain('3 late deliveries per week stays as stated for “Late deliveries by the night crew”.');
     expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
     expect(w.graph().nodes.find((n: Rec) => n.id === 'late_deliveries').observed_state).toMatchObject({ raw_value: 3 });
   });
@@ -598,7 +598,7 @@ describe('LABEL, NOT GATE: a correction naming the period differently from the i
     expect(card, JSON.stringify(card).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
     expect(JSON.stringify(card)).not.toContain('unrelated_correction');
     expect(card.public_label).toContain('Olumi’s reading: these words concern “Late handovers per ward week”.');
-    expect(card.public_label).toContain('If you approve, the current figure for “Late handovers per ward week”, which is the one you are withdrawing, will be withdrawn too');
+    expect(card.public_label).toContain('If you approve, “Late handovers per ward week” will no longer use 6 late handovers per week, because this correction removes the source it rests on. It will have no current figure until one is given.');
     const res = await w.press(card.proposal_id) as Rec;
     expect(res, JSON.stringify(res).slice(0, 600)).toMatchObject({ ok: true, applied: true });
     for (const g of [w.writes[0]!.graph, (await w.cold()).body.graph]) {
@@ -638,12 +638,13 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
     const w = await correctionWorld(g, words);
     const card = await w.offer('propose_statement', { correction: { quote: words, edits } }) as Rec;
     expect(card, JSON.stringify(card).slice(0, 600)).toMatchObject({ ok: true, mutated: false });
+    const frozen = (w.proposals.get(card.proposal_id)!.operations[0]!.value as Rec).correction as Rec;
     const pressed = await w.press(card.proposal_id) as Rec;
     expect(pressed, JSON.stringify(pressed).slice(0, 600)).toMatchObject({ ok: true, applied: true });
     expect(w.writes).toHaveLength(1);
     const cold = (await w.cold()).body.graph;
     expect(cold.nodes).toEqual(w.writes[0]!.graph.nodes);
-    return { card, pressed, g: cold };
+    return { card, pressed, g: cold, frozen };
   }
   const nightEdit = (disposition: 'historical' | 'retracted', replacement?: Rec, retained: string[] = []): Rec => ({ subject: NIGHT,
     retirement: { quote: OLD, scope: 'whole', disposition }, retained, reading_words: 'correct the night shift account', ...(replacement === undefined ? {} : { replacement }) });
@@ -676,8 +677,8 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
     expect(nodeOf(r.g, 'total')).not.toHaveProperty('observed_state');
     expect(nodeOf(r.g, 'remainder')).not.toHaveProperty('observed_state');
     for (const label of ['Total shift hours', 'Remaining cover hours']) {
-      expect(r.card.public_label).toContain(`If you approve, Olumi’s previous figure for “${label}” will be withdrawn from current analysis`);
-      expect(r.pressed.follow_up).toContain(`“${label}” now has no current figure`);
+      expect(r.card.public_label).toContain(`If you approve, the calculation for “${label}” will become unavailable because its inputs have changed.`);
+      expect(r.pressed.follow_up).toContain(`The calculation for “${label}” is now unavailable because its inputs have changed.`);
     }
   });
 
@@ -691,6 +692,8 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
 
   it('P1-4 HISTORICAL BASIS: moving the old figure to earlier context with nothing kept takes it and its dependents out of current analysis', async () => {
     const r = await run(graph(), 'The 40 night hours were last month; I do not know the current weekly hours.', [nightEdit('historical')]);
+    // The card SAYS it before approval (DL-3 decision 1): earlier context for words stating that figure alone withdraws it.
+    expect(r.card.public_label).toContain('If you approve, “Night shift hours” will no longer use 40 hours per week, because this correction removes the source it rests on.');
     expect(nodeOf(r.g, 'night')).not.toHaveProperty('observed_state');
     expect(nodeOf(r.g, 'total')).not.toHaveProperty('observed_state');
     expect(nodeOf(r.g, 'remainder')).not.toHaveProperty('observed_state');
@@ -716,8 +719,127 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
     const changed = before.nodes.filter((n: Rec) => !isDeepStrictEqualJson(n.observed_state, nodeOf(r.g, n.id)?.observed_state)).map((n: Rec) => String(n.label));
     expect(changed.length).toBeGreaterThan(0);
     for (const label of changed) expect(r.card.public_label, label).toContain(`“${label}”`);
+    // Buddy-A 20:42 §4: by IDENTITY, not label: the ids whose figure changed are exactly the ids the frozen card's actions name.
+    const named = (r.frozen.edits as Rec[]).flatMap((e) => (e.dependent?.action === 'level_replaced' || e.dependent?.action === 'level_unavailable'
+      ? [e.subject.id, ...(e.dependent.defined ?? []).map((d: Rec) => d.id)] : []));
+    expect(new Set(named)).toEqual(new Set(before.nodes.filter((n: Rec) => !isDeepStrictEqualJson(n.observed_state, nodeOf(r.g, n.id)?.observed_state)).map((n: Rec) => n.id)));
     expect(r.g.edges).toEqual(before.edges);
   });
+  /**
+   * ⭐ ROUND 2 (Codex @6e0fbc04 findings 1–3; Buddy-A 20:42 §1–§3; DL-3 strict fail-safe defaults). Each row is RED on 6e0fbc04.
+   */
+  const UNIT = 'hours per week';
+  const TWO = 'Correction: night shifts take 45 hours per week, not 40; day shifts take 70 hours per week.';
+  const withoutDay = (g: Rec): Rec => ({ ...g, nodes: g.nodes.filter((n: Rec) => n.id !== 'day'), edges: g.edges.filter((x: Rec) => x.from !== 'day') });
+  it.each([
+    ['a span cropped from another item’s clause', TWO, '70 hours per week', 70, true,
+      'The source gives 70 hours per week for “Day shift hours”, so this card will not use it for “Night shift hours”.'],
+    ['another item the model does not hold', TWO, 'day shifts take 70 hours per week', 70, false,
+      'I could not confirm that 70 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    // Codex round 2's own graph: no other label shares "shift", so "day shifts" reads as the night item's words; the line then gives
+    // the night item two figures, a contradiction, never permission.
+    ['an absent subject whose head word is this item’s', TWO, 'day shifts take 70 hours per week', 70, 'relabelled',
+      'I could not confirm that 70 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['another item named, the line’s only figure', 'Correction: day shifts take 70 hours per week.', 'day shifts take 70 hours per week', 70, true,
+      'The source gives 70 hours per week for “Day shift hours”, so this card will not use it for “Night shift hours”.'],
+    ['an unnamed figure among several', 'Correction: 45 hours per week, and 12 hours per week of agency cover.', '45 hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['a denied figure', 'Night shifts do not take 45 hours per week.', 'Night shifts do not take 45 hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['a bound, not a point', 'Night shifts take at least 45 hours per week.', 'Night shifts take at least 45 hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+  ] as const)('SPAN READ IN ITS WHOLE SOURCE (%s): never written; the card says why, before approval', async (_kind, words, span, value, day, line) => {
+    const relabelled = (g: Rec): Rec => { nodeOf(g, 'total').label = 'Combined cover'; nodeOf(g, 'remainder').label = 'Spare cover'; return g; };
+    const r = await run(day === true ? graph() : day === false ? withoutDay(graph()) : relabelled(withoutDay(graph())), words, [nightEdit('retracted', { value, unit: UNIT, span })]);
+    expect(nodeOf(r.g, 'night')).not.toHaveProperty('observed_state');
+    expect(r.card.public_label).toContain(line);
+    expect(claimRecordFor(r.g, NIGHT)!.statements[0]).toMatchObject({ low: value, checks: { figure_found: false } });
+  });
+
+  it.each(['Correction: it is 45 hours per week, not 40.', 'Correction: 45 hours per week.'])('LABELLED READING CONTROL (DL-3 21:26Z): an elliptical answer naming no item, the only figure in its line, is written as Olumi’s reading, labelled (“%s”)', async (words) => {
+    const r = await run(graph(), words, [nightEdit('retracted', { value: 45, unit: UNIT, span: '45 hours per week' })]);
+    expect(nodeOf(r.g, 'night').observed_state).toMatchObject({ raw_value: 45, source: 'user_override' });
+    expect(r.card.public_label).toContain('Olumi’s reading: these words concern “Night shift hours”.');
+    expect(claimRecordFor(r.g, NIGHT)!.statements[0]).toMatchObject({ quote: '45 hours per week', checks: { subject_bound: false } });
+  });
+
+  it.each([
+    ['a node with no figure', (g: Rec): void => { delete nodeOf(g, 'total').observed_state; }],
+    ['a structural definition', (g: Rec): void => { Object.assign(nodeOf(g, 'total').observed_state, { value: 0, raw_value: 0, extra_share_by_date: {} }); }],
+  ] as const)('CLOSURE THROUGH %s: the Olumi figure downstream becomes unavailable; the intermediate stays exactly as it was', async (_kind, shape) => {
+    const g = graph(); shape(g);
+    const r = await run(g, 'Correction: night shifts take 45 hours per week, not 40.', [nightEdit('retracted', { value: 45, unit: UNIT, span: 'night shifts take 45 hours per week' })]);
+    expect(nodeOf(r.g, 'remainder')).not.toHaveProperty('observed_state');
+    expect(nodeOf(r.g, 'total')).toEqual(nodeOf(g, 'total'));
+    expect(r.card.public_label).toContain('If you approve, the calculation for “Remaining cover hours” will become unavailable because its inputs have changed.');
+  });
+
+  it('CLOSURE CONTROL: a figure a person gave is an independent value; it and what rests on it stay', async () => {
+    const g = graph(); Object.assign(nodeOf(g, 'total').observed_state, { source: 'brief_extraction', extractionType: 'explicit' });
+    const r = await run(g, 'Correction: night shifts take 45 hours per week, not 40.', [nightEdit('retracted', { value: 45, unit: UNIT, span: 'night shifts take 45 hours per week' })]);
+    expect(nodeOf(r.g, 'total')).toEqual(nodeOf(g, 'total'));
+    expect(nodeOf(r.g, 'remainder')).toEqual(nodeOf(g, 'remainder'));
+  });
+
+  it('SAME FIGURE AGAIN: a written replacement equal to the old figure still makes the calculations from it unavailable (no raw-equality skip)', async () => {
+    const r = await run(graph(), 'Correction: night shifts take 40 hours per week; the old note was wrong.',
+      [nightEdit('retracted', { value: 40, unit: UNIT, span: 'night shifts take 40 hours per week' })]);
+    expect(nodeOf(r.g, 'night').observed_state).toMatchObject({ raw_value: 40, source: 'user_override' });
+    expect(nodeOf(r.g, 'total')).not.toHaveProperty('observed_state');
+    expect(nodeOf(r.g, 'remainder')).not.toHaveProperty('observed_state');
+  });
+
+  it('ONE LINE PER CALCULATION: two corrected inputs of one calculation name it once on the card', async () => {
+    const g = graph(); g.edges.push(def('day', 'total'));
+    const r = await run(g, 'Correction: night shifts take 45 hours per week; day shifts take 70 hours per week.', [
+      nightEdit('retracted', { value: 45, unit: UNIT, span: 'night shifts take 45 hours per week' }),
+      { subject: { ...NIGHT, id: 'day' }, retirement: { quote: DAY_OLD, scope: 'whole', disposition: 'retracted' }, retained: [], reading_words: 'correct the day shift account',
+        replacement: { value: 70, unit: UNIT, span: 'day shifts take 70 hours per week' } }]);
+    expect(nodeOf(r.g, 'day').observed_state.raw_value).toBe(70);
+    expect(String(r.card.public_label).split('“Total shift hours”').length - 1).toBe(1);
+    expect(nodeOf(r.g, 'total')).not.toHaveProperty('observed_state');
+  });
+
+  describe('DEFAULT KEEP (DL-3 decision 1): a figure the user gave stays unless the correction says so of THAT figure', () => {
+    const BUNDLE = 'Available time is 60 hours per week; 2 hours of it are already used.';
+    const AVAIL = { kind: 'factor' as const, id: 'avail', field: 'level' as const }, USED = { ...AVAIL, id: 'used' };
+    const bundled = (): Rec => {
+      const avail = level('avail', 'Available time', 60, { source: 'brief_extraction', extractionType: 'explicit' });
+      avail.user_statements = [claimOf('avail', BUNDLE, 60)];
+      const used = level('used', 'Used time', 2);
+      used.user_statements = [claimOf('used', BUNDLE, 2)];
+      return { nodes: [{ id: 'goal', kind: 'goal', label: 'Coverage goal' }, avail, used, level('remain', 'Remaining time', 58)],
+        edges: [def('avail', 'remain'), def('used', 'remain'), { from: 'remain', to: 'goal', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }] };
+    };
+    const earlier = (subject: Rec, reading: string): Rec => ({ subject, retirement: { quote: BUNDLE, scope: 'whole', disposition: 'historical' }, retained: [], reading_words: reading });
+
+    it('R07 SHAPE, ORIGINAL ARGUMENTS: a sentence stating two figures moved to earlier context keeps the user’s 60; Olumi’s 2 and 58 go; the card says so', async () => {
+      const r = await run(bundled(), 'The 2 used hours were last week, not this week; the 60 hours stay as this week’s available time.',
+        [earlier(AVAIL, 'keep 60 hours as available time'), earlier(USED, 'the 2 hours were last week')]);
+      expect(nodeOf(r.g, 'avail')).toMatchObject({ observed_state: nodeOf(bundled(), 'avail').observed_state });
+      expect(r.card.public_label).toContain('60 hours per week stays as stated for “Available time”. If it no longer holds, say so.');
+      expect(nodeOf(r.g, 'used')).not.toHaveProperty('observed_state');
+      expect(nodeOf(r.g, 'remain')).not.toHaveProperty('observed_state');
+      expect(r.card.public_label).toContain('If you approve, “Used time” will no longer use 2 hours per week, because this correction removes the source it rests on.');
+    });
+
+    it('DESCRIBES ONLY: earlier context for words stating no figure keeps the user’s figure, and says so', async () => {
+      const g = graph(); nodeOf(g, 'night').user_statements = [claimOf('night', 'Night shifts take 40 hours per week, as the rota says.', 40)];
+      const r = await run(g, 'The rota part was last month.', [{ subject: NIGHT, retirement: { quote: 'as the rota says', scope: 'whole', disposition: 'historical' },
+        retained: [], reading_words: 'the rota reference is earlier context' }]);
+      expect(nodeOf(r.g, 'night').observed_state).toEqual(nodeOf(g, 'night').observed_state);
+      expect(r.card.public_label).toContain('40 hours per week stays as stated for “Night shift hours”. If it no longer holds, say so.');
+      expect(nodeOf(r.g, 'total').observed_state).toEqual(nodeOf(g, 'total').observed_state);
+    });
+
+    it('NOT A BLANKET EXEMPTION: a retraction of the same bundled sentence withdraws the user’s 60 (explicit), and Olumi’s figure is never kept by default', async () => {
+      const r = await run(bundled(), 'Scrap that whole sentence about available and used time.',
+        [{ ...earlier(AVAIL, 'withdrawn'), retirement: { quote: BUNDLE, scope: 'whole', disposition: 'retracted' } }]);
+      expect(nodeOf(r.g, 'avail')).not.toHaveProperty('observed_state');
+      expect(nodeOf(r.g, 'remain')).not.toHaveProperty('observed_state');
+    });
+  });
+
   // ⭐ R07 FIRST LOSS (real-AI replay on 94b330bd: `propose_statement` refused `node_changed` at the offer). The AI attached a legacy
   // dependency expectation to an item that holds no such carrier. That is a label (words Olumi could not find), never a stale refusal.
   it('R07 SHAPE: a legacy expectation on a carrier the item does not hold is labelled, not refused; the rest of the correction lands', async () => {

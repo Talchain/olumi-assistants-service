@@ -43,9 +43,9 @@ export interface StatementSubject {
  * from `speaker` (`saidByOf`), so the user's own claims keep today's bytes.
  */
 export type SaidBy = 'user' | 'party' | 'unknown' | 'olumi';
-export const SAID_BY: readonly SaidBy[] = ['user', 'party', 'unknown', 'olumi'];
+const SAID_BY: readonly SaidBy[] = ['user', 'party', 'unknown', 'olumi'];
 export type ClaimStatus = 'proposed' | 'confirmed' | 'superseded' | 'withdrawn';
-export const CLAIM_STATUSES: readonly ClaimStatus[] = ['proposed', 'confirmed', 'superseded', 'withdrawn'];
+const CLAIM_STATUSES: readonly ClaimStatus[] = ['proposed', 'confirmed', 'superseded', 'withdrawn'];
 /** The literal word checks, as labels the card shows: never a gate, never a reason to change `said_by` (AIE ORIGIN). */
 export interface ClaimChecks {
   readonly words_found: boolean;

@@ -679,7 +679,7 @@ describe.each(cases)('$name: correct_statement on the existing native operation'
     expect(result.public_label).toContain(`For ${row.factor}`);
     expect(result.public_label).toContain(`Withdraw “${row.withdrawn}”`);
     expect(result.public_label).toContain(`Keep explicitly: “${row.retained}”`);
-    expect(result.public_label).toContain('Your quote stays yours; the reading remains Olumi’s');
+    expect(result.public_label).toContain('Your original source remains in the history, and Olumi’s interpretation stays separate from it.');
     expect(result.public_label).not.toMatch(/Subject:|field:|Retire as|Recorded figure\/bounds|subject_key|recorded_by|\{"/u);
   });
 });

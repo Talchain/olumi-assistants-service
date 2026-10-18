@@ -321,7 +321,7 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
         + replaced.map((r) => ` “${r.label}” now has your corrected figure, ${r.said}.`).join('')
         + unavailable.map((d) => ` “${d.label}” now has no current figure: the analysis cannot use one until it is given again`
           + `${d.held_unit === undefined ? '' : ` in ${d.held_unit}`}${d.incomplete === true ? '. Your corrected figure is kept with your words; this correction is incomplete' : ''}.`).join('')
-        + defined.map((label) => ` “${label}” now has no current figure: Olumi’s figure for it was worked out from the figure you corrected.`).join('') };
+        + defined.map((label) => ` The calculation for “${label}” is now unavailable because its inputs have changed.`).join('') };
   }
   const said = approved.user_statement;
   const record = claimRecordOf(said.record);
