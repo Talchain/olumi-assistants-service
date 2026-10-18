@@ -1015,6 +1015,11 @@ export const InterventionV3 = z.object({
   /** Olumi's draft-widening level, with a basis the user can check; never user-authored. */
   estimate: z.boolean().optional(),
   basis: z.string().optional(),
+  /**
+   * G3: the level's figure is in the user's own material, but its origin could not be verified (as `ObservedStateV3`'s field).
+   * The one provenance authority reads it as unknown (`settingProvenanceOf`): it narrows a level's credit, never widens it.
+   */
+  user_material_unverified: z.literal(true).optional(),
   // --- Raw+Encoded pattern fields (additive, optional) ---
   /** Original value before encoding (for categorical/boolean interventions) */
   raw_value: RawInterventionValue.optional(),

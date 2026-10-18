@@ -146,7 +146,10 @@ const InterventionSpecSchema = z.object({
   // restated; `brief_extraction` is the drafter's and never an Agent's. Typed, so any other value is
   // `parameters_invalid` — refused, never dropped and stamped as the user's.
   source: InterventionV3.shape.source.extract(['user_specified', 'cee_hypothesis']).optional(),
-});
+  // G3 (W15): beside `cee_hypothesis` only, the level's origin could not be verified (construction's marker, the contract's own field). It
+  // narrows Olumi's estimate to unknown origin, never widens anything to the user's; on any other source it is refused (`parameters_invalid`).
+  user_material_unverified: z.literal(true).optional(),
+}).refine((iv) => iv.user_material_unverified === undefined || iv.source === 'cee_hypothesis');
 
 const AddOptionParamsSchema = z.object({
   parent_decision_id: z.string().min(1),
@@ -367,6 +370,7 @@ export function buildAddOptionTransaction(
     };
     if (iv.unit !== undefined) entry.unit = iv.unit;
     if (iv.raw_value !== undefined) entry.raw_value = iv.raw_value;
+    if (iv.user_material_unverified === true) entry.user_material_unverified = true;
     interventionBundle[iv.factor_id] = entry;
   }
   const sameAs = unvalued.length === 0 ? existingOptionWithSameLevels(interventionBundle, graph) : undefined;
