@@ -3899,6 +3899,10 @@ function statedRangeUnsizedEntry(l: CandidateLink, range: StatedWholeRangeOfLink
     before: { low: range.low, high: range.high, text: range.text }, after: ne?.amount ?? null, reason, severity: 'warn' } as RepairEntry;
 }
 
+/** AIE-QUALIFIED-LIMIT-DISCLOSURE-20261018-v1 (SHA256 c80faee3…), exact: a declared limit the user's own words keep qualified. */
+export const QUALIFIED_LIMIT_NOT_ENFORCED = (quantity: string): string =>
+  `\u2018${quantity}\u2019: this limit is kept with its qualifications for reasoning; it will not be enforced as a hard limit in analysis.`;
+
 function admitOnce(
   candidateModel: CandidateModel,
   widened: WidenerAdditions,
@@ -5311,7 +5315,15 @@ function admitOnce(
     const bounds = said.filter((st) => st.form === (upper ? 'upper_bound' : 'lower_bound') && (upper ? st.high : st.low) === c.value);
     if (bounds.length === 0) return false;
     const ends = combineStatementEnds(bounds);
-    return ends.kind === 'held' && ends.hard_end === undefined;
+    if (ends.kind !== 'held' || ends.hard_end !== undefined) return false;
+    // ⭐ Never dropped silently (DL-3; AIE-QUALIFIED-LIMIT-DISCLOSURE-20261018-v1, exact): said once, in the EXISTING loss ledger, for
+    // this limit only. The user's whole statement (source, qualifier, conditions) stays recorded on the node (`withConstructionStatements`).
+    loss.push({ field_path: `nodes[${slugId(c.metric)}].qualified_limit_not_enforced`,
+      before: { metric: c.metric, operator: c.operator, value: c.value, ...(c.unit !== undefined ? { unit: c.unit } : {}),
+        statements: bounds.map((st) => ({ quote: st.quote, ...(st.qualifier !== undefined ? { qualifier: st.qualifier } : {}),
+          ...(st.conditions !== undefined ? { conditions: st.conditions } : {}) })) },
+      after: null, severity: 'info', reason: QUALIFIED_LIMIT_NOT_ENFORCED(c.metric) } as RepairEntry);
+    return true;
   };
   const constraintResult = withGoalTargetRows(admitCandidateConstraints(
     model.constraints.filter((c) => !qualifiedLimit(c)),

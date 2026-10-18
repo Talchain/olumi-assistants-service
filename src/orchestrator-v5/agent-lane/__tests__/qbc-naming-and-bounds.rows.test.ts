@@ -38,7 +38,7 @@ describe('row 12 (#3400 RES1): an item is named only by words outside another it
 /* ── Row 10's admission hunk (C5's OWED row, flipped): a declared limit is hard only where its own bound statement is unqualified ── */
 const PRICE = 'Monthly price';
 const LIMIT_40 = { metric: PRICE, operator: '<=', value: 40, unit: '£ per month', provenance: 'explicit', frame: 'level', role: 'limit' };
-async function constructPrice(said: string, statement: Rec): Promise<Rec | undefined> {
+async function constructPrice(said: string, statement: Rec): Promise<{ graph: Rec | undefined; result: Rec }> {
   let graph: Rec | undefined;
   const draft = {
     goal: { kind: null, deliverable: null, metric: 'Monthly revenue', operator: '>=', target_stated: true, value: 50000, unit: '£', horizon_months: 12,
@@ -59,22 +59,31 @@ async function constructPrice(said: string, statement: Rec): Promise<Rec | undef
     if (path.endsWith('/versions')) return { status: 200, json: { versions: [] } };
     return { status: 200, json: { graph: graph ?? { nodes: [], edges: [] }, graph_hash: 'h' } };
   }) as unknown as InternalDispatch;
-  await buildModelFromBrief('qbc00000-0000-4000-8000-0000000000b0', `We want monthly revenue of at least £50,000. ${said} We could raise the price.`, dispatch,
-    (async () => ({ text: JSON.stringify(draft), status: 'completed' })) as unknown as CallStructuredModel);
-  return graph;
+  const result = await buildModelFromBrief('qbc00000-0000-4000-8000-0000000000b0', `We want monthly revenue of at least £50,000. ${said} We could raise the price.`,
+    dispatch, (async () => ({ text: JSON.stringify(draft), status: 'completed' })) as unknown as CallStructuredModel) as Rec;
+  return { graph, result };
 }
+/** AIE-QUALIFIED-LIMIT-DISCLOSURE-20261018-v1 (SHA256 c80faee3…), exact, for the price. */
+const QUALIFIED_LINE = '\u2018Monthly price\u2019: this limit is kept with its qualifications for reasoning; it will not be enforced as a hard limit in analysis.';
 const hardPriceLimits = (g: Rec | undefined): Rec[] => {
   const price = ((g?.nodes ?? []) as Rec[]).find((n) => n.label === PRICE);
   return ((g?.goal_constraints ?? []) as Rec[]).filter((c) => c.node_id === price?.id && c.value === 40);
 };
 describe('row 10 admission (C5\'s owner hunk): a declared limit is hard only where its own bound statement is unqualified', () => {
-  it('RED: "likely at most £40", kept qualified by the AI yet declared as a limit, is never a hard limit', async () => {
-    const graph = await constructPrice('Our monthly price is likely at most £40 per month.', { qualifier: 'likely' });
+  it('RED: "likely at most £40", kept qualified by the AI yet declared as a limit, is never a hard limit, and is said so once (AIE, exact)', async () => {
+    const said = 'Our monthly price is likely at most £40 per month.';
+    const { graph, result } = await constructPrice(said, { qualifier: 'likely' });
     expect(graph, 'PRECONDITION: the model registers').toBeDefined();
     expect(hardPriceLimits(graph)).toEqual([]);
+    // Never dropped silently: the AIE's sentence, once, in the build's own not_represented; the user's whole statement stays on the node.
+    expect((result.not_represented as string[]).filter((l) => l === QUALIFIED_LINE)).toHaveLength(1);
+    const price = ((graph!.nodes ?? []) as Rec[]).find((n) => n.label === PRICE)!;
+    expect(JSON.stringify(price.user_statements)).toContain(said);
+    expect(JSON.stringify(price.user_statements)).toContain('"qualifier":"likely"');
   });
-  it('CONTROL (the probe sees a limit): "cannot exceed £40", unqualified and declared, registers its hard limit of 40', async () => {
-    const graph = await constructPrice('Our monthly price cannot exceed £40 per month.', { qualifier: null });
+  it('CONTROL (the probe sees a limit): "cannot exceed £40", unqualified and declared, registers its hard limit of 40, with no such line', async () => {
+    const { graph, result } = await constructPrice('Our monthly price cannot exceed £40 per month.', { qualifier: null });
     expect(hardPriceLimits(graph)).toHaveLength(1);
+    expect(result.not_represented as string[]).not.toContain(QUALIFIED_LINE);
   });
 });
