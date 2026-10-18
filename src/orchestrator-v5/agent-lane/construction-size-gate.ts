@@ -163,6 +163,14 @@ export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, af
  * A user-stated node is kept as itself, or as the redraft's goal under the same label (the quantity the user's target named
  * became the goal: T5 D2's "Conversion rate"). Every relationship, and every other node and limit, by identity as above.
  */
+/**
+ * A goal target's FULL identity, as adoption compares it: the quantity (read as every identity key reads it), comparator, signed
+ * figure, unit and frame. The one key a retry is held to (`keepsEveryUserStatedIdentityWhenGoalRechosen`, `keepsTheFirstVerifiedTarget`).
+ */
+export function goalTargetIdentity(target: { readonly metric: unknown; readonly operator: unknown; readonly value: unknown; readonly unit?: unknown; readonly frame?: unknown }): string {
+  return [keyLabel(target.metric), target.operator, target.value, target.unit ?? '', target.frame ?? ''].join('|');
+}
+
 export function keepsEveryUserStatedIdentityWhenGoalRechosen(before: ConstructionSizeVerdict, after: ConstructionSizeVerdict,
   retryGoal: { readonly metric: string; readonly operator: string; readonly value: number | null; readonly unit?: string | null; readonly frame?: string | null }): boolean {
   const n = new Set(after.brief_stated_keys.nodes);
@@ -172,7 +180,7 @@ export function keepsEveryUserStatedIdentityWhenGoalRechosen(before: Constructio
   const quantityAndTerms = (k: string): string => k.slice(k.indexOf(':') + 1);
   const asGoal = new Set(after.brief_stated_keys.limits.filter((k) => k.startsWith('goal:')).map(quantityAndTerms));
   if (retryGoal.value !== null) {
-    asGoal.add([keyLabel(retryGoal.metric), retryGoal.operator, retryGoal.value, retryGoal.unit ?? '', retryGoal.frame ?? ''].join('|'));
+    asGoal.add(goalTargetIdentity(retryGoal));
   }
   return before.brief_stated_keys.nodes.every((k) => k.startsWith('goal:') || n.has(k) || n.has(`goal:${quantityAndTerms(k)}`))
     && before.brief_stated_keys.edges.every((k) => e.has(k))

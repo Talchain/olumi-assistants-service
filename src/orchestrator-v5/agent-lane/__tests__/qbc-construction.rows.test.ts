@@ -219,6 +219,27 @@ describe('row 4 (#3401 retry): a retry that adds a path never changes the user\'
     expect(goalOf(g)).toMatchObject({ goal_threshold_raw: 600000, goal_threshold_unit: '£' });
     expect(referralReaches(g), 'the first draft is kept').toBe(false);
   });
+  // Codex #3412 r1 (P1 ×2): the first target is kept WHOLE, its comparator and frame too, not only its figure and unit.
+  it.each([
+    ['>= → <=', { operator: '<=' }],
+    ['level → change_abs', { frame: 'change_abs', quantity_frame: 'change' }],
+  ] as const)('RED: a range + link retry that also changes the goal\'s %s is not adopted; the user\'s ≥ £600k level stays', async (_c, change) => {
+    const changed = contractDraft(true, true, true);
+    Object.assign(changed.goal, change);
+    const { graph, inputs } = await construct([contractDraft(false, true, false), changed], BRIEF4);
+    expect(inputs, 'PRECONDITION: the retry was asked').toHaveLength(2);
+    const g = GraphV3.parse(graph) as unknown as Rec;
+    expect(goalOf(g)).toMatchObject({ goal_threshold_raw: 600000, goal_threshold_unit: '£', goal_threshold_frame: 'level', goal_direction: '>=' });
+    expect(referralReaches(g), 'the first draft is kept').toBe(false);
+  });
+  it('GUARD (Codex #3412 r1): a retry that drops the user\'s target statements and relabels the goal Olumi\'s keeps the target theirs', async () => {
+    const changed = contractDraft(true, true, true);
+    changed.goal.provenance = 'ai_proposed';
+    changed.statements = (changed.statements as Rec[]).filter((st) => st.subject.kind !== 'goal');
+    const { graph, inputs } = await construct([contractDraft(false, true, false), changed], BRIEF4);
+    expect(inputs).toHaveLength(2);
+    expect(goalOf(GraphV3.parse(graph) as unknown as Rec)).toMatchObject({ threshold_source: 'brief_extraction', provenance: 'from_brief' });
+  });
   it('CONTROL: the same retry with the goal unchanged is adopted (its link registers)', async () => {
     const { graph, inputs } = await construct([contractDraft(false, true, false), contractDraft(true, true, true)], BRIEF4);
     expect(inputs).toHaveLength(2);

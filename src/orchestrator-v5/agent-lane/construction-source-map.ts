@@ -23,6 +23,7 @@ import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { figureTheUserWroteFor } from './stated-by-user.js';
+import { goalTargetIdentity } from './construction-size-gate.js';
 
 /**
  * What a statement states about its subject. ⚠ REBASE: the ONE closed list moves to session 4's statement door (DL condition 1),
@@ -426,20 +427,24 @@ export function goalTargetStatements(model: unknown, brief: string, figure: numb
 }
 
 /**
- * ⭐ QUANTITY BINDING CONTRACT (PR-A rows 3–4): a retry never changes the user's verified target. The FIRST draft's own statements
- * of a target on the quantity the retry's goal is (the first goal's, or, where a redraft re-chose the goal, that quantity's) must
- * still BIND the retry's goal by the one binder (`goalTargetStatements`: its figure, signed, in the goal's comparator and frame,
- * at this goal's occurrence), in the unit the user's statement was read in (`sameUnit`). A first goal whose target bound is kept
- * as the goal. `true` where the first draft verified no target for that quantity: nothing of the user's is at stake. Pure.
+ * ⭐ QUANTITY BINDING CONTRACT (PR-A rows 3–4; Codex #3412 r1 SIMPLER-ALTERNATIVE): a retry never changes the user's verified target.
+ * The FIRST draft's verified target is kept WHOLE, by the existing adoption equality (`goalTargetIdentity`: quantity, comparator,
+ * signed figure, unit and frame), and its authorship by the first draft's own statements, which must still bind the retry's goal
+ * (`goalTargetStatements`, the one binder). Where a redraft re-chose the goal and the first draft verified a target for that quantity
+ * only as a statement, the statement's own terms are kept: its signed figure (the binder), comparator (`BOUND_FORM`) and unit
+ * (`sameUnit`); a frame it never stated is not invented. Conditions are kept by `keepsEveryGoalCondition`. `true` where the first
+ * draft verified no target for the retry goal's quantity: nothing of the user's is at stake. Pure.
  */
 export function keepsTheFirstVerifiedTarget(first: unknown, retry: unknown, brief: string): boolean {
-  const f = first !== null && typeof first === 'object' ? first as { statements?: unknown; goal?: { metric?: unknown; value?: unknown } } : {};
-  const r = retry !== null && typeof retry === 'object' ? retry as { goal?: { metric?: unknown; value?: unknown; unit?: unknown } } : {};
+  type Goal = { metric?: unknown; operator?: unknown; value?: unknown; unit?: unknown; frame?: unknown };
+  const f = first !== null && typeof first === 'object' ? first as { statements?: unknown; goal?: Goal } : {};
+  const r = retry !== null && typeof retry === 'object' ? retry as { goal?: Goal } : {};
   if (!Array.isArray(f.statements)) return true;
   const firstMetric = typeof f.goal?.metric === 'string' ? f.goal.metric : '';
   const metric = typeof r.goal?.metric === 'string' ? r.goal.metric : '';
   const firstOwn = typeof f.goal?.value === 'number' ? goalTargetStatements(first, brief, f.goal.value) ?? [] : [];
-  if (firstOwn.length > 0 && norm(firstMetric) !== norm(metric)) return false;
+  // The first goal's own verified target: its full terms, by the one adoption key.
+  if (firstOwn.length > 0 && (r.goal === undefined || goalTargetIdentity({ ...f.goal, metric: firstMetric }) !== goalTargetIdentity({ ...r.goal, metric }))) return false;
   // The first draft's raw target entries on the retry goal's quantity, each taken as the retry goal's: the user's figure as the AI first
   // read it (a goal's own target only where it bound; a re-chosen quantity's target where the one rule verified it).
   const entries = (f.statements as unknown[]).flatMap((entry) => {
@@ -453,8 +458,9 @@ export function keepsTheFirstVerifiedTarget(first: unknown, retry: unknown, brie
   });
   if (entries.length === 0) return true;
   const value = r.goal?.value;
+  const comparator = typeof r.goal?.operator === 'string' ? BOUND_FORM[r.goal.operator] : undefined;
   const bound = typeof value === 'number' ? goalTargetStatements({ ...(retry as object), statements: entries }, brief, value) ?? [] : [];
-  return bound.length > 0 && bound.every((st) => sameUnit(st.unit, r.goal?.unit));
+  return bound.length > 0 && bound.every((st) => sameUnit(st.unit, r.goal?.unit) && (st.form === 'point' || st.form === comparator));
 }
 
 /**
