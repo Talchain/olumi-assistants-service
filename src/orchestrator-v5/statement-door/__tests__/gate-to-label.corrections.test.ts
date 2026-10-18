@@ -65,7 +65,7 @@ describe('R4 + L1: an approved retraction withdraws the size that rested on the 
       reading_words: 'the stated tutoring effect is withdrawn' }] } }) as Rec;
     expect(card, JSON.stringify(card).slice(0, 400)).toMatchObject({ ok: true, mutated: false });
     expect(card.public_label).toContain('Olumi could not find “tutoring lifting results by three points” in the recorded source; what is withdrawn or kept here is Olumi’s reading.');
-    expect(card.public_label).toContain('the link sizes withdrawn with them, as shown');
+    expect(card.public_label).toContain('the figures withdrawn with them, as shown');
     expect(card.public_label).not.toContain('Unknowns, figures, link strengths');
   });
 
@@ -113,3 +113,47 @@ describe('negatives: stale and tampered writes still refuse; nothing is written'
     expect(userStatementFor(w.graph(), LINK)?.statements.some((st) => st.quote === SAID) ?? false).toBe(false);
   });
 });
+
+describe('R09 (converged plan): a correction never changes the note while leaving the old figure live', () => {
+  const COUNT = 'I counted three late deliveries by the night crew last week.';
+  const LEVEL = { kind: 'factor' as const, id: 'late_deliveries', field: 'level' as const };
+  const levelGraph = (): Rec => ({ nodes: [
+    { id: 'goal', kind: 'goal', label: 'On-time deliveries goal' },
+    { id: 'late_deliveries', kind: 'factor', label: 'Late deliveries by the night crew',
+      observed_state: { value: 0.3, raw_value: 3, unit: 'late deliveries per week', cap: 10, source: 'brief_extraction' },
+      user_statements: [userStatementRecord(LEVEL, [{ speaker: 'user', quote: COUNT, source: COUNT, form: 'point', low: 3, high: 3,
+        unit: 'late deliveries per week', reading: 'olumi', subject: { quantity: 'level', node_id: 'late_deliveries' } }], '2026-10-10T09:00:00.000Z', { recorded_by: 'construction' })] },
+  ], edges: [{ from: 'late_deliveries', to: 'goal', strength: { mean: -0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' }] });
+  const FIX = 'That count was for the whole month, not one week: three late deliveries over the month, and not all by the night crew.';
+  const retract = { correction: { quote: FIX, edits: [{ subject: LEVEL, retirement: { quote: COUNT, scope: 'whole', disposition: 'retracted' },
+    retained: [], reading_words: 'three late deliveries over a month, by more than one crew' }] } };
+
+  it('card → press → the note is corrected AND the per-week figure is withdrawn in the same commit; said on the card and the receipt', async () => {
+    const w = await correctionWorld(levelGraph(), FIX);
+    const card = await w.offer('propose_statement', retract) as Rec;
+    expect(card, JSON.stringify(card).slice(0, 400)).toMatchObject({ ok: true, mutated: false });
+    expect(card.public_label).toContain('The current figure for “Late deliveries by the night crew” is the withdrawn one, so it is withdrawn too');
+    const res = await w.press(card.proposal_id) as Rec;
+    expect(res, JSON.stringify(res).slice(0, 400)).toMatchObject({ ok: true, applied: true });
+    expect(res.follow_up).toContain('“Late deliveries by the night crew” now has no current figure');
+    expect(w.registers).toHaveLength(1);
+    const node = w.graph().nodes.find((n: Rec) => n.id === 'late_deliveries');
+    expect(node).not.toHaveProperty('observed_state');
+    expect(claimRecordFor(w.graph(), LEVEL)!.history?.map((st) => [st.low, st.status])).toEqual([[3, 'withdrawn']]);
+    const cold = await w.cold();
+    expect(cold.body.graph.nodes.find((n: Rec) => n.id === 'late_deliveries')).not.toHaveProperty('observed_state');
+  });
+
+  it('CONTRAST: a correction that keeps the figure\'s own statement keeps the figure', async () => {
+    const message = 'Keep the count, but it was not only the night crew.';
+    const w = await correctionWorld(levelGraph(), message);
+    const card = await w.offer('propose_statement', { correction: { quote: message, edits: [{ subject: LEVEL,
+      retirement: { quote: 'by the night crew', scope: 'part', disposition: 'retracted' }, retained: ['I counted three late deliveries'],
+      reading_words: 'three late deliveries, crew unknown' }] } }) as Rec;
+    expect(card, JSON.stringify(card).slice(0, 400)).toMatchObject({ ok: true });
+    expect(card.public_label).not.toContain('is the withdrawn one');
+    expect(await w.press(card.proposal_id)).toMatchObject({ ok: true, applied: true });
+    expect(w.graph().nodes.find((n: Rec) => n.id === 'late_deliveries').observed_state).toMatchObject({ raw_value: 3 });
+  });
+});
+

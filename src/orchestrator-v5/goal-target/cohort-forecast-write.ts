@@ -290,7 +290,8 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       || !isDeepStrictEqual(approved.expected_node, first.expected_node)
       || !isDeepStrictEqual(approved.user_statement, { subject: first.subject, record: first.record })) return { kind: 'refused', reason: 'invalid_statement' };
     const written = applyStatementCorrection(persistedGraph, correction);
-    const unsized = correction!.edits.flatMap((e) => (e.dependent !== undefined ? [e.dependent.label] : []));
+    const unsized = correction!.edits.flatMap((e) => (e.dependent?.action === 'link_unsized' ? [e.dependent.label] : []));
+    const unavailable = correction!.edits.flatMap((e) => (e.dependent?.action === 'level_unavailable' ? [e.dependent.label] : []));
     if (written.refused !== undefined || written.candidate === undefined) return { kind: 'refused',
       reason: written.refused === 'node_changed' || written.refused === 'node_not_found' ? written.refused : 'invalid_statement' };
     if (written.unchanged) return { kind: 'unchanged' };
@@ -302,10 +303,11 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
         graph_hash_after: computeAnalysisAffectingGraphHash(written.candidate as never) || null,
         safe_summary: 'Recorded your source correction and explicitly retained material',
         // A correction that withdrew a size the analysis used changes what any earlier Run rested on (GATE → LABEL, one commit).
-        impact: unsized.length > 0 ? 'high' : 'low', rerun_recommended: unsized.length > 0 } });
+        impact: unsized.length + unavailable.length > 0 ? 'high' : 'low', rerun_recommended: unsized.length + unavailable.length > 0 } });
     return { kind: 'mutated', mutatedGraph: written.candidate, handlerFacts: [fact as HandlerFact],
       confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.'
-        + unsized.map((label) => ` The link “${label}” is now unsized: the analysis cannot use its size until it is sized again.`).join('') };
+        + unsized.map((label) => ` The link “${label}” is now unsized: the analysis cannot use its size until it is sized again.`).join('')
+        + unavailable.map((label) => ` “${label}” now has no current figure: the analysis cannot use one until it is given again.`).join('') };
   }
   const said = approved.user_statement;
   const record = claimRecordOf(said.record);

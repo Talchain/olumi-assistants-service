@@ -319,7 +319,8 @@ interface ApprovedCorrectionEdit extends CorrectionEditRequest {
    */
   readonly labels?: { readonly binding?: 'olumi_reading'; readonly bound_label?: string; readonly unheld?: readonly string[]; readonly approved?: true };
   /** The operative value that rests on the retired words, and what the same commit does to it (`link_unsized`), with its preimage. */
-  readonly dependent?: { readonly action: 'link_unsized'; readonly expected_edge: Rec; readonly label: string };
+  readonly dependent?: { readonly action: 'link_unsized'; readonly expected_edge: Rec; readonly label: string }
+    | { readonly action: 'level_unavailable'; readonly label: string };
 }
 export interface StatementCorrection {
   readonly source: UserStatement;
@@ -436,7 +437,8 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     const node = nodeOf(graph, e.subject.id);
     return node !== undefined && isDeepStrictEqual(claimRecordFor(graph, e.subject), claimRecordOf(writtenRecord(e)))
       && (e.legacy === undefined || isDeepStrictEqual(legacyOf(node, e.legacy.field), e.legacy.replacement === null ? undefined : e.legacy.replacement))
-      && (e.dependent === undefined || isDeepStrictEqual(edgeOf(graph, e.subject), unsizedEdge(e.dependent.expected_edge)));
+      && (e.dependent?.action !== 'link_unsized' || isDeepStrictEqual(edgeOf(graph, e.subject), unsizedEdge(e.dependent.expected_edge)))
+      && (e.dependent?.action !== 'level_unavailable' || !isRec(node.observed_state));
   });
   if (held) return { candidate: graph, unchanged: true };
   for (const [editIndex, e] of approved.edits.entries()) {
@@ -450,7 +452,7 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
       return { refused: 'node_changed' };
     }
     // The operative value it disables is the one the card showed: its link is still there, unchanged since.
-    if (e.dependent !== undefined) {
+    if (e.dependent?.action === 'link_unsized') {
       const edge = edgeOf(graph, e.subject);
       if (edge === undefined) return { refused: 'node_not_found' };
       if (!isDeepStrictEqual(edge, e.dependent.expected_edge)) return { refused: 'node_changed' };
@@ -475,10 +477,15 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     }
     // ⭐ ONE COMMIT (Codex co-design §1 "atomic representations"): the size that rested on the withdrawn words is withdrawn in the SAME
     // candidate. Never a source-only write that leaves the old figure live.
-    if (e.dependent !== undefined) {
+    if (e.dependent?.action === 'link_unsized') {
       const edges = candidate.edges as unknown[];
       const at = edges.findIndex((x) => isRec(x) && x.from === e.subject.id && x.to === e.subject.to_id);
       edges[at] = unsizedEdge(e.dependent.expected_edge);
+    }
+    // The level that was the retired figure is no longer held: no current figure, so readiness asks for it again.
+    if (e.dependent?.action === 'level_unavailable') {
+      const node = nodeOf(candidate, e.subject.id)!;
+      delete node.observed_state;
     }
   }
   return { candidate };
@@ -510,13 +517,26 @@ const edgeOf = (graph: unknown, subject: DoorSubject): Rec | undefined => (subje
  * stored source words are among the retired ones (byte identity, never a word match). `undefined`: nothing operative rests on them.
  */
 function dependentAction(graph: unknown, e: Pick<ApprovedCorrectionEdit, 'subject' | 'retirement' | 'retained' | 'expected_record'>): ApprovedCorrectionEdit['dependent'] {
+  const kept = (st: UserStatement): boolean => e.retained.some((span) => st.quote.includes(span));
+  const retired = (e.expected_record?.statements ?? []).filter((st) => !kept(st));
+  // ⭐ R09 (converged plan; Codex §1 "never leave an executable 'per week' behind a corrected 'over the month'"): a factor's current
+  // level that IS a retired claim's figure (numeric identity with its stored raw figure) is withdrawn with it; the corrected words
+  // carry no figure of their own here, so the calculation that used it is unavailable until a figure is given again.
+  if (e.subject.kind === 'factor' && e.subject.option_id === undefined && e.subject.field === 'level') {
+    const node = nodeOf(graph, e.subject.id);
+    const os = isRec(node?.observed_state) ? node.observed_state : undefined;
+    const raw = typeof os?.raw_value === 'number' ? os.raw_value : undefined;
+    const restsOn = raw !== undefined && retired.some((st) => st.low === raw && st.high === raw)
+      && !(e.expected_record?.statements ?? []).some((st) => kept(st) && st.low === raw && st.high === raw);
+    return restsOn && typeof node?.label === 'string' ? { action: 'level_unavailable', label: node.label } : undefined;
+  }
   if (e.subject.kind !== 'link' || e.subject.field !== 'effect' || e.retirement.disposition !== 'retracted' || e.retained.length > 0) return undefined;
   const edge = edgeOf(graph, e.subject);
   if (edge === undefined) return undefined;
   const p = isRec(edge.provenance) ? edge.provenance : {};
-  const retired = [e.retirement.quote, ...(e.expected_record?.statements.map((st) => st.quote) ?? [])];
+  const quotes = [e.retirement.quote, ...retired.map((st) => st.quote)];
   const restsOn = linkSizing(edge) === 'user'
-    || (typeof p.source_quote === 'string' && p.source_quote.trim() !== '' && retired.some((q) => q.includes(p.source_quote as string) || (p.source_quote as string).includes(q)));
+    || (typeof p.source_quote === 'string' && p.source_quote.trim() !== '' && quotes.some((q) => q.includes(p.source_quote as string) || (p.source_quote as string).includes(q)));
   const label = labelOfSubject(graph, e.subject);
   return restsOn && linkSizing(edge) !== 'placeholder' && label !== undefined ? { action: 'link_unsized', expected_edge: structuredClone(edge), label } : undefined;
 }
@@ -532,7 +552,8 @@ function unsizedEdge(edge: Rec): Rec {
 const labelsOf = (v: unknown): boolean => v === undefined || (isRec(v)
   && (v.binding === undefined || v.binding === 'olumi_reading') && (v.bound_label === undefined || typeof v.bound_label === 'string')
   && (v.unheld === undefined || (Array.isArray(v.unheld) && v.unheld.every((x) => typeof x === 'string'))) && (v.approved === undefined || v.approved === true));
-const dependentOf = (v: unknown): boolean => v === undefined || (isRec(v) && v.action === 'link_unsized' && isRec(v.expected_edge) && typeof v.label === 'string');
+const dependentOf = (v: unknown): boolean => v === undefined || (isRec(v) && typeof v.label === 'string'
+  && ((v.action === 'link_unsized' && isRec(v.expected_edge)) || (v.action === 'level_unavailable' && v.expected_edge === undefined)));
 
 /** All changes are existing record/source members. The complete old/new bytes are available before approval. */
 export function statementCorrectionWords(c: StatementCorrection | { readonly selected_label: string; readonly bound_label?: string }
@@ -585,7 +606,8 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
         : ` Olumi’s item reader matched them to “${e.labels.bound_label}” instead; approve only if “${String(e.expected_node.label)}” is the item you mean.`}`] : []),
       ...(e.labels?.unheld === undefined ? [] : [`Olumi could not find ${e.labels.unheld.map(q => `“${q}”`).join(' or ')} in the recorded source; what is withdrawn or kept here is Olumi’s reading.`]),
       ...(e.labels?.approved === true ? ['This replaces a record you approved on its card. That approval stays in its history and no longer applies once this correction is approved.'] : []),
-      ...(e.dependent === undefined ? [] : [`The size of the link “${e.dependent.label}” rests on the withdrawn words, so it is withdrawn too: the link becomes unsized, and the analysis cannot use it until it is sized again.`]),
+      ...(e.dependent?.action === 'link_unsized' ? [`The size of the link “${e.dependent.label}” rests on the withdrawn words, so it is withdrawn too: the link becomes unsized, and the analysis cannot use it until it is sized again.`] : []),
+      ...(e.dependent?.action === 'level_unavailable' ? [`The current figure for “${e.dependent.label}” is the withdrawn one, so it is withdrawn too: the analysis cannot use a current figure for it until one is given again.`] : []),
       ...(legacy ? [] : [`Olumi’s reading: ${e.reading_words}. Proposed change to “${String(e.expected_node.label)}” — ${fieldWords[e.subject.field] ?? 'account'}:`]),
       e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
         : `Keep “${e.retirement.quote}” only as earlier context.`,
@@ -600,7 +622,7 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
     ]),
     // The unchanged-members sentence is true only where no size is withdrawn with the words (GATE → LABEL, one commit).
     c.edits.some(e => e.dependent !== undefined)
-      ? 'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records the listed source corrections and the link sizes withdrawn with them, as shown. Other changes need their own supported card. Unknowns, other figures, other link strengths, options, settings and other people’s recorded views remain unchanged. Your quote stays yours; the reading remains Olumi’s after approval.'
+      ? 'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records the listed source corrections and the figures withdrawn with them, as shown. Other changes need their own supported card. Unknowns, other figures, other link strengths, options, settings and other people’s recorded views remain unchanged. Your quote stays yours; the reading remains Olumi’s after approval.'
       : 'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records only the listed source corrections. Other changes need their own supported card. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',
     ...(legacy ? [] : ['Approving authorises only this displayed change as an Olumi reading; it does not make it something you said.']),
   ].join('\n');
