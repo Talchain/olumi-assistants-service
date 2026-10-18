@@ -21,8 +21,9 @@
  * percentage unit it must retain the raw percentage: "40%" is 40, never 0.4. The unit is part of the figure.
  *
  * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
- * money and percentages ("four percent"; a plain COUNT in words IS read by `figureTheUserWroteFor`), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
- * the Agent dropped (£54k vs 54).
+ * money and percentages ("four percent"), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
+ * the Agent dropped (£54k vs 54). A plain figure in WORDS ("thirty-five minutes") is read like its digits, by the one cardinal
+ * grammar (`writtenFigures`; deployed 7d052e5d: 7/7 corrections written in words were refused as origin unknown).
  *
  * SCALE: a MONEY unit's own magnitude letter is the scale its figure is in, so 100 in "£k/month" is the "£100k" the
  * user wrote (DL #72 5862282849: journey A's goal lost its brief source on every turn). Read by
@@ -55,11 +56,40 @@ export function hasApproximateFigureQualifier(before: string, after: string): bo
     || /^(?:[-\s]*ish\b|\s*or so\b)/i.test(after);
 }
 
+/**
+ * Every figure `userText` writes: in digits (`findStatedAmounts`) or in words, by the repo's one cardinal grammar (`countsInWords`:
+ * no articles, fractions or ordinals; each amount keeps its own span and kind). Read through `writtenIs`.
+ */
+function writtenFigures(userText: string | null | undefined): readonly (StatedAmount | ReturnType<typeof countsInWords>[number])[] {
+  return typeof userText !== 'string' ? findStatedAmounts(userText) : [...findStatedAmounts(userText), ...countsInWords(userText)];
+}
+
+/**
+ * `amountIs`, where a figure in WORDS is written only WITH its unit word, of the held unit's kind ("seventy tickets", "two hours"),
+ * so it is never read more broadly than the same digits followed by that word (Codex SPELLED pair):
+ *  · no unit word right after it, no figure: "one of them", "the one who", "twenty-first", "Two" ending a name;
+ *  · never money, a percentage, a share or a scaled money unit (`amountIs`'s family rule, the share classifier, the unit's scale),
+ *    nor a word of those kinds after it ("two percent" is never two people).
+ * Presence only, never attestation of WHICH quantity it is (that stays `figureTheUserWroteFor`'s binding and the card's).
+ */
+function writtenIs(a: StatedAmount | ReturnType<typeof countsInWords>[number], value: number, unit: unknown,
+  family: ReturnType<typeof unitPhraseFamily>, text: string | undefined): boolean {
+  if (a.kind !== 'words') return amountIs(a, value, unit, family, text);
+  if (text === undefined || moneyUnitScale(unit) !== 1 || isProportionScaledFactor({ unit, cap: undefined, value: undefined, raw_value: undefined })) return false;
+  const word = /^\s*([A-Za-z][A-Za-z-]*)/.exec(text.slice(a.index + a.matchedText.length))?.[1];
+  if (word === undefined) return false;
+  const writtenAs = unitWordAfter(text, a);
+  if (writtenAs === 'currency' || writtenAs === 'percent') return false;
+  // Its unit word: a word of the held unit itself ("seventy TICKETS" in tickets per week), or a unit of the held unit's own kind.
+  const ownWord = typeof unit === 'string' && wordsOf(unit).some((u) => sameWord(u, word.toLowerCase()));
+  return (ownWord || (family !== null && writtenAs === family)) && amountIs(a, value, unit, family, text);
+}
+
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
 export function figureTheUserWroteSpan(value: number, unit: unknown, userText: string | null | undefined): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const family = unitPhraseFamily(unit);
-  const a = findStatedAmounts(userText).find(a => amountIs(a, value, unit, family, userText ?? undefined));
+  const a = writtenFigures(userText).find(a => writtenIs(a, value, unit, family, userText ?? undefined));
   return a === undefined ? null : { start: a.index, end: a.index + a.matchedText.length };
 }
 export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
@@ -73,7 +103,7 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 export function timesTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText ?? undefined)).length;
+  return writtenFigures(userText).filter((a) => writtenIs(a, value, unit, family, userText ?? undefined)).length;
 }
 
 /**
@@ -250,7 +280,10 @@ const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_F
  * Every miss under-claims: the figure reads as Olumi's.
  */
 function baselineTheBriefStates(value: number, unit: unknown, brief: string, label: unknown): boolean {
-  if (figureTheUserWrote(value, unit, brief)) return true;
+  // Digits first, as before; words keep this function's own stricter binding below (Codex SPELLED pair: "hire three engineers"
+  // never states three enterprise customers).
+  const family0 = unitPhraseFamily(unit);
+  if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, family0, brief))) return true;
   if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
   const family = unitPhraseFamily(unit);
   if (family === 'currency' || family === 'percent') return false;
