@@ -666,7 +666,7 @@ describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () 
     return x as unknown as CandidateModel;
   };
   const GAP_ISSUE = 'Phased £54 Price -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
-    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+    + 'otherwise an ai_proposed estimate in the factor\'s unit); keep it only in changes if no defensible level exists';
   const issues = (input: string): string[] => JSON.parse(/Construction issues: (\[.*\])\n/.exec(input)![1]!) as string[];
   const phasedLevels = (g: Graph) => Object.keys((g.nodes.find((n) => n.id === 'phased_54_price') as { interventions?: Record<string, unknown> } | undefined)?.interventions ?? {});
 

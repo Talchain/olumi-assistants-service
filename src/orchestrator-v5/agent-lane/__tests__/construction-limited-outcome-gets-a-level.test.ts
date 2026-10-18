@@ -124,7 +124,7 @@ describe('a limit on a quantity drafted as an OUTCOME is a limit gap for the ONE
     const { inputs, trace } = await construct(firstPass(), churnAsFactor('ai_proposed', 3));
     expect(inputs).toHaveLength(2);
     expect(trace).toMatchObject({ retried: true, reasons: { coverage: 1 }, outcome: 'adopted' });
-    expect(inputs[1]).toContain(`${CHURN}: declare it in factors, not outcomes (role observable, with its plausible_max), and give it a baseline_value (a provisional estimate with baseline_known:false, provenance ai_proposed — never the user's) — the user limits its level`);
+    expect(inputs[1]).toContain(`${CHURN}: declare it in factors, not outcomes (role observable; plausible_max only for a supported upper domain bound in its actual unit and encoding, else null), and give it a baseline_value only with its own separately grounded meaning and basis (a provisional estimate with baseline_known:false, provenance ai_proposed — never the user's) — the user limits its level`);
   });
 
   it('⭐ RED: the retry that does as asked is ADOPTED — churn registers with Olumi\'s 3%, cee_inference, still the user\'s named quantity', async () => {

@@ -789,7 +789,7 @@ describe('ordering — the rule runs inside admission, so the size gate measures
  */
 describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate option and coverage gaps', () => {
   const USER_GAP = '£59 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
-    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+    + 'otherwise an ai_proposed estimate in the factor\'s unit); keep it only in changes if no defensible level exists';
   const BASELINE_GAP = 'AI feature availability: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it';
   type Req = { instructions: string; input: string };
   /** The real construction, drafter faked (`drafts[i]` answers call i, the last repeats); a refusal is returned, not thrown. */
@@ -892,7 +892,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    * duplicate the FIRST draft already withheld is still left out of the retry's gaps — the first draft never registered it.
    */
   const GAP_54 = '£54 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
-    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+    + 'otherwise an ai_proposed estimate in the factor\'s unit); keep it only in changes if no defensible level exists';
   const PRICE_54 = { factor_label: 'Pro plan price', value: 54, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' };
   type Opt = CandidateModel['options'][number];
   /** Within the limit: `padded(0, withTest)` (the user's option gap-free) plus Olumi's £54, AI availability open unless `o54` sets it. */
