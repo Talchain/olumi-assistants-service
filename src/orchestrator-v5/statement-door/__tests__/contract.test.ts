@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { verifyStatement, verifyStatements } from '../../agent-lane/user-statements.js';
 import { resolveSubject, subjectKey, type DoorSubject } from '../subject.js';
-import { readStatement, statementBoundTo } from '../read.js';
+import { boundReading, readStatement, statementBoundTo } from '../read.js';
 import { doorCardWords, DOOR_APPROVE } from '../card.js';
 import { answeredAsk, askedSubjects } from '../ask.js';
 import { doorRowFor, ROLE_TABLE as TABLE, rowKey, type RoleRow } from '../role-table.js';
@@ -111,9 +111,18 @@ describe('SYSTEM 1 contract: one subject, one verifier, one binding rule, one ca
       + 'How strongly it affects the model is a separate assumption. Record this reading?');
     expect(v.reading.statements[0]).toMatchObject({ subject: { quantity: 'relation', node_id: RISK.id }, qualifier: 'about', low: 30 });
     expect(DOOR_APPROVE).toEqual({ label: 'Record what you said', message: 'Yes, record what I said.' });
-    // Refusals keep the words: not this field, not this subject, not their words.
+    expect(boundReading(v)).toBe(true);
+    // Refusals keep the words: not this field, not their words.
     expect(readStatement(G, RISK_T, 'Code quality deterioration', ['It might slip.'], { now: 'It might slip.' }, ctx)).toMatchObject({ kind: 'refused', refusal: 'not_this_field' });
-    expect(readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: SAID })).toMatchObject({ kind: 'refused', refusal: 'not_this_subject' });
+    // ⭐ GATE → LABEL (change 1): words nothing binds to this subject are a LABELLED reading, never a refusal: which item they concern is
+    // Olumi's reading, on the card and on each statement (subject_bound false), and a route issuer never issues it (not bound).
+    const unbound = readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: SAID });
+    expect(unbound.kind === 'read' && unbound.reading.binding).toEqual({});
+    expect(boundReading(unbound)).toBe(false);
+    if (unbound.kind !== 'read') return;
+    expect(unbound.reading.statements[0]).toMatchObject({ speaker: 'user', low: 30, checks: { words_found: true, figure_found: true, unit_found: true, subject_bound: false } });
+    expect(doorCardWords(unbound.reading)).toBe(`From your message: “${SAID}” Olumi proposes this reading: your estimate of about 30% that ‘Code quality deterioration’ happens. `
+      + 'How strongly it affects the model is a separate assumption. Olumi’s reading: these words concern “Code quality deterioration”. Record this reading?');
     expect(readStatement(G, RISK_T, 'Code quality deterioration', [SAID], { now: 'Yes.', unverified: SAID }, ctx)).toMatchObject({ kind: 'refused', refusal: 'origin_unknown' });
   });
 });

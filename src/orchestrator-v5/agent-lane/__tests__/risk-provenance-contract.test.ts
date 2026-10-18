@@ -5,6 +5,9 @@ import { authorshipOf } from '../../../cee/provenance/provenance-of.js';
 import { figureTheUserWrote } from '../stated-by-user.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { unsizedOlumiRiskIds, withoutUnsizedOlumiRisksRecorded, unsizedOlumiRiskLine } from '../unsized-risk.js';
+import { claimRecordsOn, userStatementsOn } from '../../statement-door/statements.js';
+import { projectModelContext } from '../runtime/agent-capabilities.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
 const { outbound } = vi.hoisted(() => {
@@ -284,3 +287,125 @@ describe('draft source → risk admission → retained participation → readine
       expect([...unsizedOlumiRiskIds(g)]).toEqual([]);
     });
 });
+
+/**
+ * ⭐ STEP 8c (AIE 19:05:21Z; DL-3): the user's words a claim QUOTES are source, not authorship of the risk. A risk the drafter introduced
+ * as its own reading (`ai_proposed`, or `inferred`: the tag admission already honours, T4f / AIE 6177505214 T9), bound to the user's
+ * sentence only by a figure-free description of it, is Olumi's hypothesis: kept in the model, out of the calculation, its omission
+ * recorded, and the user's sentence kept whole as source. Served 9d17caa6 (synthetic P1/P4): such a risk was saved `unverified_brief`
+ * and withheld the whole Run. Unknown, human or adopted operative risks stay protected (#3327 R2 B1 negatives above unchanged).
+ */
+describe('STEP 8c: source words are not authorship of Olumi\'s risk hypothesis', () => {
+  const LIFT = 'Adding a specialist should lift output by about 20 projects per week.';
+  const HOLDS = 'The specialist role is already unfilled, and the team disagrees about its impact.';
+  const WORRY = 'I\'m a bit worried that specialist capacity falls below target.';
+  const describes = (quote: string, changes: Rec = {}) => ({ subject: { kind: 'risk', label: RISK }, field: 'measure', form: 'describes',
+    quote, value: null, low: null, high: null, unit: null, qualifier: 'should; about', conditions: 'the stated lift is uncertain', speaker: 'user', ...changes });
+  const tagged = (introduced: string | undefined, statements: unknown[]): Rec => {
+    const model = draft(statements);
+    if (introduced === undefined) delete model.risks[0].provenance; else model.risks[0].provenance = introduced;
+    return model;
+  };
+
+  it.each([['ai_proposed', 'model_proposed']] as const)(
+    '⭐ RED: a risk the drafter ADDED (%s) whose description quotes the user is Olumi\'s reading, kept out with its omission recorded', (introduced, cls) => {
+      const { graph, risk, out } = admitted(tagged(introduced, [describes(LIFT)]), `${BASE} ${LIFT}`);
+      expect(risk.provenance).toBe('ai_inferred');
+      expect(authorshipOf({ nodeTag: risk.provenance }).origin).toBe('ai');
+      expect(out.inference_classes[risk.id]).toBe(cls);
+      expect(risk.analysis_participation).toBe('retained_excluded');
+      expect(issuesFor(graph, risk.id)).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(true);
+      const cold = JSON.parse(JSON.stringify(graph));
+      expect([...unsizedOlumiRiskIds(cold)]).toEqual([risk.id]);
+      expect(withoutUnsizedOlumiRisksRecorded(cold).omitted).toEqual([{ node_id: risk.id, label: RISK, reason: 'unsized_olumi_risk' }]);
+      // The user's sentence is kept whole as SOURCE (speaker user), never deleted with the authorship.
+      expect(JSON.stringify(risk.user_statements)).toContain(LIFT);
+      expect(JSON.stringify(risk.user_statements)).toContain('"speaker":"user"');
+    });
+
+  /**
+   * ⭐ READER AGREEMENT (DL-3; AIE 19:05Z "the same saved/AI/UI/reopen meaning must agree"): ONE node, read through the "you said" list,
+   * the claim reader, the AI's model context and a cold readback through the store's own contract, carries ONE authorship: Olumi's
+   * hypothesis, with the user's words kept whole as source bound only by Olumi's reading (`subject_bound: false`), never as the
+   * user's statement of the risk. The contrast is the user's own worry, read as theirs by every reader.
+   */
+  const readers = (graph: Rec, id: string) => {
+    const node = graph.nodes.find((n: Rec) => n.id === id);
+    const ai = (projectModelContext({ nodes: graph.nodes, edges: graph.edges, raw: graph, analysis_state: null, analysis_ready: null } as never)
+      .recorded_reasoning as Rec[] | undefined)?.find((r) => r.id === id);
+    return { node, youSaid: userStatementsOn(node), claims: claimRecordsOn(node), ai };
+  };
+  it('⭐ RED (reader agreement): Olumi\'s risk reads as Olumi\'s in the statement list, the AI context and a cold readback', () => {
+    const { graph, risk } = admitted(tagged('ai_proposed', [describes(LIFT)]), `${BASE} ${LIFT}`);
+    const cold = JSON.parse(JSON.stringify(GraphV3.parse(graph)));
+    for (const [where, g] of [['saved', graph], ['cold readback', cold]] as const) {
+      const r = readers(g, risk.id);
+      expect(r.node.provenance, where).toBe('ai_inferred');
+      expect(r.youSaid, `${where}: no "you said" record of the user's words on Olumi's risk`).toEqual([]);
+      const words = r.claims.flatMap((c) => c.statements);
+      expect(words.map((w) => w.quote), `${where}: the user's words kept whole as source`).toEqual([LIFT]);
+      expect(words[0]).toMatchObject({ speaker: 'user', checks: { subject_bound: false } });
+      expect(r.ai, `${where}: the AI sees the node`).toMatchObject({ provenance: 'ai_inferred', analysis_participation: 'retained_excluded' });
+      expect(r.ai?.current_retained, `${where}: the AI is handed no retained user statement of this risk`).toBeUndefined();
+      expect(JSON.stringify(r.ai?.user_statements)).toContain('"subject_bound":false');
+    }
+  });
+  it('⛔ CONTRAST (reader agreement): the user\'s own worry reads as theirs in every reader', () => {
+    const { graph, risk } = admitted(tagged('explicit', [describes(WORRY, { qualifier: 'a bit worried', conditions: null })]), `${BASE} ${WORRY}`);
+    const cold = JSON.parse(JSON.stringify(GraphV3.parse(graph)));
+    for (const g of [graph, cold]) {
+      const r = readers(g, risk.id);
+      expect(r.node.provenance).toBe('unverified_brief');
+      expect(r.youSaid.flatMap((c) => c.statements).map((w) => w.quote)).toEqual([WORRY]);
+      expect(r.ai?.provenance).toBe('unverified_brief');
+      expect(JSON.stringify(r.ai?.user_statements)).toContain(WORRY);
+      expect(JSON.stringify(r.ai?.user_statements)).not.toContain('subject_bound');
+    }
+  });
+
+  it('⛔ the user\'s own worry (drafter: explicit) stays theirs: unverified human material, still asked, the Run withheld', () => {
+    const { graph, risk, out } = admitted(tagged('explicit', [describes(WORRY, { qualifier: 'a bit worried', conditions: null })]), `${BASE} ${WORRY}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    expect(JSON.stringify(out.loss)).toContain(WORRY);
+  });
+
+  // ⛔ Codex STEP8C pair (AMEND): `inferred` ("interprets that material, or its introduction is uncertain", build-model.ts) is a
+  // fallback, not a positive identification: the same quote keeps today's path, and so does the user's own worry the drafter tags so.
+  it.each([['the same quote', LIFT], ['the user\'s own worry', WORRY]] as const)(
+    '⛔ the drafter\'s `inferred` tag is no positive identification (%s): protected, still asked', (_n, quote) => {
+      const { graph, risk } = admitted(tagged('inferred', [describes(quote)]), `${BASE} ${quote}`);
+      expect(risk.provenance).toBe('unverified_brief');
+      expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+      expect(resolveRunAdmission(graph).willProceed).toBe(false);
+    });
+
+  it('⛔ an unknown-origin risk (no drafter tag) quoting the user is protected: never Olumi\'s', () => {
+    const { graph, risk } = admitted(tagged(undefined, [describes(LIFT)]), `${BASE} ${LIFT}`);
+    expect(authorshipOf({ nodeTag: risk.provenance }).origin).not.toBe('ai');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(resolveRunAdmission(graph).willProceed).toBe(false);
+  });
+
+  it.each([
+    ['a holds-now claim', describes(HOLDS, { field: 'holds_now', form: 'holds_now', qualifier: null, conditions: null }), HOLDS],
+    ['a stated occurrence', describes('There is about a 30% chance that specialist capacity falls below target.',
+      { field: 'occurrence', form: 'point', value: 30, unit: '%' }), 'There is about a 30% chance that specialist capacity falls below target.'],
+    ['a described figure', describes(LIFT, { value: 20, unit: 'projects per week' }), LIFT],
+  ] as const)('⛔ an introduced risk whose claim is %s stays protected (unverified human), never Olumi\'s', (_n, st, quote) => {
+    const { graph, risk } = admitted(tagged('ai_proposed', [st]), `${BASE} ${quote}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.analysis_participation).toBeUndefined(); expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+  });
+
+  it('⛔ a retained receipt (already_true_evidence) keeps an introduced risk human material, its card intact', () => {
+    const model = tagged('ai_proposed', [describes(LIFT)]); model.risks[0].already_true_evidence = { quote: HOLDS };
+    const { risk } = admitted(model, `${BASE} ${LIFT} ${HOLDS}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.already_true_quote).toBe(HOLDS);
+  });
+});
+

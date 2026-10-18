@@ -14,6 +14,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { comparatorTheUserWrote, userWordsOf } from '../stated-by-user.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440d01';
 const S1 = 'Our quarterly revenue is £100,000.';
@@ -30,23 +31,30 @@ const GRAPH = {
   edges: [{ from: 'sprint', to: 'quarterly_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }],
 };
 const dispatch: InternalDispatch = async (path) => {
-  if (path.endsWith('/graph')) return { status: 200, json: { graph: GRAPH, graph_hash: 'h1' } };
+  if (path.endsWith('/graph')) return { status: 200, json: { graph: structuredClone(GRAPH), graph_hash: computeAnalysisAffectingGraphHash(GRAPH as never) } };
   throw new Error(`unexpected dispatch ${path}`);
 };
 const propose = (turn: string, earlier: readonly string[], args: Record<string, unknown>, store = new ProposalStore()) =>
   createAgentCapabilities(dispatch, store).proposeGoalTarget!(ctxOf(turn, earlier), { rationale: 'x', unit: '£', ...args } as never);
 
 describe('F5 D1: Paul\'s "aiming to double that" is a target card — a decision, from his own figure', () => {
-  it('RED: "double that" after "£100,000" → ONE card "at least £200,000 (2 × your £100,000)", offered as a decision', async () => {
+  // ⭐ GATE → LABEL (DL-3 AMEND 18 Oct, replacing DL #2447's rule): a target Olumi DERIVES from the user's figure is Olumi's derivation,
+  // its arithmetic shown, approved if pressed: never "your target", never `threshold_source: user`. It is still a card, never a refusal.
+  it('RED: "double that" after "£100,000" → ONE card: Olumi’s derivation £100,000 × 2 = £200,000, never "your target"', async () => {
     const store = new ProposalStore();
     const p = await propose(S2, [S1], { constraint_type: 'at_least', value: 200000, derived_from: { base: 100000, multiplier: 2 } }, store);
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
-    expect(p.public_label).toBe('Set the goal "Quarterly revenue" to at least £200,000 (2 × your £100,000)');
-    const chips = approvalChipsFor([{ name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(p.proposal_id) }],
-      (id) => ({ proposal: store.get(id), result: p }));
-    expect(chips.map((c) => c.label)).toEqual(['Yes, at least', 'At most instead', 'Change something first']);
-    expect(chips[0]!.detail).toBe(p.public_label);
-    expect(chips[1]).toEqual(expect.objectContaining({ id: 'agent-direction-alternative', message: 'No, the goal should be at most that figure.' }));
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, outcome: 'target_reading:source_message_missing,derived_target' }));
+    expect(p.public_label).toContain('Olumi read at least £200,000 as the target for “Quarterly revenue”. Derived by Olumi from your figures: £100,000 × 2 = £200,000; your original figure stays in the quote.');
+    expect(p.public_label).toContain('the target and its binding are Olumi’s reading, including after approval.');
+    expect(p.public_label).not.toContain('your £100,000)');
+    const proposal = store.get(String(p.proposal_id))!;
+    expect(proposal.provenance.authored_by).toBe('model_proposed');
+    const op = proposal.operations[0]!.value as Record<string, any>;
+    expect(op.derived_from).toEqual({ base: 100000, multiplier: 2, unit: '£' });
+    // The prepared postimage is Olumi's inference, never the user's stamp.
+    const goal = (op.candidate.nodes as Array<Record<string, unknown>>).find((n) => n.id === 'quarterly_revenue')!;
+    expect(goal.threshold_source).toBe('cee_inference');
+    expect((op.candidate.goal_constraints as Array<Record<string, unknown>>).find((r) => r.node_id === 'quarterly_revenue')).toMatchObject({ provenance: 'inferred' });
   });
 
   it('RED: neutral wording ("our target is £200,000") takes the SAME path — a decision, never a refusal', async () => {

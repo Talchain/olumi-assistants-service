@@ -35,12 +35,47 @@ export interface StatementSubject {
   readonly option_id?: string;
 }
 
+/**
+ * ⭐ CLAIM RECORD (plan v6.0 S1a; outbox/CLAIM-RECORD-SPEC.md v2; AIE 13:10Z + 14:00Z): each statement is one CLAIM, and `said_by` is
+ * who asserts its figure: the user's own assertion, a party the words name (`party`, verbatim; `relayed_by`: whether the message
+ * context establishes that the user supplied the report), an unresolved source, or an estimate Olumi itself introduced. `reading`
+ * stays Olumi's interpretation and approval stays the host's receipt: neither moves authorship. Absent on a stored claim: derived
+ * from `speaker` (`saidByOf`), so the user's own claims keep today's bytes.
+ */
+export type SaidBy = 'user' | 'party' | 'unknown' | 'olumi';
+export const SAID_BY: readonly SaidBy[] = ['user', 'party', 'unknown', 'olumi'];
+export type ClaimStatus = 'proposed' | 'confirmed' | 'superseded' | 'withdrawn';
+export const CLAIM_STATUSES: readonly ClaimStatus[] = ['proposed', 'confirmed', 'superseded', 'withdrawn'];
+/** The literal word checks, as labels the card shows: never a gate, never a reason to change `said_by` (AIE ORIGIN). */
+export interface ClaimChecks {
+  readonly words_found: boolean;
+  readonly figure_found: boolean;
+  readonly unit_found: boolean;
+  /** Whether the host proved the words are about THIS subject. `false`: Olumi's reading of the user's words, which their press may confirm. */
+  readonly subject_bound?: boolean;
+}
+
 export interface UserStatement {
   /**
    * `'unknown'` (the estate's speaker-unknown label, DL-3 16:14Z on #3363): words the brief writes verbatim that the quote check cannot
-   * bound as one whole statement, kept exactly as written. Never the user's, and never operative: `describes`, with no figure, unit or sign.
+   * bound as one whole statement, kept exactly as written: `describes`, with no figure, unit or sign. Written only beside the two
+   * legacy-legal claims (`said_by` user, or unknown words with no figure); every other claim carries `said_by` and no `speaker`, so a
+   * build that predates the claim record reads it as nobody's, never the user's.
    */
-  readonly speaker: 'user' | 'unknown';
+  readonly speaker?: 'user' | 'unknown';
+  readonly said_by?: SaidBy;
+  readonly party?: string;
+  readonly relayed_by?: 'user' | 'unknown';
+  /** A range's EXPLICIT central figure, kept only where the words write it (C5 for G2's sizing): never a midpoint or a mean. */
+  readonly value?: number;
+  readonly claim_id?: string;
+  readonly status?: ClaimStatus;
+  readonly supersedes?: readonly string[];
+  /** The host's receipt: the displayed card's proposal id. Authorises the shown operation only (AIE AMEND 13:43Z). */
+  readonly approval?: { readonly proposal_id: string };
+  readonly checks?: ClaimChecks;
+  /** On a retired claim only: the approval or adoption its record held when it was retired (kept as a historical receipt; Codex §1). */
+  readonly attested?: Readonly<Record<string, string | number | boolean>>;
   /** The user's words, verbatim, as the Agent quoted them. */
   readonly quote: string;
   /** The complete line of the user's typed words that holds the quote. */
@@ -83,6 +118,10 @@ export interface StatementArgs {
    * can be theirs; an AI-read `'user'` still needs the literal span. Absent: no reading given, the span check alone decides (as before).
    */
   readonly speaker?: unknown;
+  /** ⭐ CLAIM RECORD: the AI's reading of who asserts the claim (`CLAIM_SOURCE`), the party's name as written, and who relayed it. */
+  readonly said_by?: unknown;
+  readonly party?: unknown;
+  readonly relayed_by?: unknown;
 }
 
 /**
@@ -126,6 +165,13 @@ export interface StatementRules {
    * the quote, never a proof of what the quantity is: the row still decides which units its field takes.
    */
   readonly unitWritten?: true;
+  /**
+   * ⭐ CLAIM RECORD (spec v2 rule 6): the claim door only. The AI's reading of who asserts the statement is kept on it (`said_by`):
+   * another party's or an unresolved claim is verified as that claim, never as the user's. Every other caller leaves this unset and
+   * reads a verified statement as the user's own, exactly as before. ⭐ GATE → LABEL (change 1): here a failed word check is the
+   * claim's LABEL (`checks`), never a refusal: words not found, a figure not in them, or words held with their origin unverified.
+   */
+  readonly claims?: true;
 }
 
 export type StatementsVerdict =
@@ -343,25 +389,45 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (quote === undefined || form === undefined) {
     return malformed(`Each statement needs the user's exact words (quote) and one form of: ${rules.forms.join(', ')}. Nothing was prepared.`);
   }
-  // ⭐ LEAN CORE P2 (DL-3 18 Oct): words the AI itself reads as another speaker's, or cannot place, are never the user's statement.
-  if (given?.speaker === 'other' || given?.speaker === 'unknown') {
+  // ⭐ CLAIM RECORD (spec v2 rule 6; AIE 13:10Z ruling 1, 14:00Z ORIGIN): the AI's reading of WHO asserts the claim is kept, never
+  // vetoed. Words it reads as another speaker's are that party's claim, relayed by the user; words it cannot place stay unresolved.
+  // Only the user's own reading can be theirs, and only on their literal span (below). Olumi's own estimates are not statements.
+  // Every caller but the claim door (`rules.claims`) asks "did the USER state this?": there, another speaker's or an unresolved reading
+  // is never theirs (LEAN CORE P2, unchanged). The claim door keeps it as that claim instead (spec v2 rule 6).
+  if (rules.claims !== true && (given?.speaker === 'other' || given?.speaker === 'unknown')) {
     return { kind: 'refused', refusal: 'statement_not_found', detail: `You read “${quote}” as ${given.speaker === 'other' ? 'someone else\u2019s words or view, reported by the user' : 'words whose speaker you cannot tell'}, so they are not the user's own statement and nothing was prepared. Their words stay as said, with that speaker.` };
   }
+  const claims = rules.claims === true;
+  const given_by = claims ? claimSourceOf(given) : { said_by: 'user' as const };
+  if (given_by === undefined) return malformed(`Give who asserts “${quote}”: the user, a named party, or unresolved. Nothing was prepared.`);
   // ⭐ THE ONE AUTHORSHIP RULE (lean core, DL-3 18 Oct): the span is the user's own words, literally, in a verified message.
   const said = usersOwnSpan(texts, quote, current);
-  if (said !== 'theirs') {
+  // Another party's or an unresolved claim needs its words held: typed by the user (they relayed it) or retained, origin unverified
+  // (relay unknown). The user's own claim needs their literal span, as before. In the claim door only words the user's own messages
+  // report as Olumi's, disputed or withdrawn are refused; every other miss is the claim's label (below).
+  if (said !== 'theirs' && (claims ? said === 'not_their_claim' : given_by.said_by === 'user' || said !== 'retained')) {
     return said === 'retained'
       ? { kind: 'refused', refusal: 'origin_unknown', detail: `The words “${quote}” are retained, but their origin is not verified, so nothing was prepared. Ask the user to confirm that figure in their own words.` }
       : said === 'not_their_claim'
         ? { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is reported as Olumi’s, disputed, or withdrawn in the user’s own messages, so it is not their statement and nothing was prepared.` }
         : { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” is not in the user's own words, so nothing was prepared. Quote their words, verbatim, from any of their messages.` };
   }
+  // ⭐ GATE → LABEL: in the claim door, words held with their origin unverified are never the user's own claim, and words found in no
+  // message cannot be placed as anyone's: each is an unresolved claim (spec v2 ORIGIN), labelled, never refused.
+  const wordsFound = said === 'theirs' || said === 'retained';
+  const unresolved = { said_by: 'unknown' as const };
+  let by: NonNullable<ReturnType<typeof claimSourceOf>> = claims && (!wordsFound || (said === 'retained' && given_by.said_by === 'user'))
+    ? unresolved : given_by;
   // ⭐ LEAN CORE P2 (C2): words that END in another speaker's quoted words are a report: quoting an entire report does not transfer its
   // embedded claim (AIE). The AI's speaker reading only ever subtracts credit, so an explicit `user` reading never exempts it (Founder
-  // 05:46 evidence row: an explicit speaker=user requote of a whole reported line became a "your words" card).
-  if (form === 'describes' && endsInQuotedSpeech(quote)) {
-    return { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” ends in another speaker's quoted words, so it reports their claim, not the user's own statement. Nothing was prepared. Their words stay as said.` };
+  // 05:46 evidence row: an explicit speaker=user requote of a whole reported line became a "your words" card). The claim door keeps it
+  // as an unresolved claim instead: the words do not name who asserts it.
+  if (by.said_by === 'user' && form === 'describes' && endsInQuotedSpeech(quote)) {
+    if (!claims) return { kind: 'refused', refusal: 'statement_not_found', detail: `“${quote}” ends in another speaker's quoted words, so it reports their claim, not the user's own statement. Nothing was prepared. Their words stay as said.` };
+    by = unresolved;
   }
+  const theirs = by.said_by === 'user';
+  const relayed: 'user' | 'unknown' = said === 'theirs' && by.relayed_by !== 'unknown' ? 'user' : 'unknown';
   const source = verbatimSourceLine({ now: texts.now, conversation: texts.conversation }, quote) ?? quote;
   const qualifier = trimmed(given?.qualifier, 80);
   const conditions = trimmed(given?.conditions, 160);
@@ -383,7 +449,10 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     detail: `“${quote}” leaves out the bound the user wrote on ${figureWords} (“${source}”), so it is not their statement. Quote their words with it. Nothing was prepared.` });
   const unitRefused = (said: string): StatementVerdict => ({ kind: 'refused', refusal: 'figure_not_in_quote',
     detail: `“${quote}” does not state ${said} in ${givenUnit}: the unit read is the one written after the figure. Quote the words that state it. Nothing was prepared.` });
-  const base = { speaker: 'user' as const, quote, source, subject: rules.subject, form, unit: givenUnit ?? rules.unit,
+  // Who asserts it: the user's own claim keeps today's bytes (`speaker`); any other carries `said_by` (and a party its name and relay).
+  const assertedBy = (b: typeof by) => (b.said_by === 'user' ? { speaker: 'user' as const }
+    : b.said_by === 'party' ? { said_by: 'party' as const, party: b.party!, relayed_by: relayed } : { said_by: b.said_by });
+  const core = { quote, source, subject: rules.subject, form, unit: givenUnit ?? rules.unit,
     ...(rules.reference !== undefined ? { reference: rules.reference } : {}), ...(rules.period !== undefined ? { period: rules.period } : {}),
     ...(qualifier !== undefined ? { qualifier, qualifier_in_quote: plainQuoteWords(quote).toLowerCase().includes(plainQuoteWords(qualifier).toLowerCase()) } : {}),
     ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
@@ -391,18 +460,32 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   // Recording a measure/source may retain numbers in its words; using them to ground a figure-free estimate may not.
   if (form === 'describes' && rules.describesNumericEstimate === true && rules.figuresIn(quote).length > 0) return { kind: 'refused', refusal: 'figure_not_in_quote',
     detail: 'These words state a figure for this quantity. Use the figure-bearing form in its stated unit, rather than a figure-free description. Nothing was prepared.' };
+  /**
+   * ⭐ GATE → LABEL (change 1; Codex co-design §1): the claim door's statement with its word checks as LABELS, only where one failed
+   * (a claim whose checks all pass keeps today's bytes). A figure the words do not write is kept as Olumi's reading of them, its ends as
+   * given, and never reads as "you said" (`youSaid`); a figure only in another speaker's quoted words is an unresolved claim.
+   */
+  const labelled = (ends: { low?: number; high?: number }, figureFound: boolean, inSpeech = false): StatementVerdict => {
+    const statement = { ...assertedBy(inSpeech ? unresolved : by), ...core, ...ends };
+    return { kind: 'verified', statement: wordsFound && figureFound ? statement
+      : { ...statement, checks: { words_found: wordsFound, figure_found: figureFound, unit_found: figureFound } } };
+  };
   // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
-  if (FIGURE_FREE.has(form)) return { kind: 'verified', statement: base };
+  if (FIGURE_FREE.has(form)) return labelled({}, true);
   const stated = rules.figuresIn(quote);
   if (form === 'range') {
     const low = figure(given?.low, rules.allowsZero), high = figure(given?.high, rules.allowsZero);
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
-    if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-    if (figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
+    if (read === undefined) {
+      return claims ? labelled({ low, high }, false)
+        : { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+    }
+    const inSpeech = theirs && figureOnlyInSpeech(quote, read.high);
+    if (inSpeech && !claims) return anotherSpeaker(`${low}–${high}`);
     if (dropsBound(read.low) || dropsBound(read.high)) return boundDropped(`${low}–${high}`);
     if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
-    return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
+    return labelled({ low: read.low, high: read.high }, true, inSpeech);
   }
   // A negative is a figure only where the quote's own words state it as one (`figuresIn`: a net loss, S4); never the Agent's sign.
   const signed = typeof given?.value === 'number' && given.value < 0 && stated.some((r) => r.low === given.value && r.high === given.value)
@@ -410,11 +493,16 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   const value = figure(given?.value, rules.allowsZero) ?? signed;
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
-  if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-  if (figureOnlyInSpeech(quote, end)) return anotherSpeaker(String(value));
+  const endsOf = (x: number) => (form === 'point' ? { low: x, high: x } : form === 'lower_bound' ? { low: x } : { high: x });
+  if (end === undefined) {
+    return claims ? labelled(endsOf(value), false)
+      : { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
+  }
+  const inSpeech = theirs && figureOnlyInSpeech(quote, end);
+  if (inSpeech && !claims) return anotherSpeaker(String(value));
   if (dropsBound(end)) return boundDropped(String(value));
   if (givenUnit !== undefined && !unitWrittenAfter(quote, end, givenUnit)) return unitRefused(String(value));
-  return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };
+  return labelled(endsOf(end), true, inSpeech);
 }
 
 /** Words `text` writes verbatim on one line, kept with speaker unknown for `subject`: no figure, unit or sign. `undefined` if not written. */
@@ -491,6 +579,47 @@ export function combineStatementEnds(statements: readonly UserStatement[]): Comb
  * A statement as stored (a card's operation, a carrier's `statements`), read back as the contract's type, or `undefined` if it is
  * not one. The ONE reader, so no caller double-casts stored bytes into a statement (the forbidden-boundary gate).
  */
+/**
+ * The AI's reading of who asserts a statement (`said_by`, else its P2 `speaker` reading): the user (also when no reading is given, as
+ * before), a party it names (`party`, as written; without a name the source is unresolved), or unresolved. `undefined` for any other
+ * reading, Olumi's own estimate included: that is proposed as an assumption, never as the user's statement.
+ */
+function claimSourceOf(given: StatementArgs | null | undefined): { readonly said_by: 'user' | 'party' | 'unknown'; readonly party?: string; readonly relayed_by?: 'user' | 'unknown' } | undefined {
+  const reading = given?.said_by ?? (given?.speaker === 'other' ? 'party' : given?.speaker);
+  const party = trimmed(given?.party, 200);
+  const relayedBy = given?.relayed_by === 'unknown' ? 'unknown' as const : undefined;
+  if (reading === undefined || reading === 'user') return { said_by: 'user' };
+  if (reading === 'unknown' || (reading === 'party' && party === undefined)) return { said_by: 'unknown' };
+  return reading === 'party' ? { said_by: 'party', party: party!, ...(relayedBy !== undefined ? { relayed_by: relayedBy } : {}) } : undefined;
+}
+
+/** Who asserts a claim's figure: its own `said_by`, else its legacy `speaker` (the user's, or unresolved). */
+export const saidByOf = (s: Pick<UserStatement, 'said_by' | 'speaker'>): SaidBy => s.said_by ?? (s.speaker === 'user' ? 'user' : 'unknown');
+
+/** A claim's identity, status, supersession, approval and check labels, each only where stored; `undefined` if any is malformed. */
+function claimFieldsOf(r: Record<string, unknown>): Partial<Pick<UserStatement, 'claim_id' | 'status' | 'supersedes' | 'approval' | 'checks' | 'attested'>> | undefined {
+  const id = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= 200;
+  const status = CLAIM_STATUSES.find((x) => x === r.status);
+  const a = r.approval, c = r.checks;
+  const approval = a !== null && typeof a === 'object' && !Array.isArray(a) && id((a as Record<string, unknown>).proposal_id)
+    ? { proposal_id: (a as Record<string, unknown>).proposal_id as string } : undefined;
+  const cr = c !== null && typeof c === 'object' && !Array.isArray(c) ? c as Record<string, unknown> : undefined;
+  const checks = cr !== undefined && (['words_found', 'figure_found', 'unit_found'] as const).every((k) => typeof cr[k] === 'boolean')
+    && (cr.subject_bound === undefined || typeof cr.subject_bound === 'boolean')
+    ? { words_found: cr.words_found as boolean, figure_found: cr.figure_found as boolean, unit_found: cr.unit_found as boolean,
+      ...(typeof cr.subject_bound === 'boolean' ? { subject_bound: cr.subject_bound } : {}) } : undefined;
+  if ((r.claim_id !== undefined && !id(r.claim_id)) || (r.status !== undefined && status === undefined)
+    || (r.supersedes !== undefined && !(Array.isArray(r.supersedes) && r.supersedes.every(id)))
+    || (a !== undefined && approval === undefined) || (c !== undefined && checks === undefined)) return undefined;
+  const t = r.attested;
+  const attested = t !== null && typeof t === 'object' && !Array.isArray(t) && Object.values(t).every((x) => typeof x === 'boolean'
+    || (typeof x === 'string' && x.length <= 200) || (typeof x === 'number' && Number.isFinite(x))) ? { ...(t as Record<string, string | number | boolean>) } : undefined;
+  if (t !== undefined && attested === undefined) return undefined;
+  return { ...(id(r.claim_id) ? { claim_id: r.claim_id } : {}), ...(status !== undefined ? { status } : {}),
+    ...(Array.isArray(r.supersedes) ? { supersedes: [...r.supersedes as string[]] } : {}),
+    ...(approval !== undefined ? { approval } : {}), ...(checks !== undefined ? { checks } : {}), ...(attested !== undefined ? { attested } : {}) };
+}
+
 export function userStatementOf(v: unknown): UserStatement | undefined {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return undefined;
   const r = v as Record<string, unknown>;
@@ -499,10 +628,24 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
   const optional = (k: string): string | undefined => (typeof r[k] === 'string' ? r[k] as string : undefined);
   const end = (k: string): number | undefined => (typeof r[k] === 'number' && Number.isFinite(r[k]) ? r[k] as number : undefined);
   const unknownWords = r.speaker === 'unknown' && form === 'describes' && [r.low, r.high, r.unit, r.negated].every((x) => x === undefined);
-  if ((r.speaker !== 'user' && !unknownWords) || r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
+  // The two legacy-legal speakers; any other `speaker` is malformed. A stored `said_by` must agree with the speaker beside it.
+  const legacy: 'user' | 'unknown' | undefined = r.speaker === 'user' ? 'user' : unknownWords ? 'unknown' : undefined;
+  const saidBy = SAID_BY.find((x) => x === r.said_by);
+  const by = saidBy ?? legacy;
+  if ((r.speaker !== undefined && legacy === undefined) || (r.said_by !== undefined && saidBy === undefined) || by === undefined
+    || (legacy !== undefined && saidBy !== undefined && legacy !== saidBy)) return undefined;
+  const party = trimmed(r.party, 200);
+  const relayedBy = r.relayed_by === 'user' || r.relayed_by === 'unknown' ? r.relayed_by : undefined;
+  if (by === 'party' ? party === undefined || relayedBy === undefined : r.party !== undefined || r.relayed_by !== undefined) return undefined;
+  if (r.reading !== 'olumi' || typeof r.quote !== 'string' || typeof r.source !== 'string' || form === undefined
     || subject === undefined || typeof subject.quantity !== 'string') return undefined;
+  const claim = claimFieldsOf(r);
+  if (claim === undefined) return undefined;
   const low = end('low'), high = end('high'), qualifier = optional('qualifier'), conditions = optional('conditions');
-  return { speaker: unknownWords ? 'unknown' : 'user', quote: r.quote, source: r.source, form, reading: 'olumi',
+  return { ...(legacy !== undefined ? { speaker: legacy } : {}), ...(saidBy !== undefined ? { said_by: saidBy } : {}),
+    ...(party !== undefined ? { party } : {}), ...(relayedBy !== undefined ? { relayed_by: relayedBy } : {}),
+    ...(end('value') !== undefined ? { value: end('value') } : {}), ...claim,
+    quote: r.quote, source: r.source, form, reading: 'olumi',
     subject: { quantity: subject.quantity, ...(typeof subject.node_id === 'string' ? { node_id: subject.node_id } : {}),
       ...(typeof subject.option_id === 'string' ? { option_id: subject.option_id } : {}) },
     ...(low !== undefined ? { low } : {}), ...(high !== undefined ? { high } : {}),

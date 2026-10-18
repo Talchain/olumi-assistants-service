@@ -327,14 +327,20 @@ describe('RT-6 natural sentences: held-out B5 corpus', () => {
 
 describe('RT-6 request selection, conservative statement controls and mutants', () => {
   const f5 = NATURAL_SENTENCE_ROWS.find(row => row.id === 'F5')!;
-  it.each(['nodes', null, 'source_only', 'wrong_link'] as const)('F5 with selection %s: both REQUEST node ends bind; other selections ask which link once', async selection => {
+  // ⭐ GATE → LABEL (change 1): with no selection, or only one end selected, WHICH link the words size is Olumi's reading, not a refusal;
+  // F5's remaining question is then its figure's unit (readable from an end's label only when the link is selected). A selection of
+  // ANOTHER link is the user's own evidence against that reading, so it still asks which link. Every case: one question, no card, no write.
+  it.each(['nodes', null, 'source_only', 'wrong_link'] as const)('F5 with selection %s: both REQUEST node ends bind; another link asks which link; otherwise one unit question', async selection => {
     const w = world(f5); const before = w.graph(); const result = await propose(w, f5, selection);
     if (selection === 'nodes') {
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
       expect(cardsFor(w, result)[0]?.detail).toBe(f5.card);
       expect(w.attempts).toEqual([]); expect(w.graph()).toEqual(before);
-    } else {
+    } else if (selection === 'wrong_link') {
       oneQuestion(result, 'Which link do you mean: “Café subscribers” → “Wholesale subscription revenue”?');
+      expect(cardsFor(w, result)).toEqual([]); noWrite(w, f5, before);
+    } else {
+      oneQuestion(result, 'What unit is the 250 change in “Wholesale subscription revenue” stated in?');
       expect(cardsFor(w, result)).toEqual([]); noWrite(w, f5, before);
     }
   });

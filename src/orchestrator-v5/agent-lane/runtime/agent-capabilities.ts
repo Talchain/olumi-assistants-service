@@ -17,20 +17,20 @@ import { ZERO_SPREAD_NEEDS_MONTHLY_CHANGES } from '../../goal-target/zero-spread
 import { heldGoalHorizonMonths } from '../../goal-target/goal-horizon-verdict.js';
 import { isCalendarDate, applyGoalHorizonEdit, approvedDeadlineReadingOf, goalHorizonPostimageIsScoped, goalHorizonLandedWriteIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { runFactsOf } from '../run-facts.js';
-import { currentStatementRetention, userStatementsOn, recordsWithUnknownSpeakerOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { bindingReadingWords, currentStatementRetention, userStatementsOn, claimRecordsOn, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { recordedMeasureOf } from '../../statement-door/fields/measure.js';
 import { answeredBasisOf, applyGoalReadingEdit, goalReadingProjectionOf, goalReadingRecordedWords, goalReadingWords } from '../../goal-target/goal-reading-write.js';
 import { applyRiskOccurrenceEdit, olumiOccurrenceBlock, riskOccurrenceCardWords, riskOccurrenceGoalHolds,
   riskOccurrenceRecordedWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP,
   riskOccurrencePostimageNode, type ApprovedRiskOccurrence } from '../risk-occurrence.js';
-import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
+import { asMemberOp, doorAsks, doorCardOf, doorOperation, doorRecordedWords, doorRowOf, typedDoorStatement, type DoorCard } from '../../statement-door/door.js';
 import { optionCapacityRecordedWords } from '../../statement-door/fields/option-capacity.js';
 import { rangeLawAdoption, rangeLawStatementOf } from '../../statement-door/fields/range-law.js';
 import { readStatement, statementBoundTo, type DoorContext } from '../../statement-door/read.js';
 import { doorRowFor } from '../../statement-door/role-table.js';
 import { resolveSubject } from '../../statement-door/subject.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
-import { DOOR_PROPOSED_NOTE, doorCardWords } from '../../statement-door/card.js';
+import { claimSourceWords, DOOR_PROPOSED_NOTE, doorCardLabelled, doorCardWords, yourWords } from '../../statement-door/card.js';
 import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
 import { applyStructuralRename } from '../../system-events/structural-rename.js';
 import { applyStructuralDelete } from '../../system-events/structural-delete.js';
@@ -47,7 +47,7 @@ const doorContextOf = (ctx: AgentToolContext, graph?: unknown): DoorContext => (
 const doorStatementDetail = (label: string): string => `The user made their own statement about the risk ‘${label.trim()}’. Record it with `
   + `propose_statement (subject: kind risk, label ‘${label.trim()}’, field occurrence for a chance of it happening with the time span they gave, `
   + 'or holds_now for a condition they say is already true now), quoting their complete words. Nothing was prepared.';
-import { userStated, userStatementOf, verifyStatements, type StatementTexts } from '../user-statements.js';
+import { userStated, userStatementOf, verifyStatements, type StatementTexts, saidByOf } from '../user-statements.js';
 import { optionStatedLinkEffect } from '../link-effect-option-statement.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 /**
@@ -56,6 +56,8 @@ import { findLinkEffectAmounts } from '../link-effect-figures.js';
  * an unclear or level figure, a figure of another quantity) stands.
  */
 const OPTION_READS_PAST: ReadonlySet<string> = new Set(['not_one_statement', 'figure_counts_another_unit', 'figures_not_in_statement']);
+/** GATE → LABEL: the one binder miss that is about WHICH link the user's figures size, never about the figures themselves. */
+const ITEM_READING_MISS = 'end_not_named';
 /** ⛔ Wrong author (served hiring 14 Oct): Olumi's claim, reported, framed, disputed or disowned, is never the user's figure. */
 const NOT_THE_USERS_CLAIM = 'Nothing was prepared: these words report, dispute or disown Olumi\u2019s estimate, so they are not the user\u2019s own figure. '
   + 'Ask the user for their own figure, in their words.';
@@ -1866,7 +1868,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
   // ⭐ E5: each option's start times and pace as the model holds them, with whose each figure is (`hiring-times.ts`).
   const hiringTimes = goals.length === 1 && isEventShareForecast(g.raw) ? hiringTimesSummaryOf(g.raw, goals[0]!.id) : [];
   const recordedReasoning = (Array.isArray(g.raw.nodes) ? g.raw.nodes : []).filter(isPlainRecord).flatMap(n => {
-    const records = recordsWithUnknownSpeakerOn(n);
+    const records = claimRecordsOn(n);
     const current = userStatementsOn(n).flatMap(r => {
       const retained = currentStatementRetention(r);
       return retained === undefined ? [] : [{ field: r.field, ...retained }];
@@ -1934,6 +1936,15 @@ function linkSelectedByRequest(ctx: AgentToolContext, from: string, to: string):
   return selection !== undefined && selection.unresolved === 'none'
     && (selection.element_ids.includes(from) && selection.element_ids.includes(to)
       || (ctx.grounded_links ?? []).some(link => link.from === from && link.to === to));
+}
+/**
+ * ⭐ GATE → LABEL: the user's canvas selection names ANOTHER link (or an element that is not one of this link's ends). That is the
+ * user's own evidence against Olumi's reading of WHICH link their words size, so the card is never offered against it: ask instead.
+ */
+function selectionNamesAnotherLink(ctx: AgentToolContext, from: string, to: string): boolean {
+  const selection = ctx.grounded_selection;
+  if (selection === undefined || selection.unresolved !== 'none' || linkSelectedByRequest(ctx, from, to)) return false;
+  return (ctx.grounded_links ?? []).length > 0 || selection.element_ids.some(id => id !== from && id !== to);
 }
 function linkEffectConsent(raw: unknown, from: string, to: string, effect: { amount: number; per_source_change: number }): { reversal?: LinkEffectReversal } {
   const found = linkEffectTargetOf(raw, from, to);
@@ -4551,7 +4562,8 @@ export function createAgentCapabilities(
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, before: GraphRead,
   ): Promise<ToolResult> => {
     const card = doorCardOf(parent.operations[0]!);
-    const memberOp = asMemberOp(parent.operations[0]!);
+    // The press confirms the card's new claims with its own receipt (claim record spec v2): the write and its read-back hold them.
+    const memberOp = asMemberOp(parent.operations[0]!, { proposal_id: parent.proposal_id });
     const row = card === undefined ? undefined : doorRowOf(card);
     if (card === undefined || memberOp === undefined || row === undefined) {
       return { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' };
@@ -4565,7 +4577,7 @@ export function createAgentCapabilities(
       : { ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied' } satisfies ToolResult;
     if (res.ok !== true) return res;
     const after = await readGraph(ctx.scenario_id);
-    return { ...res, follow_up: row.recordedWords(card.statements, card.subject, card.label, after?.raw ?? before.raw) };
+    return { ...res, follow_up: doorRecordedWords(row, card, after?.raw ?? before.raw) };
   };
 
   /**
@@ -5523,7 +5535,7 @@ export function createAgentCapabilities(
         if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
         let working: unknown = g.raw;
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
-          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
+          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true; item_is_olumis_reading?: true }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
@@ -5589,7 +5601,9 @@ export function createAgentCapabilities(
             fail('not_the_users_statement', linkEffectDeniedWords(from, to));
             continue;
           }
-          if (miss !== null) {
+          // ⭐ GATE → LABEL (change 1; Codex amendment 2): a statement whose figures the binder finds but whose words do not name this
+          // link's ends is the user's figure; WHICH link it sizes is Olumi's reading, said on the card, approved only by its press.
+          if (miss !== null && (miss !== ITEM_READING_MISS || selectionNamesAnotherLink(ctx, from.id, to.id))) {
             fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label,
               linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question), from, to));
             continue;
@@ -5644,6 +5658,7 @@ export function createAgentCapabilities(
           const mediated = linkEffectMediatorReadings(unitView, from.id, to.id);
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
             ...unitReadings, ...labelReadings, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
+            ...(miss !== null ? { item_is_olumis_reading: true as const } : {}),
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
@@ -5659,12 +5674,16 @@ export function createAgentCapabilities(
             ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
             ...(item.label_readings !== undefined ? { label_readings: item.label_readings } : {}),
             ...(item.mediator_readings !== undefined ? { mediator_readings: item.mediator_readings } : {}) } }));
+        // GATE → LABEL (Codex amendment 1): "user_stated" only where every link is the user's by the binder; never for Olumi's reading.
+        const readings = prepared.filter((item) => item.item_is_olumis_reading === true);
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
-          operations, provenance: { authored_by: 'user_stated', basis: prepared.map((item) => item.said).join('\n') },
-          validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links` });
+          operations, provenance: { authored_by: readings.length === 0 ? 'user_stated' : 'model_proposed', basis: prepared.map((item) => item.said).join('\n') },
+          validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links`
+            + readings.map((item) => ` ${bindingReadingWords(`${item.from_label} → ${item.to_label}`)}`).join('') });
         proposals.put(proposal);
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
-          links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said })),
+          links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said,
+            ...(item.item_is_olumis_reading === true ? { item_is_olumis_reading: true } : {}) })),
           ...(notPrepared.length > 0 ? { not_prepared: notPrepared } : {}),
           note: 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
       }
@@ -5735,7 +5754,10 @@ export function createAgentCapabilities(
       if (miss === 'denied' && saysNoChange(quote, text)) {
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, detail: linkEffectDeniedWords(from, to) };
       }
-      if (miss !== null) {
+      // ⭐ GATE → LABEL (change 1; Codex amendment 2): the user's figures, in words that do not name this link's ends: WHICH link they
+      // size is Olumi's reading, said on the card and approved only by its press; the figure stays theirs. Every other miss still asks.
+      const itemReading = miss === ITEM_READING_MISS && !selectionNamesAnotherLink(ctx, from.id, to.id);
+      if (miss !== null && !itemReading) {
         const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds, statedScope.target_units)?.question);
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, question: ask,
           detail: linkEffectUnitAskWords(ask, from, to) };
@@ -5788,9 +5810,10 @@ export function createAgentCapabilities(
           value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...labelReadings,
             // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
             ...((m) => m.length > 0 ? { mediator_readings: m } : {})(linkEffectMediatorReadings(unitView, from.id, to.id)), ...consent } }],
-        provenance: { authored_by: 'user_stated', basis: said },
+        provenance: { authored_by: itemReading ? 'model_proposed' : 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,
+        public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`
+          + (itemReading ? ` ${bindingReadingWords(`${cardNameOf(g, from.id)} → ${cardNameOf(g, to.id)}`)}` : ''),
       });
       proposals.put(proposal);
       return {
@@ -5798,8 +5821,9 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
+        link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said, ...(itemReading ? { item_is_olumis_reading: true } : {}) },
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
+          + (itemReading ? 'and that which link it sizes is Olumi’s reading of their words, confirmed only by the card’s button, ' : '')
           + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
@@ -6628,7 +6652,16 @@ export function createAgentCapabilities(
         retainedAim = retainedTargetAim(g.raw, goal.id, quote, laterAmbitionUnverified, laterAmbitionSourceUnverified);
         if (retainedAim === undefined) return { ok: false, mutated: false, refusal: 'ambition_not_retained' };
       }
-      if (restatedQuantity || retainedAim !== undefined) {
+      /**
+       * ⭐ GATE → LABEL (DL-3 AMEND, 18 Oct: two reviews and the external audit). A target DERIVED by Olumi from the user's figures
+       * ("cut 120,000 kWh by 15%" → 102,000) is Olumi's derivation, with its operands shown, approved by the user if pressed: never
+       * `threshold_source: user`, never "you said". This replaces DL #2447's rule that such a target is theirs. It takes the existing
+       * reading card below (stamped `cee_inference` / `inferred`). Its base must still pass the main path's own scope reader for this
+       * goal (`figureTheUserWroteFor`), and the goal's kind of unit; else the main path refuses as before.
+       */
+      const derivedReading = derived !== null && unitsConflict(unit, goalUnit) === null
+        && (restatedQuantity || figureTheUserWroteFor(derived.base, unit, ctx.user_text, scopeIn(g, goal.label)));
+      if (restatedQuantity || retainedAim !== undefined || derivedReading) {
         const messages = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
         const matchedSource = messages.reverse().find(message => figureTheUserWrote(derived?.base ?? value, unit, message));
         // TL 11:15Z: these are uncertainties for the existing interpretation card, not reasons to refuse it.
@@ -6708,12 +6741,13 @@ export function createAgentCapabilities(
           base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_goal_target', path: goal.id, value: {
             constraint_type: type, raw_value: value, unit, candidate, base_identity: g.graph_identity_hash,
             brief_text: g.brief_text, goal_turn_id: turn, operation_id, confirmation: { source, quote: source },
+            ...(derived !== null ? { derived_from: { base: derived.base, multiplier: derived.multiplier, unit } } : {}),
             ...(retainedAim === undefined ? {} : { retained_aim_description: retainedAim, later_ambition_quote: args.later_ambition_quote,
               ...(laterAmbitionUnverified ? { later_ambition_binding_unverified: true } : {}),
               ...(laterAmbitionSourceUnverified ? { later_ambition_source_unverified: true } : {}) }) } }],
           provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] },
           public_label: `From your message: “${source}”. Olumi read ${DIRECTION_WORDS[type]} ${figure} as the target for “${goal.label}”.`
-            + (derived === null ? '' : ` Olumi derived this figure as ${derived.multiplier} × ${targetFigure(derived.base, unit)}; the original figure stays in the quote.`)
+            + (derived === null ? '' : ` Derived by Olumi from your figures: ${targetFigure(derived.base, unit)} × ${derived.multiplier} = ${figure}; your original figure stays in the quote.`)
             + measurement + replaces + ambitionKept + levelLeftOut
             + ' Your original words stay yours; the target and its binding are Olumi’s reading, including after approval.'
             + (ctx.user_text_complete === false ? ' The retained context is incomplete; check this interpretation and its conditions.' : '')
@@ -6856,7 +6890,7 @@ export function createAgentCapabilities(
           ...(typeof x.reading_words === 'string' ? { reading_words: x.reading_words } : {}),
           // ONE BINDER: pass the source and AI reading unchanged to the existing owner.
           // This adapter does not interpret the words or verify their meaning.
-          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated', 'speaker'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
+          ...Object.fromEntries((['form', 'value', 'low', 'high', 'unit', 'negated', 'speaker', 'said_by', 'party', 'relayed_by'] as const).filter((k) => x[k] !== undefined).map((k) => [k, x[k]])) }] : []));
       const texts = { now: ctx.user_turn_text, conversation: ctx.user_text,
         unverified: [ctx.unverified_user_text, g.brief_text].filter((t): t is string => typeof t === 'string').join('\n') };
       const v = readStatement(g.raw, resolved.subject, resolved.label, quotes, texts, doorContextOf(ctx, g.raw));
@@ -6871,7 +6905,9 @@ export function createAgentCapabilities(
       }
       const card: DoorCard = { subject: resolved.subject, label: resolved.label, field: row.field, carrier: row.carrier,
         statements: v.reading.statements, member: write.member, payload: write.payload, ...(write.expected !== undefined ? { expected: write.expected } : {}),
-        ...(row.derives === true ? { derives: true } : {}) };
+        // A claim another party asserts, an unresolved one, or a card that carries a label (GATE → LABEL: the item, or a word check, is
+        // Olumi's reading) is never "what you said": its press uses the reading's button.
+        ...(row.derives === true || v.reading.statements.some((st) => saidByOf(st) !== 'user') || doorCardLabelled(v.reading) ? { derives: true } : {}) };
       const operations: ProposalOperation[] = [doorOperation(card)];
       const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
         operations, provenance: { authored_by: 'model_proposed', basis: v.reading.statements[0]!.source },
@@ -6880,7 +6916,10 @@ export function createAgentCapabilities(
       const memberOp = asMemberOp(operations[0]!);
       const preview = await readinessIfApplied(ctx, memberOp === undefined ? [] : [memberOp]);
       return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
-        statement: { subject: resolved.label, field: row.field, quotes: v.reading.statements.map((x) => x.quote), your_words: true },
+        // ⭐ GATE → LABEL (Codex amendment 1): "your words" only where the host found the user's words, figure and unit; which item they
+        // concern is said separately when it is Olumi's reading. Never a constant.
+        statement: { subject: resolved.label, field: row.field, quotes: v.reading.statements.map((x) => x.quote), your_words: v.reading.statements.every(yourWords),
+          ...(v.reading.binding !== undefined ? { item_is_olumis_reading: true } : {}) },
         note: DOOR_PROPOSED_NOTE + stillBlockedNote(preview) };
       })();
       if (result.ok === false && typeof result.refusal === 'string') {
@@ -7363,7 +7402,9 @@ export function createAgentCapabilities(
       const directionConflict: { label: string }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; bindingUnverified?: true; asPercent?: true; kept?: true;
-        confirmed?: { source: string; quote: string }; described?: { source: string; quote: string } }[] = [];
+        confirmed?: { source: string; quote: string }; described?: { source: string; quote: string }; describedWords?: string;
+        /** GATE → LABEL: whose words the figure was given in, where they are not the user's own statement of it (`claimSourceWords`). */
+        reported?: string }[] = [];
       const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'unverified_brief' | 'already_accepted' }[] = [];
       // ⭐ Hiring path (a): an unvalued risk ROOT takes Olumi's occurrence range on its own card (`risk-occurrence.ts`).
       const riskRanges: { id: string; label: string; node: Record<string, unknown>; block: EventRiskV1T; basis: string;
@@ -7561,17 +7602,23 @@ export function createAgentCapabilities(
         if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
         // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
+        // ⭐ GATE → LABEL (change 1; Codex amendment 1): read as the claim door reads it. Words that are not the user's own statement of
+        // the figure (another party's, an unresolved source's, words found nowhere, a figure they do not write) are the card's LABEL,
+        // never a refusal: the figure is kept as human material whose role is unverified (`user_material_unverified`), never as yours.
+        let reported: string | undefined;
         if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
           const claimed = Number(a.value), unit = a?.unit ?? nodeUnit;
           const v = verifyStatements(a.statements.map((st: unknown) => ({ ...(isPlainRecord(st) ? st : {}), form: 'point', value: claimed })),
             { now: ctx.user_turn_text, conversation: ctx.user_text,
               unverified: [ctx.unverified_user_text, g.brief_text].filter((t) => typeof t === 'string').join('\n') },
             { subject: { quantity: 'level_today', node_id: node.id }, unit: String(unit ?? ''), forms: ['point'],
-              figuresIn: (q) => (figureTheUserWrote(claimed, unit, q) ? [{ low: claimed, high: claimed }] : []) });
+              figuresIn: (q) => (figureTheUserWrote(claimed, unit, q) ? [{ low: claimed, high: claimed }] : []), claims: true });
           if (v.kind === 'refused') {
             return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'level_not_stated',
               detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
           }
+          const notTheirs = v.statements.find((st) => !yourWords(st));
+          if (notTheirs !== undefined) reported = claimSourceWords(notTheirs);
         }
         if (a.user_stated === true && unitPhraseFamily(a?.unit ?? nodeUnit) === 'percent' && origin !== 'human') {
           return { ok: false, mutated: false, refusal: 'figure_not_in_users_words',
@@ -7584,7 +7631,7 @@ export function createAgentCapabilities(
         const bound = writtenAbout && isFactorNamedByUser(node.label, bindingWords ?? '')
           && !quoteIsNotTheUsersClaim(source, source)
           && comparatorTheUserWroteFor(source, Number(a.value)) === null;
-        const bindingUnverified = origin === 'human' && !bound;
+        const bindingUnverified = origin === 'human' && (!bound || reported !== undefined);
         const quote = bindingUnverified ? source : null;
         /**
          * ⭐ S2 (DL 14 Oct, SCIENCE's marketing capture; PL 18:41Z): words the user said ABOUT this factor ("I'm not that
@@ -7592,6 +7639,7 @@ export function createAgentCapabilities(
          * is Olumi's own estimate from them, labelled and press-only, verified by the one shared contract.
          */
         let described: { source: string; quote: string } | undefined;
+        let describedWords: string | undefined;
         if (a?.user_stated === false && Array.isArray(a?.statements)) {
           const quantityUnits = [...new Set([a?.unit, nodeUnit, ...optionUnitsForFactor(g.raw, node.id)]
             .filter((u): u is string => typeof u === 'string' && u.trim() !== ''))];
@@ -7607,16 +7655,20 @@ export function createAgentCapabilities(
               ? quantityUnits.some(unit => figureTheUserWrote(amount.magnitude, unit, quote))
               : amount.kind === 'plain' && figureTheUserWrote(amount.magnitude, undefined, quote))
               .map(amount => ({ low: amount.magnitude, high: amount.magnitude }));
-          } });
+          }, claims: true });
           if (v.kind === 'refused') {
             return { ok: false, mutated: false, refusal: v.refusal === 'origin_unknown' ? 'origin_unknown' : 'description_not_stated',
               detail: v.refusal === 'origin_unknown' ? UNKNOWN_ORIGIN_DETAIL : v.detail };
           }
           described = { source: v.statements[0]!.source, quote: v.statements[0]!.quote };
+          // GATE → LABEL: words that are not the user's own are quoted with their source, never as "your words".
+          if (!yourWords(v.statements[0]!)) describedWords = claimSourceWords(v.statements[0]!);
         }
         adopted.push({
           id: node.id, label: node.label,
           ...(described !== undefined ? { described } : {}),
+          ...(describedWords !== undefined ? { describedWords } : {}),
+          ...(reported !== undefined ? { reported } : {}),
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
           userWrote: origin === 'human',
@@ -7664,11 +7716,13 @@ export function createAgentCapabilities(
       // user's; crediting only revisions stored a typed first figure as Olumi's assumption, a false attribution). Anything
       // else is Olumi's (`valueOpAuthor`). ONE predicate for what is stored, what the card heads it as and what the Agent
       // is told to say, so the words cannot drift from the authorship.
-      const usersOwn = (a: { userWrote: boolean }): boolean => a.userWrote;
+      // GATE → LABEL: a figure given in words that are not the user's own statement of it is human material whose role is unverified
+      // (written as `user_stated` + `user_material_unverified`, read as never yours, never Olumi's), and never headed as yours.
+      const usersOwn = (a: { userWrote: boolean; reported?: string }): boolean => a.userWrote && a.reported === undefined;
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed',
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: a.userWrote ? 'user_stated' : 'model_proposed',
           // S2: the user's own statement this figure is confirmed from (the card quotes it; the press makes it theirs), or the
           // words Olumi's estimate is read from (quoted; the figure stays Olumi's).
           ...(a.confirmed !== undefined ? { confirmed_from: a.confirmed } : {}),
@@ -7690,25 +7744,29 @@ export function createAgentCapabilities(
       const said = (value: number, unit: string) => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ' ' + unit : ''}`;
       const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
       const pct = (v: number): string => `${Number((v * 100).toPrecision(6))}%`;
+      const unverifiedWords = (a: { reported?: string }): string => (a.reported !== undefined
+        ? '(not verified as a figure you stated)' : '(figure from the quoted message; field binding unverified)');
       const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string; bindingUnverified?: true; asPercent?: true; kept?: true;
-        confirmed?: { source: string; quote: string } }) =>
+        confirmed?: { source: string; quote: string }; reported?: string }) =>
         a.confirmed !== undefined ? `${a.label} = ${sayFigureRead(a.value, a.unit)} today, as you wrote it: “${a.confirmed.source}”`
         : a.kept ? `${a.label} = ${sayFigureRead(a.value, a.unit)}`
         : typeof a.replaces === 'number'
           // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A). A pairing the
           // approval confirms is shown with the user's own sentence (above), in the units they wrote.
           ? a.quote !== undefined
-            ? `${a.label}: ${a.asPercent ? `${pct(a.replaces)} \u2192 ${pct(a.value)}` : `${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`} ${a.bindingUnverified ? '(figure from the quoted message; field binding unverified)' : `(your figure, in your words: "${a.quote}")`}`
+            ? `${a.label}: ${a.asPercent ? `${pct(a.replaces)} \u2192 ${pct(a.value)}` : `${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`} ${a.bindingUnverified ? unverifiedWords(a) : `(your figure, in your words: "${a.quote}")`}`
             : `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
-          : `${a.label} = ${withUnit(a)}${a.bindingUnverified ? " (figure from the quoted message; field binding unverified)" : ""}`;
+          : `${a.label} = ${withUnit(a)}${a.bindingUnverified ? ` ${unverifiedWords(a)}` : ""}`;
       const kept = ordered.filter((a) => a.kept);
       // A first value the user wrote is RECORDED as theirs, never offered as a starting assumption (`usersOwn`).
       const freshYours = fresh.filter(usersOwn);
-      const freshOlumis = fresh.filter((a) => !usersOwn(a));
+      const freshReported = fresh.filter((a) => a.reported !== undefined);
+      const freshOlumis = fresh.filter((a) => !a.userWrote);
       const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
       const acts = [
         ...(revisions.length > 0 ? [`revise ${plural(revisions.length, 'value')}${fresh.length === 0 ? ' you asked to change' : ''}`] : []),
         ...(freshYours.length > 0 ? [`record ${plural(freshYours.length, 'figure')} you gave`] : []),
+        ...(freshReported.length > 0 ? [`use ${plural(freshReported.length, 'figure')} from the quoted words`] : []),
         ...(freshOlumis.length > 0 ? [`adopt ${plural(freshOlumis.length, 'starting assumption')}`] : []),
       ];
       const actsSaid = acts.length <= 1 ? (acts[0] ?? '') : `${acts.slice(0, -1).join(', ')} and ${acts[acts.length - 1]}`;
@@ -7718,6 +7776,8 @@ export function createAgentCapabilities(
           ? `Accept Olumi\u2019s estimate${kept.length === 1 ? '' : 's'}, unchanged: `
           : `${actsSaid.charAt(0).toUpperCase()}${actsSaid.slice(1)}: `;
       const bindingSources = [...new Set(ordered.flatMap(a => a.bindingUnverified && a.quote !== undefined ? [a.quote] : []))];
+      // Each quoted source in its own words: the user's, or (GATE → LABEL) a reported party's, an unresolved or an unverified source's.
+      const sourceLines = [...new Set(ordered.flatMap(a => a.bindingUnverified && a.quote !== undefined ? [a.reported ?? `From your words: “${a.quote}”`] : []))];
       const allYours = kept.length === 0 && ordered.every(usersOwn) && bindingSources.length === 0;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -7742,13 +7802,16 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: (bindingSources.length === 0 ? '' : bindingSources.map(source => `From your words: “${source}”.`).join('\n')
-          + ' The quoted source is retained; these field bindings are Olumi’s reading, including after approval. ') + heading + ordered.map(a => {
+        public_label: (bindingSources.length === 0 ? '' : sourceLines.map(line => `${line}.`).join('\n')
+          + (ordered.some(a => a.bindingUnverified && a.reported === undefined)
+            ? ' The quoted source is retained; these field bindings are Olumi’s reading, including after approval.' : '')
+          + (ordered.some(a => a.reported !== undefined)
+            ? ' The quoted source is retained as shown; approving does not make it your own statement of the figure.' : '') + ' ') + heading + ordered.map(a => {
           const figure = describe(a);
           // AIE 6141593167: the complete basis belongs on the bound card, beside its figure.
           // Keeping a canonical estimate is retention, not a newly authored estimate.
-          return usersOwn(a) || a.kept ? figure
-            : `${figure}${a.described !== undefined ? `\nFrom your words: “${a.described.source}” Olumi’s figure from them is its own estimate, not yours.` : ''}`
+          return a.userWrote || a.kept ? figure
+            : `${figure}${a.described !== undefined ? `\n${a.describedWords !== undefined ? `${a.describedWords}.` : `From your words: “${a.described.source}”`} Olumi’s figure from them is its own estimate, not yours.` : ''}`
               + `\nWhy Olumi suggests this (not checked against a source unless one is shown): “${a.basis}”`;
         }).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
@@ -7763,6 +7826,7 @@ export function createAgentCapabilities(
           ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
           ...(usersOwn(a) && !a.bindingUnverified ? { your_figure: true } : {}),
           ...(a.bindingUnverified ? { interpretation: 'olumi', source: a.quote, user_material_unverified: true } : {}),
+          ...(a.reported !== undefined ? { not_the_users_statement: a.reported } : {}),
           ...(a.confirmed !== undefined ? { confirms_your_figure: true, from_your_words: a.confirmed.source } : {}),
           ...(a.kept ? { keeps_olumis_estimate: true } : {}),
         })),

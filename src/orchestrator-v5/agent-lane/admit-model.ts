@@ -4461,8 +4461,12 @@ function admitOnce(
       const source = subjectSource(model, brief, { kind: 'risk', label: r.label }, receipt);
       // The drafter's OWN tag saying the risk is Olumi's is honoured where no claim settles its source: it can only keep the risk
       // Olumi's, never make it the user's (T4f, AIE 6177505214 T9). A human tag still needs the owner's verified source.
-      const author = source.author.origin === 'unknown' && (r.provenance === 'inferred' || r.provenance === 'ai_proposed')
-        ? authorshipOf({ nodeTag: 'ai_inferred' }) : source.author;
+      // ⭐ STEP 8c (AIE 19:05:21Z, AMEND 19:13Z): quoted user words are SOURCE, not authorship. Positive identification is the AI's own
+      // semantic reading that it ADDED this risk beyond the material (`ai_proposed`), uncontradicted by any operative claim of it
+      // (`describesOnly`). `inferred` ("its introduction is uncertain") cannot tell a new hypothesis from a mistagged user concern, so it,
+      // unknown and human origin keep today's protected path. The words stay whole on the node as source (`withConstructionStatements`).
+      const author = (source.author.origin === 'unknown' && (r.provenance === 'inferred' || r.provenance === 'ai_proposed'))
+        || (source.describesOnly === true && r.provenance === 'ai_proposed') ? authorshipOf({ nodeTag: 'ai_inferred' }) : source.author;
       if (author.origin === 'unknown' || author.role === 'unverified') loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE, layer: 'cee', field_path: `nodes[${slugId(r.label)}].provenance`,
         before: { risk: r, claimed_statements: source.claimed }, after: author.origin === 'human' ? 'unverified_human' : 'unknown',
