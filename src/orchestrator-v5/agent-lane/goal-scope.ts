@@ -82,7 +82,7 @@ export function scopeShareAnswerCanBind(prior: readonly PendingAction[], goalId:
  */
 export function scopeSourcesAreUserWords(scope: GoalScope, texts: StatementTexts, prior?: GoalScope): boolean {
   const theirs = (quote: string, value?: number): boolean => userStated({ quote, ...(value !== undefined ? { value, unit: 'proportion' } : {}) }, texts,
-    { quantity: 'goal_scope' }).origin === 'human';
+    { quantity: 'scope' }).origin === 'human';
   const written = (quote: string, old?: string) => theirs(quote) || quote === old;
   if (!written(scope.source.quote, prior?.source.quote)) return false;
   if (prior && ['modelled', 'alternative', 'extent'].some(k => scope[k as 'extent'] !== prior[k as 'extent']) && !theirs(scope.source.quote)) return false;

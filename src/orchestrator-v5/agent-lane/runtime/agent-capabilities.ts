@@ -9,7 +9,6 @@ import { carriesQuoteConfirmation, plainQuoteWords, verbatimSourceLine } from '.
 import { runOmittedRisks } from '../unsized-risk.js';
 import { compareAnalysisRunFactIdentity } from '../../context/analysis-interpretation-identity.js';
 import { nextStepBlockerForAgent } from '../next-step-blocker.js';
-import { plainWords } from '../../goal-target/hiring-times.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { statementOrigin, UNKNOWN_ORIGIN_DETAIL } from './statement-origin.js';
 import { linkBandSource, quoteIsNotTheUsersClaim } from '../../goal-target/input-claim-context.js';

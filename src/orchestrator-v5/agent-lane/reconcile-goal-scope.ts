@@ -32,7 +32,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   const texts: StatementTexts = { now: ctx.user_turn_text, conversation: ctx.user_text,
     ...(ctx.verified_user_messages !== undefined && ctx.verified_user_messages.length > 0 ? { messages: ctx.verified_user_messages } : {}) };
   const said = (quote: string | undefined, value?: number, unit?: string): boolean => userStated({ quote, ...(value !== undefined ? { value, unit } : {}) },
-    texts, { quantity: 'goal_scope' }).origin === 'human';
+    texts, { quantity: 'scope' }).origin === 'human';
   let scope: GoalScope | undefined = args.scope === undefined ? prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope) : scopeOf(args.scope);
   if (!scope) return fail('scope_unresolved', prior?.question ?? 'State whether this goal covers the whole metric or a component. Nothing was recorded.');
   if (args.component_share !== undefined || args.component_basis !== undefined || args.count_basis !== undefined) {
