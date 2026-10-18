@@ -38,10 +38,13 @@ describe("staged draft rate limiting", () => {
   const call = (url: string) =>
     app.inject({ method: "POST", url, payload: PAYLOAD, headers: { accept: "text/event-stream" } });
 
-  it("allows two staged calls within the allowance", async () => {
-    // Spend the whole allowance on the staged sibling.
+  it("refuses the third staged call once the draft-tier allowance is spent", async () => {
+    // Spend the whole allowance (2 RPM) on the staged route.
     expect((await call("/assist/v1/draft-graph/staged")).statusCode).toBe(200);
     expect((await call("/assist/v1/draft-graph/staged")).statusCode).toBe(200);
 
+    // The third call in the same minute must be refused at the draft-tier boundary.
+    const third = await call("/assist/v1/draft-graph/staged");
+    expect(third.statusCode, "the staged route is not rate-limited at the draft tier").toBe(429);
   });
 });
