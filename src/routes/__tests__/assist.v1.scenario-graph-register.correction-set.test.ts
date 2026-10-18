@@ -791,8 +791,8 @@ describe('explicit CURRENT rebuild through the native correction writer', () => 
     expect(ctx.user_text_complete).toBe(false); expect(ctx.verified_user_messages).not.toContain(unknown);
     const out = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: framing, explicit_rebuild_request: rebuildRequest }), ctx, w.caps());
     expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: false });
-    expect(w.calls[0].input).toContain(JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified', text: unknown }));
-    expect(w.calls[0].input).not.toContain(JSON.stringify({ speaker: 'user', source: 'typed', text: unknown }));
+    expect(w.calls[0].input).toContain(`${JSON.stringify({ speaker: 'unknown', source: 'stored, origin not verified' })}\n${unknown}`);
+    expect(w.calls[0].input).not.toContain(`${JSON.stringify({ speaker: 'user', source: 'typed' })}\n${unknown}`);
     expect(w.writes).toHaveLength(0);
   });
 

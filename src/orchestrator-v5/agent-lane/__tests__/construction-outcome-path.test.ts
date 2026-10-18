@@ -164,7 +164,7 @@ describe('M3 outcome paths in the existing construction retry (0 LLM)', () => {
     const r = await replay(first, retry);
     expect(r.out.size_retried).toBe(true); expect(r.out.ok).toBe(true);
     expect(r.requests).toHaveLength(2);
-    expect(r.requests[1]!.input).toBe(`${BRIEF}\n\nYour previous model, to shrink: ${JSON.stringify(first)}`);
+    expect(r.requests[1]!.input).toBe(`${r.requests[0]!.input}\n\nYour previous model, to shrink: ${JSON.stringify(first)}`);
     expect(r.requests[1]!.instructions).not.toContain('Repair only the listed construction issues');
     expect(r.trace).toMatchObject({ outcome: 'adopted' });
     if (process.env.M3_SIZE_BYTES) writeFileSync(process.env.M3_SIZE_BYTES, JSON.stringify(r));

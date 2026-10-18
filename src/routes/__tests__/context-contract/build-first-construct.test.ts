@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { capture, seedOf, object, keysDeep, type Witness, type Obj } from './provider-harness.js';
+import { BRIEF_LABEL } from '../../../orchestrator-v5/agent-lane/turn-context.js';
 
 export const BUILD_BRIEF = 'S8_FIRST_CONSTRUCT: Reach £20,000 MRR within 12 months. Keep £49 price or raise price to £59. Paul assumes churn stays at 3%; Maya disagrees. What evidence would settle this?';
 let memo: Promise<Witness> | undefined;
@@ -34,7 +35,10 @@ function construction(w: Witness) {
 describe('build/draft first-construct exact provider body', () => {
   it('R2 planted positive: first construction carries exact brief, options and qualitative reasoning', async () => {
     const body = construction(await run()).body;
-    expect(body.input).toBe(BUILD_BRIEF);
+    // The shared turn-context frame (#3394): the server's today line, then the brief block, verbatim and exact.
+    const [today, briefBlock] = String(body.input).split('\n\n');
+    expect(today).toMatch(/^TODAY, from Olumi’s server clock/);
+    expect(briefBlock).toBe(`${BRIEF_LABEL}\n${BUILD_BRIEF}`);
     expect(body.input).toContain('Keep £49 price or raise price to £59');
     expect(body.input).toContain('Paul assumes churn stays at 3%; Maya disagrees.');
     expect(body.input).toContain('What evidence would settle this?');
