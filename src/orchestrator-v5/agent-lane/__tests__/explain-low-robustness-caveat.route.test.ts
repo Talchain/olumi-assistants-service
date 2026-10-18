@@ -95,6 +95,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   let app: FastifyInstance;
   let narrator = NARRATOR;
   let providerCalls = 0;
+  let lastExplainInstructions = '';
   let preparingRun = false;
   let emptyNarration = false;
   let readbackState: Record<string, unknown>;
@@ -111,6 +112,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
         { type: 'message', content: [{ type: 'output_text', text: 'The analysis result is available.' }] },
       ] }), { status: 200 });
       providerCalls += 1;
+      if (!preparingRun) lastExplainInstructions = String(body.instructions ?? '');
       // Concurrent-write and caveat stimuli belong to Explain, not its setup Run.
       if (preparingRun) return new Response(JSON.stringify({ output: [{ type: 'message',
         content: [{ type: 'output_text', text: 'The current model result is provisional.' }] }] }), { status: 200 });
@@ -494,6 +496,18 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(countSentenceCopies(b.assistant_text, sentence), b.assistant_text).toBe(1);
     expect(b.assistant_text).toContain(NARRATOR);
     expect(b.assistant_text).not.toMatch(/prop_[0-9a-f]{6,}/);
+  });
+
+  // AIE-RUN-ROBUSTNESS-SEMANTIC-INSTRUCTION-20261018-v1 (sha256 2bb83b6d…), byte-exact: the AI's robustness claims follow the
+  // Run through the producer instruction, never a host matcher on its words.
+  it('W23: a fragile Run whose AI claims robustness \u2014 the sent Explain instructions carry the AIE robustness sentence once, after the provisional rule', async () => {
+    const AIE_ROBUSTNESS = 'Describe the selected CURRENT Run’s finding as robust, stable or settled only to the extent its recorded robustness supports that claim within the tested scope, preserving any near-tie override and required qualifiers; when it is not robust, say so without contradicting its supplied disclosure and explain a recorded, permitted change that could alter the finding, or state that no such change is established and offer one grounded reasoning step instead, treating missing robustness as unknown rather than evidence either way and never turning no observed flip into proof that changes cannot matter.';
+    narrator = `This result is robust; small changes cannot flip it. ${NARRATOR}`;
+    await press(await run());
+    expect(lastExplainInstructions.split(AIE_ROBUSTNESS), 'sent once').toHaveLength(2);
+    const at = lastExplainInstructions.indexOf(AIE_ROBUSTNESS);
+    expect(at).toBeGreaterThan(lastExplainInstructions.indexOf('as a provisional finding on those estimates'));
+    expect(at).toBeLessThan(lastExplainInstructions.indexOf('Where supported, say which option is most likely to meet the goal in this model'));
   });
 
   // One class row: seven narrator variants crossed with both host-obligation states.
