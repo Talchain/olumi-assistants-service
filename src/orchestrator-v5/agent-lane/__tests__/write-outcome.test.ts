@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { assertsCompletedWrite, narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
+import { approvalChoiceWords, assertsCompletedWrite, narrateWriteOutcome, TYPED_APPROVAL_READ_BY_OLUMI, withWriteOutcome } from '../write-outcome.js';
 
 // Served success claims (each must be caught when nothing landed).
 const CLAIMS = [
@@ -49,18 +49,33 @@ describe('the write-status line is composed from the tool results', () => {
   // R2 T1 (friction audit row T1): typed "Yes, that is my deadline." met "Not saved: the change could not be made this time —
   // ask me to try again", which was false: the change was waiting for its card, not failed.
   it('R2 T1: approval_required says the change waits for its card (AIE AMENDED 6128697025: the button only), never "try again"', () => {
-    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, true);
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {});
     expect(n.status).toBe('Not saved yet: press the approval button on the card.');
     expect(n.status).not.toContain('type its words');
     expect(n.status).not.toContain('could not be made this time');
   });
-  // Independent check, non-blocking (recovery/bR2/check): typed words bind only when exactly ONE card waits.
-  it.each([['more than one card waits', false], ['the count is not known', undefined]] as const)(
-    'R2 T1: when %s, approval_required names the button only, never "or type its words"', (_name, one) => {
-      const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, one);
-      expect(n.status).toBe('Not saved yet: press the approval button on the card.');
-      expect(n.status).not.toContain('type its words');
-    });
+  // ⭐ ONE APPROVAL ACTION (DL-3 18 Oct): with several cards waiting, typed words bind none; the line says which to press.
+  it.each([
+    ['two cards wait and the words seemed to mean one', approvalChoiceWords(2, 'Buy a faster mixer acts on Prep time cut from mixer and sets it to 15%.'),
+      'Not saved yet: two changes are waiting. To apply "Buy a faster mixer acts on Prep time cut from mixer and sets it to 15%", press its button below.'],
+    ['three cards wait and the words named none', approvalChoiceWords(3), 'Not saved yet: three changes are waiting. Press the button on the one you mean.'],
+  ] as const)('when %s, approval_required says which button, never "or type its words"', (_name, words, said) => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'approval_required' }], {}, words);
+    expect(n.status).toBe(said);
+    expect(n.status).not.toContain('type its words');
+    expect(n.status).not.toContain('could not be made this time');
+  });
+  // ⭐ CONSENT PROVENANCE (DL-3 ruling A): a write on the user's typed approval, read by Olumi, quotes their words; a versioned
+  // save points to the reply's Undo; a press (no typed approval) says neither.
+  it('a typed-approval write quotes the user\u2019s words and offers Undo where the save is versioned; a press does not', () => {
+    const typed = { ...APPLIED, approval: { kind: TYPED_APPROVAL_READ_BY_OLUMI, words: 'Yes, go ahead with that' } };
+    const signedIn = narrateWriteOutcome('', [{ name: 'authorise_change' }], [typed], { versioned: true });
+    expect(signedIn.status).toBe('Saved on your typed approval: \u201cYes, go ahead with that\u201d. Saved as version 11. If that is not what you meant, press \u201cUndo this change\u201d.');
+    const guest = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ...typed, receipts: [] }], { versioned: false });
+    expect(guest.status).toBe('Saved on your typed approval: \u201cYes, go ahead with that\u201d. Saved.');
+    const pressed = narrateWriteOutcome('', [{ name: 'authorise_change' }], [APPLIED], { versioned: true });
+    expect(pressed.status).toBe('Saved as version 11.');
+  });
   it('R2 T1 CONTRAST: an unworded refusal keeps the generic line', () => {
     const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: 'some_new_code' }]);
     expect(n.status).toBe('Not saved: the change could not be made this time — ask me to try again.');
@@ -214,7 +229,7 @@ describe('the route states what was saved', () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Yes, apply it.' } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] }; _diagnostic_trace: { write_claims_removed?: number } };
-    expect(body._agent.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }]);
+    expect(body._agent.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal', arguments: { proposal_id: 'prop_nope' } }]);
     expect(body.assistant_text).not.toMatch(/Applied proposal/);
     expect(body.assistant_text).toMatch(/Not saved: that proposal is no longer available, so nothing was changed/);
     expect(body._diagnostic_trace.write_claims_removed).toBe(1);

@@ -574,9 +574,11 @@ function levelIdsOf(graph: unknown, edits: readonly CorrectionEditRequest[], sou
     if (replaced !== undefined && replacedObservedState(node, replaced) !== undefined) return [x.subject.id];
     const held = x.expected_record === undefined ? userStatementFor(graph, x.subject) ?? null : x.expected_record;
     const retained = Array.isArray(x.retained) ? x.retained : [];
-    const keptFigure = (held?.statements ?? []).some((st) => {
+    const os = isRec(node.observed_state) ? node.observed_state : undefined;
+    const keptFigure = os !== undefined && (held?.statements ?? []).some((st) => {
       const k = keptClaim(st, x);
-      return [k.low, k.high].some((v) => {
+      // ⭐ Buddy-A 19:29Z: the kept figure must BE the operative level (the retract rule's identity), not a figure of another period.
+      return isLevelFigure(k, os) && [k.low, k.high].some((v) => {
         const at = v === undefined ? null : figureTheUserWroteSpan(v, k.unit, st.quote);
         return at !== null && retained.some((span) => {
           const from = st.quote.indexOf(span);
@@ -644,9 +646,7 @@ function dependentAction(graph: unknown, e: Pick<ApprovedCorrectionEdit, 'subjec
         : { action: 'level_unavailable', label: node.label, incomplete: true, ...(typeof os.unit === 'string' ? { held_unit: os.unit } : {}), ...also };
     }
     if (e.retirement.disposition !== 'retracted' || os === undefined || typeof os.raw_value !== 'number' || typeof os.unit !== 'string') return undefined;
-    const held = unitComparisonKey(os.unit);
-    const same = (st: UserStatement): boolean => st.low === os.raw_value && st.high === os.raw_value && held !== undefined
-      && unitComparisonKey(st.unit) === held;
+    const same = (st: UserStatement): boolean => isLevelFigure(st, os);
     const statements = e.expected_record?.statements ?? [];
     const restsOn = statements.some(same) && !statements.filter(kept).some((st) => same(keptClaim(st, e)));
     return restsOn ? { action: 'level_unavailable', label: node.label, ...also } : undefined;
@@ -679,6 +679,15 @@ function definedFrom(graph: unknown, id: string, levelIds: readonly string[]): D
     const p = valueProvenanceOf(n.observed_state);
     return p.origin === 'ai' && !p.accepted && !p.structural ? [{ id: target, label: n.label, observed_state: structuredClone(n.observed_state) }] : [];
   });
+}
+
+/**
+ * ⭐ THE ONE LEVEL-IDENTITY RULE: a claim IS a factor's operative level when it states that same figure in the same unit and period
+ * (`unitComparisonKey`). Never a raw value alone. Retract withdraws only such a level; only such a kept figure exempts a dependent.
+ */
+function isLevelFigure(st: UserStatement, os: Rec): boolean {
+  const held = typeof os.raw_value === 'number' && typeof os.unit === 'string' ? unitComparisonKey(os.unit) : undefined;
+  return held !== undefined && st.low === os.raw_value && st.high === os.raw_value && unitComparisonKey(st.unit) === held;
 }
 
 /** A well-formed replacement figure: finite, with a unit as written (period included). */
@@ -746,16 +755,18 @@ function levelWords(e: ApprovedCorrectionEdit, source: UserStatement, withdrawnB
   const r = e.replacement === undefined ? undefined : replacementOf(e.replacement);
   const said = r === undefined ? '' : `${r.value} ${r.unit}`;
   const notFound = r !== undefined && verifiedReplacement(source, e) === undefined
-    ? [`Olumi could not find ${said} in your correction’s own words, so it is not written as the figure for “${label}”.`] : [];
+    ? [`Olumi could not find ${said} in your correction’s own words, so it will not be written as the figure for “${label}”.`] : [];
   const d = e.dependent;
-  const defined = definedOf(e).map((x) => `Olumi’s figure for “${x.label}” was worked out from the figure for “${label}”, so it no longer holds and is withdrawn too: `
-    + 'the analysis cannot use a figure for it until one is given or worked out again.');
-  if (d?.action === 'level_replaced') return [`The current figure for “${label}” becomes ${said}, your corrected figure, in the same change.`, ...defined];
+  // AIE 19:00 (prompt/AIE-LIVE-RESUME-AND-TEXT-REVIEW-20261018-v1.json, 1eae2474): every change is conditional on approval, and a
+  // dependent goes because its derivation used a corrected input, never because it was proved false.
+  const defined = definedOf(e).map((x) => `If you approve, Olumi’s previous figure for “${x.label}” will be withdrawn from current analysis because it was `
+    + 'derived from the input you are correcting. No replacement value has been calculated.');
+  if (d?.action === 'level_replaced') return [`If you approve, the current figure for “${label}” will become ${said}, your corrected figure, in the same change.`, ...defined];
   if (d?.action === 'level_unavailable' && d.incomplete === true) {
-    return [`Your corrected figure for “${label}”, ${said}, is kept with your words, but the model ${d.held_unit === undefined ? 'cannot hold it on its current scale'
-      : `measures “${label}” in ${d.held_unit}`}, so this correction is incomplete: the figure it used is withdrawn, and the analysis cannot use a figure for it until one is given${d.held_unit === undefined ? '' : ` in ${d.held_unit}`}.`, ...defined];
+    return [`If you approve, your corrected figure for “${label}”, ${said}, will be kept with your words, but the model ${d.held_unit === undefined ? 'cannot hold it on its current scale'
+      : `measures “${label}” in ${d.held_unit}`}, so this correction will be incomplete: the figure it used will be withdrawn, and the analysis cannot use a figure for it until one is given${d.held_unit === undefined ? '' : ` in ${d.held_unit}`}.`, ...defined];
   }
-  if (d?.action === 'level_unavailable') return [...notFound, `The current figure for “${label}” is the withdrawn one, so it is withdrawn too: the analysis cannot use a current figure for it until one is given again.`, ...defined];
+  if (d?.action === 'level_unavailable') return [...notFound, `If you approve, the current figure for “${label}”, which is the one you are withdrawing, will be withdrawn too: the analysis cannot use a current figure for it until one is given again.`, ...defined];
   return [...notFound, ...(isRec(e.expected_node.observed_state) && !withdrawnByAnother.has(e.subject.id) ? [`The current figure for “${label}” stays as it is.`] : [])];
 }
 
@@ -832,7 +843,7 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
     ]),
     // The unchanged-members sentence is true only where no size is withdrawn with the words (GATE → LABEL, one commit).
     c.edits.some(e => e.dependent !== undefined)
-      ? 'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records the listed source corrections and the figures withdrawn with them, as shown. Other changes need their own supported card. Unknowns, other figures, other link strengths, options, settings and other people’s recorded views remain unchanged. Your quote stays yours; the reading remains Olumi’s after approval.'
+      ? 'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. If you approve, this card will save the source corrections, corrected figures and withdrawals explicitly listed above. Unlisted figures, link strengths, options, settings and other people’s recorded views remain unchanged. Your original source is retained; Olumi’s interpretation remains separate from it.'
       : 'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records only the listed source corrections. Other changes need their own supported card. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',
     ...(legacy ? [] : ['Approving authorises only this displayed change as an Olumi reading; it does not make it something you said.']),
   ].join('\n');

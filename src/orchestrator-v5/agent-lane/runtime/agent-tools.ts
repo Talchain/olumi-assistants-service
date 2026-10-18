@@ -141,6 +141,12 @@ export interface AgentToolContext {
   /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
   readonly typed_approval_words?: string;
   /**
+   * ⭐ ONE APPROVAL ACTION (DL-3 18 Oct, ruling A): the user's OWN typed words, when the route bound the ONE waiting card to
+   * them (not a press, not the card's exact words). Olumi's reading of them is the consent; a write it authorises records
+   * them as a typed approval, read by Olumi, and the receipt quotes them with an Undo.
+   */
+  readonly typed_assent?: string;
+  /**
    * ⭐ S-D: the values the user set in the change's panel, sent WITH that card's press and bound by the route to it —
    * never model output. Only a held product proposal (`gmh_`) takes them in slice 1.
    */
@@ -549,7 +555,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     // ⭐ SYSTEM 1: THE ONE STATEMENT DOOR (M1). Tool text: AIE 6181498097, exact.
     type: 'function',
     name: 'propose_statement',
-    description: 'Use correction alone only for an explicit current request to correct or withdraw recorded source material. Bind each exact saved subject and field; quote the complete relevant current request verbatim, list the held spans to retire and the explicitly held spans to retain, and state any supported legacy evidence or dependency change. Never infer the unmentioned remainder. This mode records source and its separate Olumi reading. For a factor’s level only, put the corrected figure the user gives in this message in that edit’s replacement (the figure and its unit as written, period included); list a figure they say to keep among the spans to retain; use disposition retracted only when they withdraw it and give no new figure. It changes no other operative figure, setting, causal strength or range’s uncertainty law, and is never a way around an approval or source check. A protected adoption or attestation that this mode cannot preserve safely requires an honest refusal, not copied approval or another route that drops it. A prepared card is not a saved correction; say what actually changed only after the applied readback. ' + 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
+    description: 'Use correction alone only for an explicit current request to correct or withdraw recorded source material. Bind each exact saved subject and field; quote the complete relevant current request verbatim, list the held spans to retire and the explicitly held spans to retain, and state any supported legacy evidence or dependency change. Never infer the unmentioned remainder. This mode records source and its separate Olumi reading. For a factor’s level only, put the corrected figure the user gives in this message in that edit’s replacement (the figure and its unit as written, period included); list a figure they say to keep among the spans to retain; use disposition retracted only when they withdraw it and give no new figure. Only the displayed corrected level and explicitly listed dependent Olumi figures may change on this card. Preserve unrelated figures, settings, causal strengths and uncertainty laws; a correction is not a substitute for their own supported approval. A protected adoption or attestation that this mode cannot preserve safely requires an honest refusal, not copied approval or another route that drops it. A prepared card is not a saved correction; say what actually changed only after the applied readback. ' + 'Propose recording a verified human statement through the existing bound card. Give the current canonical subject and '
       + 'field, and the complete statement with its actual speaker/source, qualifications, negation, conditions, reference and window; reuse '
       + 'a retained applicable statement rather than asking for it again. This door currently supports a risk\u2019s occurrence estimate and '
       + 'its current-condition reading; an option\u2019s forecast of how many people it reaches over the stated window, and the user\u2019s '

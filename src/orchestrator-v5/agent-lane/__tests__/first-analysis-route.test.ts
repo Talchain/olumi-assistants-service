@@ -27,6 +27,7 @@ import { readMoneyTotal } from '../same-unit.js';
 import { sayFigure } from '../say-figure.js';
 import { goalFigureCoHoldOf } from '../withheld-leader-fail-closed.js';
 import { valueChangeDisclosures } from '../disclosure.js';
+import { shownBy } from './fixtures/displayed.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -533,7 +534,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(approve, 'control: a real proposal was offered').toBeDefined();
     const proposalId = approve!.id.slice('agent-approve-proposal:'.length);
     script = [callTool('authorise_change', { proposal_id: proposalId }), callTool('run_analysis', { reason: 'Check the comparison after the change.' })];
-    const b = await turn(app, { message: 'Yes, go ahead with that.' });
+    // The client sends the cards it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    const b = await turn(app, { message: 'Yes, go ahead with that.', displayed_proposals: shownBy(proposed) });
     expect(b._diagnostic_trace.fast_path, 'the words path, not a chip').toBeUndefined();
     expect(st(SID).extraEdges, 'control: the approval really applied').toHaveLength(1);
     const calls = b._agent.tool_calls as { name: string; ok: boolean; refusal?: string }[];
@@ -549,7 +551,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const proposed = await turn(app, { message: 'Option A strongly drives the outcome directly, so connect them.' });
     const proposalId = proposed.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'))!.id.slice('agent-approve-proposal:'.length);
     script = [callTool('authorise_change', { proposal_id: proposalId }), callTool('run_analysis', { reason: 'r' })];
-    await turn(app, { message: 'Yes, go ahead with that.' });
+    // The client sends the cards it shows (Codex BLOCK 18 Oct): typed words bind only to a card in that set.
+    await turn(app, { message: 'Yes, go ahead with that.', displayed_proposals: shownBy(proposed) });
     expect(st(SID).injectRuns).toBe(0);
     script = [callTool('run_analysis', { reason: 'The user asked to run it.' })];
     const next = await turn(app, { message: 'Now run the analysis.' });

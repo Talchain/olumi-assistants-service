@@ -81,6 +81,23 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'mixed_goal_changes' }); expect(w.writes).toHaveLength(0);
   });
 
+  // ⭐ P11 (proof 2, 18 Oct, scenario 75bc9a57: revision 2→3 and a new hash, yet "could not be confirmed"): a served graph
+  // carries display refs, and the register route re-assigns them — the demoted goal loses its "G" ref to the new aim. The
+  // receipt must say what was saved: the read-back compares the approved meaning, never the store's own labels.
+  it('P11: on a served graph with display refs, the landed reframe is confirmed (the register re-assigns the demoted goal\u2019s ref)', async () => {
+    const f = fixture(row);
+    const refs: Record<string, string> = { old_goal: 'G1', factor: 'F1', option_a: 'O1', option_b: 'O2', dissent: 'R1' };
+    const served = { ...f.graph, nodes: f.graph.nodes.map((n: Rec) => ({ ...n, ref: refs[n.id] })), ref_high_water: { G: 1, F: 1, O: 2, R: 1 } };
+    const w = await correctionWorld(served, row.message);
+    const result = await w.offer('propose_goal_target', { reframe: f.request });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    const pid = String(result.proposal_id);
+    const applied = await w.press(pid, w.restoreCard(w.proposals.get(pid)!, result, 'propose_goal_target'));
+    expect(applied, JSON.stringify({ applied, responses: w.responses })).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(w.writes).toHaveLength(1);
+    expect(w.graph().nodes.filter((n: Rec) => n.kind === 'goal').map((n: Rec) => n.label)).toEqual([row.aim]);
+  });
+
   it('stale source/goal state and a different card’s press do not write', async () => {
     const f = fixture(row), w = await correctionWorld(f.graph, row.message);
     const result = await w.offer('propose_goal_target', { reframe: f.request });
@@ -130,5 +147,15 @@ describe.each(cases)('$name: qualitative reframe on repoint_goal', row => {
     expect(old.description).toContain(`${row.value} ${row.unit}`);
     expect(old.description).toContain(f.graph.goal_constraints[0].source_quote);
     expect(old.description).not.toMatch(/\{"|constraint_id|node_id|value_frame|Complete earlier bound records/u);
+  });
+});
+
+describe('P11: the read-back compares the approved meaning, never the store’s display refs', () => {
+  const g = (label: string, ref: string | undefined): Rec => ({ nodes: [{ id: 'aim', kind: 'goal', label, ...(ref === undefined ? {} : { ref }) },
+    { id: 'f', kind: 'factor', label: 'Coverage', ref: 'F1' }], edges: [{ from: 'f', to: 'aim', strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' }] });
+  it('a re-assigned or removed ref is held; a changed label is not', () => {
+    expect(approvedGraphHeld(g('Understand priorities', 'G1'), g('Understand priorities', 'G2'))).toBe(true);
+    expect(approvedGraphHeld(g('Understand priorities', 'G1'), g('Understand priorities', undefined))).toBe(true);
+    expect(approvedGraphHeld(g('Understand priorities', 'G1'), g('Understand delivery', 'G1'))).toBe(false);
   });
 });

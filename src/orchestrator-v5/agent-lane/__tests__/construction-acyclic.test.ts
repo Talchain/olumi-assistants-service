@@ -47,6 +47,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
+import { runOmittedRisks } from '../unsized-risk.js';
 import { asQuestionTitled } from '../../__tests__/support/question-title.support.js';
 const COVERAGE = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { coverage_templates: { id: string; replacement: string }[] }).coverage_templates;
 /** The AIE T1 coverage clause (18 Oct), as the retry SENDS it for one gap: the template's placeholders filled, never retyped. */
@@ -219,7 +220,7 @@ const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
   x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x);
 
 /** `run_analysis` through the production snapshot loader, PLoT faked. */
-async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { option_id?: string; id?: string }[] }[]; error: unknown }> {
+async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { option_id?: string; id?: string }[] }[]; error: unknown; out?: unknown }> {
   const plotCalls: { options: { option_id?: string; id?: string }[] }[] = [];
   const store = {
     readMostRecentPendingActions: async () => [],
@@ -243,8 +244,9 @@ async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { opti
   });
   const invocation = { payload: { scenario_id: '77777777-7777-4777-8777-777777777777' }, requestId: 'req-acyclic', signal: undefined } as unknown as HandlerInvocation;
   let error: unknown = null;
-  try { await handler(invocation); } catch (e) { error = e; }
-  return { plotCalls, error };
+  let out: unknown;
+  try { out = await handler(invocation); } catch (e) { error = e; }
+  return { plotCalls, error, out };
 }
 
 describe('the fixture IS the served model (fidelity, not a self-authored stand-in)', () => {
@@ -330,6 +332,18 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect(delay?.provenance, 'PRECONDITION: the drafter tagged the risk as its own').toBe('ai_inferred');
     expect(blockers(graph)).toEqual([]);
     expect(resolveRunAdmission(graph).willProceed).toBe(true);
+  });
+
+  // ⭐ STEP 8b, the second brief (DL-3 18 Oct; AIE R2 "this Run omission IDs/reasons/scope"): admission now PERSISTS this root's
+  // omission, so the Run's participation guard drops it before the recorded projection. THIS Run still records it, by identity.
+  it('STEP 8b: the risk admission kept out is recorded with THIS Run (id, label then, reason, scope)', async () => {
+    const { graph } = await build(servedCandidate());
+    expect((graph.nodes.find((n) => n.id === DELAY) as { analysis_participation?: unknown }).analysis_participation).toBe('retained_excluded');
+    const { plotCalls, error, out } = await runAnalysis(graph);
+    expect(error).toBeNull();
+    expect(plotCalls).toHaveLength(1);
+    const fact = ((out as { handler_facts?: { fact_type: string; result: unknown }[] }).handler_facts ?? []).find((f) => f.fact_type === 'run_analysis');
+    expect(runOmittedRisks(fact?.result)).toEqual([{ node_id: DELAY, label: 'AI release delay', reason: 'unsized_olumi_risk' }]);
   });
 
   it('T4f CONTRAST: the same root tagged as the user\'s, or with no tag, still withholds its unknown risk root', async () => {
