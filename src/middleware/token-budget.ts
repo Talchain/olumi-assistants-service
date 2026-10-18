@@ -108,7 +108,6 @@ function taskFromUrl(url: string): string | null {
   if (url.startsWith('/assist/v1/elicit-preferences')) return 'elicit_preferences';
   if (url.startsWith('/assist/v1/explain-tradeoff')) return 'explain_tradeoff';
   if (url.startsWith('/assist/v1/isl-synthesis')) return 'isl_synthesis';
-  if (url.startsWith('/assist/v1/ask')) return 'ask';
   if (url.startsWith('/assist/v1/review')) return 'review';
   if (url.startsWith('/assist/v1/decision-review')) return 'decision_review';
   if (url.startsWith('/assist/v1/edit-graph')) return 'edit_graph';

@@ -214,7 +214,7 @@ export const scenarioOwnershipPlugin = fp(async (app: FastifyInstance) => {
               ownershipRefusalEvent(req, 'invalid_scenario_id', '');
               return envelope(reply, req, 400, 'invalid_scenario_id', 'scenario_id is required.');
             }
-            if (path === '/agent/v1/turn' || path === '/assist/v1/ask' || path === '/assist/v1/graph-readiness') return refuse(req, reply, '', 'scenario_not_found');
+            if (path === '/agent/v1/turn' || path === '/assist/v1/graph-readiness') return refuse(req, reply, '', 'scenario_not_found');
           }
           return;
         }
