@@ -8410,10 +8410,11 @@ export function createAgentCapabilities(
         const p = held === undefined ? undefined : agentProposalOf(held);
         // ⛔ Each operation must carry its producer's OWN Olumi stamp (`authored_by: 'model_proposed'` on the op, as
         // propose_assumptions and propose_option_interventions write it). An op without one is never presumed Olumi's:
-        // the user's exact-band link and an adoption the user asked for are theirs (Codex #3405 r1 P1).
+        // the user's exact-band link and an adoption the user asked for are theirs (Codex #3405 r1 P1); so is the user's
+        // "keep it" card (`isKeepProposal`, r2 P1).
         const olumisOwn = p !== undefined && p.provenance.authored_by === 'model_proposed'
           && !(p.provenance.basis ?? '').startsWith('edited_from:') && p.interpretation === undefined
-          && !hasCardOnlyOperations(p.operations)
+          && !hasCardOnlyOperations(p.operations) && !isKeepProposal(p)
           && p.operations.every(op => (op.value as { authored_by?: unknown } | undefined)?.authored_by === 'model_proposed');
         if (held === undefined || p === undefined || !olumisOwn || p.user_id !== ctx.authenticated_user_id
           || proposals.isApplied(id) || proposals.partialProgressOf(id) !== undefined) return notFound;

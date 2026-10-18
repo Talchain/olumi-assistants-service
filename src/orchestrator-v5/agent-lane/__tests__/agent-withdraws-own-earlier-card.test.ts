@@ -373,6 +373,47 @@ describe('DL-3 ruling F: Olumi takes back its own earlier card', () => {
     expect(offeredIds(r)).toContain(second.approve_action.id);
   }, 180_000);
 
+  it('CONTRAST keep: the user’s “keep it” card for Olumi’s figure is the user’s request, so it refuses withdrawal', async () => {
+    seed();
+    const g = graphNow();
+    // Olumi's own inferred figure, as served (keep-olumis-estimate.test.ts): 4 hours/week on a 40-hour frame.
+    graphOf.set(SCENARIO, projectGraphForPersistence({ ...g, nodes: g.nodes.map((n) => n.id !== 'fac_hours' ? n : { ...n, provenance: 'ai_inferred', scale_frame: 40,
+      observed_state: { unit: 'hours/week', value: 0.1, source: 'cee_inference', raw_value: 4, extractionType: 'inferred' } }) }));
+    script = [() => fnCall('propose_assumptions', { assumptions: [
+      { user_stated: false, factor_label: 'Hours', value: 4, unit: 'hours/week', basis: 'the user said it is about right', keep: true },
+    ] }), () => say('Here is that figure, ready for you to keep.')];
+    const b = await turn({ message: '4 hours a week is about right for me. Keep it.' });
+    const p = b._proposal_fields!.proposals.at(-1)!;
+    const { agentProposalOf } = await import('../proposal-object/record.js');
+    const { isKeepProposal } = await import('../approval-chips.js');
+    const card = agentProposalOf((await carrierOf(p.proposal_id))!)!;
+    // The shape Codex named: Olumi's figure, model_proposed on every op, but a keep the user asked for.
+    expect(isKeepProposal(card)).toBe(true);
+    expect(card.operations.every((o) => (o.value as { authored_by?: unknown }).authored_by === 'model_proposed')).toBe(true);
+    await refusedAndKept(p);
+  }, 180_000);
+
+  it('BULK by chronology: withdraw A, re-propose A (the same id), withdraw B — B is refused and stays', async () => {
+    seed(); const first = await olumisCard();
+    script = [() => fnCall('propose_assumptions', { assumptions: [
+      { user_stated: false, factor_label: 'Cost', value: 200, unit: 'GBP', basis: 'A starting estimate' },
+    ] }), () => say('Here is a starting assumption for the other missing figure.')];
+    const b = await turn({ message: 'Suggest a starting assumption for the other missing figure.' });
+    const second = b._proposal_fields!.proposals.find((x) => x.proposal_id !== first.proposal_id)!;
+    expect(await carrierOf(second.proposal_id), 'both cards are held').toBeDefined();
+    script = [() => fnCall('withdraw_proposal', { proposal_id: first.proposal_id }),
+      // The same content as the first card, so the same content-derived id.
+      () => fnCall('propose_assumptions', { assumptions: [{ user_stated: false, factor_label: 'Hours', value: 10, unit: 'hours', basis: 'A starting estimate' }] }),
+      () => fnCall('withdraw_proposal', { proposal_id: second.proposal_id }),
+      () => say('I have reconsidered these estimates.')];
+    const r = await turn({ message: 'Are those figures well grounded?' });
+    const [w1, again, w2] = r._agent.tool_calls;
+    expect(w1).toMatchObject({ name: 'withdraw_proposal', ok: true, proposal_id: first.proposal_id });
+    expect(again, 'the re-proposal recreates the first card’s id').toMatchObject({ name: 'propose_assumptions', ok: true, proposal_id: first.proposal_id });
+    expect(w2).toMatchObject({ name: 'withdraw_proposal', ok: false, refusal: 'not_proposed_this_turn' });
+    expect(await carrierOf(second.proposal_id), 'the second card stays held').toBeDefined();
+  }, 180_000);
+
   it('THIS TURN unchanged: a card proposed and withdrawn in the same turn is withdrawn, never offered', async () => {
     seed();
     script = [() => fnCall('propose_assumptions', { assumptions: [
