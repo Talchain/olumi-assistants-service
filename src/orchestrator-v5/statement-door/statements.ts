@@ -182,6 +182,28 @@ export function claimStatusOf(s: UserStatement, record: Pick<UserStatementRecord
 }
 
 /**
+ * ⭐ CLAIM RECORD (spec v2 rule 1; AIE 14:00Z DISSENT): the subject's record once `fresh` is written beside what it already holds.
+ * A held claim from ANOTHER source (another party, the user vs a party, an unresolved one) or under other conditions stays current:
+ * recency never retires a different view. A held claim from the SAME source under the same conditions is that source's earlier view:
+ * it moves to `history` as superseded (kept whole), and the new claim names it in `supersedes` where it has an id. A carried claim
+ * construction wrote keeps its meaning explicitly (`proposed`), since the record's `attest` is now the new write's.
+ */
+export function withClaimsKept(graph: unknown, subject: DoorSubject, fresh: UserStatementRecord): UserStatementRecord {
+  const held = claimRecordFor(graph, subject);
+  if (held === undefined) return fresh;
+  const sourceKey = (st: UserStatement): string => [saidByOf(st), st.party ?? '', st.conditions ?? ''].join('|');
+  const incoming = new Set(fresh.statements.map(sourceKey));
+  const explicit = (st: UserStatement): UserStatement => (st.status === undefined && claimStatusOf(st, held) !== undefined
+    ? { ...st, status: claimStatusOf(st, held)! } : st);
+  const kept = held.statements.filter((st) => !incoming.has(sourceKey(st))).map(explicit);
+  const retired = held.statements.filter((st) => incoming.has(sourceKey(st))).map((st): UserStatement => ({ ...st, status: 'superseded' }));
+  const ids = retired.flatMap((st) => (st.claim_id !== undefined ? [st.claim_id] : []));
+  const statements = [...kept, ...fresh.statements.map((st) => (ids.length > 0 && st.supersedes === undefined ? { ...st, supersedes: ids } : st))];
+  const history = [...retired, ...(held.history ?? [])];
+  return { ...fresh, statements, ...(history.length > 0 ? { history } : {}) };
+}
+
+/**
  * A record construction wrote from the brief (AIE 6183705670 (1)): the user's own sentence, kept for the saved model, a reopen and
  * the AI, but never a PRESS. A reader whose meaning is "the user approved this on its card" (the same-people answer, a stated
  * chance) reads only `pressedRecord`; a later press for the same subject replaces it.

@@ -179,5 +179,35 @@ describe('claim record rows (spec §1–§4, §6): who asserts the figure is sav
     const own = await world().caps.proposeStatement!(ctx(OWN) as never, reading(OWN, 'user') as never) as Rec;
     expect(own.public_label).toMatch(/^From your message: “/u);
   });
+
+  const LATER = 'Actually, switching on pre-orders would cut daily food waste by between 5 and 7 kg.';
+  const pressOn = async (w: ReturnType<typeof world>, said: string, speaker: string, extra: Rec = {}, ends: Rec = {}) => {
+    const card = await w.caps.proposeStatement!(ctx(said) as never, { subject: LINK, statements: [{ ...reading(said, speaker, extra).statements[0], ...ends }] } as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true });
+    expect(await press(w, card.proposal_id), 'press').toMatchObject({ ok: true, applied: true });
+    return card;
+  };
+
+  it('COEXIST (AIE DISSENT): the kitchen manager\'s range, then the user\'s own, are BOTH current; "you said" reads only the user\'s', async () => {
+    const w = world();
+    await pressOn(w, PARTY, 'other', { party: 'Our kitchen manager' });
+    await pressOn(w, LATER, 'user', {}, { low: 5, high: 7 });
+    const all = claimRecordsOn(fromNode(w.graph()))[0]!;
+    expect(all.statements.map((st: Rec) => [saidByOf(st as never), st.low, st.high])).toEqual([['party', 4, 6], ['user', 5, 7]]);
+    expect(all.history).toBeUndefined();
+    expect(userStatementFor(w.graph(), SUBJECT)?.statements.map((st) => [st.low, st.high])).toEqual([[5, 7]]);
+  });
+
+  it('SUPERSEDE + UNDO: the same source\'s later view supersedes its earlier one (kept in history); restoring the prior version restores it', async () => {
+    const w = world();
+    await pressOn(w, OWN, 'user');
+    const before = JSON.parse(JSON.stringify(w.graph()));
+    await pressOn(w, LATER, 'user', {}, { low: 5, high: 7 });
+    const all = claimRecordsOn(fromNode(w.graph()))[0]!;
+    expect(all.statements.map((st: Rec) => [st.low, st.high, st.status])).toEqual([[5, 7, 'confirmed']]);
+    expect(all.history?.map((st: Rec) => [st.low, st.high, st.status])).toEqual([[4, 6, 'superseded']]);
+    // Undo is the existing model-version restore: the prior version holds the earlier claim as current, byte for byte.
+    expect(claimRecordsOn(fromNode(before))[0]!.statements.map((st: Rec) => [st.low, st.high, st.status])).toEqual([[4, 6, 'confirmed']]);
+  });
 });
 
