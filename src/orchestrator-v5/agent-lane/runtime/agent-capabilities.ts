@@ -6627,7 +6627,16 @@ export function createAgentCapabilities(
         retainedAim = retainedTargetAim(g.raw, goal.id, quote, laterAmbitionUnverified, laterAmbitionSourceUnverified);
         if (retainedAim === undefined) return { ok: false, mutated: false, refusal: 'ambition_not_retained' };
       }
-      if (restatedQuantity || retainedAim !== undefined) {
+      /**
+       * ⭐ GATE → LABEL (DL-3 AMEND, 18 Oct: two reviews and the external audit). A target DERIVED by Olumi from the user's figures
+       * ("cut 120,000 kWh by 15%" → 102,000) is Olumi's derivation, with its operands shown, approved by the user if pressed: never
+       * `threshold_source: user`, never "you said". This replaces DL #2447's rule that such a target is theirs. It takes the existing
+       * reading card below (stamped `cee_inference` / `inferred`). Its base must still pass the main path's own scope reader for this
+       * goal (`figureTheUserWroteFor`), and the goal's kind of unit; else the main path refuses as before.
+       */
+      const derivedReading = derived !== null && unitsConflict(unit, goalUnit) === null
+        && (restatedQuantity || figureTheUserWroteFor(derived.base, unit, ctx.user_text, scopeIn(g, goal.label)));
+      if (restatedQuantity || retainedAim !== undefined || derivedReading) {
         const messages = [...(ctx.verified_user_messages ?? []), ...(ctx.user_turn_text ? [ctx.user_turn_text] : [])];
         const matchedSource = messages.reverse().find(message => figureTheUserWrote(derived?.base ?? value, unit, message));
         // TL 11:15Z: these are uncertainties for the existing interpretation card, not reasons to refuse it.
@@ -6707,12 +6716,13 @@ export function createAgentCapabilities(
           base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_goal_target', path: goal.id, value: {
             constraint_type: type, raw_value: value, unit, candidate, base_identity: g.graph_identity_hash,
             brief_text: g.brief_text, goal_turn_id: turn, operation_id, confirmation: { source, quote: source },
+            ...(derived !== null ? { derived_from: { base: derived.base, multiplier: derived.multiplier, unit } } : {}),
             ...(retainedAim === undefined ? {} : { retained_aim_description: retainedAim, later_ambition_quote: args.later_ambition_quote,
               ...(laterAmbitionUnverified ? { later_ambition_binding_unverified: true } : {}),
               ...(laterAmbitionSourceUnverified ? { later_ambition_source_unverified: true } : {}) }) } }],
           provenance: { authored_by: 'model_proposed', basis: source }, validation: { admitted: true, loss_count: 0, refusals: [] },
           public_label: `From your message: “${source}”. Olumi read ${DIRECTION_WORDS[type]} ${figure} as the target for “${goal.label}”.`
-            + (derived === null ? '' : ` Olumi derived this figure as ${derived.multiplier} × ${targetFigure(derived.base, unit)}; the original figure stays in the quote.`)
+            + (derived === null ? '' : ` Derived by Olumi from your figures: ${targetFigure(derived.base, unit)} × ${derived.multiplier} = ${figure}; your original figure stays in the quote.`)
             + measurement + replaces + ambitionKept + levelLeftOut
             + ' Your original words stay yours; the target and its binding are Olumi’s reading, including after approval.'
             + (ctx.user_text_complete === false ? ' The retained context is incomplete; check this interpretation and its conditions.' : '')
