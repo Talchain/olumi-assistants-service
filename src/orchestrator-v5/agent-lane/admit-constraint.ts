@@ -321,6 +321,15 @@ export function percentPeriodsDiffer(limitUnit: string, nodeUnit: string | undef
 }
 
 /**
+ * ⭐ A NODE WHOSE OWN UNIT IS IN THE PERCENT FAMILY (the shared classifier, or a percentage-points level). Only there is a
+ * frame of 100 the node's encoding; on any other node it is Olumi's computational reference (AIE 18 Oct 00:27/00:37: an
+ * unsupported bound is unknown, never an encoding).
+ */
+export function percentScaleUnit(unit: string | undefined): boolean {
+  return unit !== undefined && (classifyUnitScaleClass(unit) === 'percent' || isPercentagePointsWithPeriod(unit));
+}
+
+/**
  * True only when the node's level IS the percentage ÷ 100 — the one scale PLoT's `"%"` rung lands on. A frame of
  * exactly 100 (`cap`, else the estimate's `scale_frame` — the served agent-lane churn estimate, `{value 0.07,
  * raw_value 7}` + `scale_frame 100`), or an unframed, UNITLESS level already in [0, 1).
@@ -330,8 +339,8 @@ export function percentPeriodsDiffer(limitUnit: string, nodeUnit: string | undef
  * decision-grade `unit_percent` threshold on a node at 0.8. It stays verbatim, so PLoT flags it.
  */
 function levelIsPercentOver100(target: LimitTargetScale): boolean {
-  if (target.cap !== undefined) return target.cap === 100;
-  if (target.scale_frame !== undefined) return target.scale_frame === 100;
+  if (target.cap !== undefined) return target.cap === 100 && percentScaleUnit(target.unit);
+  if (target.scale_frame !== undefined) return target.scale_frame === 100 && percentScaleUnit(target.unit);
   return (
     target.unit === undefined &&
     target.raw_value === undefined &&

@@ -197,6 +197,9 @@ describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit
     ['a level carrying a separate raw figure but no frame (not provably a proportion)', { unit: '%', value: 0.35, raw_value: 7 }],
     ['a UNITLESS level carrying a separate raw figure but no frame (not provably a proportion)', { value: 0.35, raw_value: 7 }],
     ['a node that is not a percent at all', { unit: 'customers', cap: 1000, value: 0.2, raw_value: 200 }],
+    // U1 (18 Oct, A): with no percent unit, a 100 is Olumi's reference, never the node's encoding (pairs: CONTROLS below).
+    ['a UNITLESS node capped at 100', { cap: 100, value: 0.07, raw_value: 7 }],
+    ['a UNITLESS estimate framed on 100', { value: 0.07, raw_value: 7, scale_frame: 100 }],
     ['a node with no scale at all', {}],
     ['no node scale supplied', undefined],
   ] as const) {
@@ -281,6 +284,12 @@ describe('admitCandidateModel hands each limit its target node', () => {
   it('an AI ESTIMATE framed on 100 (scale_frame, no cap) admits the limit as "%" — the node frame reaches the rewrite', () => {
     expect(admittedLimit({ unit: 'percent per month', baseline_value: 7, plausible_max: 100, baseline_known: false }, { value: 10, unit: 'percent per month' }))
       .toMatchObject({ unit: '%', value: 10 });
+  });
+
+  it('U1: the drafter\'s 100 on a UNITLESS factor is not read as a percent — the limit stays verbatim (pair: the row above)', () => {
+    const c = admittedLimit({ unit: '', baseline_value: 7, plausible_max: 100, baseline_known: false }, { value: 10, unit: 'percent per month' });
+    expect(c).toMatchObject({ unit: 'percent per month', value: 10 });
+    expect(stampKeys(c)).toEqual([]);
   });
 
   it('a "£" factor turns a "£k" limit into £', () => {

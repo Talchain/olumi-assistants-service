@@ -175,13 +175,18 @@ function carried(churn: Churn, limits: Limit[], opts: { churnIsRoot?: boolean } 
   };
 }
 
-/** A hand-built non-root target (`f → n → goal`) in the served estimate shape, overridable per row. */
+/**
+ * A hand-built non-root target (`f → n → goal`) in the served estimate shape, overridable per row. The served node
+ * carries its own unit (`ESTIMATE`: `'%'`), so every override keeps it unless the row names another (18 Oct, A: only a
+ * percent-unit node's frame of 100 is its encoding).
+ */
 function hand(target: Record<string, unknown>) {
+  const os = target.observed_state ?? { value: 0.07, raw_value: 7, source: 'cee_inference' };
   return {
     nodes: [
       { id: 'goal', kind: 'goal', label: 'MRR' },
       { id: 'f', kind: 'factor', label: 'Price' },
-      { kind: 'factor', label: 'Churn', scale_frame: 100, observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference' }, ...target },
+      { kind: 'factor', label: 'Churn', scale_frame: 100, ...target, observed_state: { unit: '%', ...(os as object) } },
     ],
     edges: [{ from: 'f', to: String(target.id) }, { from: String(target.id), to: 'goal' }],
   };
@@ -366,6 +371,13 @@ describe('a level limit on a non-root node is checked against that node\'s curre
     expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 20, source: 'cee_inference' } }), PCT10('n'), undefined, NO_OPTIONS).size).toBe(0);
     expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 20 }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS).size, 'capped on 20').toBe(0);
     expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100 }, scale_frame: undefined }), PCT10('n'), undefined, NO_OPTIONS), 'PRESENT: capped on 100').toEqual(new Set(['n']));
+    // U1 (18 Oct, A): the same pair on a node with no percent unit is framed on Olumi's reference, not encoded in percent.
+    for (const unit of [undefined, 'score']) {
+      for (const frame of [{ cap: 100 }, {}]) {
+        const node = hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', unit, ...frame } });
+        expect(levelLimitBaselineNodeIds(node, PCT10('n'), undefined, NO_OPTIONS).size, `unit ${unit}, ${'cap' in frame ? 'cap' : 'scale_frame'} 100`).toBe(0);
+      }
+    }
   });
 
   it('FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten', () => {
