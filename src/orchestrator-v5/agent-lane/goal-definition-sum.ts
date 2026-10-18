@@ -42,7 +42,7 @@ interface NodeIn {
 interface EdgeIn { readonly from: string; readonly to: string; readonly provenance?: unknown }
 
 /** The words a part is named in: the goal's level today, as a quantity of its own. */
-export const todayPartLabel = (goalLabel: string): string => `${goalLabel} today`;
+const todayPartLabel = (goalLabel: string): string => `${goalLabel} today`;
 
 export interface GoalDefinitionSum<S> {
   readonly part: { id: string; kind: 'factor'; label: string; category: 'observable'; observed_state: S; scale_frame?: number };
@@ -103,7 +103,7 @@ export function goalDefinitionSum<N extends NodeIn>(
  * whose id construction minted from the goal's own (`<goal id>_today`, `_2`…, never renamed by an edit). It is bound by that
  * identity, never by its figure (Codex review of 04c63519: a part edited away from the goal's level must stay bound), so the
  * goal-level writer writes it with the goal (`goal-current-level.ts`) and every write through the one persistence route carries
- * it at the goal's own level today (`withEveryTodayPartAtGoalLevel`). `undefined` when there is none.
+ * it at the goal's own level today (`withTodayPartsAtGoalLevel`). `undefined` when there is none.
  */
 export function goalSumTodayPart<N extends NodeIn>(nodes: readonly N[], goalId: string): N | undefined {
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -115,43 +115,33 @@ export function goalSumTodayPart<N extends NodeIn>(nodes: readonly N[], goalId: 
 }
 
 /**
- * The goal's level today, on the compiled today part, exactly: the part IS that level, so whatever a writer left on it, the
- * goal's own `observed_state` is carried there. The goal stays the one authority for its level today. The same graph when
- * there is no part or nothing differs. Pure.
+ * Every goal's compiled today part at that goal's level today, exactly: the part IS that level, so whatever a writer left on it,
+ * the goal's own `observed_state` is carried there (the goal stays the one authority). What the one persistence route writes,
+ * for every writer. The same graph when nothing differs. Pure.
  */
-export function withTodayPartAtGoalLevel<G>(graph: G, goalId: string): G {
-  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : undefined;
-  const part = nodes === undefined ? undefined : goalSumTodayPart(nodes, goalId);
-  const level = nodes?.find((n) => n.id === goalId)?.observed_state;
-  if (part === undefined || !isRec(level) || stableStringify(part.observed_state) === stableStringify(level)) return graph;
-  return { ...graph, nodes: nodes!.map((n) => (n.id === part.id ? { ...n, observed_state: { ...level } } : n)) } as G;
-}
-
-/** Every goal's compiled today part at that goal's level today: what the one persistence route writes, for every writer. */
-export function withEveryTodayPartAtGoalLevel<G>(graph: G): G {
-  const goals = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]).filter((n) => n.kind === 'goal') : [];
-  return goals.reduce((g, goal) => withTodayPartAtGoalLevel(g, goal.id), graph);
-}
-
-/** A write that makes a goal's compiled today part anything but that goal's level today: an option setting it, or a link into it. */
-export class GoalTodayPartOwnershipError extends Error {
-  constructor(readonly partLabel: string, readonly goalLabel: string) {
-    super(`"${partLabel}" is the current level of "${goalLabel}"; only the goal's current level sets it.`);
-    this.name = 'GoalTodayPartOwnershipError';
-  }
+export function withTodayPartsAtGoalLevel<G>(graph: G): G {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
+  const levelOf = new Map(nodes.filter((n) => n.kind === 'goal').flatMap((goal) => {
+    const part = goalSumTodayPart(nodes, goal.id);
+    return part !== undefined && isRec(goal.observed_state) && stableStringify(part.observed_state) !== stableStringify(goal.observed_state)
+      ? [[part.id, goal.observed_state] as const] : [];
+  }));
+  return levelOf.size === 0 ? graph
+    : { ...graph, nodes: nodes.map((n) => (levelOf.has(n.id) ? { ...n, observed_state: { ...levelOf.get(n.id)! } } : n)) } as G;
 }
 
 /**
  * The today part has no setter of its own (Codex review round 2 of #3421: an option's intervention on it reached the Run as an
- * operand of 50 beside a goal of 40). Thrown, and nothing written, when any option sets it or any link leads into it.
+ * operand of 50 beside a goal of 40). The part and its goal when any option sets it or any link leads into it, for the
+ * persistence route to refuse the write; `undefined` when none does.
  */
-export function assertTodayPartsOwnedByGoal(graph: unknown): void {
+export function todayPartSetBesideGoal(graph: unknown): { readonly part: string; readonly goal: string } | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? (graph.edges as EdgeIn[]) : [];
   for (const goal of nodes.filter((n) => n.kind === 'goal')) {
     const part = goalSumTodayPart(nodes, goal.id);
-    if (part === undefined) continue;
-    const setByOption = nodes.some((o) => o.kind === 'option' && isRec(o.interventions) && part.id in o.interventions);
-    if (setByOption || edges.some((e) => e.to === part.id)) throw new GoalTodayPartOwnershipError(part.label, goal.label);
+    if (part !== undefined && (nodes.some((o) => o.kind === 'option' && isRec(o.interventions) && part.id in o.interventions)
+      || edges.some((e) => e.to === part.id))) return { part: part.label, goal: goal.label };
   }
+  return undefined;
 }

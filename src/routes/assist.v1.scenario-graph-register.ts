@@ -51,7 +51,7 @@ import {
   emitHoldLapseTelemetry,
   threadHoldsThroughMutatingCommit,
 } from "../orchestrator-v5/handlers/hold-thread-through.js";
-import { assertTodayPartsOwnedByGoal, GoalTodayPartOwnershipError, withEveryTodayPartAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
+import { todayPartSetBesideGoal, withTodayPartsAtGoalLevel } from "../orchestrator-v5/agent-lane/goal-definition-sum.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 
 /** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
@@ -773,8 +773,7 @@ export default async function route(app: FastifyInstance) {
         assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
         // ⭐ STEP 8: a goal's compiled today part IS that goal's level today, on every write by every writer (the goal is the one
         // authority; `set_factor_value` refuses to set the part on its own and says where to change it).
-        graphToRegister = withEveryTodayPartAtGoalLevel(graphToRegister);
-        assertTodayPartsOwnedByGoal(graphToRegister);
+        graphToRegister = withTodayPartsAtGoalLevel(graphToRegister);
       } catch (err) {
         if (err instanceof PreconditionStampApprovalRequiredError) {
           return invalid('PRECONDITION_STAMP_SERVER_OWNED',
@@ -782,13 +781,17 @@ export default async function route(app: FastifyInstance) {
         }
         if (err instanceof ShareByDateOwnershipError) return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'The share_by_date carrier is server-owned. Nothing was written.', { code: 'SHARE_BY_DATE_SERVER_OWNED' }, requestId));
-        if (err instanceof GoalTodayPartOwnershipError) return reply.code(409).send(buildErrorV1('BAD_INPUT',
-          `${err.message} Change the goal's current level and it changes with it. Nothing was written.`, { code: 'GOAL_TODAY_PART_SERVER_OWNED' }, requestId));
         if (!(err instanceof OptionGapApprovalRequiredError)) throw err;
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',
           { code: 'OPTION_GAP_APPROVAL_REQUIRED' }, requestId));
       }
+
+      // ⭐ STEP 8: no option sets a goal's today part and no link leads into it, whichever writer sent the graph.
+      const todaySetter = todayPartSetBesideGoal(graphToRegister);
+      if (todaySetter !== undefined) return reply.code(409).send(buildErrorV1('BAD_INPUT',
+        `"${todaySetter.part}" is the current level of "${todaySetter.goal}"; only the goal's current level sets it. Change the goal's current level and it changes with it. Nothing was written.`,
+        { code: 'GOAL_TODAY_PART_SERVER_OWNED' }, requestId));
 
       /**
        * The raw read, decided independently of hashability (see the absence assertion below, which reads the same three).
