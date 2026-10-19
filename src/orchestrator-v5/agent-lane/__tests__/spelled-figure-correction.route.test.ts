@@ -26,7 +26,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
-import { figureTheUserWrote, figureTheUserWroteSpan, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { comparatorTheUserWrote, comparatorTheUserWroteFor, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteSpan, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/capacity-358132d8-unsized-olumi-risk-graph-20261014.json', import.meta.url), 'utf8')) as Rec;
@@ -270,13 +270,61 @@ describe('parity by property: a spelled figure gives exactly its digits’ verdi
         expect(digits.slice(d.start, d.end)).toBe(String(v));
         expect(words.slice(x.start, x.end).toLowerCase()).toBe(w);
       }
-      // The noun-mismatch property: a count whose own noun (with its modifier) names nothing of the held unit is never its figure.
+      // The noun-mismatch property: a count whose own noun (with its modifier) names nothing of the held unit is never its figure,
+      // unless the held unit is a headcount.
       const heldWords = unit.toLowerCase().match(/[a-z]{3,}/g)!.map((x) => x.replace(/s$/, ''));
-      if (![noun, m.trim()].some((x) => x !== '' && heldWords.includes(x.toLowerCase().replace(/s$/, '')))) expect(d, `${unit} | ${digits}`).toBeNull();
+      const headcount = unit === 'people'; // a headcount unit counts any phrase ("300 subscribers" are people)
+      if (!headcount && ![noun, m.trim()].some((x) => x !== '' && heldWords.includes(x.toLowerCase().replace(/s$/, '')))) expect(d, `${unit} | ${digits}`).toBeNull();
       seen[d !== null ? 'written' : 'not'] += 1;
     }
     expect(seen.written).toBeGreaterThan(200);
     expect(seen.not).toBeGreaterThan(200);
+  });
+});
+
+/**
+ * ⛔ ONE SPEAKER RULE FOR EVERY READER (Codex #3429 R3: the identity card's bound-figure reader skipped it and saved a manager's quoted
+ * 70 subscribers as "your figure"). `figureTheUserWroteFor`, which the identity, option and limit doors bind with, never reads another
+ * speaker's quoted words either, in digits or words; the user's own words still bind.
+ */
+describe('the bound-figure reader keeps the one speaker rule', () => {
+  const scope = { target: ['Paying subscribers'], others: ['Pro plan price', 'MRR'] };
+  it.each([
+    ['quoted, digits', 'Our manager said: \u201CPaying subscribers are 70 subscribers\u201D.', false],
+    ['quoted, words', 'Our manager said: \u201CPaying subscribers are seventy subscribers\u201D.', false],
+    // the binder's own word rule (a label word within two words of a spelled count) is unchanged
+    ['the user’s own, digits', 'We have 70 paying subscribers today.', true],
+    ['the user’s own, words', 'We have seventy paying subscribers today.', true],
+    ['the same words quoted', 'Our manager said: \u201CWe have seventy paying subscribers today\u201D.', false],
+  ] as const)('%s', (_n, text, bound) => {
+    expect(figureTheUserWroteFor(70, 'subscribers', text, scope)).toBe(bound);
+  });
+});
+
+/**
+ * ⭐ THE COMPARATOR READERS USE THE ONE READER (lean core on 02837faf: "at least forty-five night shift hours per week" saved a plain
+ * 45 while "at least 45 …" was refused). Generated: every comparator × number × noun phrase reads the same in words and digits.
+ */
+describe('parity by property: a comparator binds a spelled figure exactly as it binds its digits', () => {
+  const NUMBERS: [number, string][] = [[2, 'two'], [15, 'fifteen'], [45, 'forty-five'], [120, 'one hundred and twenty']];
+  const PHRASES = (f: string): string[] => [`at least ${f}`, `no more than ${f}`, `over ${f}`, `under ${f}`, `${f} or more`, `${f} or fewer`, `exactly ${f}`];
+  const NOUNS = ['night shift hours per week', 'support tickets', 'people'];
+  it('the lean core row: "at least forty-five night shift hours per week" is at least 45, as its digits are', () => {
+    expect(comparatorTheUserWroteFor('We need at least forty-five night shift hours per week.', 45)).toBe('at_least');
+    expect(comparatorTheUserWroteFor('We need at least 45 night shift hours per week.', 45)).toBe('at_least');
+  });
+  it('same comparator for every combination, whole-turn and per figure; the sweep reaches every comparator', () => {
+    const seen = new Set<string | null>();
+    for (const [v, w] of NUMBERS) for (const noun of NOUNS) {
+      const words = PHRASES(`${w} ${noun}`), digits = PHRASES(`${v} ${noun}`);
+      words.forEach((phrase, i) => {
+        const wt = `We need ${phrase} next quarter.`, dt = `We need ${digits[i]} next quarter.`;
+        expect(comparatorTheUserWroteFor(wt, v), wt).toBe(comparatorTheUserWroteFor(dt, v));
+        expect(comparatorTheUserWrote(wt), wt).toBe(comparatorTheUserWrote(dt));
+        seen.add(comparatorTheUserWroteFor(dt, v));
+      });
+    }
+    expect([...seen].sort()).toEqual(['above', 'at_least', 'at_most', 'below', null].sort());
   });
 });
 
