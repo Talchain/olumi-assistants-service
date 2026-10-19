@@ -13,7 +13,7 @@ import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } f
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { endsInQuotedSpeech, quoteIsNotTheUsersClaim, sentenceAroundSpan, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
-import { amountsWrittenIn, comparatorTheUserWroteFor, figureTheUserWroteSpan, inAnotherSpeakersWords, wordsAmountComplete } from './stated-by-user.js';
+import { amountsWrittenIn, comparatorTheUserWroteFor, figureTheUserWroteSpan, inAnotherSpeakersWords, amountComplete } from './stated-by-user.js';
 import { unitPhraseFamily, unitPhraseHead } from './unit-conflict.js';
 import { classifyValueUnitAgainstFactor } from '../routing/value-unit-resolution.js';
 
@@ -194,9 +194,9 @@ function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentCor
  */
 export function figuresWritten(quote: string, unit?: string): readonly { readonly low: number; readonly high: number }[] {
   // The ONE located-amount reader (`amountsWrittenIn`): digits and words, a fraction or an ordinal never a count (Codex #3427 R4 SIMPLER),
-  // through the SAME complete-span eligibility as the one check (`wordsAmountComplete`, in the statement's own unit where it has one;
+  // through the SAME eligibility as the one check (`amountComplete`, in the statement's own unit where it has one;
   // Codex #3438 R5: no raw-word bypass at the verifier).
-  const amounts = amountsWrittenIn(quote).filter((a) => wordsAmountComplete(a, unit, quote)).sort((a, b) => a.index - b.index);
+  const amounts = amountsWrittenIn(quote).filter((a) => amountComplete(a, unit, quote)).sort((a, b) => a.index - b.index);
   return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
     ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
     ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
@@ -208,10 +208,10 @@ export function figuresWritten(quote: string, unit?: string): readonly { readonl
  */
 function figureOnlyInSpeech(quote: string, figure: number, unit: string): boolean {
   // The one reader's amounts and its ONE speaker rule (`inAnotherSpeakersWords`, every quote style, both forms; Codex #3427 R4 SIMPLER).
-  // Where the quote writes the figure as a complete span (`wordsAmountComplete`, the figure list's own eligibility), only those places
+  // Where the quote writes the figure as a standalone, complete span (`amountComplete`, the figure list's own eligibility), only those places
   // count: words never credited ("… and twenty-odd hours") cannot make a quoted "120 hours" the user's (Codex #3438 R5).
   const at = amountsWrittenIn(quote).filter((a) => Math.abs(a.magnitude) === Math.abs(figure));
-  const complete = at.filter((a) => wordsAmountComplete(a, unit, quote));
+  const complete = at.filter((a) => amountComplete(a, unit, quote));
   const places = complete.length > 0 ? complete : at;
   return places.length > 0 && places.every((a) => inAnotherSpeakersWords(quote, a));
 }
