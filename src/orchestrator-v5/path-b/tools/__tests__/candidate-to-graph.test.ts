@@ -95,10 +95,10 @@ const sumDraft = (totalToday: number): Rec => ({
     evidence: { quote: 'All our orders come either online or from the shop.' } }],
 });
 
-const converted = (draft: Rec, brief = BRIEF): { graph: Rec; declared: Rec; loss: Rec[] } => {
-  const out = candidateToGraph(draft, brief);
+const converted = (draft: Rec): { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] } => {
+  const out = candidateToGraph(draft);
   if ('refused' in out) throw new Error(`refused: ${out.refused}`);
-  return out as unknown as { graph: Rec; declared: Rec; loss: Rec[] };
+  return out as unknown as { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] };
 };
 const byLabel = (g: Rec, label: string): Rec => (g.nodes as Rec[]).find((n) => n.label === label)!;
 const ofKind = (g: Rec, kind: string): Rec[] => (g.nodes as Rec[]).filter((n) => n.kind === kind);
@@ -108,7 +108,7 @@ const edge = (g: Rec, from: string, to: string): Rec | undefined =>
 describe('candidateToGraph: conversion + science only', () => {
   it('⭐ the dated-dilemma draft → a valid graph with the aim open, every drafted claim kept with the origin the AI declared', () => {
     const draft = dilemmaDraft();
-    const { graph, declared, loss } = converted(draft);
+    const { graph, declared, loss, blocked_schema } = converted(draft);
     expect(GraphV3.safeParse(graph).success).toBe(true);
     // The aim is open: the goal the AI declared, as Olumi's reading, with no figure invented for it.
     const goals = ofKind(graph, 'goal');
@@ -134,6 +134,8 @@ describe('candidateToGraph: conversion + science only', () => {
       expect(valueProvenanceOf(figure(label)).origin, `${label}: never Olumi's`).not.toBe('ai');
     }
     expect(byLabel(graph, 'Card stock lead time').source_quote).toBe(S[1]);
+    // GraphV3 cannot hold the printer's NAME: said as BLOCKED-SCHEMA (the origin stays unknown, never Olumi's); `declared` keeps it.
+    expect(blocked_schema).toEqual([{ field_path: 'nodes[card_stock_lead_time].observed_state', declared: 'other', missing: 'speaker_name' }]);
     // The declared status quo is held; the raw draft travels beside the graph exactly as the AI wrote it.
     expect(byLabel(graph, 'Ship with the old card stock').is_baseline).toBe(true);
     expect(declared).toEqual(draft);
@@ -155,7 +157,7 @@ describe('candidateToGraph: conversion + science only', () => {
   });
 
   it('⭐ SCIENCE: a level target on its own cap, today\'s level on it, the lever framed, a stated size sized, an addition summed', () => {
-    const { graph, declared } = converted(salesDraft(), 'synthetic');
+    const { graph, declared } = converted(salesDraft());
     expect(GraphV3.safeParse(graph).success).toBe(true);
     // 600 orders: cap 600 × 1.25 = 750 (target headroom); today's 400 is 400 / 750 on it; the declared direction and horizon held.
     expect(ofKind(graph, 'goal')[0]).toMatchObject({ goal_threshold_raw: 600, goal_threshold_cap: 750, goal_threshold: 0.8,
@@ -178,23 +180,38 @@ describe('candidateToGraph: conversion + science only', () => {
 
   it('⭐ SCIENCE: a level already above an "at least" target is upside down, so it is not used (the existing rule and words)', () => {
     const draft = salesDraft(); draft.goal.baseline_value = 700;
-    const { graph, loss } = converted(draft, 'synthetic');
+    const { graph, loss } = converted(draft);
     expect(ofKind(graph, 'goal')[0]!.observed_state).toBeUndefined();
     expect(ofKind(graph, 'goal')[0]!.goal_threshold_raw).toBe(600);
     expect(loss.map((l) => l.reason).join(' ')).toContain('is already above the target of 600');
   });
 
   it('⭐ SCIENCE: a declared sum is carried when today\'s parts add up (300 + 100 = 400), as Olumi\'s reading; refused when they do not', () => {
-    const kept = converted(sumDraft(400), 'synthetic');
+    const kept = converted(sumDraft(400));
     expect(ofKind(kept.graph, 'goal')[0]!.nonlinear_identity).toEqual({ operation: 'sum',
       factor_ids: [byLabel(kept.graph, 'Online orders').id, byLabel(kept.graph, 'Shop orders').id], stated_in_brief: false });
-    const off = converted(sumDraft(500), 'synthetic');
+    const off = converted(sumDraft(500));
     expect(ofKind(off.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
     expect(off.loss.map((l) => l.reason).join(' ')).toContain('while those parts add up to');
   });
 
+  it('BLOCKED-SCHEMA: a target another person stated and a size from an unclear source are listed, never relabelled', () => {
+    const draft = salesDraft();
+    const said = (quote: string, subject: Rec, field: string, speaker: string): Rec => ({ quote, subject: { to_label: null, factor_label: null, ...subject },
+      field, form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker });
+    draft.statements = [said('Our agent reckons 600 pre-orders a month is the target.', { kind: 'goal', label: 'Monthly pre-orders' }, 'target', 'other'),
+      said(AD_QUOTE, { kind: 'link', label: 'Ad spend', to_label: 'Monthly pre-orders' }, 'effect', 'unknown')];
+    const { graph, blocked_schema } = converted(draft);
+    expect(blocked_schema).toEqual([
+      { field_path: 'nodes[monthly_pre_orders].goal_threshold_raw', declared: 'other', missing: 'target_origin' },
+      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_origin' },
+    ]);
+    expect(ofKind(graph, 'goal')[0]!.goal_threshold_raw).toBe(600);
+    expect(converted(salesDraft()).blocked_schema).toEqual([]);
+  });
+
   it('protocol only: a draft with no goal is refused as unreadable; nothing is refused for what it means', () => {
-    expect(candidateToGraph(null, 'x')).toEqual({ refused: 'candidate_invalid' });
-    expect(candidateToGraph({ goal: { metric: ' ' }, options: [], factors: [], links: [] }, 'x')).toEqual({ refused: 'candidate_invalid' });
+    expect(candidateToGraph(null)).toEqual({ refused: 'candidate_invalid' });
+    expect(candidateToGraph({ goal: { metric: ' ' }, options: [], factors: [], links: [] })).toEqual({ refused: 'candidate_invalid' });
   });
 });

@@ -40,8 +40,15 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 type Rec = Record<string, any>;
 /** Whose figure the AI declared it to be. */
 type Who = 'user' | 'olumi' | 'other' | 'unknown';
+/** An origin the AI declared that GraphV3 has no field for (DL 19 Oct: BLOCKED-SCHEMA, never a downgrade); `declared` keeps it. */
+export interface BlockedSchema {
+  readonly field_path: string;
+  readonly declared: 'other' | 'unknown';
+  readonly missing: 'speaker_name' | 'link_origin' | 'target_origin';
+}
 export type CandidateToGraphResult =
-  | { readonly graph: Record<string, unknown>; readonly declared: unknown; readonly loss: readonly RepairEntry[] }
+  | { readonly graph: Record<string, unknown>; readonly declared: unknown; readonly loss: readonly RepairEntry[];
+    readonly blocked_schema: readonly BlockedSchema[] }
   | { readonly refused: 'candidate_invalid' | 'graph_invalid' };
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -62,10 +69,11 @@ function asCandidate(v: unknown): CandidateModel | null {
   return model as CandidateModel;
 }
 
-export function candidateToGraph(input: unknown, _brief: string): CandidateToGraphResult {
+export function candidateToGraph(input: unknown): CandidateToGraphResult {
   const c = asCandidate(input);
   if (c === null) return { refused: 'candidate_invalid' };
   const loss: RepairEntry[] = [];
+  const blocked: BlockedSchema[] = [];
   const g = c.goal;
   // The AI's own reading of whose words each statement is, by the subject it declared.
   const statements = list<Rec>((input as Rec).statements);
@@ -86,11 +94,12 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
   };
 
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node: Rec }[] = [
-    { label: g.metric, kind: 'goal', provenance: g.provenance, node: goalFields(c, speakerOf, whoOf, loss) },
+    { label: g.metric, kind: 'goal', provenance: g.provenance, node: goalFields(c, speakerOf, whoOf, loss, blocked) },
     ...c.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance, node: {} })),
     ...c.factors.map((f) => {
       const { cap, convention } = frameFor(f.label, f.plausible_max);
       const who = whoOf(f.provenance, speakerOf('factor', f.label, (s) => s.field === 'level'));
+      if (who === 'other' && finite(f.baseline_value)) blocked.push({ field_path: `nodes[${slugId(f.label)}].observed_state`, declared: 'other', missing: 'speaker_name' });
       const quote = typeof f.baseline_evidence?.quote === 'string' ? { source_quote: f.baseline_evidence.quote } : {};
       return { label: f.label, kind: 'factor' as const, provenance: f.provenance, node: {
         category: f.role, ...(cap !== undefined ? { scale_frame: cap } : {}), ...(finite(f.baseline_value) ? quote : {}),
@@ -151,6 +160,7 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
       }
       const who = whoOf(iv.provenance, speakerOf('option', o.label, (s) => canonicalLabel(String(s.subject.factor_label ?? '')) === canonicalLabel(iv.factor_label)));
       if (bundle[fid] !== undefined && !(who === 'user' && bundle[fid]!.source !== 'brief_extraction')) continue;
+      if (who === 'other') blocked.push({ field_path: `nodes[${oid}].interventions.${fid}`, declared: 'other', missing: 'speaker_name' });
       bundle[fid] = { ...constructedLevel(fid, level, factor.scale_frame, who === 'olumi' ? 'cee_hypothesis' : 'brief_extraction', factor,
         iv.unit ?? declaredFactor?.unit ?? undefined, additional),
         ...(who === 'other' || who === 'unknown' ? { user_material_unverified: true as const } : {}),
@@ -169,6 +179,9 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
       continue;
     }
     if (kindOf(from) === 'option' && kindOf(to) === 'factor') { actsOn.get(from)?.add(to); continue; }
+    const who = whoOf(l.effect_provenance ?? l.provenance,
+      speakerOf('link', l.from, (s) => canonicalLabel(String(s.subject.to_label ?? '')) === canonicalLabel(l.to)));
+    if (who === 'other' || who === 'unknown') blocked.push({ field_path: `edges[${from}::${to}]`, declared: who, missing: 'link_origin' });
     causal.push({ ...l, from, to });
   }
   const optionLevels = new Map<string, number[]>();
@@ -251,21 +264,31 @@ export function candidateToGraph(input: unknown, _brief: string): CandidateToGra
     ...(constraints.constraints.length > 0 ? { goal_constraints: constraints.constraints } : {}) } as Rec, { goalOwnRows: true }).graph;
   const graph = clampForPersist(refitFramesForOlumiEstimates(stated as never).graph as never) as Record<string, unknown>;
   if (!GraphV3.safeParse(graph).success) return { refused: 'graph_invalid' };
-  return { graph, declared: structuredClone(input), loss };
+  return { graph, declared: structuredClone(input), loss, blocked_schema: blocked };
 }
 
 /** The goal as declared: an open aim gets no threshold; a target is read on its own cap, with the existing level rules. */
 function goalFields(c: CandidateModel, speakerOf: (kind: string, label: string, extra?: (s: Rec) => boolean) => unknown,
-  whoOf: (provenance: unknown, speaker: unknown) => Who, loss: RepairEntry[]): Rec {
+  whoOf: (provenance: unknown, speaker: unknown) => Who, loss: RepairEntry[], blocked: BlockedSchema[]): Rec {
   const g = c.goal;
   const raw = g.value;
   const unit = g.unit ? { goal_threshold_unit: g.unit } : {};
   const horizon = finite(g.horizon_months) && g.horizon_months > 0 ? { goal_horizon_months: g.horizon_months } : {};
   const quote = typeof (g as Rec).source_quote === 'string' ? { source_quote: (g as Rec).source_quote } : {};
-  if (g.target_stated === false || !finite(raw)) return { ...unit, goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME, ...horizon, ...quote };
+  if (g.target_stated === false || !finite(raw)) {
+    if (finite(g.baseline_value)) {
+      loss.push(note(`nodes[${slugId(g.metric)}].observed_state.baseline`, g.baseline_value, `Today's level of "${g.metric}" (${g.baseline_value}) `
+        + 'was drafted, but with no target there is no scale to place it on yet, so it is not used; Olumi kept it as drafted.', 'warn'));
+    }
+    return { ...unit, goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME, ...horizon, ...quote };
+  }
   const direction = g.operator === '>=' || g.operator === '<=' || g.operator === '>' || g.operator === '<' ? { goal_direction: g.operator } : {};
   const base = g.baseline_value;
   const baseWho = whoOf(g.baseline_provenance ?? g.provenance, speakerOf('goal', g.metric, (s) => s.field === 'level'));
+  const targetWho = whoOf(g.provenance, speakerOf('goal', g.metric, (s) => s.field === 'target'));
+  const goalPath = `nodes[${slugId(g.metric)}]`;
+  if (targetWho === 'other' || targetWho === 'unknown') blocked.push({ field_path: `${goalPath}.goal_threshold_raw`, declared: targetWho, missing: 'target_origin' });
+  if (baseWho === 'other' && finite(base)) blocked.push({ field_path: `${goalPath}.observed_state`, declared: 'other', missing: 'speaker_name' });
   const baselineStamp = (os: Rec | undefined): Rec => (os === undefined ? {} : { observed_state: { ...unstamped(os), ...valueStamp(baseWho) } });
   const withheld = (reason: string): void => { loss.push(note(`nodes[${slugId(c.goal.metric)}].observed_state.baseline`, base ?? null, reason, 'warn')); };
   if (g.frame === 'change_abs' || g.frame === 'change_rel') {
