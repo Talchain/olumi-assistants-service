@@ -803,6 +803,19 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
     expect(claimRecordFor(r.g, NIGHT)!.statements[0]).toMatchObject({ quote: '45 hours per week', checks: { subject_bound: false } });
   });
 
+  // ⭐ Codex R4 BLOCK @f8895476: the same elliptical answer in WORDS withdrew 40 and saved no 45, while its digits (the CONTROL above)
+  // save 45. A figure in words is read exactly as its digits are (the shared reader); every words negative above stays.
+  it.each([
+    ['It is forty-five hours per week.', 'forty-five hours per week'],
+    ['It is forty five hours per week.', 'forty five hours per week'],
+    ['Correction: it is forty-five hours per week, not 40.', 'forty-five hours per week'],
+  ] as const)('LABELLED READING IN WORDS (Codex R4): “%s” is written as its digits are, as Olumi’s reading, labelled', async (words, span) => {
+    const r = await run(graph(), words, [nightEdit('retracted', { value: 45, unit: UNIT, span })]);
+    expect(nodeOf(r.g, 'night').observed_state).toMatchObject({ raw_value: 45, source: 'user_override' });
+    expect(r.card.public_label).toContain('Olumi’s reading: these words concern “Night shift hours”.');
+    expect(claimRecordFor(r.g, NIGHT)!.statements[0]).toMatchObject({ quote: span, low: 45, high: 45, checks: { subject_bound: false } });
+  });
+
   it.each([
     ['a node with no figure', (g: Rec): void => { delete nodeOf(g, 'total').observed_state; }],
     ['a structural definition', (g: Rec): void => { Object.assign(nodeOf(g, 'total').observed_state, { value: 0, raw_value: 0, extra_share_by_date: {} }); }],
