@@ -29,6 +29,7 @@ import { projectCanonicalAnalysisCells } from '../../../routes/canonical-analysi
 import { buildAnalysisResultBlock } from '../../compose.js';
 import { goalChanceFactsForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { buildCandidateSchema, strictForTheDrafter } from '../runtime/build-model.js';
+import { withStatedSd } from '../../__tests__/support/supported-spread.support.js';
 
 const memory = vi.hoisted(() => ({ graph: null as any, rows: [] as any[], run: null as any }));
 vi.mock('../../session/index.js', async original => ({
@@ -112,6 +113,16 @@ async function build(reading: 'net' | 'gross' | undefined, explicit = true, chan
   expect(result.ok, JSON.stringify(result)).toBe(true);
   expect(stored).toBeDefined();
   return { graph: stored!, result };
+}
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): "Each £10 price rise adds £5,000 MRR a month" is a size alone, with no supported spread, so the raised
+ * price's chance is withheld. These rows' subject is the time cut, so they read a SUPPORTED control: the user also states that
+ * size's standard deviation, recorded by the actual chat writer (`withStatedSd`).
+ */
+async function supported(g: Rec): Promise<Rec> {
+  const price = g.nodes.find((n: Rec) => n.label === 'Price');
+  const sized = g.edges.find((e: Rec) => e.from === price.id && e.provenance?.natural_effect !== undefined);
+  return withStatedSd(g, SCENARIO, sized.from, sized.to);
 }
 function ratify(g: Rec): Rec {
   const graph = structuredClone(g);
@@ -233,7 +244,7 @@ describe('S4 time cut Q1 + Q2 through real admission and real Run', () => {
     expect(fact.result.enrichment.option_comparison.every((r: Rec) => r.probability_of_goal === undefined)).toBe(true);
   });
   it('R6 inference zero earns no chance; the same source-ratified graph is licensed', async () => {
-    const graph = (await build('net')).graph;
+    const graph = await supported((await build('net')).graph);
     const inferred = await run(graph);
     expect(zeroOf(graph).observed_state.source).toBe('cee_inference');
     expect(evaluatedIdentityCarriers(graph.nodes, inferred.envelope.identity_evaluations).has(carrierOf(graph).id)).toBe(false);
@@ -344,7 +355,7 @@ describe('slices B + C through the existing card, Run and canonical read', () =>
     expect((strictForTheDrafter(schema) as Rec).properties.identities.items.properties.reading).toEqual(items.properties.reading);
   });
   it('B2 press ratifies the goal and net zero, credits the carrier, and licenses every real scored option', async () => {
-    const graph = (await build('net', false)).graph;
+    const graph = await supported((await build('net', false)).graph);
     const before = await run(graph);
     expect(before.fact.result.enrichment.option_comparison.every((r: Rec) => r.probability_of_goal === undefined)).toBe(true);
     const confirmed = await press(graph);
@@ -453,7 +464,7 @@ it('a negative net change is refused at admission, said, and no method or net-re
 });
 
 it('B2 the identity door postimage itself licenses the real Run only after its zero source is written', async () => {
-  const graph = (await build('net', false)).graph;
+  const graph = await supported((await build('net', false)).graph);
   const card = proposeProductIdentity(graph)!;
   const written = applyIdentityConfirmEdit({ ...card, persistedGraph: graph,
     expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, reading_token: identityConfirmReadingToken(card) });

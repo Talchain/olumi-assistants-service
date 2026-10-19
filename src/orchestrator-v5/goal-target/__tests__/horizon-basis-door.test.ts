@@ -33,6 +33,7 @@ import { executeOptionInterventionBatch } from '../../system-events/option-inter
 import { applyStructuralAdd } from '../../system-events/structural-add.js';
 import { applyGoalSteadyEdit,goalSteadyPostimageIsScoped,horizonBasisWriteIsAuthorised } from '../goal-steady-write.js';
 import { horizonBasisMetricKey,horizonSteadyAttested } from '../horizon-basis.js';
+import { withStatedSd } from '../../__tests__/support/supported-spread.support.js';
 
 vi.mock('../../../orchestrator/tools/edit-graph.js', async original => ({
   ...await original<typeof import('../../../orchestrator/tools/edit-graph.js')>(), handleEditGraph: vi.fn(),
@@ -516,7 +517,16 @@ describe('S5 r2 pure append-door assertion', () => {
 
 
 // Fully sized B2 level-change control from the P45 route harness; no time carrier.
-function steadyB2() {
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the user's stated £-per-£ size on ‘Monthly revenue change’ → goal carries no supported spread alone,
+ * which withholds every chance resting on it. The steady-horizon rows' subject is the horizon, so they read a SUPPORTED control:
+ * the user also states that size's standard deviation, recorded by the actual chat writer (`withStatedSd`).
+ */
+async function steadyB2() {
+  const raw = steadyB2AsSized();
+  return { ...raw, graph: await withStatedSd(raw.graph, SCENARIO, 'monthly_change', raw.goalId) };
+}
+function steadyB2AsSized() {
   const captured = JSON.parse(readFileSync(new URL(
     '../../../routes/__tests__/fixtures/b2-zero-spread/read-graph-1791489457020.json', import.meta.url), 'utf8')).j;
   const g = clone(captured.graph) as Rec;
@@ -595,12 +605,12 @@ describe('#2925 door read-back: goal_steady_attested from the committed bytes (a
     turn_id: TURN, base_graph_hash: computeAnalysisAffectingGraphHash(w.read() as never)!, levels: [], links: [],
     goal_steady: { goal_id: goalId, months: 9 } }, rid);
   it('fresh press → committed with goal_steady_attested true; a level-only commit carries no flag', async () => {
-    const { graph, goalId } = steadyB2(), w = world(graph);
+    const { graph, goalId } = await steadyB2(), w = world(graph);
     const pressed = await pressSteadyB2(w, goalId);
     expect(pressed).toMatchObject({ status: 'committed', goal_steady_attested: true });
   });
   it('proof zeroed in the committed bytes → never committed-and-attested', async () => {
-    const { graph, goalId } = steadyB2(), w = world(graph); activeStore = w.store;
+    const { graph, goalId } = await steadyB2(), w = world(graph); activeStore = w.store;
     const real = steadyWrite.applyGoalSteadyEdit;
     const spy = vi.spyOn(steadyWrite, 'applyGoalSteadyEdit').mockImplementation((g, approved, scenarioId) => {
       const out = real(g, approved, scenarioId);
@@ -616,7 +626,7 @@ describe('#2925 door read-back: goal_steady_attested from the committed bytes (a
     } finally { spy.mockRestore(); }
   });
   it('already-attested re-press ("unchanged") never reads committed-and-not-attested', async () => {
-    const { graph, goalId } = steadyB2(), w = world(graph);
+    const { graph, goalId } = await steadyB2(), w = world(graph);
     await pressSteadyB2(w, goalId);
     const again = await press(w, goalId, 'steady-door-repress');
     if (again.status === 'committed') expect(again).toMatchObject({ goal_steady_attested: true });
@@ -737,7 +747,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
   });
 
   it('Run loaded with horizonSteadyAttested=true licenses the goal chance for the attested months and removes the untested-horizon withhold', async () => {
-    const { graph, body, goalId } = steadyB2(), w = world(graph);
+    const { graph, body, goalId } = await steadyB2(), w = world(graph);
     await pressSteadyB2(w, goalId);
     const run = await storedSteadyRun(w, body), result = buildAnalysisResultBlock(run);
     expect(goalHorizonVerdict(w.read(), run.result.enrichment)).toBe('steady_attested');
@@ -766,7 +776,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
 
   it('real Run: missing baseline stays withheld; a supported static result needs no date-attestation card', async () => {
     const { steadyHorizonCard } = await import('../../agent-lane/steady-horizon-card.js');
-    const { graph, body } = steadyB2();
+    const { graph, body } = await steadyB2();
     const card = (result: unknown) => steadyHorizonCard({ graph, graphHash: computeAnalysisAffectingGraphHash(graph as never) ?? undefined,
       scenarioId: SCENARIO, userId: null, runReply: true, runResult: result, approvalHeld: false });
     const codesOf = (result: Rec) => ((result.enrichment as Rec).inference_warnings as Rec[]).map(w => w.code);
@@ -788,7 +798,7 @@ describe('S5 r4 prepared candidate hashes and cold Run', () => {
     const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
     const { default: versionsRoute } = await import('../../../routes/assist.v1.scenario-versions.js');
     const management = await import('../../model-management/index.js');
-    const { graph, body, goalId } = steadyB2(), w = world(graph);
+    const { graph, body, goalId } = await steadyB2(), w = world(graph);
     await pressSteadyB2(w, goalId);
     const run = await storedSteadyRun(w, body), storedBytes = JSON.stringify(run);
     const supportedGraph = clone(w.read());

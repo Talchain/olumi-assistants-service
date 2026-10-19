@@ -23,6 +23,7 @@ import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answe
 import { createRunAnalysisHandler, withholdGoalFiguresForUntestedHorizon } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import minimalFixture from '../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { withStatedSd } from '../../__tests__/support/supported-spread.support.js';
 
 vi.mock('../../../config/index.js', async original => {
   const actual = await original<typeof import('../../../config/index.js')>();
@@ -78,7 +79,16 @@ function plotBody(): Rec {
  * A constructed, fully sized level-change B2 control isolates §(ad) from the
  * served capture's separate unsized-link refusals. The horizon is never scored.
  */
-function cleanB2(): { graph: Rec; body: Rec } {
+/**
+ * ⭐ STEP 8 (Codex R2 #3443): the user's stated £-per-£ size on ‘Monthly revenue change’ → goal carries no supported spread alone,
+ * which withholds every chance resting on it. This file's subject is the horizon, so the clean B2 reads a SUPPORTED control: the
+ * user also states that size's standard deviation, recorded by the actual chat writer (`withStatedSd`).
+ */
+async function cleanB2(): Promise<{ graph: Rec; body: Rec }> {
+  const raw = cleanB2AsSized();
+  return { graph: await withStatedSd(raw.graph, SCENARIO, 'monthly_change', GOAL), body: raw.body };
+}
+function cleanB2AsSized(): { graph: Rec; body: Rec } {
   const g = clone(B2_READ.graph);
   g.nodes = g.nodes.filter((node: Rec) => ['goal', 'option', 'decision'].includes(node.kind));
   g.nodes.push({ id: 'monthly_change', kind: 'factor', label: 'Monthly revenue change', scale_frame: 50000,
@@ -280,7 +290,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   }, 60_000);
 
   it('fully sized B2 with real door-minted attestation shows chance and ACKed Why through the served route', async () => {
-    const clean = cleanB2(); providerBodyOverride = clean.body;
+    const clean = await cleanB2(); providerBodyOverride = clean.body;
     const issued = applyGoalSteadyEdit(clean.graph, { goal_id: GOAL, months: 9 }, SCENARIO);
     if (issued.kind !== 'mutated') throw new Error('real route fixture mint refused');
     graph = JSON.parse(JSON.stringify(issued.mutatedGraph));
@@ -293,7 +303,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   }, 60_000);
 
   it.skipIf(CAPTURE_BASELINE)('fully sized B2: a stored triple cannot turn verified static figures into a date forecast', async () => {
-    const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
+    const clean = await cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     const before = await realRun(graph);
     expect(before.result.enrichment.inference_warnings.some((w: Rec) => w.code === HORIZON_WITHHOLD)).toBe(false);
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
@@ -321,7 +331,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   }, 60_000);
 
   it.skipIf(CAPTURE_BASELINE)('a stored triple does not unlock a zero-spread option, even when other static chances are supported', async () => {
-    const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
+    const clean = await cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     Object.assign(goal(graph), { horizon_basis: 'steady_attested', horizon_basis_source: 'user_stated', horizon_basis_months: goal(graph).goal_horizon_months });
     const keep = providerBodyOverride!.option_comparison.find((row: Rec) => row.option_id === 'keep_current_pricing');
     keep.probability_of_goal = 0;
@@ -339,7 +349,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   }, 60_000);
 
   it('a scoped static Run replays its exact answer and shape without another provider call', async () => {
-    const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
+    const clean = await cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     const body = await turn(); // Existing helper asserts deep-equal real same-id replay and zero additional provider calls.
     expectSupportedStatic(body);
     expect(body.assistant_text).not.toContain("Your goal is for month 9, and this model only has today's numbers.");
@@ -347,7 +357,7 @@ describe('Science §(ad) through the producer and reply route', () => {
   }, 60_000);
 
   it('no-H brief: all three current-number chances survive and baseline reply bytes are unchanged', async () => {
-    const clean = cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
+    const clean = await cleanB2(); graph = clean.graph; providerBodyOverride = clean.body;
     delete goal(graph).goal_horizon_months;
     const body = await turn();
     expect(lastView.options).toHaveLength(3);
