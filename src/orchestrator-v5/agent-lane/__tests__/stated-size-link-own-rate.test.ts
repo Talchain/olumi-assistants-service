@@ -4,30 +4,58 @@
  * rate factor ‘Tickets resolved per additional specialist’, so the binder refused the sentence as naming another quantity: the user's
  * 20 reached the Run as Olumi's placeholder (natural 12.5), and their 10–30 was never carried. That factor is the link's own rate (it
  * feeds the same target, unsized, in the target's unit PER the source's), the figure the sentence states, never a second quantity.
- * Real path: construction → saved bytes (the user's 20, theirs, with their range). Negatives: every other shape still refuses.
+ * Real path: construction → saved bytes → readback → the Run request (the complete 20, the 10–30, the per-specialist unit, the quote and
+ * the user's record). Negatives: every other shape still refuses.
  * SYNTHETIC wording apart from the served draft's own fixture.
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { bindStatedLinkSizes, type StatedSizeBindingLink, type StatedSizeBindingNode } from '../stated-size-binding.js';
 import type { StatedRangeEnd } from '../../../cee/magnitude/link-effect.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('../../../routes/__tests__/fixtures/capacity-cfa31dfb-first-draft.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
 
-describe('real path: the served capacity draft saves the user\'s rate on its link as theirs, with their range', () => {
-  it('+1 specialist moves the capacity by the user\'s 20 tickets per week, user_stated, their 10–30 kept around it', async () => {
-    let saved: Rec | undefined;
-    const out = await buildModelFromBrief('cd3d9c25-0000-4000-8000-0000000012c3', FX.brief, (async (path: string, body: Rec) => {
-      if (path.endsWith('/graph/register')) { saved = structuredClone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
-      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
-    }) as never, (async () => ({ text: FX.raw_text })) as never) as Rec;
-    expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
-    const edge = (saved!.edges as Rec[]).find((e) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity');
-    expect(edge?.provenance?.magnitude).toBe('user_stated');
-    expect(edge?.provenance?.natural_effect).toMatchObject({ amount: 20, amount_unit: 'tickets per week', per_source_change: 1 });
-    expect(edge?.provenance?.natural_effect?.stated_range).toMatchObject({ low: 10, high: 30, end: 'centre' });
+/** Construction → saved bytes → cold snapshot (readback) → the Run's PLoT request, as step 8's row runs it. */
+async function savedAndRun(): Promise<{ saved: Rec; run: Rec }> {
+  const SC = 'cd3d9c25-0000-4000-8000-0000000012c3';
+  let saved: Rec | undefined;
+  const out = await buildModelFromBrief(SC, FX.brief, (async (path: string, body: Rec) => {
+    if (path.endsWith('/graph/register')) { saved = structuredClone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+    return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+  }) as never, (async () => ({ text: FX.raw_text })) as never) as Rec;
+  expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
+  const bytes = JSON.stringify(saved);
+  const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: FX.brief, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
+  const snapshot = await loadScenarioSnapshotForRunAnalysis(SC, 'req-own-rate', port as never);
+  let payload: Rec | undefined;
+  const handler = createRunAnalysisHandler({ plotClient: { run: vi.fn(), validatePatch: vi.fn() }, scenarioReader: async () => snapshot,
+    probe: async (s: Rec) => { payload = s.plotPayload as Rec; } } as never);
+  await handler({ context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [], session_id: SC,
+    request_id: 'req-own-rate', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 }, prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+    payload: makeMessagePayload({ turn_id: 't-own-rate', scenario_id: SC, message: 'Run analysis.', turn_class: 'decide', stage: 'analyse' }),
+    requestId: 'req-own-rate', signal: new AbortController().signal, orientationText: '' } as never);
+  expect(payload, 'the Run handler built a PLoT request').toBeDefined();
+  return { saved: JSON.parse(bytes) as Rec, run: (payload as Rec).graph as Rec };
+}
+
+describe('real path: the served capacity draft carries the user\'s rate on its link as theirs, with their range, to the Run', () => {
+  it('the complete 20, the 10–30, the per-specialist unit, the quote and the user\'s record survive saved bytes → readback → Run', async () => {
+    const { saved, run } = await savedAndRun();
+    const quote = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
+    for (const [where, g] of [['saved', saved], ['Run request', run]] as const) {
+      const edge = (g.edges as Rec[]).find((e) => e.from === 'additional_specialists' && e.to === 'additional_specialist_capacity');
+      expect(edge?.provenance, where).toMatchObject({ magnitude: 'user_stated', source_quote: quote,
+        natural_effect: { amount: 20, amount_unit: 'tickets per week', per_source_change: 1, per_source_change_unit: 'specialists',
+          stated_range: { low: 10, high: 30, end: 'centre' } } });
+      const source = (g.nodes as Rec[]).find((n) => n.id === 'additional_specialists');
+      const record = (source?.user_statements as Rec[] | undefined)?.find((r) => r.subject_key === 'link|additional_specialists|additional_specialist_capacity||effect');
+      expect(record?.statements, where).toEqual([expect.objectContaining({ speaker: 'user', quote, form: 'range', low: 10, high: 30 })]);
+    }
   });
 });
 

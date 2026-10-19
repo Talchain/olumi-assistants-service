@@ -42,7 +42,7 @@ async function runRequestGraph(): Promise<Rec> {
   return payload!.graph as Rec;
 }
 /** A node's frame as the request carries it (cap, else scale_frame, else 1). */
-const frame = (n: Rec | undefined): number => (n?.observed_state?.cap > 1 ? n.observed_state.cap : n?.scale_frame > 1 ? n.scale_frame : 1);
+const frame = (n: Rec | undefined): number => (n?.observed_state?.cap > 1 ? n?.observed_state?.cap : n?.scale_frame > 1 ? n?.scale_frame : 1);
 
 describe('the user\'s per-specialist rate reaches the Run as theirs (served draft cfa31dfb)', () => {
   it('+1 specialist moves the capacity by the user\'s 20 tickets per week, sized by the user, never Olumi\'s placeholder', async () => {
