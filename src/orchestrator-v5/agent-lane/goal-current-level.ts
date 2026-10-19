@@ -351,7 +351,17 @@ export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { 
   const statedPeriod = ratePeriodOf(stated);
   if (statedPeriod !== null && statedPeriod !== ratePeriodOf(goal.unit)) return anotherMeasure;
 
-  if (goalFamily === null) return statedFamily !== null ? anotherKind : { ok: true, raw: value };
+  // ⛔ #3467 R1 (Codex: "110 orders a month" saved as 110 orders a WEEK, the user's): a goal no classifier reads ("orders a
+  // week") takes only its OWN unit phrase (`sameUnitPhrase`: the same head, and no other period or measure after it). Another
+  // phrase, an unknown unit or none is refused, never relabelled with the goal's unit (it used to fail open here).
+  if (goalFamily === null) {
+    if (statedFamily !== null) return anotherKind;
+    if (stated === '') {
+      return { ok: false, refusal: 'unit_unstated', detail: `${value} was given with no unit, and "${goal.label}" is measured in ${goal.unit}. `
+        + `A figure is never assumed to be in the goal's unit. ${askInstead}` };
+    }
+    return sameUnitPhrase(stated, goal.unit) ? { ok: true, raw: value } : anotherMeasure;
+  }
 
   if (goalFamily === 'currency' && stated !== '') {
     const scaled = canonicaliseLimitUnit(value, stated, { unit: goalHead });
@@ -434,6 +444,12 @@ export function statedGoalLevelInUsersWords(
   statedUnitArg: unknown,
   goal: { readonly label: string; readonly unit: string | undefined },
   userText: string | undefined,
+  /**
+   * ⭐ B's typed caller only (PATH-B, DL-3 GO 19 Oct): its own rule already held — the user declared as the speaker, their current
+   * level, the quote verbatim in their typed words and holding the figure — so the words are not re-parsed here for the figure. The unit
+   * is still read by this rule (`readStatedGoalLevel`: science). Absent for every other caller, whose behaviour is unchanged.
+   */
+  typedQuote?: string,
 ):
   | { readonly ok: true; readonly raw: number; readonly statedUnit: string; readonly normalised?: UnitNormalised; readonly quote: string | null }
   | { readonly ok: false; readonly refusal: string; readonly detail: string } {
@@ -443,7 +459,7 @@ export function statedGoalLevelInUsersWords(
   const statedUnit = typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '';
   const goalUnit = goal.unit;
   const recordedIn = goalUnit !== undefined ? (unitPhraseHead(goalUnit) ?? goalUnit) : statedUnit;
-  if (!figureTheUserWrote(raw, goalUnit ?? statedUnit, userText) || !isAmountStatedInBrief(raw, recordedIn, userText)) {
+  if (typedQuote === undefined && (!figureTheUserWrote(raw, goalUnit ?? statedUnit, userText) || !isAmountStatedInBrief(raw, recordedIn, userText))) {
     return {
       ok: false,
       refusal: 'figure_not_in_users_words',
@@ -454,7 +470,8 @@ export function statedGoalLevelInUsersWords(
         (unitPhraseFamily(goalUnit) === 'percent' ? ' A percentage is passed as the user wrote it: 3% is 3, never 0.03.' : ''),
     };
   }
-  return { ok: true, raw, statedUnit, ...(stated.normalised !== undefined ? { normalised: stated.normalised } : {}), quote: writtenIn(userText ?? '', raw)?.quote ?? null };
+  return { ok: true, raw, statedUnit, ...(stated.normalised !== undefined ? { normalised: stated.normalised } : {}),
+    quote: typedQuote ?? writtenIn(userText ?? '', raw)?.quote ?? null };
 }
 
 /**
@@ -720,7 +737,9 @@ function usersReadingOf(goal: unknown): UserUnitReading | undefined {
  * Prepare the change: every admission question, then ONE held proposal. Writes nothing.
  */
 export async function proposeGoalCurrentLevel(
-  deps: { readonly readGraph: (scenarioId: string) => Promise<GoalLevelRead | null>; readonly proposals: ProposalStore },
+  deps: { readonly readGraph: (scenarioId: string) => Promise<GoalLevelRead | null>; readonly proposals: ProposalStore;
+    /** B's typed caller only (`statedGoalLevelInUsersWords`): never from a tool's arguments. */
+    readonly typedQuote?: string },
   ctx: AgentToolContext,
   args: GoalCurrentLevelArgs,
 ): Promise<ToolResult> {
@@ -825,7 +844,7 @@ export async function proposeGoalCurrentLevel(
   const adoptedUnit = forLevel.adopted ? forLevel.unit : forChange.adopted;
 
   // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
-  const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text);
+  const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text, deps.typedQuote);
   if (!inWords.ok) return refuse(inWords.refusal, inWords.detail);
   const stated = inWords;
   const raw = inWords.raw;

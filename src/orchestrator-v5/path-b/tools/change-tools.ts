@@ -318,6 +318,9 @@ function goalLevelReadOf(read: SavedRead): GoalLevelRead | null {
   return nodes.length !== all.length || nodes.length === 0 ? null
     : { graph_hash: read.graphHash, graph_identity_hash: read.identity ?? '', nodes, raw: read.graph };
 }
+/** Whether the quote writes this figure: its numerals read as digits only ("1,250" is 1250), never a word or a unit. */
+const quoteHoldsFigure = (quote: string, value: number): boolean =>
+  (quote.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).some((n) => Number(n.replace(/,/g, '')) === value);
 /** The goal-level door's context: the user's typed words as one text (`user_text`, the composer messages it binds to). */
 const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
   const typed = ctx.verified_user_messages ?? [];
@@ -332,13 +335,15 @@ const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
 async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, o: GoalLevelArgs): Promise<ToolOutcome> {
   if (o.source.origin !== 'user' || o.stance !== 'stated_current') return unavailable('goal_level_unverified', 'none', GOAL_LEVEL_UNVERIFIED);
   if (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx)) return refused('quote_not_in_users_words', undefined, { op: 0 });
+  // B's rule (DL-3 AMEND 20:01Z): the quote holds the figure, by its digits only; the words are not re-parsed for meaning.
+  if (!quoteHoldsFigure(o.source.quote, o.value)) return refused('figure_not_in_quote', undefined, { op: 0 });
   const read = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(read)) return read;
   if (read.identity === null) return unavailable('read_malformed');
   const goal = nodesOf(read.graph).find((n) => n.id === o.goal_id);
   if (goal?.kind !== 'goal') return refused('not_a_goal', undefined, { op: 0 });
   const held = new ProposalStore();
-  const offered = await proposeGoalCurrentLevel({ readGraph: async () => goalLevelReadOf(read), proposals: held }, levelCtx(ctx),
+  const offered = await proposeGoalCurrentLevel({ readGraph: async () => goalLevelReadOf(read), proposals: held, typedQuote: o.source.quote }, levelCtx(ctx),
     { goal_label: goal.label, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), user_stated: true });
   const prepared = offered.ok && typeof offered.proposal_id === 'string' ? held.get(offered.proposal_id) : undefined;
   if (prepared === undefined) {
@@ -374,9 +379,13 @@ function goalLevelApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposa
     commit: async (before) => {
       const approved = goalLevelReadOf(before);
       if (approved === null) return unavailable('read_malformed');
+      // ONE applied-state authority (#3467 R1): the writer marks its own private copy; the shared store is marked applied only
+      // below, with THIS registration's own receipt. A save with none stays unknown, never "already saved" on a retry.
+      const held = new ProposalStore();
+      held.put(p);
       let r: ToolResult;
       try {
-        r = await applyGoalCurrentLevel({ dispatch: deps.dispatch, proposals: deps.proposals, operationId: authorisationTurnId,
+        r = await applyGoalCurrentLevel({ dispatch: deps.dispatch, proposals: held, operationId: authorisationTurnId,
           readGraph: async () => { const now = await readSaved(deps, ctx.scenario_id); return isSavedRead(now) ? goalLevelReadOf(now) : null; } },
         levelCtx(ctx), p, approved);
       } catch {
@@ -803,6 +812,9 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   const decision = deps.proposals.authorise({ proposal_id: p.proposal_id, scenario_id: ctx.scenario_id,
     authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.graphHash, typed_approval_of: p.proposal_id });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
+  // A moved model that already holds exactly this change, with no receipt of this operation's own: its own write may have landed
+  // unrecorded (#3467 R1), so whether it was saved is UNKNOWN, never "superseded" and never "saved".
+  if (decision.status === 'superseded' && applier.readNow(before).holds) return unavailable('not_confirmed', 'unknown');
   if (decision.status !== 'execute') return refused(decision.status);
   // ...and on the model's FULL identity when it was prepared: a rename or other wording the graph hash leaves out moved it too.
   if (p.base_model_identity !== undefined && p.base_model_identity !== before.identity) return refused('superseded');

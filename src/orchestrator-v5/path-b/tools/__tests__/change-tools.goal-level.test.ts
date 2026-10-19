@@ -17,6 +17,7 @@ import { authorisationTurnId } from '../../../agent-lane/runtime/agent-capabilit
 import { ProposalStore } from '../../../agent-lane/proposal.js';
 import { provenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { applyChange, proposeChange } from '../change-tools.js';
+import { statedGoalLevelInUsersWords } from '../../../agent-lane/goal-current-level.js';
 
 type Rec = Record<string, unknown>;
 const SCN = '5c5c5c5c-0000-4000-8000-000000000039';
@@ -145,13 +146,58 @@ describe('the goal’s current level: the existing goal-level door, ONE registra
     expect(d.proposals.size()).toBe(0);
   });
 
-  it('a save with no receipt of its own is never reported saved: not verified, unknown', async () => {
+  it('a save with no receipt of its own is never reported saved: not verified, unknown, and a fresh-turn retry stays unknown (Codex R1)', async () => {
     const d = deps();
     const out = await propose(d, [level('user', 'stated_current', 'about 110 a week')]);
+    const id = String((out as { data: Rec }).data.proposal_id);
     noVersion = true;
-    expect(await applyChange(d, ctxSaying(SAID), { proposal_id: String((out as { data: Rec }).data.proposal_id) }))
-      .toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(await applyChange(d, ctxSaying(SAID), { proposal_id: id })).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
     expect(registered).toHaveLength(1);
+    // ONE applied-state authority: the writer's own mark is private; with no receipt the shared store never says "already saved".
+    expect(d.proposals.isApplied(id)).toBe(false);
+    const retried = await applyChange(d, { ...ctxSaying(SAID), turn_id: 'retry-no-receipt' }, { proposal_id: id });
+    expect(retried).toMatchObject({ status: 'unavailable', write: 'unknown' });
+    expect(registered, 'never a second registration').toHaveLength(1);
+  });
+
+  it('UNIT (Codex R1): "110 orders a month" for a goal in orders a week is refused unit_mismatch, never stamped weekly as the user\u2019s', async () => {
+    const words = 'We currently have 110 orders a month.';
+    const d = deps();
+    const out = await propose(d, [{ ...level('user', 'stated_current', '110 orders a month'), unit: 'orders a month' }], words);
+    expect(out).toMatchObject({ status: 'refused', reason: 'unit_mismatch' });
+    expect(d.proposals.size()).toBe(0);
+    expect(registered).toHaveLength(0);
+    expect((goal().observed_state as Rec).raw_value).toBe(120);
+  });
+
+  it.each([['widgets'], ['']])('an unknown or missing declared unit (%j) is refused, nothing proposed', async (unit) => {
+    const d = deps();
+    const out = await propose(d, [{ ...level('user', 'stated_current', 'about 110 a week'), unit }]);
+    expect(out.status).toBe('refused');
+    expect(d.proposals.size()).toBe(0);
+  });
+
+  it('B\u2019s rule, bytes only (DL-3 AMEND 20:01Z): the user\u2019s own words holding the figure are enough; the door does not re-read them for meaning', async () => {
+    const words = 'Weekly orders are 110 these days.';
+    const d = deps();
+    const out = await propose(d, [level('user', 'stated_current', 'Weekly orders are 110 these days')], words);
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+    const applied = await applyChange(d, ctxSaying(words), { proposal_id: String((out as { data: Rec }).data.proposal_id) });
+    expect(applied).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
+    expect((goal().observed_state as Rec).raw_value).toBe(110);
+  });
+
+  it('NUMBER (Codex R1): a quoted 110 cannot support a declared 115: figure_not_in_quote, nothing proposed', async () => {
+    const d = deps();
+    expect(await propose(d, [{ ...level('user', 'stated_current', 'about 110 a week'), value: 115 }])).toMatchObject({ status: 'refused', reason: 'figure_not_in_quote' });
+    expect(d.proposals.size()).toBe(0);
+  });
+
+  it('A LANE UNCHANGED: without B\u2019s typed quote, the door still reads the user\u2019s words for the figure; with it, only the unit', () => {
+    const goalUnit = { label: 'Weekly orders', unit: 'orders a week' };
+    expect(statedGoalLevelInUsersWords(110, 'orders a week', goalUnit, 'We have about 120 a week.')).toMatchObject({ ok: false, refusal: 'figure_not_in_users_words' });
+    expect(statedGoalLevelInUsersWords(110, 'orders a week', goalUnit, 'We have about 120 a week.', 'about 110 a week')).toMatchObject({ ok: true, raw: 110, quote: 'about 110 a week' });
+    expect(statedGoalLevelInUsersWords(110, 'orders a month', goalUnit, '', 'about 110 a month')).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
   });
 
   it('a model that moved since the card: superseded, nothing written', async () => {
