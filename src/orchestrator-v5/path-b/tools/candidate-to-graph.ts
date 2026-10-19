@@ -19,6 +19,8 @@
  *    AI declared as a person's keeps Olumi's placeholder (DL ruling (a)). Origins GraphV3 cannot hold are `blocked_schema`.
  *  · The raw draft travels beside the graph verbatim (`declared`); C5's draft tool returns it, so the scenario's one
  *    Conversation keeps it. The draft is Olumi's provisional model. A is untouched: it still applies its gates.
+ *  · A "stay at or below" goal's level the AI declared known and the user's is carried on A's science (cap, unit, frame,
+ *    `admitGoalBaseline`), since A reads that ceiling only from the brief (gap 3 ruling (c)).
  *  · Given the user's words, the draft's declared statements are recorded on their subjects, as construction records them
  *    (`withDeclaredStatements`): data carried, never a reading of the words' meaning.
  */
@@ -42,6 +44,8 @@ import { UNSIZED_OLUMI_RISK_REASON } from '../../agent-lane/unsized-risk.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { admitGoalBaseline } from '../../../cee/factor-extraction/goal-baseline-admissibility.js';
+import { ceilingTargetUnitMayBeALevel, targetTypedAsALevel } from '../../goal-target/goal-direction.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
 import { isStatementField, subjectKey, type DoorSubject } from '../../statement-door/subject.js';
 import { userStatementOf, type UserStatement } from '../../agent-lane/user-statements.js';
@@ -226,13 +230,28 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   const goalPath = `nodes[${slugId(g.metric)}]`;
   const threshold = finite(aGoal?.goal_threshold_raw);
   if (threshold && (targetWho === 'other' || targetWho === 'unknown')) blocked.push({ field_path: `${goalPath}.goal_threshold_raw`, declared: targetWho, missing: 'target_origin' });
-  if (goalWho === 'other' && aGoal?.observed_state !== undefined) blocked.push({ field_path: `${goalPath}.observed_state`, declared: 'other', missing: 'speaker_name' });
-  if (finite(g.baseline_value) && aGoal?.observed_state === undefined) loss.push(notConverted(a, `${goalPath}.observed_state`, g.metric, "Today's level", g.baseline_value));
+  // ⭐ GAP 3 RULING (c) (DL 19 Oct): A admits a "stay at or below" goal's level today only beside a ceiling it reads from the brief
+  // (`admit-model.ts` `ceilingRead`), and B reads no brief. So B carries the level the AI DECLARED, on the declared terms on which A
+  // admits a ">=" goal's level with no brief (known and `explicit`), with A's science: the threshold's own cap, unit and typed level
+  // frame, and A's normalisation and direction rule for a ceiling (`admitGoalBaseline`). Its author is the who-rule's.
+  const ceilingLevel = ((): Rec | undefined => {
+    const ag = aGoal as Rec | undefined;
+    const target = ag?.goal_threshold_raw, cap = ag?.goal_threshold_cap, unit = ag?.goal_threshold_unit ?? g.unit;
+    if (ag === undefined || ag.observed_state !== undefined || g.operator !== '<=' || g.baseline_known !== true
+      || (g.baseline_provenance ?? g.provenance) !== 'explicit' || !finite(g.baseline_value) || !finite(target) || !finite(cap)
+      || !(ceilingTargetUnitMayBeALevel(unit) || targetTypedAsALevel(ag.goal_threshold_frame ?? (g as Rec).frame, unit))) return undefined;
+    const level = admitGoalBaseline({ rawTarget: target, rawBaseline: g.baseline_value, cap, ceiling: true });
+    return level.admitted ? { value: level.normalised, baseline: level.normalised, ...(typeof unit === 'string' && unit.trim() !== '' ? { unit } : {}),
+      raw_value: g.baseline_value, cap } : undefined;
+  })();
+  const goalLevel = aGoal?.observed_state !== undefined ? numbersOf(aGoal.observed_state) : ceilingLevel;
+  if (goalWho === 'other' && goalLevel !== undefined) blocked.push({ field_path: `${goalPath}.observed_state`, declared: 'other', missing: 'speaker_name' });
+  if (finite(g.baseline_value) && goalLevel === undefined) loss.push(notConverted(a, `${goalPath}.observed_state`, g.metric, "Today's level", g.baseline_value));
   if (g.target_stated !== false && finite(g.value) && !threshold) loss.push(notConverted(a, `${goalPath}.goal_threshold_raw`, g.metric, 'The target', g.value));
   const goalNumbers: Rec = Object.fromEntries(Object.entries(aGoal ?? {}).filter(([k]) => k.startsWith('goal_threshold') || k === 'quantity_frame'
     || k === 'scale_frame' || k === 'goal_target_basis' || k === 'goal_level_reading'));
   const goalNode: Rec = { ...goalNumbers,
-    ...(aGoal?.observed_state !== undefined ? { observed_state: { ...numbersOf(aGoal.observed_state), ...valueStamp(goalWho) } } : {}),
+    ...(goalLevel !== undefined ? { observed_state: { ...goalLevel, ...valueStamp(goalWho) } } : {}),
     ...(threshold && ['>=', '<=', '>', '<'].includes(g.operator) ? { goal_direction: g.operator } : {}),
     ...(finite(g.horizon_months) && g.horizon_months > 0 ? { goal_horizon_months: g.horizon_months } : {}),
     ...(typeof (g as Rec).source_quote === 'string' ? { source_quote: (g as Rec).source_quote } : {}) };

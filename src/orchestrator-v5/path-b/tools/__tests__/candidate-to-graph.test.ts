@@ -919,6 +919,42 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(converted(scienceDraft()).graph, 'Competitor price cut').analysis_participation).toBe('retained_excluded');
   });
 
+  // ⭐ GAP 3 RULING (c) (DL 19 Oct): a "stay at or below" goal's declared level today is carried on A's science, with no brief read
+  // (A reads the held ceiling only from the brief: 13 of 13 such stored drafts had no level on B).
+  const ceilingDraft = (goal: Rec = {}): Rec => ({ ...salesDraft(), goal: { ...salesDraft().goal, operator: '<=', value: 300, baseline_value: 400, ...goal } });
+  it('⭐ GOAL LEVEL (ceiling): a "<=" goal keeps the level the AI declared known and the user\'s, on A\'s cap and normalisation', () => {
+    const draft = ceilingDraft();
+    // A with no brief does not admit it (it reads the ceiling from the brief); B carries it.
+    expect(ofKind(aOnDraftedNames(draft), 'goal')[0]!.observed_state).toBeUndefined();
+    const { graph, loss } = converted(draft);
+    const goal = ofKind(graph, 'goal')[0]!;
+    const cap = goal.goal_threshold_cap as number;
+    expect(goal).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 300 });
+    expect(goal.observed_state).toEqual({ value: 400 / cap, baseline: 400 / cap, unit: 'orders', raw_value: 400, cap, source: 'brief_extraction' });
+    expect(valueProvenanceOf(goal.observed_state).origin).toBe('human');
+    expect(loss.filter((l) => String(l.field_path).startsWith(`nodes[${goal.id}].observed_state`))).toEqual([]);
+    // Contrast: a ">=" goal's level is A's, as before.
+    expect(ofKind(converted(salesDraft()).graph, 'goal')[0]!.observed_state).toEqual(
+      expect.objectContaining({ raw_value: 400, source: 'brief_extraction' }));
+    // Who: a declared unknown speaker of the level wins, so it is carried with no author.
+    const unknown = ceilingDraft(); unknown.statements = [said('synthetic', { kind: 'goal', label: 'Monthly pre-orders' }, 'level', 'point', { value: 400 }, 'unknown')];
+    expect(valueProvenanceOf(ofKind(converted(unknown).graph, 'goal')[0]!.observed_state).origin).toBe('unknown');
+  });
+
+  it('GOAL LEVEL (ceiling): A\'s science still decides — a level already at the ceiling, an estimate, or a strict "<" is not carried, and said', () => {
+    const notCarried = (goal: Rec): boolean => {
+      const { graph, loss } = converted(ceilingDraft(goal));
+      const g = ofKind(graph, 'goal')[0]!;
+      return g.observed_state === undefined && loss.some((l) => String(l.field_path).startsWith(`nodes[${g.id}].observed_state`));
+    };
+    expect(notCarried({ baseline_value: 250 })).toBe(true);
+    expect(notCarried({ baseline_provenance: 'ai_proposed' })).toBe(true);
+    expect(notCarried({ baseline_provenance: 'inferred' })).toBe(true);
+    expect(notCarried({ baseline_known: false })).toBe(true);
+    expect(notCarried({ operator: '<' })).toBe(true);
+    expect(notCarried({})).toBe(false);
+  });
+
   // ⭐ THE DRAFT'S STATEMENTS ARE CARRIED, AS DATA (DL 19 Oct, gap 3 loss table: the bridge recorded 828 statements in 141 stored drafts
   // that path B did not). Each declared statement whose quote the user's words hold verbatim is recorded on its declared subject, as
   // construction records them; C5's GAP 1 claims use the same writer and subject keys.
