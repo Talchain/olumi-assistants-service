@@ -48,6 +48,8 @@ describe('the one reader: what a range does NOT share', () => {
   it.each([
     // A range gives its two ends or nothing (DL-3 range rule; C5 #3442): with no ONE scale to share, neither end is read alone.
     ['no ONE scale closes the range', 'We expect two to three hundred and fifty thousand users.', []],
+    // Across forms the two ends are two captures: the bare low end is refused, the high end is read whole as written.
+    ['no ONE scale closes the range, across forms', 'We expect 2 to three hundred and fifty thousand users.', [['words', 350_000]]],
     ['a bare digit before money', 'We need 2 to £3m.', [['currency', 3_000_000]]],
     ['a bare word before money', 'We need two to £3m.', [['currency', 3_000_000]]],
   ])('REFUSED, never credited bare: %s: "%s"', (_case, text, expected) => { expect(read(text)).toEqual(expected); });
