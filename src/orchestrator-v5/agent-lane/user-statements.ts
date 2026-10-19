@@ -195,11 +195,13 @@ function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentCor
 export function figuresWritten(quote: string, unit?: string): readonly { readonly low: number; readonly high: number }[] {
   // The ONE located-amount reader (`amountsWrittenIn`): digits and words, a fraction or an ordinal never a count (Codex #3427 R4 SIMPLER),
   // through the SAME eligibility as the one check (`amountComplete`, in the statement's own unit where it has one;
-  // Codex #3438 R5: no raw-word bypass at the verifier).
+  // Codex #3438 R5: no raw-word bypass at the verifier). A range is written only when BOTH its ends are (Codex #3438 R8: "20 ± 5 to
+  // 10" is no range of 5 to 10).
   const amounts = amountsWrittenIn(quote).filter((a) => amountComplete(a, unit, quote)).sort((a, b) => a.index - b.index);
   return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
     ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
-    ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
+    ...findJoinedRanges(quote).filter((r) => amountComplete(r.low, unit, quote) && amountComplete(r.high, unit, quote))
+      .map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
 }
 
 /**
