@@ -19,6 +19,8 @@
  *    AI declared as a person's keeps Olumi's placeholder (DL ruling (a)). Origins GraphV3 cannot hold are `blocked_schema`.
  *  · The raw draft travels beside the graph verbatim (`declared`); C5's draft tool returns it, so the scenario's one
  *    Conversation keeps it. The draft is Olumi's provisional model. A is untouched: it still applies its gates.
+ *  · Given the user's words, the draft's declared statements are recorded on their subjects, as construction records them
+ *    (`withDeclaredStatements`): data carried, never a reading of the words' meaning.
  */
 import type { RepairEntry } from '@talchain/schemas';
 import {
@@ -40,6 +42,10 @@ import { UNSIZED_OLUMI_RISK_REASON } from '../../agent-lane/unsized-risk.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../../statement-door/statements.js';
+import { isStatementField, subjectKey, type DoorSubject } from '../../statement-door/subject.js';
+import { userStatementOf, type UserStatement } from '../../agent-lane/user-statements.js';
+import { verbatimSourceLine } from '../../agent-lane/quote-confirmation.js';
 
 type Rec = Record<string, any>;
 /** Whose figure the AI declared it to be. */
@@ -480,11 +486,77 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   return { graph: { nodes, edges, ...(goal_constraints.length > 0 ? { goal_constraints } : {}) }, declared: structuredClone(input), loss, blocked_schema: blocked };
 }
 
+/** The user's own words the draft was made from, and when it is recorded: with them, the draft's statements are carried. */
+export interface StatementCarry { readonly words: string; readonly recorded_at: string }
+
+/**
+ * ⭐ THE DRAFT'S STATEMENTS, CARRIED AS DATA (DL 19 Oct, after the gap 3 loss table: "a data carry, not a rule"). Each statement the
+ * drafter declared is recorded on its declared subject by the ONE claim-record writer, as construction records them
+ * (`withUserStatement`, `CONSTRUCTION_ATTEST`; C5's GAP 1 builds its claims the same way): the quote, the line of the user's words
+ * that holds it, the form, figures, unit, qualifier and conditions, and who said it as the AI declared. A record is the user's
+ * words, so only a quote their text holds verbatim is recorded (`verbatimSourceLine`). A declared other person has no name here: their
+ * words are recorded as from an unclear source, and the name is listed (`speaker_name`). A risk's holds-now or chance stays with its
+ * card, as in A. A subject not in the model records nothing. `declared` keeps every statement.
+ */
+function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarry, blocked: BlockedSchema[]): Rec {
+  const nodes = list<Rec>(graph.nodes);
+  const idOf = (label: unknown, kinds: readonly string[]): string | undefined => {
+    if (typeof label !== 'string') return undefined;
+    const hits = nodes.filter((n) => kinds.includes(String(n.kind)) && canonicalLabel(String(n.description ?? n.label)) === canonicalLabel(label));
+    return hits.length === 1 ? String(hits[0]!.id) : undefined;
+  };
+  const subjectOf = (s: Rec, field: DoorSubject['field']): DoorSubject | undefined => {
+    if (s.kind === 'link') {
+      const from = idOf(s.label, ['factor', 'risk', 'outcome', 'goal', 'option']), to = idOf(s.to_label, ['factor', 'risk', 'outcome', 'goal']);
+      return from !== undefined && to !== undefined && list<Rec>(graph.edges).some((e) => e.from === from && e.to === to)
+        ? { kind: 'link', id: from, to_id: to, field } : undefined;
+    }
+    if (s.kind === 'option' && typeof s.factor_label === 'string' && s.factor_label.trim() !== '') {
+      const option = idOf(s.label, ['option']), factor = idOf(s.factor_label, ['factor']);
+      return option !== undefined && factor !== undefined ? { kind: 'factor', id: factor, option_id: option, field } : undefined;
+    }
+    if (s.kind === 'risk' && (field === 'holds_now' || field === 'occurrence')) return undefined;
+    const id = ['goal', 'factor', 'option', 'risk'].includes(String(s.kind)) ? idOf(s.label, [String(s.kind)]) : undefined;
+    return id === undefined ? undefined : { kind: s.kind as DoorSubject['kind'], id, field };
+  };
+  const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const groups = new Map<string, { subject: DoorSubject; statements: UserStatement[] }>();
+  for (const st of list<Rec>((input as Rec).statements)) {
+    const s = st?.subject;
+    if (s === null || typeof s !== 'object' || !isStatementField(st.field) || typeof st.quote !== 'string') continue;
+    const subject = subjectOf(s as Rec, st.field);
+    const source = subject === undefined ? undefined : verbatimSourceLine({ now: carry.words }, st.quote);
+    if (subject === undefined || source === undefined) continue;
+    // The figures as the record holds them: a point's two ends equal, a bound's one end, a range's ends and its stated central figure.
+    const one = finite(st.value) ? st.value : finite(st.low) && st.low === st.high ? st.low : undefined;
+    const figures = st.form === 'point' ? (one === undefined ? undefined : { low: one, high: one })
+      : st.form === 'range' ? (finite(st.low) && finite(st.high) ? { low: st.low, high: st.high, ...(finite(st.value) ? { value: st.value } : {}) } : undefined)
+        : st.form === 'lower_bound' ? (finite(st.low) || finite(st.value) ? { low: finite(st.low) ? st.low : st.value } : undefined)
+          : st.form === 'upper_bound' ? (finite(st.high) || finite(st.value) ? { high: finite(st.high) ? st.high : st.value } : undefined)
+            : st.form === 'holds_now' || st.form === 'describes' ? {} : undefined;
+    const statement = figures === undefined ? undefined : userStatementOf({ ...(st.speaker === 'user' ? { speaker: 'user' } : { said_by: 'unknown' }),
+      quote: st.quote, source, subject: { quantity: subjectKey(subject), node_id: subject.id, ...(subject.option_id !== undefined ? { option_id: subject.option_id } : {}) },
+      form: st.form, ...figures, ...(text(st.unit) !== undefined ? { unit: st.unit } : {}), ...(text(st.qualifier) !== undefined ? { qualifier: st.qualifier } : {}),
+      ...(text(st.conditions) !== undefined ? { conditions: st.conditions } : {}), reading: 'olumi' });
+    if (statement === undefined) continue;
+    if (st.speaker === 'other') blocked.push({ field_path: `nodes[${subject.id}].user_statements`, declared: 'other', missing: 'speaker_name' });
+    const group = groups.get(subjectKey(subject)) ?? { subject, statements: [] };
+    group.statements.push(statement);
+    groups.set(subjectKey(subject), group);
+  }
+  let out = graph as Rec & { nodes: unknown[] };
+  for (const { subject, statements } of groups.values()) {
+    out = withUserStatement(out, userStatementRecord(subject, statements, carry.recorded_at, CONSTRUCTION_ATTEST), subject) ?? out;
+  }
+  return out;
+}
+
 /**
  * The draft as Olumi's provisional model: the converted graph through the build's own post-admission science — a declared
  * accumulation over a declared horizon, then the refit chain (stated `{goalOwnRows}` → Olumi → `clampForPersist`) — schema-checked.
+ * With the user's words (`carry`), the draft's statements are recorded on their subjects (`withDeclaredStatements`).
  */
-export function candidateToGraph(input: unknown): CandidateToGraphResult {
+export function candidateToGraph(input: unknown, carry?: StatementCarry): CandidateToGraphResult {
   const converted = candidateToAdmittedGraph(input);
   if ('refused' in converted) return converted;
   const c = asCandidate(input)!;
@@ -497,6 +569,8 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
     graph0 = { ...graph0, nodes: accumulated.nodes, edges: accumulated.edges };
   }
   const stated = refitFramesForStatedEffects(graph0, { goalOwnRows: true }).graph;
-  const graph = clampForPersist(refitFramesForOlumiEstimates(stated as never).graph as never) as Record<string, unknown>;
-  return GraphV3.safeParse(graph).success ? { ...converted, graph, loss } : { refused: 'graph_invalid' };
+  const refit = clampForPersist(refitFramesForOlumiEstimates(stated as never).graph as never) as Record<string, unknown>;
+  const blocked_schema = [...converted.blocked_schema];
+  const graph = carry === undefined ? refit : withDeclaredStatements(refit, input, carry, blocked_schema);
+  return GraphV3.safeParse(graph).success ? { ...converted, graph, loss, blocked_schema } : { refused: 'graph_invalid' };
 }

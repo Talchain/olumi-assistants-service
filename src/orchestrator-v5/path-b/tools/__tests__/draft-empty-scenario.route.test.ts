@@ -161,10 +161,15 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   it('⭐ STEP 8 gap 3 (RED on the bridge): the model saved is candidateToGraph\'s conversion of the ONE draft, and the draft travels to the AI beside the receipt', async () => {
     const body = await turn();
     expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
-    const converted = candidateToGraph(DRAFT);
+    expect(registered).toHaveLength(1);
+    // ⭐ The draft's statements are recorded on their subjects from the brief's own words (gap 3 carry): the aim, on the goal's target.
+    const goal = (registered[0]!.graph.nodes as Json[]).find((n) => n.kind === 'goal')!;
+    expect(goal.user_statements).toEqual([{ subject_key: `goal|${goal.id}|||target`, field: 'target', recorded_at: expect.any(String),
+      attest: { recorded_by: 'construction' }, statements: [{ said_by: 'unknown', quote: AIM, source: AIM, form: 'lower_bound', low: 300,
+        unit: 'bookings a week', reading: 'olumi', subject: { quantity: `goal|${goal.id}|||target`, node_id: goal.id } }] }]);
+    const converted = candidateToGraph(DRAFT, { words: BRIEF, recorded_at: goal.user_statements[0].recorded_at });
     if ('refused' in converted) throw new Error(converted.refused);
     // The registered bytes are the conversion's: A's numbers on a label-blind copy, each figure with the origin the AI declared.
-    expect(registered).toHaveLength(1);
     expect(registered[0]!.graph).toEqual(converted.graph);
     // The AI reads the drafter's JSON verbatim, and what the conversion said, in the tool's answer (the conversation keeps them).
     const answer = JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json;

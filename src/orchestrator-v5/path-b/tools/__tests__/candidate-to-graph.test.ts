@@ -919,6 +919,63 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(converted(scienceDraft()).graph, 'Competitor price cut').analysis_participation).toBe('retained_excluded');
   });
 
+  // ⭐ THE DRAFT'S STATEMENTS ARE CARRIED, AS DATA (DL 19 Oct, gap 3 loss table: the bridge recorded 828 statements in 141 stored drafts
+  // that path B did not). Each declared statement whose quote the user's words hold verbatim is recorded on its declared subject, as
+  // construction records them; C5's GAP 1 claims use the same writer and subject keys.
+  const SALES = ['We want 600 pre-orders a month within six months; we get 400 now.', 'We spend £2,000 a month on ads.', AD_QUOTE,
+    'Our agency reckons doubling it means £3,500 to £4,500 a month.', 'A rival may cut prices.'];
+  const SALES_WORDS = SALES.join(' ');
+  const AT = '2026-10-19T22:00:00.000Z';
+  const said = (quote: string, subject: Rec, field: string, form: string, figures: Rec, speaker: string | null): Rec => ({ quote,
+    subject: { to_label: null, factor_label: null, ...subject }, field, form, value: null, low: null, high: null, unit: null, qualifier: null,
+    conditions: null, speaker, ...figures });
+  const carriedDraft = (): Rec => ({ ...salesDraft(),
+    risks: [{ label: 'Rival price cut', provenance: 'explicit', unit: null, plausible_max: null, already_true_evidence: null }],
+    statements: [
+      said(SALES[0]!, { kind: 'goal', label: 'Monthly pre-orders' }, 'level', 'point', { value: 400, unit: 'orders' }, 'user'),
+      said(SALES[0]!, { kind: 'goal', label: 'Monthly pre-orders' }, 'target', 'lower_bound', { value: 600, unit: 'orders' }, 'user'),
+      said(SALES[1]!, { kind: 'factor', label: 'Ad spend' }, 'level', 'point', { value: 2000, unit: '£' }, 'user'),
+      said(SALES[3]!, { kind: 'option', label: 'Double the ad spend', factor_label: 'Ad spend' }, 'level', 'range', { low: 3500, high: 4500, unit: '£' }, 'other'),
+      said(AD_QUOTE, { kind: 'link', label: 'Ad spend', to_label: 'Monthly pre-orders' }, 'effect', 'point', { value: 1, unit: 'orders' }, 'user'),
+      said(SALES[4]!, { kind: 'risk', label: 'Rival price cut' }, 'level', 'describes', {}, null),
+      // Not recorded: a risk's holds-now reading (its card's), words the user did not write, and a subject not in the model.
+      said(SALES[4]!, { kind: 'risk', label: 'Rival price cut' }, 'holds_now', 'holds_now', {}, 'user'),
+      said('We get 450 now.', { kind: 'goal', label: 'Monthly pre-orders' }, 'level', 'point', { value: 450, unit: 'orders' }, 'user'),
+      said(SALES[1]!, { kind: 'factor', label: 'Shelf space' }, 'level', 'point', { value: 3, unit: 'shelves' }, 'user'),
+    ] });
+  const record = (key: string, field: string, statements: Rec[]): Rec => ({ subject_key: key, field, recorded_at: AT, attest: { recorded_by: 'construction' },
+    statements: statements.map((st) => ({ source: SALES_WORDS, reading: 'olumi', subject: { quantity: key, node_id: key.split('|')[1], ...(key.split('|')[3] ? { option_id: key.split('|')[3] } : {}) }, ...st })) });
+
+  it('⭐ STATEMENTS CARRIED (gap 3): each declared statement the user\'s words hold is recorded on its subject, as construction records it', () => {
+    const out = candidateToGraph(carriedDraft(), { words: SALES_WORDS, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    const g = out.graph as Rec;
+    expect(byLabel(g, 'Monthly pre-orders').user_statements).toEqual([
+      record('goal|monthly_pre_orders|||level', 'level', [{ speaker: 'user', quote: SALES[0], form: 'point', low: 400, high: 400, unit: 'orders' }]),
+      record('goal|monthly_pre_orders|||target', 'target', [{ speaker: 'user', quote: SALES[0], form: 'lower_bound', low: 600, unit: 'orders' }])]);
+    expect(byLabel(g, 'Ad spend').user_statements).toEqual([
+      record('factor|ad_spend|||level', 'level', [{ speaker: 'user', quote: SALES[1], form: 'point', low: 2000, high: 2000, unit: '£' }]),
+      // Another person's range: their words, kept whole on the option's setting, from an unclear source (no name to record), listed.
+      record('factor|ad_spend||double_the_ad_spend|level', 'level', [{ said_by: 'unknown', quote: SALES[3], form: 'range', low: 3500, high: 4500, unit: '£' }]),
+      record('link|ad_spend|monthly_pre_orders||effect', 'effect', [{ speaker: 'user', quote: AD_QUOTE, form: 'point', low: 1, high: 1, unit: 'orders' }])]);
+    expect(byLabel(g, 'Rival price cut').user_statements).toEqual([
+      record('risk|rival_price_cut|||level', 'level', [{ said_by: 'unknown', quote: SALES[4], form: 'describes' }])]);
+    expect(out.blocked_schema).toContainEqual({ field_path: 'nodes[ad_spend].user_statements', declared: 'other', missing: 'speaker_name' });
+    // Nothing else is recorded: 6 of the 9 declared statements.
+    expect((g.nodes as Rec[]).flatMap((n) => (n.user_statements ?? []) as Rec[]).flatMap((r) => r.statements as Rec[])).toHaveLength(6);
+    expect(GraphV3.safeParse(g).success).toBe(true);
+  });
+
+  it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
+    const bare = converted(carriedDraft());
+    expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);
+    const out = candidateToGraph(carriedDraft(), { words: SALES_WORDS, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    const strip = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map(({ user_statements: _s, ...n }) => n) });
+    expect(strip(out.graph as Rec)).toEqual(bare.graph);
+    expect(out.loss).toEqual(bare.loss);
+  });
+
   it('⛔ LABEL-BLIND (#3464 R2): B\'s graph is the same under any names, for every synthetic draft', () => {
     const drafts = [dilemmaDraft(), salesDraft(), salesDraft('user'), sumDraft(400), sumDraft(500), sumDraft(400, 'user'), structureDraft(),
       scienceDraft(), scienceDraft({ userFold: true }), scienceDraft({ otherFold: true }), scienceDraft({ undeclaredStatusQuo: true }), scienceDraft({ otherRisk: true })];

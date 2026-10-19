@@ -4,7 +4,8 @@
  *  2. ONE drafter call, the construction's own first call (the same model, instructions, input and strict schema as
  *     `buildModelFromBrief`'s first pass), and the drafter's JSON becomes the model through Step 8's pure `candidateToGraph`:
  *     A's numbers and structure science on a label-blind copy, each figure with the origin the AI declared, no reading of the
- *     brief. It replaces the named bridge (`buildModelFromBrief`, DL-3 ruling 6), which path B no longer calls;
+ *     brief. It replaces the named bridge (`buildModelFromBrief`, DL-3 ruling 6), which path B no longer calls. The draft's
+ *     statements are recorded on their subjects from the brief's own words (`candidateToGraph`'s carry);
  *  3. CREATE-ONLY registration under the construction's own operation id (`constructionOperationId`), so a lost response or a
  *     concurrent copy is recovered as this construction's own version, never a second one;
  *  4. an INDEPENDENT readback: `mutated` only when THIS construction's own version (`findConstructionVersion`) is on record AND
@@ -77,7 +78,7 @@ export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 's
 
   const draft = await drafted(deps.callStructured, args.brief);
   if ('outcome' in draft) return draft.outcome;
-  const converted = candidateToGraph(draft.draft);
+  const converted = candidateToGraph(draft.draft, { words: args.brief, recorded_at: new Date().toISOString() });
   if ('refused' in converted) return refused(converted.refused);
 
   let reg: Awaited<ReturnType<InternalDispatch>>;
