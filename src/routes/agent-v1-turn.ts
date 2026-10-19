@@ -5202,7 +5202,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // approval is waiting (that card is the next step) and never on an unchecked verdict.
     const startingAssumptions = approvals.length === 0 && carriedApproval.length === 0
       ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
-    const steadyCard = steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId, brief: identityOfferBrief,
+    /**
+     * ⭐ PATH-B `core` (DL-3 22:5xZ; Paul: out of the box, the AI is the ONE voice; both judges' criterion 5 on 548f886f): beside the
+     * AI's reply only the cards of a change waiting for a yes (approve, change, not now, review), the AI's own research offers,
+     * the protocol controls that make the engine or the AI act (Run, Explain, rebuild), receipts and blocks. No host-composed
+     * next step, guidance card, sizing chip, gap signal, Run-outcome chip, action bar or host-issued proposal:
+     * a host card asked "Give your estimate" on the link the AI's reply had just said could not hold it. Every other lane: unchanged.
+     */
+    const hostCards = mode !== 'core';
+    const steadyCard = !hostCards ? null : steadyHorizonCard({ graph: readbackGraph, graphHash, scenarioId, userId, brief: identityOfferBrief,
       runReply: resultFirstRunCompleted || result.tool_calls.some((c, i) => c.name === 'run_analysis' && result.tool_results[i]?.ran === true),
       runResult: analysisResult,
       approvalHeld: approvals.length + carriedApproval.length + liveHolds.length + proposals.outstanding(scenarioId, userId).length > 0 });
@@ -5238,7 +5246,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(steadyCard === null ? [] : [steadyCard.chip]),
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
-      ...runOutcomeChips,
+      ...(hostCards ? runOutcomeChips : []),
       ...(resultFirstRunCompleted
         ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
       // The explanation failed on a Run that is still current: the SAME bound control is offered again (the fallback;
@@ -5246,7 +5254,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(fastPath === 'explain' && narrationStatus === 'unavailable' && runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })
         ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
       // The run is refused and Olumi can fill the gap: the one specific next step replaces the general one.
-      ...(startingAssumptions.length > 0 ? startingAssumptions
+      ...(!hostCards ? [] : startingAssumptions.length > 0 ? startingAssumptions
         : ((runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked) && !onlyUserCanUnblock(analysisReady) ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent. Only a
@@ -5269,7 +5277,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
       state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       // S-B typed replies own their exits, including an intentional empty list (Science's estimate questions).
-    }, !aiWroteReply && actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
+    }, hostCards && !aiWroteReply && actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash, readbackGraph) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
@@ -5338,7 +5346,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const thin = thinDraftOffer(readbackGraph, constructionConfirmResolved
       || result.tool_calls.some(c => c.name === 'build_model_from_brief' && c.mutated === true));
     let thinShownGuidance: GuidanceWire | undefined;
-    if (thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
+    if (hostCards && thin !== null && heldCardOffer.length === 0 && approvals.length === 0 && carriedApproval.length === 0
       && fastPath !== 'method' && (fastPath !== 'approve' || constructionConfirmResolved)) {
       nextStepOffers.offered.splice(0, nextStepOffers.offered.length, ...firstOfEachId([
         ...nextStepOffers.offered.filter(c => c.id === RUN_OFFER_CHIP.id), thin.press, ...nextStepOffers.offered,
@@ -5356,7 +5364,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (guidedReplyText.progress !== null) text = `${text} ${guidedReplyText.progress}`;
     }
     const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
-    const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
+    const guidedActions = !hostCards ? [] : guidedSizingActions(guidedDraft, readbackGraph,
       guidedDraft === undefined ? [] : await guidedSizingHistory(historyReader, scenarioId, undefined));
     offeredNow.push(...guidedActions);
     const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
@@ -6036,11 +6044,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
       const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash, readbackGraph);
-      const guidance = nextStepOffers.selection;
+      const guidance = hostCards ? nextStepOffers.selection : undefined;
       if (guidance !== undefined) wireBody = { ...wireBody, guidance };
       // ⭐ S-C/S-E STANDING GAP SIGNAL (DL ruling 7 Oct): typed and deterministic, from this same final readback, on every
       // turn; S-B renders it (T0 tier, suppressed once dismissed). Only the widen reply also says it in words.
-      const gap = modelGapOf(readbackGraph, toolCtx.user_text ?? '');
+      const gap = hostCards ? modelGapOf(readbackGraph, toolCtx.user_text ?? '') : null;
       if (gap !== null) wireBody = { ...wireBody, model_gap: gap };
       // ⭐ THE SUGGESTION PREVIEW (DL 5941839936; `turn-context/proposal-preview.ts`): what a Yes on THIS turn's consent
       // chip would do, from the STORED proposal the chip names, only while it would still execute. Attached below, AFTER
@@ -6583,7 +6591,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * persisted state (amendment 9), so an unchanged state reloads it byte for byte. Never stored: the answer row's SQL
      * envelopes carry no bar (the recorded missing contract).
      */
-    const actionBar = await (async () => {
+    const actionBar = !hostCards ? undefined : await (async () => {
       try {
         let history: GuidanceState | null = guidanceHistory;
         if (answerGuidance !== undefined) {
