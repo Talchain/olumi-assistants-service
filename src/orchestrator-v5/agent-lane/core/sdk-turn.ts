@@ -23,7 +23,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  Agent, MaxTurnsExceededError, MemorySession, OpenAIResponsesModel, run, setTracingDisabled, system, tool, user, withTrace,
+  Agent, MaxTurnsExceededError, MemorySession, OpenAIResponsesModel, run, setTracingDisabled, system, tool, ToolCallError, user, withTrace,
   type AgentInputItem, type OpenAIClient,
 } from '@openai/agents';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
@@ -198,6 +198,9 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
     parameters: def.parameters as ToolParameters,
     strict: false,
     execute: async (args: unknown) => call(def.name, (args !== null && typeof args === 'object' ? args : {}) as Record<string, unknown>),
+    // A capability that THROWS (an ownership refusal, a revision conflict, an unreadable model) ends the turn exactly as it
+    // does on the existing loop: the route's own handlers answer it. Never turned into text for the model.
+    errorFunction: null,
   }));
   const agent = new Agent({
     name: 'Olumi',
@@ -267,6 +270,8 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
   } catch (err) {
     await forgetContext().catch(() => undefined);
     if (err instanceof MaxTurnsExceededError) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
+    // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.
+    if (err instanceof ToolCallError && err.error !== undefined) throw err.error;
     log.warn({ event: 'agent_core.turn_failed', scenario_id: input.ctx.scenario_id, request_id: input.ctx.request_id, err: String(err).slice(0, 300) },
       'agent-core: the SDK run did not finish');
     throw err;
