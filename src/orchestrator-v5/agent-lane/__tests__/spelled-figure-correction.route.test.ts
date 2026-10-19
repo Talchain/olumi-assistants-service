@@ -128,7 +128,9 @@ describe('a figure written in words is written, exactly as its digits are (deplo
     for (const typed of ['We now have 70 customers on the support plan; the team resolves the same as before.',
       'We now have seventy customers on the support plan; the team resolves the same as before.']) {
       const { result, chip, w } = await correct(typed, teamLevel(70));
-      expect(result, typed).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+      // The user wrote 70, for customers: nothing is proposed for the team and the Agent asks which they mean (Codex R6 on #3433:
+      // the generic "origin unknown" refusal became the quantity-specific ask).
+      expect(result, typed).toMatchObject({ ok: false, mutated: false, refusal: 'nothing_to_adopt' });
       expect(chip).toBeUndefined();
       expect(nodeOf(w.graph(), TEAM)).toEqual(nodeOf(SERVED.graph, TEAM));
     }
