@@ -740,14 +740,14 @@ function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx,
 /** A new option as stored on the proposal: its id, decision and name, and each setting as the batch door's plan read it. */
 type StoredOption = { readonly kind: 'option'; readonly id: string; readonly decision_id: string; readonly label: string;
   readonly settings: readonly { readonly factor_id: string; readonly value: number; readonly raw_value?: number; readonly unit?: string;
-    readonly author: 'model_proposed' | 'unverified'; readonly declared: z.infer<typeof Declared> }[] };
+    readonly author: 'model_proposed' | 'unverified'; readonly declared: z.infer<typeof StoredFigure> }[] };
 
 /**
  * add_to_model, options: each new option as the add-option door takes one. Its id comes from that door's own builder on this read
  * (decision, factors, same settings as an existing option); each setting passes the same rules as an option's setting today (its
  * source and stance by the ONE table, a person's words checked) and is read on the factor's range by the batch door's own plan.
  */
-function newOptionsOf(options: readonly AddOptionArgs[], read: SavedRead, ctx: ChangeCtx, at: (i: number) => number): StoredOption[] | ToolOutcome {
+function newOptionsOf(options: readonly AddOptionArgs[], read: SavedRead, ctx: ChangeCtx, at: (i: number) => number, recordedAt: string): StoredOption[] | ToolOutcome {
   const out: StoredOption[] = [];
   let graph = read.graph;
   for (const [i, o] of options.entries()) {
@@ -761,7 +761,8 @@ function newOptionsOf(options: readonly AddOptionArgs[], read: SavedRead, ctx: C
     if ('refusal' in plan) return stopped(plan, declared, () => at(i));
     const settings = plan.levels.map((l, k) => ({ factor_id: l.factor_id, value: l.value, ...(l.raw_value !== undefined ? { raw_value: l.raw_value } : {}),
       ...(l.unit !== undefined ? { unit: l.unit } : {}), author: l.author === 'model_proposed' ? 'model_proposed' as const : 'unverified' as const,
-      declared: { value: o.settings[k]!.value, unit: o.settings[k]!.unit, stance: o.settings[k]!.stance, source: o.settings[k]!.source } }));
+      // Stored as every figure is (`operationOf`): a person's setting keeps the line of their words its claim is built from (GAP 1).
+      declared: StoredFigure.parse(operationOf({ op: 'set_option_setting', option_id: '', ...o.settings[k]! }, ctx, recordedAt).value) }));
     const candidate: StoredOption = { kind: 'option', id: '', decision_id: o.decision_id, label: o.label, settings };
     const built = buildAddOptionTransaction({ parent_decision_id: o.decision_id, label: o.label, interventions: doorOptionOf(candidate).interventions }, graphViewOf(graph));
     if (!built.matched) return refused(codeOf(`add_option_${built.reason}`), undefined, { op: at(i) });
@@ -784,7 +785,7 @@ function optionsOf(operations: readonly ProposalOperation[]): StoredOption[] | n
     const v = isRec(o.value) ? o.value : {};
     const settings = Array.isArray(v.settings) ? v.settings.filter(isRec) : null;
     if (v.id !== o.path || typeof v.decision_id !== 'string' || typeof v.label !== 'string' || settings === null) return null;
-    const parsed = settings.map((st) => ({ st, d: Declared.safeParse(st.declared) }));
+    const parsed = settings.map((st) => ({ st, d: StoredFigure.safeParse(st.declared) }));
     if (parsed.some(({ st, d }) => !d.success || typeof st.factor_id !== 'string' || typeof st.value !== 'number'
       || (st.author !== 'model_proposed' && st.author !== 'unverified'))) return null;
     out.push({ kind: 'option', id: o.path, decision_id: v.decision_id, label: v.label, settings: parsed.map(({ st, d }) => ({ factor_id: String(st.factor_id),
@@ -902,7 +903,7 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   if (members === null) return refused('unsupported_change');
   const added = newFactorsOf(adds, read, ctx, at(adds));
   if (!Array.isArray(added)) return added;
-  const options = newOptionsOf(addOptions, read, ctx, at(addOptions));
+  const options = newOptionsOf(addOptions, read, ctx, at(addOptions), recordedAt);
   if (!Array.isArray(options)) return options;
   const written = { nodes: [...plan.levels.flatMap((l) => [l.option_id, l.factor_id]), ...(plan.values ?? []).map((v) => v.factor_id), ...(plan.frames ?? []).map((f) => f.factor_id),
     ...options.flatMap((o) => [o.decision_id, ...o.settings.map((st) => st.factor_id)])],
@@ -1003,7 +1004,9 @@ function doorApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, c:
     commit: async (before) => {
       const plan = planOf(ctx.scenario_id, p.proposal_id, c.figures, before.graph);
       if ('refusal' in plan) return stopped(plan, c.figures);
-      const claims = claimsFor(before.graph, [...c.figures, ...c.addFigures], new Set(c.adds.map((a) => a.id)));
+      // Each person's claim in the same commit, a new option's settings' too (on their factor, naming the option).
+      const optionSettings = c.options.flatMap((o) => o.settings.map((st): Op => ({ kind: 'setting', option_id: o.id, factor_id: st.factor_id, ...st.declared })));
+      const claims = claimsFor(before.graph, [...c.figures, ...c.addFigures, ...optionSettings], new Set(c.adds.map((a) => a.id)));
       const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
         links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}),
         ...(c.links.length > 0 ? { link_strengths: linkStrengthsIn(c.links) } : {}),
