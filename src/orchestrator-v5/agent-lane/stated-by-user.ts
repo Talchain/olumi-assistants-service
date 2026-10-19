@@ -296,8 +296,8 @@ const ORDINAL_WORDS = [...'first second third fourth fifth sixth seventh eighth 
   ...[CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)].map((w) => `${w}th`)];
 const SCALE_WORDS = [CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)];
 /**
- * A number the text writes in words ("three engineers", "a hundred and twenty"), read by the repo's one cardinal grammar, with an
- * article before a scale word read as "one" (`wordsAmount`).
+ * A number the text writes in words ("three engineers"; an article, a scale word and "and twenty"), read by the repo's one cardinal
+ * grammar, with an article before a scale word read as "one" (`wordsAmount`).
  */
 // ⛔ READ WHOLE OR NOT AT ALL (Codex #3438 R2/R3: an article amount + "and twenty" read only its first part; "… and twenty and a half
 // hours" read 120 and "the two and a half …th ticket" 2.5, each credited as the user's). Every capture takes its WHOLE continuation with
