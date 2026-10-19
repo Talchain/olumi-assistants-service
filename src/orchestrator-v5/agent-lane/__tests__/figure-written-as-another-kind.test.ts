@@ -23,7 +23,9 @@ describe('figureTheUserWrote: a plain number written with a unit word of another
     ['CONTROL: "300 subscribers" IS 300 people (the same family: count)', 300, 'people', 'we have 300 subscribers on Pro', true],
     ['CONTROL: "12 months" IS 12 months', 12, 'months', 'reach it within 12 months', true],
     ['CONTROL (a word that is no unit): "49 a month" is still £49/month', 49, 'GBP/month', 'we charge 49 a month', true],
-    ['CONTROL (a word that is no unit): "300 Pro seats" reads "Pro" — unchanged, grounds', 300, 'GBP/month', 'we sold 300 Pro seats', true],
+    // DL-3 on #3429 (the counted-noun class, digits and words): a count followed by a noun phrase that names nothing of the held
+    // unit counts that, so "300 Pro seats" no longer grounds £/month (before: "a word that is no unit — unchanged, grounds").
+    ['RED (counted noun): "300 Pro seats" is never 300 GBP/month', 300, 'GBP/month', 'we sold 300 Pro seats', false],
     ['CONTROL (money written as money): "£300 a month" is 300 GBP/month', 300, 'GBP/month', 'it costs £300 a month', true],
     ['CONTROL (end of text): "we have 300" is still 300 GBP/month', 300, 'GBP/month', 'we have 300', true],
   ])('%s', (_label, value, unit, text, expected) => {
