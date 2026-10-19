@@ -42,7 +42,7 @@ import { draftedTeamPartOf, eventModelAsk, unsizedEventOptions } from "../../orc
 import { unsizedOlumiRiskIds } from "../../orchestrator-v5/agent-lane/unsized-risk.js";
 import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, riskOccurrenceIsCurrent, riskOccurrenceSubject, riskOccurrenceWindowFromToday, riskWindowHoldsAskWords } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
-import { recordsWithUnknownSpeakerOn } from "../../orchestrator-v5/statement-door/statements.js";
+import { recordsWithUnknownSpeakerOn, userStatementsOn, type UserStatementRecord } from "../../orchestrator-v5/statement-door/statements.js";
 import type { UserStatement } from "../../orchestrator-v5/agent-lane/user-statements.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
@@ -1382,29 +1382,36 @@ const statusQuoLevelAsk = (label: string): string =>
  * exact words; VERIFIER C6). Where a factor's kept level statements hold several readings for one quantity, period and conditions,
  * the ask never asks for a figure the user gave, and never offers zero, a mean or weights. Each statement counts only at its own
  * evidence strength:
- *  · two or more DISTINCT figures of the user's own, each bound to the quantity by the statement door → their different cases;
- *  · one sentence read as two or more level readings the quote check could not bind (the brief's words kept verbatim, as C6's
- *    distribution was) → the recorded information, claiming neither cases nor probabilities.
+ *  · two or more DISTINCT figures of the user's OWN (`userStatementsOn`: never the brief's unbound words), each bound to the quantity
+ *    by the statement door → their different cases;
+ *  · ONE record in which construction kept one sentence as two or more level readings it could not bind (C6: the brief's words, kept
+ *    verbatim once per reading) → the recorded information, claiming neither cases nor probabilities. A duplicated record of one
+ *    reading is no such evidence.
  * No probability is read from the words: a stated distribution has no carrier yet (the weighted-distribution capability is owed),
  * so the probability-for-each-case words wait for it. `null` otherwise: an ordinary missing level keeps the status-quo ask.
  */
 function recordedCasesAsk(node: unknown, label: string): string | null {
-  const groups = new Map<string, UserStatement[]>();
-  for (const s of recordsWithUnknownSpeakerOn(node).filter((r) => r.field === 'level').flatMap((r) => r.statements)) {
-    const key = [s.subject.quantity, s.period ?? '', s.conditions ?? ''].join('|');
-    groups.set(key, [...(groups.get(key) ?? []), s]);
-  }
-  for (const group of groups.values()) {
-    const period = group[0]!.period?.trim();
-    const what = period && !label.toLowerCase().includes(period.toLowerCase()) ? `${label.trim()} ${period}` : label.trim();
-    // A point is always the user's own (`userStatementOf`: the brief's unbound words are only ever a description).
-    if (new Set(group.filter((s) => s.form === 'point').map((s) => s.low)).size >= 2) {
-      return `You supplied different cases for ‘${what}’. This calculation cannot yet use them together faithfully. `
+  const groupOf = (s: UserStatement): string => [s.subject.quantity, s.period ?? '', s.conditions ?? ''].join('|');
+  const what = (s: UserStatement): string => {
+    const period = s.period?.trim();
+    return period && !label.toLowerCase().includes(period.toLowerCase()) ? `${label.trim()} ${period}` : label.trim();
+  };
+  const levels = (records: readonly UserStatementRecord[]): (readonly UserStatement[])[] =>
+    records.filter((r) => r.field === 'level').map((r) => r.statements);
+  const figures = new Map<string, Set<number | undefined>>();
+  for (const s of levels(userStatementsOn(node)).flat().filter((x) => x.form === 'point')) {
+    const seen = figures.get(groupOf(s)) ?? new Set<number | undefined>();
+    figures.set(groupOf(s), seen.add(s.low));
+    if (seen.size >= 2) {
+      return `You supplied different cases for ‘${what(s)}’. This calculation cannot yet use them together faithfully. `
         + 'We can still reason through each case and what it would mean.';
     }
-    const unbound = group.filter((s) => s.speaker === 'unknown').map((s) => s.quote);
-    if (unbound.length > new Set(unbound).size) {
-      return `This calculation cannot yet use the recorded information about ‘${what}’ faithfully. `
+  }
+  for (const statements of levels(recordsWithUnknownSpeakerOn(node))) {
+    const unbound = statements.filter((s) => s.speaker === 'unknown');
+    const s = unbound.find((x, i) => unbound.findIndex((y) => groupOf(y) === groupOf(x) && y.quote === x.quote) !== i);
+    if (s !== undefined) {
+      return `This calculation cannot yet use the recorded information about ‘${what(s)}’ faithfully. `
         + 'We can still reason through that information and what it would mean.';
     }
   }

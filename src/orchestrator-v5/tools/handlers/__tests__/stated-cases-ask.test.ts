@@ -25,6 +25,10 @@ const option = (id: string, label: string, value: number, is_baseline = false): 
 
 /** A valued lever, a goal, and the factor with no level whose kept statements are `statements` (as construction keeps them). */
 function graphWith(statements: readonly Rec[], field = 'level'): Rec {
+  return graphWithRecords(statements.length === 0 ? [] : [statements], field);
+}
+/** The same, with each list of statements kept as its own record. */
+function graphWithRecords(records: readonly (readonly Rec[])[], field = 'level'): Rec {
   const options = [option('add_staff', 'Add a second assistant', 2 / 10), option('carry_on', 'Carry on as now', 1 / 10, true)];
   const nodes: Rec[] = [
     { id: 'decision', kind: 'decision', label: 'Staffing' },
@@ -32,8 +36,8 @@ function graphWith(statements: readonly Rec[], field = 'level'): Rec {
     { id: 'staff', kind: 'factor', label: 'Assistants on shift', category: 'controllable',
       observed_state: { value: 1 / 10, raw_value: 1, unit: 'people', source: 'brief_extraction' } },
     { id: 'visits', kind: 'factor', label: LABEL, category: 'observable',
-      ...(statements.length === 0 ? {} : { user_statements: [{ subject_key: `factor|visits|||${field}`, field, statements,
-        recorded_at: '2026-10-19T09:00:00.000Z', attest: { recorded_by: 'construction' } }] }) },
+      ...(records.length === 0 ? {} : { user_statements: records.map((statements) => ({ subject_key: `factor|visits|||${field}`, field,
+        statements, recorded_at: '2026-10-19T09:00:00.000Z', attest: { recorded_by: 'construction' } })) }) },
     ...options,
   ];
   const edges = [...options.map((o) => edge('decision', String(o.id))), ...options.map((o) => edge(String(o.id), 'staff')),
@@ -100,6 +104,17 @@ describe('every other shape: the words say only what the kept statements support
     const ask = visitsAsk(graphWith(statements as readonly Rec[]));
     expect(ask).toBe(expected);
     expect(ask).not.toMatch(/probability/i);
+  });
+
+  it('two identical records of ONE reading are no recorded cases (PL 12:13); C6\'s one record of several readings stays positive', () => {
+    const reading = unbound('Walk-ins have been patchy lately.');
+    expect(visitsAsk(graphWithRecords([[reading], [reading]]))).toBe(TODAY_ASK);
+    expect(visitsAsk(graphWithRecords([[unbound(C6_LIKE), unbound(C6_LIKE), unbound(C6_LIKE)]]))).toBe(RECORDED(LABEL));
+  });
+
+  it('figures whose speaker is unknown are never the user\'s cases: such a record is not read at all', () => {
+    const unknownFigure = (v: number): Rec => ({ ...point('Someone said 30 or 45 walk-ins.', v), speaker: 'unknown' });
+    expect(visitsAsk(graphWith([unknownFigure(30), unknownFigure(45)]))).toBe(TODAY_ASK);
   });
 
   it('cases kept on another field (how strongly it drives the goal) are not its level', () => {
