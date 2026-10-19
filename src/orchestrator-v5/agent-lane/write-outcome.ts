@@ -94,6 +94,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   construction_unavailable: 'building a model is not available right now — ask me to try again later',
   empty_brief: 'there was no brief to build it from — tell me about the question you are working on',
   unresolved_effect_relationship: 'the option does not act on that factor, so no level could be set for it',
+  goal_today_part_owned: 'that factor is the goal’s own level today, which changes only with the goal’s current level — change the goal’s current level instead; nothing was changed',
 };
 
 /**

@@ -5,6 +5,7 @@
  * The handler retains payload validation, persisted-graph fidelity and analysis projection. */
 
 import { toOutboundGraph } from '../orchestrator-v5/goal-target/outbound-graph.js';
+import { deriveTodayParts } from '../orchestrator-v5/agent-lane/goal-definition-sum.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 
@@ -521,6 +522,7 @@ export default async function route(app: FastifyInstance) {
         // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
         deriveDecisionContextGraphHash(graph)) : undefined;
 
+      const todayPartNotes = graphPresent ? deriveTodayParts(graph).notes : [];
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
@@ -528,6 +530,8 @@ export default async function route(app: FastifyInstance) {
         ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
         graph: graphPresent ? toOutboundGraph(graph) : null,
+        // STEP 8: the stored bytes stay as stored; an invalid saved today part is said, with the value every Run uses instead.
+        ...(todayPartNotes.length > 0 ? { today_part_notes: todayPartNotes } : {}),
         graph_present: graphPresent,
         brief_text: briefText,
         scenario_created_at: snapshot?.createdAt ?? null,

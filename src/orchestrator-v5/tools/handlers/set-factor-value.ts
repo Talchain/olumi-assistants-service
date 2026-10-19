@@ -65,6 +65,7 @@ import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../contex
 import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
 import { log } from '../../../utils/telemetry.js';
 import { userTypedStoredFigure } from '../../agent-lane/figure-scope.js';
+import { goalSumTodayPart } from '../../agent-lane/goal-definition-sum.js';
 
 /**
  * P0 V5 golden-path repair (Wave 2): staleness narrative appended to a
@@ -369,6 +370,21 @@ export function createSetFactorValueHandler(): HandlerFn {
             accepted_kinds: [...SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS],
           },
           userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
+        },
+      );
+    }
+
+    // ⭐ STEP 8: a goal's compiled today part IS that goal's level today (`goalSumTodayPart`): it is changed only with the
+    // goal, by the goal-level card, so the two never part. Nothing is written here; the user is told where to change it.
+    const todayOf = graph.nodes.find((g) => g.kind === 'goal' && goalSumTodayPart(graph.nodes, g.id)?.id === targetId);
+    if (todayOf !== undefined) {
+      throw new D1HandlerError(
+        'PRECONDITION_UNMET',
+        `"${targetNode.label}" is the current level of "${todayOf.label}"; it changes only with that goal.`,
+        {
+          details: { handler_id: 'set_factor_value', target_id: targetId, goal_id: todayOf.id },
+          userGuidance: `"${targetNode.label}" is the current level of "${todayOf.label}": Olumi works out "${todayOf.label}" as its level `
+            + `today plus each option's change. Change the current level of "${todayOf.label}" and this changes with it. Nothing was written.`,
         },
       );
     }

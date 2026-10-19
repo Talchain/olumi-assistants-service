@@ -87,6 +87,7 @@ import { retainUnsizedOlumiRisks } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
+import { goalDefinitionSum } from './goal-definition-sum.js';
 import { isStatedLevelRange, USER_TODAY_SOURCE } from '../routing/add-factor-transaction.js';
 
 const MAX_ID = 100;
@@ -6006,9 +6007,28 @@ function admitOnce(
   // ⭐ L2: a SUM the drafter declared, checked whole against the FINAL structure (`checkDeclaredSums`) and carried on its
   // total with the bound declaration's authorship. A declared product wins its node; a declared sum
   // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
+  const frameOfNode = (id: string): number | undefined => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); };
   const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
-    finalEdges, (id) => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); }, brief);
+    finalEdges, frameOfNode, brief);
   loss.push(...declaredSums.loss);
+  // ⭐ STEP 8 ROUTE A (`goal-definition-sum.ts`): the goal's validated definitional parts plus its level today, proposed as ONE
+  // Olumi-read sum and checked by the same `checkDeclaredSums`, in its own call so every drafter declaration is judged exactly as
+  // before. Only an accepted sum stages its today part and link; a refused one writes and says nothing.
+  const definitionSum = goalForReach === undefined || carriers.has(goalForReach.id) ? null
+    : goalDefinitionSum(levers.nodes, finalEdges, goalForReach.id, Array.isArray(model.identities) ? model.identities : [], frameOfNode);
+  if (definitionSum !== null) {
+    const { part, link, declaration } = definitionSum;
+    const compiled = checkDeclaredSums([declaration],
+      (label) => (canonicalLabel(label) === canonicalLabel(part.label) ? part.id : resolveEntity(label)),
+      [...levers.nodes, part], [...finalEdges, link], (id) => (id === part.id ? frameOfNode(goalForReach!.id) : frameOfNode(id)), brief);
+    if (compiled.accepted.length === 1) {
+      levers.nodes.push(part);
+      finalEdges = [...finalEdges, link];
+      labelById.set(part.id, part.label);
+      magnitudeNodeById.set(part.id, magnitudeNodeFor(part));
+      declaredSums.accepted.push(compiled.accepted[0]!);
+    }
+  }
   const declaredCarried: AcceptedDeclaredSum[] = [];
   for (const s of declaredSums.accepted) {
     if (carriers.has(s.outcome_id)) continue;
