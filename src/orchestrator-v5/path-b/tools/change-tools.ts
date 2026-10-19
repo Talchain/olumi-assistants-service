@@ -35,12 +35,17 @@
  *    commit (`compound`). Each member is prepared as it would be alone — renames and removals by the existing proposers
  *    (`prepareStructuralOp`), carried literally — and the whole change is refused before any card when one member is refused,
  *    left out, or acts on a part another member removes. Never a first half.
+ *  · the goal's current level (DL-3 ruling (a), bounded) — the existing goal-level door (`proposeGoalCurrentLevel`, its rules
+ *    unchanged) and its writer (ONE registration). Held as the user's own figure ONLY when the AI declares the user as its
+ *    speaker and puts it forward as their current level, with the figure in their typed words; anything else is BLOCKED-SCHEMA
+ *    (`goal_level_unverified`): the goal's carrier holds no "unverified" stamp. Alone: one whole-model registration.
  * Adding a factor or an option is not made on this path yet: it comes back `unavailable`, naming what is not available.
  */
 import { z } from 'zod-v4';
 import type { AgentToolContext, ToolResult } from '../../agent-lane/runtime/agent-tools.js';
 import { authorisationTurnId, prepareStructuralOp, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
-import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from '../../agent-lane/proposal.js';
+import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../../agent-lane/proposal.js';
+import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, type GoalLevelRead } from '../../agent-lane/goal-current-level.js';
 import { runWithApprovedBindings, type ApprovedAdoption } from '../../agent-lane/approved-adoption-context.js';
 import { defaultFrameFor } from '../../agent-lane/admit-model.js';
 import { GraphStaleWriteError } from '../../build-turn-context.js';
@@ -91,6 +96,8 @@ export const ChangeOp = z.discriminatedUnion('op', [
   /** The goal's success target. The comparator, figure, unit, what it measures and its frame are the AI's, carried literally. */
   z.object({ op: z.literal('set_goal_target'), goal_id: id, comparator: z.enum(['<', '<=', '>', '>=']), value: z.number(), unit: z.string(),
     quantity: z.string(), frame: z.enum(['level', 'change']), stance: Stance, source: Source }).strict(),
+  /** The goal's current level (today's figure), in the user's own words. Alone. */
+  z.object({ op: z.literal('set_goal_current_level'), goal_id: id, value: z.number(), unit: z.string().nullable(), stance: Stance, source: Source }).strict(),
   /** Rename an option, a factor or a risk: the user's own request in this message, quoted exactly, holding the new name. */
   z.object({ op: z.literal('rename'), kind: z.enum(['option', 'factor', 'risk']), target_id: id, new_label: z.string(), quote: z.string() }).strict(),
   /** Remove a factor or a risk (`to_id` null), or the direct link from `target_id` to `to_id`: the user's own request, quoted exactly. */
@@ -101,6 +108,7 @@ type FigureOp = Extract<z.infer<typeof ChangeOp>, { op: 'set_factor_value' | 'se
 type TargetArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_target' }>;
 type LinkArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_link_strength' }>;
 type StructuralArgs = Extract<z.infer<typeof ChangeOp>, { op: 'rename' | 'remove_from_model' }>;
+type GoalLevelArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_current_level' }>;
 /** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
 const TargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
   frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
@@ -298,6 +306,103 @@ const codeOf = (reason: string): string => {
 const LINKS_NOT_HERE = 'Changing how strongly one factor affects another isn\'t available on this path yet. Nothing was proposed or saved.';
 const MIXED_TARGET = 'Changing the goal\'s target together with other changes isn\'t available on this path yet; propose the target on its own. Nothing was proposed or saved.';
 const CHANGE_TARGET = 'A target stated as a change from today isn\'t available on this path yet. Nothing was proposed or saved.';
+const MIXED_GOAL_LEVEL = 'Changing the goal\'s current level together with other changes isn\'t available on this path yet; propose it on its own. Nothing was proposed or saved.';
+const GOAL_LEVEL_UNVERIFIED = 'The goal\'s current level can be recorded only as the user\'s own current figure, in their words; this figure is not that, and the goal cannot hold it as anyone else\'s or as unverified on this path yet. Nothing was proposed or saved.';
+
+type LevelNode = GoalLevelRead['nodes'][number];
+const isLevelNode = (n: unknown): n is LevelNode => isRec(n) && typeof n.id === 'string' && typeof n.kind === 'string' && typeof n.label === 'string';
+/** A saved read as the goal-level door reads it: EVERY node, typed (its writer registers them all), else none. */
+function goalLevelReadOf(read: SavedRead): GoalLevelRead | null {
+  const all: unknown[] = Array.isArray(read.graph.nodes) ? read.graph.nodes : [];
+  const nodes = all.filter(isLevelNode);
+  return nodes.length !== all.length || nodes.length === 0 ? null
+    : { graph_hash: read.graphHash, graph_identity_hash: read.identity ?? '', nodes, raw: read.graph };
+}
+/** Whether the quote writes this figure: its numerals read as digits only ("1,250" is 1250), never a word or a unit. */
+const quoteHoldsFigure = (quote: string, value: number): boolean =>
+  (quote.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).some((n) => Number(n.replace(/,/g, '')) === value);
+/** The goal-level door's context: the user's typed words as one text (`user_text`, the composer messages it binds to). */
+const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
+  const typed = ctx.verified_user_messages ?? [];
+  return { ...ctx, request_id: ctx.turn_id ?? ctx.scenario_id,
+    user_text: [...typed, ...(ctx.user_turn_text === undefined || typed.includes(ctx.user_turn_text) ? [] : [ctx.user_turn_text])].join('\n') };
+};
+
+/**
+ * The goal's current level (DL-3 ruling (a), bounded): only the user's own current figure in their typed words, by the existing
+ * goal-level door on this read in a private store; its prepared operation and card are carried literally onto ONE proposal.
+ */
+async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, o: GoalLevelArgs): Promise<ToolOutcome> {
+  if (o.source.origin !== 'user' || o.stance !== 'stated_current') return unavailable('goal_level_unverified', 'none', GOAL_LEVEL_UNVERIFIED);
+  if (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx)) return refused('quote_not_in_users_words', undefined, { op: 0 });
+  // B's rule (DL-3 AMEND 20:01Z): the quote holds the figure, by its digits only; the words are not re-parsed for meaning.
+  if (!quoteHoldsFigure(o.source.quote, o.value)) return refused('figure_not_in_quote', undefined, { op: 0 });
+  const read = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(read)) return read;
+  if (read.identity === null) return unavailable('read_malformed');
+  const goal = nodesOf(read.graph).find((n) => n.id === o.goal_id);
+  if (goal?.kind !== 'goal') return refused('not_a_goal', undefined, { op: 0 });
+  const held = new ProposalStore();
+  const offered = await proposeGoalCurrentLevel({ readGraph: async () => goalLevelReadOf(read), proposals: held, typedQuote: o.source.quote }, levelCtx(ctx),
+    { goal_label: goal.label, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), user_stated: true });
+  const prepared = offered.ok && typeof offered.proposal_id === 'string' ? held.get(offered.proposal_id) : undefined;
+  if (prepared === undefined) {
+    return refused(codeOf(typeof offered.refusal === 'string' ? offered.refusal : 'goal_level_refused'), typeof offered.detail === 'string' ? offered.detail : undefined, { op: 0 });
+  }
+  // The same base as every core proposer and the card machinery (#3472, K7/K9): the graph hash, plus the model's full identity.
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
+    base_model_identity: read.identity, operations: prepared.operations, provenance: { authored_by: 'user_stated', basis: o.source.quote },
+    validation: prepared.validation, public_label: prepared.public_label });
+  deps.proposals.put(p);
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
+}
+
+/** The goal's level as the model now holds it: the approved figure, unit and source on the goal; the user's words are not kept. */
+function goalLevelRead(read: SavedRead, p: StructuredProposal): { holds: boolean; faithful: boolean; written: Rec[] } {
+  const op = p.operations[0]!;
+  const want = isRec(op.value) && isRec(op.value.goal_current_level) ? op.value.goal_current_level : {};
+  const os = nodesOf(read.graph).find((n) => n.id === op.path)?.observed_state;
+  const held = isRec(os) ? os : undefined;
+  const holds = held !== undefined && close(held.raw_value, Number(want.raw_value)) && held.source === want.source
+    && (want.unit === undefined || held.unit === want.unit);
+  return { holds, faithful: false, written: [{ op: 'set_goal_current_level', goal_id: op.path, figure: held?.raw_value ?? null, unit: held?.unit ?? null,
+    declared: { origin: 'user', quote: p.provenance.basis, stance: 'stated_current' }, stored_as: provenanceOf({ value: held }),
+    not_kept: [{ what: 'words', declared: p.provenance.basis }] }] };
+}
+
+/** The goal's level: the goal-level door's own writer (ONE registration, its operation id), then PATH-B's receipt and readback. */
+function goalLevelApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal): Applier {
+  const receiptTurn = registrationTurnId(ctx.scenario_id, authorisationTurnId(`${p.proposal_id}#goal_current_level`));
+  const readNow = (read: SavedRead) => goalLevelRead(read, p);
+  return {
+    receiptTurn,
+    readNow,
+    commit: async (before) => {
+      const approved = goalLevelReadOf(before);
+      if (approved === null) return unavailable('read_malformed');
+      // ONE applied-state authority (#3467 R1): the writer marks its own private copy; the shared store is marked applied only
+      // below, with THIS registration's own receipt. A save with none stays unknown, never "already saved" on a retry.
+      const held = new ProposalStore();
+      held.put(p);
+      let r: ToolResult;
+      try {
+        r = await applyGoalCurrentLevel({ dispatch: deps.dispatch, proposals: held, operationId: authorisationTurnId,
+          readGraph: async () => { const now = await readSaved(deps, ctx.scenario_id); return isSavedRead(now) ? goalLevelReadOf(now) : null; } },
+        levelCtx(ctx), p, approved);
+      } catch {
+        return unavailable('not_confirmed', 'unknown');
+      }
+      if (!r.ok) return r.mutated === true ? unavailable('not_verified', 'unknown') : refused(codeOf(typeof r.refusal === 'string' ? r.refusal : 'not_applied'));
+      const after = await readSaved(deps, ctx.scenario_id);
+      const back = isSavedRead(after) ? readNow(after) : null;
+      const receipt = (Array.isArray(r.receipts) ? r.receipts as ReceiptSummary[] : []).find((x) => x.source_turn_id === receiptTurn);
+      if (back === null || !back.holds || !isSavedRead(after) || receipt === undefined) return unavailable('not_verified', 'unknown');
+      deps.proposals.markApplied(p.proposal_id, [receipt]);
+      return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
+        written: back.written }, { mutated: true });
+    },
+  };
+}
 
 /** The one goal-target declaration a proposal holds, as stored (hashed); `null` when the proposal is not a target change. */
 function targetOf(p: StructuredProposal): (TargetDeclaration & { readonly stored: z.infer<typeof TargetStored> }) | null {
@@ -554,6 +659,8 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   if (args.public_label.trim() === '') return refused('label_empty');
   const target = args.ops.find((o): o is TargetArgs => o.op === 'set_goal_target');
   if (target !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_TARGET) : proposeTarget(deps, ctx, args, target);
+  const level = args.ops.find((o): o is GoalLevelArgs => o.op === 'set_goal_current_level');
+  if (level !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_GOAL_LEVEL) : proposeGoalLevel(deps, ctx, level);
   const links = args.ops.filter((o): o is LinkArgs => o.op === 'set_link_strength');
   const structural = args.ops.filter((o): o is StructuralArgs => o.op === 'rename' || o.op === 'remove_from_model');
   const ops = args.ops.filter((o): o is FigureOp => o.op === 'set_factor_value' || o.op === 'set_option_setting');
@@ -674,19 +781,21 @@ function targetApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, 
   };
 }
 
-/** A change this path prepared (a goal target, or figures, links and structural members): `apply_change` commits it. */
-export const isChangeProposal = (p: StructuredProposal | undefined): boolean => p !== undefined && (targetOf(p) !== null || compoundOf(p) !== null);
+/** A change this path prepared (the goal's level or target, or figures, links and structural members): `apply_change` commits it. */
+export const isChangeProposal = (p: StructuredProposal | undefined): boolean =>
+  p !== undefined && (isGoalCurrentLevelProposal(p) || targetOf(p) !== null || compoundOf(p) !== null);
 
 export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyChangeArgs): Promise<ToolOutcome> {
   const p = deps.proposals.get(args.proposal_id);
   if (p === undefined) return refused('unknown_proposal');
   if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return refused('not_authorised');
   const turnId = authorisationTurnId(p.proposal_id);
-  const target = targetOf(p);
-  const c = target === null ? compoundOf(p) : null;
-  if (target === null && c === null) return refused('not_a_change_proposal');
+  const level = isGoalCurrentLevelProposal(p);
+  const target = level ? null : targetOf(p);
+  const c = level || target !== null ? null : compoundOf(p);
+  if (!level && target === null && c === null) return refused('not_a_change_proposal');
   // The capability's own link set keeps its `#links` turn; every other change is this path's ONE door commit.
-  const applier = target !== null ? targetApplier(deps, ctx, p, target, turnId)
+  const applier = level ? goalLevelApplier(deps, ctx, p) : target !== null ? targetApplier(deps, ctx, p, target, turnId)
     : c!.figures.length + c!.structural.length === 0 ? linksApplier(deps, ctx, p, c!.links) : doorApplier(deps, ctx, p, c!, turnId);
   if (!('commit' in applier)) return applier;
   const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
@@ -705,6 +814,9 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   const decision = deps.proposals.authorise({ proposal_id: p.proposal_id, scenario_id: ctx.scenario_id,
     authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.graphHash, typed_approval_of: p.proposal_id });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
+  // A moved model that already holds exactly this change, with no receipt of this operation's own: its own write may have landed
+  // unrecorded (#3467 R1), so whether it was saved is UNKNOWN, never "superseded" and never "saved".
+  if (decision.status === 'superseded' && applier.readNow(before).holds) return unavailable('not_confirmed', 'unknown');
   if (decision.status !== 'execute') return refused(decision.status);
   // ...and on the model's FULL identity when it was prepared: a rename or other wording the graph hash leaves out moved it too.
   if (p.base_model_identity !== undefined && p.base_model_identity !== before.identity) return refused('superseded');

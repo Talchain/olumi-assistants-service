@@ -73,11 +73,19 @@ describe('refused: never recorded as the goal\'s current level', () => {
   });
 });
 
-describe('NAMED RESIDUAL (fail open, as the lane does) — pinned so a change is a decision, not drift', () => {
+describe('A GOAL IN A UNIT NO CLASSIFIER READS takes only its OWN unit (DL-3 decision after Codex R1 on #3467: the residual is closed)', () => {
   it.each([
-    ['customers', ''], ['customers', 'customers'], ['customers', 'subscribers'], ['£M ARR', '£M ARR'],
-  ])('goal in %j (a unit no classifier reads), stated %j → admitted unchanged', (goalUnit, stated) => {
+    ['customers', 'customers'], ['£M ARR', '£M ARR'], ['orders a week', 'orders a week'],
+    // DL-3 (19 Oct): no unit stated stays admitted here, as the base does (A's words carry it; B's typed caller refuses it).
+    ['customers', ''], ['orders a week', ''],
+  ])('goal in %j, stated %j (its own unit, or none) → admitted unchanged', (goalUnit, stated) => {
     expect(read(12, stated, goalUnit)).toStrictEqual({ ok: true, raw: 12 });
+  });
+
+  it.each([
+    ['customers', 'subscribers', 'unit_mismatch'], ['orders a week', 'orders a month', 'unit_mismatch'], ['customers', 'widgets', 'unit_mismatch'],
+  ])('goal in %j, stated %j → refused %s: never relabelled with the goal\u2019s unit', (goalUnit, stated, refusal) => {
+    expect(read(12, stated, goalUnit)).toMatchObject({ ok: false, refusal });
   });
 
   it('a goal with no unit at all → admitted unchanged (nothing to hold the figure to)', () => {
