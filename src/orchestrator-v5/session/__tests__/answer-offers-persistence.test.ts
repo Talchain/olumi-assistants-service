@@ -167,6 +167,10 @@ describe('X4 migration boundaries (static, no database required)', () => {
     const storeSource = readFileSync(new URL('../supabase-store.ts', import.meta.url), 'utf8');
     const hot = storeSource.match(/const V5_CONVERSATION_TURN_COLUMNS\s*=\s*([^;]+);/)?.[1];
     expect(hot).toBeDefined(); expect(hot).not.toContain('suggested_actions');
-    expect(storeSource.match(/\.update\(/g) ?? []).toHaveLength(2);
+    // ⛔ CHANGED EXPECTATION (PATH-B, 19 Oct): 2 → 5. The three added updates are the `core` lane's own scenario columns
+    // (migration 20261019150000), each one conditional write: claim the Conversation id, save a paused run, take it. None
+    // touches the answer row or answer offers, which this control guards.
+    expect(storeSource.match(/\.update\(/g) ?? []).toHaveLength(5);
+    expect(storeSource.match(/\.update\(\{ openai_(conversation_id|paused_run): /g) ?? []).toHaveLength(3);
   });
 });
