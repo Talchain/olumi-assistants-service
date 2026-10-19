@@ -1,8 +1,9 @@
 /**
  * ⭐ PATH-B: THE DRAFT ADAPTER (C5, 19 Oct 2026; Step 8 gap 3, DL 19 Oct). Olumi's PROVISIONAL first model from the user's brief.
  *  1. literal check only: the brief is in the user's own typed words (`inTheUsersWords`);
- *  2. ONE drafter call, the construction's own first call (the same model, instructions, input and strict schema as
- *     `buildModelFromBrief`'s first pass), and the drafter's JSON becomes the model through Step 8's pure `candidateToGraph`:
+ *  2. ONE drafter call with the construction's model and strict schema, its STATIC instructions (`BUILD_INSTRUCTIONS`) and the
+ *     literal brief in the shared turn context (`turnContextItems`): no host reading of the brief changes what the AI is told
+ *     (#3473 R1: no event-by-date attestation, no range notes). The drafter's JSON becomes the model through Step 8's pure `candidateToGraph`:
  *     A's numbers and structure science on a label-blind copy, each figure with the origin the AI declared, no reading of the
  *     brief. It replaces the named bridge (`buildModelFromBrief`, DL-3 ruling 6), which path B no longer calls. The draft's
  *     statements are recorded on their subjects from the brief's own words (`candidateToGraph`'s carry);
@@ -18,9 +19,9 @@ import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import {
-  buildCandidateSchema, buildInstructionsForBrief, constructionOperationId, findConstructionVersion, firstConstructInput, strictForTheDrafter,
-  type CallStructuredModel,
+  BUILD_INSTRUCTIONS, buildCandidateSchema, constructionOperationId, findConstructionVersion, strictForTheDrafter, type CallStructuredModel,
 } from '../../agent-lane/runtime/build-model.js';
+import { turnContextItems, turnContextText } from '../../agent-lane/turn-context.js';
 import { budgetFor } from '../../agent-lane/model-budgets.js';
 import { candidateToGraph } from './candidate-to-graph.js';
 import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
@@ -43,15 +44,15 @@ export interface DraftDeps {
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
-/** The construction's first drafter call, unchanged: the draft, or why there is none. Nothing is written. */
+/** The ONE drafter call, on the static instructions and the literal brief: the draft, or why there is none. Nothing is written. */
 async function drafted(callStructured: CallStructuredModel, brief: string): Promise<{ readonly draft: unknown } | { readonly outcome: ToolOutcome }> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let out: Awaited<ReturnType<CallStructuredModel>>;
   try {
     out = await callStructured({
       model: budget.model,
-      instructions: buildInstructionsForBrief(brief),
-      input: firstConstructInput(brief),
+      instructions: BUILD_INSTRUCTIONS,
+      input: turnContextItems({ now: new Date(), briefText: brief, conversation: [], construction: {} }).map(turnContextText).join('\n\n'),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
       schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),

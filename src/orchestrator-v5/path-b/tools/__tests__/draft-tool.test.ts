@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BuildModelParams, buildModel, type DraftDeps } from '../draft-tool.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
-import { constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
+import { BUILD_INSTRUCTIONS, constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { traceRow } from '../outcome.js';
 import { read, type Rec } from './fixtures.js';
@@ -85,6 +85,23 @@ describe('Olumi\'s provisional first model: ONE draft, converted by candidateToG
     expect(out).toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
     expect(traceRow('build_model_from_brief', out).mutated).toBeNull();
     expect(p.onModelRegistered).not.toHaveBeenCalled();
+  });
+});
+
+// ⛔ #3473 R1 (Codex's two probes): no host reading of the brief changes what the AI is told before it declares anything.
+describe('the drafter is told the static instructions and the literal brief, nothing a host reader added', () => {
+  it.each([
+    ['a written range (no range notes)', 'We may add a sales rep. Each deal is worth £1-2m.'],
+    ['a deadline (no event-by-date attestation)', 'We need to launch by March. Should we add an engineer?'],
+  ])('%s', async (_name, brief) => {
+    const p = product({ graph: [EMPTY], register: [{ status: 422, json: {} }] });
+    await buildModel(p, { scenario_id: SID, verified_user_messages: [brief], user_turn_text: brief }, { brief });
+    expect(p.callStructured).toHaveBeenCalledTimes(1);
+    const sent = p.callStructured.mock.calls[0]![0];
+    expect(sent.instructions).toBe(BUILD_INSTRUCTIONS);
+    expect(sent.input).toContain(brief);
+    expect(sent.input).not.toContain('Construction notes');
+    expect(`${sent.instructions}\n${sent.input}`).not.toContain('deterministic reader');
   });
 });
 
