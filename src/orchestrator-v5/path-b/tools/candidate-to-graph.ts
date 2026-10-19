@@ -389,16 +389,12 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     provenance: { source: 'cee_hypothesis' } });
   const decisionId = nodes.find((n) => n.kind === 'decision')!.id;
   // SCIENCE (structure): each option's links are A's — what it sets and acts on, with A's rules (a level on a quantity its own
-  // levers make, a link with no direction, are not drawn). A status quo is held as A holds it only when it is the ONE status
-  // quo the AI declared and it acts on nothing: A's reading of an option's label as "carrying on" is never taken (a gate).
-  const declaredStatusQuo = [...new Set(options.filter((o) => o.is_status_quo === true).map((o) => idFor(o.label)!))];
-  const sq = declaredStatusQuo.length === 1 ? declaredStatusQuo[0]! : undefined;
+  // levers make, a link with no direction, are not drawn). A status quo is held as A holds it (`wireInertStatusQuo`): on the
+  // label-blind draft, only the ONE status quo the AI declared, when it acts on nothing — never one its name reads as.
   const held = (e: object): boolean => (e as Rec).origin === REPAIR_AUTHORED_ORIGIN;
-  const sqActs = sq !== undefined && a.edges.some((e) => e.from === aIdOf.get(sq) && !held(e));
   const optionEdges = a.edges.flatMap((e) => {
     const from = bIdOfA.get(e.from), to = bIdOfA.get(e.to);
-    if (from === undefined || to === undefined || kindOf(from) !== 'option') return [];
-    return held(e) && (from !== sq || sqActs) ? [] : [{ ...e, from, to }];
+    return from === undefined || to === undefined || kindOf(from) !== 'option' ? [] : [{ ...e, from, to }];
   });
   for (const from of new Set(optionEdges.filter(held).map((e) => e.from))) {
     nodeById.get(from)!.is_baseline = true;
