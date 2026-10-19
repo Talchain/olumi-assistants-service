@@ -79,6 +79,13 @@ export const GOAL_FIGURES_PLACEHOLDER_PATH = 'GOAL_FIGURES_PLACEHOLDER_PATH';
  * default (`unsupportedSpreadWarning`, goal-certainty.ts). The size stays the user's; the chance is not supported.
  */
 export const GOAL_FIGURES_UNSUPPORTED_SPREAD = 'GOAL_FIGURES_UNSUPPORTED_SPREAD';
+/**
+ * ⭐ STEP 8 (Codex R1 #3443; DL-3: targets AND limits): the same cause for ONE condition on another node (`constraint_ids`):
+ * the Run withheld those options' P on it and their joint (`withholdOptionLimitScores`), and this record says why, in the
+ * AIE's words, links named. NOT a goal-figures withhold (deliberately outside {@link GOAL_FIGURES_WITHHELD_CODES}): the
+ * primary goal's own chance stands; only the several-targets block and the limit checks read it.
+ */
+export const CONDITION_FIGURES_UNSUPPORTED_SPREAD = 'CONDITION_FIGURES_UNSUPPORTED_SPREAD';
 
 /**
  * CEE's code for a run whose goal figures it withheld because the user's own levels make the goal a rate × count product

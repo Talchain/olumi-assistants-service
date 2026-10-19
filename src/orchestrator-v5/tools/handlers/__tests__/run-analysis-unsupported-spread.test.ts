@@ -44,6 +44,14 @@ import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
 import { EDGE_STRENGTH_MIDPOINTS, edgeBandStd } from '../../../format/edge-strength-bands.js';
 import { linkSizing } from '../../../../cee/magnitude/link-sizing.js';
 import { LINK_AUTHORSHIP_MEMBERS } from '../run-input-residual.js';
+import { goalChanceLicenceForAgent } from '../../../goal-target/goal-chance-licence.js';
+import { goalChanceCellFacesForAgent } from '../../../agent-lane/goal-chance-screen-lines.js';
+import { goalChanceSideOf } from '../../../goal-target/goal-chance-sides.js';
+import { runChanceHeadline } from '../../../coaching/run-chance-headline.js';
+import { limitChecksForAgent } from '../../../agent-lane/limit-checks.js';
+import { readLimitVerdictsFromResult } from '../../../../orchestrator/context/constraint-feasibility.js';
+import { CONDITION_FIGURES_UNSUPPORTED_SPREAD } from '../../../../orchestrator/context/option-result-source.js';
+import { notesAsShown } from '../../../goal-target/goal-targets-joint.js';
 
 type Json = Record<string, any>;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -409,3 +417,159 @@ describe('PROVENANCE: construction\'s UNMARKED stated point is named through sav
     expect(chanceSupportGoalPaths(refit, ['add_one_packer']).unsupportedSpread).toEqual(named);
   });
 });
+
+describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND limits): the same support decision, per condition', () => {
+  // Codex's case, on the several-targets harness of `last-check-reproductions.test.ts` (r2): goal ‘Quality’ (primary target),
+  // ‘Reach’ (second target) and ‘Cost’ (a limit). Each plan moves ‘Effort’ and ‘Audience’; ‘Effort’ → ‘Quality’ is a validated
+  // definition (exact on the Run input), and ‘Audience’ → ‘Reach’ is the user's 0.3 with no stated spread. Real snapshot loader
+  // and real Run handler; PLoT's body is local transport.
+  const jsid = 'acdca123-4567-4000-8000-1234567893a1';
+  const precision = { n_informative: 10000, standard_error: 0.005 };
+  const FIXTURE = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-minimal.json', 'utf8')) as Json;
+  const userPoint = (): Json => ({ source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 0.3, amount_unit: '%',
+    per_source_change: 1, per_source_change_unit: '%', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } });
+  /** The ACTUAL chat writer's record of a named band (`adjust-edge-strength.ts`): the user's strength and their spread. */
+  const bandStated = (e: Json): void => { e.provenance = { source: 'user_specified' }; e.provenance_display = 'user_set'; delete e.std_defaulted; };
+  function jointGraph(o: { limitVia?: 'x' | 'y'; optionsSetLimit?: boolean; planC?: boolean } = {}): Json {
+    // Codex's probe names the definition's part as part of the total (`Quality contribution`), so the definition validates.
+    const names: Record<string, string> = { g: 'Quality', other: 'Reach', limit: 'Cost', x: 'Quality contribution', y: 'Audience' };
+    const nodes: Json[] = Object.entries(names).map(([id, label]) => ({ id, label, kind: id === 'g' ? 'goal' : 'factor',
+      observed_state: { value: 0.2, baseline: 0.2, raw_value: 20, cap: 100, unit: '%', source: 'user_override' } }));
+    Object.assign(nodes[0]!, { goal_threshold_frame: 'level', goal_threshold_raw: 70, goal_threshold_cap: 100, goal_threshold: 0.7,
+      goal_threshold_unit: '%', goal_direction: '>=', goal_target_basis: { quantity_frame: 'level', target_frame: 'level', target_raw: 70,
+        reference: 'today', period_months: 3, period_kind: 'at_end', effect_unit: 'percentage points at month three', effects_at_period_end: true,
+        source: 'olumi_reading' } });
+    const set = ['x', 'y', ...(o.optionsSetLimit !== false ? ['limit'] : [])];
+    for (const id of ['a', 'b']) nodes.push({ id, kind: 'option', label: `Plan ${id}`, interventions: Object.fromEntries(set
+      .map((n) => [n, { value: id === 'a' ? 0.6 : 0.7, raw_value: id === 'a' ? 60 : 70, unit: '%', source: 'user_specified' }])) });
+    // Plan c moves only ‘Quality contribution’: nothing it does reaches ‘Reach’ through the user's point.
+    if (o.planC === true) nodes.push({ id: 'c', kind: 'option', label: 'Plan c', interventions: { x: { value: 0.8, raw_value: 80, unit: '%', source: 'user_specified' },
+      ...(o.optionsSetLimit !== false ? { limit: { value: 0.8, raw_value: 80, unit: '%', source: 'user_specified' } } : {}) } });
+    nodes.push({ id: 'd', kind: 'decision', label: 'Which plan?' });
+    const link = (from: string, to: string, provenance: Json): Json => ({ from, to, strength: { mean: 0.3, std: 0.15 }, exists_probability: 1,
+      effect_direction: 'positive', provenance });
+    const edges = [...[['d', 'a'], ['d', 'b'], ...['a', 'b'].flatMap((opt) => set.map((n) => [opt, n])),
+      ...(o.planC === true ? [['d', 'c'], ['c', 'x'], ...(o.optionsSetLimit !== false ? [['c', 'limit']] : [])] : [])]
+      .map(([from, to]) => ({ from, to, strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'user_specified' } })),
+    { from: 'x', to: 'g', strength: { mean: 1, std: 0.5 }, exists_probability: 1, effect_direction: 'positive',
+      provenance: { source: 'brief_extraction', magnitude: 'user_stated', definitional: true, natural_effect: { amount: 1, per_source_change: 1,
+        amount_unit: '%', per_source_change_unit: '%', strength_mean: 1, strength_mean_frame: 'edge_strength' } } },
+    link('y', 'other', userPoint()), ...(o.limitVia !== undefined ? [link(o.limitVia, 'limit', userPoint())] : [])];
+    return { nodes, edges, goal_constraints: [
+      { constraint_id: 'primary', node_id: 'g', operator: '>=', value: 70, unit: '%', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'secondary', node_id: 'other', operator: '>=', value: 50, unit: '%', value_frame: 'level', role: 'goal_target' },
+      { constraint_id: 'budget', node_id: 'limit', operator: '<=', value: 80, unit: '%', value_frame: 'level' },
+    ] };
+  }
+  const rows = (req: Json): Json[] => (req.options as Json[]).map((opt, i) => ({ option_id: opt.id, probability_of_goal: 0.41 + i * 0.1,
+    probability_of_goal_precision: precision, probability_of_joint_goal: 0.21 + i * 0.1, probability_of_joint_goal_precision: precision,
+    constraint_probabilities: Object.fromEntries(((req.goal_constraints ?? []) as Json[]).map((c) => [c.constraint_id,
+      c.node_id === 'g' ? 0.41 + i * 0.1 : c.node_id === 'other' ? 0.51 + i * 0.1 : 0.8])),
+    constraint_probabilities_precision: Object.fromEntries(((req.goal_constraints ?? []) as Json[]).map((c) => [c.constraint_id, precision])),
+    outcome: { mean: 82, std: 4, p10: 77, p50: 82, p90: 90 } }));
+  async function runJoint(g: Json): Promise<{ result: Json; analysis: Json; licence: Json }> {
+    const bytes = JSON.stringify(g);
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(jsid, 'req-sp-joint', {
+      loadGraphAndBriefText: async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 }), readMostRecentPendingActions: async () => [],
+    } as never);
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot, plotClient: {
+      run: async (req: Json) => ({ ...clone(FIXTURE), option_comparison: rows(req) }), validatePatch: async () => {},
+    } } as never);
+    const outcome = await handler({ payload: { scenario_id: jsid, turn_id: 'sp-joint' }, requestId: 'req-sp-joint', signal: new AbortController().signal,
+      context: {}, orientationText: '' } as never) as Json;
+    const result = outcome.handler_facts?.[0]?.result as Json;
+    expect(RunAnalysisResultSchema.safeParse(result).success).toBe(true);
+    const analysis = { type: 'analysis_result', enrichment: result.enrichment, computed_against_hash: result.graph_hash_at_run };
+    return { result, analysis, licence: goalChanceLicenceForAgent(analysis) as Json };
+  }
+  const perTarget = (l: Json, id: string): Json => (l.targets.per_target as Json[]).find((t) => t.constraint_id === id)?.pct_by_option ?? {};
+  /** What a surface shows of the block's notes (`notesAsShown`: a grouped cause is said as its one line). */
+  const says = (l: Json): string => notesAsShown(l.targets.notes ?? [], l.targets.note_groups).join(' ');
+  const spreadRecords = (r: Json): Json[] => warningsOf(r).filter((w) => w?.code === CONDITION_FIGURES_UNSUPPORTED_SPREAD);
+
+  it('POSITIVE CONTROL: with the user\'s band on ‘Audience’ → ‘Reach’ (their spread), both targets and the joint are licensed', async () => {
+    const g = jointGraph();
+    bandStated(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'));
+    const { result, licence } = await runJoint(g);
+    expect(spreadRecords(result)).toEqual([]);
+    expect(perTarget(licence, 'primary')).toEqual({ a: 41, b: 51 });
+    expect(perTarget(licence, 'secondary')).toEqual({ a: 51, b: 61 });
+    expect(licence.targets.joint).toMatchObject({ status: 'licensed', pct_by_option: { a: 21, b: 31 } });
+  });
+
+  it('⭐ RED→GREEN: the user\'s point with no stated spread feeding only the second target withholds its chance and the joint on every surface; the primary 41%/51% stands', async () => {
+    const g = jointGraph();
+    const { result, analysis, licence } = await runJoint(g);
+    // The primary goal's chance rests on an exact definition: untouched (no goal-figures withhold at all).
+    expect(coded(result, GOAL_FIGURES_UNSUPPORTED_SPREAD)).toEqual([]);
+    expect(perTarget(licence, 'primary')).toEqual({ a: 41, b: 51 });
+    // The second target and the joint: withheld for both plans, said once in the AIE's words with the link named.
+    expect(perTarget(licence, 'secondary')).toEqual({});
+    expect(licence.targets.joint.status).toBe('withheld');
+    const [record, ...more] = spreadRecords(result);
+    expect(more).toEqual([]);
+    expect(record).toMatchObject({ constraint_ids: ['secondary'], option_ids: ['a', 'b'], links: [{ from: 'y', to: 'other' }] });
+    expect(record.message).toBe(`On the link from ‘Audience’ to ‘Reach’: ${UNSUPPORTED_POINT_WORDS} ${UNSUPPORTED_POINT_QUESTION}`);
+    expect(says(licence)).toContain(record.message);
+    expect(says(licence).split(UNSUPPORTED_POINT_WORDS).length - 1, 'said once').toBe(1);
+    // No surface quotes the withheld second target or joint: Agent licence, card faces, compare, coaching.
+    expect(Object.values(licence.pct_by_option ?? {})).not.toContain(21);
+    const faces = [...goalChanceCellFacesForAgent(analysis, g, true).values()].join(' ');
+    for (const pct of ['21%', '31%', '51%', '61%']) expect(faces).not.toContain(pct);
+    for (const id of ['a', 'b']) expect(goalChanceSideOf(result, id)).not.toMatchObject({ kind: 'point', pct: id === 'a' ? 21 : 31 });
+    expect(runChanceHeadline(result, g) ?? '').not.toMatch(/21%|31%/);
+    // The engine's own figures are kept for nothing else: the stored rows lose exactly the second target's P and the joint.
+    for (const row of envOf(result).option_comparison as Json[]) {
+      expect(row.constraint_probabilities).not.toHaveProperty('secondary');
+      expect(row).not.toHaveProperty('probability_of_joint_goal');
+      expect(row.probability_of_goal).toBeTypeOf('number');
+    }
+    // The per-condition row for the Agent: the second target is not shown for either plan, in the same words.
+    const checks = limitChecksForAgent(g, readLimitVerdictsFromResult(result)) ?? [];
+    const reach = checks.find((c) => c.constraint_id === 'secondary');
+    expect(reach?.say).toContain(record.message);
+    expect(reach?.say).not.toMatch(/was checked/);
+  });
+
+  it('⭐ LIMIT: a limit moved through the user\'s point with no stated spread is withheld for those plans, with the joint; the targets stand', async () => {
+    const g = jointGraph({ limitVia: 'x', optionsSetLimit: false });
+    bandStated(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'));
+    const { result, licence } = await runJoint(g);
+    expect(perTarget(licence, 'primary')).toEqual({ a: 41, b: 51 });
+    expect(perTarget(licence, 'secondary')).toEqual({ a: 51, b: 61 });
+    expect(licence.targets.joint.status).toBe('withheld');
+    const [record, ...more] = spreadRecords(result);
+    expect(more).toEqual([]);
+    expect(record).toMatchObject({ constraint_ids: ['budget'], option_ids: ['a', 'b'], links: [{ from: 'x', to: 'limit' }] });
+    for (const row of envOf(result).option_comparison as Json[]) {
+      expect(row.constraint_probabilities).not.toHaveProperty('budget');
+      expect(row).not.toHaveProperty('probability_of_joint_goal');
+    }
+    const cost = (limitChecksForAgent(g, readLimitVerdictsFromResult(result)) ?? []).find((c) => c.constraint_id === 'budget');
+    expect(cost?.say).toContain(`On the link from ‘Quality contribution’ to ‘Cost’: ${UNSUPPORTED_POINT_WORDS} ${UNSUPPORTED_POINT_QUESTION}`);
+    expect(cost?.say).not.toMatch(/was checked/);
+  });
+
+  it('PER OPTION: only the plans the spread withholds lose the second target and the joint, named in the note; plan c keeps both', async () => {
+    const g = jointGraph({ planC: true });
+    const { result, licence } = await runJoint(g);
+    const [record] = spreadRecords(result);
+    expect(record).toMatchObject({ constraint_ids: ['secondary'], option_ids: ['a', 'b'] });
+    expect(perTarget(licence, 'primary')).toMatchObject({ a: 41, b: 51 });
+    expect(perTarget(licence, 'secondary')).toEqual({ c: 71 });
+    expect(licence.targets.joint).toMatchObject({ status: 'licensed', pct_by_option: { c: 41 } });
+    expect(licence.targets.joint.withheld_option_ids).toEqual(['a', 'b']);
+    expect(says(licence)).toContain(`‘Reach’ being at least 50% at three months (for ‘Plan a’ and ‘Plan b’): ${record.message}`);
+    expect(says(licence).split(UNSUPPORTED_POINT_WORDS).length - 1, 'said once').toBe(1);
+    expect(says(licence)).not.toContain('did not return a usable chance for ‘Plan a’');
+  });
+
+  it('SCOPE: a limit each plan SETS itself is a fixed input — a user point into it carries no plan\'s P, so nothing is withheld', async () => {
+    const g = jointGraph({ limitVia: 'y', optionsSetLimit: true });
+    bandStated(g.edges.find((e: Json) => e.from === 'y' && e.to === 'other'));
+    const { result, licence } = await runJoint(g);
+    expect(spreadRecords(result)).toEqual([]);
+    expect(licence.targets.joint).toMatchObject({ status: 'licensed', pct_by_option: { a: 21, b: 31 } });
+  });
+});
+

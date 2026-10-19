@@ -445,7 +445,7 @@ export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly strin
  *    `adjust-edge-strength.ts`): `std_defaulted` set = Olumi's; removed = the user's named band or explicit spread.
  * Exact links are decided by the walk (`chanceSupportGoalPaths`).
  */
-export function unsupportedSpreadLink(edge: unknown): boolean {
+function unsupportedSpreadLink(edge: unknown): boolean {
   return isRec(edge) && linkSizing(edge) === 'user' && (hasUserStatedSize(edge) || edge.std_defaulted === true);
 }
 
@@ -459,13 +459,22 @@ export function unsupportedSpreadLink(edge: unknown): boolean {
  * moves nothing are never named. Pure.
  */
 export function chanceSupportGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[],
-  scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): { readonly unsized: PlaceholderGoalPath[]; readonly unsupportedSpread: PlaceholderGoalPath[] } {
+  scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>,
+  /** A target or limit on another node (Codex R1 #3443; DL-3: targets AND limits): the same walk, to that condition's node. */
+  toNodeId?: string): { readonly unsized: PlaceholderGoalPath[]; readonly unsupportedSpread: PlaceholderGoalPath[] } {
   const seeds = actualMoveSeeds(graph, optionIds, scoredInterventions);
-  const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations);
+  const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations, undefined, toNodeId);
   const definition = validatedDefinitionForGraph(graph);
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const operands = exactIdentityOperandLinks(nodes, isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [], identityEvaluations);
+  const setsNode = (optionId: string, nodeId: string): boolean => {
+    const option = nodes.find(n => n.id === optionId);
+    const iv = scoredInterventions?.get(optionId) ?? (option === undefined ? undefined : mergeInterventionSourceObjects(option));
+    return isRec(iv) && Object.hasOwn(iv, nodeId);
+  };
   const named = (test: (e: Rec) => boolean): PlaceholderGoalPath[] => paths.flatMap(path => {
+    // An option that sets the condition's node itself holds it at that level: no link into it carries that option's P.
+    if (toNodeId !== undefined && setsNode(path.option_id, toNodeId)) return [];
     const links = path.links.filter(test)
       .flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
     return links.length > 0 ? [{ option_id: path.option_id, links }] : [];
