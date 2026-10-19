@@ -726,3 +726,6 @@ export function classifyAmountAgainstBrief(
 
   return magnitude === null ? "undecidable" : "not_stated";
 }
+
+/** The one range-joiner rule, for the one eligibility's joined-expression check (stated-by-user.ts: a range is never an operand). */
+export { joinedAsRange };

@@ -12,9 +12,12 @@
  *  · the answer door's reading of a restated range: what it accepts today, and the KNOWN LOSSES (`it.fails`, step 2).
  */
 import { describe, expect, it } from 'vitest';
+// First: the real register/read world's module doubles (config, session store, identity) load before the build imports.
+import { correctionWorld } from './corrections-stage2-world.js';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { userStatementFor } from '../../statement-door/statements.js';
 import { centreRangeOfQuote, linkEffectTheUserStated } from '../stated-by-user.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
 
@@ -139,6 +142,38 @@ describe('construction: a stated effect RANGE is held as the user’s statement 
     const g = await built(A_BRIEF, draftOf({ ...A, effect: { ...A.effect, label: 'Referral scheme active' } }));
     expect(effectRecord(g, 'Corporate deal active', 'weekday attendance')).toBeUndefined();
   });
+});
+
+/**
+ * ⛔ A RANGE IS THE USER'S ONLY WHEN BOTH ITS ENDS ARE (Codex #3438 R8 P1). The verifier's figure list read joined ranges raw, so a
+ * tolerance end made a range: "20 ± 5 to 10" persisted as the user's 5–10. Both ends now pass the one eligibility (`amountComplete`).
+ * Real path: construction → the real register route → cold read → `GraphV3.parse`. SYNTHETIC wording.
+ */
+describe('a range is the user’s only when both its ends are complete amounts, through registration and cold read', () => {
+  const LEVEL = 'Attendance is 45% today.';
+  const TARGET = 'Attendance must reach at least 55%.';
+  async function registeredCold(quote: string, effect: { low: number; high: number }): Promise<Rec> {
+    const brief = `${LEVEL} ${TARGET} ${quote}`;
+    const w = await correctionWorld({ nodes: [], edges: [] }, brief, { brief });
+    const draft = draftOf({ goal: { metric: 'Attendance', baseline: 45, target: 55, levelQuote: LEVEL, targetQuote: TARGET },
+      option: 'Corporate deal', factor: 'Corporate deal active', factorUnit: '0/1', perSource: null, amount: null,
+      effect: { quote, ...effect, unit: 'attendance points' } });
+    const result = await buildModelFromBrief(w.ctx.scenario_id, brief, w.dispatch as never, (async () => ({ text: draft, status: 'completed' })) as never) as Rec;
+    expect(result.ok, JSON.stringify(result).slice(0, 1500)).toBe(true);
+    expect(w.writes).toHaveLength(1);
+    const cold = await w.cold();
+    expect(cold.status, JSON.stringify(cold.body).slice(0, 800)).toBe(200);
+    return GraphV3.parse(JSON.parse(JSON.stringify(cold.body.graph))) as unknown as Rec;
+  }
+  it.each(['20 ± 5 to 10', '20 plus or minus 5 to 10'])('NEGATIVE: a tolerance end never makes the user’s range: "%s"', async (expr) => {
+    const g = await registeredCold(`The corporate deal would add ${expr} attendance points.`, { low: 5, high: 10 });
+    const rec = effectRecord(g, 'Corporate deal active', 'Attendance');
+    expect((rec?.statements ?? []).filter((s) => s.speaker === 'user' && s.form === 'range' && s.low === 5 && s.high === 10), JSON.stringify(rec)).toEqual([]);
+  }, 60_000);
+  it('CONTROL: a whole range ("between 5 and 10") is held as the user’s through registration and cold read', async () => {
+    const g = await registeredCold('The corporate deal would add between 5 and 10 attendance points.', { low: 5, high: 10 });
+    expect(effectRecord(g, 'Corporate deal active', 'Attendance')?.statements[0]).toMatchObject({ speaker: 'user', form: 'range', low: 5, high: 10 });
+  }, 60_000);
 });
 
 describe('the answer door’s reading of a restated range (pure; the proposer reads it the same way)', () => {

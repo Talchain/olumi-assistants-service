@@ -1073,4 +1073,59 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
   }, 120_000);
+
+  /**
+   * ⛔ A REFUSED FIGURE IS NEVER CONFIRMED INTO THE USER'S (Codex #3438 R7 BLOCK, real path): the door quoted a raw match
+   * (`quoteOfFigure`) as a figure for the user to confirm, and the approval stamped a tolerance, an operand, an incomplete span or
+   * a range end as their own (0/7). The quote reads THE ONE CHECK now. Proposal → hold → approval → save → readback: none of the
+   * seven is held or saved as the user's figure; "45 now" (the user's own, digits) is. SYNTHETIC wording, Codex's own seven.
+   */
+  it.each([
+    ['a tolerance after ±', 'Night shift load is 20 ± 5 hours.', 5],
+    ['the value before plus or minus', 'Night shift load is 20 plus or minus 5 hours.', 20],
+    ['the value "within 5 of"', 'Night shift load is within 5 of 20 hours.', 20],
+    ['the tolerance after give or take', 'Night shift load is a hundred and twenty give or take five hours.', 5],
+    ['the value before give or take', 'Night shift load is a hundred and twenty give or take five hours.', 120],
+    ['an incomplete span beside another figure', 'Night shift load is a hundred and twenty-odd hours; we have 4 engineers.', 120],
+    ['a range end in words', 'Night shift load is two to three users.', 3],
+  ])('R7 real path: %s ("%s" → %d) is never held or saved as the user’s figure', async (_case, message, value) => {
+    graphOf.set(SCENARIO, seedGraph());
+    const unit = message.includes('users') ? 'users' : 'hours';
+    const t1 = await propose([{ label: 'Night shift load', unit, today: { value }, affects: 'Delivery capacity', direction: 'positive' }], message);
+    const held = await heldOnLatestRow();
+    const members = held.flatMap((h) => (h.action.inline_patch?.[GM_HELD_USER_TODAY] as { basis?: string }[] | undefined) ?? []);
+    expect(members.filter((m) => m.basis === 'confirmed_by_approval' || m.basis === 'written_about'), JSON.stringify(members)).toEqual([]);
+    const approve = approveChipOf(t1);
+    if (approve !== undefined) await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    for (const g of [graphNow(), GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as unknown as G]) {
+      const saved = g.nodes.find((x) => x.label === 'Night shift load')?.['observed_state'] as Record<string, unknown> | undefined;
+      expect(saved?.['source'] === USER_SOURCE && saved?.['raw_value'] === value, JSON.stringify(saved)).toBe(false);
+      expect(saved?.['reviewed_by_user'], JSON.stringify(saved)).toBeUndefined();
+    }
+  }, 120_000);
+  it('R7 real path CONTROL: "Night shift load is 45 now." is held, approved, saved and read back as the user’s 45', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await propose([{ label: 'Night shift load', unit: 'hours', today: { value: 45 }, affects: 'Delivery capacity', direction: 'positive' }],
+      'Night shift load is 45 now.');
+    expect(callOf(t1), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const approve = approveChipOf(t1)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    for (const g of [graphNow(), GraphV3.parse(JSON.parse(JSON.stringify(graphNow()))) as unknown as G]) {
+      expect(g.nodes.find((x) => x.label === 'Night shift load')?.['observed_state'], 'saved and read back as the user’s')
+        .toMatchObject({ raw_value: 45, source: USER_SOURCE });
+    }
+  }, 120_000);
+  it('R7 real path: a refused fragment in unverified words still WITHHOLDS (origin unknown), never becomes Olumi’s estimate', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await turn({ message: 'Night shift load is 20 ± 5 hours.', source: 'chip', chip: { id: 'chip-not-typed' } });
+    const before = bytes();
+    script = [() => fnCall('propose_new_factor', { factors: [{ label: 'Night shift load', unit: 'hours', today: { value: 5 }, affects: 'Delivery capacity',
+      direction: 'positive' }], rationale: '' }), () => say('Please confirm the source.')];
+    const result = await turn({ message: 'Add the night shift load to the model.' });
+    expect(callOf(result), JSON.stringify(result._agent.tool_calls)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    expect(await heldOnLatestRow()).toHaveLength(0);
+    expect(bytes()).toBe(before);
+  }, 120_000);
 });
