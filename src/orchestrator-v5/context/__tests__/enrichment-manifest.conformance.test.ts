@@ -191,6 +191,7 @@ describe('manifest ↔ PLoT RunResponseV3 (the seam that had no bolt)', () => {
     'coaching_signal_produced_at',
     '_diagnostics',
     'run_provenance',
+    '__cee_evaluated_response',
   ]);
   const LEGACY_V1_ONLY = new Set(['results']);
   const manifestPlotSection = [...ENRICHMENT_PRODUCER_MANIFEST].filter(
