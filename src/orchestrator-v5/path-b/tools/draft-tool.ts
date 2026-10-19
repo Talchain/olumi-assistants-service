@@ -7,7 +7,7 @@
  *     version (`findConstructionVersion`, by its operation id) is on record AND a fresh read holds a model.
  * A retry of a construction that already committed reports "already saved", never a second write or "model exists".
  */
-import { z } from 'zod/v4';
+import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
