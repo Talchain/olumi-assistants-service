@@ -45,7 +45,8 @@ describe('the binding still refuses a figure written about another quantity', ()
   it('CONTROL (#2195 kept): "300 Pro paying subscribers" is never a £300 limit on the Pro plan price', () => {
     const g = { nodes: [{ label: 'Pro plan price', kind: 'factor' }, { label: 'Pro paying subscribers', kind: 'factor' }, { label: 'MRR', kind: 'goal' }] };
     const t = 'We have 300 Pro paying subscribers, and MRR must be at least that';
-    expect(figureTheUserWrote(300, 'GBP', t)).toBe(true);
+    // DL-3 on #3429: "300 Pro paying subscribers" counts subscribers, so it is no figure of £ even before the binding (it was).
+    expect(figureTheUserWrote(300, 'GBP', t)).toBe(false);
     expect(figureTheUserWroteFor(300, 'GBP', t, limitScopeIn(g, 'Pro plan price'))).toBe(false);
   });
   it('CONTRAST ("to" before a NOUN is not a purpose): "move £30,000 to Advertising spend" is not the release budget', () => {
