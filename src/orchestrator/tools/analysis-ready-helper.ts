@@ -1373,8 +1373,16 @@ function hasSampledPrior(prior: unknown): boolean {
     && min !== max;
 }
 
+/**
+ * ⭐ ONE quotable-label rule for the level asks (Codex R1 on #3454: a schema-valid label holding a closing quote ended the quotation
+ * and spoke for Olumi). As the scaffold disclosure's label slot (`[^'\n]`), a label is quoted only when it is one line with no
+ * quotation mark of any kind, a word's own ending excepted ("customer’s", "don’t"); otherwise the ask names "this factor", unquoted.
+ */
+const quotable = (label: string): boolean => label.trim() !== ''
+  && !/[\r\n"“”‘’']/u.test(label.trim().replace(/(?<=\p{L})['’](?:s|t|re|ve|ll|d|m)(?!\p{L})/gu, ''));
+
 const statusQuoLevelAsk = (label: string): string =>
-  `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
+  `What is ${quotable(label) ? `"${label}"` : 'this factor’s level'} today, before any option changes it? Without a current level the analysis would treat it as zero.`;
 
 /**
  * ⭐ EBD E1 — ONE READINESS AUTHORITY FOR THE DEADLINE MODEL (Paul, 12 Oct, scenario 4184e877). Its team part
@@ -1428,11 +1436,16 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
    * `neutral_existing_level_gap_words`, exact; supersedes #3451). Where this factor's OWN level record keeps information (the user's
    * statements or the brief's speaker-unknown words) and readiness still finds no supported level, the ask claims neither cases nor a
    * limitation, and never offers zero. The slot is the node's label, as the status-quo ask renders it: no stored statement text reaches
-   * it (Codex R2 on #3451), and no writer sets a level statement's period.
+   * it (Codex R2 on #3451), and no writer sets a level statement's period; it is quoted only where `quotable`.
    */
+  // Only a VALID kept record (Codex R1 on #3454): its key and field both name this factor's level, and every statement keeps words
+  // (a non-blank quote and source line). The stored reader checks only their types.
   const ownLevel = subjectKey({ kind: 'factor', id: gap.id, field: 'level' });
-  if (gap.kind === 'factor' && recordsWithUnknownSpeakerOn(node).some((r) => r.subject_key === ownLevel)) {
-    return `This calculation does not yet have a supported starting level for ‘${gap.label.trim()}’. We can still reason through what is already recorded.`;
+  const kept = recordsWithUnknownSpeakerOn(node).some((r) => r.subject_key === ownLevel && r.field === 'level'
+    && r.statements.every((st) => st.quote.trim() !== '' && st.source.trim() !== ''));
+  if (gap.kind === 'factor' && kept) {
+    return `This calculation does not yet have a supported starting level for ${quotable(gap.label) ? `‘${gap.label.trim()}’` : 'this factor'}. `
+      + 'We can still reason through what is already recorded.';
   }
   return statusQuoLevelAsk(gap.label);
 };
