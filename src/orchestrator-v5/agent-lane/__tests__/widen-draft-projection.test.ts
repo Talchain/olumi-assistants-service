@@ -225,13 +225,6 @@ describe('P05b widening retains the level its existing options gate checked', ()
     expect(projectEntity(added as never)).toMatchObject({ id: 'hiring_stalls', kind: 'risk', proposed_by: 'olumi', analysis_participation: 'retained_excluded' });
     const stated = projectEntity(graph.nodes.find((node) => node.id === 'supplier_delay')! as never);
     expect(stated).not.toHaveProperty('proposed_by');
-    // AIE 19 Oct (02:54Z / 04:12Z): the user's risk has no link here, so it is kept out of the calculation as untested: never
-    // Olumi's (no `proposed_by`), never wired into the goal. A user risk WITH its own link carries neither (the CONTROL below).
-    expect(stated).toMatchObject({ analysis_participation: 'retained_excluded' });
-    const linked = admitCandidateModel({ ...candidate, links: [...candidate.links,
-      { from: 'Supplier delay', to: 'Features delivered', direction: 'negative', provenance: 'inferred' }] } as CandidateModel, {}, brief);
-    const linkedRisk = projectEntity(linked.nodes.find((node) => node.id === 'supplier_delay')! as never);
-    expect(linkedRisk).not.toHaveProperty('proposed_by');
-    expect(linkedRisk).not.toHaveProperty('analysis_participation');
+    expect(stated).not.toHaveProperty('analysis_participation');
   });
 });

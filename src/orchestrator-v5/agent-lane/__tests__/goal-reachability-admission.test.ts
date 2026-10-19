@@ -57,7 +57,7 @@ const labels = (ns: readonly { label: string }[]) => ns.map((n) => n.label).sort
  * failure, an outcome, not a cause of it. A concern left unlinked is RETAINED, visible as untested, and NOT auto-wired.
  */
 describe('unlinked risks are kept, not wired in and not deleted', () => {
-  it('keeps every unlinked risk, with no link invented, left out of the calculation (retained_excluded)', () => {
+  it('keeps every unlinked risk OLUMI drafted, with no link invented, left out of the calculation under the unsized-risk rule (retained_excluded)', () => {
     const a = admit();
     const riskIds = a.nodes.filter((n) => n.kind === 'risk').map((n) => n.id);
     // ⭐ Bound by IDENTITY: both risks kept, neither with any edge, both marked untested.
@@ -72,8 +72,8 @@ describe('unlinked risks are kept, not wired in and not deleted', () => {
     const a = admit();
     const said = a.loss.filter((l) => l.field_path.endsWith('.left_out_of_analysis')).map((l) => l.reason);
     expect(said).toEqual([
-      '"Churn constraint breach" is kept in the model but left out of this analysis, because nothing in the model says how it affects "Monthly recurring revenue". It has not been connected to "Monthly recurring revenue" as a cause.',
-      '"MRR target miss" is kept in the model but left out of this analysis, because nothing in the model says how it affects "Monthly recurring revenue". It has not been connected to "Monthly recurring revenue" as a cause.',
+      '"Churn constraint breach" is Olumi’s suggestion and is kept in the model but left out of this analysis, because nothing in the model says how it affects "Monthly recurring revenue". It has not been connected to "Monthly recurring revenue" as a cause.',
+      '"MRR target miss" is Olumi’s suggestion and is kept in the model but left out of this analysis, because nothing in the model says how it affects "Monthly recurring revenue". It has not been connected to "Monthly recurring revenue" as a cause.',
     ]);
     expect(a.loss.some((l) => /was named but never connected|as a negative influence/.test(l.reason))).toBe(false);
   });

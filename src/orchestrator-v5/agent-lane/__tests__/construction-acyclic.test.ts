@@ -47,7 +47,10 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
-import { runOmittedRisks } from '../unsized-risk.js';
+import { runOmittedRisks, unsizedOlumiRiskIds } from '../unsized-risk.js';
+import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { compactGraph } from '../../../orchestrator/context/graph-compact.js';
 import { asQuestionTitled } from '../../__tests__/support/question-title.support.js';
 const COVERAGE = (JSON.parse(readFileSync('tests/fixtures/sys2/aie-t1-producer-text-v1.json', 'utf8')) as { coverage_templates: { id: string; replacement: string }[] }).coverage_templates;
 /** The AIE T1 coverage clause (18 Oct), as the retry SENDS it for one gap: the template's placeholders filled, never retyped. */
@@ -154,9 +157,11 @@ const PRICE_QUOTE = 'Our Pro price is £49 a month.';
 const quoted = (m: CandidateModel): CandidateModel => ({ ...m, factors: m.factors.map((f) =>
   f.label === 'Pro plan price' && f.baseline_known && f.provenance === 'explicit' && f.baseline_value === 49
     ? { ...f, baseline_evidence: { quote: PRICE_QUOTE } } : f) });
+/** Words a case adds to the end of the served brief (a sentence the user wrote that a draft's statement quotes). */
+let briefExtra = '';
 async function build(...drafts: CandidateModel[]): Promise<Built> {
   drafts = drafts.map(quoted);
-  const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}`;
+  const brief = `${PRICE_QUOTE}\n\n${SERVED.brief}${briefExtra}`;
   let body: unknown = null;
   const inputs: string[] = [];
   const instructions: string[] = [];
@@ -598,57 +603,153 @@ describe('(a) a risk a withheld loop link leaves with nothing onward is kept and
 });
 
 /**
- * ⭐ NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN (AIE 19 Oct 02:54Z: "An incoming causal edge does not size a risk ... do not invent a
- * −0.5 response or call omission probability 0"; PROMPT-INT #3435 bench row 1/1b). On staging d2cb10ef every risk with no outgoing
- * link was wired into the goal, direction negative, mean +0.5 (Olumi's placeholder): a concern the drafter deliberately left unlinked
- * (a consequence of missing the target) became a cause, was asked for a figure (`MISSING_FACTOR_LEVEL`), and once sized went to PLoT
- * as +0.5 beside "negative". Synthetic labels.
+ * ⭐ NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN (AIE 19 Oct 02:54Z + 04:53Z, prompt/AIE-UNLINKED-CONCERN-PARTICIPATION-AND-LIFECYCLE-
+ * 20261019-v1.json; PROMPT-INT #3435 bench row 1/1b). On staging d2cb10ef every risk with no outgoing link was wired into the goal,
+ * direction negative, mean +0.5 (Olumi's placeholder): a concern the drafter deliberately left unlinked became a cause and was asked
+ * for a figure (`MISSING_FACTOR_LEVEL`). Now no link is invented, and zero links alone grant no exclusion: Olumi's own unlinked
+ * concern is left out under the existing unsized-risk rule (with this Run's omission record); a human, adopted or unknown-origin
+ * one keeps its question and the result that would depend on it is withheld. Synthetic labels.
  */
-describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: kept, left out of the calculation, said; never wired into the goal', () => {
+describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: never wired into the goal; only Olumi’s own is left out of the calculation', () => {
   const withConcern = (provenance: 'inferred' | 'explicit', link?: Link): CandidateModel => {
     const c = extended(servedCandidate(), link === undefined ? {} : { links: [link] }) as unknown as { risks: Record<string, unknown>[] };
     c.risks.push({ label: 'Storage overflow', provenance });
     return c as unknown as CandidateModel;
   };
   const CONCERN = 'storage_overflow';
-  const KEPT_OUT = '"Storage overflow" is kept in the model but left out of this analysis, because nothing in the model says how it affects "MRR". It has not been connected to "MRR" as a cause.';
+  const participation = (g: Graph): unknown => (g.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown } | undefined)?.analysis_participation;
+  const storeOf = (g: Graph) => ({ readMostRecentPendingActions: async () => [], loadGraph: async () => g,
+    loadGraphAndBriefText: async () => ({ graph: g, briefText: null }) }) as unknown as SessionStore;
+  const reopen = async (g: Graph): Promise<Graph> =>
+    (await loadScenarioSnapshotForRunAnalysis('77777777-7777-4777-8777-777777777777', 'req-reopen', storeOf(g))).rawPersistedGraph as Graph;
+  const ledgerOf = (c: CandidateModel) => admitCandidateModel(prepareProvisionalCandidate(quoted(c)).candidate, {}).loss;
+  const userLink = (from: string, mean: number) => ({ op: 'add_edge', path: `${from}::${GOAL}`, value: { from, to: GOAL, strength: { mean, std: 0.1 },
+    exists_probability: 0.9, effect_direction: mean < 0 ? 'negative' : 'positive', provenance: { source: 'user_specified' } } });
+  const userLevel = (id: string) => ({ op: 'update_node', path: id,
+    value: { observed_state: { value: 0.2, raw_value: 0.2, source: 'user_edited', extractionType: 'explicit' } } });
+  const sentEdges = (plotCalls: unknown[]) => (plotCalls[0] as { graph: Graph }).graph.edges;
 
-  it.each([['Olumi’s', 'inferred'], ['of unknown origin', 'explicit']] as const)('RED: a concern %s with no link at all — no link is invented, it is kept and left out, the Run proceeds without it, and the ledger says why', async (_who, provenance) => {
-    const c = withConcern(provenance);
+  it('RED: OLUMI’s unlinked concern — no link is invented; it is left out under the unsized-risk rule, THIS Run records its omission, and a cold reopen keeps it unlinked', async () => {
+    const c = withConcern('inferred');
     const { graph } = await build(c);
-    const node = graph.nodes.find((n) => n.id === CONCERN) as (Node & { analysis_participation?: unknown }) | undefined;
-    expect(node?.label, 'kept, visibly').toBe('Storage overflow');
+    expect(graph.nodes.find((n) => n.id === CONCERN)?.label, 'kept, visibly').toBe('Storage overflow');
     expect(graph.edges.filter((e) => e.from === CONCERN || e.to === CONCERN), 'no invented link').toEqual([]);
-    expect(node?.analysis_participation).toBe('retained_excluded');
-    // Was ['MISSING_FACTOR_LEVEL'] for the unknown-origin concern on d2cb10ef: a figure asked for a cause nobody stated.
+    expect(participation(graph)).toBe('retained_excluded');
     expect(blockers(graph)).toEqual([]);
-    // SAVE → REOPEN: the production snapshot loader reads the saved model back cold; the concern is still there, still unlinked.
-    const store = { readMostRecentPendingActions: async () => [], loadGraph: async () => graph,
-      loadGraphAndBriefText: async () => ({ graph, briefText: null }) } as unknown as SessionStore;
-    const reopened = (await loadScenarioSnapshotForRunAnalysis('77777777-7777-4777-8777-777777777777', 'req-reopen', store)).rawPersistedGraph as Graph;
-    expect((reopened.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown } | undefined)?.analysis_participation).toBe('retained_excluded');
-    expect(reopened.edges.filter((e) => e.from === CONCERN || e.to === CONCERN)).toEqual([]);
-    const { plotCalls, error } = await runAnalysis(graph);
+    const { plotCalls, error, out } = await runAnalysis(graph);
     expect(error).toBeNull();
-    expect(plotCalls).toHaveLength(1);
     expect(JSON.stringify((plotCalls[0] as unknown as { graph: unknown }).graph)).not.toContain(CONCERN);
-    const loss = admitCandidateModel(prepareProvisionalCandidate(quoted(c)).candidate, {}).loss;
-    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}].left_out_of_analysis`).map((l) => l.reason)).toEqual([KEPT_OUT]);
+    const fact = ((out as { handler_facts?: { fact_type: string; result: unknown }[] }).handler_facts ?? []).find((f) => f.fact_type === 'run_analysis');
+    expect((runOmittedRisks(fact?.result) ?? []).filter((r) => r.node_id === CONCERN)).toEqual([{ node_id: CONCERN, label: 'Storage overflow', reason: 'unsized_olumi_risk' }]);
+    const back = await reopen(graph);
+    expect(participation(back)).toBe('retained_excluded');
+    expect(back.edges.filter((e) => e.from === CONCERN || e.to === CONCERN)).toEqual([]);
+    const loss = ledgerOf(c);
+    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}].left_out_of_analysis`).map((l) => l.reason)).toEqual([
+      '"Storage overflow" is Olumi’s suggestion and is kept in the model but left out of this analysis, because nothing in the model says how it affects "MRR". It has not been connected to "MRR" as a cause.']);
     expect(loss.some((l) => l.field_path === `edges[${CONCERN}->${GOAL}]`)).toBe(false);
-    // Never said as a blocker it no longer is ("the analysis cannot be run while it is unconnected").
-    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}]`)).toEqual([]);
+    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}]`), 'never said as unconnected').toEqual([]);
   });
 
-  it('RED (the sign on the wire): every link the Run sends carries a mean whose sign agrees with its direction', async () => {
-    const { graph } = await build(withConcern('explicit'));
-    // Sized, so a concern wired into the goal would be sent (d2cb10ef: +0.5 beside "negative", flipped only by PLoT's normaliser).
-    const sized = { ...graph, nodes: graph.nodes.map((n) => (n.id === CONCERN
-      ? { ...n, observed_state: { value: 0.2, raw_value: 0.2, source: 'cee_inference', extractionType: 'inferred' } } : n)) } as Graph;
-    const { plotCalls, error } = await runAnalysis(sized);
+  it('RED: a concern of UNKNOWN origin with no link — zero links grant no exclusion: no invented link, no mark, it is said and asked about, and the result that depends on it is withheld', async () => {
+    const c = withConcern('explicit');
+    const { graph } = await build(c);
+    expect(graph.nodes.find((n) => n.id === CONCERN)?.label, 'the full concern is saved').toBe('Storage overflow');
+    expect(graph.edges.filter((e) => e.from === CONCERN || e.to === CONCERN), 'no invented link').toEqual([]);
+    expect(participation(graph), 'never relabelled as Olumi’s optional material').toBeUndefined();
+    // The dependent result is withheld (d2cb10ef instead asked a figure for a cause nobody stated: MISSING_FACTOR_LEVEL).
+    expect(blockers(graph)).toContain('ORPHAN_NODE');
+    expect(blockers(graph)).not.toContain('MISSING_FACTOR_LEVEL');
+    const loss = ledgerOf(c);
+    expect(loss.filter((l) => l.field_path === `nodes[${CONCERN}]`).map((l) => l.reason)).toEqual([
+      '"Storage overflow" is in the model but no chain of causes runs from it to "MRR", so the analysis cannot be run while it is unconnected. It has been kept rather than deleted — ask what it affects, and the link can be added.']);
+    expect(loss.some((l) => l.field_path === `edges[${CONCERN}->${GOAL}]` || l.field_path === `nodes[${CONCERN}].left_out_of_analysis`)).toBe(false);
+  });
+
+  it('RED: a HUMAN-claimed concern with no link (the user’s own sentence) — not excluded, never relabelled as Olumi’s, said as unconnected, and the dependent result withheld; the unsized rule never takes it even if marked', async () => {
+    const said = ' Our storage is already overflowing at peak times.';
+    const c = withConcern('explicit') as unknown as { statements?: unknown[] };
+    c.statements = [{ quote: said.trim(), subject: { kind: 'risk', label: 'Storage overflow', to_label: null, factor_label: null }, field: 'holds_now',
+      form: 'holds_now', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker: 'user' }];
+    briefExtra = said;
+    try {
+      const { graph } = await build(c as unknown as CandidateModel);
+      const node = graph.nodes.find((n) => n.id === CONCERN) as (Node & { provenance?: unknown }) | undefined;
+      expect(node?.provenance, 'the user’s claim, never Olumi’s').toBe('unverified_brief');
+      expect(graph.edges.filter((e) => e.from === CONCERN || e.to === CONCERN), 'no invented link').toEqual([]);
+      expect(participation(graph)).toBeUndefined();
+      expect(blockers(graph)).toContain('ORPHAN_NODE');
+      // Run consumption: the unsized-risk rule keeps its authorship safeguard — a stray mark on the user's concern is not Olumi's omission.
+      const stray = { ...graph, nodes: graph.nodes.map((n) => (n.id === CONCERN ? { ...n, analysis_participation: 'retained_excluded' } : n)) };
+      expect(unsizedOlumiRiskIds(stray).has(CONCERN)).toBe(false);
+    } finally { briefExtra = ''; }
+  });
+
+  it('RED (the sign): every saved link and every link the Run sends carries a mean whose sign agrees with its direction', async () => {
+    const { graph } = await build(withConcern('inferred'));
+    const disagrees = (e: Edge) => (e.effect_direction === 'negative' ? (e.strength?.mean ?? 0) > 0 : (e.strength?.mean ?? 0) < 0);
+    // d2cb10ef saved this concern's invented link as +0.5 beside "negative" (PLoT's normaliser flipped it; the AI's view did not).
+    expect(graph.edges.filter(disagrees)).toEqual([]);
+    const { plotCalls, error } = await runAnalysis(graph);
     expect(error).toBeNull();
-    const wire = (plotCalls[0] as unknown as { graph: Graph }).graph.edges;
-    expect(wire.length).toBeGreaterThan(0);
-    expect(wire.filter((e) => (e.effect_direction === 'negative' ? (e.strength?.mean ?? 0) > 0 : (e.strength?.mean ?? 0) < 0))).toEqual([]);
+    expect(sentEdges(plotCalls).length).toBeGreaterThan(0);
+    expect(sentEdges(plotCalls).filter(disagrees)).toEqual([]);
+  });
+
+  // ⭐ DL-3 ruling + AIE ruling 2 on #3441: a later genuine, authorised link is reflected in ONE saved candidate; the mark never
+  // outlives the rule that set it, and is never cleared merely because an edge appeared. The writes go through the shared add-edge
+  // writer every canvas edit and approved Agent change uses (`applyPatchOperations`).
+  it('RED (a later user link): the user links their concern and gives its figure → the next Run sends it with the user’s own sign, the AI view reads that sign, and a cold reopen keeps it', async () => {
+    const { body, graph } = await build(withConcern('explicit'));
+    const linked = applyPatchOperations(GraphV3.parse(graph), [userLink(CONCERN, -0.3), userLevel(CONCERN)] as never);
+    const saved = projectGraphForPersistence({ ...body, nodes: linked.nodes, edges: linked.edges }) as unknown as Graph;
+    expect(participation(saved)).toBeUndefined();
+    expect(blockers(saved)).toEqual([]);
+    const { plotCalls, error } = await runAnalysis(saved);
+    expect(error).toBeNull();
+    const wire = sentEdges(plotCalls).filter((e) => e.from === CONCERN);
+    expect(wire.map((e) => [e.to, e.effect_direction, e.strength?.mean])).toEqual([[GOAL, 'negative', -0.3]]);
+    // The AI's compact view (graph-compact.ts) carries the mean without the direction: for a new link that mean holds the sign.
+    expect(compactGraph(GraphV3.parse(saved) as never).edges.filter((e) => e.from === CONCERN).map((e) => e.strength)).toEqual([-0.3]);
+    const back = await reopen(saved);
+    expect(back.edges.filter((e) => e.from === CONCERN).map((e) => [e.to, e.effect_direction, e.strength?.mean])).toEqual([[GOAL, 'negative', -0.3]]);
+    expect(participation(back)).toBeUndefined();
+  });
+
+  it('RED (the mark follows its rule): Olumi’s concern linked AND given a figure by the user in one write is included in that same saved candidate, and the Run sends it with the user’s sign', async () => {
+    const { body, graph } = await build(withConcern('inferred'));
+    expect(participation(graph), 'PRECONDITION').toBe('retained_excluded');
+    const linked = applyPatchOperations(GraphV3.parse(graph), [userLink(CONCERN, -0.3), userLevel(CONCERN)] as never);
+    expect(participation(linked as unknown as Graph), 'the unsized rule no longer holds').toBeUndefined();
+    const saved = projectGraphForPersistence({ ...body, nodes: linked.nodes, edges: linked.edges }) as unknown as Graph;
+    const { plotCalls, error, out } = await runAnalysis(saved);
+    expect(error).toBeNull();
+    expect(sentEdges(plotCalls).filter((e) => e.from === CONCERN).map((e) => [e.to, e.effect_direction, e.strength?.mean])).toEqual([[GOAL, 'negative', -0.3]]);
+    const fact = ((out as { handler_facts?: { fact_type: string; result: unknown }[] }).handler_facts ?? []).find((f) => f.fact_type === 'run_analysis');
+    expect((runOmittedRisks(fact?.result) ?? []).map((r) => r.node_id)).not.toContain(CONCERN);
+    expect(participation(await reopen(saved))).toBeUndefined();
+  });
+
+  it('CONTROL (never cleared merely because an edge appeared): Olumi’s concern linked but still unsized keeps its mark and stays out', async () => {
+    const { graph } = await build(withConcern('inferred'));
+    const linked = applyPatchOperations(GraphV3.parse(graph), [userLink(CONCERN, -0.3)] as never);
+    expect(participation(linked as unknown as Graph)).toBe('retained_excluded');
+  });
+
+  it('RED (the mark follows its rule): a cause drawn into Olumi’s concern ends the unsized-risk mark in the same write (it is no longer a root; K3 then governs it)', async () => {
+    const { graph } = await build(withConcern('inferred'));
+    expect(participation(graph), 'PRECONDITION').toBe('retained_excluded');
+    const cause = { op: 'add_edge', path: `${NEW_CONVERSIONS}::${CONCERN}`, value: { from: NEW_CONVERSIONS, to: CONCERN,
+      strength: { mean: 0.2, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' } };
+    expect(participation(applyPatchOperations(GraphV3.parse(graph), [cause] as never) as unknown as Graph)).toBeUndefined();
+  });
+
+  it('CONTROL: an excluded risk that already had links keeps its mark when another link is added (an unsized Olumi suggestion stays out)', async () => {
+    const { graph } = await build(servedCandidate());
+    expect((graph.nodes.find((n) => n.id === DELAY) as { analysis_participation?: unknown }).analysis_participation, 'PRECONDITION').toBe('retained_excluded');
+    const linked = applyPatchOperations(GraphV3.parse(graph), [{ op: 'add_edge', path: `${DELAY}::${NEW_CONVERSIONS}`,
+      value: { from: DELAY, to: NEW_CONVERSIONS, strength: { mean: -0.2, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' } } as never]);
+    expect((linked.nodes.find((n) => n.id === DELAY) as { analysis_participation?: unknown }).analysis_participation).toBe('retained_excluded');
   });
 
   it('CONTROL: a concern WITH its own link keeps the drafter’s link and sign, and still asks for its figure (operative material is never left out)', async () => {
@@ -656,14 +757,14 @@ describe('NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN: kept, left out of the cal
     const own = graph.edges.filter((e) => e.from === CONCERN);
     expect(own.map((e) => [e.to, e.effect_direction])).toEqual([[GOAL, 'negative']]);
     expect(own[0]!.strength!.mean).toBeLessThan(0);
-    expect((graph.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown }).analysis_participation).toBeUndefined();
+    expect(participation(graph)).toBeUndefined();
     expect(blockers(graph)).toContain('MISSING_FACTOR_LEVEL');
   });
 
   it('CONTROL: a concern whose link the drafter stated with direction unknown keeps its question, unmarked', async () => {
     const { graph } = await build(withConcern('explicit', L('Storage overflow', 'MRR', 'unknown')));
     expect(graph.edges.filter((e) => e.from === CONCERN)).toEqual([]);
-    expect((graph.nodes.find((n) => n.id === CONCERN) as { analysis_participation?: unknown }).analysis_participation).toBeUndefined();
+    expect(participation(graph)).toBeUndefined();
   });
 });
 

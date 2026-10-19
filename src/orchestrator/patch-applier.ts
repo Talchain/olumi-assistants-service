@@ -22,6 +22,7 @@ import {
 } from "../schemas/required-nested-merge.js";
 import type { PatchOperation } from "./types.js";
 import { preconditionRiskLinkViolations } from './graph-structure-validator.js';
+import { reconcileUnsizedOlumiRiskMarks } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { hasReliesOnRiskWrite } from '../orchestrator-v5/graph-management/field-safety.js';
 
 // ============================================================================
@@ -100,6 +101,9 @@ export function applyPatchOperations(
         );
     }
   }
+
+  // An Olumi risk kept out of the calculation by the unsized-risk rule stays out only while that rule still holds after this write.
+  reconcileUnsizedOlumiRiskMarks(graph, { ...candidate, goal_constraints: (graph as { goal_constraints?: unknown }).goal_constraints });
 
   // Enforce the central precondition rule after the WHOLE atomic batch: an
   // explicit removal can repair a bad stored link, but no writer can persist

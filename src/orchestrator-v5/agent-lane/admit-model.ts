@@ -81,7 +81,7 @@ import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, wit
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
 import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
-import { retainUnsizedOlumiRisks } from './unsized-risk.js';
+import { retainUnsizedOlumiRisks, unsizedOlumiRiskIds } from './unsized-risk.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -5663,10 +5663,10 @@ function admitOnce(
    * 1. (WITHDRAWN 19 Oct, AIE 02:54Z.) A risk with no outgoing edge used to be connected to the goal,
    *    negative, at Olumi's placeholder size, "entailed by the node's own kind". It is not: a concern the
    *    drafter left unlinked may be a consequence of missing the goal, not a cause of it, and an incoming
-   *    edge does not size a risk. No link is invented now (`unlinkedConcerns`, below): a risk with no link
-   *    at all is kept and left out of the calculation, one with only a cause drawn in is K3's, and a risk
-   *    whose link the drafter STATED with direction `unknown` keeps its withheld link as the question
-   *    (#63 5793252993: ASK instead of defaulting).
+   *    edge does not size a risk. No link is invented now (`olumisUnlinked`, below): Olumi's own unlinked
+   *    concern is left out under the unsized-risk rule; any other risk with no link is kept, said, and asked
+   *    about; a risk whose link the drafter STATED with direction `unknown` keeps its withheld link as the
+   *    question (#63 5793252993: ASK instead of defaulting).
    * 2. Anything that STILL cannot reach the goal is withheld from the admitted
    *    graph and named in `loss`, because there is no non-guessing repair for
    *    it — and a model nobody can analyse is worse than a model that says
@@ -5818,35 +5818,38 @@ function admitOnce(
     // drafter CandidateModel path accepts no stamp and never re-admits that stored graph; neither register nor the
     // Run loader calls it. Only server-authored draft widening metadata exempts a new zero-edge suggestion here.
     /**
-     * ⭐ NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN (AIE 19 Oct 02:54Z: "An incoming causal edge does not size a risk ... do not
-     * invent a −0.5 response or call omission probability 0"; PROMPT-INT #3435 bench row 1/1b). Every risk with no outgoing link
-     * used to be wired into the goal, negative, at Olumi's placeholder size (mean +0.5 beside direction negative), so a concern the
-     * drafter deliberately left unlinked (a consequence of missing the target) re-entered the Run as a cause and was asked for a
-     * figure. Now no link is invented:
-     *  · a risk with NO link at all is kept, visibly, and left out of the calculation (`retained_excluded`: readiness, the Run's
-     *    participation guard and its disclosure already read that mark), and the ledger says why;
-     *  · a risk with a cause drawn into it but nothing onward is K3's (`graph/inert-risk.ts`): left out and asked, below;
-     *  · a risk whose own link was withheld as direction-unknown keeps its question, and a widening suggestion its stamp.
-     * A risk with an outgoing link (human, adopted or Olumi's) is untouched: it still asks for its figure or is withheld as before.
+     * ⭐ NO PLACEHOLDER LINK FOR AN UNLINKED CONCERN (AIE 19 Oct 02:54Z + 04:53Z; PROMPT-INT #3435 bench row 1/1b). Every risk with no
+     * outgoing link used to be wired into the goal, negative, at Olumi's placeholder size (mean +0.5 beside direction negative), so a
+     * concern the drafter deliberately left unlinked (a consequence of missing the target) re-entered the Run as a cause and was asked
+     * for a figure. No link is invented now, and zero links alone grant no exclusion:
+     *  · OLUMI's own unlinked, unsized concern joins the existing unsized-risk rule (`unsizedOlumiRiskIds`): marked below by
+     *    `retainUnsizedOlumiRisks`, left out of the calculation with this Run's omission record, reason and scope, and said;
+     *  · a human, adopted or unknown-origin risk with no link keeps its safeguards: it is kept, said as unconnected (the question
+     *    that brings it in), and readiness withholds the result that would depend on it;
+     *  · a risk with a cause drawn in but nothing onward is K3's; a direction-unknown risk keeps its question; widening its stamp.
+     * A risk with its own outgoing link is untouched.
      */
-    const touchedNow = new Set(brokenEdges.flatMap((e) => [e.from, e.to]));
+    const edgesNow = brokenEdges;
+    const linkedNow = new Set(edgesNow.flatMap((e) => [e.from, e.to]));
     // A risk whose own link was withheld as direction-unknown was answered "I cannot say which way" — not left unconnected.
     const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
-    const unlinkedConcerns = new Set<string>();
-    nodes.forEach((r, i) => {
-      if (r.kind !== 'risk' || touchedNow.has(r.id) || directionDeclined.has(r.id) || wideningRiskIds.has(r.id)) return;
-      unlinkedConcerns.add(r.id);
-      if (r.analysis_participation === undefined) nodes[i] = { ...r, analysis_participation: 'retained_excluded' as const };
+    const unlinked = new Set(nodes.filter((n) => n.kind === 'risk' && !linkedNow.has(n.id) && !directionDeclined.has(n.id)
+      && !wideningRiskIds.has(n.id) && n.analysis_participation === undefined).map((n) => n.id));
+    // The unsized-risk rule decides which of them is Olumi's own, unsized and not needed (its authorship safeguards, unchanged).
+    const marked = (n: AdmittedNode): AdmittedNode => (unlinked.has(n.id) ? { ...n, analysis_participation: 'retained_excluded' as const } : n);
+    const olumisUnlinked = new Set([...unsizedOlumiRiskIds({ nodes: nodes.map(marked), edges: edgesNow, goal_constraints: constraintResult.constraints })]
+      .filter((id) => unlinked.has(id)));
+    nodes.forEach((n, i) => { if (olumisUnlinked.has(n.id)) nodes[i] = marked(n); });
+    for (const r of nodes.filter((n) => olumisUnlinked.has(n.id))) {
       loss.push({
         field_path: `nodes[${r.id}].left_out_of_analysis`,
         before: r.label,
         after: 'retained_excluded',
-        reason: `"${r.label}" is kept in the model but left out of this analysis, because nothing in the model says how it affects `
-          + `"${goalForReach.label}". It has not been connected to "${goalForReach.label}" as a cause.`,
+        reason: `"${r.label}" is Olumi’s suggestion and is kept in the model but left out of this analysis, because nothing in the model `
+          + `says how it affects "${goalForReach.label}". It has not been connected to "${goalForReach.label}" as a cause.`,
         severity: 'warn',
       } as RepairEntry);
-    });
-    const edgesNow = brokenEdges;
+    }
     /**
      * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
      *
@@ -5889,7 +5892,7 @@ function admitOnce(
     for (const n of nodes) {
       // A pure limit left with no edge out ends at its limit by construction (above): readiness holds it as a valid
       // terminal. One that still feeds something is judged like any other node.
-      if (n.id === goalForReach.id || n.kind === 'decision' || unlinkedConcerns.has(n.id) || reachesGoal(n.id) || sinkBranch.has(n.id)
+      if (n.id === goalForReach.id || n.kind === 'decision' || olumisUnlinked.has(n.id) || reachesGoal(n.id) || sinkBranch.has(n.id)
         || (pureLimits.some((p) => p.node_id === n.id) && !edgesNow.some((e) => e.from === n.id))) continue;
       // The risk itself is said; a cause drawn only into it is left out with it and comes back when the risk does.
       if (leftOut.has(n.id)) {
