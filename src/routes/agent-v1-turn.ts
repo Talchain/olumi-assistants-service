@@ -4357,6 +4357,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
           canonicalState: canonicalContext?.packet?.state,
           withheldTools: withheldToolsOf(body),
+          // The scenario's ONE OpenAI Conversation id is saved on the scenario, so a reopen continues it.
+          ...(typeof store.readOpenAiConversationId === 'function' && typeof store.claimOpenAiConversationId === 'function' ? {
+            conversationStore: {
+              read: (sid: string) => store.readOpenAiConversationId!(sid),
+              claim: (sid: string, id: string) => store.claimOpenAiConversationId!(sid, id),
+            } } : {}),
         });
         coreSdk = core.sdk;
         result = core;
