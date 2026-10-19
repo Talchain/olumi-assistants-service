@@ -27,6 +27,9 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import type { CommittedTurnLedger } from '../../session/store.js';
 import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 import { identityPartFiguresToIssue } from '../identity-card.js';
+import { figuresWritten } from '../user-statements.js';
+import { amountsWrittenIn } from '../stated-by-user.js';
+import { sourceMapOf } from '../construction-source-map.js';
 import { comparatorTheUserWrote, comparatorTheUserWroteFor, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteSpan, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 
 type Rec = Record<string, any>;
@@ -128,7 +131,9 @@ describe('a figure written in words is written, exactly as its digits are (deplo
     for (const typed of ['We now have 70 customers on the support plan; the team resolves the same as before.',
       'We now have seventy customers on the support plan; the team resolves the same as before.']) {
       const { result, chip, w } = await correct(typed, teamLevel(70));
-      expect(result, typed).toMatchObject({ ok: false, mutated: false, refusal: 'origin_unknown' });
+      // The user wrote 70, for customers: nothing is proposed for the team and the Agent asks which they mean (Codex R6 on #3433:
+      // the generic "origin unknown" refusal became the quantity-specific ask).
+      expect(result, typed).toMatchObject({ ok: false, mutated: false, refusal: 'nothing_to_adopt' });
       expect(chip).toBeUndefined();
       expect(nodeOf(w.graph(), TEAM)).toEqual(nodeOf(SERVED.graph, TEAM));
     }
@@ -300,6 +305,123 @@ describe('the bound-figure reader keeps the one speaker rule', () => {
     ['the same words quoted', 'Our manager said: \u201CWe have seventy paying subscribers today\u201D.', false],
   ] as const)('%s', (_n, text, bound) => {
     expect(figureTheUserWroteFor(70, 'subscribers', text, scope)).toBe(bound);
+  });
+});
+
+/**
+ * ⭐ ONE BINDING, BOTH FORMS (Codex #3427 R4 first loss: the user's own elliptical "it is forty-five hours per week" withdrew 40 but saved
+ * no 45, while its digits saved 45; the words-only nearby-label branch). Generated: number × form × sentence × scope mode. A word amount
+ * binds, named or unbound, exactly as its digits do; another entity named, another speaker's words, another counted noun, several
+ * figures under the strict reader and a reader that requires a name all still refuse, in both forms.
+ */
+describe('parity by property: the bound reader binds a spelled figure exactly as its digits, named or unbound', () => {
+  // Article forms bind exactly as their digits too (a fraction is no figure: words-read-whole-or-not.test.ts).
+  const NUMBERS: [number, string][] = [[45, 'forty-five'], [45, 'forty five'], [12, 'twelve'], [120, 'one hundred and twenty'],
+    [100, 'a hundred'], [120, 'a hundred and twenty']];
+  const SENTENCES: [string, (f: string) => string, { plain: boolean; strict: boolean; named: boolean }][] = [
+    ['elliptical', (f) => `It is ${f} hours per week.`, { plain: true, strict: true, named: false }],
+    ['named', (f) => `Night shift is ${f} hours per week.`, { plain: true, strict: true, named: true }],
+    ['another entity named', (f) => `Day shift is ${f} hours per week.`, { plain: false, strict: false, named: false }],
+    ['another speaker', (f) => `Our lead said: "it is ${f} hours per week".`, { plain: false, strict: false, named: false }],
+    ['another counted noun', (f) => `It is ${f} nurses.`, { plain: false, strict: false, named: false }],
+    ['another counted noun, same rate', (f) => `It is ${f} emails per week.`, { plain: false, strict: false, named: false }],
+    ['several figures, unnamed', (f) => `It is ${f} hours per week, not 30.`, { plain: true, strict: false, named: false }],
+  ];
+  const base = { target: ['Night shift hours'], others: ['Day shift hours'] };
+  const MODES = [['plain', base], ['strict', { ...base, strict: true as const }], ['named', { ...base, requireNamed: true as const }]] as const;
+  it('the same verdict in words and digits, and the rule\'s verdict, for every combination', () => {
+    let bound = 0;
+    for (const [v, w] of NUMBERS) for (const [name, say, expected] of SENTENCES) for (const [mode, scope] of MODES) {
+      const words = figureTheUserWroteFor(v, 'hours per week', say(w), scope);
+      expect(words, `${name} ${mode} | ${say(w)}`).toBe(figureTheUserWroteFor(v, 'hours per week', say(String(v)), scope));
+      expect(words, `${name} ${mode} | ${say(w)}`).toBe(expected[mode]);
+      if (words) bound += 1;
+    }
+    expect(bound).toBeGreaterThan(10);
+  });
+  /**
+   * ⛔ ALIASES ARE THE SAME UNIT (Codex #3438 R1: "Night shift is 45 hrs per week" and "45 mins" bound on base and not on 3f82142f). The
+   * counted noun is read through THE ONE UNIT VOCABULARY's spellings, in digits and words: every alias gives its canonical spelling's verdict.
+   */
+  it('alias template: hrs/hours, mins/minutes, wk/week and £k/thousand give the canonical spelling\'s verdict, named and unbound', () => {
+    const ALIASES: [string, number, string, string[], { target: string[]; others: string[] }][] = [
+      ['hours per week', 45, '45 hours per week', ['45 hrs per week', '45 hr per week', '45 hours per wk', '45 hrs a week', 'forty-five hrs per week'], base],
+      ['minutes per day', 45, '45 minutes per day', ['45 mins per day', '45 min a day', '45 minutes a day', 'forty-five mins per day'], { target: ['Night shift handover time'], others: ['Day shift handover time'] }],
+      ['£k', 45, '£45k', ['£45 thousand', '£45,000'], { target: ['Night shift cost'], others: ['Day shift cost'] }],
+    ];
+    let bound = 0;
+    for (const [unit, v, canonical, forms, scope] of ALIASES) for (const say of [(f: string) => `Night shift is ${f}.`, (f: string) => `It is ${f}.`])
+    for (const mode of [scope, { ...scope, strict: true as const }]) {
+      const want = figureTheUserWroteFor(v, unit, say(canonical), mode);
+      expect(want, `${unit} canonical | ${say(canonical)}`).toBe(true);
+      for (const f of forms) { expect(figureTheUserWroteFor(v, unit, say(f), mode), `${unit} | ${say(f)}`).toBe(want); bound += 1; }
+    }
+    expect(bound).toBeGreaterThan(30);
+    // Another quantity is still another, whatever its spelling: weeks are not hours, nurses are not hours.
+    for (const text of ['It is 45 weeks.', 'It is 45 wks.', 'It is 45 nurses.']) expect(figureTheUserWroteFor(45, 'hours per week', text, base), text).toBe(false);
+  });
+
+  /**
+   * ⛔ COMPOUND TEMPLATE (Codex #3438 R2: "a hundred and twenty" read 100, "half a million and fifty thousand" read 500000, both credited).
+   * A compound is read whole or refused whole, at the one reader, the verifier's figure list and the shared check alike; a plain
+   * cardinal keeps the grammar's own reading.
+   */
+  it('compound template: read whole or not at all; never a truncated prefix', () => {
+    const words = (t: string): number[] => amountsWrittenIn(t).filter((a) => a.kind === 'words').map((a) => a.magnitude);
+    const COMPOUNDS: [string, number[], number[]][] = [
+      ['We sell a hundred and twenty tickets.', [120], [100, 20]],
+      ['We sell a thousand and fifty tickets.', [1050], [1000, 50]],
+      ['We have half a million and fifty thousand tickets.', [], [500000, 50000]],
+      ['Revenue is two and a half million and fifty thousand pounds.', [], [2500000, 50000]],
+      ['It takes three hours.', [3], []],
+    ];
+    for (const [text, whole, never] of COMPOUNDS) {
+      expect(words(text), text).toEqual(whole);
+      for (const v of never) {
+        expect(figuresWritten(text).some((f) => f.low === v && f.high === v), `${text} figuresWritten ${v}`).toBe(false);
+        expect(figureTheUserWrote(v, 'tickets', text), `${text} shared check ${v}`).toBe(false);
+      }
+    }
+  });
+
+  it('OWNER REVIEW (the article forms): the counted-noun, speaker and idiom guards hold for them too; a fraction is no figure', () => {
+    expect(figureTheUserWroteFor(1000000, 'hours per week', 'We serve a million customers.', base), 'another counted noun').toBe(false);
+    expect(figureTheUserWroteFor(120, 'hours per week', 'Our lead said: "it is a hundred and twenty hours per week".', base), 'another speaker').toBe(false);
+    expect(figureTheUserWroteFor(100, 'hours per week', 'A hundred things could go wrong on the night shift.', base), 'idiom').toBe(false);
+    expect(figureTheUserWroteFor(120, 'hours per week', 'It is a hundred and twenty hours per week.', base), 'control: the user\'s own').toBe(true);
+    for (const v of [2, 2.5]) expect(figureTheUserWroteFor(v, 'hours per week', 'It is two and a half hours per week.', base), `fraction ${v}`).toBe(false);
+  });
+  it('a word that counts nothing, an idiom or an ordinal is never a figure (the word safeguards kept)', () => {
+    for (const text of ['It is forty-five of them.', 'That is the forty-fifth hour this week.', 'One more thing: night shift hours matter.'])
+      expect(figureTheUserWroteFor(45, 'hours per week', text, base) || figureTheUserWroteFor(1, 'hours per week', text, base), text).toBe(false);
+  });
+});
+
+/**
+ * ⭐ NO PARALLEL CARDINAL SCAN (Codex #3427 R4 SIMPLER): the verifier's figure list (`figuresWritten`) and its speech check
+ * (`figureOnlyInSpeech`) read the one located-amount reader and the one speaker rule. An ordinal or a fraction is never a count there
+ * either, and another speaker's quotation opening on the figure itself is theirs in digits exactly as in words.
+ */
+describe('the verifier reads the one reader: no ordinal count, and one speaker rule for both forms', () => {
+  it('an ordinal or a fraction is never a figure the span writes; a cardinal in words or digits is', () => {
+    const has = (q: string, v: number): boolean => figuresWritten(q).some((f) => f.low === v && f.high === v);
+    expect(has('This is our one hundred first ticket.', 100)).toBe(false);
+    expect(has('It closes on the twenty-first of May.', 20)).toBe(false);
+    expect(has('We raised two and a half million.', 2)).toBe(false);
+    expect(has('We resolve one hundred and twenty tickets.', 120)).toBe(true);
+    expect(has('We resolve 120 tickets.', 120)).toBe(true);
+  });
+  it('another speaker\'s single-quoted figure is refused at the verifier in digits as in words; the user\'s own is verified', () => {
+    const verdict = (sentence: string): string => {
+      const st = { quote: sentence, subject: { kind: 'factor', label: 'Weekly tickets resolved', to_label: null, factor_label: null }, field: 'level',
+        form: 'point', value: 70, low: null, high: null, unit: 'tickets per week', qualifier: null, conditions: null };
+      const map = sourceMapOf([st], `${sentence} We need 90 tickets per week.`);
+      return map.verified.size > 0 ? 'verified' : map.refused[0]?.refusal ?? 'none';
+    };
+    for (const f of ['70', 'seventy']) {
+      expect(verdict(`Our lead said: '${f} tickets per week'.`), f).toBe('statement_not_found');
+      expect(verdict(`I checked: ${f} tickets per week.`), f).toBe('verified');
+    }
   });
 });
 

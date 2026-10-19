@@ -550,6 +550,15 @@ export const NodeV3 = z.object({
    * `goal_threshold_frame`. CEE mints it; no model authors it.
    */
   analysis_participation: z.enum(['included', 'retained_excluded']).optional(),
+  /**
+   * WHICH RULE owns a `retained_excluded` mark, where a rule re-evaluates it at every save (#3441, DL-3 re-scope after Codex R2).
+   * `unsized_olumi_risk`: Olumi's own risk suggestion nobody has sized (`agent-lane/unsized-risk.ts`). The persisted form
+   * (`projectGraphForPersistence`) removes this tag and its mark together as soon as the candidate itself no longer supports the
+   * rule (the risk is sized, an option or a limit needs it, or it is no longer Olumi's), whatever the stored base or history. A
+   * mark without this tag (another rule's, or one saved before it existed) is never touched. CEE mints it with the mark; no model
+   * authors it (`field-safety.ts`), and it changes no analysis on its own, so it is not in the analysis hash.
+   */
+  analysis_participation_reason: z.literal('unsized_olumi_risk').optional(),
   /** Prior distribution data for external factors (set by LLM or synthesised by unreachable-factors repair).
    *  ISL needs prior ranges to run Monte Carlo sampling on external factors. */
   prior: z.object({ distribution: z.string(), range_min: z.number(), range_max: z.number() }).passthrough().optional(),

@@ -53,6 +53,8 @@ export function assertsCompletedWrite(sentence: string): boolean {
   return NOW_EFFECT.test(s) || I_DID.test(s);
 }
 
+/** A re-press answered from memory, with no durable proof of what the model holds now (Codex, #3453 post-merge). */
+export const ALREADY_APPLIED_UNCONFIRMED = 'Nothing was written again. Check the current model to confirm whether this change is saved.';
 const versionsOf = (r: ToolResult): number[] => {
   const receipts = Array.isArray(r.receipts) ? (r.receipts as { version?: unknown }[]) : [];
   return receipts.map((x) => x.version).filter((v): v is number => typeof v === 'number').sort((a, b) => a - b);
@@ -525,7 +527,14 @@ function writeStatusLine(name: string, r: ToolResult, pending: AwaitingApproval 
   }
   const perPart = partsLine(r);
   if (perPart !== null) return perPart;
+  /**
+   * ⛔ A REPLAY IS NOT A READ-BACK (Codex post-merge check of #3453, cae490f4). `already_applied` from the process's own memory
+   * survives an Undo, so "already saved" was said of a change the model no longer holds. "Saved" is said only where the result
+   * carries durable proof of the stored model (`saved_state_confirmed`: a committed operation plus a native read-back);
+   * otherwise the reply says what is known: nothing was written again.
+   */
   if (r.ok === true && r.already_applied === true) {
+    if (r.saved_state_confirmed !== true) return ALREADY_APPLIED_UNCONFIRMED;
     const vs = versionsOf(r);
     return `That change was already saved${vs.length > 0 ? ` (version ${vs[vs.length - 1]})` : ''}; nothing was written again.`;
   }

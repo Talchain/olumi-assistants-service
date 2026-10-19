@@ -184,7 +184,9 @@ describe('a link-strength approval through the REAL route: the user reads what w
     // Marked applied: the same click again recovers the first result and writes nothing twice.
     afterWrite = undefined;
     const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
-    expect(t3.assistant_text, t3.assistant_text).toMatch(/That change was already saved; nothing was written again\./);
+    // A replay from memory is not a read-back of the model (Codex, #3453 post-merge): nothing written again, never "saved".
+    expect(t3.assistant_text, t3.assistant_text).toMatch(/Nothing was written again\. Check the current model to confirm whether this change is saved\./);
+    expect(t3.assistant_text, t3.assistant_text).not.toMatch(/already saved/);
     expect(linkWrites, 'written once').toBe(1);
   }, 120_000);
 

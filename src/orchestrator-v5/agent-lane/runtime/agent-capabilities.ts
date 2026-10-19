@@ -367,7 +367,7 @@ import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../sel
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, figureAppearsIn, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { figureIsThisQuantitys, type Candidate } from '../quantity-identity.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
@@ -421,7 +421,8 @@ import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../sa
 import { rangeApproximationWords, rangeLawAdopted } from '../../intervention-range.js';
 import { authorshipOf, heldFigureOwnerOf, isHumanStatementSource, isUnverifiedUserMaterial, linkDrawnByOf, provenanceOf, settingDisplayOf, settingProvenanceOf, whoseOf } from '../../../cee/provenance/provenance-of.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import { DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, TYPED_APPROVAL_READ_BY_OLUMI, type NotSavedValue } from '../write-outcome.js';
+import { FRESH_READ } from '../turn-read-cache.js';
+import { ALREADY_APPLIED_UNCONFIRMED, DRAWN_LINK_ESTIMATE_CONFLICT_MESSAGE, PARTIAL_WRITE_MESSAGES, partialRangeLevelsWarning, quoteLabelForUser, TYPED_APPROVAL_READ_BY_OLUMI, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -2799,8 +2800,9 @@ export function createAgentCapabilities(
     return '';
   };
 
-  const readGraph = async (scenarioId: string, section?: 'run_explanation'): Promise<GraphRead | null> => {
-    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+  // `fresh`: a read that must see other writers (an Undo in another tab) bypasses the turn's kept read (`FRESH_READ`).
+  const readGraph = async (scenarioId: string, section?: 'run_explanation', read?: { readonly fresh?: boolean }): Promise<GraphRead | null> => {
+    const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, read?.fresh === true ? { ...FRESH_READ } : {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     const view = isPlainRecord(r.json.canonical_analysis_view) ? r.json.canonical_analysis_view : undefined;
@@ -3899,9 +3901,11 @@ export function createAgentCapabilities(
     const pid = parent.proposal_id, a = parent.operations[0]!.value as ApprovedHiringTimes;
     const notApplied = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: pid, refusal, detail });
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring timings are set only by pressing their own card, so nothing was changed.');
-    if (hiringTimesHeld(before.raw, a)) {
+    // "Saved" only from the stored model now: a fresh read, never the turn's kept read (Codex, #3456: an Undo elsewhere).
+    const heldNow = hiringTimesHeld(before.raw, a) ? await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null) : null;
+    if (heldNow !== null && hiringTimesHeld(heldNow.raw, a)) {
       proposals.markApplied(pid, []);
-      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
+      return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
     }
     if (!hiringTimesStillApply(a, before.raw)) {
       return notApplied('superseded', 'The hiring timings in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
@@ -3951,9 +3955,11 @@ export function createAgentCapabilities(
     const done = optionCapacityRecordedWords(a);
     const note = 'The analysis runs on the saved model; speak only to its result, and state no chance before it returns.';
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
-    if (optionCapacityChangeHeld(before.raw, a)) {
+    // "Saved" only from the stored model now: a fresh read, never the turn's kept read (Codex, #3456: an Undo elsewhere).
+    const heldNow = optionCapacityChangeHeld(before.raw, a) ? await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null) : null;
+    if (heldNow !== null && optionCapacityChangeHeld(heldNow.raw, a)) {
       proposals.markApplied(pid, []);
-      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: done, note };
+      return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: pid, receipts: [], follow_up: done, note };
     }
     if (!optionCapacityChangeStillApplies(a, before.raw)) {
       return notApplied('superseded', `The model changed after this card was offered, so nothing was set for ‘${a.option_label}’. Offer it again only if it still applies.`);
@@ -4576,7 +4582,7 @@ export function createAgentCapabilities(
     // stated over is still exactly as bound (Codex r1: a concurrent 3 → 6 month change still said the 3-month receipt).
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
-    if (check === null || !isDeepStrictEqual(held, riskOccurrencePostimageNode(approved))
+    if (check === null || !isDeepStrictEqual(held, riskOccurrencePostimageNode(approved, check.raw))
       || !riskOccurrenceGoalHolds(approved, check.raw)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
@@ -7638,13 +7644,16 @@ export function createAgentCapabilities(
         const origin = statementOrigin(writtenFigure,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
-        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⛔ The user wrote this figure, but their words give it to another quantity, in another unit, or turn it down for this
-        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not.
-        if (origin === 'human' && identity?.verdict === 'not_this') {
+        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not, and the user is
+        // asked which they mean. The verdict's own presence is the user's words (Codex R6: "70 tickets" for a factor counted in
+        // nurses was "origin unknown", so the ask was generic). Olumi's own estimate is never the user's figure, so it stays Olumi's
+        // and is never asked about (P53: a user asking for a cost estimate in words gets Olumi's £200 proposed).
+        if (origin !== 'ai' && identity?.verdict === 'not_this') {
           notThisFactors.push({ label: node.label, value: Number(a.value), written_for: identity.givenTo });
           continue;
         }
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
         // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
         // ⭐ GATE → LABEL (change 1; Codex amendment 1): read as the claim door reads it. Words that are not the user's own statement of
@@ -8589,8 +8598,11 @@ export function createAgentCapabilities(
       // from its native registration operation AND the whole approved postimage; another writer's equal graph is no receipt.
       const correction = pendingAdoption?.operations.length === 1 && isPreparedSavedCorrection(pendingAdoption.operations[0])
         ? pendingAdoption.operations[0]!.value as { operation_id?: unknown; candidate?: unknown; brief_text?: unknown } : undefined;
-      const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string'
-        && correction.brief_text === before.brief_text && approvedGraphHeld(correction.candidate, before.raw)
+      // ⛔ "Saved" is earned only from the STORED model now (Codex, #3456): a fresh read, never the turn's kept read, which an
+      // Undo in another tab does not move.
+      const correctionNow = correction === undefined ? null : await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null);
+      const correctionSaved = correction !== undefined && typeof correction.operation_id === 'string' && correctionNow !== null
+        && correction.brief_text === correctionNow.brief_text && approvedGraphHeld(correction.candidate, correctionNow.raw)
         && opts.readCommittedTurnLedger !== undefined
         && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
           registrationTurnId(ctx.scenario_id, correction.operation_id as string)), () => false);
@@ -8624,7 +8636,8 @@ export function createAgentCapabilities(
           const committed = opts.readCommittedTurnLedger !== undefined
             && await opts.readCommittedTurnLedger(ctx.scenario_id).then(l => l.write_turn_ids.includes(
               authorisationTurnId(`${decision.proposal.proposal_id}#deadline`)), () => false);
-          if (!committed || !appliedDeadlineHolds(op, before.raw)) return {
+          const deadlineNow = committed ? await readGraph(ctx.scenario_id, undefined, { fresh: true }).catch(() => null) : null;
+          if (!committed || deadlineNow === null || !appliedDeadlineHolds(op, deadlineNow.raw)) return {
             ok: false, mutated: false, applied: false, proposal_id: decision.proposal.proposal_id, refusal: 'not_confirmed',
             follow_up: LINK_SET_SAVE_NOT_CONFIRMED,
           };
@@ -8632,12 +8645,17 @@ export function createAgentCapabilities(
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
         // the retry is bound to the same proposal by identity, and the ORIGINAL
         // receipts, so the Agent can say which version it already became.
+        // "Saved" is said only with durable proof (Codex, #3453 post-merge): the deadline's committed operation and native
+        // read-back above, or a prepared correction's own registration plus its whole postimage. Otherwise it is memory only.
+        const savedStateConfirmed = op?.op === 'set_goal_deadline' || (isPreparedSavedCorrection(op) && correctionSaved);
         return {
           ok: true, mutated: false, applied: true, already_applied: true,
+          ...(savedStateConfirmed ? { saved_state_confirmed: true } : {}),
           proposal_id: decision.proposal.proposal_id,
           receipts: decision.receipts,
-          detail:
-            decision.receipts.length > 0
+          // The Agent reads `detail`, and may repeat it: the SAME proof as the user's words (Codex, #3456), never memory alone.
+          detail: !savedStateConfirmed ? ALREADY_APPLIED_UNCONFIRMED
+            : decision.receipts.length > 0
               ? `That proposal was already applied and saved as version ${Math.max(...decision.receipts.map((x) => x.version))}. Nothing was applied twice.`
               : 'That proposal was already applied. No saved version was recorded for it. Nothing was applied twice.',
         };
@@ -8649,7 +8667,7 @@ export function createAgentCapabilities(
       }
       if (correctionSaved) {
         proposals.markApplied(decision.proposal.proposal_id, []);
-        return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: decision.proposal.proposal_id, receipts: [],
+        return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: decision.proposal.proposal_id, receipts: [],
           follow_up: 'The changes on that card are already saved in the model. Nothing was applied twice.' };
       }
 
@@ -11976,8 +11994,7 @@ export function createAgentCapabilities(
         const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
         const origin = statementOrigin(source !== undefined || priorHuman,
           (prior !== undefined && prior.member === undefined)
-          || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
-          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
+          || figureAppearsIn(t.value, todayUnit, ctx.unverified_user_text) || figureAppearsIn(t.value, todayUnit, g.brief_text), ctx.user_text_complete);
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
           originUnknown = true;

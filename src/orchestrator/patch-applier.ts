@@ -203,7 +203,14 @@ function applyAddEdge(graph: GraphV3T, op: PatchOperation): void {
     throw new PatchApplyError('EDGE_ALREADY_EXISTS', `Edge "${from}" → "${to}" already exists`);
   }
 
-  graph.edges.push(value as GraphV3T['edges'][number]);
+  // ⭐ A NEW LINK'S MEAN CARRIES ITS STATED DIRECTION'S SIGN (Codex R1 on #3441: an approved new link saved and sent +0.3 beside
+  // "negative", and the AI's compact view, which reads the mean alone, said it raised its target). PLoT already computes such a link
+  // as negative (APPLY_SIGN_FROM_DIRECTION, the canvas writer signs at source: `signedMeanFor`), so the saved link, the Run's request
+  // and the AI's view now agree with what is computed. Only the link this op creates; a stored link is never rewritten here.
+  const strength = value.strength as Record<string, unknown> | undefined;
+  const signed = value.effect_direction === 'negative' && typeof strength?.mean === 'number' && strength.mean > 0
+    ? { ...value, strength: { ...strength, mean: -strength.mean } } : value;
+  graph.edges.push(signed as GraphV3T['edges'][number]);
 }
 
 function applyRemoveEdge(graph: GraphV3T, op: PatchOperation): void {

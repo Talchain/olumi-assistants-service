@@ -113,3 +113,15 @@ describe('the value door\'s shape (DL-3: "70 customers per week; the existing te
     ['FLIP a bare number counting another label\'s thing', 'We will hire 70 additional specialists; the existing team capacity is unchanged.', false],
   ])('%s: "%s" → %s', (_case, text, expected) => { expect(is(text)).toBe(expected); });
 });
+
+describe('presence is the number the user wrote; only this rule says whose (Codex R6 on #3433)', () => {
+  it('a figure only the unit-free reading finds, in no unit that conflicts, is never this quantity\'s and is no evidence either way', () => {
+    // "70" with no magnitude letter is no £k figure, so only the unit-free reading finds it: it may show the figure is another
+    // quantity's, never that it is this one's.
+    expect(figureIsThisQuantitys('The marketing budget is 70 a month.', 70, '£k per month', { target: ['Marketing budget'], others: [] }, []).verdict)
+      .toBe('not_written');
+  });
+  it('CONTROL: the same figure counting another thing is evidence it is another quantity\'s', () => {
+    expect(figureIsThisQuantitys('The team capacity is 70 tickets.', 70, 'nurses', { target: ['Team capacity'], others: [] }, []).verdict).toBe('not_this');
+  });
+});
