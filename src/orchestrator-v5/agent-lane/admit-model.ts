@@ -46,7 +46,7 @@ import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
-import { isRelativeChangePercentUnit, readPercentUnit } from './same-unit.js';
+import { denominatorNamesCount, isRelativeChangePercentUnit, readCount, readPercentUnit, readUnitParts } from './same-unit.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
 import type { LabelHeadReading } from './label-head-unit.js';
@@ -827,6 +827,8 @@ function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_f
 
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
+  /** The range is a count's computational scale (`countFrameFor`), never a cap: the capless framed pair. */
+  scale_only?: boolean;
 }, verifiedCurrentLevel?: boolean, userMaterialUnverified = false): Record<string, unknown> {
   const raw = f.baseline_value as number;
   // ⛔ A KNOWN BASELINE THE BUILDER INFERRED IS OLUMI'S, NOT NOBODY'S (AIQ #70 5852160429). Source-less, served
@@ -878,6 +880,9 @@ export function framedObservedState(f: {
   // gate reads the pair against that stored frame. Measured on ISL staging a5725a15: the same model as a magnitude (15 lost,
   // link −) gives the same goal chance within 0.006.
   if (raw < 0) return { value: raw / cap, raw_value: raw, ...base };
+  // ⭐ A COUNT'S COMPUTATIONAL SCALE IS NO CAP (AIE 9bd1d08c): the same capless framed pair, its frame on `scale_frame`
+  // (written below, because no cap is), so the value writer never refuses a later count above Olumi's 10.
+  if (f.scale_only === true) return { value: raw / cap, raw_value: raw, ...base };
   return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
 }
 
@@ -956,6 +961,50 @@ export function defaultFrameFor(largestMagnitude: number): number {
   if (frame <= magnitude) frame *= 10;
   else if (frame / 10 > magnitude) frame /= 10;
   return frame;
+}
+
+/**
+ * ⭐ A COUNT IS BOUND ONLY POSITIVELY, BY A QUANTITY STATED PER ONE OF IT (AIE count-versus-switch ruling 9bd1d08c, 19 Oct).
+ * Served capacity (CEE 390a1dbe): "Additional specialists" held 0 today and 1 under its option, so it got no frame and
+ * `isSwitch` read it as a 0/1 switch ("per switch"; the card refused 2). Levels {0, 1} cannot tell a count from a switch,
+ * and no word list may (AIE), so a factor is a count only where the user's material counts it in its own unit:
+ *  · the user's stated size on a link out of it, in a sentence of the brief (`locatedBriefSentence`), validated per ONE
+ *    source unit by the stated-effect reader (`statedEffectQuoteMatches`: "each additional packer ships 30 orders a day");
+ *  · a product whose other operand's unit has this unit as its denominator (`denominatorNamesCount`: orders per packer
+ *    per day × packers), the dimensional proof `unitsCompose` reads.
+ * Anything else, a genuine switch or a 0/1 whose meaning nothing states, is left exactly as it was.
+ */
+function countBoundLabels(model: CandidateModel, brief: string | undefined): ReadonlySet<string> {
+  const same = (a: string, b: string): boolean => canonicalLabel(a) === canonicalLabel(b);
+  const factorOf = (label: string) => model.factors.find((f) => same(f.label, label));
+  const unitOf = (label: string): unknown => same(label, model.goal.metric) ? model.goal.unit
+    : [...model.factors, ...model.outcomes, ...model.risks].find((n) => same(n.label, label))?.unit;
+  const countOf = (unit: unknown): string[] | null => (readUnitParts(unit)?.kind === 'count' ? readCount(unit) : null);
+  const out = new Set<string>();
+  for (const l of model.links) {
+    const f = factorOf(l.from);
+    const amountUnit = unitOf(l.to);
+    if (f === undefined || countOf(f.unit) === null || typeof amountUnit !== 'string') continue;
+    if (typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number') continue;
+    const sentence = locatedBriefSentence(brief, (l as { source_quote?: unknown }).source_quote);
+    if (sentence !== null && statedEffectQuoteMatches(sentence, { amount: l.effect_amount, amount_unit: amountUnit,
+      per_source_change: l.effect_per_source_change, per_source_change_unit: f.unit as string }, undefined, { source: l.from, target: l.to })) out.add(f.label);
+  }
+  for (const i of model.identities ?? []) {
+    if (i.operation !== 'product' || i.factors.length !== 2) continue;
+    for (const [c, r] of [[i.factors[0]!, i.factors[1]!], [i.factors[1]!, i.factors[0]!]] as const) {
+      const f = factorOf(c);
+      const count = f === undefined ? null : countOf(f.unit);
+      const per = readUnitParts(unitOf(r))?.per;
+      if (f !== undefined && count !== null && per != null && denominatorNamesCount(per, count)) out.add(f.label);
+    }
+  }
+  return out;
+}
+
+/** A count's default frame: one unit is a whole thing, never a proportion, so the frame sits strictly above max(largest, 1). */
+export function countFrameFor(largestMagnitude: number): number {
+  return Math.abs(largestMagnitude) > 1 ? defaultFrameFor(largestMagnitude) : 10;
 }
 
 /**
@@ -4056,17 +4105,27 @@ function admitOnce(
     }
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
+  /** A positively bound count's frame: the defaulted reference as a computational scale on the capless carrier, never a cap. */
+  const countedFrames: { label: string; frame: number }[] = [];
+  const counted = countBoundLabels(model, brief);
   for (const [label, largest] of largestByLabel) {
     const unframedEstimate = model.factors.some((f) => f.label === label && !f.baseline_known
       && (f.plausible_max === null || f.plausible_max === undefined)
       && typeof f.unit === 'string' && f.unit.trim() !== ''
       && typeof f.baseline_value === 'number' && Number.isFinite(f.baseline_value) && f.baseline_value >= 0);
+    if (!capByLabel.has(label) && counted.has(label)) {
+      const frame = countFrameFor(largest);
+      capByLabel.set(label, frame);
+      countedFrames.push({ label, frame });
+      continue;
+    }
     if (capByLabel.has(label) || (largest <= 1 && !unframedEstimate)) continue;
     const frame = defaultFrameFor(largest);
     capByLabel.set(label, frame);
     defaultedFrames.push({ label, frame });
   }
   const capFor = (label: string): number | undefined => capByLabel.get(label);
+  const scaleOnly = (label: string): { scale_only?: true } => (countedFrames.some((x) => x.label === label) ? { scale_only: true } : {});
   const loss: RepairEntry[] = [];
 
   /**
@@ -4397,7 +4456,7 @@ function admitOnce(
         ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
           ? { observed_state: withStatedLevelRange(unscaled.has(f.label)
             ? { value: f.baseline_value, user_material_unverified: true as const }
-            : framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
+            : framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max, ...scaleOnly(f.label) }, verifiedLevels.has(f),
             !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
@@ -4443,7 +4502,7 @@ function admitOnce(
           const c = unscaled.has(f.label) ? undefined : capFor(f.label) ?? f.plausible_max;
           if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
           if ((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number') {
-            const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
+            const os = framedObservedState({ ...f, plausible_max: c, ...scaleOnly(f.label) }) as { cap?: unknown };
             // Already framed inside `observed_state` — a second carrier could
             // disagree with it, so do not write one.
             if (typeof os.cap === 'number') return {};
@@ -4705,12 +4764,24 @@ function admitOnce(
       after: null, severity: 'warn', reason: `Olumi holds ${sayFigureWithoutRounding(f.baseline_value as number, '')} for \u201c${f.label}\u201d, with its `
         + 'meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?' } as RepairEntry);
   }
+  // "Your own figures" only when a figure the user stated fed the frame; when
+  // every figure is Olumi's, saying so is the honest record.
+  const whoseFigures = (label: string): string => (userStatedFigureLabels.has(label)
+    ? 'your own figures are stored unchanged beside it.'
+    : "the figures it was taken from are Olumi's own estimates, not figures you gave, and are stored unchanged beside it.");
+  for (const d of countedFrames.filter((x) => !unscaled.has(x.label))) {
+    const unit = model.factors.find((f) => f.label === d.label)?.unit ?? '';
+    loss.push({
+      field_path: `nodes[${ids.get(d.label) ?? d.label}].scale_frame`,
+      before: null,
+      after: d.frame,
+      reason: `No range was stated for "${d.label}", which counts ${unit}, so a range of 0 to ${d.frame} has been used to read it. `
+        + `That is a unit of measurement, not a forecast or a limit on the count, and ${whoseFigures(d.label)}`,
+      severity: 'warn',
+    } as RepairEntry);
+  }
   for (const d of defaultedFrames.filter((x) => !unscaled.has(x.label))) {
-    // "Your own figures" only when a figure the user stated fed the frame; when
-    // every figure is Olumi's, saying so is the honest record.
-    const whose = userStatedFigureLabels.has(d.label)
-      ? 'your own figures are stored unchanged beside it.'
-      : "the figures it was taken from are Olumi's own estimates, not figures you gave, and are stored unchanged beside it.";
+    const whose = whoseFigures(d.label);
     loss.push({
       field_path: `nodes[${ids.get(d.label) ?? d.label}].observed_state.cap`,
       before: null,

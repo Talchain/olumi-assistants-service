@@ -19,7 +19,7 @@ import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/pro
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
 import { sayFigure } from './say-figure.js';
-import { readCount, readMoney, readMoneyTotal, readUnitParts } from './same-unit.js';
+import { denominatorNamesCount, readCount, readMoney, readMoneyTotal, readUnitParts } from './same-unit.js';
 
 export { periodIn, readMoneyTotal, sameUnit } from './same-unit.js';
 
@@ -70,7 +70,7 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
     // word: "subscriber seats" counts seats), and every word of it must be in the count.
     const per = money.per;
     if (per === null) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
-    if (per[per.length - 1] !== count[count.length - 1] || !per.every((w) => count.includes(w))) continue;
+    if (!denominatorNamesCount(per, count)) continue;
     // A per-N-month rate composes but is never the parser's proof (AIQ 5891385320 (3)): the card.
     if (money.mixed === true) { confirm = { kind: 'confirm', rate: m.label, count: c.label, code: goal.code }; continue; }
     return { kind: 'proof', rate: m.label, count: c.label, code: goal.code };

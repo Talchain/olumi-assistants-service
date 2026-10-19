@@ -117,6 +117,15 @@ export function readCount(unit: unknown): string[] | null {
 }
 
 /**
+ * A rate's per-unit denominator NAMES a count (AIQ 5886967509, the dimensional proof `unitsCompose` reads): it ends in the
+ * count's own noun ("subscriber seats" counts seats) and every word of it is in the count. Both are singular words
+ * (`readCount`, `readUnitParts().per`).
+ */
+export function denominatorNamesCount(per: readonly string[], count: readonly string[]): boolean {
+  return per.length > 0 && count.length > 0 && per[per.length - 1] === count[count.length - 1] && per.every((w) => count.includes(w));
+}
+
+/**
  * Two units naming the same quantity as `unitsCompose` reads them (AIQ 5906521706, P0 PARTNER row E): the same count noun
  * ("subscribers" = "subscriber"; never "customers"), or the same money (currency, period and denominator). A unit neither
  * reads is compared word for word; no unit on either side is never the same.
