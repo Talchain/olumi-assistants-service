@@ -3531,7 +3531,7 @@ export type CommitOptionLevelsInput = {
   readonly compound?: CompoundChange;
 };
 /** The door's own conflict rule and member shape, for the typed core caller (one seam onto the writer: this door). */
-export { compoundMembersConflict, type CompoundAddFactor, type CompoundStructuralMember } from './option-intervention-edit.js';
+export { compoundMembersConflict, type CompoundAddFactor, type CompoundAddOption, type CompoundStructuralMember } from './option-intervention-edit.js';
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
       /**
