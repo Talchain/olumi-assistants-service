@@ -35,7 +35,7 @@ import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
-import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_WORDS, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_WORDS, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, CARDINAL_WORD_VALUES, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -287,34 +287,60 @@ export function moneyUnitScale(unit: unknown): number {
 }
 
 /**
- * An ORDINAL ending a cardinal's words ("twenty-FIRST", "forty FIFTH", "... and FIRST", a scale word + "th") is consumed with them,
- * so `parseCardinalAmount` refuses the whole capture, as the fraction tail does (Codex #3429 BLOCK: an ordinal compound saved its
- * cardinal part as a capacity). Never "twenty seconds" or "two second-hand cars".
+ * An ORDINAL beside a cardinal's words ("twenty-FIRST", "forty FIFTH", "... and FIRST", a scale word + "th") makes them part of a
+ * longer number, so the capture is refused (`touchesAnotherNumber`; Codex #3429 BLOCK: an ordinal compound saved its cardinal part
+ * as a capacity). Never "twenty seconds" or "two second-hand cars".
  */
 const ORDINAL_WORDS = [...'first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth'.split(' '),
   ...['thir', 'four', 'fif', 'six', 'seven', 'eigh', 'nine'].map((w) => `${w}teenth`), ...['twen', 'thir', 'for', 'fif', 'six', 'seven', 'eigh', 'nine'].map((w) => `${w}tieth`),
   ...[CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)].map((w) => `${w}th`)];
 const SCALE_WORDS = [CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)];
 /**
- * A number the text writes in words ("three engineers"; an article, a scale word and "and twenty"), read by the repo's one cardinal
- * grammar, with an article before a scale word read as "one" (`wordsAmount`).
+ * A number the text writes in words ("three engineers"; an article, a scale word and "and twenty"; "seven point five"), read by the
+ * repo's one cardinal grammar (`wordsAmount`): an article before a scale word is "one", and "point" + digit words are its decimals.
  */
-// ⛔ READ WHOLE OR NOT AT ALL (Codex #3438 R2/R3: an article amount + "and twenty" read only its first part; "… and twenty and a half
-// hours" read 120 and "the two and a half …th ticket" 2.5, each credited as the user's). Every capture takes its WHOLE continuation with
-// it: "and" + a number, a fraction (and what it is a fraction of), "point" + a number, an ordinal. The grammar then reads it whole or
-// refuses it whole, so no prefix and no leftover part is ever a figure. A fraction is no figure at all (DL-3 fail-safe: an under-claim,
-// never a wrong number).
-const SCALE = SCALE_WORDS.join('|'), FRACTIONS = CARDINAL_FRACTION_WORDS.join('|');
-const AND_MORE = `(?:[\\s,]+and\\s+(?:${CARDINAL_AMOUNT_SOURCE})(?:\\s+(?:${SCALE}))?)?`;
-const FRACTION_TAIL = `(?:(?:\\s+and\\s+a\\s+|[\\s-]+)(?:${FRACTIONS})\\b(?:\\s+of\\s+an?)?(?:\\s+(?:${SCALE}))?${AND_MORE})?`;
-const POINT_TAIL = `(?:\\s+point\\s+(?:${CARDINAL_AMOUNT_SOURCE}))?`;
-const ORDINAL_TAIL = `(?:[\\s-]+(?:and\\s+)?(?:${ORDINAL_WORDS.join('|')})(?![\\w-]))?`;
-const CARDINAL_PHRASE = new RegExp(`\\b(?:(?:(?:an?\\s+)?(?:${FRACTIONS})\\s+(?:of\\s+)?)?an?\\s+(?:${SCALE})${AND_MORE}|(?:${CARDINAL_AMOUNT_SOURCE}))`
-  + `${FRACTION_TAIL}${POINT_TAIL}${ORDINAL_TAIL}\\b`, 'gi');
-/** The value of a `CARDINAL_PHRASE` capture by the cardinal grammar (`parseCardinalAmount`), an opening article read as "one"; else null. */
+// ⛔ READ WHOLE OR NOT AT ALL (Codex #3438 R2–R4: an article, a scale word and "and twenty", + "and a half", "plus five", ", and a quarter" or
+// "-and-a-half" read 120, and "the two and a half …th ticket" 2.5, each credited as the user's). The class, not a list of tails: a
+// capture TOUCHING another number word through what joins one number's parts (`touchesAnotherNumber`: a dash, a comma, "and", "plus",
+// "point", "of", an article) is part of a longer number, so it is refused, and so is that other part. A fraction is no figure at all
+// (DL-3 fail-safe: an under-claim, never a wrong number).
+const SCALE = SCALE_WORDS.join('|');
+const DIGIT_WORDS = Object.keys(CARDINAL_WORD_VALUES).filter((w) => CARDINAL_WORD_VALUES[w]! < 10).join('|');
+const AND_MORE = `(?:[\\s,]+and\\s+(?:${CARDINAL_AMOUNT_SOURCE}))?`;
+const DECIMALS = `(?:\\s+point(?:\\s+(?:${DIGIT_WORDS}))+(?:\\s+(?:${SCALE}))?)?`;
+const CARDINAL_PHRASE = new RegExp(`\\b(?:an?\\s+(?:${SCALE})${AND_MORE}|(?:${CARDINAL_AMOUNT_SOURCE}))${DECIMALS}\\b`, 'gi');
+const DECIMAL_READING = new RegExp(`^(.+?) point ((?:(?:${DIGIT_WORDS}) )*(?:${DIGIT_WORDS}))(?: (${SCALE}))?$`);
+/**
+ * The value of a `CARDINAL_PHRASE` capture by the cardinal grammar (`parseCardinalAmount`): an opening article is "one", and
+ * "point" + digit words are the decimals of a whole with no scale word, before an optional scale ("two point five" + a scale word).
+ * Anything else refuses (null).
+ */
 function wordsAmount(phrase: string): number | null {
-  const article = /^an?\s+(.+)$/i.exec(phrase.trim());
-  return parseCardinalAmount(article === null ? phrase : `one ${article[1]}`);
+  const t = phrase.trim().toLowerCase().replace(/[\s-]+/g, ' ');
+  const read = /^an? /.test(t) ? `one ${t.replace(/^an? /, '')}` : t;
+  const decimal = DECIMAL_READING.exec(read);
+  if (decimal === null) return parseCardinalAmount(read);
+  const whole = parseCardinalAmount(decimal[1]);
+  if (whole === null || decimal[1]!.split(' ').some((w) => SCALE_WORDS.includes(w))) return null;
+  const digits = decimal[2]!.split(' ').map((w) => CARDINAL_WORD_VALUES[w]!).join('');
+  const scale = decimal[3] === undefined ? 1 : decimal[3] === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[decimal[3]]!;
+  return (whole + Number(`0.${digits}`)) * scale;
+}
+/**
+ * One number word (THE ONE VOCABULARY: a cardinal, a scale word, a fraction; after the amount an ordinal too) or a digit, never part
+ * of a longer word. An ordinal BEFORE a count starts no longer number ("the first three months" is 3).
+ */
+const NUMBER_WORDS_BEFORE = [...Object.keys(CARDINAL_WORD_VALUES), ...SCALE_WORDS, ...CARDINAL_FRACTION_WORDS].join('|');
+const NUMBER_WORDS = `${NUMBER_WORDS_BEFORE}|${ORDINAL_WORDS.join('|')}`;
+/** What joins two parts of ONE written number: a dash, a comma or a space, then at most one joining word, then an article. */
+const JOIN = `[\\s,\\u2013\\u2014-]+(?:(?:and|plus|minus|point|times|of)[\\s,\\u2013\\u2014-]+)?(?:an?[\\s-]+)?`;
+// A word ends at anything but a letter or digit, or at a hyphen into another number word ("twenty-five"; never "second-hand").
+const WORD_END = `(?=$|[^\\p{L}\\d-]|-(?:${NUMBER_WORDS}|and|an?)(?![\\p{L}]))`;
+const NUMBER_AFTER = new RegExp(`^${JOIN}(?:(?:${NUMBER_WORDS})${WORD_END}|\\d)`, 'iu');
+const NUMBER_BEFORE = new RegExp(`(?:(?<![\\p{L}\\d])(?:${NUMBER_WORDS_BEFORE})|\\d)${JOIN}$`, 'iu');
+/** Whether the words at [start, end) touch another number word or digit through a join: they are part of a longer number. */
+function touchesAnotherNumber(text: string, start: number, end: number): boolean {
+  return NUMBER_AFTER.test(text.slice(end)) || NUMBER_BEFORE.test(text.slice(0, start));
 }
 
 /**
@@ -909,7 +935,8 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
 export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
     const v = wordsAmount(m[0]);
-    return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
+    return v === null || m.index === undefined || touchesAnotherNumber(text, m.index, m.index + m[0].length) ? []
+      : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
   });
 }
 

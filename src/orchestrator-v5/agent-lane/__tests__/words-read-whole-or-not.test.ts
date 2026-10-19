@@ -1,6 +1,6 @@
 /**
  * ⛔ A NUMBER IN WORDS IS READ WHOLE OR NOT AT ALL (Codex #3438 R2/R3; DL-3 fail-safe ruling, 19 Oct). The ONE located-amount reader
- * reads a count in words and an article before a scale word ("a million", "a hundred and twenty"). A fraction is no figure (an
+ * reads a count in words, an article before a scale word ("a million", "a hundred and twenty") and decimals ("seven point five"). A fraction is no figure (an
  * under-claim, never a wrong number), and every capture takes its whole continuation with it, so a prefix of a longer amount, or a part
  * left over after one, is never a figure: R3 credited 120 from "a hundred and twenty and a half hours" and 2.5 from "the two and a half
  * millionth ticket". Generated: every amount phrase × every continuation gives the complete value or nothing. SYNTHETIC wording.
@@ -26,6 +26,17 @@ describe('the located-amount reader: articles read, fractions refused (C5\'s row
     ['FRACTION one third', 'One third of orders are late.', []],
     ['CODEX R3 a fraction after an article compound (credited 120)', 'It takes a hundred and twenty and a half hours.', []],
     ['CODEX R3 an ordinal after a fraction (credited 2.5)', 'This is the two and a half millionth ticket.', []],
+    ['CODEX R4 "plus" after an article compound (credited 120)', 'It takes a hundred and twenty plus five hours.', []],
+    ['CODEX R4 a comma before the fraction (credited 120)', 'It takes a hundred and twenty, and a quarter hours.', []],
+    ['CODEX R4 a hyphenated fraction (credited 120)', 'It takes a hundred and twenty-and-a-half hours.', []],
+    ['DECIMAL read whole', 'We have seven point five months of runway.', [7.5]],
+    ['DECIMAL before a scale word', 'We raised two point five million pounds.', [2500000]],
+    ['DECIMAL after a scale word is no reading', 'We raised two million point five pounds.', []],
+    ['DECIMAL that is not digit words is no reading', 'It is twenty point twenty-five units.', []],
+    ['CONTROL two counts joined by "or" both read, as before', 'Hire one or two engineers.', [1, 2]],
+    ['CONTROL counts of different things both read', 'Hire one senior and two juniors.', [1, 2]],
+    ['CONTROL "second-hand" is no ordinal', 'We bought two second-hand vans.', [2]],
+    ['CONTROL an ordinal BEFORE a count starts no longer number (served s3-t5 brief)', 'We need 20 new customers during the first three months.', [3]],
     ['CONTROL a plain cardinal is unchanged', 'We have five cafés.', [5]],
     ['CONTROL an ordinal refuses', 'The twenty-third café opened.', []],
     ['CONTROL an ordinal after a cardinal refuses', 'This is our forty fifth order.', []],
@@ -43,7 +54,10 @@ describe('the complete value or nothing, never a prefix: every amount phrase × 
   ];
   const CONTINUATIONS: [string, 'refused' | 'whole or nothing'][] = [
     [' and a half', 'refused'], [' and a quarter', 'refused'], [' and two thirds', 'refused'], ['-thirds', 'refused'],
-    [' point five', 'refused'], [' point two five', 'refused'],
+    [' point five', 'whole or nothing'], [' point two five', 'whole or nothing'],
+    // Codex R4: what joins a number's parts is a class, not a list of tails ("plus", a comma, a hyphenated "and").
+    [' plus five', 'refused'], [', and a quarter', 'refused'], ['-and-a-half', 'refused'], [' minus two', 'refused'], [' times three', 'refused'],
+    [', and a half million', 'refused'], [' and a half-millionth', 'refused'],
     [' millionth', 'refused'], ['-millionth', 'refused'], [' thousandth', 'refused'], ['-fifth', 'refused'], [' and fifth', 'refused'],
     [' and a half million', 'refused'], [' and a half million and fifty thousand', 'refused'], [' quarters of a million', 'refused'],
     [' and twenty', 'whole or nothing'], [' and three', 'whole or nothing'], [' and fifty thousand', 'whole or nothing'],
