@@ -351,6 +351,32 @@ describe('PATH-B core turn on the Agents SDK', () => {
       expect(applied).toBe(0);
       expect(result.sdk.resumed).toMatchObject({ answer: 'declined' });
       expect(JSON.stringify(sent[1]!.input)).toContain(PAUSE_DECLINED);
+      expect(pausedColumn, 'cleared by the decline (the conditional take)').toBeNull();
+    });
+
+    it('the paused state is replaced by a new pause, and never written to a log', async () => {
+      const { log } = await import('../../../utils/telemetry.js');
+      const logged = (['debug', 'info', 'warn', 'error'] as const).map((m) => vi.spyOn(log, m));
+      try {
+        log.info({ probe: 'spies-are-wired' }, 'positive control');
+        scripted = [pausing()];
+        await turn('Please drop option B.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
+        const first = pausedColumn!;
+        // The person writes instead; the AI proposes again and pauses on a new call.
+        scripted = [[{ type: 'message', text: 'Then only option C; approve it on the card.' }, { type: 'function_call', name: 'apply_change', args: { proposal_id: PID } }]];
+        await turn('No, take out option C instead.', caps(), { tools: () => applyTool(), pausedRunStore: pausedStore() });
+        expect(pausedColumn, 'a new pause is held').not.toBeNull();
+        expect(pausedColumn!.pause_id).not.toBe(first.pause_id);
+        expect(pausedColumn!.call_id).not.toBe(first.call_id);
+        expect(applied).toBe(0);
+        const everyLogArgument = JSON.stringify(logged.flatMap((spy) => spy.mock.calls));
+        expect(everyLogArgument, 'positive control: the spies see log lines').toContain('spies-are-wired');
+        expect(everyLogArgument, 'no paused state in any log line').not.toContain(first.state.slice(0, 40));
+        expect(everyLogArgument).not.toContain('Please drop option B.');
+        expect(everyLogArgument).not.toContain('No, take out option C instead.');
+      } finally {
+        logged.forEach((spy) => spy.mockRestore());
+      }
     });
 
     it('⛔ a typed message instead of a press declines the paused call first, then the message; ONE reply; nothing applied', async () => {
