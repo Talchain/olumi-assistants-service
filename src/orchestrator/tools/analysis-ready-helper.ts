@@ -1397,7 +1397,8 @@ function recordedCasesAsk(node: unknown, label: string): string | null {
   for (const group of groups.values()) {
     const period = group[0]!.period?.trim();
     const what = period && !label.toLowerCase().includes(period.toLowerCase()) ? `${label.trim()} ${period}` : label.trim();
-    if (new Set(group.filter((s) => s.speaker === 'user' && s.form === 'point').map((s) => s.low)).size >= 2) {
+    // A point is always the user's own (`userStatementOf`: the brief's unbound words are only ever a description).
+    if (new Set(group.filter((s) => s.form === 'point').map((s) => s.low)).size >= 2) {
       return `You supplied different cases for ‘${what}’. This calculation cannot yet use them together faithfully. `
         + 'We can still reason through each case and what it would mean.';
     }
