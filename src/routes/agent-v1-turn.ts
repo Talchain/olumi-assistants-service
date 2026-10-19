@@ -1,5 +1,5 @@
 import { STATIC_MODEL_SCOPE_NOTE } from '../orchestrator-v5/goal-target/static-run-evidence.js';
-import { readRecordedRun, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
+import { readRecordedRun, restoreRunOperation, runOperationTurnId, type RecoveredRun } from '../orchestrator-v5/agent-lane/run-operation.js';
 import { withoutUnsizedLinkInvitation } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { RUN_FACTS_USE } from '../orchestrator-v5/agent-lane/run-facts.js';
 import { buildBaselineHoldSuffix } from '../orchestrator-v5/coaching/scaffold-disclosure.js';
@@ -3151,12 +3151,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
       });
     };
+    /**
+     * ⭐ ONE RESTORE = ONE Run (PATH-B gap 4; Codex R1 on #3469). On `core`, a Run press while the saved head is a restore
+     * (the canvas's Run after an Undo, DGAI #2767) is that restore's Run operation (`restoreRunOperation`), not the request's:
+     * a re-press with another turn id recovers the Run the restore already has (`readRecordedRun`, the existing reader) and
+     * never runs the engine again. Any other Run press keeps its own operation, so a deliberate Run still runs.
+     */
+    const restoreRun = mode === 'core' && approvedProposal === undefined && typedRunOf(body) ? await restoreRunOperation(scenarioId) : undefined;
+    if (restoreRun !== undefined && recoveredRun === undefined) {
+      recoveredRun = await readRecordedRun(store, scenarioId, restoreRun, () => readBackState(
+        (path, b) => readCache.dispatch(path, { ...(b as Record<string, unknown>), ...FRESH_READ }), scenarioId));
+    }
+    const runOperationKey = restoreRun ?? turnId;
     const capabilities = createAgentCapabilities(
       capDispatch, proposals, capCallStructured, mode, onCapAnalysis,
       {
         turnAuthority: true,
         ...(recoveredRun !== undefined ? { recoveredRun } : {}),
-        ...(typedRunOf(body) && turnId !== undefined ? { runOperationId: runOperationTurnId(scenarioId, turnId) } : {}),
+        ...(typedRunOf(body) && runOperationKey !== undefined ? { runOperationId: runOperationTurnId(scenarioId, runOperationKey) } : {}),
         deadlineAt: constructionDeadlineAt,
         firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
         /**

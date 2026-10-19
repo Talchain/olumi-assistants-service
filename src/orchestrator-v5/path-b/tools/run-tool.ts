@@ -4,7 +4,7 @@
  * operation id makes a resend recover that Run, never run another) and the facts the AI coaches from (`result`,
  * `run_comparison` against the preceding Run). The adapter only types what is on record afterwards, read by the ONE
  * context reader:
- *  · `ok` with `ran: true` ONLY when a fresh read selects THIS Run (its own identity) on the model as it now stands. Its
+ *  · `ok` with `ran: true` ONLY when a fresh read selects THIS Run (its own id and identity) on the model as it now stands. Its
  *    data is the pipeline's own facts, never a figure composed here;
  *  · `refused` with the pipeline's own code when it declined (`run_blocked`: the engine gave an outcome and no result);
  *  · `refused('run_not_requested')` when this turn already applied an approved change: the automatic Run after that
@@ -63,8 +63,9 @@ export async function recordedRun(deps: { readonly dispatch: InternalDispatch },
   const run = isRec(after.data.selected_run) ? after.data.selected_run : null;
   const revision = isRec(after.data.revision) ? after.data.revision.graph_hash : null;
   const at = isRec(run?.run_state) ? run.run_state.computed_at : undefined;
-  if (run !== null && id !== undefined && run.graph_hash_at_run === id.graph_hash_at_run && id.graph_hash_at_run === revision
-    && at === id.computed_at) {
+  // A Run with no id is no receipt, whatever its revision and time (the canonical view allows `run_id: null`).
+  if (run !== null && typeof run.run_id === 'string' && run.run_id !== '' && id !== undefined
+    && run.graph_hash_at_run === id.graph_hash_at_run && id.graph_hash_at_run === revision && at === id.computed_at) {
     return ok({ run_id: run.run_id, ...facts }, { ran: true });
   }
   return unavailable('run_not_recorded');

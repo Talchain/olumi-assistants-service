@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { getModelManagementService } from '../model-management/index.js';
 import type { SessionStore } from '../session/store.js';
+import { SELECTED_RUN_DELTA_DEADLINE_MS } from './selected-run-delta-for-model.js';
 
 /** One native Run identity per user operation, never per model revision. */
 export function runOperationTurnId(scenarioId: string, turnId: string): string {
@@ -9,6 +11,27 @@ export function runOperationTurnId(scenarioId: string, turnId: string): string {
   b[8] = (b[8] & 0x3f) | 0x80;
   const h = b.toString('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/**
+ * ⭐ ONE RESTORE = ONE Run (PATH-B gap 4; Codex R1 on #3469). When the saved head is a restore of this scenario (an Undo or
+ * Redo: its own saved version and mutation), the Run that analyses it is THAT restore's operation, whoever presses Run and
+ * with whatever request id: the key is the restore's mutation. Any other head, or one that cannot be read in time, keys nothing.
+ */
+export async function restoreRunOperation(scenarioId: string): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const head = await Promise.race([getModelManagementService().getCurrentVersion(scenarioId),
+      new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), SELECTED_RUN_DELTA_DEADLINE_MS); })]);
+    if (head?.status !== 'ok' || head.value === null) return undefined;
+    const v = head.value;
+    return v.scenario_id === scenarioId && v.creation_kind === 'restore' && typeof v.mutation_id === 'string' && v.mutation_id !== ''
+      ? `restore:${v.mutation_id}` : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 type RunRead = {

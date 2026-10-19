@@ -98,6 +98,9 @@ vi.mock('../../path-b/tools/index.js', async (original) => {
 
 let pausedRun: any = null;
 const rows = new Map<string, any>();
+/** The engine's Run turns as the orchestrator records them: the turn row (keyed by the Run operation's id) and its fact. */
+const runRows = new Map<string, any>();
+const runFacts = new Map<string, unknown>();
 const conversationIds = new Map<string, string>();
 const store = {
   readOpenAiPausedRun: vi.fn(async () => pausedRun),
@@ -106,7 +109,7 @@ const store = {
   readOpenAiConversationId: vi.fn(async (sid: string) => conversationIds.get(sid) ?? null),
   claimOpenAiConversationId: vi.fn(async (sid: string, id: string) => { if (!conversationIds.has(sid)) conversationIds.set(sid, id); return conversationIds.get(sid); }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
-  readCommittedTurn: vi.fn(async (_sid: string, id: string) => rows.get(id) ?? null),
+  readCommittedTurn: vi.fn(async (_sid: string, id: string) => rows.get(id) ?? runRows.get(id) ?? null),
   append: vi.fn(async (w: any) => {
     const prior = rows.get(w.turn_id);
     if (prior !== undefined) return prior.request_hash === w.request_hash ? { id: prior.id, replayedPriorTurn: true as const } : { id: prior.id, priorTurnConflict: true as const };
@@ -116,7 +119,7 @@ const store = {
   }),
   readRecent: vi.fn(async () => [...rows.values()].filter((r) => !String(r.turn_id).endsWith(':claim')).reverse()),
   readMostRecentPendingActions: vi.fn(async () => [...rows.values()].filter((r) => !String(r.turn_id).endsWith(':claim')).at(-1)?.pending_actions ?? []),
-  readFactsFor: vi.fn(async () => []),
+  readFactsFor: vi.fn(async (ids: readonly string[], kind?: string) => kind === 'run_analysis' ? ids.flatMap((id) => runFacts.has(id) ? [runFacts.get(id)] : []) : []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
   readExistingScenario: vi.fn(async () => null),
 };
@@ -173,16 +176,20 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     route.AGENT_TURN_CLAIM_WAIT.totalMs = 50;
     app = Fastify({ logger: false });
     // The engine's Run turn: counted. It analyses the SAVED model; a preceding Run gives it a run-over-run delta.
-    app.post('/orchestrate/v2/turn', async (_req, reply) => {
+    app.post('/orchestrate/v2/turn', async (req, reply) => {
       runTurns += 1;
       if (world.runStatus !== 200) return reply.code(world.runStatus).send({ error: 'engine unavailable' });
       world.ranOnSaved = true;
+      const turnId = String((req.body as Json).turn_id);
+      runRows.set(turnId, { id: `run-row-${runTurns}`, turn_id: turnId, request_hash: 'native-run', user_message: null, assistant_message: null, llm_calls_used: 0 });
+      runFacts.set(`run-row-${runTurns}`, { fact_type: 'run_analysis', fact_version: 1, noop: false, result: { scenario_id: SCENARIO,
+        run_id: 'fixture-read-run', graph_hash_at_run: world.hash, computed_at: RUN_AT, leading_option_id: null, summary: RESULT.summary } });
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: world.hash,
         blocks: [RESULT], analysis_state: STATE, analysis_ready: READY, ...(world.delta ? { run_delta: DELTA } : {}) };
     });
     app.post('/assist/v1/scenarios/:id/graph', async () => world.ranOnSaved
       ? withCanonicalAnalysisView({ graph: world.graph, graph_hash: world.hash, analysis_ready: READY, analysis_state: STATE, analysis_result: RESULT,
-          ...(world.delta ? { current_read: { run_delta: DELTA } } : {}) }, SCENARIO)
+          current_read: { run_state: STATE.run_state, run_id: 'fixture-read-run', computed_against_hash: world.hash, ...(world.delta ? { run_delta: DELTA } : {}) } }, SCENARIO)
       : { graph: world.graph, graph_hash: world.hash, analysis_ready: READY,
           ...(world.prior ? { analysis_state: PRIOR_STATE, analysis_result: PRIOR_RESULT } : {}) });
     await app.register(route.agentV1TurnRoute);
@@ -190,7 +197,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    rows.clear(); conversationIds.clear(); pausedRun = null; calls = []; outputs = []; runTurns = 0; probe.applied = 0;
+    rows.clear(); runRows.clear(); runFacts.clear(); conversationIds.clear(); pausedRun = null; calls = []; outputs = []; runTurns = 0; probe.applied = 0;
     Object.assign(world, { graph: GRAPH_AT_4, hash: HASH_4, ranOnSaved: false, prior: true, runStatus: 200, delta: true });
     head = { status: 'ok', value: versionRow({ creation_kind: 'committed_mutation', source_version_id: null, restored_from_version_id: null, label: 'Edit Capacity', id: EDIT_V }) };
   });
@@ -308,6 +315,30 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(ran?.data?.run_comparison?.restore_between_runs).toMatchObject({ version_id: RESTORE_V, mutation_id: RESTORE_MUT, restored_version_id: EARLIER_V });
     expect(j.assistant_text).toBe(UNDONE);
     expect((j.blocks as Json[]).some((b) => b.type === 'analysis_result')).toBe(true);
+  });
+
+  it('⭐ RED→GREEN (Codex R1): ONE restore = ONE Run. The same Undo\'s Run re-pressed with a fresh turn id recovers that Run; no second engine call', async () => {
+    Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
+    head = { status: 'ok', value: versionRow() };
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run after Undo', effects_timing: null } }], [{ type: 'message', text: UNDONE }]];
+    expect((await runPress()).statusCode).toBe(200);
+    expect(runTurns).toBe(1);
+    calls = [];
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run after Undo', effects_timing: null } }], [{ type: 'message', text: UNDONE }]];
+    const again = await runPress();
+    expect(again.statusCode, again.body).toBe(200);
+    expect(runTurns, 'one restore, re-pressed with another request id: still ONE engine call').toBe(1);
+    expect(outputOf('run_call'), 'the re-press is answered from the restore\'s own Run').toMatchObject({ status: 'ok', ran: true, data: { run_id: 'fixture-read-run' } });
+    expect((again.json() as Json).assistant_text).toBe(UNDONE);
+  });
+
+  it('CONTRAST: an ordinary head (an edit, not a restore) keeps a fresh Run per press', async () => {
+    Object.assign(world, { graph: GRAPH_AT_2, hash: HASH_2 });
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run it', effects_timing: null } }], [{ type: 'message', text: COACHED }]];
+    await runPress();
+    outputs = [[{ type: 'function_call', name: 'run_analysis', call_id: 'run_call', args: { reason: 'Run it', effects_timing: null } }], [{ type: 'message', text: COACHED }]];
+    await runPress();
+    expect(runTurns, 'two deliberate Run presses on an edited model: two Runs').toBe(2);
   });
 
   it('⭐ narration retry: a resend of the press whose narration failed repeats no write, no Run and no model call', async () => {

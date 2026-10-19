@@ -47,6 +47,10 @@ describe('a Run is claimed only when the read selects that Run on the current mo
     ['the read selects another Run (another time)', graphRead('run_1', 'h_one', 'h_one', '2026-10-19T09:00:00.000Z')],
     ['the model has moved since the Run', graphRead('run_2', 'h_one', 'h_two')],
     ['no Run at all', graphRead(null)],
+    // Codex R1 on #3469: the canonical view allows a current Run with no id; a matching revision and time is no receipt.
+    ['a current Run on the right revision and time, with no Run id', { status: 200, json: read({ graph_hash: 'h_one',
+      canonical_analysis_view: { staleness: { revision: 7, stale: false }, run: { run_id: null, graph_hash_at_run: 'h_one' } },
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: AT } } }) } as Reply],
   ] as const)('%s: unavailable, never "ran", and no result is passed on', async (_name, after) => {
     const out = await runAnalysis(product(RAN, [after]), ctx, ARGS, FREE);
     expect(out).toEqual({ status: 'unavailable', reason: 'run_not_recorded', write: 'none' });
