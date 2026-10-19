@@ -7,7 +7,8 @@
  *  · revision: the read's analysis hash, identity hash and scenario revision;
  *  · the model as stored (nodes, option settings, links) with each figure's source as the ONE authority answers it
  *    (`provenanceOf` / `authorshipOf`: origin human | ai | unknown, `accepted` kept apart from origin, the role) and each
- *    node's kept statements (speaker and verbatim quote, `recordsWithUnknownSpeakerOn`). Unknown stays unknown;
+ *    node's kept statements (speaker and verbatim quote, `recordsWithUnknownSpeakerOn`). Unknown stays unknown; a person's
+ *    figure whose role is unverified says what its carrier does not record (`observed_not_recorded`);
  *  · readiness: the run admission's verdict and the typed blocking codes (`resolveRunAdmission`), with no ask text;
  *  · the selected Run: its id, the hash it ran on, its currency and leader permission, and the licensed Run facts
  *    (`runFactsOf`, the packet every AI call after a Run reads).
@@ -43,12 +44,15 @@ function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
   const settings = isRec(n.interventions) ? Object.entries(n.interventions).map(([factorId, cell]) => ({
     factor_id: factorId, cell, source: provenanceOf({ setting: cell, target: byId.get(factorId) }),
   })) : [];
+  const observedSource = observed === undefined ? undefined : provenanceOf({ value: observed });
   const statements = recordsWithUnknownSpeakerOn(n).map((r) => ({ subject_key: r.subject_key, field: r.field,
     statements: r.statements.map((s) => pick(s, ['speaker', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated'])) }));
   return {
     ...pick(n, ['id', 'kind', 'label', 'description', 'proposed_by', 'analysis_participation', 'option_status']),
     ...(n.provenance === undefined ? {} : { added_by: authorshipOf({ nodeTag: n.provenance }) }),
-    ...(observed === undefined ? {} : { observed: pick(observed, ['value', 'raw_value', 'unit', 'cap', 'range']), observed_source: provenanceOf({ value: observed }) }),
+    ...(observed === undefined ? {} : { observed: pick(observed, ['value', 'raw_value', 'unit', 'cap', 'range']), observed_source: observedSource,
+      // A person's figure whose role is unverified: its carrier keeps neither who said it nor their words (PL AMEND 15:35).
+      ...(observedSource?.origin === 'human' && observedSource.role === 'unverified' ? { observed_not_recorded: ['speaker', 'words'] } : {}) }),
     ...(settings.length === 0 ? {} : { settings }),
     ...(statements.length === 0 ? {} : { statements }),
   };
