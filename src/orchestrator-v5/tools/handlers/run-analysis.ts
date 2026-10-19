@@ -1222,8 +1222,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
-    /** STEP 8 (Codex R2 #3443): the evaluated result before the recorded-support projection, kept whole in the saved Run. */
-    let evaluatedBeforeSupport: unknown;
+    /** STEP 8: whether a recorded-support projection withheld anything, so the saved Run keeps the evaluated copy below. */
+    let projectedForSupport = false;
     // Fix 4 review fix (round 2): every timing site is gated on the flag.
     // Default-OFF production runs make zero `Date.now()` calls, allocate no
     // RunAnalysisTimings object, and emit no `v5.run_analysis.timings`
@@ -1807,6 +1807,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // ⭐ STEP 8 (Codex R1 #3452 BLOCK 2): the engine's validated result, captured ONCE before every projection below, so the
+    // saved Run's evaluated copy (`RUN_EVALUATED_BEFORE_SUPPORT_KEY`) is what the engine returned, whatever withheld first.
+    const evaluatedResponse = structuredClone(response);
+
     // #3167 fix-forward (PL 6135017311): THIS Run's omitted Olumi risks, recorded in its own result for every later reader.
     if (unsizedProjection.omitted.length > 0) response = appendInferenceWarning(response, unsizedOlumiRiskOmissionWarning(unsizedProjection.omitted));
 
@@ -1871,9 +1875,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       unsupportedSpreadTo,
     );
     const placeholderMovedByLimit = limitOwners.placeholderMovedOptionIds;
-    // ⭐ STEP 8 (Codex R2 #3443 P1): the saved Run keeps the engine's evaluated result whole, as it stood before the projection
-    // withholds what rests on an unsupported spread (`RUN_EVALUATED_BEFORE_SUPPORT_KEY`); the enrichment is that projection.
-    if (limitOwners.unsupportedSpreadByLimit.size > 0) evaluatedBeforeSupport ??= structuredClone(response);
+    // ⭐ STEP 8 (Codex R2 #3443 P1): where a projection withholds what rests on an unsupported spread, the saved Run keeps the
+    // engine's evaluated result whole (`evaluatedResponse`, captured once above); the enrichment is the projection.
+    if (limitOwners.unsupportedSpreadByLimit.size > 0) projectedForSupport = true;
     for (const [constraintId, paths] of limitOwners.unsupportedSpreadByLimit) {
       response = appendInferenceWarning(response, { ...unsupportedSpreadWarning(graphForAnalysis, paths),
         code: CONDITION_FIGURES_UNSUPPORTED_SPREAD, severity: 'info', constraint_ids: [constraintId] });
@@ -2015,7 +2019,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // drawn on the same unsupported spread has no warrant of its own, and never stands in for the withheld chance). The
         // outcome stays in the saved Run for the structural challenge (`keepOutcome`); its range never reaches a public block or
         // the AI (`unsupportedIntervalOptionIds`, AIE 764e9c72).
-        evaluatedBeforeSupport ??= structuredClone(response);
+        projectedForSupport = true;
         response = withholdOptionGoalFigures(response, new Set(support.unsupportedSpread.map((p) => p.option_id)),
           unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOutcome: true });
         // The goal's own conditions rest on those withheld chances (Codex R2 P1): each withheld option's P for them, their precision
@@ -2829,7 +2833,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
         enrichment: stampRunAnalysisProjection({ ...(response as Record<string, unknown>),
-          ...(evaluatedBeforeSupport !== undefined ? { [RUN_EVALUATED_BEFORE_SUPPORT_KEY]: evaluatedBeforeSupport } : {}) }),
+          ...(projectedForSupport ? { [RUN_EVALUATED_BEFORE_SUPPORT_KEY]: evaluatedResponse } : {}) }),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

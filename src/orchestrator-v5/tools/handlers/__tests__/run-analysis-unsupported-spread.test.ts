@@ -54,6 +54,7 @@ import { CONDITION_FIGURES_UNSUPPORTED_SPREAD } from '../../../../orchestrator/c
 import { notesAsShown } from '../../../goal-target/goal-targets-joint.js';
 import { compactAnalysis } from '../../../../orchestrator/context/analysis-compact.js';
 import { buildInvokeInputForTests } from '../../../coaching/decision-review-enricher.js';
+import { RUN_EVALUATED_BEFORE_SUPPORT_KEY } from '../../../context/analysis-projection-policy.js';
 
 type Json = Record<string, any>;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -616,3 +617,15 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
   });
 });
 
+
+describe('ONE evaluated copy, captured before every projection (Codex R1 #3452 BLOCK 2: mixed causes)', () => {
+  it('⭐ RED→GREEN: an unsized link and an unsupported spread together keep the engine\'s own win shares in the saved Run', async () => {
+    const { result } = await cutRun(userSized(CUT_GRAPH, CUT_MOVERS, { only: 1 }));
+    const raw = envOf(result)[RUN_EVALUATED_BEFORE_SUPPORT_KEY] as Json | undefined;
+    const shares = (r: Json) => entriesFor(r, CUT_MOVERS[0]!).map((x) => x.win_probability);
+    expect(raw).toBeDefined();
+    expect(shares(raw!)).toEqual(shares(CUT.plot_body as Json));
+    // The public projection still carries none of them.
+    expect(shares(envOf(result)).every((s) => s === undefined)).toBe(true);
+  });
+});
