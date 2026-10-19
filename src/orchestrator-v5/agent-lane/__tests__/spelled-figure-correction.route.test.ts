@@ -313,8 +313,9 @@ describe('parity by property: another speaker’s quoted figure is never the use
   const QUOTES: [string, string][] = [['"', '"'], ['\u201C', '\u201D'], ["'", "'"], ['\u2018', '\u2019']];
   const LEADS = ['Our lead said: ', 'Our lead said ', 'The report says: '];
   it('quoted: never written; unquoted: written; for every combination', () => {
-    for (const [v, w] of NUMBERS) for (const [open, close] of QUOTES) for (const lead of LEADS) for (const f of [w, String(v)]) {
-      const said = `we resolve ${f} tickets per week`;
+    // The quotation may open on the figure itself ("'70 tickets per week'") or on a word before it.
+    for (const [v, w] of NUMBERS) for (const [open, close] of QUOTES) for (const lead of LEADS) for (const f of [w, String(v)])
+    for (const said of [`we resolve ${f} tickets per week`, `${f} tickets per week`]) {
       const quoted = `${lead}${open}${said}${close}; I have not checked it.`;
       expect(figureTheUserWrote(v, 'tickets per week', quoted), quoted).toBe(false);
       expect(figureTheUserWrote(v, 'tickets per week', `I checked: ${said}.`), said).toBe(true);
@@ -338,6 +339,7 @@ describe('identity part figures: the one reader and check, both forms', () => {
     ['digits, the user’s own', 'We have 300 Pro subscribers', { parts: [COUNT] }],
     ['digits, a manager’s quoted words', 'Our manager said: \u201CWe have 300 Pro subscribers\u201D.', undefined],
     ['digits, single quotes', "Our manager said: 'We have 300 Pro subscribers'.", undefined],
+    ['digits, single quotes opening on the figure', "Our manager said: '300 Pro subscribers'.", undefined],
   ] as const)('%s', (_n, text, issued) => {
     expect(answer(text)).toEqual(issued);
   });
