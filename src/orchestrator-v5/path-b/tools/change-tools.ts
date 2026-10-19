@@ -59,7 +59,7 @@ import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js
 import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
 import { targetCandidate, targetReadback, type TargetDeclaration } from './goal-target.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
-import { inTheUsersWords, type TypedWords } from './user-words.js';
+import { inTheUsersWords, verbatimInTheUsersWords, type TypedWords } from './user-words.js';
 
 export const PROPOSE_CHANGE = 'propose_change';
 export const APPLY_CHANGE = 'apply_change';
@@ -318,9 +318,12 @@ function goalLevelReadOf(read: SavedRead): GoalLevelRead | null {
   return nodes.length !== all.length || nodes.length === 0 ? null
     : { graph_hash: read.graphHash, graph_identity_hash: read.identity ?? '', nodes, raw: read.graph };
 }
-/** Whether the quote writes this figure: its numerals read as digits only ("1,250" is 1250), never a word or a unit. */
+/**
+ * Whether the quote writes this figure WITH ITS SIGN: its numerals read as digits only ("1,250" is 1250), never a word or a unit.
+ * A minus that no digit precedes belongs to the numeral ("-110" is -110, never 110); a range's dash ("2-3") does not.
+ */
 const quoteHoldsFigure = (quote: string, value: number): boolean =>
-  (quote.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).some((n) => Number(n.replace(/,/g, '')) === value);
+  (quote.match(/(?:(?<!\d)[-\u2212])?\d[\d,]*(?:\.\d+)?/g) ?? []).some((n) => Number(n.replace(/,/g, '').replace('\u2212', '-')) === value);
 /** The goal-level door's context: the user's typed words as one text (`user_text`, the composer messages it binds to). */
 const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
   const typed = ctx.verified_user_messages ?? [];
@@ -334,8 +337,9 @@ const levelCtx = (ctx: ChangeCtx): AgentToolContext => {
  */
 async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, o: GoalLevelArgs): Promise<ToolOutcome> {
   if (o.source.origin !== 'user' || o.stance !== 'stated_current') return unavailable('goal_level_unverified', 'none', GOAL_LEVEL_UNVERIFIED);
-  if (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx)) return refused('quote_not_in_users_words', undefined, { op: 0 });
-  // B's rule (DL-3 AMEND 20:01Z): the quote holds the figure, by its digits only; the words are not re-parsed for meaning.
+  // B's rule (DL-3 AMEND 20:01Z; bytes and sign, #3471 R2): the quote is a byte-exact span of the typed words and holds the figure
+  // with its sign, by its digits only; the words are not re-parsed for meaning.
+  if (o.source.quote === null || !verbatimInTheUsersWords(o.source.quote, ctx)) return refused('quote_not_in_users_words', undefined, { op: 0 });
   if (!quoteHoldsFigure(o.source.quote, o.value)) return refused('figure_not_in_quote', undefined, { op: 0 });
   const read = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(read)) return read;

@@ -187,6 +187,31 @@ describe('the goal’s current level: the existing goal-level door, ONE registra
     expect((goal().observed_state as Rec).raw_value).toBe(110);
   });
 
+  it.each([
+    ['a run of spaces folded', 'Right now it is 110   a week.', '110 a week'],
+    ['a long dash folded', 'Right now: 110\u2014a week.', '110-a week'],
+    ['curly quotes folded', 'Right now it is \u2018110 a week\u2019.', "'110 a week'"],
+  ])('BYTES (#3471 R2): %s is not verbatim: quote_not_in_users_words, nothing proposed or saved', async (_, words, quote) => {
+    expect(words.includes(quote)).toBe(false);
+    const d = deps();
+    expect(await propose(d, [level('user', 'stated_current', quote)], words)).toMatchObject({ status: 'refused', reason: 'quote_not_in_users_words' });
+    expect(d.proposals.size()).toBe(0);
+    expect((goal().observed_state as Rec).raw_value).toBe(120);
+  });
+
+  it.each([['a minus', 'Net, we sit at -110 a week now.', '-110 a week'], ['a minus sign', 'Net, we sit at \u2212110 a week now.', '\u2212110 a week']])(
+    'SIGN (#3471 R2): a quote with %s before 110 cannot support +110: figure_not_in_quote, nothing proposed', async (_, words, quote) => {
+      const d = deps();
+      expect(await propose(d, [level('user', 'stated_current', quote)], words)).toMatchObject({ status: 'refused', reason: 'figure_not_in_quote' });
+      expect(d.proposals.size()).toBe(0);
+    });
+
+  it('SIGN contrast: a range\u2019s dash is not a minus, so "100-110 a week" still holds 110 (the bytes are the user\u2019s)', async () => {
+    const words = 'These days it is 100-110 a week.';
+    const out = await propose(deps(), [level('user', 'stated_current', '100-110 a week')], words);
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', data: { proposal_id: expect.any(String) } });
+  });
+
   it('NUMBER (Codex R1): a quoted 110 cannot support a declared 115: figure_not_in_quote, nothing proposed', async () => {
     const d = deps();
     expect(await propose(d, [{ ...level('user', 'stated_current', 'about 110 a week'), value: 115 }])).toMatchObject({ status: 'refused', reason: 'figure_not_in_quote' });
