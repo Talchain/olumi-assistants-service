@@ -26,7 +26,7 @@
  *
  * No word list names a kind of quantity: the model's own labels and units, and the door's candidates, decide.
  */
-import { isProseAfterValue } from '../routing/value-unit-resolution.js';
+import { isProseAfterValue, unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { readUnitParts, statedTailParts, type UnitParts } from './same-unit.js';
 import { amountsWrittenIn, amountTheUserWrote, figureTheUserWroteForSpan, sameWord, wordsOf, type EntityScope } from './stated-by-user.js';
@@ -63,10 +63,12 @@ function writtenInItsUnit(stated: UnitParts | null, own: UnitParts | null, share
   if (stated.kind === 'count' ? stated.period !== own.period || !perFits
     : (stated.period !== null && stated.period !== own.period) || (stated.per !== null && !perFits)) return false;
   if (stated.code !== null && own.code !== null && stated.code !== own.code) return false;
-  // The counted thing by its head noun ("70 support tickets" counts tickets). A share's base is not compared: the reader keeps
-  // one word of it ("80% of MY time" against "% of founder working time").
+  // The counted thing by its head noun ("70 support tickets" counts tickets). A headcount unit (people, hires, FTE, seats:
+  // `unitFamilyOf` 'count') counts whatever its phrase names, as the ONE reader reads it (`amountTheUserWrote`): "3 developers"
+  // are 3 hires. A share's base is not compared: the reader keeps one word of it ("80% of MY time" against "% of founder
+  // working time").
   const counted = own.noun?.[own.noun.length - 1];
-  return counted === undefined || (stated.noun ?? []).includes(counted);
+  return counted === undefined || unitFamilyOf(counted) === 'count' || (stated.noun ?? []).includes(counted);
 }
 
 /** The labels a phrase NAMES: a label's whole phrase, longest labels first ("Annual oven capacity" keeps its words from "Oven capacity"), or a word only that label has. */

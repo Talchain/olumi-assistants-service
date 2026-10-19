@@ -82,6 +82,10 @@ describe('the full written unit: the same sentence names the quantity, and only 
     ['FLIP another counted thing', 'The team capacity limit should be at most 2 specialists.', 'tickets per week', false],
     ['FLIP a count into a percentage', 'The team capacity limit should be at most 2 requests.', '%', false],
     ['FLIP another denominator', 'The team capacity limit should be at most £2 per client.', '£ per engineer', false],
+    // A headcount unit counts whatever its phrase names, as the ONE reader reads it (held-status-quo (b3): "We hire 3 developers").
+    ['BASE: a headcount unit counts the people its phrase names', 'The team capacity limit should be at most 2 developers.', 'hires', true],
+    ['FLIP the same phrase into a unit that counts a thing', 'The team capacity limit should be at most 2 developers.', 'tickets', false],
+    ['FLIP the same people, as a rate, into a headcount', 'The team capacity limit should be at most 2 developers per week.', 'hires', false],
   ])('%s: "%s" into "%s" → %s', (_case, text, unit, expected) => { expect(is(text, unit)).toBe(expected); });
 });
 
