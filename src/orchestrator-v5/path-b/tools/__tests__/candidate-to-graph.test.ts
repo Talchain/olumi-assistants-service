@@ -233,6 +233,20 @@ describe('candidateToGraph: conversion + science only', () => {
       expect(loss.map((l) => l.reason)).toContain(`"Add £1,000 of ad spend" sets "Ad spend" to £3,000, Olumi's derived figure: `
         + `£3,000 = ${partSaid[today]('£2,000')} + ${partSaid[added]('£1,000')}.`);
     });
+  it('PL 16:35: a total the user WRITES ("£3,000 in total") keeps its own origin; only a total the converter COMPUTES is Olumi\'s', () => {
+    const draft = salesDraft();
+    draft.options[1].interventions[0] = { factor_label: 'Ad spend', value: 3000, value_kind: 'absolute', unit: '£', provenance: 'explicit', stated_evidence: null };
+    const { graph, loss } = converted(draft);
+    const written = byLabel(graph, 'Add £1,000 of ad spend').interventions[byLabel(graph, 'Ad spend').id];
+    expect(written).toMatchObject({ raw_value: 3000, value: 0.3, source: 'brief_extraction' });
+    expect(settingProvenanceOf(written).origin).toBe('human');
+    expect(loss.some((l) => String(l.field_path).endsWith('.derived_total'))).toBe(false);
+    // The total of a carried sum, as the user wrote it (400 = 300 + 100), keeps its origin beside Olumi's sum reading.
+    const sum = converted(sumDraft(400));
+    expect(ofKind(sum.graph, 'goal')[0]!.nonlinear_identity).toMatchObject({ operation: 'sum', stated_in_brief: false });
+    expect(valueProvenanceOf(ofKind(sum.graph, 'goal')[0]!.observed_state).origin).toBe('human');
+  });
+
   it('GENERATIVE (absolute): a setting that is not calculated keeps its own declared origin', () => {
     const draft = salesDraft(); draft.options[0].interventions[0].provenance = 'ai_proposed';
     const { graph } = converted(draft);
