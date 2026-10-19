@@ -367,6 +367,18 @@ export interface AnswerOffersRead {
   readonly run_key: string | null;
 }
 
+/**
+ * PATH-B `core`: an SDK run paused for the person's approval. `state` is the SDK's own `RunState.toString()`; the rest binds
+ * a press to it (the proposal on the card, and the paused tool call).
+ */
+export interface OpenAiPausedRun {
+  readonly pause_id: string;
+  readonly proposal_id: string | null;
+  readonly call_id: string;
+  readonly tool: string;
+  readonly state: string;
+}
+
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
   /**
@@ -793,11 +805,17 @@ export interface SessionStore {
   readAnalysisInvalidatedAt?(scenarioId: string): Promise<string | null>;
   /**
    * PATH-B `core`: the scenario's ONE OpenAI Conversation id (`scenarios.openai_conversation_id`, migration 20261019150000).
-   * `undefined` = this store cannot hold it yet (column absent), so the caller keeps it in process memory.
+   * `undefined` = this store cannot hold it (column absent): the core turn stops (503 CORE_STATE_UNAVAILABLE), no fallback.
    */
   readOpenAiConversationId?(scenarioId: string): Promise<string | null | undefined>;
   /** Save `id` only where the scenario holds none; returns the scenario's id afterwards (the winner of a race). */
   claimOpenAiConversationId?(scenarioId: string, id: string): Promise<string | null | undefined>;
+  /** PATH-B `core`: the one SDK run paused for the person's approval (`scenarios.openai_paused_run`); `undefined` = cannot hold it. */
+  readOpenAiPausedRun?(scenarioId: string): Promise<OpenAiPausedRun | null | undefined>;
+  /** Save `run` only where none is held: true = saved, false = another run is already paused, `undefined` = cannot hold it. */
+  saveOpenAiPausedRun?(scenarioId: string, run: OpenAiPausedRun): Promise<boolean | undefined>;
+  /** Clear the paused run `pauseId` only while it is the one held: true = this caller took it, and it alone resumes it. */
+  takeOpenAiPausedRun?(scenarioId: string, pauseId: string): Promise<boolean | undefined>;
   /**
    * Idempotently ensure a row exists in `public.scenarios` for `scenarioId`,
    * creating it with `userId` as the owner if absent. `userId` may be null
