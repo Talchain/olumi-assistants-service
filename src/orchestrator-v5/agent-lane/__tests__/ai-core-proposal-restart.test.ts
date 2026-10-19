@@ -89,8 +89,8 @@ const nodeOf = (id: string): Rec => ((persisted as { nodes: Rec[] }).nodes.find(
 const SAID = 'On a Saturday the queue is about 20 minutes, and my manager reckons about 20 minutes too.';
 const ctx = { scenario_id: SCN, authenticated_user_id: 'user-a', request_id: 'req-c5', turn_id: 'turn-c5',
   user_turn_text: SAID, verified_user_messages: [SAID] };
-const queueTo = (origin: string, quote: string | null, named: string | null = null) => ({
-  op: 'set_factor_value' as const, factor_id: 'queue', value: 20, unit: 'minutes', source: { origin, quote, named_source: named } });
+const queueTo = (origin: string, quote: string | null, named: string | null = null, stance = origin === 'olumi' ? 'estimate' : 'stated_current') => ({
+  op: 'set_factor_value' as const, factor_id: 'queue', value: 20, unit: 'minutes', stance, source: { origin, quote, named_source: named } });
 
 type Mod = typeof import('../../path-b/tools/change-tools.js');
 let proposeChange: Mod['proposeChange'];
