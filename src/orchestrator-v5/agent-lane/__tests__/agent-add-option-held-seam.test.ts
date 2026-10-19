@@ -1743,7 +1743,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   const proposeJourneyA = async (today: Record<string, unknown> | undefined, firstMessage: string = BRIEF_A, olumiSaid = 'Noted. Shall I build on the model you have?',
     // A1 £59 rows: the option's label, its level on the new price (`null` = none given) and the user's message.
     opts: { label?: string; level?: Record<string, unknown> | null; message?: string } = {}) => {
-    const level = opts.level === undefined ? { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59' } : opts.level;
+    // The AI's `QUOTE_SPEAKER` reading of the £59 (DL-3 decision on #3436): the user's own instruction naming their option.
+    const level = opts.level === undefined ? { value: 59, unit: 'GBP/month', estimate: true, basis: 'the option is named for £59', speaker: 'user' } : opts.level;
     script = [() => say(olumiSaid)];
     await turn({ message: firstMessage });
     script = [
@@ -2018,7 +2019,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
 
   it('[A1-59 R1] RED (A05 served shape): today\'s £49 AND the option\'s £59 in ONE call → one hold → one approval → the option holds 59 user_specified on the SAME frame as the £49, and the Run reaches PLoT (never MISSING_OPTION_VALUE)', async () => {
     graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
-    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP per month' }, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month' }, message: A05_SERVED });
+    const t1 = await proposeJourneyA({ value: 49, unit: 'GBP per month' }, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month', speaker: 'user' }, message: A05_SERVED });
     expect(t1._agent.tool_calls.filter((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual([expect.objectContaining({ ok: true })]);
     const approve = approveChipOf(t1);
     expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
@@ -2090,7 +2091,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
 
   it('[A1-59 R3] CONTRAST (unchanged): a new graded factor with NO today level → the option\'s level is not set ("no range yet"); nothing rides the hold', async () => {
     graphOf.set(SCENARIO, structuredClone(JOURNEY_A));
-    const t1 = await proposeJourneyA(undefined, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month' }, message: A05_SERVED });
+    const t1 = await proposeJourneyA(undefined, BRIEF_A, undefined, { level: { value: 59, unit: 'GBP per month', speaker: 'user' }, message: A05_SERVED });
     expect(approveChipOf(t1)?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
     expect(toolOutputSeen).toMatch(/levels_not_set\\*":\[\{/);
     expect(toolOutputSeen).toMatch(/New Pro customer price\\*" is new in this change and has no range yet/);

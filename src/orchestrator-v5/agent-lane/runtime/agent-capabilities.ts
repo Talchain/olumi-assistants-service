@@ -243,6 +243,39 @@ const notWrittenReason = (value: number, factor: string): string =>
   `${value} is not a figure the user gave for ${factor}, so this change leaves that level unset. Say plainly it has no level yet, `
   + `and ask for ${factor}\u2019s figure only if the user wants to set it. Never send 0 or any placeholder to mean "not set": leave level out.`;
 
+/** The AI's speaker reading of a door figure (the existing `QUOTE_SPEAKER` values), or undefined when it gave none. */
+const speakerOf = (v: unknown): 'user' | 'other' | 'unknown' | undefined => (v === 'user' || v === 'other' || v === 'unknown' ? v : undefined);
+/**
+ * ⛔ WHOSE FIGURE IS UNCLEAR: NOTHING WRITTEN; ASK (DL-3 rulings on Codex #3436): the AI read the figure's speaker as unknown, or the
+ * user's message holds it only inside another speaker's quoted words. Never the user's, never a silent drop.
+ */
+const quotedNotOwnedReason = (value: number, factor: string, quote: string): string =>
+  `${value} appears in the user\u2019s message only inside quoted words (\u201C${quote}\u201D) that they report rather than give as their own `
+  + `instruction, so ${factor}\u2019s level is left unset. Ask the user whose figure ${value} is, naming that quote, and set it only if they give `
+  + `or adopt it. Never send 0 or any placeholder to mean "not set": leave level out.`;
+/**
+ * ⛔ ANOTHER SPEAKER'S FIGURE THE USER ASKS TO USE: NOTHING WRITTEN (DL-3 ruling (b); the AIE's exact limited response,
+ * prompt/AIE-REPORTED-FIGURE-ENCODING-DISPOSITION-20261019-v1.json). The AI read the figure as another speaker's (a CFO's, Olumi's).
+ * The user's request would author the setting, never that claim, and this route cannot yet keep the two apart through its readers,
+ * so it prepares nothing, keeps the source in the conversation, and tells the Agent the exact words, with the actual party and
+ * quantity. It never asks the user to make the claim their own or to repeat the request.
+ */
+const reportedFigureNotKept = (value: number, quantity: string, quote: string): ToolResult => ({
+  ok: false, mutated: false, refusal: 'reported_figure_source_not_kept',
+  detail: `Nothing was prepared or saved: ${value} for "${quantity}" is another speaker\u2019s figure in the user\u2019s message (\u201C${quote}\u201D), `
+    + `and this route cannot yet keep that figure\u2019s source separate from who sets "${quantity}". Keep its complete quote, source and `
+    + 'qualifications, and the user\u2019s request to use it. Say exactly, with the actual person or party in place of [party]: '
+    + `\u201CI\u2019ve kept the [party]\u2019s proposal and your request to use it. This change has not been saved because this route cannot yet `
+    + `keep the proposal\u2019s source separate from who sets the ${quantity}.\u201D Never ask the user to make that figure their own, to check `
+    + 'its source, or to repeat their request; continue with the rest of the reasoning.',
+});
+/** ⛔ WHOSE FIGURE CANNOT BE TOLD (the AI read the speaker as unknown) at a door that writes one figure: nothing prepared; ask. */
+const unknownSpeakerNotKept = (value: number, quantity: string, quote: string): ToolResult => ({
+  ok: false, mutated: false, refusal: 'figure_speaker_unknown',
+  detail: `Nothing was prepared: whose figure ${value} for "${quantity}" is cannot be told from the user\u2019s message (\u201C${quote}\u201D). `
+    + `Ask the user whose figure ${value} is, naming that quote, and set it only if they give or adopt it.`,
+});
+
 /** What the Agent is told to say about a named input that cannot hold a value. */
 /** AIE packet 6e52e896 `event_risk.risk_occurrence_note`, byte for byte: a risk root that can take Olumi's range, named without one. */
 const RISK_OCCURRENCE_NEEDED_NOTE = 'These risks have no held occurrence likelihood. If the event and listed window are clear and supported, propose one through the available propose_assumptions tool with that risk alone, user_stated false, a grounded basis, and occurrence_range: the low and high chance, in percent, that it happens at least once within within_months. Nothing was proposed for these risks in this call. If event meaning or window is unresolved, preserve its source and clarify only that missing part.';
@@ -365,7 +398,7 @@ import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../sel
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, figureOnlyInQuotation, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { figureIsThisQuantitys, type Candidate } from '../quantity-identity.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
@@ -8144,6 +8177,15 @@ export function createAgentCapabilities(
           continue;
         }
         const raw = Number(i?.value);
+        // ⛔ WHOSE CLAIM (the AI's speaker reading; DL-3 decision on Codex #3436 R3): another speaker's figure is never written (the whole
+        // change is refused, `reportedFigureNotKept`); an unclear one is not this level and is asked.
+        const levelSpeaker = speakerOf((i as { speaker?: unknown } | undefined)?.speaker);
+        const levelQuote = (): string => quoteOfFigure(raw, declaredUnit, ctx.user_text) ?? String(raw);
+        if (levelSpeaker === 'other' && Number.isFinite(raw)) return reportedFigureNotKept(raw, factor.label, levelQuote());
+        if (levelSpeaker === 'unknown' && Number.isFinite(raw)) {
+          notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: quotedNotOwnedReason(raw, factor.label, levelQuote()) });
+          continue;
+        }
         /**
          * TEMPORAL (B6's ask, #2384; R3 #75 5914230653): the user's LIKELY RANGE for this level, decided from the TYPED
          * arguments only (Codex CR 5963331228 P1: no parsing of the user's words). Both ends; the reading the Agent took
@@ -8194,7 +8236,8 @@ export function createAgentCapabilities(
 
         // A rejected range has no bearing on the ordinary level or its authorship.
         const userWrote = claimedByUser && (likelyRange !== undefined
-          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+          || figureTheUserWroteFor(raw, factorUnitOf(g.raw, factor), ctx.user_text,
+            { ...scopeIn(g, factor.label, option.label), ...(levelSpeaker !== undefined ? { speaker: levelSpeaker } : {}) }));
         if (statementOrigin(userWrote, figureTheUserWrote(raw, factorUnitOf(g.raw, factor), ctx.unverified_user_text)
           || figureTheUserWrote(raw, factorUnitOf(g.raw, factor), g.brief_text), ctx.user_text_complete, i.user_stated === false) === 'unknown') {
           return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
@@ -10945,6 +10988,12 @@ export function createAgentCapabilities(
           };
         }
       }
+      // ⛔ A LEVEL THE AI READ AS ANOTHER SPEAKER'S FIGURE: the whole change is refused, nothing written (`reportedFigureNotKept`).
+      for (const spec of askedSpecs) for (const a of spec.acts_on ?? []) {
+        if (speakerOf(a.level?.speaker) !== 'other' || a.level?.estimate === true || typeof a.level?.value !== 'number') continue;
+        return reportedFigureNotKept(a.level.value, a.factor_label,
+          quoteOfFigure(a.level.value, a.level.unit, ctx.user_text) ?? (typeof ctx.user_text === 'string' ? ctx.user_text : String(a.level.value)));
+      }
       if (askedSpecs.length > MAX_OPTIONS_PER_TRANSACTION) {
         return {
           ok: false, mutated: false, refusal: 'too_many_options',
@@ -11103,7 +11152,7 @@ export function createAgentCapabilities(
         statedToday.push({ key: f.key, label: f.label, value: t.value, ...(unit !== undefined ? { unit } : {}), observed_state: os });
       }
       const entries = plans.map(({ spec, plan }) => {
-        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' | 'unverified' };
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' | 'unverified'; speaker?: 'user' | 'other' | 'unknown' };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const lv = doorLevelOf(a.level);
@@ -11111,7 +11160,8 @@ export function createAgentCapabilities(
           const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
           // Olumi's own suggested figure, with its basis (ChatGPT 5839692762 A: an EXPLICIT hypothesis, never silent).
           const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
-          if (f !== undefined) levelById.set(f.id, { ...lv, ...(basis !== undefined ? { estimate: basis } : {}) });
+          const speaker = speakerOf(a.level?.speaker);
+          if (f !== undefined) levelById.set(f.id, { ...lv, ...(basis !== undefined ? { estimate: basis } : {}), ...(speaker !== undefined ? { speaker } : {}) });
         }
         /**
          * ⛔ THE USER'S OWN SPLIT (AI Quality ruling #70 5859388817; served C08 "Let's spit it 50/50" of the £30,000 limit the
@@ -11140,7 +11190,17 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
+          const wrote = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text,
+            { ...scopeIn(g, f.label, plan.label), ...(lvl.speaker !== undefined ? { speaker: lvl.speaker } : {}) });
+          // ⛔ WHOSE CLAIM (the AI's speaker reading at the door; DL-3 decision on Codex #3436 R3): another speaker's figure was refused whole
+          // above; an unclear one, or one the message holds only inside another speaker's quotation, is never the user's and is asked.
+          const quoteHere = (): string => quoteOfFigure(lvl.value, lvl.unit ?? factorUnit, ctx.user_text) ?? String(lvl.value);
+          const quoted = wrote || lvl.estimate !== undefined ? null
+            : lvl.speaker === 'unknown' ? quoteHere() : figureOnlyInQuotation(lvl.value, lvl.unit ?? factorUnit, ctx.user_text);
+          if (quoted !== null) {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: quotedNotOwnedReason(lvl.value, f.label, quoted) });
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
+          }
           const retained = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.unverified_user_text)
             || figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, g.brief_text);
           // ⭐ QBC row 8 (G3, W15): a figure only the retained or brief words write is USER MATERIAL of unknown origin: recorded with its
@@ -11264,7 +11324,13 @@ export function createAgentCapabilities(
             continue;
           }
           const levelUnit = unit ?? today.unit;
-          const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text, scopeIn(g, a.label, plan.label));
+          const lvSpeaker = speakerOf((lv as { speaker?: unknown }).speaker);
+          const wrote = figureTheUserWroteFor(asked, levelUnit, ctx.user_text,
+            { ...scopeIn(g, a.label, plan.label), ...(lvSpeaker !== undefined ? { speaker: lvSpeaker } : {}) });
+          // ⛔ WHOSE CLAIM, as at an existing factor's level: unclear, or held only inside another speaker's quotation, is asked.
+          const quotedLv = wrote || lv.estimate === true ? null : lvSpeaker === 'unknown'
+            ? quoteOfFigure(asked, levelUnit, ctx.user_text) ?? String(asked) : figureOnlyInQuotation(asked, levelUnit, ctx.user_text);
+          if (quotedLv !== null) { notSet(quotedNotOwnedReason(asked, a.label, quotedLv)); continue; }
           const retained = figureTheUserWrote(asked, levelUnit, ctx.unverified_user_text) || figureTheUserWrote(asked, levelUnit, g.brief_text);
           // ⭐ QBC row 8 (G3, W15): a figure only the retained or brief words write is recorded with its origin unverified (as above).
           const unverifiedLv = statementOrigin(wrote, retained, ctx.user_text_complete,
@@ -12039,6 +12105,10 @@ export function createAgentCapabilities(
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const text = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
+      // ⛔ WHOSE CLAIM (the AI's speaker reading): another speaker's figure is not written; an unclear one is asked.
+      const limitSpeaker = speakerOf(args?.speaker), limitQuote = (): string => quoteOfFigure(Number(args.value), undefined, text) ?? text;
+      if (limitSpeaker === 'other') return reportedFigureNotKept(Number(args.value), String(args.quantity_label ?? ''), limitQuote());
+      if (limitSpeaker === 'unknown') return unknownSpeakerNotKept(Number(args.value), String(args.quantity_label ?? ''), limitQuote());
       const value = readNewLimit(g.raw, text, Number(args.value), args.quantity_label);
       if (value === null) {
         const figures = findStatedAmounts(text).filter(a => a.magnitude === Number(args.value));
@@ -12083,6 +12153,12 @@ export function createAgentCapabilities(
       if (typeof value !== 'number' || !Number.isFinite(value) || (operator !== '<=' && operator !== '>=') || asked === '') {
         return { ok: false, mutated: false, refusal: 'unreadable_limit',
           detail: 'A limit change needs the limit as the model lists it, its operator, and the new figure. Nothing was prepared; ask the user for whichever is missing.' };
+      }
+      // ⛔ WHOSE CLAIM (the AI's speaker reading): another speaker's figure is not written; an unclear one is asked.
+      const changeSpeaker = speakerOf(args?.speaker);
+      if (changeSpeaker !== undefined && changeSpeaker !== 'user') {
+        const said = quoteOfFigure(value, args?.unit, ctx.user_turn_text ?? '') ?? (ctx.user_turn_text ?? String(value));
+        return changeSpeaker === 'other' ? reportedFigureNotKept(value, asked, said) : unknownSpeakerNotKept(value, asked, said);
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };

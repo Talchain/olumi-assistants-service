@@ -41,7 +41,7 @@ import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js
 import { unitPhraseFamily } from './unit-conflict.js';
 import { labelHeadUnit } from './label-head-unit.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
-import { speechReading } from '../goal-target/input-claim-context.js';
+import { quoteIsNotTheUsersClaim, speechReading } from '../goal-target/input-claim-context.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
@@ -76,7 +76,7 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
  *    DL-3 on #3429). A headcount unit counts any phrase; a figure with no noun after it ("45 now", "all 6 on a prototype") reads as before.
  *  · A number in words is credited only as a COMPLETE SPAN (`wordsSpanComplete`): its quantity's word right after it.
  */
-export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string): boolean {
+export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string, names: readonly string[] = []): boolean {
   const end = a.index + a.matchedText.length;
   const counted = countedPhraseAfter(text, end);
   const held = namingWords(unit), said = namingWords(counted);
@@ -84,7 +84,7 @@ export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknow
   const another = (a.kind === 'plain' || a.kind === 'words') && held.length > 0 && !held.some((h) => unitFamilyOf(h) === 'count')
     && said.length > 0 && !namesHeldUnit(said, held);
   return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && (a.kind !== 'words' || wordsSpanComplete(text, end))
-    && !inAnotherSpeakersWords(text, a);
+    && !inAnotherSpeakersWords(text, a, names);
 }
 
 /**
@@ -114,9 +114,36 @@ function namesHeldUnit(said: readonly string[], held: readonly string[]): boolea
  * and either form. The speech reader opens a single mark only before a word, so the amount is read AS a word there (its characters,
  * same length): "'70 tickets per week'" is quoted speech exactly as "'seventy tickets per week'" is (Codex #3429 R3).
  */
-export function inAnotherSpeakersWords(text: string, a: WrittenAmount): boolean {
+export function inAnotherSpeakersWords(text: string, a: WrittenAmount, names: readonly string[] = []): boolean {
   const asWord = text.slice(0, a.index) + 'n'.repeat(a.matchedText.length) + text.slice(a.index + a.matchedText.length);
-  return speechReading(asWord).inSpeech(speechReading(asWord.slice(0, a.index)).text.length);
+  const speech = speechReading(asWord);
+  if (!speech.inSpeech(speechReading(asWord.slice(0, a.index)).text.length)) return false;
+  // ⭐ THE BOUND ENTITY'S OWN QUOTED NAME (journey A: "Let's add …: "£59 for new Pro customers; grandfather existing customers""), opened
+  // ONLY where the AI read the claim as the user's at the door (`EntityScope.speaker: 'user'` passes `names`; DL-3 decision on Codex
+  // #3436 R3: an instruction verb in front of a quote is no proof of who made the claim, so no prefix or verb rule decides it). A
+  // quotation that is EXACTLY a bound name is that name, not another speaker's words; the user's report of it as Olumi's
+  // (`quoteIsNotTheUsersClaim`) still withholds. Anything else keeps the rule. The original spelling has the same indices.
+  const plain = speechReading(text).text, at = speechReading(text.slice(0, a.index + 1)).text.length - 1;
+  return !names.some((label) => {
+    const name = speechReading(label).text;
+    for (let i = name === '' ? -1 : plain.indexOf(name); i >= 0; i = plain.indexOf(name, i + 1)) {
+      if (i <= at && at < i + name.length && speech.inSpeech(i) && !speech.inSpeech(i - 1) && !speech.inSpeech(i + name.length + 1)) {
+        return !quoteIsNotTheUsersClaim(text, label);
+      }
+    }
+    return false;
+  });
+}
+
+/**
+ * ⛔ NOTHING WRITTEN; ASK (DL-3 rulings on Codex #3436): the words around `value` when EVERY writing of it in `userText` sits inside
+ * another speaker's quotation (the one speaker rule), so a door asks whose figure it is instead of writing it as the user's or dropping
+ * it silently. Null when the user writes it in their own words, or not at all.
+ */
+export function figureOnlyInQuotation(value: number, unit: unknown, userText: string | null | undefined): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
+  const at = amountsWrittenIn(userText).filter((a) => amountIs(a, value, unit, unitPhraseFamily(unit), userText));
+  return at.length > 0 && at.every((a) => inAnotherSpeakersWords(userText, a)) ? quoteOfFigure(value, unit, userText) : null;
 }
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
@@ -597,6 +624,13 @@ export function goalLevelTheUserWrote(
 export interface EntityScope {
   /** The asked identity figure must be exact, not an approximation such as "300-ish". Other readers keep their rule. */
   readonly exactFigure?: true;
+  /**
+   * ⭐ WHOSE CLAIM, AS THE AI READ IT AT THE DOOR (DL-3 decision outbox/DL-DECISION-QUOTE-SPEAKER-20261019; AIE `speaker_answer`): the
+   * existing `QUOTE_SPEAKER` reading of the particular figure's original claim. `other` and `unknown` are never the user's here; `user`
+   * opens the bound entity's own quoted name to the one check (`inAnotherSpeakersWords`); absent keeps the one speaker rule as it was.
+   * The reader still verifies the figure itself (amount, unit, quantity); the reading only ever withholds credit or names a quotation.
+   */
+  readonly speaker?: 'user' | 'other' | 'unknown';
   readonly target: readonly string[];
   readonly others: readonly string[];
   /**
@@ -778,6 +812,8 @@ function boundUnitEnd(text: string, amount: { index: number; matchedText: string
 
 export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
+  // Another speaker's claim, or one whose speaker is unclear, is never the user's figure (the door then asks, or keeps its source).
+  if (scope.speaker === 'other' || scope.speaker === 'unknown') return null;
   const family = unitPhraseFamily(unit);
   const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
@@ -799,7 +835,7 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     if (scope.at !== undefined && a.index !== scope.at) return false;
     // ⭐ ONE CHECK, BOTH FORMS (Codex #3427 R4; PL): every amount passes the one check (unit and kind, counted noun, a word that counts
     // something, never another speaker's words) before it binds.
-    if (!amountTheUserWrote(a, value, unit, userText)) return false;
+    if (!amountTheUserWrote(a, value, unit, userText, scope.speaker === 'user' ? scope.target : [])) return false;
     const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
