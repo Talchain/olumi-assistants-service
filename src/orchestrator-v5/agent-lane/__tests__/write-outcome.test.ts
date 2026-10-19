@@ -167,9 +167,16 @@ describe('the write-status line is composed from the tool results', () => {
     });
   });
 
-  it('already applied → says so, with the original version, and that nothing was written again', () => {
-    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: true, mutated: false, applied: true, already_applied: true, receipts: [{ version: 4 }] }]);
+  it('already applied WITH durable proof of the stored model → says saved, with the original version, and that nothing was written again', () => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, receipts: [{ version: 4 }] }]);
     expect(n.status).toBe('That change was already saved (version 4); nothing was written again.');
+  });
+
+  // Codex post-merge check of #3453 (cae490f4): a replay from memory survives an Undo, so it never says "saved".
+  it('already applied from memory only (no durable proof) → nothing was written again, and the current model is the check; never "saved"', () => {
+    const n = narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: true, mutated: false, applied: true, already_applied: true, receipts: [{ version: 4 }] }]);
+    expect(n.status).toBe('Nothing was written again. Check the current model to confirm whether this change is saved.');
+    expect(n.status).not.toMatch(/already saved|out of date/);
   });
 
   it('a typed yes cannot adopt an Olumi option and points to the displayed card', () => {

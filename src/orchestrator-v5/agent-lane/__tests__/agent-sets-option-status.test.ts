@@ -149,7 +149,10 @@ describe('the Agent takes an option out of the comparison through option_status_
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, applied: true, receipts: [expect.objectContaining({ source_turn_id: authorisationTurnId(String(p.proposal_id)) })] }));
     const again = await capsOf(w, store).authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
     expect(again, JSON.stringify(again)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    expect(String(again.detail ?? again.note ?? '')).toMatch(/already applied/);
+    // Recovered by identity with its original receipt; with no read-back of the stored model it never says "saved" (Codex, #3456).
+    expect(again).toEqual(expect.objectContaining({ already_applied: true, receipts: r.receipts }));
+    expect(again.saved_state_confirmed).not.toBe(true);
+    expect(String(again.detail)).toBe('Nothing was written again. Check the current model to confirm whether this change is saved.');
     expect(w.sent, 'the retry sends nothing').toHaveLength(1);
   });
 
