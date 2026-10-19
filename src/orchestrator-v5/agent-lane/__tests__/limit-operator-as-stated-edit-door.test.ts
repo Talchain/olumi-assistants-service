@@ -236,3 +236,35 @@ describe('THE AGENT — propose_limit_change says the limit as the user stated i
     expect(p).toMatchObject({ ok: false, mutated: false, refusal: 'unreadable_limit' });
   });
 });
+
+/**
+ * ⭐ WHOSE CLAIM AT THE LIMIT DOOR (DL-3 decision on Codex #3436 R3; AIE `speaker_answer` and the reported-figure disposition): the
+ * AI's `QUOTE_SPEAKER` reading of the new figure. Another speaker's figure the user asks to use is not written (the AIE's exact
+ * limited response); an unclear one is asked; the user's own, or no reading at all, keeps the door as it was.
+ */
+describe('THE AGENT — propose_limit_change reads whose claim the figure is', () => {
+  const said = 'Our CFO said the churn limit should be 5%. Use that.';
+  it('speaker other → nothing prepared or committed; the AIE\'s exact limited response, with the limit named', async () => {
+    const { caps, ctx, commits } = agentWith(strictRow);
+    const p = await caps.proposeLimitChange!({ ...ctx, user_text: said, user_turn_text: said },
+      { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x', speaker: 'other' }) as Rec;
+    expect(p.ok).toBe(false);
+    expect(p.refusal).toBe('reported_figure_source_not_kept');
+    expect(String(p.detail)).toContain('This change has not been saved because this route cannot yet keep the proposal’s source separate from who sets the Monthly churn.');
+    expect(p).not.toHaveProperty('proposal_id');
+    expect(commits).toHaveLength(0);
+  });
+  it('speaker unknown → nothing prepared; the Agent asks whose figure it is', async () => {
+    const { caps, ctx } = agentWith(strictRow);
+    const p = await caps.proposeLimitChange!({ ...ctx, user_text: said, user_turn_text: said },
+      { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x', speaker: 'unknown' }) as Rec;
+    expect(p.refusal).toBe('figure_speaker_unknown');
+    expect(String(p.detail)).toContain('Ask the user whose figure 5 is');
+  });
+  it.each(['user', undefined])('CONTROL speaker %s → the change is prepared as before', async (speaker) => {
+    const { caps, ctx } = agentWith(strictRow);
+    const p = await caps.proposeLimitChange!(ctx, { limit_label: 'Monthly churn', operator: '<=', new_value: 5, unit: '%', rationale: 'x',
+      ...(speaker === undefined ? {} : { speaker: speaker as 'user' }) }) as Rec;
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+  });
+});

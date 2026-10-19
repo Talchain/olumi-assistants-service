@@ -81,10 +81,11 @@ const on = (e: Entry | undefined, key: string) => (e?.interventions ?? []).filte
 const LEDGER = { value: 0, unit: '', estimate: false, basis: '' };
 
 /** A07's one-option shape: the £59 the user stated, and the grandfather switch with the level under test. */
-const a07 = (level: unknown, extra: Record<string, unknown>[] = []) => ({
+// The AI's `QUOTE_SPEAKER` reading of the £59's claim (DL-3 decision on #3436): the user's own instruction to add their option.
+const a07 = (level: unknown, extra: Record<string, unknown>[] = [], speaker: string | null = 'user') => ({
   label: GRANDFATHER,
   acts_on: [
-    { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month' } },
+    { factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: 'GBP per month', ...(speaker === null ? {} : { speaker }) } },
     { factor_label: GF_SWITCH, direction: 'positive', ...(level === undefined ? {} : { level }) },
     ...extra,
   ],
@@ -119,6 +120,58 @@ describe('RED — served A07 (one option): the placeholder 0 on the grandfather 
     expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(true);
     expect(r.switch_placeholder_levels_read_as_on).toEqual([{ option: GRANDFATHER, factor: GF_SWITCH }]);
     expect(r.switch_placeholder_levels_note).toContain('a placeholder, not a figure');
+  });
+
+  // ⭐ WHOSE CLAIM (DL-3 decision on Codex #3436 R3; AIE `speaker_answer`): the AI's speaker reading decides whose claim the £59 is, never an
+  // instruction verb in front of the quote. Codex R3's five rows (all user credit at 7ffbd9d3), read by the AI as another speaker's: nothing
+  // is written, the whole change is refused, and the Agent is given the AIE's exact limited response. Never "stated_by: user".
+  const CFO_ROWS = [
+    `Add it, as the CFO said: "${GRANDFATHER}".`,
+    `Add it, as the CFO said (I have not checked it): "${GRANDFATHER}".`,
+    `Add our CFO's figure: "${GRANDFATHER}".`,
+    'Add it, as the CFO said: "£59 for new Pro customers; £49 for existing customers".',
+    `Revenue was £59, and our CFO said: "${GRANDFATHER}".`,
+  ];
+  it.each(CFO_ROWS)('speaker other: %s → nothing prepared or written; the AIE\'s exact limited response', async (text) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx(text) as never, a07(LEDGER, [], 'other') as never) as Result;
+    expect(r.ok).toBe(false);
+    expect(r.refusal).toBe('reported_figure_source_not_kept');
+    expect(sent).toHaveLength(0);
+    expect(r.detail).toContain('This change has not been saved because this route cannot yet keep the proposal\u2019s source separate from who sets the Pro plan price.');
+    expect(r.detail).toContain('Never ask the user to make that figure their own');
+    expect(JSON.stringify(r)).not.toMatch(/"stated_by":"user"/);
+  });
+  it.each(CFO_ROWS)('speaker unknown: %s → the £59 is not written; the Agent asks whose figure it is', async (text) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx(text) as never, a07(LEDGER, [], 'unknown') as never) as Result;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(sentOption(sent, GRANDFATHER)?.interventions?.filter((i) => i.factor_id === 'pro_plan_price')).toEqual([{ factor_id: 'pro_plan_price', value: null, source: 'cee_hypothesis' }]);
+    const ask = (r.levels_not_set ?? []).find((l) => l.factor === 'Pro plan price') as { reason?: string } | undefined;
+    expect(ask?.reason).toContain('Ask the user whose figure 59 is');
+    expect(JSON.stringify(r)).not.toMatch(/"stated_by":"user"/);
+  });
+  it('legacy (no speaker reading): journey A\'s quoted name keeps the one speaker rule; nothing written as the user\'s; asked', async () => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx(A07) as never, a07(LEDGER, [], null) as never) as Result;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(false);
+    expect(((r.levels_not_set ?? []).find((l) => l.factor === 'Pro plan price') as { reason?: string } | undefined)?.reason).toContain('Ask the user whose figure 59 is');
+  });
+  it.each([`Add the option "${GRANDFATHER}".`, `Please add "${GRANDFATHER}".`, A07])('speaker user, the user\'s own add of the quoted name: %s → the £59 is sent as theirs', async (text) => {
+    const { caps, sent } = setup();
+    const r = await caps.proposeNewOption(ctx(text) as never, a07(LEDGER) as never) as Result;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null)).toBe(true);
+    expect((r.levels_not_set ?? []).filter((l) => l.factor === 'Pro plan price')).toEqual([]);
+  });
+  it('speaker user never opens another entity\'s quoted name, a longer quotation, or a quotation the user reports as Olumi\'s', async () => {
+    for (const text of [`Add the option "${GRANDFATHER} is what we should do".`, `Add what Olumi suggested: "${GRANDFATHER}".`]) {
+      const { caps, sent } = setup();
+      const r = await caps.proposeNewOption(ctx(text) as never, a07(LEDGER) as never) as Result;
+      expect(sentOption(sent, GRANDFATHER)?.interventions?.some((i) => i.factor_id === 'pro_plan_price' && i.value !== null), text).toBe(false);
+      expect(r.ok, text).toBe(true);
+    }
   });
 
   it('BYTE-IDENTICAL to the call the refusal asked for (the entry with no level key): the same batch is sent', async () => {

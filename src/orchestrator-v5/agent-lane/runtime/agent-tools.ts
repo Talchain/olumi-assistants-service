@@ -189,6 +189,14 @@ const WHOLE_REQUEST = {
 } as const;
 
 /** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
+/**
+ * The AIE's exact door words for whose claim a figure is (prompt/AIE-SPEAKER-CARRIER-AND-UNCERTAINTY-SUPPORT-20261019-v1.json,
+ * `speaker_answer.door_instruction_exact`), at the option-level and limit-figure doors beside the existing `QUOTE_SPEAKER` field.
+ */
+export const DOOR_SPEAKER_WORDS = "Use the shared speaker reading for the particular figure\u2019s original claim, with its complete source, subject, unit, reference, period and conditions. Asking to add or adopt another person\u2019s figure does not change who originally asserted it. Approval records the user\u2019s authorised setting or limit; it does not verify the underlying claim or transfer its authorship. An estimate flag or user-stated flag alone is not source evidence. Never turn a reported or unknown-origin figure into a new Olumi estimate merely to fit a flag. If the existing door cannot retain both the authorised choice and its original source truthfully, retain the source and return the actual limitation or clarification instead of recording false authorship.";
+/** The existing `QUOTE_SPEAKER` field at a door that writes one figure, with the AIE's door words (no new enum, no new words). */
+const DOOR_SPEAKER = { ...QUOTE_SPEAKER, description: `${QUOTE_SPEAKER.description} ${DOOR_SPEAKER_WORDS}` };
+
 const ACTS_ON = {
   type: 'array',
   description: 'The factors this option would change, and which way. At least one.',
@@ -204,6 +212,7 @@ const ACTS_ON = {
         unit: { type: 'string', description: 'The unit the user stated, if any.' },
         estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
         basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
+        speaker: DOOR_SPEAKER,
       }, ['value']),
       // ⛔ Where the model writes a level (OpenAI Runtime #70 5859406197): the switch rule sat only on new_factors.kind.
       description: 'The level this option sets the factor to. Never give a level for a factor you add in new_factors with '
@@ -795,6 +804,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       quantity_label: { type: 'string', description: 'Exact existing quantity label, for example Total cost.' },
       value: { type: 'number', description: 'The figure the user wrote, in the quantity’s own units.' },
       rationale: { type: 'string' },
+      speaker: DOOR_SPEAKER,
     }, ['quantity_label', 'value', 'rationale']),
   },
   {
@@ -815,6 +825,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         + '< for less than or under, <= for at most, > for more than, >= for at least. Omit it for a new figure alone: the limit keeps its own.' },
       unit: { type: 'string', description: 'The unit the user wrote the figure in, if any.' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      speaker: DOOR_SPEAKER,
       whole_request: WHOLE_REQUEST,
     }, ['limit_label', 'operator', 'new_value', 'rationale']),
   },
@@ -839,6 +850,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
           user_stated: OPTION_LEVEL_USER_STATED,
+          speaker: DOOR_SPEAKER,
           likely_low: {
             type: 'number',
             description:
@@ -902,6 +914,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           basis: { type: 'string' },
           unmodelled_mechanisms: UNMODELLED_MECHANISMS,
           user_stated: OPTION_LEVEL_USER_STATED,
+          speaker: DOOR_SPEAKER,
         }, ['option_label', 'factor_label', 'value', 'basis', 'user_stated']),
       },
     }, ['assumptions', 'option_levels']),
@@ -1059,7 +1072,7 @@ export interface ProposeLevelsInternal {
 export type NewOptionActsOn = {
   factor_label: string;
   direction: 'positive' | 'negative';
-  level?: { value: number; unit?: string; estimate?: boolean; basis?: string } | null;
+  level?: { value: number; unit?: string; estimate?: boolean; basis?: string; speaker?: 'user' | 'other' | 'unknown' } | null;
 };
 
 export interface AgentCapabilities {
@@ -1152,11 +1165,13 @@ export interface AgentCapabilities {
     }[];
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
-  proposeNewLimit?(ctx: AgentToolContext, args: { quantity_label: string; value: number; rationale: string }): Promise<ToolResult>;
+  proposeNewLimit?(ctx: AgentToolContext, args: { quantity_label: string; value: number; rationale: string; speaker?: 'user' | 'other' | 'unknown' }): Promise<ToolResult>;
   proposeLimitChange?(ctx: AgentToolContext, args: {
     limit_label: string; operator: '<=' | '>='; new_value: number; unit?: string; rationale: string;
     /** A2 follow-up: the comparator the user stated in this message, typed; absent for a new figure alone. */
     stated_operator?: '<' | '<=' | '>' | '>=';
+    /** The AI's `QUOTE_SPEAKER` reading of whose claim the figure is (DL-3 decision on #3436). */
+    speaker?: 'user' | 'other' | 'unknown';
   }): Promise<ToolResult>;
   /**
    * `afterCommittedChange` is the ROUTE's own automatic Run after a committed change (Paul, #94 6166259456). The Agent's
