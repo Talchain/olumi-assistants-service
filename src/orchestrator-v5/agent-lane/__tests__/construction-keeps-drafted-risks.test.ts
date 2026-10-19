@@ -78,8 +78,10 @@ describe('every risk the drafter writes registers (DL 5916217417: structure is n
     for (const n of graph.nodes.filter((x) => x.kind === 'risk')) expect(n.analysis_participation, String(n.id)).toBeUndefined();
   });
 
-  it('the drafter is told to keep a risk, and no sentence tells it to leave the limit\'s risk out', () => {
-    expect(BUILD_INSTRUCTIONS).toContain('ALWAYS KEEP AT LEAST ONE RISK');
+  it('the drafter is told to keep material risks (never the goal\'s own failure), and no sentence tells it to leave the limit\'s risk out', () => {
+    // AIE risk-mechanism consolidation (0e20eb33, refined 5a909f57, amended 6d6cae9d): MATERIAL RISKS replaces the one-risk quota.
+    expect(BUILD_INSTRUCTIONS).toContain('Keep Olumi’s additions visibly provisional and testable, with no risk-count quota.');
+    expect(BUILD_INSTRUCTIONS).not.toContain('ALWAYS KEEP AT LEAST ONE RISK');
     expect(BUILD_INSTRUCTIONS).not.toMatch(/do not ALSO keep that one risk as a node/);
     expect(BUILD_INSTRUCTIONS).toContain('keep that risk as a node, linked to the goal metric with all three size fields null');
   });
