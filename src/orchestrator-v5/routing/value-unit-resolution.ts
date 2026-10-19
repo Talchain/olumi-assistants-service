@@ -219,11 +219,16 @@ export function lastValueTrailingToken(message: string): string | null {
 /** How a single trailing token relates to the factor's unit family. */
 type TokenClass = 'compatible' | 'incompatible' | 'connective' | 'unresolved' | 'none';
 
+/** Whether the word written right after a value is ordinary prose ("now", "by", "instead"), never its unit (the one list above). */
+export function isProseAfterValue(token: string): boolean {
+  return CONNECTIVE_TOKENS.has(token.trim().toLowerCase());
+}
+
 function classifyToken(token: string | null, factorFamily: UnitFamily): TokenClass {
   if (token === null) return 'none';
   const fam = unitFamilyOf(token);
   if (fam !== null) return fam === factorFamily ? 'compatible' : 'incompatible';
-  if (CONNECTIVE_TOKENS.has(token.trim().toLowerCase())) return 'connective';
+  if (isProseAfterValue(token)) return 'connective';
   return 'unresolved';
 }
 
