@@ -297,16 +297,13 @@ describe('ROW 3: each declared source, through the real writers, read back by th
     expect(JSON.stringify(persisted)).toBe(before);
   });
 
-  it.each([
-    ['add_to_model', 'Adding a factor or an option'],
-  ])('%s is not on this path yet: unavailable, named, and nothing is read, proposed or saved', async (op, named) => {
+  it('add_to_model whose part to act on is not in the model: refused by the add-factor door\'s own builder, nothing proposed or saved', async () => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'A change', basis: 'b',
-      ops: [queueTo('user', 'about 20 minutes'), { op, target_id: 'goal' }] } as never);
-    expect(out).toMatchObject({ status: 'unavailable', reason: `${op}_not_available`, write: 'none' });
-    expect((out as { detail: string }).detail).toContain(named);
+      ops: [{ op: 'add_to_model', kind: 'factor', label: 'Weekend volunteers', acts_on: 'nope', direction: 'negative', value: 4, unit: 'people',
+        stance: 'estimate', source: { origin: 'olumi', quote: null, named_source: null } }] } as never);
+    expect(out).toMatchObject({ status: 'refused', reason: 'add_node_not_found' });
     expect(proposals.size()).toBe(0);
-    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it.each([
