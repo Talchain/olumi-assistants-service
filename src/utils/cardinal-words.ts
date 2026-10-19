@@ -84,6 +84,13 @@ export const CARDINAL_WORD_VALUES: Readonly<Record<string, number>> = Object.fre
 export const CARDINAL_HUNDRED_WORD = "hundred";
 
 /**
+ * The other compounder: "dozen" multiplies the group by 12, as "hundred" does by 100 ("two dozen" is 24, never the fragment 2). It
+ * completes the closed numeral vocabulary; it is no phrase list (DL-3, 19 Oct). Singular only: "dozens of customers" is vague and
+ * reads nothing. Like "hundred", it is absent from the magnitude alphabet: it is a numeral, never a suffix.
+ */
+export const CARDINAL_DOZEN_WORD = "dozen";
+
+/**
  * The scale words, DERIVED from the canonical alphabet: word-shaped keys
  * (three or more letters — `k`/`m`/`b`/`t`/`bn`/`mn` are suffix notation, not
  * English) carrying a multiplier of at least 1,000. The ≥1,000 floor is
@@ -110,6 +117,7 @@ const SMALL_ALTERNATION = alternation(Object.keys(CARDINAL_WORD_VALUES));
 const TOKEN_ALTERNATION = alternation([
   ...Object.keys(CARDINAL_WORD_VALUES),
   CARDINAL_HUNDRED_WORD,
+  CARDINAL_DOZEN_WORD,
   ...Object.keys(CARDINAL_SCALE_MULTIPLIERS),
 ]);
 
@@ -125,7 +133,7 @@ const DECIMAL_DIGIT_ALTERNATION = alternation(Object.keys(DECIMAL_DIGITS));
 const FRACTION_ALTERNATION = "halves|half|quarters|quarter|thirds|third";
 
 /** The words that multiply a group: the compounder and every scale word. */
-const MULTIPLIER_ALTERNATION = alternation([CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)]);
+const MULTIPLIER_ALTERNATION = alternation([CARDINAL_HUNDRED_WORD, CARDINAL_DOZEN_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)]);
 
 /**
  * ONE number in words: a small cardinal, then hundred/scale/small tokens joined by whitespace, hyphens or "and", then an optional
@@ -152,8 +160,11 @@ const START_GUARD = `(?<!\\b(?:${TOKEN_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bp
 const NO_LONGER_AMOUNT = `(?!(?:[\\s-]+(?:${TOKEN_ALTERNATION}|and))*[\\s-]+(?:point|${FRACTION_ALTERNATION})\\b)`;
 /** The number just matched ends on "hundred" or a scale word. */
 const ENDS_ON_A_MULTIPLIER = `(?<=\\b(?:${MULTIPLIER_ALTERNATION}))`;
-/** The number just matched is whole: nothing that would continue it, or start another, follows ("… two hundred AND FIFTY"). */
-const WHOLE = `(?![\\s-]+(?:${TOKEN_ALTERNATION})\\b|\\s+and\\s+(?:${SMALL_ALTERNATION})\\b)`;
+/**
+ * The number just matched is whole: nothing that would continue it, or start another, follows ("… two hundred AND FIFTY"), nor a
+ * plural multiplier that makes it vague ("two dozens", "two hundreds").
+ */
+const WHOLE = `(?![\\s-]+(?:${TOKEN_ALTERNATION})s?\\b|\\s+and\\s+(?:${SMALL_ALTERNATION})\\b)`;
 /** The number just matched has "hundred" or a scale word in it ("five million", "two hundred and fifty", "one point five million"). */
 const HAS_A_MULTIPLIER = `(?<=\\b(?:${MULTIPLIER_ALTERNATION})(?:(?:\\s+and\\s+|\\s+point\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}|zero))*)`;
 /** What joins a range's two ends in words: "to", "or", or a dash (a hyphen only with space around it: "twenty-five" is one number). */
@@ -165,18 +176,20 @@ const DIGIT_AMOUNT_START = `(?:[A-Z]{0,3}[^\\s\\w])?\\d`;
 /** An amount in digits ends: its last digit, then its own magnitude and percent sign, if written. */
 const DIGIT_AMOUNT_END = `\\d(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?%?`;
 /**
- * An amount this grammar reads no figure from, written as one end of a range: an article and a word ("a dozen", "a few", "a
- * hundred", any word at all), or a word that is no number before a scale word ("several hundred"). No word list: "not read" is
- * "not parsed here" (Codex R3 on #3445).
+ * An amount this grammar reads no figure from, written as one end of a range: an article before a number word ("a hundred", "a
+ * million"), or a word that is no number before a scale word ("several hundred", "a few hundred"). An article before any other
+ * word is no amount ("grow a business to £20m": the target reads; DL-3, 19 Oct). No word list: amounts are what this grammar's own
+ * words make (Codex R3 on #3445).
  */
-const UNREAD_AMOUNT = `(?:\\ban?\\s+[a-z]+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*|\\b(?!(?:${TOKEN_ALTERNATION})\\b)[a-z]+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))+)`;
+const UNREAD_AMOUNT = `(?:\\ban?\\s+(?:${TOKEN_ALTERNATION})\\b(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*`
+  + `|\\b(?:an?\\s+)?(?!(?:${TOKEN_ALTERNATION})\\b)[a-z]+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))+)`;
 /** "between" opened a range whose "and" comes just before this point ("between a dozen and …"). */
 const AFTER_BETWEEN_AND = `\\bbetween\\s+[^.;:!?\\n]{1,40}?\\s+and\\s+`;
 /**
  * ⛔ A RANGE IS FOUND BY ITS CONNECTOR, AND GIVES BOTH ENDS OR NOTHING (DL-3 on Codex R2 #3442 and R3 #3445). A number in words is
  * never read alone as one end of a range ("to", "or", a dash, or "between … and") whose other end this grammar does not read with
  * it: an end in digits ("2 to three million", "two to 3 million": two forms never share one scale), an amount it reads no figure
- * from (`UNREAD_AMOUNT`: "a dozen to twenty", "two to a few hundred"), or any "between … and" it could not read whole ("between a
+ * from (`UNREAD_AMOUNT`: "a hundred to 200", "two to a few hundred"), or any "between … and" it could not read whole ("between a
  * dozen and twenty"). The digit reader refuses its own end of the same range (`joinedToARangeEndInWords`).
  */
 const NOT_AFTER_ANOTHER_END = `(?<!${DIGIT_AMOUNT_END}${DIGIT_RANGE_JOIN})(?<!${UNREAD_AMOUNT}${RANGE_JOIN})(?<!${AFTER_BETWEEN_AND})`
@@ -223,6 +236,12 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
   + `${CARDINAL_FRACTION_CONTINUATION}`;
 
 /**
+ * A range's low end opened by an article before a compounder or scale word ("a dozen to twenty", "between a dozen and twenty"):
+ * the article is ONE there (`cardinalReadings`). Never after a fraction word ("half a dozen" is no dozen), and never alone: a
+ * single "a dozen" or "a hundred" is no count here.
+ */
+const ARTICLE_LOW_END = `(?<!\\b(?:${FRACTION_ALTERNATION})\\s+)an?\\s+(?:${MULTIPLIER_ALTERNATION})\\b(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION})\\b)*`;
+/**
  * A bare number is never the high end of a range whose low end carries the only scale, where that low end is no number this
  * grammar reads whole ("a million to seven", "a hundred and twenty to three", "two and a half million to three": never 7 or 3).
  * After "and" (`between a million and seven`) `START_GUARD` already refuses it.
@@ -256,9 +275,9 @@ const ONE_NUMBER = `${START_GUARD}${NOT_AFTER_ANOTHER_END}${NOT_A_BARE_HIGH_END}
  * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as it does for the magnitude alternation.
  */
 export const CARDINAL_AMOUNT_SOURCE =
-  `(?:between\\s+${NUMBER_CORE}\\s+and\\s+${NUMBER_CORE}${WHOLE}${NO_LONGER_AMOUNT}`
+  `(?:between\\s+(?:${NUMBER_CORE}|${ARTICLE_LOW_END})\\s+and\\s+${NUMBER_CORE}${WHOLE}${NO_LONGER_AMOUNT}`
   + `|${START_GUARD}${BARE_END}${RANGE_JOIN}${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}${NO_LONGER_AMOUNT}`
-  + `|${START_GUARD}${NUMBER_CORE}${HAS_A_MULTIPLIER}${RANGE_JOIN}${BARE_END}${WHOLE}${NO_LONGER_AMOUNT}`
+  + `|${START_GUARD}(?:${NUMBER_CORE}|${ARTICLE_LOW_END})${HAS_A_MULTIPLIER}${RANGE_JOIN}${BARE_END}${WHOLE}${NO_LONGER_AMOUNT}`
   + `|${ONE_NUMBER})`;
 
 /**
@@ -307,7 +326,7 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
     let units = whole * 10 ** digits + Number(rest.slice(0, digits).map((d) => DECIMAL_DIGITS[d]).join(""));
     let previous = Infinity;
     for (const w of scales) {
-      const factor = w === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[w]!;
+      const factor = multiplierOf(w);
       if (factor >= previous) return null;
       units *= factor;
       previous = factor;
@@ -317,7 +336,7 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
 
   let total = 0;
   let group = 0;
-  let last: "start" | "ten" | "small" | "hundred" | "scale" = "start";
+  let last: "start" | "ten" | "small" | "hundred" | "dozen" | "scale" = "start";
   let hundredSeen = false;
   let lastScale = Infinity;
   for (const [i, token] of tokens.entries()) {
@@ -331,16 +350,24 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
     if (small !== undefined) {
       // A small cardinal opens a group, follows "hundred" or a scale word, or is
       // a unit after a ten; any other small after a small is a second number.
-      if (last === "small" || (last === "ten" && small >= 10)) return null;
+      if (last === "small" || last === "dozen" || (last === "ten" && small >= 10)) return null;
       group += small;
       last = small >= 20 ? "ten" : "small";
       continue;
     }
     if (token === CARDINAL_HUNDRED_WORD) {
-      if (group === 0 || hundredSeen) return null;
+      if (group === 0 || hundredSeen || last === "dozen") return null;
       group *= 100;
       hundredSeen = true;
       last = "hundred";
+      continue;
+    }
+    // "dozen" multiplies the whole group by 12 and closes it to all but a scale word ("two hundred dozen" is 2,400; "a dozen
+    // hundred", "two dozen five" and "two dozen and five" are no number).
+    if (token === CARDINAL_DOZEN_WORD) {
+      if (group === 0 || last === "dozen") return null;
+      group *= 12;
+      last = "dozen";
       continue;
     }
     const scale = CARDINAL_SCALE_MULTIPLIERS[token];
@@ -366,7 +393,9 @@ export interface CardinalReading {
   readonly matchedText: string;
 }
 
-const isMultiplier = (w: string): boolean => w === CARDINAL_HUNDRED_WORD || CARDINAL_SCALE_MULTIPLIERS[w] !== undefined;
+/** The factor of a word `isMultiplier` accepts: "hundred" 100, "dozen" 12, a scale word its own ("million" 1,000,000). */
+const multiplierOf = (w: string): number => (w === CARDINAL_HUNDRED_WORD ? 100 : w === CARDINAL_DOZEN_WORD ? 12 : CARDINAL_SCALE_MULTIPLIERS[w]!);
+const isMultiplier = (w: string): boolean => w === CARDINAL_HUNDRED_WORD || w === CARDINAL_DOZEN_WORD || CARDINAL_SCALE_MULTIPLIERS[w] !== undefined;
 const tokensOf = (s: string): string[] => s.toLowerCase().split(/[\s-]+/).filter((w) => w.length > 0);
 
 /**
@@ -385,7 +414,7 @@ function endsSharingScale(low: string, high: string, valueOf: (phrase: string) =
   while (k > 0 && isMultiplier(highTokens[k - 1]!)) k -= 1;
   if (!tokensOf(low).some(isMultiplier) && k < highTokens.length) {
     if (highTokens.slice(0, k).some((w) => isMultiplier(w) || w === "and")) return null;
-    const scale = highTokens.slice(k).reduce((m, w) => m * (w === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[w]!), 1);
+    const scale = highTokens.slice(k).reduce((m, w) => m * multiplierOf(w), 1);
     // A shared scale makes a range ("two to three thousand"); where it would not, the low end is as written ("twenty to
     // one hundred": 20, never 2,000).
     if (lowValue * scale < highValue) return [lowValue * scale, highValue];
@@ -417,8 +446,13 @@ export function cardinalReadings(
     const value = valueOf(matched);
     return value === null ? [] : [{ magnitude: value, index, matchedText: matched }];
   }
+  // A low end opened by an article before a compounder or scale word reads it as ONE ("a dozen to twenty": 12 and 20).
+  const endValue = (phrase: string): number | null => {
+    const article = /^an?\s+(\S+)/i.exec(phrase);
+    return valueOf(article !== null && isMultiplier(article[1]!.toLowerCase()) ? `one ${phrase.replace(/^an?\s+/i, "")}` : phrase);
+  };
   const readings = splits.flatMap((i) => {
-    const ends = endsSharingScale(body.slice(0, i).join(" "), body.slice(i + 1).join(" "), valueOf);
+    const ends = endsSharingScale(body.slice(0, i).join(" "), body.slice(i + 1).join(" "), endValue);
     return ends === null ? [] : [ends];
   });
   if (readings.length !== 1) return [];
@@ -435,8 +469,8 @@ const WORDS_RANGE_END_AFTER_BETWEEN = new RegExp(`^\\s+and\\s+(?!${DIGIT_AMOUNT_
 /**
  * ⛔ TWO FORMS NEVER SHARE ONE SCALE, at the digit reader (DL-3 on Codex R2 #3442). Whether the amount in digits written at
  * `[start, end)` is one end of a range whose other end is in words: number words of any shape this grammar reads or not (an
- * article, a fraction: "a million to 3", "two and a half million to 3"), or an amount it reads no figure from ("a dozen to 20",
- * "20 to a few hundred"). Joined by "to", "or" or a dash ("2 to three million", "five million to 7"), or by "and" after "between"
+ * article, a fraction: "a million to 3", "two and a half million to 3"), or an amount it reads no figure from ("several hundred
+ * to 2,000", "20 to a few hundred"). Joined by "to", "or" or a dash ("2 to three million", "five million to 7"), or by "and" after "between"
  * ("between 2 and three thousand", "between a dozen and 20", "between 20 and a dozen"). The words end is never read alone there
  * (`CARDINAL_AMOUNT_SOURCE`), so the digit reader refuses this end too: such a range gives nothing, never one end alone. Pure.
  */

@@ -125,6 +125,10 @@ describe("L67 — the hand-written cardinal corpus", () => {
     ["one point two five", 1.25],
     ["one point one million", 1_100_000],
     ["twenty three point zero five", 23.05],
+    // "dozen" is a compounder like "hundred" (DL-3, 19 Oct): "two dozen" is 24, never the fragment 2.
+    ["two dozen", 24],
+    ["three dozen", 36],
+    ["two hundred dozen", 2_400],
   ];
   for (const [phrase, value] of CORPUS) {
     it(`"${phrase}" → ${value}`, () => {
@@ -183,6 +187,13 @@ describe("L67 — the parser fails closed", () => {
     ["two to three million", "a range — never 2, never 3,000,000"],
     ["between two and three", "a range — never 5"],
     ["one hundred and", "\"and\" with nothing to join"],
+    ["a dozen", "an article is not a count on its own"],
+    ["dozen", "a compounder alone is no count"],
+    ["two dozen five", "\"dozen\" closes its group to all but a scale word"],
+    ["two dozen and five", "\"and\" joins only after \"hundred\" or a scale word"],
+    ["two dozen hundred", "\"hundred\" never follows \"dozen\""],
+    ["two dozen dozen", "one \"dozen\" per group"],
+    ["dozens", "a vague plural, never 12"],
   ];
   for (const [phrase, why] of REFUSED) {
     it(`"${phrase}" → null (${why})`, () => {

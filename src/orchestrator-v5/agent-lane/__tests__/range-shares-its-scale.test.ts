@@ -112,12 +112,15 @@ describe('⛔ a range with no ONE shared scale gives nothing, never one end alon
   });
 });
 
-/** Codex R3 on #3445 @6a7a47e8 (held-out witnesses, adopted verbatim), then each side and connector with an end not read. */
+/**
+ * Each side and connector with an end not read: an article before a number word, a word before a scale word, any "between … and" it
+ * cannot read whole. An article before any other word is no amount (DL-3): "a few to twenty" and "several to twenty" read 20, disclosed
+ * residuals (no word list).
+ */
 const AN_END_NOT_READ = [
-  'a dozen to twenty', 'a dozen to 20', 'between a dozen and twenty', 'a dozen or twenty', 'a dozen – twenty',
-  'We expect a few to 20 users.', 'We expect a couple or three users.', 'We expect a handful – twenty users.', 'We expect a zillion to twenty users.',
-  'We expect several hundred to 2,000 users.', 'We expect several hundred to three thousand users.',
-  'We expect two to a dozen users.', 'We expect 20 to a few hundred users.', 'We expect between 20 and a dozen users.', 'We expect between two and a dozen users.',
+  'We expect a hundred to 200 users.', 'We expect a million or two million users.', 'We expect twenty to a hundred users.',
+  'We expect several hundred to 2,000 users.', 'We expect several hundred to three thousand users.', 'We expect a few hundred – twenty users.',
+  'We expect 20 to a few hundred users.', 'We expect between 20 and a dozen users.', 'We expect between two and a dozen users.',
 ];
 
 describe('⛔ a range is found by its connector: an end the grammar does not read means the range gives nothing (Codex R3 on #3445)', () => {
@@ -126,15 +129,36 @@ describe('⛔ a range is found by its connector: an end the grammar does not rea
     expect(figuresWritten(text)).toEqual([]);
   });
   const texts = (m: string) => ({ now: m, conversation: m, messages: [m] });
-  it('the witness is never the user\'s 20 (typed, as Codex typed it)', () => {
+  it('Codex R3\'s witness (typed) is never the user\'s 20 alone: the authorship rule reads no single end of a range', () => {
     const quote = 'People total a dozen to twenty people.';
     expect(userStated({ quote, value: 20 }, texts(quote), { quantity: 'level', node_id: 'people' }).origin).not.toBe('human');
+  });
+  it('CONTROL an article before a word that is no number is no amount: the goal target is the user\'s', () => {
+    const quote = 'We want to grow a business to £20m.';
+    expect(userStated({ quote, value: 20_000_000, unit: 'GBP' }, texts(quote), { quantity: 'goal_target', node_id: 'goal' }).origin).toBe('human');
   });
   it.each([
     ['We want to grow to twenty stores.', [20]], ['Grow the team to 20 people.', [20]], ['Increase MRR to £20k.', [20_000]],
     ['We need 20 or more customers.', [20]], ['Target – 20 hires.', [20]], ['Hire two to three engineers.', [2, 3]],
+    ['We want to grow a business to £20m.', [20_000_000]], ['Take a team to 30 people.', [30]],
   ] as const)('CONTROL a connector beside no amount still reads its number: "%s"', (text, expected) => {
     expect(read(text).map(([, v]) => v)).toEqual(expected);
+  });
+});
+
+describe('"dozen" is a compounder like "hundred" (DL-3, 19 Oct): Codex R3\'s witness reads its true range', () => {
+  it.each([
+    ['a dozen to twenty (Codex R3)', 'People total a dozen to twenty people.', [['words', 12], ['words', 20]]],
+    ['between a dozen and twenty (Codex R3)', 'People total between a dozen and twenty people.', [['words', 12], ['words', 20]]],
+    ['two dozen', 'We ordered two dozen laptops.', [['words', 24]]],
+    ['dozens of: vague', 'We have dozens of customers.', []],
+    ['half a dozen: the complete 6 or nothing, never 0.5 or 12', 'We need half a dozen engineers.', []],
+    ['half a dozen in a range: never 12', 'We expect half a dozen to twenty users.', []],
+    ['CONTROL a compound keeps its value', 'We sold two hundred and fifty thousand units.', [['words', 250_000]]],
+  ])('%s: "%s"', (_case, text, expected) => { expect(read(text)).toEqual(expected); });
+  it('the authorship rule reads "two dozen" as 24, never 2', () => {
+    expect(figuresWritten('We ordered two dozen laptops.')).toEqual([{ low: 24, high: 24 }]);
+    expect(figuresWritten('We need half a dozen engineers.').filter((f) => f.low === 12 || f.low === 0.5)).toEqual([]);
   });
 });
 
@@ -199,7 +223,7 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
     }
   }
   // An end the grammar reads no figure from, on either side of every connector: the range has no true reading, so nothing.
-  for (const unread of ['a dozen', 'a few', 'a zillion', 'several hundred']) for (const join of joins) for (const other of ['twenty', '20']) {
+  for (const unread of ['a hundred', 'a million', 'a few hundred', 'several hundred']) for (const join of joins) for (const other of ['twenty', '20']) {
     cases.push({ text: `We expect ${join(unread, other)} users.`, truth: [] });
     cases.push({ text: `We expect ${join(other, unread)} users.`, truth: [] });
   }
