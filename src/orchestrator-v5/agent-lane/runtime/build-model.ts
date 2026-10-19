@@ -90,7 +90,7 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import { preparingDraftReplacementFor } from './draft-replacement-context.js';
-import { draftStatements, figureSource, goalTargetStatements, keepsTheFirstVerifiedTarget, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
+import { draftStatements, figureSource, STATEMENT_STANCES, goalTargetStatements, keepsTheFirstVerifiedTarget, sourceMapOf, subjectKey, withConstructionStatements } from '../construction-source-map.js';
 import { QUOTE_SPEAKER, QUOTE_SPEAKER_WORDS } from '../user-statements.js';
 
 /**
@@ -420,9 +420,15 @@ export function buildCandidateSchema(): Record<string, unknown> {
         unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, qualifier: { anyOf: [{ type: 'string' }, { type: 'null' }] }, conditions: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         // ⭐ LEAN CORE P2 (DL-3 18 Oct): the AI's own reading of whose claim the words are (`QUOTE_SPEAKER`); read by the one rule.
         speaker: { anyOf: [{ type: 'string', enum: QUOTE_SPEAKER.enum }, { type: 'null' }], description: QUOTE_SPEAKER_WORDS },
-      }, ['quote', 'subject', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'speaker']) },
+        // ⭐ STANCE (AIE reply 20261019 v1, sha 543db8bb, exact_description verbatim): how this figure is put forward. The host credits a
+        // current level only on `stated_current` (`declaresCurrent`) and never reads mood words for it.
+        stance: { type: 'string', enum: [...STATEMENT_STANCES], description: STATEMENT_STANCE_WORDS },
+      }, ['quote', 'subject', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'speaker', 'stance']) },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'identities', 'unknowns', 'decision_question']);
 }
+
+/** AIE reply 20261019 v1 (sha 543db8bb), `stance.exact_description`, verbatim. */
+export const STATEMENT_STANCE_WORDS = "How this particular figure is put forward in its full source context, not whether it is true and not who authored it. hypothetical: a supposition, conditional scenario or what-if, including numbers embedded inside that assumed situation. target: a desired or required outcome or threshold, rather than an observed level. estimate: a tentative assessment, approximation or prediction offered as such, rather than an asserted current fact. stated_current: the speaker asserts an actual current or already observed level for this subject at the relevant time, outside a supposition, target or estimate. Read the whole proposition and its conditions: indicative wording inside a supposition does not make its embedded figure stated_current. Classify each figure by its own proposition; one statement's status must not transfer to a different quantity or subject. Preserve the original source, wording, sign, units, period and conditions. stated_current describes the assertion; it does not mean verified, accurate or adopted.";
 
 /** AIE #6134594584: approved declared-sum schema and instruction, including the outcome amendment. */
 export const AIE_APPROVED_DECLARED_SUM = {

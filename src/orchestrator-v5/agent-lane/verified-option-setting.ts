@@ -12,7 +12,7 @@ import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
 import { log } from '../../utils/telemetry.js';
-import { draftStatements, figureSource, sourceMapOf, subjectKey } from './construction-source-map.js';
+import { declaresCurrent, draftStatements, figureSource, sourceMapOf, subjectKey, type StatementStance } from './construction-source-map.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -843,7 +843,10 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
       const point = sourceMapOf([{ ...r, form: 'point', low: null, high: null }], brief).verified.get(key) ?? [];
       return point.map((st) => ({ statement: st, ends: [range.low, range.high] }));
     });
-  const candidates = [...(map.verified.get(key) ?? []).map((statement) => ({ statement, ends: [] as number[] })), ...anchored];
+  // ⭐ STANCE (AIE 543db8bb): only the drafter's declared current assertion can be this factor's current level. A supposition, a
+  // target, an estimate or no declaration stays on the unverified path (its origin is still read by `statementCitesLevel`).
+  const candidates = [...(map.verified.get(key) ?? []).map((statement) => ({ statement, ends: [] as number[] })), ...anchored]
+    .filter(({ statement }) => declaresCurrent(statement));
   return candidates.some(({ statement, ends }) => {
     if (statement.form !== 'point' || statement.low !== value || statement.negated === true) return false;
     const quote = statement.quote;
@@ -871,7 +874,7 @@ function boundByStatement(model: CandidateModel, factor: Factor, brief: string |
       && statements.some((s) => s.quote === quote && (s.low === value || s.high === value)))) return false;
     // The four tests only settle WHICH subject; the sentence must still be this factor's current level in context.
     return levelInContext(model, factor, brief, quote, (text) => (text === quote
-      ? { start: stated.index, end: stated.index + stated.matchedText.length } : null));
+      ? { start: stated.index, end: stated.index + stated.matchedText.length } : null), true);
   });
 }
 
@@ -930,6 +933,23 @@ export function statementCitesLevel(model: CandidateModel, factor: Factor, brief
     .some((s) => s.negated !== true && (s.low === Math.abs(value) || s.high === Math.abs(value)));
 }
 
+/**
+ * ⭐ STANCE (AIE 543db8bb): the drafter's declared stance and speaker on the verified statement that writes this factor's level
+ * figure, when exactly one stance is declared for it; `undefined` otherwise (none, or contradictory). Origin only: who said it and
+ * how it was put forward, never whether it is a current level (`verifiedFactorLevel`).
+ */
+export function levelStatementStance(model: CandidateModel, factor: Factor, brief: string | undefined):
+  { readonly stance: StatementStance; readonly speaker: unknown } | undefined {
+  const value = factor.baseline_value;
+  if (typeof brief !== 'string' || typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const key = subjectKey({ kind: 'factor', label: factor.label }, 'level');
+  const citing = (sourceMapOf(draftStatements(model), brief).verified.get(key) ?? [])
+    .filter((s) => s.negated !== true && (s.low === Math.abs(value) || s.high === Math.abs(value)));
+  const stances = new Set(citing.map((s) => s.stance));
+  if (stances.size !== 1 || citing[0]?.stance === undefined) return undefined;
+  return { stance: citing[0].stance, speaker: citing[0].speaker };
+}
+
 /** The label-word binder (Recovery Batch B, V2): the clause names this factor by its label's own words. */
 function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: string | undefined): boolean {
   const quote = factor === undefined ? undefined : recordedRawLevelQuote(model, factor);
@@ -949,7 +969,7 @@ function labelBoundFactorLevel(model: CandidateModel, factor: Factor, brief: str
  * are kept for both binders.
  */
 function levelInContext(model: CandidateModel, factor: Factor, brief: string | undefined, quote: unknown,
-  bind: (text: string) => { start: number; end: number } | null): boolean {
+  bind: (text: string) => { start: number; end: number } | null, declaredCurrent = false): boolean {
   try {
     const value = factor.baseline_value;
     if (typeof brief !== 'string' || typeof quote !== 'string'
@@ -966,7 +986,9 @@ function levelInContext(model: CandidateModel, factor: Factor, brief: string | u
     const span = bind(a.text);
     if (span === null) return false;
     if (insideQuotation(brief, a, span)) return false;
-    if (!currentLevelRole(a.text, { span, unit: factor.unit })) return false;
+    // ⭐ RETIRED for a statement-backed read (AIE 543db8bb): the drafter DECLARED this figure a current assertion, so the host no
+    // longer reads the sentence's own mood words for it. Only the legacy label-bound path (no `statements[]`) still reads them.
+    if (!declaredCurrent && !currentLevelRole(a.text, { span, unit: factor.unit })) return false;
     return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), value, true, text => {
       if (text.length <= MAX_ASSERTION && restatesLevel(text, factor, value)) return true;
       // DL ruling 15 Oct ~06:2xZ: a neighbour bounds a figure only if it speaks about THAT figure. A repeat of the magnitude

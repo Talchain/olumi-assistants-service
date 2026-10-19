@@ -35,6 +35,19 @@ export const SUBJECT_KINDS = ['goal', 'factor', 'option', 'risk', 'link'] as con
 export type SubjectKind = typeof SUBJECT_KINDS[number];
 
 /** The drafted item a statement is about, by the drafter's own labels: the host binds labels to ids after admission. */
+/**
+ * ⭐ STANCE (AIE reply 20261019 v1, sha 543db8bb): how the drafter declares THIS figure is put forward: a current assertion, a
+ * supposition, a target or an estimate. The AI declares it; the host never reads mood words for it. Only `stated_current` can earn
+ * current-level credit; a missing, unknown or contradictory stance never does (`declaresCurrent`).
+ */
+export const STATEMENT_STANCES = ['stated_current', 'hypothetical', 'target', 'estimate'] as const;
+export type StatementStance = typeof STATEMENT_STANCES[number];
+/** A verified statement with the drafter's own declared stance for it, carried on the EXACT entry it was verified from. */
+export type StancedStatement = UserStatement & { readonly stance?: StatementStance };
+const stanceOf = (v: unknown): StatementStance | undefined => STATEMENT_STANCES.find((s) => s === v);
+/** Current-level credit needs the drafter's own declaration that this figure is a current assertion. */
+export const declaresCurrent = (st: { readonly stance?: unknown }): boolean => st.stance === 'stated_current';
+
 export interface DraftedSubject {
   readonly kind: SubjectKind;
   readonly label: string;
@@ -61,7 +74,7 @@ export interface GivenStatement {
 
 export interface SourceMap {
   /** Verified statements by subject key (`subjectKey`), in brief order. */
-  readonly verified: ReadonlyMap<string, readonly UserStatement[]>;
+  readonly verified: ReadonlyMap<string, readonly StancedStatement[]>;
   /**
    * Authorship UNKNOWN: every entry the host could not verify, kept WHOLE with why (a refusal, or `not_checked` past the
    * per-draft limit): out of verified numerical use, never out of the reasoning, never relabelled as Olumi's.
@@ -71,7 +84,7 @@ export interface SourceMap {
 
 /** How many entries one draft has checked; the rest are retained unchecked (`not_checked`), never dropped. */
 const MAX = 60;
-const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'negated', 'speaker'] as const;
+const GIVEN_KEYS = ['quote', 'field', 'form', 'value', 'low', 'high', 'unit', 'qualifier', 'conditions', 'negated', 'speaker', 'stance'] as const;
 const plain = (v: unknown): v is string | number | boolean | null => v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v));
 function givenOf(r: Record<string, unknown>): GivenStatement {
   const out: Record<string, GivenStatement[string]> = {};
@@ -116,7 +129,7 @@ function writtenEndsOfNegativeRange(low: unknown, high: unknown): { readonly low
  * unknown. A statement the AI marks `negated` keeps that denial (the verifier's own carrier), so it never reads as a supplied effect.
  */
 export function sourceMapOf(raw: unknown, brief: string): SourceMap {
-  const verified = new Map<string, UserStatement[]>();
+  const verified = new Map<string, StancedStatement[]>();
   const refused: RefusedStatement[] = [];
   const entries = Array.isArray(raw) ? raw : [];
   entries.forEach((entry: unknown, index) => {
@@ -140,7 +153,9 @@ export function sourceMapOf(raw: unknown, brief: string): SourceMap {
     const key = subjectKey(subject, field);
     const v = verifyEntry(r, form, key, brief, false);
     if (v.kind === 'refused') { kept(v.refusal, v.detail, key); return; }
-    verified.set(key, [...(verified.get(key) ?? []), ...(field === 'effect' && form === 'range' ? v.statements.map(withOwnRangeUnit) : v.statements)]);
+    const stance = stanceOf(r['stance']);
+    const statements = field === 'effect' && form === 'range' ? v.statements.map(withOwnRangeUnit) : v.statements;
+    verified.set(key, [...(verified.get(key) ?? []), ...(stance === undefined ? statements : statements.map((st) => ({ ...st, stance })))]);
   });
   return { verified, refused };
 }
@@ -271,7 +286,10 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
     && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && st.low === value
       : typeof st.low === 'number' ? st.low === value : typeof st.high === 'number' && st.high === value);
   const map = sourceMapOf(drafted, brief);
-  return (map.verified.get(key) ?? []).some((st) => states(st)
+  // ⭐ STANCE: a goal's or factor's LEVEL is the user's current level only on their declared current assertion; a supposition, a
+  // target or an estimate stays visible on the unverified path. An option's setting is a what-if by nature and keeps its rule.
+  const current = (st: StancedStatement): boolean => subject.kind === 'option' || field !== 'level' || declaresCurrent(st);
+  return (map.verified.get(key) ?? []).some((st) => states(st) && current(st)
     && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
     ? 'user' : 'unverified';
 }

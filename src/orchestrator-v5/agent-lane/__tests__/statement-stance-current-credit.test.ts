@@ -24,13 +24,17 @@ async function admit(raw: Rec): Promise<Rec> {
   return graph!;
 }
 const node = (g: Rec, label: string): Rec => (g.nodes as Rec[]).find((x) => x.label === label)!;
-const credited = (n: Rec): boolean => n.provenance === 'from_brief' || n.observed_state?.source === 'brief_extraction';
+/** Credited as the user's CURRENT level: the verified-current stamp on the value (the entity's own provenance is a different claim). */
+const credited = (n: Rec): boolean => n.observed_state?.source === 'brief_extraction';
 
 describe('a figure is credited as the user\'s current level only when its statement declares it current', () => {
   it('RED: the declared-hypothetical 25 per temporary picker is never credited as a current level; the declared-current 1,150 and 30 stay credited', async () => {
     const g = await admit(structuredClone(FX.raw));
     const rate = node(g, 'Orders packed per temporary picker per day');
     expect(credited(rate), JSON.stringify(rate)).toBe(false);
+    // Kept visible and the user's, as THEIR assumption (AIE label decision): the figure is not dropped and never Olumi's estimate.
+    expect(rate.observed_state).toMatchObject({ raw_value: 25, source: 'user_assumption' });
+    expect(rate.observed_state.reviewed_by_user).toBeUndefined();
     // Positive controls, same sentence family: the brief's own current figures stay the user's.
     expect(credited(node(g, 'Warehouse staff'))).toBe(true);
     expect((g.nodes as Rec[]).find((x) => x.kind === 'goal')!.observed_state?.raw_value ?? null).not.toBe(25);
@@ -41,6 +45,8 @@ describe('a figure is credited as the user\'s current level only when its statem
     for (const s of raw.statements as Rec[]) if (s.value === 25) delete s.stance;
     const rate = node(await admit(raw), 'Orders packed per temporary picker per day');
     expect(credited(rate), JSON.stringify(rate)).toBe(false);
+    // Not invented as an assumption either: no declaration, the existing unverified path (visible, unknown role).
+    expect(rate.observed_state?.source).not.toBe('user_assumption');
   }, 120_000);
 
   it('CONTROL: the same figure declared stated_current is credited (the gate reads the declaration, not the sentence\'s words)', async () => {
@@ -48,5 +54,19 @@ describe('a figure is credited as the user\'s current level only when its statem
     for (const s of raw.statements as Rec[]) if (s.value === 25) s.stance = 'stated_current';
     const rate = node(await admit(raw), 'Orders packed per temporary picker per day');
     expect(credited(rate), JSON.stringify(rate)).toBe(true);
+  }, 120_000);
+  it('RED: the goal\'s level declared a supposition is never the user\'s current level of the goal; declared current, it is', async () => {
+    const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((x) => x.kind === 'goal')!;
+    expect(credited(goalOf(await admit(structuredClone(FX.raw)))), 'control: declared current').toBe(true);
+    const raw = structuredClone(FX.raw);
+    for (const s of raw.statements as Rec[]) if (s.subject.kind === 'goal' && s.field === 'level') s.stance = 'hypothetical';
+    expect(credited(goalOf(await admit(raw)))).toBe(false);
+  }, 120_000);
+
+  it('CONTROL: an option\'s setting stated inside the supposition stays the user\'s setting (a what-if is what an option is)', async () => {
+    const g = await admit(structuredClone(FX.raw));
+    const option = (g.nodes as Rec[]).find((x) => x.kind === 'option' && /temporary pickers/i.test(String(x.label)))!;
+    const setting = Object.values(option.interventions as Record<string, Rec>)[0]!;
+    expect(setting).toMatchObject({ raw_value: 8, source: 'brief_extraction' });
   }, 120_000);
 });

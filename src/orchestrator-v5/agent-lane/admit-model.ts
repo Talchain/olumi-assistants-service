@@ -83,7 +83,7 @@ import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/
 import { figureSource, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks, UNSIZED_OLUMI_RISK_REASON, unsizedOlumiRiskIds } from './unsized-risk.js';
 import { amountsWrittenIn } from './stated-by-user.js';
-import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefSentencesRead, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, levelQuotedByBrief, levelStatementStance, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefSentencesRead, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { goalDefinitionSum } from './goal-definition-sum.js';
@@ -4058,6 +4058,20 @@ function admitOnce(
       && findStatedAmounts(quote).some(a => a.magnitude === Math.abs(value)) && quoteBindsFactorFigure(model, f, brief))
       || briefWritesFactorFigure(f, brief);
   };
+  /**
+   * ⭐ STANCE (AIE 543db8bb, label decision): the user's own words putting this figure forward as a SUPPOSITION are their
+   * assumption, labelled "Your assumption" through the existing carrier (`user_assumption`, bare: the user's declared guess, not
+   * an accepted Olumi estimate). Never their current level (`verifiedFactorLevel` needs a declared current assertion) and never
+   * Olumi's estimate. A third-party or unknown speaker, a target, an estimate, or no or contradictory stance keeps the existing
+   * unverified path. Only a figure the unverified path already holds is relabelled.
+   */
+  const asUsersAssumption = (f: CandidateModel['factors'][number], os: Record<string, unknown>): Record<string, unknown> => {
+    if (verifiedLevels.has(f) || !carriesStatements(model)) return os;
+    const declared = levelStatementStance(model, f, brief);
+    if (declared?.stance !== 'hypothetical' || declared.speaker !== 'user') return os;
+    const { user_material_unverified: _unverified, extractionType: _type, ...rest } = os;
+    return { ...rest, source: 'user_assumption' };
+  };
   const verifiedLevels = new Set(model.factors.filter(f => verifiedFactorLevel(model, f, brief) || (f.baseline_value === TODAY_LEVEL && f.unit === TODAY_UNIT && restatedChanges.some(r => r.label === f.label) && candidateModel.factors.some(original => original.label === f.label && verifiedFactorLevel(candidateModel, original, brief)))));
   /**
    * ⭐ AIE W27 (17 Oct 22:03Z, 23:45Z): a figure from the user's material with no unit has no established scale; a definition of
@@ -4329,10 +4343,10 @@ function admitOnce(
         // A factor the drafter tagged an estimate BUT quoted the brief for is a user CLAIM the receipt gate could not verify
         // (e.g. no first-person owner): it stays visible as the user's unverified claim, never Olumi's estimate.
         ...((f.baseline_known || verifiedLevels.has(f) || quotesBrief(f)) && typeof f.baseline_value === 'number'
-          ? { observed_state: withStatedLevelRange(unscaled.has(f.label)
+          ? { observed_state: asUsersAssumption(f, withStatedLevelRange(unscaled.has(f.label)
             ? { value: f.baseline_value, user_material_unverified: true as const }
             : framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }, verifiedLevels.has(f),
-            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f) }
+            !verifiedLevels.has(f) && (f.provenance === 'explicit' || f.provenance === 'from_brief' || quotesBrief(f))), f)) }
           : {}),
         // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
         // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
