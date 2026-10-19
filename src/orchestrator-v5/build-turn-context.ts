@@ -1522,7 +1522,8 @@ export function deriveDecisionContextGraphHash(graph: unknown | null, projection
     // new Run is admitted. The unconditional Run reader below owns admission.
     // The former flag-off branch remains removed; every freshness path applies
     // the same value-preserving canonicalisation.
-    toHash = canonicaliseForAnalysis(graph);
+    // STEP 8: the analysis identity attests the derived today part (`deriveTodayParts`), as the Run's stamp does.
+    toHash = canonicaliseForAnalysis(deriveTodayParts(graph).graph);
     const parsed = GraphStateIngressSchema.safeParse(toHash);
     return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data, projection) : null;
   } catch {
@@ -3167,7 +3168,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // Canonical carrier projection with the persisted numeric bytes intact:
     // hash/readback see the same model identity as freshness, while the
     // compute-only sigma floor cannot silently rewrite that identity.
-    rawPersistedGraph: canonicaliseForAnalysis(persistedGraph),
+    rawPersistedGraph: canonicaliseForAnalysis(todayParts.graph),
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
     // constraints added via `add_constraint`. Omitted when absent so
     // run-analysis can use the existing optional-field idiom.

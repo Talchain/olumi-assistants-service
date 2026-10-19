@@ -149,9 +149,10 @@ export function todayPartsApartFromGoal(graph: unknown): string[] {
 /**
  * ⭐ THE NUMBER'S SAFETY AT THE REVISION → REQUEST BOUNDARY (DL-3 ruling on Codex R2 of #3421): whatever is stored — an Undo to a
  * legacy row, a canvas save straight to the database — each compiled today part is DERIVED from its goal's current level, an
- * option's setting of it is dropped and a link into it is dropped, on a copy. The Run's compute snapshot and the scenario read
- * both use this one derivation, so the screen and the number agree; each correction is said in `notes`. The stored bytes
- * (and their hashes) are untouched. The same graph and no notes when nothing differs. Pure.
+ * option's setting of it is dropped and a link into it is dropped, on a copy: the Run's compute snapshot and its analysis
+ * identity (`graph_hash_at_run`, freshness) attest these DERIVED inputs. The stored bytes, their edit (CAS) hash and historical
+ * Run facts are untouched; the scenario read returns the stored bytes and says each invalid saved value in `notes`. The same
+ * graph and no notes when nothing differs. Pure.
  */
 export function deriveTodayParts<G>(graph: G): { readonly graph: G; readonly notes: readonly string[] } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
@@ -165,13 +166,13 @@ export function deriveTodayParts<G>(graph: G): { readonly graph: G; readonly not
     const level = isRec(goal.observed_state) ? goal.observed_state : undefined;
     const said = (os: unknown): string => (isRec(os) && finite(os.raw_value) ? `${os.raw_value}${typeof os.unit === 'string' ? ` ${os.unit}` : ''}` : 'no figure');
     if (stableStringify(part.observed_state) !== stableStringify(level)) {
-      notes.push(`"${part.label}" is the current level of "${goal.label}", so Olumi used ${said(level)}, not the ${said(part.observed_state)} stored on it.`);
+      notes.push(`"${part.label}" is the current level of "${goal.label}": the ${said(part.observed_state)} saved on it is not valid, and every Run uses ${said(level)}.`);
     }
     for (const o of nodes.filter((n) => n.kind === 'option' && isRec(n.interventions) && part.id in n.interventions)) {
-      notes.push(`"${o.label}" set "${part.label}" to ${said((o.interventions as Rec)[part.id])}; that was not used: it changes only with the current level of "${goal.label}".`);
+      notes.push(`"${o.label}" sets "${part.label}" to ${said((o.interventions as Rec)[part.id])} in the saved model; that is not valid and no Run uses it: "${part.label}" changes only with the current level of "${goal.label}".`);
     }
     for (const e of edges.filter((x) => x.to === part.id)) {
-      notes.push(`The link from "${nodes.find((n) => n.id === e.from)?.label ?? e.from}" into "${part.label}" was not used: it changes only with the current level of "${goal.label}".`);
+      notes.push(`The saved link from "${nodes.find((n) => n.id === e.from)?.label ?? e.from}" into "${part.label}" is not valid and no Run uses it: "${part.label}" changes only with the current level of "${goal.label}".`);
     }
   }
   if (notes.length === 0) return { graph, notes };

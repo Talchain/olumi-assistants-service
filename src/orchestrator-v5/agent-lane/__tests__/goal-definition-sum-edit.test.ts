@@ -213,7 +213,7 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     expect(at('net_change_in_widgets_per_hour').kind).not.toBe('refused');
   });
 
-  it('RED (DL-3 ruling on Codex R2): the scenario read shows the same derived today part the Run uses — 40, not a canvas-direct 41', async () => {
+  it('RED (DL-3 amend): the scenario read returns the stored bytes as stored and says the saved 41 is not valid and every Run uses 40', async () => {
     const initial = await constructed(true);
     const canvas = clone(initial);
     const os = nodeOf(canvas, TODAY)!.observed_state;
@@ -221,9 +221,16 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     const h = await harness(canvas);
     const read = await h.read();
     expect(read.status, JSON.stringify(read.json).slice(0, 300)).toBe(200);
-    const shown = read.json.graph as Rec;
-    expect(nodeOf(shown, TODAY)!.observed_state.raw_value).toBe(40);
-    expect(nodeOf(h.stored(), TODAY)!.observed_state.raw_value).toBe(41); // the stored bytes are untouched
+    expect(nodeOf(read.json.graph as Rec, TODAY)!.observed_state.raw_value).toBe(41);
+    expect(read.json.graph_hash).toBe(computeAnalysisAffectingGraphHash(canvas as never));
+    expect(read.json.today_part_notes).toEqual(['"Widgets per hour today" is the current level of "Widgets per hour": the 41 widgets/hour saved on it is not valid, and every Run uses 40 widgets/hour.']);
+  });
+
+  it('CONTRAST: the graph as built reads back with no note', async () => {
+    const h = await harness(await constructed(true));
+    const read = await h.read();
+    expect(read.status).toBe(200);
+    expect(read.json).not.toHaveProperty('today_part_notes');
   });
 
   it('CONTRAST: an ordinary sum part (not the part construction minted for the goal\'s level today) is never moved', async () => {

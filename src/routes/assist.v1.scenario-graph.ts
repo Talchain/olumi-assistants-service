@@ -522,14 +522,16 @@ export default async function route(app: FastifyInstance) {
         // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
         deriveDecisionContextGraphHash(graph)) : undefined;
 
+      const todayPartNotes = graphPresent ? deriveTodayParts(graph).notes : [];
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
         ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
-        // STEP 8: the same derived today part the Run computes with (`deriveTodayParts`); the hashes below stay the stored bytes'.
-        graph: graphPresent ? toOutboundGraph(deriveTodayParts(graph).graph) : null,
+        graph: graphPresent ? toOutboundGraph(graph) : null,
+        // STEP 8: the stored bytes stay as stored; an invalid saved today part is said, with the value every Run uses instead.
+        ...(todayPartNotes.length > 0 ? { today_part_notes: todayPartNotes } : {}),
         graph_present: graphPresent,
         brief_text: briefText,
         scenario_created_at: snapshot?.createdAt ?? null,

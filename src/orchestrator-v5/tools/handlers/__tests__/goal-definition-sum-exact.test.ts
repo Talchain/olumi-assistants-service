@@ -15,7 +15,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
 import type { InternalDispatch } from '../../../agent-lane/runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
-import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
+import { deriveDecisionContextGraphHash, loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
+import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
+import { canonicaliseForAnalysis } from '../analysis-ready-core.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { whoSized } from '../../../agent-lane/strength-authorship-words.js';
@@ -163,7 +166,7 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     expect(((p.options as Rec[]).find((o) => o.id === 'option_b')!.interventions as Rec).widgets_per_hour_today).toBeUndefined();
     expect(setting(p, 'option_b', netId(WIDGETS))).toBe(19);
     expect(40 + 19 >= 60).toBe(false);
-    expect(await snapshotNotes(legacy)).toEqual(['"Option B" set "Widgets per hour today" to 50 widgets/hour; that was not used: it changes only with the current level of "Widgets per hour".']);
+    expect(await snapshotNotes(legacy)).toEqual(['"Option B" sets "Widgets per hour today" to 50 widgets/hour in the saved model; that is not valid and no Run uses it: "Widgets per hour today" changes only with the current level of "Widgets per hour".']);
   });
 
   it('RED: a canvas save straight to the database left the today part at 41 — the request uses the goal\'s 40, and says so', async () => {
@@ -174,7 +177,7 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     const p = await request(canvas);
     expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
     expectExactSum(p, WIDGETS, 20, 19);
-    expect(await snapshotNotes(canvas)).toEqual(['"Widgets per hour today" is the current level of "Widgets per hour", so Olumi used 40 widgets/hour, not the 41 widgets/hour stored on it.']);
+    expect(await snapshotNotes(canvas)).toEqual(['"Widgets per hour today" is the current level of "Widgets per hour": the 41 widgets/hour saved on it is not valid, and every Run uses 40 widgets/hour.']);
   });
 
   it('RED: the Run\'s own readback says what it used — the stored 41 is named and the goal\'s 40 is the figure used', async () => {
@@ -194,7 +197,33 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     const sent = (run.mock.calls[0] as unknown as [Rec])[0];
     expect(raw(node(sent.graph, 'widgets_per_hour_today')!)).toBe(40);
     expect(String((outcome.handler_facts[0] as Rec).result.summary)).toContain(
-      '"Widgets per hour today" is the current level of "Widgets per hour", so Olumi used 40 widgets/hour, not the 41 widgets/hour stored on it.');
+      '"Widgets per hour today" is the current level of "Widgets per hour": the 41 widgets/hour saved on it is not valid, and every Run uses 40 widgets/hour.');
+  });
+
+  it('RED: a saved link into the today part never reaches the engine request (the operand has no setter but its goal)', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const linked = structuredClone(stored);
+    (linked.edges as Rec[]).push({ ...structuredClone(edge(linked, netId(WIDGETS), 'widgets_per_hour')), to: 'widgets_per_hour_today' });
+    const p = await request(linked);
+    expect((p.graph.edges as Rec[]).filter((e) => e.to === 'widgets_per_hour_today')).toEqual([]);
+    expectExactSum(p, WIDGETS, 20, 19);
+  });
+
+  it('RED: an old Run stamped on a legacy override is never current — its stamp is not the derived analysis identity; a valid graph\'s is unchanged', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const legacy = structuredClone(stored);
+    const os = node(legacy, 'widgets_per_hour_today')!.observed_state;
+    const b = (legacy.nodes as Rec[]).find((n) => n.id === 'option_b')!;
+    b.interventions = { ...b.interventions, widgets_per_hour_today: { ...os, raw_value: 50, value: 50 / os.cap } };
+    // The stamp an old Run carried: the analysis hash over the stored bytes as they were (no derivation).
+    const oldStamp = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(canonicaliseForAnalysis(legacy)) as never);
+    expect(deriveDecisionContextGraphHash(legacy)).not.toBe(oldStamp);
+    // A new Run on the same stored bytes stamps the derived identity, so it — not the old one — is current.
+    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: structuredClone(legacy), briefText: null, revision: 3 })), readMostRecentPendingActions: vi.fn(async () => []) };
+    const snap = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-step8-stamp', port as never);
+    expect(computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(snap.rawPersistedGraph) as never)).toBe(deriveDecisionContextGraphHash(legacy));
+    // CONTRAST: on the graph as built nothing is derived, so every historical stamp keeps its identity.
+    expect(deriveDecisionContextGraphHash(stored)).toBe(computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(canonicaliseForAnalysis(stored)) as never));
   });
 
   it('CONTRAST: the graph as built is used as stored, with nothing said', async () => {
