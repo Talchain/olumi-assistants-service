@@ -166,7 +166,7 @@ import {
   resolveRunAdmission,
 } from './analysis-ready-core.js';
 import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
-import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
+import { projectionWithheldEvaluated, RUN_EVALUATED_RESPONSE_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
@@ -1805,6 +1805,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // ⭐ STEP 8 (Codex R1 #3452 BLOCK 2): the engine's validated result, captured ONCE before every projection below; the saved Run
+    // keeps it whole (`RUN_EVALUATED_RESPONSE_KEY`) wherever a projection withheld something it evaluated.
+    const evaluatedResponse = structuredClone(response);
+
     // #3167 fix-forward (PL 6135017311): THIS Run's omitted Olumi risks, recorded in its own result for every later reader.
     if (unsizedProjection.omitted.length > 0) response = appendInferenceWarning(response, unsizedOlumiRiskOmissionWarning(unsizedProjection.omitted));
 
@@ -2781,7 +2785,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        enrichment: stampRunAnalysisProjection({ ...(response as Record<string, unknown>),
+          ...(projectionWithheldEvaluated(evaluatedResponse, response) ? { [RUN_EVALUATED_RESPONSE_KEY]: evaluatedResponse } : {}) }),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

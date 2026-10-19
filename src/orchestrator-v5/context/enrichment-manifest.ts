@@ -228,6 +228,8 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   // SERVER-initiated run only. Unmanifested until now, so every auto-run fact
   // fired the unknown-key tripwire.
   'run_provenance', // CEE-injected: handlers/chip-click-dispatch.ts stampAutoRunProvenance
+  // STEP 8 (Codex R1 #3452): the engine's validated response, captured once before every projection, kept in the saved Run.
+  '__cee_evaluated_response', // CEE-injected: tools/handlers/run-analysis.ts (RUN_EVALUATED_RESPONSE_KEY)
   // ── Legacy V1 inbound-tolerance ───────────────────────────────────────────
   // Not emitted by the live PLoT /v2/run producer (RunResponseV3 has no
   // top-level `results`); emitted by the V1 bundle (plot v1/run.ts:589) and
@@ -487,6 +489,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['coaching_signal_produced_at', R_COACHING_SIGNAL],
   ['_diagnostics', R_INTERNAL],
   ['run_provenance', R_RUN_PROVENANCE],
+  ['__cee_evaluated_response', R_INTERNAL],
   ['results', R_LEGACY_COMPACT],
   // V7-C slice 1b — transported to the UI, never narrated by the coach.
   ['correlation_model', R_VOI_NOT_COACH_NARRATED],

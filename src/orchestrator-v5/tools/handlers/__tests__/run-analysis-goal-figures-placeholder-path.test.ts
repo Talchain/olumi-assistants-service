@@ -30,6 +30,9 @@ import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { RUN_EVALUATED_RESPONSE_KEY } from '../../../context/analysis-projection-policy.js';
+import { analysisResultForAgent } from '../../../agent-lane/decision-sensitivity.js';
+import { modelFacingToolResult } from '../../../agent-lane/licensed-run-view.js';
 
 type Json = Record<string, any>;
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-cut-costs-altB-r0-1f9d769.json', import.meta.url), 'utf8')) as {
@@ -129,7 +132,33 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
         for (const k of ['mean', 'p10', 'p50', 'p90', 'std']) expect(e.outcome ?? {}).not.toHaveProperty(k);
       }
     }
-    expect(JSON.stringify(env)).not.toContain('0.0617');
+    // The public projection holds none of it; the engine's own result is kept only under the saved Run's internal key (below).
+    expect(JSON.stringify({ ...env, [RUN_EVALUATED_RESPONSE_KEY]: undefined })).not.toContain('0.0617');
+  });
+
+  it('⭐ ONE EVALUATED COPY (Codex R1 #3452): the saved Run keeps what the engine returned, captured before every projection; no public surface or AI view carries it', async () => {
+    const r = await runOn(WORKING.graph);
+    const env = r.enrichment ?? r;
+    const raw = env[RUN_EVALUATED_RESPONSE_KEY] as Json;
+    expect(raw.option_comparison).toEqual(F.plot_body.option_comparison);
+    expect(entriesFor(raw, SWITCH).some((e) => e.probability_of_goal === 0.0617)).toBe(true);
+    const block = buildAnalysisResultBlock(lastFact as never);
+    const ai = JSON.stringify(modelFacingToolResult('run_analysis', { result: analysisResultForAgent(block as never, WORKING.graph) }));
+    for (const carrier of [JSON.stringify(block), ai]) {
+      expect(carrier).not.toContain(RUN_EVALUATED_RESPONSE_KEY);
+      expect(carrier).not.toContain('0.0617');
+    }
+  });
+
+  it('CONTROL: a Run whose projections withhold nothing keeps no second copy', async () => {
+    const g = clone(WORKING.graph);
+    for (const e of g.edges as Json[]) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+    // The same served body without the limit's own rows (the downtime limit's P and the joint, which its projection withholds).
+    const body = clone(F.plot_body);
+    for (const row of body.option_comparison as Json[]) { delete row.constraint_probabilities; delete row.probability_of_joint_goal; }
+    const env = (await runOn(g, body)).enrichment as Json;
+    expect((env.option_comparison as Json[]).find((o) => o.option_id === SWITCH)).toMatchObject({ probability_of_goal: 0.0617 });
+    expect(env).not.toHaveProperty(RUN_EVALUATED_RESPONSE_KEY);
   });
 
   it('RED: no win share on any option and no leader anywhere (a win share compares every option)', async () => {
