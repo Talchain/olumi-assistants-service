@@ -56,7 +56,7 @@ import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldA
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, goalLevelOfStatedSum, goalLevelOwner, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, goalLevelOwner, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -2580,11 +2580,10 @@ async function buildModelFromBriefOnce(
     // ⭐ A HELD CEILING's stated current level (MG #72 5870097103): admission withheld every `<=` level before the brief
     // attested the comparator; with `'<='` now held, the run minimises that goal, so the same rule is asked again
     // (`admitGoalLevelBesideHeldCeiling`). Any other goal: untouched, byte for byte.
-    // The same goal admission read: the total of the user's own sum is their level (`goalLevelOfStatedSum`).
     // ⭐⭐ ONE AUTHORSHIP OWNER (TL 11:51Z; BUDDY-A #3290 r2; TL 13:18Z): for a draft with statements, whether the user wrote this
     // level is the owner's verdict (`goalLevelOwner`), never a figure the host finds in the brief; the host reader decides only
     // for a draft recorded before SYSTEM 2.
-    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, goalLevelOfStatedSum(candidate, brief).goal, admitted.loss, (value, unit) => {
+    const ceilingLevel = admitGoalLevelBesideHeldCeiling(heldGoal.nodes, candidate.goal, admitted.loss, (value, unit) => {
       const own = goalLevelOwner(candidate, brief, value);
       return (own === undefined ? figureTheUserWrote(value, unit, brief) : own === 'user')
         && levelWrittenApartFromTarget(value, unit, candidate.goal.value, brief);

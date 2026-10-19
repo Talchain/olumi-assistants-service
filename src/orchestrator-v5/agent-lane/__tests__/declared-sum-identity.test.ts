@@ -31,6 +31,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { linkEffectQuoteContextMiss } from '../stated-by-user.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Rec = Record<string, any>;
 
@@ -81,6 +82,13 @@ const declare = (c: Rec, evidence?: Rec | null): Rec => ({ ...c, identities: [..
 /** One drafter statement, as the SYSTEM 2 drafter writes it. */
 const said = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null): Rec => ({ quote,
   subject: { to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null });
+/**
+ * The goal's level today stated in its own sentence, apart from any sum, with the drafter's statement of it: the sum is then
+ * judged at its own quote, past "has no figure today" (a level is no longer derived from a quoted sum: Codex #3440 R3).
+ */
+const TODAY = 'Weekly support capacity today is 80 tickets per week.';
+const withLevel = ({ raw, brief }: { raw: Rec; brief: string }): { raw: Rec; brief: string } => ({ brief: `${brief} ${TODAY}`,
+  raw: { ...raw, statements: [...raw.statements, said(TODAY, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 'point', 80, 'tickets per week')] } });
 /** Run 5 held the brief's 80 as the goal's level (`brief_extraction`); the served c85817f2 draft typed it "inferred". */
 const goalLevelAsRun5 = (c: Rec): Rec => ({ ...c, goal: { ...c.goal, baseline_provenance: 'explicit' } });
 /** The approved text's part: a quantity with its level today (0: no specialist is added today), in the total's unit. */
@@ -206,13 +214,21 @@ describe('⛔ OWED (temporarily fail-closed) — the served SYSTEM 2 draft (cfa3
   });
 
   it('the genuine affirmative is not taken while the capability is owed: no identity, the links exactly as drafted, the reason said once', async () => {
-    const { graph, result } = await construct(sys2().raw, sys2().brief);
-    const { graph: drafted } = await construct(sys2(SENTENCE, { declared: false }).raw, SYS2.brief);
+    const { graph, result } = await construct(withLevel(sys2()).raw, withLevel(sys2()).brief);
+    const { graph: drafted } = await construct(withLevel(sys2(SENTENCE, { declared: false })).raw, withLevel(sys2()).brief);
+    expect(node(graph, GOAL).observed_state, 'the goal\'s own stated level stays the user\'s').toMatchObject({ raw_value: 80, source: 'brief_extraction' });
     expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
     expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
     for (const k of OPERANDS2) expect(naturalLinks(graph).get(k)?.magnitude, k).not.toBe('user_stated');
     expect((result.not_represented as string[]).filter((x) => x.includes('added together'))).toEqual([refused2(OWED)]);
     expect((result.open_questions ?? []).join(' ')).not.toContain('the definition your brief gives');
+  });
+
+  it('the goal\'s level today is not derived from the quoted sum: no level, readiness asks for it, and the sum is refused on that', async () => {
+    const { graph, result } = await construct(sys2().raw, sys2().brief);
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+    expect(JSON.stringify(targetTestabilityOf(graph))).toContain('missing_goal_baseline');
+    expect((result.not_represented as string[]).filter((x) => x.includes('added together'))).toEqual([refused2('"Weekly support capacity" has no figure today')]);
   });
 
   it('the Run request carries no sum: every link is sent exactly as the same draft with no sum declared', async () => {
@@ -283,9 +299,9 @@ describe('CONTRASTS', () => {
 
   it('a QUESTION is no statement of the sum, even with the drafter\'s relation statement on it: no sum, the links as drafted, said', async () => {
     const question = 'Is total weekly support capacity the existing 80 tickets per week plus the additional specialist capacity?';
-    const { raw, brief } = sys2(question);
+    const { raw, brief } = withLevel(sys2(question));
     const { graph, result } = await construct(raw, brief);
-    const { graph: drafted } = await construct(sys2(question, { declared: false }).raw, brief);
+    const { graph: drafted } = await construct(withLevel(sys2(question, { declared: false })).raw, brief);
     expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
     expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
     expect(result.not_represented).toContain(refused2(OWED));
@@ -304,11 +320,9 @@ describe('CONTRASTS', () => {
     'Let\'s say total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity.',
   ];
   it.each(HYPOTHETICALS)('⭐ RED→GREEN: a supposed sum is no one\'s sum, even with the drafter\'s relation statement and the level stated apart: %s', async (hypothetical) => {
-    const today = 'Weekly support capacity today is 80 tickets per week.';
-    const withLevel = (raw: Rec): Rec => ({ ...raw, statements: [...raw.statements, said(today, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 'point', 80, 'tickets per week')] });
-    const { raw, brief } = sys2(hypothetical);
-    const { graph, result } = await construct(withLevel(raw), `${brief} ${today}`);
-    const { graph: drafted } = await construct(withLevel(sys2(hypothetical, { declared: false }).raw), `${brief} ${today}`);
+    const { raw, brief } = withLevel(sys2(hypothetical));
+    const { graph, result } = await construct(raw, brief);
+    const { graph: drafted } = await construct(withLevel(sys2(hypothetical, { declared: false })).raw, brief);
     expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
     expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
     const wire = (await runRequest(graph)).graph as Rec;
@@ -327,7 +341,7 @@ describe('CONTRASTS', () => {
 
   it('the drafter\'s relation statement grants nothing: with or without it, the quoted sum is not taken, said once', async () => {
     for (const relation of [true, false]) {
-      const { raw, brief } = sys2(SENTENCE, { relation });
+      const { raw, brief } = withLevel(sys2(SENTENCE, { relation }));
       const { graph, result } = await construct(raw, brief);
       expect(node(graph, GOAL).nonlinear_identity, `relation=${relation}`).toBeUndefined();
       expect((result.not_represented as string[]).filter((x) => x.includes('added together')), `relation=${relation}`).toEqual([refused2(OWED)]);
@@ -410,11 +424,21 @@ describe('⭐ SERVED cbcefb47: the total of the user\'s own sum is the user\'s l
     expect(part(c, 'Additional specialist capacity')).toMatchObject({ baseline_value: 0, provenance: 'inferred', baseline_evidence: null });
   });
 
-  it('⭐ the goal holds the user\'s 80 today; the quoted sum itself is not taken while that capability is owed', async () => {
-    const { graph, result } = await construct(draft13(), SERVED13.brief);
-    expect(node(graph, GOAL).observed_state, 'the goal\'s level today').toMatchObject({ raw_value: 80, source: 'brief_extraction' });
-    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
-    expect(result.not_represented).toContain(refused(OWED));
+  /**
+   * ⛔ CHANGED (Codex #3440 R3; DL-3 ruling by measurement): this row held the goal's 80 as the user's, derived from their quoted sum.
+   * Measured, Codex's witnesses "In a world where …" and "Let's say …" made it the user's too: the same hole. While user-declared
+   * sums are owed, no level is derived from a quoted sum; the goal's level today is withheld and readiness asks for it instead.
+   */
+  const SUPPOSED = [
+    'In a world where total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity, we could compare the options.',
+    'Let\'s say total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity.',
+  ];
+  it.each([SENTENCE, ...SUPPOSED])('⭐ no goal level from a quoted sum (the affirmative and Codex\'s witnesses alike): withheld, readiness asks: %s', async (sentence) => {
+    const swap = (x: string): string => x.split(SENTENCE).join(sentence);
+    const { graph } = await construct(JSON.parse(swap(SERVED13.raw_text)), swap(SERVED13.brief));
+    expect(node(graph, GOAL).observed_state ?? null).toBeNull();
+    expect(node(graph, GOAL).goal_level_reading).toBeUndefined();
+    expect(JSON.stringify(targetTestabilityOf(graph))).toContain('missing_goal_baseline');
   });
 
   it('ADVERSARIAL: the non-zero part is Olumi\'s (no sentence states it) → the goal\'s level stays Olumi\'s, withheld', async () => {

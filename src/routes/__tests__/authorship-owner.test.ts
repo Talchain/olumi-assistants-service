@@ -279,14 +279,19 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
     expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toBeUndefined();
     expect(JSON.stringify(out.result.not_represented)).toContain('Confirm the current level of \\"scrap rate on Line 2\\"');
   });
-  it('CONTROL (served capacity cfa31dfb, row 5d0a23b7): a goal level with no goal-level statement is still theirs as the total of their own declared sum', async () => {
+  /**
+   * ⛔ CHANGED (Codex #3440 R3; DL-3 ruling by measurement): this control read the goal's 80 as the user's, as the total of a sum the
+   * drafter quoted. A supposed sum ("In a world where …") was read the same way. While user-declared exact sums are owed, a quoted
+   * sum is no proof: the owner is the goal's own level statement only, and with none the level is withheld (readiness asks).
+   */
+  it('CONTROL (served capacity cfa31dfb, row 5d0a23b7): a goal level with no goal-level statement is not theirs through a quoted sum (owed)', async () => {
     const fx = JSON.parse(readFileSync(new URL('./fixtures/capacity-cfa31dfb-first-draft.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
     const m = JSON.parse(fx.raw_text) as Rec;
     expect(figureSource(m, fx.brief, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 80)).toBe('unclaimed');
-    expect(goalLevelOwner(m as never, fx.brief, 80), 'the owner, through the declared sum').toBe('user');
+    expect(goalLevelOwner(m as never, fx.brief, 80), 'no owner through a quoted sum').toBe('unclaimed');
     const out = await construct(fx.brief, [m as unknown as CandidateModel]);
     expect(out.result, JSON.stringify(out.result).slice(0, 1500)).toMatchObject({ ok: true, mutated: true });
-    expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toMatchObject({ raw_value: 80, source: 'brief_extraction' });
+    expect(out.graph!.nodes.find((n: Rec) => n.kind === 'goal').observed_state).toBeUndefined();
   });
   it('NEGATIVE (settings, same rule): a cost flagged `explicit` with no statement for it is UNKNOWN, as is its switch', async () => {
     const m = draftOf(COSTS);
