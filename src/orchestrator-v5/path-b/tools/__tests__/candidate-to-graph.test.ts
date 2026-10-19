@@ -30,7 +30,7 @@ const S = [
 const BRIEF = S.join(' ');
 const SHIPPED = 'Board game shipped before the holidays';
 const link = (from: string, to: string, direction: string, quote: string | null = null, size: Rec = {}): Rec => ({ from, to, direction,
-  provenance: quote === null ? 'inferred' : 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null,
+  provenance: quote === null ? 'ai_proposed' : 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null,
   definitional: null, basis: null, source_quote: quote, ...size });
 const statement = (quote: string, label: string, speaker: 'user' | 'other' | 'unknown', value: number, unit: string, form = 'point'): Rec => ({
   quote, subject: { kind: 'factor', label, to_label: null, factor_label: null }, field: 'level', form, value, low: null, high: null, unit,
@@ -79,7 +79,7 @@ const salesDraft = (size: 'olumi' | 'user' = 'olumi'): Rec => ({
     plausible_max: 10000, baseline_evidence: { quote: 'We spend £2,000 a month on ads.' } }],
   risks: [], outcomes: [],
   links: [link('Ad spend', 'Monthly pre-orders', 'positive', size === 'user' ? AD_QUOTE : null,
-    { effect_amount: 1, effect_per_source_change: 20, effect_provenance: size === 'user' ? 'explicit' : 'inferred' })],
+    { effect_amount: 1, effect_per_source_change: 20, effect_provenance: size === 'user' ? 'explicit' : 'ai_proposed' })],
   identities: [], unknowns: [], decision_question: 'How should we change our ad spend?', unknown_concerns: [], statements: [],
 });
 
@@ -90,9 +90,9 @@ const structureDraft = (): Rec => ({
   constraints: [{ metric: 'Ad spend', operator: '<=', value: 5000, unit: '£', provenance: 'explicit', frame: 'level', role: 'limit' },
     { metric: 'Word of mouth', operator: '>=', value: 200, unit: 'mentions', provenance: 'explicit', frame: 'level', role: 'ambition' }],
   factors: [...salesDraft().factors, factor('Word of mouth', 50, 'mentions', 'explicit'), { ...factor('Influencer posts', null, 'posts', 'inferred'), plausible_max: 40 }],
-  links: [...salesDraft().links, link('Ad spend', 'Word of mouth', 'positive', null, { effect_amount: 1, effect_per_source_change: 100, effect_provenance: 'inferred' }),
-    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'inferred' }),
-    link('Influencer posts', 'Monthly pre-orders', 'positive', null, { effect_amount: 10, effect_per_source_change: 1, effect_provenance: 'inferred' })],
+  links: [...salesDraft().links, link('Ad spend', 'Word of mouth', 'positive', null, { effect_amount: 1, effect_per_source_change: 100, effect_provenance: 'ai_proposed' }),
+    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'ai_proposed' }),
+    link('Influencer posts', 'Monthly pre-orders', 'positive', null, { effect_amount: 10, effect_per_source_change: 1, effect_provenance: 'ai_proposed' })],
 });
 
 // A goal the AI declared to be two parts added together, with the sentence it read it from.
@@ -105,8 +105,8 @@ const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Re
     { label: 'Shop orders', role: 'observable', baseline_known: true, baseline_value: 100, unit: 'orders', provenance: 'explicit', plausible_max: null },
   ],
   links: ['Online orders', 'Shop orders'].map((part) => link(part, 'Total orders', 'positive', null,
-    { provenance: definedBy === 'user' ? 'explicit' : 'inferred', effect_amount: 1, effect_per_source_change: 1,
-      effect_provenance: definedBy === 'user' ? 'explicit' : 'inferred', definitional: true })),
+    { provenance: definedBy === 'user' ? 'explicit' : 'ai_proposed', effect_amount: 1, effect_per_source_change: 1,
+      effect_provenance: definedBy === 'user' ? 'explicit' : 'ai_proposed', definitional: true })),
   identities: [{ operation: 'sum', outcome: 'Total orders', factors: ['Online orders', 'Shop orders'],
     evidence: { quote: 'All our orders come either online or from the shop.' } }],
 });
@@ -126,8 +126,8 @@ const scienceDraft = (opts: { userFold?: boolean; otherFold?: boolean; undeclare
     sciOption('Status quo', 'explicit', [], [], opts.undeclaredStatusQuo === true ? null : true)],
   factors: [{ ...factor('Price', 20, '£', 'explicit'), role: 'controllable', plausible_max: 50 }, { ...factor('Customers', 1000, 'customers', 'explicit'), role: 'controllable', plausible_max: 3000 },
     { ...factor('Brand awareness', 30, '%', 'explicit'), role: 'controllable', plausible_max: 100 }],
-  risks: [{ label: 'Competitor price cut', provenance: 'inferred' }, { label: 'Key supplier failure', provenance: opts.otherRisk === true ? 'inferred' : 'explicit' },
-    { label: 'Churn spike', provenance: 'inferred' }],
+  risks: [{ label: 'Competitor price cut', provenance: 'ai_proposed' }, { label: 'Key supplier failure', provenance: opts.otherRisk === true ? 'inferred' : 'explicit' },
+    { label: 'Churn spike', provenance: 'ai_proposed' }],
   outcomes: [{ label: 'Monthly churn', provenance: 'inferred' }],
   links: [link('Price', 'Monthly revenue', 'positive'), link('Customers', 'Monthly revenue', 'positive'), link('Brand awareness', 'Customers', 'positive'),
     { ...link('Price', 'Churn spike', 'positive'), ...(opts.userFold === true || opts.otherFold === true ? { provenance: 'explicit' } : {}) },
@@ -148,7 +148,7 @@ const definitionDraft = (): Rec => ({
     sciOption('Open a second line', 'explicit', [sciLevel('Net change in orders per day', 50, 'orders per day')])],
   factors: [{ ...factor('Net change in orders per day', 0, 'orders per day', 'inferred'), role: 'controllable', baseline_known: true }],
   risks: [], outcomes: [],
-  links: [link('Net change in orders per day', 'Orders per day', 'positive', null, { effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })],
+  links: [link('Net change in orders per day', 'Orders per day', 'positive', null, { effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: true })],
   unknowns: [], decision_question: 'How do we reach 120 orders a day?', unknown_concerns: [], statements: [],
 });
 
@@ -168,11 +168,12 @@ const ofKind = (g: Rec, kind: string): Rec[] => (g.nodes as Rec[]).filter((n) =>
 const edge = (g: Rec, from: string, to: string): Rec | undefined =>
   (g.edges as Rec[]).find((e) => e.from === byLabel(g, from).id && e.to === byLabel(g, to).id);
 
-/** Whose the AI declared an entity or link to be (the spec of B's rule): a speaker other/unknown wins; else explicit = the user's. */
+/** Whose the AI declared an entity or link to be (the spec of B's rule): a speaker other/unknown wins; else explicit = the user's,
+ * ai_proposed = Olumi's, and inferred (the drafter's contract: a reformulation of supplied material, or unresolved) = unknown. */
 const declaredWho = (draft: Rec, kind: string, label: string, provenance: unknown, field = 'level'): string => {
   const st = ((draft.statements ?? []) as Rec[]).find((x) => x?.subject?.kind === kind && x?.field === field
     && canonicalLabel(String(x.subject.label ?? '')) === canonicalLabel(label));
-  return st?.speaker === 'other' || st?.speaker === 'unknown' ? st.speaker : provenance === 'explicit' ? 'user' : 'olumi';
+  return st?.speaker === 'other' || st?.speaker === 'unknown' ? st.speaker : provenance === 'explicit' ? 'user' : provenance === 'ai_proposed' ? 'olumi' : 'unknown';
 };
 
 /**
@@ -861,6 +862,156 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(loss.some((l) => String(l.field_path).endsWith('.nonlinear_identity_rejected') && String(l.reason).includes('"Stall visitors" has no figure yet'))).toBe(true);
     expect(differential(draft)).toMatchObject({ mismatches: [] });
     expect(blindness(draft)).toEqual([]);
+  });
+
+  // ⛔ AUTHORSHIP BY THE DRAFTER'S OWN CONTRACT (gap 3 swap, DL 19 Oct; `introducedBy`, runtime/build-model.ts): `explicit` is the
+  // user's, `ai_proposed` Olumi's, `inferred` ("a reformulation of a supplied item, or genuinely unresolved … never ai_proposed by
+  // default") UNKNOWN; a factor level is Olumi's estimate unless the AI declared it known. One row per figure class.
+  it('⛔ AUTHORSHIP (setting): a setting the AI declared `inferred` is of unknown origin, never Olumi\'s', () => {
+    const origin = (provenance: string): string => {
+      const draft = salesDraft(); draft.options[0].interventions[0].provenance = provenance;
+      const { graph } = converted(draft);
+      return settingProvenanceOf(byLabel(graph, 'Double the ad spend').interventions[byLabel(graph, 'Ad spend').id]).origin;
+    };
+    expect(['explicit', 'ai_proposed', 'inferred'].map(origin)).toEqual(['human', 'ai', 'unknown']);
+  });
+
+  it('⛔ AUTHORSHIP (factor level): a level the AI declared known and `inferred` is of unknown origin; a level it did not declare known is Olumi\'s estimate', () => {
+    const origin = (provenance: string, known: boolean, speaker?: 'other' | 'unknown'): string => {
+      const draft = salesDraft(); draft.factors[0] = { ...draft.factors[0], provenance, baseline_known: known };
+      if (speaker !== undefined) draft.statements = [statement('synthetic', 'Ad spend', speaker, 2000, '£')];
+      return valueProvenanceOf(byLabel(converted(draft).graph, 'Ad spend').observed_state).origin;
+    };
+    expect([origin('explicit', true), origin('ai_proposed', true), origin('inferred', true)]).toEqual(['human', 'ai', 'unknown']);
+    // The item's introducer is not the level's author: a factor the user named, with a level the AI did not declare known.
+    expect([origin('explicit', false), origin('inferred', false)]).toEqual(['ai', 'ai']);
+    // A declared speaker of another person, or an unknown one, still wins over "not declared known".
+    expect([origin('explicit', false, 'other'), origin('ai_proposed', false, 'unknown')]).toEqual(['unknown', 'unknown']);
+  });
+
+  it('⛔ AUTHORSHIP (goal): today\'s level and the target the AI declared `inferred` are of unknown origin, listed where GraphV3 cannot hold it', () => {
+    const draft = salesDraft(); draft.goal = { ...draft.goal, provenance: 'inferred', baseline_provenance: 'inferred' };
+    const { graph, blocked_schema } = converted(draft);
+    expect(valueProvenanceOf(ofKind(graph, 'goal')[0]!.observed_state).origin).toBe('unknown');
+    expect(blocked_schema).toContainEqual({ field_path: 'nodes[monthly_pre_orders].goal_threshold_raw', declared: 'unknown', missing: 'target_origin' });
+    // Contrast: declared the user's.
+    const own = converted(salesDraft());
+    expect(valueProvenanceOf(ofKind(own.graph, 'goal')[0]!.observed_state).origin).toBe('human');
+    expect(own.blocked_schema.filter((b) => String(b.field_path).startsWith('nodes[monthly_pre_orders]'))).toEqual([]);
+  });
+
+  it('⛔ AUTHORSHIP (link): a link and a size the AI declared `inferred` are not Olumi\'s: the size keeps the placeholder, said, and both origins are listed', () => {
+    const draft = salesDraft(); draft.links[0] = { ...draft.links[0], provenance: 'inferred', effect_provenance: 'inferred' };
+    const { graph, loss, blocked_schema } = converted(draft);
+    expect(blocked_schema).toEqual(expect.arrayContaining([
+      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_origin' },
+      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_size_origin' }]));
+    expect(loss.some((l) => String(l.field_path) === 'edges[ad_spend::monthly_pre_orders].link_size_not_used')).toBe(true);
+    // Contrast: declared Olumi's, the size is A's and nothing is listed.
+    const olumi = converted(salesDraft());
+    expect(olumi.blocked_schema.filter((b) => String(b.field_path).startsWith('edges['))).toEqual([]);
+    expect(edge(olumi.graph, 'Ad spend', 'Monthly pre-orders')!.strength.mean).not.toBe(edge(graph, 'Ad spend', 'Monthly pre-orders')!.strength.mean);
+  });
+
+  it('⛔ AUTHORSHIP (risk): an unsized risk the AI declared `inferred` is not Olumi\'s suggestion, so it stays in the Run', () => {
+    const draft = scienceDraft(); draft.risks[0] = { ...draft.risks[0], provenance: 'inferred' };
+    expect(byLabel(converted(draft).graph, 'Competitor price cut').analysis_participation).toBeUndefined();
+    expect(byLabel(converted(scienceDraft()).graph, 'Competitor price cut').analysis_participation).toBe('retained_excluded');
+  });
+
+  // ⭐ GAP 3 RULING (c) (DL 19 Oct): a "stay at or below" goal's declared level today is carried on A's science, with no brief read
+  // (A reads the held ceiling only from the brief: 13 of 13 such stored drafts had no level on B).
+  const ceilingDraft = (goal: Rec = {}): Rec => ({ ...salesDraft(), goal: { ...salesDraft().goal, operator: '<=', value: 300, baseline_value: 400, ...goal } });
+  it('⭐ GOAL LEVEL (ceiling): a "<=" goal keeps the level the AI declared known and the user\'s, on A\'s cap and normalisation', () => {
+    const draft = ceilingDraft();
+    // A with no brief does not admit it (it reads the ceiling from the brief); B carries it.
+    expect(ofKind(aOnDraftedNames(draft), 'goal')[0]!.observed_state).toBeUndefined();
+    const { graph, loss } = converted(draft);
+    const goal = ofKind(graph, 'goal')[0]!;
+    const cap = goal.goal_threshold_cap as number;
+    expect(goal).toMatchObject({ goal_direction: '<=', goal_threshold_raw: 300 });
+    expect(goal.observed_state).toEqual({ value: 400 / cap, baseline: 400 / cap, unit: 'orders', raw_value: 400, cap, source: 'brief_extraction' });
+    expect(valueProvenanceOf(goal.observed_state).origin).toBe('human');
+    expect(loss.filter((l) => String(l.field_path).startsWith(`nodes[${goal.id}].observed_state`))).toEqual([]);
+    // Contrast: a ">=" goal's level is A's, as before.
+    expect(ofKind(converted(salesDraft()).graph, 'goal')[0]!.observed_state).toEqual(
+      expect.objectContaining({ raw_value: 400, source: 'brief_extraction' }));
+    // Who: a declared unknown speaker of the level wins, so it is carried with no author.
+    const unknown = ceilingDraft(); unknown.statements = [said('synthetic', { kind: 'goal', label: 'Monthly pre-orders' }, 'level', 'point', { value: 400 }, 'unknown')];
+    expect(valueProvenanceOf(ofKind(converted(unknown).graph, 'goal')[0]!.observed_state).origin).toBe('unknown');
+  });
+
+  it('GOAL LEVEL (ceiling): A\'s science still decides — a level already at the ceiling, an estimate, or a strict "<" is not carried, and said', () => {
+    const notCarried = (goal: Rec): boolean => {
+      const { graph, loss } = converted(ceilingDraft(goal));
+      const g = ofKind(graph, 'goal')[0]!;
+      return g.observed_state === undefined && loss.some((l) => String(l.field_path).startsWith(`nodes[${g.id}].observed_state`));
+    };
+    expect(notCarried({ baseline_value: 250 })).toBe(true);
+    // On a level that fits the target's own scale (350 of a 375 cap), only its author decides: an estimate is withheld, as A
+    // withholds a ">=" goal's estimated level.
+    expect(notCarried({ baseline_value: 350, baseline_provenance: 'ai_proposed' })).toBe(true);
+    expect(notCarried({ baseline_value: 350, baseline_provenance: 'inferred' })).toBe(true);
+    expect(notCarried({ baseline_value: 350, baseline_known: false })).toBe(true);
+    expect(notCarried({ operator: '<' })).toBe(true);
+    expect([notCarried({}), notCarried({ baseline_value: 350 })]).toEqual([false, false]);
+  });
+
+  // ⭐ THE DRAFT'S STATEMENTS ARE CARRIED, AS DATA (DL 19 Oct, gap 3 loss table: the bridge recorded 828 statements in 141 stored drafts
+  // that path B did not). Each declared statement whose quote the user's words hold verbatim is recorded on its declared subject, as
+  // construction records them; C5's GAP 1 claims use the same writer and subject keys.
+  const SALES = ['We want 600 pre-orders a month within six months; we get 400 now.', 'We spend £2,000 a month on ads.', AD_QUOTE,
+    'Our agency reckons doubling it means £3,500 to £4,500 a month.', 'A rival may cut prices.'];
+  const SALES_WORDS = SALES.join(' ');
+  const AT = '2026-10-19T22:00:00.000Z';
+  const said = (quote: string, subject: Rec, field: string, form: string, figures: Rec, speaker: string | null): Rec => ({ quote,
+    subject: { to_label: null, factor_label: null, ...subject }, field, form, value: null, low: null, high: null, unit: null, qualifier: null,
+    conditions: null, speaker, ...figures });
+  const carriedDraft = (): Rec => ({ ...salesDraft(),
+    risks: [{ label: 'Rival price cut', provenance: 'explicit', unit: null, plausible_max: null, already_true_evidence: null }],
+    statements: [
+      said(SALES[0]!, { kind: 'goal', label: 'Monthly pre-orders' }, 'level', 'point', { value: 400, unit: 'orders' }, 'user'),
+      said(SALES[0]!, { kind: 'goal', label: 'Monthly pre-orders' }, 'target', 'lower_bound', { value: 600, unit: 'orders' }, 'user'),
+      said(SALES[1]!, { kind: 'factor', label: 'Ad spend' }, 'level', 'point', { value: 2000, unit: '£' }, 'user'),
+      said(SALES[3]!, { kind: 'option', label: 'Double the ad spend', factor_label: 'Ad spend' }, 'level', 'range', { low: 3500, high: 4500, unit: '£' }, 'other'),
+      said(AD_QUOTE, { kind: 'link', label: 'Ad spend', to_label: 'Monthly pre-orders' }, 'effect', 'point', { value: 1, unit: 'orders' }, 'user'),
+      said(SALES[4]!, { kind: 'risk', label: 'Rival price cut' }, 'level', 'describes', {}, null),
+      // Not recorded: a risk's holds-now reading (its card's), words the user did not write, and a subject not in the model.
+      said(SALES[4]!, { kind: 'risk', label: 'Rival price cut' }, 'holds_now', 'holds_now', {}, 'user'),
+      said('We get 450 now.', { kind: 'goal', label: 'Monthly pre-orders' }, 'level', 'point', { value: 450, unit: 'orders' }, 'user'),
+      said(SALES[1]!, { kind: 'factor', label: 'Shelf space' }, 'level', 'point', { value: 3, unit: 'shelves' }, 'user'),
+    ] });
+  const record = (key: string, field: string, statements: Rec[]): Rec => ({ subject_key: key, field, recorded_at: AT, attest: { recorded_by: 'construction' },
+    statements: statements.map((st) => ({ source: SALES_WORDS, reading: 'olumi', subject: { quantity: key, node_id: key.split('|')[1], ...(key.split('|')[3] ? { option_id: key.split('|')[3] } : {}) }, ...st })) });
+
+  it('⭐ STATEMENTS CARRIED (gap 3): each declared statement the user\'s words hold is recorded on its subject, as construction records it', () => {
+    const out = candidateToGraph(carriedDraft(), { words: SALES_WORDS, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    const g = out.graph as Rec;
+    expect(byLabel(g, 'Monthly pre-orders').user_statements).toEqual([
+      record('goal|monthly_pre_orders|||level', 'level', [{ speaker: 'user', quote: SALES[0], form: 'point', low: 400, high: 400, unit: 'orders' }]),
+      record('goal|monthly_pre_orders|||target', 'target', [{ speaker: 'user', quote: SALES[0], form: 'lower_bound', low: 600, unit: 'orders' }])]);
+    expect(byLabel(g, 'Ad spend').user_statements).toEqual([
+      record('factor|ad_spend|||level', 'level', [{ speaker: 'user', quote: SALES[1], form: 'point', low: 2000, high: 2000, unit: '£' }]),
+      // Another person's range: their words, kept whole on the option's setting, from an unclear source (no name to record), listed.
+      record('factor|ad_spend||double_the_ad_spend|level', 'level', [{ said_by: 'unknown', quote: SALES[3], form: 'range', low: 3500, high: 4500, unit: '£' }]),
+      record('link|ad_spend|monthly_pre_orders||effect', 'effect', [{ speaker: 'user', quote: AD_QUOTE, form: 'point', low: 1, high: 1, unit: 'orders' }])]);
+    expect(byLabel(g, 'Rival price cut').user_statements).toEqual([
+      record('risk|rival_price_cut|||level', 'level', [{ said_by: 'unknown', quote: SALES[4], form: 'describes' }])]);
+    expect(out.blocked_schema).toContainEqual({ field_path: 'nodes[ad_spend].user_statements', declared: 'other', missing: 'speaker_name' });
+    // Nothing else is recorded: 6 of the 9 declared statements.
+    expect((g.nodes as Rec[]).flatMap((n) => (n.user_statements ?? []) as Rec[]).flatMap((r) => r.statements as Rec[])).toHaveLength(6);
+    expect(GraphV3.safeParse(g).success).toBe(true);
+  });
+
+  it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
+    const bare = converted(carriedDraft());
+    expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);
+    const out = candidateToGraph(carriedDraft(), { words: SALES_WORDS, recorded_at: AT });
+    if ('refused' in out) throw new Error(out.refused);
+    const strip = (g: Rec): Rec => ({ ...g, nodes: (g.nodes as Rec[]).map(({ user_statements: _s, ...n }) => n) });
+    expect(strip(out.graph as Rec)).toEqual(bare.graph);
+    expect(out.loss).toEqual(bare.loss);
   });
 
   it('⛔ LABEL-BLIND (#3464 R2): B\'s graph is the same under any names, for every synthetic draft', () => {
