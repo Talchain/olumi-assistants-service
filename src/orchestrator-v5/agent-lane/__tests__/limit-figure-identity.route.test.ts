@@ -234,3 +234,53 @@ describe('R4 independent limit denominator class',()=>{
   await press(targetTurn(text,singleRate(unit),'Team capacity',2,'<=',unit),[2]);
  });
 });
+
+/** Codex R5 on #3433 @ab82694d (held-out, adopted verbatim, minus its console capture): the same full-unit rows at the limit door. */
+describe("R5 independent limit full-unit writes",()=>{
+ it.each([["tickets per account", "2 tickets per customer account", true], ["tickets per customer", "2 tickets per customer account", false], ["tickets per engineer", "2 tickets per engineer team", false], ["tickets", "2 ticket buyers", false], ["tickets", "2 support tickets", true], ["engineers", "2 engineer teams", false], ["engineers", "2 tickets", false], ["hires", "2 tickets", false], ["hires", "2 developers", true], ["engineers per week", "2 tickets per week", false], ["hires per week", "2 developers per week", true], ["hires per week", "2 developers", false], ["hires", "2 developers per week", false], ["tickets per week", "2 tickets per week per month", false], ["tickets per week", "2 tickets per month per week", false], ["tickets per engineer", "2 tickets per engineer per customer", false], ["tickets per week", "2 support tickets per week per month", false], ["tickets per week", "2 tickets per week", true]]) ("%s <- %s; expected write %s",async(unit,tail,write)=>{
+ const {w,turn,r,made}=await targetTurn("The team capacity limit should be at most "+tail+".",singleRate(unit),"Team capacity",2,"<=",unit);
+ let pressed:Rec|undefined;
+ if(made?.ok===true){const chip=chipFor(r,idOf(r,"propose_limit_change"));pressed=await turn({message:chip.message,source:"chip_click",chip:{id:chip.id},agent_session_id:r._agent.session_id});}
+ expect(limitRows(w.read()).map(c=>c.value)).toEqual([write?2:3]);
+ if(write)expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);
+ });
+});
+
+/**
+ * THE ASK AT THE LIMIT DOOR, AS THE AGENT RECEIVES IT (Codex R5 on #3433: "limit candidate naming remains unproved at code
+ * level"). The rows read the Agent's NEXT model input (the request the route sends after `propose_limit_change` ran) and find,
+ * by identity, the refusal it reads: the quantity the user's words gave the figure to (`written_for`) and the instruction to ask
+ * naming both, quoting them. The words the Agent then writes are the model's. 0 provider calls.
+ */
+describe('the ask the Agent is given at the limit door names both quantities',()=>{
+ const refusalTheAgentRead=():Rec=>{
+  const sent=vi.mocked(fetch).mock.calls.map(([,init])=>JSON.parse(String((init as {body?:string}|undefined)?.body??'{}')) as Rec);
+  const outputs=sent.flatMap(req=>((req.input??[]) as Rec[]).filter(i=>i.type==='function_call_output').map(i=>JSON.parse(String(i.output)) as Rec));
+  const read=outputs.filter(o=>o.refusal==='figure_not_stated');
+  expect(read,JSON.stringify(outputs).slice(0,3000)).toHaveLength(1);
+  return read[0]!;
+ };
+ it('a figure the user gave to another limit: the Agent reads that limit\'s name and the instruction to ask about both',async()=>{
+  await refuse(targetTurn('The shelf capacity limit should be at most 2 ovens.',standard,'Oven capacity',2));
+  const read=refusalTheAgentRead();
+  expect(read.written_for).toEqual(['Shelf capacity']);
+  expect(read.detail).toBe('Nothing was prepared: the user wrote this figure, but their words give it to another quantity (named in '
+   +'written_for), write it in another unit, or turn it down for the limit on "Oven capacity". Ask the user which they mean, '
+   +'naming this limit and, when written_for names one, that quantity too, and quote their words; never just refuse.');
+ });
+ it('a unit no limit holds: the Agent reads this limit alone, still to be asked about, never refused',async()=>{
+  await refuse(targetTurn('The team capacity limit should be at most 2 tickets per week per month.',singleRate('tickets per week'),'Team capacity',2,'<=','tickets per week'));
+  const read=refusalTheAgentRead();
+  expect(read.written_for).toEqual([]);
+  expect(read.detail).toBe('Nothing was prepared: the user wrote this figure, but their words give it to another quantity (named in '
+   +'written_for), write it in another unit, or turn it down for the limit on "Team capacity". Ask the user which they mean, '
+   +'naming this limit and, when written_for names one, that quantity too, and quote their words; never just refuse.');
+ });
+ it('a figure whose limit the user\'s words leave open: the Agent reads that the user wrote it, and to ask whether it is this limit',async()=>{
+  await refuse(targetTurn('Make it at most 2 ovens.',standard,'Oven capacity',2));
+  const read=refusalTheAgentRead();
+  expect(read).not.toHaveProperty('written_for');
+  expect(read.detail).toBe('Nothing was prepared: the user wrote this figure, but their words do not say it is the limit on "Oven capacity" '
+   +'rather than another. Ask whether it is, quoting their words; never offer a figure of your own as theirs.');
+ });
+});

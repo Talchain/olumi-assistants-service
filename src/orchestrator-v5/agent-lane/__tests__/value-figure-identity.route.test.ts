@@ -167,3 +167,12 @@ describe('the ask the Agent is given names both quantities',()=>{
   expect(sent.some(b=>b.includes('function_call_output'))).toBe(true);
  });
 });
+
+/** Codex R5 on #3433 @ab82694d (held-out, adopted verbatim): each unit part by its head, a headcount unit counts only another headcount ("70 tickets" are no hires; "70 engineer teams" no engineers), and two periods are no unstated unit. */
+describe("R5 independent value full-unit writes",()=>{
+ it.each([["tickets per account", "70 tickets per customer account", true], ["tickets per customer", "70 tickets per customer account", false], ["tickets per engineer", "70 tickets per engineer team", false], ["tickets", "70 ticket buyers", false], ["tickets", "70 support tickets", true], ["engineers", "70 engineer teams", false], ["engineers", "70 tickets", false], ["hires", "70 tickets", false], ["hires", "70 developers", true], ["engineers per week", "70 tickets per week", false], ["hires per week", "70 developers per week", true], ["hires per week", "70 developers", false], ["hires", "70 developers per week", false], ["tickets per week", "70 tickets per week per month", false], ["tickets per week", "70 tickets per month per week", false], ["tickets per engineer", "70 tickets per engineer per customer", false], ["tickets per week", "70 support tickets per week per month", false], ["tickets per week", "70 tickets per week", true]]) ("%s <- %s; expected write %s",async(unit,tail,write)=>{
+ const {saved,pressed}=await valueTurn("Correction: existing team capacity is "+tail+".","Existing team capacity",unit,"Additional specialist capacity",unit);
+ expect(saved.raw_value).toBe(write?70:80);
+ if(write){expect(saved.unit).toBe(unit);expect(authorised(pressed!)).toEqual([expect.objectContaining({ok:true,mutated:true})]);}
+ });
+});

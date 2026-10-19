@@ -86,6 +86,10 @@ describe('the full written unit: the same sentence names the quantity, and only 
     ['BASE: a headcount unit counts the people its phrase names', 'The team capacity limit should be at most 2 developers.', 'hires', true],
     ['FLIP the same phrase into a unit that counts a thing', 'The team capacity limit should be at most 2 developers.', 'tickets', false],
     ['FLIP the same people, as a rate, into a headcount', 'The team capacity limit should be at most 2 developers per week.', 'hires', false],
+    // ... but only a head that is itself a headcount: things are never people (Codex R5 on #3433).
+    ['FLIP a headcount unit given a thing', 'The team capacity limit should be at most 2 tickets.', 'hires', false],
+    ['FLIP a headcount unit given a group of them', 'The team capacity limit should be at most 2 engineer teams.', 'engineers', false],
+    ['BASE: a headcount unit given another headcount', 'The team capacity limit should be at most 2 engineers.', 'hires', true],
     // Each part by its HEAD noun, never a word inside it; a unit that states two periods is no unstated unit (Codex R4 on #3433).
     ['BASE: a modifier before the denominator\'s head', 'The team capacity limit should be at most £2 per senior engineer.', '£ per engineer', true],
     ['FLIP the denominator\'s word is only its modifier', 'The team capacity limit should be at most £2 per engineer team.', '£ per engineer', false],

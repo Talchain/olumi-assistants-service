@@ -12172,8 +12172,21 @@ export function createAgentCapabilities(
       }
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (interpretation === null && figureIsThisQuantitys(ctx.user_text, value, unit, limitScopeIn(g, node.label),
-        otherLimitsThatCouldHold(g, node.id, unit)).verdict !== 'this') {
+      const identity = interpretation === null
+        ? figureIsThisQuantitys(ctx.user_text, value, unit, limitScopeIn(g, node.label), otherLimitsThatCouldHold(g, node.id, unit)) : null;
+      // The user wrote it, but for another quantity, in another unit, or turned it down: the ask names both (the value door's).
+      if (identity?.verdict === 'not_this') {
+        return { ok: false, mutated: false, refusal: 'figure_not_stated', written_for: identity.givenTo,
+          detail: 'Nothing was prepared: the user wrote this figure, but their words give it to another quantity (named in '
+            + `written_for), write it in another unit, or turn it down for the limit on "${node.label}". Ask the user which they mean, `
+            + 'naming this limit and, when written_for names one, that quantity too, and quote their words; never just refuse.' };
+      }
+      if (identity?.verdict === 'unclear') {
+        return { ok: false, mutated: false, refusal: 'figure_not_stated',
+          detail: `Nothing was prepared: the user wrote this figure, but their words do not say it is the limit on "${node.label}" `
+            + 'rather than another. Ask whether it is, quoting their words; never offer a figure of your own as theirs.' };
+      }
+      if (identity !== null && identity.verdict !== 'this') {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

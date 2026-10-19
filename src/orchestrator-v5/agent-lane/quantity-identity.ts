@@ -13,8 +13,8 @@
  * - **Its unit.** The unit written after the figure, read whole by the shared unit reader (`statedTailReading`), must be this
  *   quantity's (`readUnitParts`): the same kind, the same counted thing and the same denominator, each by its HEAD noun, and for
  *   a count the same period (2 engineers is a headcount, never 2 engineers a week). Money or a percentage that names no period
- *   keeps the quantity's. A headcount unit counts whatever its phrase names. A unit that cannot be read (two periods) is no
- *   quantity's, never an unstated one.
+ *   keeps the quantity's. A headcount unit also counts another headcount ("developers" for hires), never a thing. A unit
+ *   that cannot be read (two periods) is no quantity's, never an unstated one.
  * - **Names.** Its phrase runs from a clause break or conjunction to the next; the quantity's own unit words after the figure
  *   name nothing. It names a quantity by the label's whole phrase (longest labels first, symbols included: "%", "£"), or by a
  *   word only that label has.
@@ -67,11 +67,13 @@ function writtenInItsUnit(stated: UnitParts | null, own: UnitParts | null, share
     : (stated.period !== null && stated.period !== own.period) || (stated.per !== null && !perFits)) return false;
   if (stated.code !== null && own.code !== null && stated.code !== own.code) return false;
   // The counted thing by its head noun ("70 support tickets" counts tickets). A headcount unit (people, hires, FTE, seats:
-  // `unitFamilyOf` 'count') counts whatever its phrase names, as the ONE reader reads it (`amountTheUserWrote`): "3 developers"
-  // are 3 hires. A share's base is not compared: the reader keeps one word of it ("80% of MY time" against "% of founder
-  // working time").
+  // `unitFamilyOf` 'count') also counts a head that is itself a headcount ("3 developers" are 3 hires), never any other thing
+  // ("70 tickets" are no hires; "70 engineer TEAMS" no engineers: Codex R5 on #3433). A share's base is not compared: the
+  // reader keeps one word of it ("80% of MY time" against "% of founder working time").
   const counted = own.noun === null ? undefined : headOf(own.noun);
-  return counted === undefined || unitFamilyOf(counted) === 'count' || (stated.noun !== null && headOf(stated.noun) === counted);
+  const said = stated.noun === null ? undefined : headOf(stated.noun);
+  return counted === undefined || said === counted
+    || (said !== undefined && unitFamilyOf(counted) === 'count' && unitFamilyOf(said) === 'count');
 }
 
 /**
