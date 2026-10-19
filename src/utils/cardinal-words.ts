@@ -112,48 +112,20 @@ const TOKEN_ALTERNATION = alternation([
   ...Object.keys(CARDINAL_SCALE_MULTIPLIERS),
 ]);
 
+/** The words that multiply a group: the compounder and every scale word. */
+const MULTIPLIER_ALTERNATION = alternation([CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)]);
+
 /**
- * The phrase grammar, as a SOURCE string with NO capture groups so one
- * pattern can embed it twice under different named wrappers (the same
- * constraint that shaped `MAGNITUDE_SUFFIX_ANON`).
- *
- * Shape: a phrase STARTS with a small cardinal (one…ninety) — never with
- * "hundred", a scale word, or "and", so "from thousand to…" and a stray
- * article cannot open an amount — and continues with hundred/scale/small
- * tokens joined by whitespace, hyphens, or a bridging "and". The repetition
- * is greedy, so "two hundred and fifty thousand" is consumed whole.
- *
- * ⚠ CORRECTED CLAIM (adversarial review F1, executed at `42fe683a`) — this
- * comment used to say an out-of-vocabulary continuation "simply ends the
- * phrase … no fragment is ever committed as the amount", AND THAT WAS FALSE
- * AS A GENERAL CLAIM. It held for from-side truncation and for shapes the
- * direction refusal happened to catch — the shapes the first cut's own pins
- * sampled — and failed exactly where a goal word anchored and the fragment
- * was ≥ the baseline: "from one to a target of two and a half million by
- * December 2026" committed 2 (truth 2,500,000) at explicit/0.95, because
- * nothing after the target is mandatory, so nothing made the surrounding
- * pattern fail. The repair is `CARDINAL_FRACTION_CONTINUATION` below, which
- * the embedding amount grammar appends INSIDE its capture: a fraction-shaped
- * tail is consumed WITH the phrase and `parseCardinalAmount` then refuses the
- * whole capture by vocabulary. The refusal fires after the regex has
- * committed, so backtracking cannot re-split "twenty two and a half" into
- * "twenty" + a passing guard — the mistake a positional lookahead guard would
- * have made.
- *
- * WHAT IS ACTUALLY GUARANTEED, stated narrowly: a continuation in the
- * FRACTION class (below) refuses the amount; an in-vocabulary "and" is a
- * compound and parses whole; any OTHER continuation ("and celebrate the win")
- * ends the phrase and the committed value is the complete compound the user
- * spelled before it. The DIGIT grammar's twin behaviour ("2 and a half
- * million" → 2) is pre-existing, out of this module's reach, and disclosed in
- * the PR rather than silently matched.
- *
- * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as
- * it does for the magnitude alternation.
+ * ONE number in words: a small cardinal, then hundred/scale/small tokens joined by whitespace or hyphens. "and" joins
+ * ONLY right after "hundred" or a scale word ("two hundred AND fifty", "one thousand AND five"); after a small cardinal
+ * it is a connector between two numbers, never part of one ("two and three"). It never starts right after a
+ * multiplier word (the fragment "one" of "a hundred and one") or next to "point" ("seven point five" is no 7 and no 5).
  */
-export const CARDINAL_AMOUNT_SOURCE =
+const NUMBER_CORE =
   `(?:${SMALL_ALTERNATION})` +
-  `(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*`;
+  `(?:(?:(?<=\\b(?:${MULTIPLIER_ALTERNATION}))\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*` +
+  `(?![\\s-]+(?:(?:${TOKEN_ALTERNATION})[\\s-]+)*point\\b)`;
+const ONE_NUMBER = `(?<!\\b(?:${MULTIPLIER_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint\\s+)${NUMBER_CORE}`;
 
 /**
  * The fraction words whose arrival after a cardinal phrase means the phrase
@@ -188,6 +160,27 @@ export const CARDINAL_FRACTION_CONTINUATION =
   `|[\\s-]+(?:${alternation([...CARDINAL_FRACTION_WORDS])})\\b)?`;
 
 /**
+ * The phrase grammar, as a SOURCE string with NO capture groups so one pattern can embed it twice under different named
+ * wrappers (the same constraint that shaped `MAGNITUDE_SUFFIX_ANON`).
+ *
+ * Shape: ONE number (above), or a RANGE written in words, consumed WHOLE so no end, sum or fragment of it can be read as
+ * one figure: "between X and Y", "X to Y", "X or Y". `parseCardinalAmount` refuses a range capture (its connector is
+ * outside the vocabulary); `cardinalReadings` reads its two ends. The repetition is greedy, so "two hundred and fifty
+ * thousand" is consumed whole.
+ *
+ * ⚠ CORRECTED CLAIM (adversarial review F1, executed at `42fe683a`): a fraction-shaped tail ("from one to a target of
+ * two and a half million") once committed the fragment 2. The repair is `CARDINAL_FRACTION_CONTINUATION` below, which
+ * the embedding amount grammar appends INSIDE its capture: the tail is consumed WITH the phrase and the parser refuses
+ * the whole capture by vocabulary, so backtracking cannot re-split "twenty two and a half" into "twenty" + a passing
+ * guard. The digit grammar's twin ("2 and a half million" → 2) is out of this module's reach.
+ *
+ * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as it does for the magnitude alternation.
+ */
+export const CARDINAL_AMOUNT_SOURCE =
+  `(?:between\\s+${NUMBER_CORE}${CARDINAL_FRACTION_CONTINUATION}\\s+and\\s+${NUMBER_CORE}`
+  + `|${ONE_NUMBER}(?:${CARDINAL_FRACTION_CONTINUATION}\\s+(?:to|or)\\s+${NUMBER_CORE})?)`;
+
+/**
  * Fold a matched cardinal phrase to its number, or `null` for anything the
  * grammar above did not guarantee — the parser re-checks every token rather
  * than trusting its caller (a guard whose input it cannot see is trap 13's
@@ -201,18 +194,19 @@ export const CARDINAL_FRACTION_CONTINUATION =
  *
  * ⛔ A RANGE IS NEVER SUMMED (8b on #3438: "between two and three" read 5). Only
  * an English compound accumulates: a small cardinal opens a group, follows
- * `hundred` or a scale word, or is a unit after a ten ("twenty five"); `hundred`
- * compounds a group once; scale words only fall ("one million two hundred
- * thousand"). Anything else is two numbers, not one ("two and three", "two
- * hundred and three hundred", "two thousand and three thousand"), and the
- * phrase refuses: a range gives its two ends or nothing, never their sum.
+ * `hundred` or a scale word, or is a unit after a ten ("twenty five"); "and"
+ * joins only right after `hundred` or a scale word, into a smaller part;
+ * `hundred` compounds a group once; scale words only fall ("one million two
+ * hundred thousand"). Anything else is two numbers, not one ("two and three",
+ * "twenty and one hundred", "two hundred and three hundred"), and the phrase
+ * refuses. A range's two ends are read by `cardinalReadings`.
  */
 export function parseCardinalAmount(phrase: string | undefined): number | null {
   if (phrase === undefined) return null;
   const tokens = phrase
     .toLowerCase()
     .split(/[\s-]+/)
-    .filter((token) => token.length > 0 && token !== "and");
+    .filter((token) => token.length > 0);
   if (tokens.length === 0) return null;
 
   let total = 0;
@@ -220,7 +214,13 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
   let last: "start" | "ten" | "small" | "hundred" | "scale" = "start";
   let hundredSeen = false;
   let lastScale = Infinity;
-  for (const token of tokens) {
+  for (const [i, token] of tokens.entries()) {
+    // "and" joins only right after "hundred" or a scale word, into a smaller part
+    // ("two hundred and fifty"); anywhere else it joins two numbers, never one.
+    if (token === "and") {
+      if ((last !== "hundred" && last !== "scale") || CARDINAL_WORD_VALUES[tokens[i + 1] ?? ""] === undefined) return null;
+      continue;
+    }
     const small = CARDINAL_WORD_VALUES[token];
     if (small !== undefined) {
       // A small cardinal opens a group, follows "hundred" or a scale word, or is
@@ -251,4 +251,70 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
   }
   const value = total + group;
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** One figure a capture says: its value, where the capture starts, and the capture as written. */
+export interface CardinalReading {
+  readonly magnitude: number;
+  readonly index: number;
+  readonly matchedText: string;
+}
+
+const isMultiplier = (w: string): boolean => w === CARDINAL_HUNDRED_WORD || CARDINAL_SCALE_MULTIPLIERS[w] !== undefined;
+const tokensOf = (s: string): string[] => s.toLowerCase().split(/[\s-]+/).filter((w) => w.length > 0);
+
+/**
+ * A range's two ends, with the scale the high end closes on given to a low end that names none, where that makes a range
+ * ("two to three million": 2,000,000 and 3,000,000; "between one and two hundred": 100 and 200; but "twenty to one hundred":
+ * 20 and 100). A low end with its own scale keeps it ("between two hundred and three thousand": 200 and 3,000). Null when an
+ * end is unreadable, when the high end is a compound whose scale a bare low end could share in two ways ("twenty and two
+ * hundred and fifty thousand"), or when low is not below high.
+ */
+function endsSharingScale(low: string, high: string, valueOf: (phrase: string) => number | null): readonly [number, number] | null {
+  const lowValue = valueOf(low);
+  const highValue = valueOf(high);
+  if (lowValue === null || highValue === null) return null;
+  const highTokens = tokensOf(high);
+  let k = highTokens.length;
+  while (k > 0 && isMultiplier(highTokens[k - 1]!)) k -= 1;
+  if (!tokensOf(low).some(isMultiplier) && k < highTokens.length) {
+    if (highTokens.slice(0, k).some((w) => isMultiplier(w) || w === "and")) return null;
+    const scale = highTokens.slice(k).reduce((m, w) => m * (w === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[w]!), 1);
+    // A shared scale makes a range ("two to three thousand"); where it would not, the low end is as written ("twenty to
+    // one hundred": 20, never 2,000).
+    if (lowValue * scale < highValue) return [lowValue * scale, highValue];
+  }
+  return lowValue < highValue ? [lowValue, highValue] : null;
+}
+
+/**
+ * ⭐ THE ONE READING OF A NUMBER-WORDS CAPTURE (DL-3: the range class; Codex R1 on #3442). What a `CARDINAL_AMOUNT_SOURCE`
+ * capture says, as figures:
+ *  · ONE number → its value (`valueOf`; by default `parseCardinalAmount`), or nothing.
+ *  · A RANGE ("between X and Y", "X to Y", "X or Y") → its two ends (`endsSharingScale`), each carrying the WHOLE capture as
+ *    written, so the unit after the range is read for both; or nothing. "between X and Y" splits at the one "and" that leaves
+ *    two readable ends, low below high ("between one hundred and fifty and two hundred": 150 and 200); two such splits, none.
+ * Never a sum of the ends, a glue of them, or one end alone.
+ */
+export function cardinalReadings(
+  matched: string,
+  index: number,
+  valueOf: (phrase: string) => number | null = parseCardinalAmount,
+): readonly CardinalReading[] {
+  const words = matched.trim().split(/\s+/);
+  const between = words[0]?.toLowerCase() === "between";
+  const body = between ? words.slice(1) : words;
+  const connectors = between ? ["and"] : ["to", "or"];
+  const splits = body.flatMap((w, i) => (i > 0 && i < body.length - 1 && connectors.includes(w.toLowerCase()) ? [i] : []));
+  if (!between && splits.length === 0) {
+    const value = valueOf(matched);
+    return value === null ? [] : [{ magnitude: value, index, matchedText: matched }];
+  }
+  const readings = splits.flatMap((i) => {
+    const ends = endsSharingScale(body.slice(0, i).join(" "), body.slice(i + 1).join(" "), valueOf);
+    return ends === null ? [] : [ends];
+  });
+  if (readings.length !== 1) return [];
+  const [low, high] = readings[0]!;
+  return [{ magnitude: low, index, matchedText: matched }, { magnitude: high, index, matchedText: matched }];
 }

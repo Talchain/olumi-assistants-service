@@ -19,6 +19,7 @@ import {
   CARDINAL_HUNDRED_WORD,
   CARDINAL_SCALE_MULTIPLIERS,
   CARDINAL_WORD_VALUES,
+  cardinalReadings,
   parseCardinalAmount,
 } from "../cardinal-words.js";
 import { MAGNITUDE_MULTIPLIERS } from "../magnitude-alphabet.js";
@@ -113,6 +114,11 @@ describe("L67 — the hand-written cardinal corpus", () => {
     ["fifteen hundred", 1_500],
     ["one thousand two hundred", 1_200],
     ["two thousand and fifty", 2_050],
+    // Codex R1 on #3442: compounds that must keep reading.
+    ["one hundred twenty", 120],
+    ["twelve hundred", 1_200],
+    ["nineteen hundred and ninety", 1_990],
+    ["one thousand and five hundred", 1_500],
   ];
   for (const [phrase, value] of CORPUS) {
     it(`"${phrase}" → ${value}`, () => {
@@ -159,6 +165,16 @@ describe("L67 — the parser fails closed", () => {
     ["two hundred and three hundred", "a range of hundreds — never 20,300"],
     ["two thousand and three thousand", "a range of thousands — never 5,000"],
     ["three thousand two million", "a scale that rises is a second number"],
+    // Codex R1 on #3442: "and" joins only after "hundred" or a scale word, into a smaller part.
+    ["twenty and one hundred", "a range — never 2,100 (\"and\" after a ten joins two numbers)"],
+    ["twenty twenty-six", "two numbers — never 46"],
+    ["one two three", "three numbers — never 6"],
+    ["a hundred and one", "an article is not a count — never 1, never 100"],
+    ["seven point five", "decimals in words are not folded — never 7, never 5"],
+    ["two or three thousand", "a range — never 2, never 3,000"],
+    ["two to three million", "a range — never 2, never 3,000,000"],
+    ["between two and three", "a range — never 5"],
+    ["one hundred and", "\"and\" with nothing to join"],
   ];
   for (const [phrase, why] of REFUSED) {
     it(`"${phrase}" → null (${why})`, () => {
@@ -168,5 +184,84 @@ describe("L67 — the parser fails closed", () => {
 
   it("case-folds: 'Two Hundred And Fifty Thousand' reads the same as lowercase", () => {
     expect(parseCardinalAmount("Two Hundred And Fifty Thousand")).toBe(250_000);
+  });
+});
+
+/* ===========================================================================
+ * THE RANGE CLASS (DL-3; Codex R1 on #3442): a range written in words gives its two ends, or nothing — never a sum, a
+ * glue of the ends, a fragment, or one end alone. Read through the grammar's own capture and `cardinalReadings`.
+ * ========================================================================= */
+
+const readAll = (text: string): number[] =>
+  [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})`, "gi"))].flatMap((m) => cardinalReadings(m[0], m.index!).map((r) => r.magnitude));
+
+describe("the range class: two ends or nothing", () => {
+  it.each([
+    ["between two and three", "We need between two and three more bakers.", [2, 3]],
+    ["between twenty and one hundred", "Between twenty and one hundred orders arrive late.", [20, 100]],
+    ["between two hundred and three thousand", "Between two hundred and three thousand loaves are sold.", [200, 3_000]],
+    ["between one hundred and fifty and two hundred", "Between one hundred and fifty and two hundred loaves.", [150, 200]],
+    ["two to three million (a shared scale)", "Revenue is two to three million pounds.", [2_000_000, 3_000_000]],
+    ["two or three thousand (a shared scale)", "We sell two or three thousand loaves.", [2_000, 3_000]],
+    ["between twenty and thirty thousand (a shared scale)", "Between twenty and thirty thousand visitors came.", [20_000, 30_000]],
+    ["between one and two hundred (hundred is shared)", "Between one and two hundred orders arrive.", [100, 200]],
+    ["two hundred to three thousand (the low end's own scale)", "From two hundred to three thousand loaves.", [200, 3_000]],
+    ["twenty to one hundred (a shared scale that would make no range)", "We need twenty to one hundred more.", [20, 100]],
+    ["two to three", "We need two to three more bakers.", [2, 3]],
+    ["a hundred and one", "We sold a hundred and one loaves.", []],
+    ["seven point five", "We waited seven point five weeks.", []],
+    ["between twenty and two hundred and fifty thousand (a shared scale read two ways)", "Between twenty and two hundred and fifty thousand.", []],
+    ["between three and two (low not below high)", "Between three and two bakers.", []],
+    ["CONTROL a compound with and", "We sell two hundred and fifty loaves.", [250]],
+    ["CONTROL two numbers in two clauses", "We have two ovens and three mixers.", [2, 3]],
+  ])("%s", (_case, text, expected) => { expect(readAll(text)).toEqual(expected); });
+
+  it("a range's two ends carry the whole capture, so the unit after it is read for both", () => {
+    const [m] = [..."Revenue is two to three million pounds.".matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})`, "gi"))];
+    expect(cardinalReadings(m![0], m!.index!)).toEqual([
+      { magnitude: 2_000_000, index: 11, matchedText: "two to three million" },
+      { magnitude: 3_000_000, index: 11, matchedText: "two to three million" },
+    ]);
+  });
+
+  /**
+   * GENERATED: every pair of ends × every connector × a scale on the high end, on both ends, or none. The reading is exactly
+   * the oracle's two ends or nothing where the oracle says nothing; never any other number.
+   */
+  it("generated: ends × connectors × scales — the two ends, never a sum, a glue or a prefix", () => {
+    const ENDS: ReadonlyArray<readonly [string, number, boolean]> = [
+      ["two", 2, false], ["three", 3, false], ["twenty", 20, false], ["twenty five", 25, false], ["thirty", 30, false],
+      ["one hundred", 100, true], ["two hundred", 200, true], ["two hundred and fifty", 250, true], ["three thousand", 3_000, true],
+    ];
+    const CONNECTORS: ReadonlyArray<(x: string, y: string) => string> = [
+      (x, y) => `between ${x} and ${y}`, (x, y) => `${x} to ${y}`, (x, y) => `${x} or ${y}`,
+    ];
+    const SCALES: ReadonlyArray<readonly [string, number]> = [["", 1], [" thousand", 1_000], [" million", 1_000_000]];
+    const failures: string[] = [];
+    let cases = 0;
+    for (const [lw, lv, lm] of ENDS) for (const [hw, hv, hm] of ENDS) for (const join of CONNECTORS) for (const [sw, sv] of SCALES) {
+      for (const both of [false, true]) {
+        if (sw === "" && both) continue;
+        if (sw !== "" && (hm || (both && lm))) continue; // a scale after a scale is no number
+        const low = both ? lw + sw : lw;
+        const high = hw + sw;
+        const highValue = hv * sv;
+        // The agreed reading: a scale the high end closes on is shared by a bare low end where that makes a range.
+        const highWords = high.split(" ");
+        const closing = highWords.filter((w, i) => i > 0 && ["hundred", "thousand", "million"].includes(w) && highWords.slice(i).every((x) => ["hundred", "thousand", "million"].includes(x)));
+        const shared = closing.reduce((m, w) => m * (w === "hundred" ? 100 : w === "thousand" ? 1_000 : 1_000_000), 1);
+        const lowLiteral = both ? lv * sv : lv;
+        const bare = !both && !lm && shared > 1 && !highWords.slice(0, highWords.length - closing.length).some((w) => w === "and" || ["hundred", "thousand", "million"].includes(w));
+        const oracle = bare && lowLiteral * shared < highValue ? [lowLiteral * shared, highValue]
+          : !both && !lm && shared > 1 && !bare ? []
+          : lowLiteral < highValue ? [lowLiteral, highValue] : [];
+        const text = `We plan ${join(low, high)} units.`;
+        const read = readAll(text);
+        cases += 1;
+        if (JSON.stringify(read) !== JSON.stringify(oracle)) failures.push(`${text} → ${JSON.stringify(read)} (expected ${JSON.stringify(oracle)})`);
+      }
+    }
+    expect(cases).toBeGreaterThan(500);
+    expect(failures).toEqual([]);
   });
 });
