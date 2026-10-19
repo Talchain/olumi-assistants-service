@@ -6,7 +6,12 @@ import { createProposal, type ProposalStore, type ReceiptSummary, type Structure
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { prepareStatementCorrection, statementCorrectionWords, statementBoundTo, userStatementRecord, withUserStatement,
   type StatementCorrectionRequest, type DoorContext } from '../../statement-door/statements.js';
-import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
+import { applyStatementRecordEdit, approvedStatementRecordOf, SET_STATEMENT_RECORD_OP } from '../../goal-target/cohort-forecast-write.js';
+import { RECORD_STATEMENT_OP } from '../../statement-door/write.js';
+import type { PendingAction } from '../../session/pending-action.js';
+import { agentProposalOf, heldChangeLabel, heldChangeName } from '../proposal-object/record.js';
+import { heldCardForReview, heldCardReplaced } from '../proposal-object/still-applies.js';
+import { heldCorrectedSentence, heldLapseSentence } from '../proposal-object/reply.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { verifyStatements } from '../user-statements.js';
@@ -49,18 +54,82 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
 /**
  * ⭐ A CORRECTION RETIRES THE CARDS IT SUPERSEDES (DL-3 19 Oct; verifier joined diagnosis R07/C3, a stale result). An older card the
  * user has not approved that writes a subject this correction corrects was built on the source the correction retires ("30 minutes
- * per night" after the user said it is per block), so it is never offered again, beside or after the correction card. Exact subject
- * paths only (a node, or a link as `from->to`); cards on any other subject, applied or partly applied cards and the correction card
- * itself are untouched.
+ * per night" after the user said it is per block), so it is never offered again, beside or after the correction card. Exact subjects
+ * only (`writtenSubjects`); cards on any other subject, applied or partly applied cards and the correction card itself are untouched.
+ * This is the process's memory, so the same turn cannot approve it; its held carrier is retired by `retireCorrectedHolds`.
  */
 function retireSupersededCards(ctx: AgentToolContext, proposals: ProposalStore, keep: string,
   subjects: readonly { readonly id: string; readonly to_id?: string }[]): void {
-  const paths = new Set(subjects.map(s => (s.to_id === undefined ? s.id : `${s.id}->${s.to_id}`)));
+  const corrected = new Set(subjects.map(subjectIdOf));
   for (const o of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
     const p = o.proposal_id === keep ? undefined : proposals.get(o.proposal_id);
     if (p === undefined || proposals.isApplied(p.proposal_id) || proposals.partialProgressOf(p.proposal_id) !== undefined) continue;
-    if (p.operations.some(op => typeof op.path === 'string' && paths.has(op.path))) proposals.discard(p.proposal_id);
+    if (p.operations.some(op => writtenSubjects(op).some(s => corrected.has(s)))) proposals.discard(p.proposal_id);
   }
+}
+
+/** One subject identity: a node id, or a link as `from->to`. */
+const subjectIdOf = (s: { readonly id: string; readonly to_id?: string }): string => (s.to_id === undefined ? s.id : `${s.id}->${s.to_id}`);
+
+/**
+ * EVERY subject an operation writes, as one identity (Codex approach review of the retirement fix, both rounds):
+ *  · a statement record: its own subject, and every edit's subject of a correction, not only the first (`op.path`);
+ *  · a door card: its subject;
+ *  · any other operation: its path, with `from::to` read as the link `from->to`.
+ * This is the ONE reader of what a correction supersedes, in memory and on the held carriers.
+ */
+export function writtenSubjects(op: StructuredProposal['operations'][number]): string[] {
+  const statement = op.op === SET_STATEMENT_RECORD_OP ? approvedStatementRecordOf(op) : undefined;
+  if (statement !== undefined) {
+    return [...new Set([subjectIdOf(statement.user_statement.subject), ...(statement.correction?.edits ?? []).map(e => subjectIdOf(e.subject))])];
+  }
+  const door = op.op === RECORD_STATEMENT_OP && isPlainRecord(op.value) && isPlainRecord(op.value.subject) ? op.value.subject : undefined;
+  if (door !== undefined && typeof door.id === 'string') {
+    return [subjectIdOf({ id: door.id, ...(typeof door.to_id === 'string' ? { to_id: door.to_id } : {}) })];
+  }
+  return typeof op.path === 'string' ? [op.path.replace('::', '->')] : [];
+}
+
+/** The subjects a correction card corrects; undefined for any other card. */
+export function correctedSubjectsOf(p: StructuredProposal | undefined): readonly string[] | undefined {
+  const op = p?.operations.length === 1 ? p.operations[0]! : undefined;
+  const correction = op === undefined ? undefined : approvedStatementRecordOf(op)?.correction;
+  return correction === undefined ? undefined : correction.edits.map(e => subjectIdOf(e.subject));
+}
+
+/**
+ * ⭐ A CORRECTION RETIRES ONLY THE PART OF A HELD CARD IT REPLACES, VISIBLY (DL-3 19 Oct; 8b's real-route probe: the memory-only
+ * discard left the card's durable carrier, and its earlier button saved the replaced figure beside the pending correction).
+ * This reads the held carriers the turn carries, including cards already under review:
+ *  · every subject it writes is now corrected (this turn or before) → it goes, said once (the existing 'superseded' words);
+ *  · some are → it is kept for review (PR-2's `heldCardForReview`), with the replaced subjects recorded on it cumulatively. It is
+ *    said once, naming the replaced and the kept part, and its "Review this change" asks for the kept part only.
+ * A card under review is never bound by its old button or typed words (agent-v1-turn.ts), on this or a cold read.
+ */
+export function retireCorrectedHolds(holds: readonly PendingAction[], corrected: ReadonlySet<string>, graph: unknown, graphHash: string | undefined)
+  : { holds: PendingAction[]; gone: string[]; said: string[] } {
+  const nodes = isPlainRecord(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isPlainRecord) : [];
+  const labelOf = (id: string): string | undefined => { const n = nodes.find(x => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; };
+  const nameOf = (subject: string): string => {
+    const [from, to] = subject.split('->');
+    return to === undefined ? labelOf(from!) ?? 'one item' : `${labelOf(from!) ?? 'one item'} → ${labelOf(to) ?? 'one item'}`;
+  };
+  const out: PendingAction[] = [], gone: string[] = [], said: string[] = [];
+  for (const h of holds) {
+    const card = agentProposalOf(h);
+    const writes = card === undefined ? [] : [...new Set(card.operations.flatMap(writtenSubjects))];
+    const before = new Set(heldCardReplaced(h).map(r => r.subject));
+    const now = writes.filter(s => corrected.has(s) && !before.has(s));
+    if (card === undefined || now.length === 0) { out.push(h); continue; }
+    if (writes.every(s => before.has(s) || corrected.has(s))) {
+      gone.push(card.proposal_id);
+      said.push(heldLapseSentence(heldChangeName(h), 'superseded'));
+      continue;
+    }
+    out.push(heldCardForReview(h, graphHash, now.map(subject => ({ subject, name: nameOf(subject) }))));
+    said.push(heldCorrectedSentence(heldChangeLabel(h), now.map(nameOf), writes.filter(s => !before.has(s) && !corrected.has(s)).map(nameOf)));
+  }
+  return { holds: out, gone, said };
 }
 
 /** The existing statement operation's scoped correction is one complete native CAS registration. */

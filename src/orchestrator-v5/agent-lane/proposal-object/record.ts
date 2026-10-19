@@ -37,7 +37,7 @@ import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { heldReliesOnRiskLines, readReliesOnRisk } from '../../routing/relies-on-risk.js';
 import { whoSized } from '../strength-authorship-words.js';
 import { computeProposalId, type ProposalOperation, type StructuredProposal } from '../proposal.js';
-import { heldCardAppliesAt, heldCardUnderReview } from './still-applies.js';
+import { heldCardAppliesAt, heldCardReplaced, heldCardUnderReview } from './still-applies.js';
 import { reviewChipFor } from './reply.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 
@@ -416,7 +416,8 @@ export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.n
     if (reading === undefined || !identityCardOfferable(graph, reading.part_levels, reading)) return undefined;
   }
   const record = productHoldRecord(pa, graph, nowMs) ?? agentProposalRecord(pa, graph, nowMs);
-  return record !== undefined && heldCardUnderReview(pa) ? { ...record, review_action: reviewChipFor(record.proposal_id, heldChangeLabel(pa)) } : record;
+  return record !== undefined && heldCardUnderReview(pa)
+    ? { ...record, review_action: reviewChipFor(record.proposal_id, heldChangeLabel(pa), heldCardReplaced(pa).map((r) => r.name)) } : record;
 }
 
 /** What the change is, in the user's words: "the risk 'X'", "the option 'X'", "the factors 'X' and 'Y'". */
