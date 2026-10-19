@@ -198,4 +198,13 @@ describe("C5's range property: two true ends or nothing, never one end alone", (
     }
     expect(rows).toBe(2 * 2 * JOINS.length - 1);
   });
+  // C5 on 577c89c7: the low end's own scale word ("2 thousand") was read as a number word joined to the high end, so the high end was
+  // refused and 2000 stood alone. Both true ends, or nothing.
+  it.each(['We expect 2 thousand \u2013 3 thousand users.', 'We expect between 2 thousand and 3 thousand users.', 'We expect 2 thousand to 3 thousand users.'])(
+    'C5 witness "%s": both ends at their scale, or nothing', (text) => {
+      const both = (got: readonly number[]): boolean => got.length === 0 || [...got].sort((x, y) => x - y).join() === '2000,3000';
+      const points = [...new Set(figuresWritten(text, 'users').filter((f) => f.low === f.high).map((f) => f.low))];
+      expect(both(points), JSON.stringify(points)).toBe(true);
+      expect(both([2000, 3000].filter((v) => figureTheUserWrote(v, 'users', text))), 'one check').toBe(true);
+    });
 });
