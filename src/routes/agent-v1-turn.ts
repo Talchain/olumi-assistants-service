@@ -941,7 +941,11 @@ export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your r
   + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author. '
   + 'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run: '
   + 'what its result implies for the user\u2019s goal in the current model, what it rests on most, what is still uncertain or missing, and one thing worth checking or testing next, using only the supplied analysis; '
-  + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both.';
+  + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both. '
+  // K3 scope: the AIE's wording, verbatim (19 Oct 19:5xZ; no further ACK). Applied by meaning: no keyword ladder or classifier.
+  + "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. "
+  + 'Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. '
+  + 'If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.';
 /** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). */
 export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change'];
 /** The instructions for one call in this lane mode: unchanged outside `core`. */

@@ -22,6 +22,11 @@ const SCENARIO = '7e6d5c4b-3a2f-4e1d-8c9b-6a5f4e3d2c1b';
 const CORE = { 'x-olumi-ai-mode': 'core' };
 /** The core instruction's own opening words (agent-v1-turn.ts `CORE_REPLY_INSTRUCTION`). */
 const CORE_RULE = 'In this mode Olumi adds nothing to your reply and rewrites none of it';
+/**
+ * K3 SCOPE (the AIE's exact wording, inbox/DL-3.md "### AIE → current DL and existing owners — scope wording supplied",
+ * 19 Oct 19:5xZ). Copied from the AIE's post, never from the source under test: a change to either side turns the row RED.
+ */
+const AIE_SCOPE = "Keep a clearly separate situation out of the current scenario's Living Model. If the relationship to the current scenario is unclear, ask one brief scope question before building or changing the model, while continuing useful discussion. Do not ask again when the person has already made the scope clear. Ordinary expansion and what-ifs within this scenario remain allowed. If the available tools cannot create or work in a separate scenario, say so; do not claim it was created or put its facts into this model instead.";
 const AI_WORDS = 'The analysis ran.';
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string; assistant_message?: string; user_message?: string }>();
@@ -138,6 +143,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect(full.assistant_text.startsWith(AI_WORDS)).toBe(true);
     expect(full.assistant_text.length).toBeGreaterThan(AI_WORDS.length);
     expect(sent.some((b) => b.includes(CORE_RULE)), 'outside core the instructions are unchanged').toBe(false);
+    expect(sent.some((b) => b.includes('Keep a clearly separate situation')), 'the scope wording is core\'s only').toBe(false);
 
     sent.length = 0;
     const core = await typed('What should I look at next?', CORE);
@@ -161,6 +167,10 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     expect(converse, 'the converse call carries the state').toBeDefined();
     expect(converse!).toContain('goal_target_missing');
     expect(converse!).toContain(CORE_RULE);
+    // K3: the AIE's scope wording rides the SAME instructions, byte for byte, on every core call; the full lane never has it.
+    const coreCalls = sent.filter((b) => b.includes(CORE_RULE));
+    expect(coreCalls.length).toBeGreaterThan(0);
+    for (const b of coreCalls) expect((JSON.parse(b) as Json).instructions as string).toContain(AIE_SCOPE);
     // Protocol and data are unchanged: the same readback, readiness and result block ride the wire.
     expect(core.graph_hash).toBe(full.graph_hash);
     expect(core.analysis_ready).toEqual(full.analysis_ready);
