@@ -5,7 +5,7 @@ import { GOAL_RECORD_PRECEDENCE, readGoalRecord, type GoalRecord } from '../goal
 import { timeClassOf } from '../goal-target/time-class.js';
 import { readCount, readUnitParts, statedTailParts, words } from './same-unit.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
-import { ceilingTheUserWroteFor, figureTheUserWroteForSpan, hasApproximateFigureQualifier, countsInWords } from './stated-by-user.js';
+import { amountsWrittenIn, ceilingTheUserWroteFor, figureTheUserWroteForSpan, hasApproximateFigureQualifier } from './stated-by-user.js';
 import { sayFigureAsWritten } from './say-figure.js';
 import type { IdentityProposal } from './identity-proposal.js';
 import { assignEntityRefs } from '../graph/entity-refs.js';
@@ -49,7 +49,7 @@ function ceilingContinuation(clause: string, h: number): boolean {
   if (clause === 'without breaking its maintenance targets') return true;
   const duration = /^over (?:the next )?(.+) months$/iu.exec(clause)?.[1];
   if (duration === undefined) return false;
-  const amounts = [...findStatedAmounts(duration), ...countsInWords(duration)];
+  const amounts = amountsWrittenIn(duration);
   return amounts.length === 1 && amounts[0]!.magnitude === h && amounts[0]!.matchedText === duration;
 }
 function ceilingTail(tail: string, unit: string, h: number): boolean {
