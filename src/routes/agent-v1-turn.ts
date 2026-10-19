@@ -1868,14 +1868,6 @@ export function chipOperationOf(body: Record<string, unknown>): string | undefin
   const { id, action_type: actionType } = chip as { id?: unknown; action_type?: unknown };
   return `chip:${JSON.stringify([typeof id === 'string' ? id : null, typeof actionType === 'string' ? actionType : null])}`;
 }
-/**
- * ⛔ THE TYPED ORIGIN RIDES THE STORED HASH (#3468 R1, Codex): a request that was NOT typed and carries no chip object (a `chip_click`
- * the UI sent without its `chip`, any other non-composer source) never stores the plain hash, so `typedRowProof` never reads its
- * words as typed after a restart. A UI chipless retry keeps the plain hash: it must replay its original row (`sameAgentTurnRequest`).
- */
-export function untypedOriginOf(body: Record<string, unknown>): string | undefined {
-  return typedByUser(body) || isChiplessRetry(body) ? undefined : `source:${JSON.stringify([body['kind'] ?? null, body['source'] ?? null])}`;
-}
 /** The turn's request hash with its chip bound, when it has one (see `chipOperationOf`). */
 export function withChipOperation(requestHash: string, chipOperation: string | undefined, tag = ''): string {
   return chipOperation === undefined ? requestHash
@@ -2447,7 +2439,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : isRunExplanationChip(explanationId) ? explanationId : undefined;
     const pressedChipIsStructural = typeof explanationId === 'string' && explanationId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX);
     let requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
-      ownOperation === undefined ? chipOperationOf(body) ?? untypedOriginOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
+      ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
     /** Live turns and replays resolve issuance exactly as reload does, from one bounded recent window. */
     const proposalIssuers = async (records: readonly ProposalRecord[], pending: readonly PendingAction[]): Promise<ReadonlyMap<string, string>> => {

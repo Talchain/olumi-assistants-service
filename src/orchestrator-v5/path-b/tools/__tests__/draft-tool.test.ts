@@ -79,20 +79,10 @@ describe('exactly once: a retry of a committed construction is "already saved"',
 });
 
 describe('refusals and unknowns, said as such', () => {
-  it('a brief that is not literally the user\'s words is built from THEIR words, never the AI\'s text (VERIFIER CORE 20261019T174921Z)', async () => {
-    const p = product([EMPTY, MODEL]);
-    expect(await buildModel(p, ctx, { brief: 'We run a large museum.' })).toMatchObject({ status: 'ok', mutated: true });
-    expect(bridge.build).toHaveBeenCalledWith('scn_1', BRIEF, p.dispatch, p.callStructured);
-  });
-
-  it.each([
-    ['no message of theirs at all', { scenario_id: 'scn_1' }],
-    ['only blank messages', { scenario_id: 'scn_1', verified_user_messages: ['  '], user_turn_text: '  ' }],
-  ])('a brief with %s is not the user\'s words: refused, nothing is read or built', async (_name, noWords) => {
+  it('a brief that is not literally the user\'s words: nothing is read or built', async () => {
     const p = product([]);
-    expect(await buildModel(p, noWords, { brief: 'We run a large museum.' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
+    expect(await buildModel(p, ctx, { brief: 'We run a large museum.' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
     expect(p.dispatch).not.toHaveBeenCalled();
-    expect(bridge.build).not.toHaveBeenCalled();
   });
 
   it('a NEW scenario (the served read: graph null, graph_present false) is where the draft starts, never "malformed"', async () => {
@@ -127,10 +117,8 @@ describe('refusals and unknowns, said as such', () => {
     expect(await buildModel(product([EMPTY]), ctx, { brief: BRIEF })).toEqual({ status: 'unavailable', reason: 'not_confirmed', write: 'unknown' });
   });
 
-  it('the parameters take the brief only; an empty brief is never the AI\'s text: the user\'s own words, or refused without them', async () => {
+  it('the parameters take the brief only; an empty brief is not the user\'s words', async () => {
     expect(BuildModelParams.safeParse({ brief: BRIEF, explicit_rebuild_request: 'yes' }).success).toBe(false);
-    expect(await buildModel(product([]), { scenario_id: 'scn_1' }, { brief: '' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
-    await buildModel(product([EMPTY, MODEL]), ctx, { brief: '' });
-    expect(bridge.build).toHaveBeenCalledWith('scn_1', BRIEF, expect.anything(), expect.anything());
+    expect(await buildModel(product([]), ctx, { brief: '' })).toEqual({ status: 'refused', reason: 'brief_not_users_words' });
   });
 });

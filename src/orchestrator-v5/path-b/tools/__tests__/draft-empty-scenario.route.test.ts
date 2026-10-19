@@ -4,7 +4,7 @@
  * false, graph_hash: null, graph_identity_hash: null` (assist.v1.scenario-graph.ts, "An EMPTY graph is a valid answer"), and the
  * adapters' one reader called that malformed. Through the REAL route in core mode: a scripted AI, the REAL construction
  * (`buildModelFromBrief`) with a scripted drafter answer, and the graph / register / versions routes as doubles that answer in
- * the served shapes. SYNTHETIC wording; no journey brief.
+ * the served shapes. SYNTHETIC wording; no journey brief. (The brief stays the AI's literal copy of the user's words, as on base.)
  */
 import { runPressToolResponse } from '../../../agent-lane/__tests__/fixtures/run-press-model.js';
 import { randomUUID } from 'node:crypto';
@@ -94,7 +94,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
   let saved: Json | null = null;
   let registered: Json[] = [];
   let read: () => Json = EMPTY_READ;
-  let briefArg = BRIEF;
+  const briefArg = BRIEF;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
       if (String(url).endsWith('/v1/conversations')) return new Response(JSON.stringify({ id: 'conv_draft', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -135,7 +135,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; briefArg = BRIEF; });
+  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; });
 
   const turn = async (): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core' }, payload: {
@@ -158,13 +158,5 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     const body = await turn();
     expect(draftCall(body)).toMatchObject({ ok: false, mutated: false, outcome: 'unavailable', refusal: 'read_malformed' });
     expect(registered).toHaveLength(0);
-  });
-
-  it('the AI re-types the brief: the draft is built from the user\\u2019s own words, never refused and never from the re-typed text', async () => {
-    briefArg = 'Grow weekly bookings to 300 in a year; evening slots or referrals?';
-    const body = await turn();
-    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true });
-    expect(registered).toHaveLength(1);
-    expect(JSON.stringify(registered[0]!.brief_text)).toBe(JSON.stringify(BRIEF));
   });
 });

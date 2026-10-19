@@ -1,8 +1,6 @@
 /**
  * ⭐ PATH-B: THE DRAFT ADAPTER (C5, 19 Oct 2026). Olumi's PROVISIONAL first model from the user's brief.
- *  1. the brief is the user's own words: the AI's text when it is literally theirs (`inTheUsersWords`), otherwise the user's own
- *     messages in this scenario as the route bound them (`verified_user_messages`, joined as the route's `userWordsOf` joins them),
- *     never the AI's re-typed text (VERIFIER CORE 20261019T174921Z: a retry re-typed the brief and was refused);
+ *  1. literal check only: the brief is in the user's own typed words (`inTheUsersWords`);
  *  2. ⚠ NAMED BRIDGE (DL-3 ruling 6, first candidate only): the existing construction (`buildModelFromBrief`, which drafts and
  *     registers create-only). Step 8's pure `candidateToGraph` replaces it in candidate 2;
  *  3. an INDEPENDENT readback (build-model.ts:3098–3143 registers without one): `mutated` only when THIS construction's own
@@ -33,21 +31,13 @@ export interface DraftDeps {
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
-/** The user's own words for the brief: the AI's text when literally theirs, else their messages in this scenario; `null` if none. */
-function briefOf(ctx: TypedWords, asked: string): string | null {
-  if (inTheUsersWords(asked, ctx)) return asked;
-  const own = (ctx.verified_user_messages ?? []).filter((m) => m.trim() !== '').join('\n');
-  return own.trim() === '' ? null : own;
-}
-
 export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 'scenario_id'> & TypedWords, args: BuildModelArgs): Promise<ToolOutcome> {
-  const brief = briefOf(ctx, args.brief);
-  if (brief === null) return refused('brief_not_users_words');
+  if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
   if (deps.callStructured === undefined) return unavailable('drafter_unavailable');
   const before = await readSaved(deps, ctx.scenario_id);
-  // A new scenario has no model yet: that is where a first draft starts.
+  // A new scenario has no model yet (`graph: null`, `graph_present: false`): that is where a first draft starts.
   if (!isSavedRead(before) && !isNoModelYet(before)) return before;
-  const ownVersion = () => findConstructionVersion(deps.dispatch, ctx.scenario_id, brief).catch(() => null);
+  const ownVersion = () => findConstructionVersion(deps.dispatch, ctx.scenario_id, args.brief).catch(() => null);
   if (isSavedRead(before) && nodesIn(before.graph) > 0) {
     const prior = await ownVersion();
     return prior === null ? refused('model_exists') : ok({ already_saved: true, model_version: prior }, { mutated: false });
@@ -55,7 +45,7 @@ export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 's
 
   let res: Awaited<ReturnType<typeof buildModelFromBrief>>;
   try {
-    res = await buildModelFromBrief(ctx.scenario_id, brief, deps.dispatch, deps.callStructured);
+    res = await buildModelFromBrief(ctx.scenario_id, args.brief, deps.dispatch, deps.callStructured);
   } catch {
     return unavailable('not_confirmed', 'unknown');
   }
