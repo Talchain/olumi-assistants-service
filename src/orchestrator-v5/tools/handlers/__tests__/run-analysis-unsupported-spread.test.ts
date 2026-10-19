@@ -566,7 +566,7 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
       expect(row.probability_of_goal).toBeTypeOf('number');
     }
     // The per-condition row for the Agent: the second target is not shown for either plan, in the same words.
-    const checks = limitChecksForAgent(g, readLimitVerdictsFromResult(result)) ?? [];
+    const checks = limitChecksForAgent(g, readLimitVerdictsFromResult(result), undefined, undefined, result) ?? [];
     const reach = checks.find((c) => c.constraint_id === 'secondary');
     expect(reach?.say).toContain(record.message);
     expect(reach?.say).not.toMatch(/was checked/);
@@ -586,7 +586,7 @@ describe('⭐ SECOND TARGET AND LIMIT (Codex R1 #3443 BLOCK; DL-3: targets AND l
       expect(row.constraint_probabilities).not.toHaveProperty('budget');
       expect(row).not.toHaveProperty('probability_of_joint_goal');
     }
-    const cost = (limitChecksForAgent(g, readLimitVerdictsFromResult(result)) ?? []).find((c) => c.constraint_id === 'budget');
+    const cost = (limitChecksForAgent(g, readLimitVerdictsFromResult(result), undefined, undefined, result) ?? []).find((c) => c.constraint_id === 'budget');
     expect(cost?.say).toContain(`On the link from ‘Quality contribution’ to ‘Cost’: ${UNSUPPORTED_POINT_WORDS} ${UNSUPPORTED_POINT_QUESTION}`);
     expect(cost?.say).not.toMatch(/was checked/);
   });

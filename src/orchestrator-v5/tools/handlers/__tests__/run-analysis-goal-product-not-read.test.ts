@@ -261,6 +261,10 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
       delete goal.goal_horizon_months;
       delete goal.goal_deadline_as_stated;
     }
+    // STEP 8 (AIE 764e9c72): the served price → churn strength is the user's chat write with no attestation (saved before it),
+    // so its chance would be withheld for the spread (`run-analysis-unsupported-spread.test.ts`). This row tests the product
+    // reading, so the user's band on it is attested as the chat writer now records it (`std_defaulted: false`).
+    for (const e of (g.edges as Json[]).filter((x) => x.from === 'pro_plan_price' && x.to === 'monthly_churn')) e.std_defaulted = false;
     const r = await runOn({ ...W3_SERVED, graph: g });
     const env = r.enrichment ?? r;
     expect(env.inference_warnings.map((x: Json) => x.code)).not.toContain(GOAL_FIGURES_PRODUCT_NOT_READ);

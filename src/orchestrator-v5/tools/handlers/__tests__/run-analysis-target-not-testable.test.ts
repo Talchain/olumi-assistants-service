@@ -116,6 +116,9 @@ describe('m1 after the identity card\'s Yes: target failures belong to their aff
     for (const e of g.edges as Json[]) {
       if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
         e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
+        // STEP 8 (AIE 764e9c72): and named its band, which the chat writer attests (`std_defaulted: false`); a user's size with
+        // no attested spread withholds the chance resting on it (`run-analysis-unsupported-spread.test.ts`).
+        e.std_defaulted = false;
       }
     }
     const result = await runOn(g);

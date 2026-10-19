@@ -83,11 +83,15 @@ const FLAT_OUTCOME_RANGE_KEYS = ['outcome_std', 'outcome_p10', 'outcome_p90'] as
  * for an option whose range rests on an unsupported spread (`unsupportedIntervalOptionIds`, the Run's own record). The centre
  * stays: it is the model's arithmetic. The same transport projection as above, on the same carriers.
  */
-export function projectUnsupportedIntervalsForTransport(enrichment: RecordValue | undefined): RecordValue | undefined {
-  if (enrichment === undefined) return undefined;
-  const ids = unsupportedIntervalOptionIds(enrichment);
-  if (ids.size === 0) return enrichment;
-  return mapOptionRows(enrichment, (row) => withoutUnsupportedInterval(row, ids));
+export function projectUnsupportedIntervalsForTransport(
+  transport: RecordValue | undefined,
+  /** The stored Run's enrichment, which carries its own record (the transport copy may not). */
+  recordedOn: unknown = transport,
+): RecordValue | undefined {
+  if (transport === undefined) return undefined;
+  const ids = unsupportedIntervalOptionIds(recordedOn);
+  if (ids.size === 0) return transport;
+  return mapOptionRows(transport, (row) => withoutUnsupportedInterval(row, ids));
 }
 
 /** One option row without its simulated outcome range when `ids` names it (the AI's facts and the decision review read it too). */

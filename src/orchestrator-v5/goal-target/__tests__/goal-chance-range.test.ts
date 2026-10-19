@@ -293,6 +293,9 @@ function servedGraph(placeholder: boolean): Json {
   for (const e of g.edges as Json[]) {
     if (e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') {
       e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
+      // STEP 8 (AIE 764e9c72): the user's band, attested by the chat writer; an unattested spread would bar the placeholder's
+      // range beside it (`run-analysis-unsupported-spread.test.ts`, RANGE RE-ENTRY). This file tests the range itself.
+      e.std_defaulted = false;
     }
     if (placeholder && e.from === 'pro_plan_price' && e.to === 'monthly_churn_rate') {
       e.provenance = { ...(e.provenance ?? {}), source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
