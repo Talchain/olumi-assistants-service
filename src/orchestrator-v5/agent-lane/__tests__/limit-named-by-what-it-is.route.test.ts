@@ -4,9 +4,9 @@
  * label word "village" being another node's; Codex R2 on #3424 @d4be73eb: a generic alias read "the shelf capacity constraint
  * … 2 ovens" as the OVEN limit's, and its press saved Oven = 2, Shelf = 3).
  *
- * The rule: a word for a limit ("limit", "constraint", "floor", "ceiling") lets the figure be this limit's ONLY when the same
- * clause names this limit by a word of its own and names no other limit by a word of that limit's own. A category word never
- * overrides a rival the user named. The ordinary attribution is unchanged; this is checked only when it refuses.
+ * The rule (`figureIsThisQuantitys`, the one quantity-identity rule): the figure is this limit's when its own clause names this
+ * limit and no other LIMIT, whatever word the user calls it by ("constraint", "pairing"): no category word decides, and a word
+ * of a quantity that holds no limit ("village") competes with nothing.
  *
  * THE PATH: the REAL `agentV1TurnRoute` → the REAL Agent loop → the REAL `propose_limit_change` → the card's press → the REAL
  * in-process limit door → the store. Scripted: only the Agent's outputs. 0 provider calls. SYNTHETIC wording and model.
@@ -61,9 +61,9 @@ describe('a limit named by what it is: the figure is its own only when the words
     expect(made, JSON.stringify(made)).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_stated' }));
   }, 120_000);
 
-  it('⛔ without a limit word the ordinary attribution stands: "the oven-mixer pairing … 2 ovens" is not the limit\'s', async () => {
+  it('a limit word is no category (DL-3: no category lists): "the oven-mixer pairing … 2 ovens" names the ONE limit it can be, as "constraint" does', async () => {
     const { made } = await ovenLimitTurn('The oven-mixer pairing should be at most 2 ovens now, not 3.');
-    expect(made, JSON.stringify(made)).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_stated' }));
+    expect(made, JSON.stringify(made)).toEqual(expect.objectContaining({ ok: true }));
   }, 120_000);
 
   it('⛔ a quantity WITHOUT a limit, named with a limit word, never authors the oven limit ("shelf capacity constraint", no shelf limit)', async () => {

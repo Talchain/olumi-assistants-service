@@ -102,3 +102,62 @@ describe('independent quantity binding',()=>{
   await refuse(targetTurn('Shelf capacity is 2 ovens; the oven capacity limit stays at 3 ovens.',standard,'Oven capacity',2));
  });
 });
+
+/**
+ * Codex R2 on #3433 @1aacff18, held-out rows adopted verbatim. Four were wrong writes on 1aacff18: symbol labels ("%", "£")
+ * could not be named; a fragment two limits share ("oven capacity") was read as one; and "90 requests … not 90%" took its source
+ * from one occurrence and its quantity from another.
+ */
+const twoNamed=(a:string,b:string,unit='ovens',held=3)=>(g:Rec)=>{
+ g.nodes.find((n:Rec)=>n.id==='oven_capacity').label=a;
+ g.nodes.push({...structuredClone(SHELF_NODE),label:b});
+ g.goal_constraints=[{...OVENS,label:a,unit,value:held,operator:unit==='%'?'>=':'<='},{...SHELVES,label:b,unit,value:held,operator:unit==='%'?'>=':'<='}];
+};
+describe('delta held-out quantity and affirmative-source contract',()=>{
+ it.each(['not','rather than','instead of'])('reject %s DIGITS',async(neg)=>{
+  await refuse(targetTurn(`The remote-village constraint should be at least 85%, ${neg} 90%.`,g=>{remoteSetup(g);g.goal_constraints[0].value=95},REMOTE.label,90,'>=','%'));
+ });
+ it.each(['not','rather than','instead of'])('reject %s WORDS',async(neg)=>{
+  await refuse(targetTurn(`The remote-village constraint should be at least eighty-five percent, ${neg} ninety percent.`,g=>{remoteSetup(g);g.goal_constraints[0].value=95},REMOTE.label,90,'>=','%'));
+ });
+ it.each(['not','rather than','instead of'])('reject %s count WORDS',async(neg)=>{
+  await refuse(targetTurn(`The oven capacity limit should be at most two ovens, ${neg} three ovens.`,twoNamed('Oven capacity','Shelf capacity','ovens',4),'Oven capacity',3));
+ });
+ it.each([
+ ['Annual oven capacity','Oven capacity','The oven capacity constraint should be at most 2 ovens.'],
+ ['Oven capacity','Annual oven capacity','The annual oven capacity constraint should be at most 2 ovens.'],
+ ['Upper oven capacity','Lower oven capacity','The lower oven capacity constraint should be at most 2 ovens.'],
+ ['Ovens','Shelf capacity','The shelf capacity limit should be at most 2 ovens.'],
+ ['Shelf capacity','Ovens','The ovens limit should be at most 2 ovens.'],
+ ['Shelf capacity','ovens','The ovens limit should be at most 2 ovens.'],
+ ])('refuse target %s when user names %s',async(a,b,text)=>{
+  await refuse(targetTurn(text,twoNamed(a,b),a,2));
+ });
+ it.each([
+ ['Shelf completion','%','The % limit should be at least 85%.','%'],
+ ['Budget','£','The £ limit should be at most £2.','GBP'],
+ ['Duration','days','The days limit should be at most 2 days.','days'],
+ ])('unit-only rival: %s cannot take %s figure',async(a,b,text,unit)=>{
+  await refuse(targetTurn(text,twoNamed(a,b,unit,95),a,unit==='%'?85:2,unit==='%'?'>=':'<=',unit));
+ });
+ it.each([
+ ['Oven capacity','Shelf capacity','The oven capacity limit should be at most 2 ovens.',[2,3]],
+ ['Ovens','Shelf capacity','The ovens limit should be at most 2 ovens.',[2,3]],
+ ['Annual oven capacity','Oven capacity','The oven capacity limit should be at most 2 ovens.',[3,2]],
+ ])('correct card and save: %s / %s',async(a,b,text,values)=>{
+  const target=values[0]===2?a:b;
+  await press(targetTurn(text,twoNamed(a,b),target,2),values);
+ });
+ it('symbol-only positive: % can receive its own named value',async()=>{
+  await press(targetTurn('The % limit should be at least 85%.',twoNamed('%','Shelf completion','%',95),'%',85,'>=','%'),[85,95]);
+ });
+ it('ambiguous shared word cannot select one sibling',async()=>{
+  await refuse(targetTurn('The oven capacity limit should be at most 2 ovens.',twoNamed('Annual oven capacity','Monthly oven capacity'),'Annual oven capacity',2));
+ });
+ it('rejected figure stays rejected when same number occurs as unrelated historical quantity',async()=>{
+  await refuse(targetTurn('Ninety requests arrived yesterday. The remote-village constraint should be at least 85%, not 90%.',g=>{remoteSetup(g);g.goal_constraints[0].value=95},REMOTE.label,90,'>=','%'));
+ });
+ it('rejected figure stays rejected with digit count elsewhere',async()=>{
+  await refuse(targetTurn('90 requests arrived yesterday. The remote-village constraint should be at least 85%, not 90%.',g=>{remoteSetup(g);g.goal_constraints[0].value=95},REMOTE.label,90,'>=','%'));
+ });
+});

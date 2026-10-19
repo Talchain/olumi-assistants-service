@@ -339,7 +339,8 @@ import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../sel
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, figureTheUserWroteSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { figureIsThisQuantitys } from '../quantity-identity.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -472,8 +473,7 @@ export { linkEffectRefusalWords, linkEffectConsent, linkEffectNoSuchLinkWords };
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): a RISK is no quantity a
  * limit's figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
- * "300 Pro paying subscribers" is never a £300 limit on the price. What a user calls a limit ("limit", "constraint") is no
- * name of ANY one limit: it binds only by `limitFigureIsThisLimits` (Codex R2 on #3424: "the shelf capacity limit" was the oven's).
+ * "300 Pro paying subscribers" is never a £300 limit on the price. Which limit a figure is for: `figureIsThisQuantitys`.
  */
 export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
   const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
@@ -481,80 +481,18 @@ export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: un
   return { target, others: others.filter((l) => !risks.has(l)) };
 }
 
-/** What a user calls a limit itself, never the name of one limit. */
-const LIMIT_WORD = /^(?:limit|constraint|floor|ceiling)s?$/;
-/** A figure the user turned down ("at least 85%, not 90%", "rather than 90%"): never their new figure. */
-const REJECTED_FIGURE = /\b(?:not|rather\s+than|instead\s+of)\s*[£$€]?\s*$/i;
-const CLAUSE_END = /[.!?;,:\n\u2013\u2014]|\b(?:and|but|while|whereas|plus)\b/i;
-const tokensOf = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-
 /**
- * The words of the phrase a written figure belongs to: from the last clause break or conjunction before it to the next one, with
- * the figure's own unit words after it left out ("2 ovens" names no quantity). The first occurrence the user did not turn down;
- * `null` when the figure is unwritten or only written as rejected.
+ * The OTHER limits a figure in `unit` could be written into: the limit door's candidates for `figureIsThisQuantitys`. The goal's
+ * own row is its target, which this door never writes (`goal_target_not_a_limit`), so it competes with no limit.
  */
-function limitFigurePhrase(text: string, value: number, unit: unknown): string[] | null {
-  const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
-  for (let from = 0; from < text.length;) {
-    const at = figureTheUserWroteSpan(value, unit, text.slice(from));
-    if (at === null) return null;
-    const start = from + at.start; const end = from + at.end;
-    const before = text.slice(0, start);
-    let phraseStart = 0;
-    for (const m of before.matchAll(new RegExp(CLAUSE_END.source, 'gi'))) phraseStart = (m.index ?? 0) + m[0].length;
-    if (!REJECTED_FIGURE.test(text.slice(phraseStart, start))) {
-      const rest = text.slice(end); const stop = rest.search(CLAUSE_END);
-      const after = tokensOf(stop < 0 ? rest : rest.slice(0, stop));
-      const unitTokens = after.findIndex((w) => !unitWords.some((u) => sameWord(u, w)));
-      return [...tokensOf(text.slice(phraseStart, start)), ...after.slice(unitTokens < 0 ? after.length : unitTokens)];
-    }
-    from = end;
-  }
-  return null;
-}
-
-/**
- * The quantities a phrase NAMES: a label's whole phrase, longest labels first (so "Annual oven capacity" keeps its own words
- * from "Oven capacity"), or a word that only that label has.
- */
-function quantitiesNamedIn(phrase: readonly string[], labels: readonly string[]): Set<string> {
-  const used = phrase.map(() => false); const named = new Set<string>();
-  for (const label of [...labels].sort((a, b) => tokensOf(b).length - tokensOf(a).length)) {
-    const ws = tokensOf(label);
-    for (let i = 0; ws.length > 0 && i + ws.length <= phrase.length; i++) {
-      if (!ws.every((w, k) => !used[i + k] && sameWord(phrase[i + k]!, w))) continue;
-      ws.forEach((_, k) => { used[i + k] = true; }); named.add(label);
-    }
-  }
-  for (const label of labels) {
-    const own = wordsOf(label).filter((w) => !labels.some((o) => o !== label && wordsOf(o).some((x) => sameWord(x, w))));
-    if (own.some((w) => phrase.some((c, i) => !used[i] && sameWord(c, w)))) named.add(label);
-  }
-  return named;
-}
-
-/**
- * ⭐ A LIMIT'S FIGURE IS THE ONE THE USER WROTE FOR THAT LIMIT (verifier P05; Codex R2 on #3424 and R1 on #3433 @29957133).
- * Never when the figure was turned down ("85%, not 90%"), and never when its phrase names ANOTHER limit, by its whole label
- * (nested: "the oven capacity constraint" is "Oven capacity", never "Annual oven capacity"; unit-only: "the ovens constraint"
- * is "Ovens") or by a word only it has ("the shelf capacity limit"). Otherwise the ordinary attribution decides (`ordinary`);
- * where it refuses because a nearer label word is another node's ("the remote-village constraint … 85%", P05), the phrase's
- * limit word binds the figure to THIS limit only when the phrase names this limit, or names no quantity at all.
- */
-function limitFigureIsThisLimits(
-  g: { readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown }[] },
-  limitRows: readonly { readonly node_id?: unknown }[], limitNodeId: string, limitLabel: string, value: number, unit: unknown,
-  text: string | null | undefined, ordinary: boolean,
-): boolean {
-  if (typeof text !== 'string') return false;
-  const phrase = limitFigurePhrase(text, value, unit);
-  if (phrase === null) return false;
-  const labelOf = new Map(g.nodes.map((n) => [n.id, typeof n.label === 'string' ? n.label : '']));
-  const otherLimits = limitRows.filter((r) => r.node_id !== limitNodeId).map((r) => labelOf.get(r.node_id) ?? '').filter((l) => l !== '');
-  const named = quantitiesNamedIn(phrase, [...new Set([limitLabel, ...limitScopeIn(g, limitLabel).others, ...otherLimits])]);
-  if (otherLimits.some((l) => named.has(l))) return false;
-  if (ordinary) return true;
-  return phrase.some((w) => LIMIT_WORD.test(w)) && (named.has(limitLabel) || named.size === 0);
+function otherLimitsThatCouldHold(
+  g: { readonly raw: { readonly goal_constraints?: unknown }; readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown }[] },
+  limitNodeId: string, unit: unknown,
+): string[] {
+  const limitable = new Map(g.nodes.filter((n) => n.kind !== 'goal').map((n) => [n.id, typeof n.label === 'string' ? n.label : '']));
+  return (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints as Record<string, unknown>[] : [])
+    .filter((r) => r !== null && typeof r === 'object' && r['node_id'] !== limitNodeId && unitsConflict(r['unit'], unit) === null)
+    .map((r) => limitable.get(r['node_id']) ?? '').filter((l) => l !== '');
 }
 
 /** `goal_chance` beside a run's result when the run withheld the goal's chance (PLoT #416); nothing otherwise. */
@@ -7625,7 +7563,7 @@ export function createAgentCapabilities(
         // A comparison whose direction or concept cannot be read needs an explicit Olumi-binding disclosure.
         const bindingWords = ctx.user_turn_text ?? ctx.user_text;
         const readable = !shareFactor || relativeFigureAgainst(node.label, bindingWords, Number(a.value) * 100) !== 'unknown';
-        const writtenAbout = readable && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, bindingWords, ownerScope);
+        const writtenAbout = readable && figureIsThisQuantitys(bindingWords, Number(a.value), a?.unit ?? nodeUnit, ownerScope, ownerScope.rivals ?? ownerScope.others);
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
         // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
@@ -12198,9 +12136,8 @@ export function createAgentCapabilities(
       }
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
-      if (interpretation === null && (!figureTheUserWrote(value, unit, ctx.user_text)
-        || !limitFigureIsThisLimits(g, rows, node.id, node.label, value, unit, ctx.user_text,
-          figureTheUserWroteFor(value, unit, ctx.user_text, limitScopeIn(g, node.label))))) {
+      if (interpretation === null && !figureIsThisQuantitys(ctx.user_text, value, unit, limitScopeIn(g, node.label),
+        otherLimitsThatCouldHold(g, node.id, unit))) {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };
