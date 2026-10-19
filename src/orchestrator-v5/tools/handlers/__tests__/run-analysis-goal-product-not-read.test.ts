@@ -26,6 +26,7 @@ import { composeAnalysisStateV1, readRawRobustnessFromResponseBody } from '../..
 import { mayPresentLeaderClaimForFact } from '../../../compose/unrequested-analysis-confinement.js';
 import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 import type { HandlerInvocation } from '../../registry.js';
+import { RUN_EVALUATED_RESPONSE_KEY } from '../../../context/analysis-projection-policy.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
@@ -139,7 +140,8 @@ describe('Gate 5 at the call site: m0 withholds every goal figure, every win sha
         for (const k of ['mean', 'p10', 'p50', 'p90', 'std']) expect(e.outcome ?? {}).not.toHaveProperty(k);
       }
     }
-    expect(JSON.stringify(env)).not.toMatch(/77410\.2|0\.84403/);
+    // The public projection holds none of them; the engine's own result is kept only under the saved Run's internal key.
+    expect(JSON.stringify({ ...env, [RUN_EVALUATED_RESPONSE_KEY]: undefined })).not.toMatch(/77410\.2|0\.84403/);
   });
 
   it('RED: no leader anywhere, and the permission every consumer obeys withholds it', async () => {
