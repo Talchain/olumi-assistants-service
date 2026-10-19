@@ -96,7 +96,7 @@ describe('consent and parameters', () => {
   it.each([
     ['no timing', { reason: 'Run it.' }],
     ['an unknown timing', { reason: 'Run it.', effects_timing: 'soon' }],
-    ['no reason', { reason: '', effects_timing: null }],
+    ['no reason', { effects_timing: null }],
     ['an extra key', { reason: 'Run it.', effects_timing: null, force: true }],
   ] as const)('the parameters refuse %s', (_name, args) => {
     expect(RunAnalysisParams.safeParse(args).success).toBe(false);

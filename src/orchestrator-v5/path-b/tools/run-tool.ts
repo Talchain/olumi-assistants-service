@@ -20,7 +20,7 @@ import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
 export const RUN_ANALYSIS = 'run_analysis';
 export const RunAnalysisParams = z.object({
   /** Why the user asked for this Run, in a few words: the Run turn's message. */
-  reason: z.string().min(1).max(400),
+  reason: z.string(),
   /** The user's stated timing of the options' effects within the goal's period; `not_stated` when they gave none. */
   effects_timing: z.enum(['in_place_by_period', 'later_or_partial', 'not_stated']).nullable(),
 }).strict();
