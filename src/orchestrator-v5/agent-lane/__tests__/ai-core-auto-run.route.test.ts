@@ -205,7 +205,7 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
   const post = (payload: Json) => app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE,
     payload: { kind: 'message', scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', ...payload } });
   /** Turn 1: the AI prepares the change and calls `apply_change`, so the SDK run pauses for approval on its card. */
-  const prepared = async (): Promise<{ approve: Json; revision: string }> => {
+  const prepared = async (): Promise<{ approve: Json; revision: string; digest: string; graphHash: string }> => {
     outputs = [[{ type: 'message', text: PREPARED }, { type: 'function_call', name: 'apply_change', call_id: 'apply_call' }]];
     const r = await post({ turn_id: randomUUID(), message: 'Set Capacity to 2.', source: 'composer' });
     expect(r.statusCode, r.body).toBe(200);
@@ -217,11 +217,15 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(probe.applied).toBe(0);
     expect(runTurns, 'nothing ran before the approval').toBe(0);
     calls = [];
-    return { approve: approve!, revision: String(rec?.revision) };
+    return { approve: approve!, revision: String(rec?.revision), digest: String(rec?.digest), graphHash: String(j._proposal_fields?.graph_hash) };
   };
   /** Turn 2: the press on that card. */
   const press = (card: { approve: Json; revision: string }, turnId = randomUUID()) => post({ turn_id: turnId, message: card.approve.message,
     source: 'chip_click', chip: { id: card.approve.id }, displayed_proposals: [{ proposal_id: probe.proposalId, revision: card.revision }] });
+  /** The UI's ordinary press (`SuggestedChips.tsx`; served bytes, VERIFIER 22:26Z): source `chip`, the issued envelope, no fields. */
+  const uiPress = (card: { approve: Json; revision: string; digest: string; graphHash: string }) => post({ turn_id: randomUUID(), message: card.approve.message,
+    source: 'chip', chip: { id: card.approve.id },
+    proposal_edits: { proposal_id: probe.proposalId, revision: card.revision, digest: card.digest, graph_hash: card.graphHash, fields: [] } });
   /** The canvas's automatic Run after an Undo: a Run press carrying only the Run chip. */
   const runPress = (turnId = randomUUID()) => post({ turn_id: turnId, message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
   /** The tool output the AI received for one scripted call (by its call id: `apply_call`, `run_call`). */
@@ -252,6 +256,17 @@ describe('PATH-B gap 4: commit and Undo each run the existing Run pipeline once;
     expect(j._agent.tool_calls, 'the kit reads the commit and its Run').toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'apply_change', mutated: true }), expect.objectContaining({ name: 'run_analysis', ok: true })]));
     expect((j.blocks as Json[]).some((b) => b.type === 'analysis_result'), 'the result blocks ride this response').toBe(true);
+  });
+
+  it('⭐ RED→GREEN (VERIFIER 22:26Z (2)): the UI\'s press → ONE write, ONE Run, and the Run\'s own row says it ran', async () => {
+    const card = await prepared();
+    const r = await uiPress(card);
+    expect(r.statusCode, r.body).toBe(200);
+    const j = r.json() as Json;
+    expect(probe.applied, 'one write').toBe(1);
+    expect(runTurns, 'exactly one Run, on the saved model').toBe(1);
+    expect(j._agent.tool_calls, 'the kit reads the commit and a Run that RAN').toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'apply_change', mutated: true }), expect.objectContaining({ name: 'run_analysis', ok: true, ran: true })]));
   });
 
   it('⭐ the FIRST eligible commit (no preceding Run) still runs once and is coached; only the comparison is absent', async () => {

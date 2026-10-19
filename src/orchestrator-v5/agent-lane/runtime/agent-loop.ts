@@ -312,6 +312,8 @@ export interface AgentTurnResult {
   readonly tool_calls: readonly {
     name: string; ok: boolean; mutated: boolean;
     proposal_id?: string; outcome?: string; refusal?: string;
+    /** A Run that RAN (a new Run on record), as the kit reads it; absent otherwise. `core`'s typed rows carry it already. */
+    ran?: true;
     /** A refused call's conflict fields — which parts of what the model sent fired (names only, never the figure). */
     conflict_fields?: readonly string[];
     /** A refused switch level's entries AS SENT — option, factor, value, unit, estimate; bounded (`rejectedLevelsOf`). */

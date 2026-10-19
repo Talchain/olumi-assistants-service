@@ -4624,7 +4624,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // every reader of "this turn ran an analysis" (the chance lines, what it rests on, break-even, the bound card, the
       // Run's outcome chips) reads it. A Run that did not complete is not recorded: its own sentence below says so, and the Run chip stays.
       if (autoRun?.ran === true) {
-        result = { ...result, tool_calls: [...result.tool_calls, { name: 'run_analysis', ok: autoRun.ok === true, mutated: false }],
+        result = { ...result, tool_calls: [...result.tool_calls, { name: 'run_analysis', ok: autoRun.ok === true, mutated: false, ran: true }],
           tool_results: [...result.tool_results, autoRun] };
       }
     }
