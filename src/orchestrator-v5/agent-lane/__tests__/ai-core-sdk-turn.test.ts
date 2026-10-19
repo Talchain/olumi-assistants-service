@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z as z4 } from 'zod-v4';
 import { ForbiddenProviderError, OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { ledgeredAgentsClient } from '../../../adapters/llm/openai-agents-client.js';
+import { runWithStageStream } from '../../../cee/unified-pipeline/stage-stream-context.js';
 import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, CoreStateUnavailableError, PAUSE_DECLINED, PAUSE_SUPERSEDED, runCoreTurn, type ConversationIdStore, type PausedRunStore } from '../core/sdk-turn.js';
 import type { OpenAiPausedRun } from '../../session/store.js';
 import { budgetFor } from '../model-budgets.js';
@@ -114,6 +115,43 @@ describe('PATH-B core turn on the Agents SDK', () => {
     }
     expect(calls[0]!.input_sha256, 'the second call sent more (the tool result)').not.toBe(calls[1]!.input_sha256);
     expect(sent[0]!.model).toBe('gpt-6.1-sol');
+  });
+
+  it('STREAM: on the streamed entry the SDK streams; "writing" is shown only once the AI\'s first words arrive; each row is recorded when its stream ends', async () => {
+    /** The Responses SSE stream for one scripted body: created → each item (text as a delta) → completed. */
+    const sse = (resp: Json): string => {
+      const ev = (o: Json) => `event: ${o.type}\ndata: ${JSON.stringify(o)}\n\n`;
+      let out = ev({ type: 'response.created', sequence_number: 0, response: { ...resp, status: 'in_progress', output: [] } });
+      (resp.output as Json[]).forEach((item, i) => {
+        out += ev({ type: 'response.output_item.added', output_index: i, item: item.type === 'message' ? { ...item, status: 'in_progress', content: [] } : item });
+        if (item.type === 'message') out += ev({ type: 'response.output_text.delta', item_id: item.id, output_index: i, content_index: 0, delta: item.content[0].text });
+        out += ev({ type: 'response.output_item.done', output_index: i, item });
+      });
+      return out + ev({ type: 'response.completed', response: resp });
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).endsWith('/v1/conversations')) {
+        return new Response(JSON.stringify({ id: 'conv_s', object: 'conversation' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      const req = JSON.parse(String(init?.body ?? '{}')) as Json;
+      sent.push(req);
+      const resp = body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }]);
+      return req.stream === true
+        ? new Response(sse(resp), { status: 200, headers: { 'content-type': 'text/event-stream' } })
+        : new Response(JSON.stringify(resp), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
+    const frames: Json[] = [];
+    const { result, calls } = await runWithStageStream((e) => { frames.push(e as Json); }, () => turn('What is in my model?', caps()));
+    expect(sent.map((b) => b.stream), 'every model call streamed').toEqual([true, true]);
+    expect(result.assistant_text).toBe('The model is empty.');
+    expect(result.tool_calls.map((t) => t.name)).toEqual(['get_canonical_state']);
+    expect(frames.filter((f) => f.kind === 'PROGRESS').map((f) => f.phase), 'writing once, when the words arrive').toEqual(['writing']);
+    expect(calls.map((c) => [c.attempt?.outcome, c.returned_model])).toEqual([['success', RETURNED_MODEL], ['success', RETURNED_MODEL]]);
+    // Contrast: the buffered entry runs the same turn unstreamed and shows no frame.
+    sent.length = 0; scripted = [[{ type: 'message', text: 'Buffered.' }]];
+    await turn('What is in my model?', caps());
+    expect(sent.map((b) => b.stream ?? false)).toEqual([false]);
   });
 
   it('TRACE: the SDK\'s own trace carries the prompt, model, Conversation, revision and Run; each tool call is a native span', async () => {
