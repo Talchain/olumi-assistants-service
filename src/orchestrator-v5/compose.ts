@@ -82,7 +82,7 @@ import {
   mayPresentLeaderClaimForFact,
 } from './compose/unrequested-analysis-confinement.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
-import { projectGoalProbabilitiesForTransport } from './compose/goal-probability-transport.js';
+import { projectGoalProbabilitiesForTransport, projectUnsupportedIntervalsForTransport } from './compose/goal-probability-transport.js';
 import { projectObjectiveContradictionSummary } from './coaching/objective-contradiction.js';
 import { readOptionResultSources } from '../orchestrator/context/option-result-source.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
@@ -1340,8 +1340,10 @@ function buildAnalysisResultBlockUnconfined(
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
   // cloned in the first place. Pure work-avoidance: the projection below still
   // runs and still owns the policy, and it would drop these keys anyway.
+  // STEP 8 (AIE 764e9c72): no simulated range rests on an unsupported spread in the public block (the fact keeps it).
   const safeTransport = projectGoalProbabilitiesForTransport(
-    toSafeTransportEnrichment(enrichment, !mayNameLeadingOption),
+    toSafeTransportEnrichment(projectUnsupportedIntervalsForTransport(enrichment as Record<string, unknown> | undefined) as typeof enrichment,
+      !mayNameLeadingOption),
     fact.result.goal_certainty,
   );
   // TIED-OPTION ORDERING — only on the branch that is allowed to present a

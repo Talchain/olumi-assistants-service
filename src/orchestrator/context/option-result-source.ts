@@ -226,6 +226,20 @@ export function runWithheldGoalFigures(envelope: Record<string, unknown>): boole
   return goalFiguresWithheldWarning(envelope) !== undefined;
 }
 
+/**
+ * ⭐ STEP 8 (AIE 764e9c72 `decision` / `consumer_scope`): the options whose simulated outcome RANGE rests on the same unsupported
+ * spread as their withheld chance — read off the Run's own recorded support (`GOAL_FIGURES_UNSUPPORTED_SPREAD`). The saved Run
+ * keeps every engine figure (the structural challenge reads it); a public result block, the AI's facts and the decision review
+ * carry the centre only, never that range. Empty for every Run without the record (history unchanged).
+ */
+export function unsupportedIntervalOptionIds(envelope: unknown): ReadonlySet<string> {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return new Set();
+  const warnings = (envelope as Record<string, unknown>).inference_warnings;
+  return new Set(filterObjectEntries(Array.isArray(warnings) ? warnings : [])
+    .filter((w) => w.code === GOAL_FIGURES_UNSUPPORTED_SPREAD && Array.isArray(w.option_ids))
+    .flatMap((w) => (w.option_ids as unknown[]).filter((id): id is string => typeof id === 'string')));
+}
+
 /** That warning (the first), or `undefined`. */
 export function goalFiguresWithheldWarning(envelope: Record<string, unknown>): Record<string, unknown> | undefined {
   return goalFiguresWithheldWarnings(envelope)[0];
