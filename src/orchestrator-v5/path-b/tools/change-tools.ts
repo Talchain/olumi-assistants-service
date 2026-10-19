@@ -49,8 +49,9 @@ import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLe
 import { runWithApprovedBindings, type ApprovedAdoption } from '../../agent-lane/approved-adoption-context.js';
 import { defaultFrameFor, framedObservedState } from '../../agent-lane/admit-model.js';
 import { buildAddFactorTransaction, USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
+import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
 import { GraphStaleWriteError } from '../../build-turn-context.js';
-import { compoundMembersConflict, type CommitOptionLevelsInput, type CommitOptionLevelsResult, type CompoundAddFactor, type CompoundStructuralMember } from '../../system-events/dispatch.js';
+import { compoundMembersConflict, type CommitOptionLevelsInput, type CommitOptionLevelsResult, type CompoundAddFactor, type CompoundAddOption, type CompoundStructuralMember } from '../../system-events/dispatch.js';
 import { linkProvenanceOf, linkSizing, provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
@@ -107,6 +108,12 @@ export const ChangeOp = z.discriminatedUnion('op', [
    */
   z.object({ op: z.literal('add_to_model'), kind: z.literal('factor'), label: z.string(), acts_on: id, direction: z.enum(['positive', 'negative']),
     value: z.number(), unit, stance: Stance, source: Source }).strict(),
+  /**
+   * A NEW option for the model's decision: its name and each setting it puts a factor at, with that figure's declared source
+   * (the add-option door: its id, decision and same-settings rules; each setting held as an option's setting is).
+   */
+  z.object({ op: z.literal('add_option'), decision_id: id, label: z.string(),
+    settings: z.array(z.object({ factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict()).max(6) }).strict(),
 ]);
 type FigureOp = Extract<z.infer<typeof ChangeOp>, { op: 'set_factor_value' | 'set_option_setting' }>;
 type TargetArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_target' }>;
@@ -114,6 +121,7 @@ type LinkArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_link_strength' }>;
 type StructuralArgs = Extract<z.infer<typeof ChangeOp>, { op: 'rename' | 'remove_from_model' }>;
 type GoalLevelArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_current_level' }>;
 type AddArgs = Extract<z.infer<typeof ChangeOp>, { op: 'add_to_model' }>;
+type AddOptionArgs = Extract<z.infer<typeof ChangeOp>, { op: 'add_option' }>;
 /** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
 const TargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
   frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
@@ -649,7 +657,7 @@ function membersOf(operations: readonly ProposalOperation[]): CompoundStructural
 /** This path's change: figures, Olumi's link bands, renames and removals, as stored on its ONE proposal. */
 type Compound = { readonly figures: Op[]; readonly links: StoredLink[]; readonly structural: CompoundStructuralMember[]; readonly adds: CompoundAddFactor[];
   /** Each new factor's figure as declared (stored beside its add): its person's claim is written and read back like a figure's. */
-  readonly addFigures: Op[] };
+  readonly addFigures: Op[]; readonly options: StoredOption[] };
 function compoundOf(p: StructuredProposal): Compound | null {
   const of = (ops: readonly string[]) => p.operations.filter((o) => ops.includes(o.op));
   const figureOps = of(['set_factor_value', 'set_option_intervention']);
@@ -660,14 +668,19 @@ function compoundOf(p: StructuredProposal): Compound | null {
   const figures = declaredOf(figureOps);
   const links = linkOps.length === 0 ? [] : linksOf(linkOps);
   const structural = membersOf(structuralOps);
-  const adds = addsOf(addOps);
-  const addFigures = declaredOf(addOps.flatMap((o) => (isRec(o.value) && o.value.declared !== undefined ? [{ op: 'set_factor_value', path: o.path, value: o.value.declared }] : [])));
-  return figures === null || links === null || structural === null || adds === null || addFigures === null ? null : { figures, links, structural, adds, addFigures };
+  const isOption = (o: ProposalOperation): boolean => isRec(o.value) && o.value.kind === 'option';
+  const factorAdds = addOps.filter((o) => !isOption(o));
+  const adds = addsOf(factorAdds);
+  const addFigures = declaredOf(factorAdds.flatMap((o) => (isRec(o.value) && o.value.declared !== undefined ? [{ op: 'set_factor_value', path: o.path, value: o.value.declared }] : [])));
+  const options = optionsOf(addOps.filter(isOption));
+  return figures === null || links === null || structural === null || adds === null || addFigures === null || options === null ? null
+    : { figures, links, structural, adds, addFigures, options };
 }
 
 /** The whole change as read back: every figure, link, rename and removal holding as approved. */
 function compoundRead(read: SavedRead, c: Compound): { holds: boolean; faithful: boolean; written: Rec[] } {
-  const parts = [readbackOf(read, c.figures), linksRead(read, c.links), structuralRead(read, c.structural), addsRead(read, c.adds, c.addFigures)];
+  const parts = [readbackOf(read, c.figures), linksRead(read, c.links), structuralRead(read, c.structural), addsRead(read, c.adds, c.addFigures),
+    optionsRead(read, c.options)];
   return { holds: parts.every((x) => x.holds), faithful: parts.every((x) => x.faithful), written: parts.flatMap((x) => x.written) };
 }
 
@@ -696,10 +709,7 @@ function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx,
     }
     if (person && (a.source.quote === null || !inTheUsersWords(a.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
   }
-  const view = { nodes: nodesOf(read.graph).map((n) => ({ id: String(n.id), kind: String(n.kind), ...(typeof n.label === 'string' ? { label: n.label } : {}),
-    ...(typeof n.category === 'string' ? { category: n.category } : {}) })),
-    edges: (Array.isArray(read.graph.edges) ? read.graph.edges.filter(isRec) : []).map((e) => ({ from: String(e.from), to: String(e.to) })) };
-  const built = buildAddFactorTransaction({ factors: adds.map((a) => ({ label: a.label, link: { to_id: a.acts_on, effect_direction: a.direction } })) }, view);
+  const built = buildAddFactorTransaction({ factors: adds.map((a) => ({ label: a.label, link: { to_id: a.acts_on, effect_direction: a.direction } })) }, graphViewOf(read.graph));
   if (!built.matched) return refused(codeOf(`add_${built.reason}`), undefined, { op: at(0) });
   return adds.map((a, i) => {
     const person = a.source.origin === 'user';
@@ -710,6 +720,79 @@ function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx,
       observed_state: observed, basis: person ? 'written_about' : 'olumi_estimate', ...(person ? { quote: a.source.quote! } : {}) };
   });
 }
+
+/** A new option as stored on the proposal: its id, decision and name, and each setting as the batch door's plan read it. */
+type StoredOption = { readonly kind: 'option'; readonly id: string; readonly decision_id: string; readonly label: string;
+  readonly settings: readonly { readonly factor_id: string; readonly value: number; readonly raw_value?: number; readonly unit?: string;
+    readonly author: 'model_proposed' | 'unverified'; readonly declared: z.infer<typeof Declared> }[] };
+
+/**
+ * add_to_model, options: each new option as the add-option door takes one. Its id comes from that door's own builder on this read
+ * (decision, factors, same settings as an existing option); each setting passes the same rules as an option's setting today (its
+ * source and stance by the ONE table, a person's words checked) and is read on the factor's range by the batch door's own plan.
+ */
+function newOptionsOf(options: readonly AddOptionArgs[], read: SavedRead, ctx: ChangeCtx, at: (i: number) => number): StoredOption[] | ToolOutcome {
+  const out: StoredOption[] = [];
+  let graph = read.graph;
+  for (const [i, o] of options.entries()) {
+    const stop = figuresAllowed(o.settings.map((st) => ({ op: 'set_option_setting' as const, option_id: '', ...st })), ctx, () => at(i));
+    if (stop !== null) return stop;
+    // Each setting read on its factor's range by the batch door's own plan, as an option's setting is today.
+    const declared: Op[] = o.settings.map((st) => ({ kind: 'setting', option_id: NEW_OPTION, ...st }));
+    const plan = planOf(ctx.scenario_id, '', declared, { ...graph, nodes: [...nodesOf(graph), { id: NEW_OPTION, kind: 'option' }] });
+    if ('refusal' in plan) return stopped(plan, declared, () => at(i));
+    const settings = plan.levels.map((l, k) => ({ factor_id: l.factor_id, value: l.value, ...(l.raw_value !== undefined ? { raw_value: l.raw_value } : {}),
+      ...(l.unit !== undefined ? { unit: l.unit } : {}), author: l.author === 'model_proposed' ? 'model_proposed' as const : 'unverified' as const,
+      declared: { value: o.settings[k]!.value, unit: o.settings[k]!.unit, stance: o.settings[k]!.stance, source: o.settings[k]!.source } }));
+    const candidate: StoredOption = { kind: 'option', id: '', decision_id: o.decision_id, label: o.label, settings };
+    const built = buildAddOptionTransaction({ parent_decision_id: o.decision_id, label: o.label, interventions: doorOptionOf(candidate).interventions }, graphViewOf(graph));
+    if (!built.matched) return refused(codeOf(`add_option_${built.reason}`), undefined, { op: at(i) });
+    out.push({ ...candidate, id: built.proposal.optionId });
+    graph = { ...graph, nodes: [...nodesOf(graph), { id: built.proposal.optionId, kind: 'option', label: o.label }] };
+  }
+  return out;
+}
+const NEW_OPTION = 'new_option';
+
+/** A new option as the door takes it: Olumi's settings as Olumi's estimate; a person's as of unestablished origin (R3, as today). */
+const doorOptionOf = (o: StoredOption): CompoundAddOption => ({ id: o.id, label: o.label, decision_id: o.decision_id,
+  interventions: o.settings.map((st) => ({ factor_id: st.factor_id, value: st.value, ...(st.raw_value !== undefined ? { raw_value: st.raw_value } : {}),
+    ...(st.unit !== undefined ? { unit: st.unit } : {}), source: 'cee_hypothesis' as const, ...(st.author === 'unverified' ? { user_material_unverified: true as const } : {}) })) });
+
+/** The new options as stored on the proposal; else `null`. */
+function optionsOf(operations: readonly ProposalOperation[]): StoredOption[] | null {
+  const out: StoredOption[] = [];
+  for (const o of operations) {
+    const v = isRec(o.value) ? o.value : {};
+    const settings = Array.isArray(v.settings) ? v.settings.filter(isRec) : null;
+    if (v.id !== o.path || typeof v.decision_id !== 'string' || typeof v.label !== 'string' || settings === null) return null;
+    const parsed = settings.map((st) => ({ st, d: Declared.safeParse(st.declared) }));
+    if (parsed.some(({ st, d }) => !d.success || typeof st.factor_id !== 'string' || typeof st.value !== 'number'
+      || (st.author !== 'model_proposed' && st.author !== 'unverified'))) return null;
+    out.push({ kind: 'option', id: o.path, decision_id: v.decision_id, label: v.label, settings: parsed.map(({ st, d }) => ({ factor_id: String(st.factor_id),
+      value: Number(st.value), ...(typeof st.raw_value === 'number' ? { raw_value: st.raw_value } : {}), ...(typeof st.unit === 'string' ? { unit: st.unit } : {}),
+      author: st.author as 'model_proposed' | 'unverified', declared: d.data! })) });
+  }
+  return out;
+}
+
+/** Each new option as the model now holds it: by its id, its name, its decision link, and each setting by the one setting readback. */
+function optionsRead(read: SavedRead, options: readonly StoredOption[]): { holds: boolean; faithful: boolean; written: Rec[] } {
+  const nodes = nodesOf(read.graph);
+  const edges = Array.isArray(read.graph.edges) ? read.graph.edges.filter(isRec) : [];
+  const parts = options.map((o) => {
+    const node = nodes.find((n) => n.id === o.id);
+    const settings = readbackOf(read, o.settings.map((st): Op => ({ kind: 'setting', option_id: o.id, factor_id: st.factor_id, ...st.declared })));
+    const holds = node !== undefined && node.kind === 'option' && node.label === o.label && edges.some((e) => e.from === o.decision_id && e.to === o.id) && settings.holds;
+    return { holds, faithful: settings.faithful, row: { op: 'add_option', id: o.id, label: node?.label ?? null, decision_id: o.decision_id, settings: settings.written } };
+  });
+  return { holds: parts.every((x) => x.holds), faithful: parts.every((x) => x.faithful), written: parts.map((x) => x.row) };
+}
+
+/** The add doors' graph view of a read. */
+const graphViewOf = (g: Rec) => ({ nodes: nodesOf(g).map((n) => ({ id: String(n.id), kind: String(n.kind), ...(typeof n.label === 'string' ? { label: n.label } : {}),
+  ...(typeof n.category === 'string' ? { category: n.category } : {}), ...(n.interventions !== undefined ? { interventions: n.interventions } : {}) })),
+  edges: (Array.isArray(g.edges) ? g.edges.filter(isRec) : []).map((e) => ({ from: String(e.from), to: String(e.to) })) });
 
 /** The new factors as stored on the proposal (`add_node`, its value the door's member); else `null`. */
 function addsOf(operations: readonly ProposalOperation[]): CompoundAddFactor[] | null {
@@ -757,7 +840,8 @@ const LINK_LEFT_OUT = 'Not every link in this change could be prepared as asked,
  * must be in its set). One refused or left-out member, or members acting on a part another removes, and nothing is proposed.
  */
 async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs,
-  figures: readonly FigureOp[], links: readonly LinkArgs[], structural: readonly StructuralArgs[], adds: readonly AddArgs[] = []): Promise<ToolOutcome> {
+  figures: readonly FigureOp[], links: readonly LinkArgs[], structural: readonly StructuralArgs[], adds: readonly AddArgs[] = [],
+  addOptions: readonly AddOptionArgs[] = []): Promise<ToolOutcome> {
   const at = (members: readonly unknown[]) => (i: number): number => args.ops.indexOf(members[i] as z.infer<typeof ChangeOp>);
   const stop = figuresAllowed(figures, ctx, at(figures));
   if (stop !== null) return stop;
@@ -770,7 +854,7 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   const plan = planOf(ctx.scenario_id, '', declared, read.graph);
   if ('refusal' in plan) return stopped(plan, declared, at(figures));
   const prepared: ProposalOperation[] = [];
-  const cards: string[] = figures.length + adds.length > 0 ? [args.public_label] : [];
+  const cards: string[] = figures.length + adds.length + addOptions.length > 0 ? [args.public_label] : [];
   for (const [i, m] of structural.entries()) {
     const raw = m.op === 'rename' ? { op: 'rename', kind: m.kind, id: m.target_id, new_label: m.new_label, quote: m.quote }
       : { op: 'remove', kind: m.kind, id: m.target_id, ...(m.to_id === null ? {} : { to_id: m.to_id }), quote: m.quote };
@@ -800,14 +884,17 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   if (members === null) return refused('unsupported_change');
   const added = newFactorsOf(adds, read, ctx, at(adds));
   if (!Array.isArray(added)) return added;
-  const written = { nodes: [...plan.levels.flatMap((l) => [l.option_id, l.factor_id]), ...(plan.values ?? []).map((v) => v.factor_id), ...(plan.frames ?? []).map((f) => f.factor_id)],
+  const options = newOptionsOf(addOptions, read, ctx, at(addOptions));
+  if (!Array.isArray(options)) return options;
+  const written = { nodes: [...plan.levels.flatMap((l) => [l.option_id, l.factor_id]), ...(plan.values ?? []).map((v) => v.factor_id), ...(plan.frames ?? []).map((f) => f.factor_id),
+    ...options.flatMap((o) => [o.decision_id, ...o.settings.map((st) => st.factor_id)])],
     links: [...plan.links.map((l) => ({ from: l.option_id, to: l.factor_id })), ...links.map((l) => ({ from: l.from, to: l.to })),
       ...added.map((a) => ({ from: a.id, to: a.link.to_id }))] };
   if (compoundMembersConflict(written, members)) return refused('compound_members_conflict');
   const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
     operations: [...figureOps, ...linkOps, ...prepared, ...added.map((a, i): ProposalOperation => ({ op: 'add_node', path: a.id,
       value: { ...a, declared: operationOf({ op: 'set_factor_value', factor_id: a.id, value: adds[i]!.value, unit: adds[i]!.unit, stance: adds[i]!.stance,
-        source: adds[i]!.source }, ctx, recordedAt).value } }))],
+        source: adds[i]!.source }, ctx, recordedAt).value } })), ...options.map((a): ProposalOperation => ({ op: 'add_node', path: a.id, value: a }))],
     provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: cards.length === 1 ? cards[0]! : `Save these changes together:\n${cards.join('\n')}` });
@@ -825,7 +912,10 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const structural = args.ops.filter((o): o is StructuralArgs => o.op === 'rename' || o.op === 'remove_from_model');
   const ops = args.ops.filter((o): o is FigureOp => o.op === 'set_factor_value' || o.op === 'set_option_setting');
   const adds = args.ops.filter((o): o is AddArgs => o.op === 'add_to_model');
-  if (structural.length + adds.length > 0 || (links.length > 0 && ops.length > 0)) return proposeCompound(deps, ctx, args, ops, links, structural, adds);
+  const addOptions = args.ops.filter((o): o is AddOptionArgs => o.op === 'add_option');
+  if (structural.length + adds.length + addOptions.length > 0 || (links.length > 0 && ops.length > 0)) {
+    return proposeCompound(deps, ctx, args, ops, links, structural, adds, addOptions);
+  }
   if (links.length > 0) return proposeLinks(deps, ctx, args, links);
   const stop = figuresAllowed(ops, ctx);
   if (stop !== null) return stop;
@@ -899,8 +989,9 @@ function doorApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, c:
       const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
         links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}),
         ...(c.links.length > 0 ? { link_strengths: linkStrengthsIn(c.links) } : {}),
-        ...(c.links.length + c.structural.length + c.adds.length + claims.length > 0 ? { compound: { structural: c.structural,
-          ...(c.adds.length > 0 ? { adds: c.adds } : {}), ...(claims.length > 0 ? { claims } : {}) } } : {}) };
+        ...(c.links.length + c.structural.length + c.adds.length + c.options.length + claims.length > 0 ? { compound: { structural: c.structural,
+          ...(c.adds.length > 0 ? { adds: c.adds } : {}), ...(c.options.length > 0 ? { addOptions: c.options.map(doorOptionOf) } : {}),
+          ...(claims.length > 0 ? { claims } : {}) } } : {}) };
       return viaDoor(deps, ctx, p, turnId, readNow, () => runWithApprovedBindings(plan.bindings, () => commitOptionLevels(input)));
     },
   };
@@ -960,7 +1051,7 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   if (!level && target === null && c === null) return refused('not_a_change_proposal');
   // The capability's own link set keeps its `#links` turn; every other change is this path's ONE door commit.
   const applier = level ? goalLevelApplier(deps, ctx, p) : target !== null ? targetApplier(deps, ctx, p, target, turnId)
-    : c!.figures.length + c!.structural.length + c!.adds.length === 0 ? linksApplier(deps, ctx, p, c!.links) : doorApplier(deps, ctx, p, c!, turnId);
+    : c!.figures.length + c!.structural.length + c!.adds.length + c!.options.length === 0 ? linksApplier(deps, ctx, p, c!.links) : doorApplier(deps, ctx, p, c!, turnId);
   if (!('commit' in applier)) return applier;
   const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
   if (prior === 'unreadable') return unavailable('read_failed');

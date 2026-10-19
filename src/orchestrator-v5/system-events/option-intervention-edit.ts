@@ -56,7 +56,8 @@ import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysi
 import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
 import { parseEditGraphResponse, buildAppliedChanges } from '../../orchestrator/tools/edit-graph.js';
 import { PatchOperationsArraySchema, validatePatchOperations } from '../../orchestrator/patch-validation.js';
-import { buildAddFactorTransaction, type UserTodayBasis } from '../routing/add-factor-transaction.js';
+import { buildAddFactorTransaction, type UserTodayBasis, type UserTodayLevel } from '../routing/add-factor-transaction.js';
+import { buildAddOptionTransaction } from '../routing/add-option-transaction.js';
 import { executeGmHeldResume } from '../handlers/gm-held-execute.js';
 import { assignEntityRefs } from '../graph/entity-refs.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
@@ -977,12 +978,22 @@ export type CompoundAddFactor = {
   readonly observed_state: Readonly<Record<string, unknown>>; readonly basis: UserTodayBasis; readonly quote?: string;
 };
 /**
+ * ⭐ add_to_model, options (PATH-B): a NEW option exactly as the add-option door takes one (`buildAddOptionTransaction`'s
+ * parameters): its id, name, its decision, and each setting already read on the factor's own range by the batch door's plan.
+ */
+export type CompoundAddOption = {
+  readonly id: string; readonly label: string; readonly decision_id: string;
+  readonly interventions: readonly { readonly factor_id: string; readonly value: number; readonly raw_value?: number; readonly unit?: string;
+    readonly source: 'cee_hypothesis'; readonly user_material_unverified?: true }[];
+};
+/**
  * ⭐ GAP 2: present ONLY from the typed core caller (PATH-B). Its link strengths ride with its figures (on their postimage)
  * and its renames and removals ride too; every other caller's link set stays ALONE (`link_strengths_not_alone`).
  */
 export type CompoundChange = {
   readonly structural: readonly CompoundStructuralMember[];
   readonly adds?: readonly CompoundAddFactor[];
+  readonly addOptions?: readonly CompoundAddOption[];
   /**
    * ⭐ GAP 1 (DL-3 GO, 19 Oct): each person's claim for a figure this commit writes (`isFigureClaimRecord`: who said it, a party's
    * name, their words, conditions and stance), by the ONE claim-record writer on the SAME candidate. Never an attest.
@@ -1570,7 +1581,8 @@ export async function prepareOptionInterventionBatchExecution(
   const structural = compound?.structural ?? [];
   const adds = compound?.adds ?? [];
   const claims = compound?.claims ?? [];
-  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length + structural.length + adds.length + claims.length > 0
+  const addOptions = compound?.addOptions ?? [];
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length + structural.length + adds.length + addOptions.length + claims.length > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
@@ -1642,30 +1654,42 @@ export async function prepareOptionInterventionBatchExecution(
       handlerFacts: [...plan.handlerFacts, ...written.handlerFacts] };
     valueConfirmations = [...valueConfirmations, written.response.assistant_text];
   }
-  const nothingElse = candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0 && adds.length === 0;
+  const nothingElse = candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged && structural.length === 0 && adds.length + addOptions.length === 0;
   if (nothingElse && claims.length === 0) return candidate;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
   }
-  // ⭐ add_to_model (PATH-B), after the levels' own link check: the new factors, each with its figure and its ONE placeholder link, built by the add-factor door's
-  // own builder on THIS candidate (its name, id, target and reaches-the-goal rules) and applied by that door's own confirm
-  // apply (`executeGmHeldResume`, pure), so they land in the SAME commit. Any refusal refuses the whole change; nothing is written.
-  if (adds.length > 0) {
-    const built = buildAddFactorTransaction({ factors: adds.map(a => ({ id: a.id, label: a.label, link: a.link })) }, plan.graph);
-    if (!built.matched) return { kind: 'refused', reason: `add_${built.reason}` };
-    const operations = PatchOperationsArraySchema.safeParse(built.proposal.operations);
+  // ⭐ add_to_model (PATH-B), after the levels' own link check: the new factors (each with its figure and its ONE placeholder link,
+  // the add-factor door's) and the new options (each with its decision and settings, the add-option door's), in the SAME commit.
+  // Each new part, built by its own door's builder on THIS candidate and applied by that door's own confirm apply
+  // (`executeGmHeldResume`, pure), numbered as the commit numbers it; any refusal refuses the whole change.
+  const applyAdded = (built: readonly PatchOperation[], userToday: readonly UserTodayLevel[]): OptionInterventionBatchRefusal | undefined => {
+    const operations = PatchOperationsArraySchema.safeParse(built);
     const baseHash = computeAnalysisAffectingGraphHash(plan.graph);
     if (!operations.success || !baseHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
-    const done = executeGmHeldResume({ operations: operations.data, currentGraph: plan.graph, currentGraphHash: baseHash,
-      userToday: adds.map(a => ({ factor_id: a.id, observed_state: a.observed_state, basis: a.basis, ...(a.quote !== undefined ? { quote: a.quote } : {}) })),
+    const done = executeGmHeldResume({ operations: operations.data, currentGraph: plan.graph, currentGraphHash: baseHash, userToday,
       freshness: input.freshness, hasExistingAnalysis: input.hasExistingAnalysis, scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
     if (done.status !== 'executed') return { kind: 'refused', reason: done.status === 'referee_blocked' ? 'add_referee_blocked' : `add_${done.reason}` };
-    // The new factors' references, numbered on from the saved model's, as the commit numbers them (the goal-horizon precedent).
+    // The new parts' references, numbered on from the saved model's, as the commit numbers them (the goal-horizon precedent).
     const graph = assignEntityRefs(projectGraphForPersistence(done.mutatedGraph), before).graph;
     const hash = isEditableGraph(graph) ? computeAnalysisAffectingGraphHash(graph) : null;
     if (!isEditableGraph(graph) || !hash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
     plan = { ...plan, graph, operations: [...plan.operations, ...operations.data], analysisGraphHash: hash, handlerFacts: [...plan.handlerFacts, done.fact] };
+    return undefined;
+  };
+  if (adds.length > 0) {
+    const built = buildAddFactorTransaction({ factors: adds.map(a => ({ id: a.id, label: a.label, link: a.link })) }, plan.graph);
+    if (!built.matched) return { kind: 'refused', reason: `add_${built.reason}` };
+    const refused = applyAdded(built.proposal.operations,
+      adds.map(a => ({ factor_id: a.id, observed_state: a.observed_state, basis: a.basis, ...(a.quote !== undefined ? { quote: a.quote } : {}) })));
+    if (refused !== undefined) return refused;
+  }
+  for (const o of addOptions) {
+    const built = buildAddOptionTransaction({ parent_decision_id: o.decision_id, label: o.label, option_id: o.id, interventions: o.interventions }, plan.graph);
+    if (!built.matched) return { kind: 'refused', reason: `add_option_${built.reason}` };
+    const refused = applyAdded(built.proposal.operations, []);
+    if (refused !== undefined) return refused;
   }
   // ⭐ GAP 1: each person's figure claim, by the ONE claim-record writer, beside the figure on the SAME candidate (last, so a factor
   // this commit adds holds its person's claim too). The card's node is checked against the persisted base (a new factor: absent
