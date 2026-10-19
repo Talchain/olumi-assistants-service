@@ -24,8 +24,8 @@
  * Pure.
  */
 import { inverseStandardNormal } from '../../orchestrator-v5/stated-range-spread.js';
-import { pluraliseUnit } from '../../orchestrator-v5/tools/handlers/d1-shared/format-confirmation.js';
-import { convertLinkEffect } from './link-effect.js';
+import { pluraliseUnit } from '../../orchestrator-v5/agent-lane/say-figure.js';
+import type { convertLinkEffect } from './link-effect.js';
 import { userFigureHeld } from './user-figure-held.js';
 
 type Rec = Record<string, unknown>;
@@ -82,11 +82,13 @@ export function linkSpreadOf(
   sd: number,
   size: { readonly amount: number; readonly per_source_change: number; readonly strength_mean: number },
   frames: { readonly target: number | undefined; readonly source: number | undefined } | null,
+  /** The size's own conversion (`convertLinkEffect`), passed in so the support reader stays outside link-effect's import cycle. */
+  convert: typeof convertLinkEffect,
 ): number | undefined {
   if (frames === null || !finite(sd) || sd <= 0) return undefined;
-  const beta = convertLinkEffect(size.amount, size.per_source_change, frames.target, frames.source);
+  const beta = convert(size.amount, size.per_source_change, frames.target, frames.source);
   if (beta === null || !SAME(beta, size.strength_mean)) return undefined;
-  const spread = convertLinkEffect(sd, size.per_source_change, frames.target, frames.source);
+  const spread = convert(sd, size.per_source_change, frames.target, frames.source);
   if (spread === null) return undefined;
   const std = Math.abs(spread);
   return std > ENGINE_STD_MIN && std <= WRITER_STD_MAX ? std : undefined;
