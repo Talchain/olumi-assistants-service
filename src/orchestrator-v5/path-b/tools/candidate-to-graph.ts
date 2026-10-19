@@ -19,7 +19,7 @@
  */
 import type { RepairEntry } from '@talchain/schemas';
 import {
-  admitStatedGoalChange, admitStatedGoalLevel, assignIds, canonicalLabel, slugId, checkDeclaredSums, constructedLevel, defaultFrameFor,
+  admitStatedGoalChange, admitStatedGoalLevel, assignIds, canonicalLabel, slugId, checkDeclaredSums, constructedLevel, declaredSumSentence, defaultFrameFor,
   displayProvenanceFor, framedObservedState, shortLabel, breakLoops,
   type AdmittedNode, type CandidateIdentity, type CandidateModel, type CandidateNodeKind, type ConstructedLevel,
 } from '../../agent-lane/admit-model.js';
@@ -61,12 +61,14 @@ const valueStamp = (who: Who): Rec => (who === 'user' ? { source: 'brief_extract
   : who === 'olumi' ? { source: 'cee_inference', extractionType: 'inferred' } : {});
 const unstamped = ({ source: _s, extractionType: _e, ...numbers }: Rec): Rec => numbers;
 /**
- * ⭐ ONE RULE FOR EVERY DERIVED FIGURE (DL, 19 Oct; Codex #3462 R2): a figure computed from declared inputs (an addition's
- * total; a checked definition's size) inherits an origin ONLY when every input has that same origin. Otherwise it is
- * Olumi's derived reading, and its inputs keep their own origins in `declared` and in the notes. Never a person's stamp on
- * a mixed result.
+ * ⭐ A DERIVED FIGURE IS OLUMI'S (signed plan, ARGUMENT-RECONCILED-20261018 item 7; Codex #3462 R2): "a derived figure is
+ * Olumi's derivation from the user's operands, shown with its arithmetic; it is never credited as the user's." Every total
+ * calculated here is stamped Olumi's; its operands keep their own origins (their own nodes, and `declared`); this shows the
+ * arithmetic with each operand's origin: "£3,000 = Olumi's £2,000 estimate + your £1,000".
  */
-const derivedOrigin = (inputs: readonly Who[]): Who => (inputs.length > 0 && inputs.every((w) => w === inputs[0]) ? inputs[0]! : 'olumi');
+const derivation = (total: string, operands: readonly { readonly by: Who; readonly amount: string }[]): string =>
+  `${total} = ${operands.map(({ by, amount }) => (by === 'olumi' ? `Olumi's ${amount} estimate` : by === 'user' ? `your ${amount}`
+    : by === 'other' ? `another person's ${amount}` : `${amount} from an unclear source`)).join(' + ')}`;
 
 function asCandidate(v: unknown): CandidateModel | null {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
@@ -174,16 +176,14 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
       }
       const setBy = whoOf(iv.provenance, speakerOf('option', o.label, (s) => s.field === 'level'
         && canonicalLabel(String(s.subject.factor_label ?? '')) === canonicalLabel(iv.factor_label)));
-      // An addition's total is derived from today's level and the increment: one origin only when both share it.
-      const todayBy = additional ? factorWho.get(declaredFactor!.label)! : setBy;
-      const who = derivedOrigin([todayBy, setBy]);
-      if (who !== todayBy || who !== setBy) {
+      // An addition's total is calculated, so it is Olumi's derived figure, its arithmetic shown with each operand's origin.
+      const who: Who = additional ? 'olumi' : setBy;
+      if (additional) {
         const unit = iv.unit ?? '';
         const say = (v: number): string => (/^[£$€]$/.test(unit) ? `${unit}${v.toLocaleString('en-GB')}` : `${v.toLocaleString('en-GB')}${unit ? ` ${unit}` : ''}`);
-        const part = (by: Who, v: number): string => (by === 'olumi' ? `Olumi's ${say(v)} estimate` : by === 'user' ? `your ${say(v)}`
-          : by === 'other' ? `another person's ${say(v)}` : `${say(v)} from an unclear source`);
         loss.push(note(`nodes[${oid}].interventions.${fid}.derived_total`, { today: declaredFactor!.baseline_value, added: iv.value },
-          `"${o.label}" sets "${iv.factor_label}" to ${say(level)}, Olumi's derived reading: ${part(todayBy, declaredFactor!.baseline_value!)} + ${part(setBy, iv.value)}.`));
+          `"${o.label}" sets "${iv.factor_label}" to ${say(level)}, Olumi's derived figure: ${derivation(say(level),
+            [{ by: factorWho.get(declaredFactor!.label)!, amount: say(declaredFactor!.baseline_value!) }, { by: setBy, amount: say(iv.value) }])}.`));
       }
       if (bundle[fid] !== undefined && !(who === 'user' && bundle[fid]!.source !== 'brief_extraction')) continue;
       if (who === 'other') blocked.push({ field_path: `nodes[${oid}].interventions.${fid}`, declared: 'other', missing: 'speaker_name' });
@@ -228,8 +228,8 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
       goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit, ...(n.quantity_frame !== undefined ? { quantity_frame: n.quantity_frame } : {}),
       unit: unitOf.get(n.id) ?? null, option_levels: optionLevels.get(n.id) ?? [], ...(gap !== undefined ? { goal_gap: gap } : {}) };
   };
-  // Link sizes (DL ruling, 19 Oct): only sizes Olumi declared are sized, as Olumi's (a checked one-for-one definition too:
-  // its size derives from its declaration, `derivedOrigin`). A size the AI declared as a person's keeps Olumi's placeholder,
+  // Link sizes (DL ruling, 19 Oct): only sizes Olumi declared are sized, as Olumi's (a one-for-one definition too, checked
+  // by `definitionalLink`). A size the AI declared as a person's keeps Olumi's placeholder,
   // said in their words, kept in `declared` and listed: a link has no "declared, not attested" state, and `user_stated`
   // means attested (Science Fi). This site never passes it true.
   const sizing = new Map<string, LinkSizing>();
@@ -238,7 +238,7 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
     const amount = l.effect_amount, per = l.effect_per_source_change;
     const stated = finite(amount) && finite(per) && per !== 0;
     const definition = stated && l.definitional === true && Math.abs(amount / per) === 1;
-    const who = derivedOrigin([sizeWho.get(l)!]);
+    const who = sizeWho.get(l)!;
     const used = stated && who === 'olumi';
     if (stated && !used) {
       const quoted = (l as Rec).source_quote;
@@ -294,8 +294,15 @@ export function candidateToGraph(input: unknown): CandidateToGraphResult {
   const sums = checkDeclaredSums(list<CandidateIdentity>(c.identities).map(({ evidence: _evidence, ...d }) => d as CandidateIdentity), idFor,
     nodes, edges as never, (id) => { const n = nodeById.get(id); return n === undefined ? undefined : resolveMagnitudeFrame(magnitude(n)); }, undefined);
   loss.push(...sums.loss);
-  // A sum is a relation, not a figure: Olumi's reading of the draft (`stated_in_brief: false`); its parts keep their own origins.
-  for (const s of sums.accepted) nodeById.get(s.outcome_id)!.nonlinear_identity = { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: false };
+  // A sum of parts is Olumi's derivation (`stated_in_brief: false`), said with the existing words; its parts keep their own origins.
+  for (const s of sums.accepted) {
+    nodeById.get(s.outcome_id)!.nonlinear_identity = { operation: 'sum', factor_ids: [...s.factor_ids], stated_in_brief: false };
+    const named = (id: string): string => String(nodeById.get(id)?.description ?? nodeById.get(id)?.label ?? id);
+    const today = (id: string): unknown => (nodeById.get(id)?.observed_state as Rec | undefined)?.raw_value;
+    const arithmetic = [s.outcome_id, ...s.factor_ids].every((id) => finite(today(id)))
+      ? ` Today: ${derivation(String(today(s.outcome_id)), s.factor_ids.map((id) => ({ by: factorWho.get(named(id)) ?? 'unknown', amount: String(today(id)) })))}.` : '';
+    loss.push(note(`nodes[${s.outcome_id}].sum_identity`, null, declaredSumSentence(named(s.outcome_id), s.factor_ids.map(named), false) + arithmetic));
+  }
 
   // What the draft declares that this conversion does not carry yet is said (and kept, verbatim, in `declared`).
   const notCarried = [...(g.kind === 'event_by_date' ? [`a forecast for the deadline of "${g.deliverable ?? g.metric}"`] : []),

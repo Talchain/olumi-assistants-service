@@ -164,11 +164,11 @@ describe('candidateToGraph: conversion + science only', () => {
     // 600 orders: cap 600 × 1.25 = 750 (target headroom); today's 400 is 400 / 750 on it; the declared direction and horizon held.
     expect(ofKind(graph, 'goal')[0]).toMatchObject({ goal_threshold_raw: 600, goal_threshold_cap: 750, goal_threshold: 0.8,
       goal_direction: '>=', goal_horizon_months: 6, observed_state: { baseline: 400 / 750, raw_value: 400, cap: 750, source: 'brief_extraction' } });
-    // £2,000 of £10,000: 0.2. Double = £4,000: 0.4. Add £1,000 = £2,000 + £1,000 = £3,000: 0.3, a computed total.
+    // £2,000 of £10,000: 0.2. Double = £4,000: 0.4. Add £1,000 = £2,000 + £1,000 = £3,000: 0.3, Olumi's derived figure.
     expect(byLabel(graph, 'Ad spend').observed_state).toMatchObject({ value: 0.2, raw_value: 2000, cap: 10000 });
     const levelOf = (option: string): Rec => byLabel(graph, option).interventions[byLabel(graph, 'Ad spend').id];
     expect(levelOf('Double the ad spend')).toMatchObject({ value: 0.4, raw_value: 4000, source: 'brief_extraction' });
-    expect(levelOf('Add £1,000 of ad spend')).toMatchObject({ value: 0.3, raw_value: 3000, value_confidence: 'medium' });
+    expect(levelOf('Add £1,000 of ad spend')).toMatchObject({ value: 0.3, raw_value: 3000, source: 'cee_hypothesis' });
     expect(settingProvenanceOf(levelOf('Double the ad spend')).origin).toBe('human');
     // Olumi's estimate of one order per £20: 1/20 × 10,000 / 750 = 0.6667 on the goal's frame, labelled as Olumi's.
     const sized = edge(graph, 'Ad spend', 'Monthly pre-orders')!;
@@ -193,6 +193,10 @@ describe('candidateToGraph: conversion + science only', () => {
     const kept = converted(sumDraft(400));
     expect(ofKind(kept.graph, 'goal')[0]!.nonlinear_identity).toEqual({ operation: 'sum',
       factor_ids: [byLabel(kept.graph, 'Online orders').id, byLabel(kept.graph, 'Shop orders').id], stated_in_brief: false });
+    // Olumi's derivation, said with the existing words and its arithmetic; the parts keep their own (the user's) origin.
+    expect(kept.loss.map((l) => l.reason)).toContain('Olumi reads "Total orders" as "Online orders" + "Shop orders": Olumi\'s reading, '
+      + 'not your figure; tell me if it includes anything else. Today: 400 = your 300 + your 100.');
+    expect(valueProvenanceOf(byLabel(kept.graph, 'Online orders').observed_state).origin).toBe('human');
     const off = converted(sumDraft(500));
     expect(ofKind(off.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
     expect(off.loss.map((l) => l.reason).join(' ')).toContain('while those parts add up to');
@@ -202,16 +206,18 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(theirs.blocked_schema.filter((b) => b.missing === 'link_size_origin').map((b) => b.declared)).toEqual(['user', 'user']);
   });
 
-  // ⭐ GENERATIVE (DL, 19 Oct): at every derivation site, flip one input's origin; the derived figure's origin follows the ONE
-  // rule — the inputs' shared origin, else Olumi's derived reading — and a mixed total says both inputs' origins.
+  // ⭐ GENERATIVE (signed plan item 7; DL 19 Oct): whatever its operands' origins (all the user's, all Olumi's, mixed), a
+  // calculated total is Olumi's derived figure, its arithmetic said with each operand's origin; the operands keep their own.
   const ORIGINS = ['user', 'olumi', 'other', 'unknown'] as const;
   type O = typeof ORIGINS[number];
   const readAs: Record<O, string> = { user: 'human', olumi: 'ai', other: 'unknown', unknown: 'unknown' };
+  const partSaid: Record<O, (amount: string) => string> = { user: (a) => `your ${a}`, olumi: (a) => `Olumi's ${a} estimate`,
+    other: (a) => `another person's ${a}`, unknown: (a) => `${a} from an unclear source` };
   const statementBy = (subject: Rec, speaker: O): Rec[] => (speaker === 'other' || speaker === 'unknown' ? [{ quote: 'synthetic',
     subject: { to_label: null, factor_label: null, ...subject }, field: 'level', form: 'point', value: null, low: null, high: null, unit: null,
     qualifier: null, conditions: null, speaker }] : []);
   it.each(ORIGINS.flatMap((today) => ORIGINS.map((added) => [today, added] as const)))(
-    'GENERATIVE (addition): today\'s £2,000 by %s + £1,000 by %s = £3,000, whose origin follows the one rule', (today, added) => {
+    'GENERATIVE (addition): today\'s £2,000 by %s + £1,000 by %s = £3,000, always Olumi\'s derived figure', (today, added) => {
       const draft = salesDraft();
       draft.factors[0].provenance = today === 'olumi' ? 'inferred' : 'explicit';
       draft.factors[0].baseline_known = today !== 'olumi';
@@ -220,19 +226,19 @@ describe('candidateToGraph: conversion + science only', () => {
         ...statementBy({ kind: 'option', label: 'Add £1,000 of ad spend', factor_label: 'Ad spend' }, added)];
       const { graph, loss } = converted(draft);
       const total = byLabel(graph, 'Add £1,000 of ad spend').interventions[byLabel(graph, 'Ad spend').id];
-      const expected: O = today === added ? today : 'olumi';
-      expect(total).toMatchObject({ raw_value: 3000, value: 0.3 });
-      expect(settingProvenanceOf(total).origin).toBe(readAs[expected]);
-      const said = loss.filter((l) => String(l.field_path).endsWith('.derived_total')).map((l) => l.reason);
-      expect(said).toHaveLength(today === added ? 0 : 1);
-      if (today !== added) expect(said[0]).toContain('sets "Ad spend" to £3,000, Olumi\'s derived reading: ');
+      expect(total).toMatchObject({ raw_value: 3000, value: 0.3, source: 'cee_hypothesis' });
+      expect(settingProvenanceOf(total).origin).toBe('ai');
+      // The operand on the model keeps its own origin; the note shows the arithmetic with both operands' origins.
+      expect(valueProvenanceOf(byLabel(graph, 'Ad spend').observed_state).origin).toBe(readAs[today]);
+      expect(loss.map((l) => l.reason)).toContain(`"Add £1,000 of ad spend" sets "Ad spend" to £3,000, Olumi's derived figure: `
+        + `£3,000 = ${partSaid[today]('£2,000')} + ${partSaid[added]('£1,000')}.`);
     });
-  it('GENERATIVE (addition): the mixed note says each input with its own origin', () => {
-    const draft = salesDraft();
-    draft.factors[0].provenance = 'inferred'; draft.factors[0].baseline_known = false;
-    const { loss } = converted(draft);
-    expect(loss.map((l) => l.reason)).toContain('"Add £1,000 of ad spend" sets "Ad spend" to £3,000, Olumi\'s derived reading: '
-      + 'Olumi\'s £2,000 estimate + your £1,000.');
+  it('GENERATIVE (absolute): a setting that is not calculated keeps its own declared origin', () => {
+    const draft = salesDraft(); draft.options[0].interventions[0].provenance = 'ai_proposed';
+    const { graph } = converted(draft);
+    expect(settingProvenanceOf(byLabel(graph, 'Double the ad spend').interventions[byLabel(graph, 'Ad spend').id]).origin).toBe('ai');
+    expect(settingProvenanceOf(converted(salesDraft()).graph.nodes.find((n: Rec) => n.label === 'Double the ad spend')
+      .interventions.ad_spend).origin).toBe('human');
   });
   it.each(ORIGINS)('GENERATIVE (definition): a one-for-one definition declared by %s is sized only when it is Olumi\'s', (by) => {
     const draft = sumDraft(400, by === 'olumi' ? 'olumi' : 'user');
