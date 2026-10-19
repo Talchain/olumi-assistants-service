@@ -10850,7 +10850,7 @@ export function createAgentCapabilities(
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
-      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown } | null };
+      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown; speaker?: unknown } | null };
       const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
       /**
        * ⭐ SEVERAL OPTIONS, ONE CHANGE (F4; Canonical's typed transaction #1940, contract #70 5841655730). "Add A
@@ -10991,7 +10991,7 @@ export function createAgentCapabilities(
       // ⛔ A LEVEL THE AI READ AS ANOTHER SPEAKER'S FIGURE: the whole change is refused, nothing written (`reportedFigureNotKept`).
       for (const spec of askedSpecs) for (const a of spec.acts_on ?? []) {
         if (speakerOf(a.level?.speaker) !== 'other' || a.level?.estimate === true || typeof a.level?.value !== 'number') continue;
-        return reportedFigureNotKept(a.level.value, a.factor_label,
+        return reportedFigureNotKept(a.level.value, String(a.factor_label ?? ''),
           quoteOfFigure(a.level.value, a.level.unit, ctx.user_text) ?? (typeof ctx.user_text === 'string' ? ctx.user_text : String(a.level.value)));
       }
       if (askedSpecs.length > MAX_OPTIONS_PER_TRANSACTION) {
