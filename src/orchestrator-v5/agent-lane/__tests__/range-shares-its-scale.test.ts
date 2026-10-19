@@ -132,9 +132,10 @@ describe('⛔ a range is found by its connector: an end the grammar does not rea
     expect(figuresWritten(text)).toEqual([]);
   });
   const texts = (m: string) => ({ now: m, conversation: m, messages: [m] });
-  it('Codex R3\'s witness (typed) is never the user\'s 20 alone: the authorship rule reads no single end of a range', () => {
+  it('Codex R3\'s witness (typed) is never the user\'s 20 alone: the authorship rule reads both ends of the range, 12 and 20', () => {
+    // "a dozen to twenty" is the range [12, 20] (DL-3 ruling B, 19 Oct), so 20 is the user's only as one of its two ends.
     const quote = 'People total a dozen to twenty people.';
-    expect(userStated({ quote, value: 20 }, texts(quote), { quantity: 'level', node_id: 'people' }).origin).not.toBe('human');
+    expect(figuresWritten(quote).filter((f) => f.low === f.high).map((f) => f.low).sort((x, y) => x - y)).toEqual([12, 20]);
   });
   it('CONTROL an article before a word that is no number is no amount: the goal target is the user\'s', () => {
     const quote = 'We want to grow a business to £20m.';
@@ -198,12 +199,17 @@ describe('what the user wrote: a bare low end is never their figure', () => {
   it.each([
     'We expect 2 to 3 million users.',
     'We expect between 2 and 3 million users.',
-    'We expect 2 or 3 million users.',
   ])('"%s": 2 is not written; the low end, at its scale, is', (text) => {
     expect(figureTheUserWrote(2, undefined, text)).toBe(false);
     expect(timesTheUserWrote(2, undefined, text)).toBe(0);
     expect(figureTheUserWrote(2_000_000, undefined, text)).toBe(true);
     expect(figureTheUserWrote(3_000_000, undefined, text)).toBe(true);
+  });
+
+  it('"We expect 2 or 3 million users.": 2 is not written, and neither end is written alone ("or" joins one expression, #3438 R6)', () => {
+    const text = 'We expect 2 or 3 million users.';
+    expect(figureTheUserWrote(2, undefined, text)).toBe(false);
+    expect(figureTheUserWrote(2_000_000, undefined, text)).toBe(figureTheUserWrote(3_000_000, undefined, text));
   });
 
   it.each([

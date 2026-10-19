@@ -202,8 +202,13 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     const omitted = a.nodes.filter(n => n.analysis_participation === 'retained_excluded').map(n => n.id);
     assert.deepEqual(omitted, RUN_OMITS_BY_RAW[c.file] ?? []);
     assert.deepEqual([...unsizedOlumiRiskIds({ nodes: a.nodes, edges: a.edges, goal_constraints: a.goal_constraints })], omitted);
+    // #3441: each omission now names its rule (`analysis_participation_reason`), on exactly the omitted risks and nowhere else;
+    // subtract exactly that field so the digest still pins every other byte as captured.
+    const reasoned = a.nodes.filter(n => n.analysis_participation_reason !== undefined).map(n => [n.id, n.analysis_participation_reason]);
+    assert.deepEqual(reasoned, omitted.map(id => [id, 'unsized_olumi_risk']));
+    const beforeReason = { ...a, nodes: a.nodes.map(({ analysis_participation_reason: _reason, ...n }) => n) };
     const baseline: Record<string, string> = json('r5-no-evidence-baseline.json');
-    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(a, raw, c.file)) })), baseline[c.file]);
+    assert.equal(digest(JSON.stringify({ p, a: beforeDoorTag(beforeAiLevelType(beforeReason, raw, c.file)) })), baseline[c.file]);
   },
 })));
 export const registrationRows: Row[] = probes.filter(p => p.id.startsWith('B-')).map(p => ({

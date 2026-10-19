@@ -3547,11 +3547,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const current = await readBackState(dispatch, scenarioId);
         const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
         const settled = proposals.get(approvedProposal);
-        // A plain re-press has no edits to bind. Its applied deadline goes through the capability's own
-        // committed-operation + native readback proof; a memory flag alone never earns an already-saved receipt.
-        const recoveringAppliedDeadline = editsForThisCard.fields.length === 0 && proposals.isApplied(approvedProposal)
-          && settled?.operations.length === 1 && settled.operations[0]?.op === 'set_goal_deadline';
-        if (!recoveringAppliedDeadline) {
+        // A plain re-press of an APPLIED card has no edits to bind and nothing held to bind them to: its carrier was consumed
+        // by its own commit. The capability answers it, as it answers the same press without a binding: its original
+        // receipts and no write (an applied deadline also needs its committed operation and a native read-back). REC-WRITE
+        // (served 390a1dbe): refused here as not held, the user read "That card is out of date" for a change that was saved.
+        const recoveringApplied = editsForThisCard.fields.length === 0 && proposals.isApplied(approvedProposal) && settled !== undefined;
+        if (!recoveringApplied) {
           if (!record || !original) editsFailure = 'not_held';
           // Bound to the model the card was SHOWN on (the current one, or its own base) and still applying NOW by the one rule
           // the turn showed it by (#3031 buddy: a card shown after an unrelated approval was refused here by its base hash).

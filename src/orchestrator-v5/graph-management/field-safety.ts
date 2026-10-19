@@ -229,6 +229,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'proposed_by',
   'option_status',
   'analysis_participation',
+  // #3441: which rule owns a `retained_excluded` mark (`unsized-risk.ts`); minted with the mark by CEE only.
+  'analysis_participation_reason',
   // RC3: only a server-validated widen press may leave an option precondition out of the Run.
   'relies_on',
   // AIE same-cohort law (science PR-4): an option's cohort forecast is written only from the user's stated figures, or Olumi's

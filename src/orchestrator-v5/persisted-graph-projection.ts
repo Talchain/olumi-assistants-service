@@ -56,6 +56,7 @@ import { normaliseOptionInterventionContract } from './normalise-option-interven
 import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options.js';
 import { reindexInterventionKeys } from './reindex-intervention-keys.js';
 import { refuseInadmissibleInterventionRanges } from './intervention-range.js';
+import { withUnsizedOlumiRiskMarksReconciled } from './agent-lane/unsized-risk.js';
 import { log } from '../utils/telemetry.js';
 
 export interface PersistedGraphProjectionContext {
@@ -125,6 +126,9 @@ export function projectGraphForPersistence<T>(
   const admitted = admitInterventionRanges(normalised, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(admitted, ctx);
   const reindexed = reindexInterventionKeys(reconciled);
+  // #3441 (DL-3 re-scope after Codex R2): the ONE place every saved write passes re-evaluates each mark the unsized Olumi risk rule
+  // owns, on this candidate alone (idempotent; a stored graph is a fixed point; another rule's mark is untouched).
+  const participation = withUnsizedOlumiRiskMarksReconciled(reindexed);
   // PL 6135017311 item 3: every committed revision recompiles each capacity ratio from the saved figures.
-  return withCompiledCapacityRatios(dropNullOptionalGraphFields(reindexed, ctx));
+  return withCompiledCapacityRatios(dropNullOptionalGraphFields(participation, ctx));
 }

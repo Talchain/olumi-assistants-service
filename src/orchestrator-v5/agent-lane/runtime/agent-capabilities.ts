@@ -365,7 +365,7 @@ import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../sel
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { appliedDeadlineHolds, deadlineCardSubjectOf, deadlineSubjectHolds, heldCardStillApplies, runApplyingHeldCard } from '../proposal-object/still-applies.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorTheUserWroteFor, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, figureAppearsIn, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { figureIsThisQuantitys, type Candidate } from '../quantity-identity.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, figureApprovalWords, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval, isEarlierTurnWithdrawal } from '../approval-chips.js';
@@ -4565,7 +4565,7 @@ export function createAgentCapabilities(
     // stated over is still exactly as bound (Codex r1: a concurrent 3 → 6 month change still said the 3-month receipt).
     const check = await readGraph(ctx.scenario_id);
     const held = (check?.raw as { nodes?: unknown[] } | undefined)?.nodes?.find((n) => isPlainRecord(n) && n.id === op.path);
-    if (check === null || !isDeepStrictEqual(held, riskOccurrencePostimageNode(approved))
+    if (check === null || !isDeepStrictEqual(held, riskOccurrencePostimageNode(approved, check.raw))
       || !riskOccurrenceGoalHolds(approved, check.raw)) return notConfirmed;
     const receipts = res.receipt === null ? [] : [res.receipt];
     proposals.markApplied(pid, receipts);
@@ -7597,13 +7597,16 @@ export function createAgentCapabilities(
         const origin = statementOrigin(writtenFigure,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
-        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⛔ The user wrote this figure, but their words give it to another quantity, in another unit, or turn it down for this
-        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not.
-        if (origin === 'human' && identity?.verdict === 'not_this') {
+        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not, and the user is
+        // asked which they mean. The verdict's own presence is the user's words (Codex R6: "70 tickets" for a factor counted in
+        // nurses was "origin unknown", so the ask was generic). Olumi's own estimate is never the user's figure, so it stays Olumi's
+        // and is never asked about (P53: a user asking for a cost estimate in words gets Olumi's £200 proposed).
+        if (origin !== 'ai' && identity?.verdict === 'not_this') {
           notThisFactors.push({ label: node.label, value: Number(a.value), written_for: identity.givenTo });
           continue;
         }
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
         // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
         if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
@@ -11910,8 +11913,7 @@ export function createAgentCapabilities(
         const quote = source === undefined ? (priorHuman ? prior!.member!.quote ?? null : null) : quoteOfFigure(t.value, todayUnit, source);
         const origin = statementOrigin(source !== undefined || priorHuman,
           (prior !== undefined && prior.member === undefined)
-          || quoteOfFigure(t.value, todayUnit, ctx.unverified_user_text ?? '') !== null
-          || quoteOfFigure(t.value, todayUnit, g.brief_text ?? '') !== null, ctx.user_text_complete);
+          || figureAppearsIn(t.value, todayUnit, ctx.unverified_user_text) || figureAppearsIn(t.value, todayUnit, g.brief_text), ctx.user_text_complete);
         const ownsIt = origin === 'human';
         if (origin === 'unknown') {
           originUnknown = true;

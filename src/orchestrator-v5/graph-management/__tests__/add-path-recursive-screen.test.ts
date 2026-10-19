@@ -28,6 +28,7 @@ import {
   INTERVENTION_CONTRACT_KEYS,
   CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST,
   checkFieldSafety,
+  stripPipelineOwnedFromAddOperations,
 } from '../field-safety.js';
 import { refereeMutation } from '../referee.js';
 import { CandidateMutationEnvelopeV1 } from '../types.js';
@@ -96,6 +97,9 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
       // + F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority, written only by construction / the adoption
       // door / the option-status writer — an AI add carrying it would forge the adoption inference.
       'analysis_participation',
+      // + #3441 (19 Oct): which rule owns a participation mark (`unsized-risk.ts`), minted with the mark by CEE only — an AI
+      // write carrying it would claim (or end) the unsized-risk rule's omission.
+      'analysis_participation_reason',
       // + Science PR-4 (14 Oct, AIE same-cohort law): an option's cohort forecast, written only by its one writer.
       'cohort_forecast',
       'defaulted',
@@ -149,7 +153,8 @@ describe('the 27 zero-reader smuggle names — enumerated at the bytes', () => {
     // 27 CEE-owned smuggle names include the three new S4 pipeline-owned fields and three horizon-basis stamps; add five J2 names and event_risk.
     // Batch C: ruling 4 — +1 smuggle name (`goal_target_basis`), so 34 in all; the six non-smuggle names are unchanged.
     // Science PR-4 — +1 smuggle name (`cohort_forecast`), so 35 in all; the six non-smuggle names are unchanged.
-    expect(all.length).toBe(35);
+    // #3441 — +1 smuggle name (`analysis_participation_reason`), so 36 in all; the six non-smuggle names are unchanged.
+    expect(all.length).toBe(36);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',
@@ -201,6 +206,50 @@ describe('2.478 — the add path screen is RECURSIVE (the nested spelling is the
     const v = addNode(undefined);
     expect(v.verdict).toBe('held');
     expect(v.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
+  });
+});
+
+// ⭐ #3441 (DL-3 security item): `analysis_participation_reason` is CEE-owned. No AI write may set it, on any path: an add (top
+// level or nested), a field update (a patch), an AI edit operation through the producer, or the held add's pipeline strip.
+describe('#3441 — the unsized-risk rule\u2019s reason dies on every AI write path', () => {
+  const REASON = 'analysis_participation_reason';
+  const ctx = { base_graph_hash: hashOf(G), scenario_id: 's', turn_id: 't', makeCandidateId: () => '22222222-2222-4222-8222-222222222222' };
+
+  it('an AI add carrying it at the top level is REJECTED (with and without the mark it would claim)', () => {
+    for (const screened of [{ [REASON]: 'unsized_olumi_risk' }, { analysis_participation: 'retained_excluded', [REASON]: 'unsized_olumi_risk' }]) {
+      const v = addNode(screened);
+      expect(v.verdict).toBe('rejected');
+      expect(v.blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+    }
+  });
+
+  it('an AI patch writing it on an existing node is REJECTED', () => {
+    const v = nodeUpdate(REASON, 'unsized_olumi_risk');
+    expect(v.verdict).toBe('rejected');
+    expect([PIPELINE_OWNED_FIELD, FIELD_NOT_ALLOWED]).toContain(v.blocker?.code);
+  });
+
+  it('an AI edit operation adding a risk with it, through the producer, is REJECTED by the referee', () => {
+    const [env] = editOperationsToCandidateEnvelopes(
+      [{ op: 'add_node', path: 'r-new', value: { id: 'r-new', kind: 'risk', label: 'R', [REASON]: 'unsized_olumi_risk' } }],
+      ctx,
+    );
+    const v = refereeMutation(CandidateMutationEnvelopeV1.parse(env), G, frameFor(G));
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+  });
+
+  it('the held add\u2019s pipeline strip removes it from an AI add, and keeps the identity', () => {
+    const { operations, strippedKeyShapes } = stripPipelineOwnedFromAddOperations([
+      { op: 'add_node', path: 'r-new', value: { id: 'r-new', kind: 'risk', label: 'R', [REASON]: 'unsized_olumi_risk' } },
+    ]);
+    expect(operations[0]!.value).toEqual({ id: 'r-new', kind: 'risk', label: 'R' });
+    expect(strippedKeyShapes.length).toBeGreaterThan(0);
+  });
+
+  it('CONTROL: the same add without it reaches its HELD verdict (no capability revoked)', () => {
+    const v = addNode({ description: 'A new factor' });
+    expect(v.verdict).toBe('held');
   });
 });
 

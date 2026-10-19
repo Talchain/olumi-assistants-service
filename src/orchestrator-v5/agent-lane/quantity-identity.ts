@@ -25,8 +25,6 @@
  *   hold it, AND either the phrase refers to the model only by words several quantities share ("change the spend limit to
  *   £30,000", "spend" being several siblings' word: DL #2195) or the ordinary attribution of that SAME occurrence
  *   (`figureTheUserWroteForSpan` at its index) reads it so.
- *
- * No word list names a kind of quantity: the model's own labels and units, and the door's candidates, decide.
  */
 import { isProseAfterValue, unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -117,37 +115,47 @@ export function figureIsThisQuantitys(
   const unitWords = typeof unit === 'string' ? tokensOf(unit) : [];
   const own = readUnitParts(unit);
   const share = isProportionScaledFactor({ unit, cap: undefined, value: undefined, raw_value: undefined });
-  const written = amountsWrittenIn(text).filter((a) => amountTheUserWrote(a, value, unit, text)).map((a) => {
+  // Presence is the number the user wrote, in their own words; WHOSE it is, and in which unit, is this rule's alone. An
+  // occurrence only the unit-free reading finds (its words count another thing: "70 tickets" for nurses) can show the figure
+  // is another quantity's, never that it is this one's (Codex R6 on #3433: it was "not written", so the ask was generic).
+  const written = amountsWrittenIn(text).flatMap((a) => {
+    const forUnit = amountTheUserWrote(a, value, unit, text);
+    return forUnit || amountTheUserWrote(a, value, undefined, text) ? [{ a, elsewhere: !forUnit }] : [];
+  }).map(({ a, elsewhere }) => {
     let phraseStart = 0;
     for (const m of text.slice(0, a.index).matchAll(new RegExp(CLAUSE_END.source, 'gi'))) phraseStart = (m.index ?? 0) + m[0].length;
     const lead = text.slice(phraseStart, a.index);
     const end = a.index + a.matchedText.length; const stop = text.slice(end).search(CLAUSE_END);
     // The figure's own phrase ends at the next clause break or conjunction: "2 ovens and the annual …" states no period.
     const phrase = stop < 0 ? text : text.slice(0, end + stop);
-    return { a, lead, phrase, tail: tokensOf(phrase.slice(end)), turnedDown: REJECTED_FIGURE.test(lead) };
+    return { a, elsewhere, lead, phrase, tail: tokensOf(phrase.slice(end)), turnedDown: REJECTED_FIGURE.test(lead) };
   });
   if (written.length === 0) return verdict('not_written');
   // A figure the user turned down anywhere is this quantity's only where their words name it, never by default.
   const turnedDown = written.some((w) => w.turnedDown);
   let unclear = false;
+  // Evidence the figure is NOT this quantity's: a turned-down occurrence, another unit, another quantity named.
+  let against = turnedDown;
   const givenTo = new Set<string>();
-  for (const { a, lead, phrase, tail } of written.filter((w) => !w.turnedDown)) {
+  for (const { a, elsewhere, lead, phrase, tail } of written.filter((w) => !w.turnedDown)) {
     const next = /^\s*([A-Za-z][A-Za-z'-]*)/.exec(phrase.slice(a.index + a.matchedText.length))?.[1];
     const read = a.kind !== 'currency' && a.kind !== 'percent' && next !== undefined && isProseAfterValue(next) ? null : statedTailReading(phrase, a);
     // A unit the user wrote that cannot be read ("70 tickets per week per month") is no quantity's, and never an unstated one.
-    if (read === 'conflict') continue;
+    if (read === 'conflict') { against = true; continue; }
     const stated = read;
     if (!writtenInItsUnit(stated, own, share)) {
       // Written in another unit: the quantities that unit fits are the ones to ask about ("70 specialists": Additional specialists).
       for (const c of candidates) if (c.label !== target && ((p) => p !== null && writtenInItsUnit(stated, p))(readUnitParts(c.unit))) givenTo.add(c.label);
+      against = true;
       continue;
     }
+    if (elsewhere) continue;
     // A rival competes only for a figure written in a unit it can hold ("1,500 Pro subscribers" is no price's).
     const competing = candidates.filter((c) => c.label !== target
       && (stated === null || ((p) => p !== null && writtenInItsUnit(stated, p))(readUnitParts(c.unit)))).map((c) => c.label);
     const words = [...tokensOf(lead), ...tail.filter((w) => !unitWords.some((u) => sameWord(u, w)))];
     const named = quantitiesNamedIn(words, labels);
-    if (competing.some((c) => named.has(c))) { competing.filter((c) => named.has(c)).forEach((c) => givenTo.add(c)); continue; }
+    if (competing.some((c) => named.has(c))) { competing.filter((c) => named.has(c)).forEach((c) => givenTo.add(c)); against = true; continue; }
     if (named.has(target)) return verdict('this');
     // Against each competing quantity, its own words decide: a word only this quantity has ("SENIOR engineers", against the
     // junior salary) and none only the rival has. A rival's own word gives the figure to the rival; the whole fragment both
@@ -160,7 +168,7 @@ export function figureIsThisQuantitys(
       const tIn = holds(t.filter((w) => !o.some((x) => sameWord(x, w)))); const rIn = holds(o.filter((w) => !t.some((x) => sameWord(x, w))));
       return tIn && !rIn ? 'this' : rIn || (shared.length > 0 && shared.every((w) => holds([w]))) ? 'rival' : 'silent';
     });
-    if (versus.includes('rival')) { competing.filter((_, i) => versus[i] === 'rival').forEach((c) => givenTo.add(c)); continue; }
+    if (versus.includes('rival')) { competing.filter((_, i) => versus[i] === 'rival').forEach((c) => givenTo.add(c)); against = true; continue; }
     if (versus.length > 0 && versus.every((v) => v === 'this')) return verdict('this');
     // With no other candidate: words several quantities share name none of them ("the spend limit"), so they never give the
     // figure away; with no model word at all, the ordinary attribution of this occurrence decides ("Revenue was £6,000 …").
@@ -168,5 +176,5 @@ export function figureIsThisQuantitys(
       || figureTheUserWroteForSpan(value, unit, text, { ...scope, at: a.index }) !== null)) return verdict('this');
     unclear = true;
   }
-  return unclear ? verdict('unclear') : verdict('not_this', [...givenTo]);
+  return unclear ? verdict('unclear') : against ? verdict('not_this', [...givenTo]) : verdict('not_written');
 }

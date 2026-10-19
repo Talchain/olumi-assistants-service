@@ -62,7 +62,7 @@ export async function correctionWorld(original: Rec, message: string, options: {
       write_turn_ids: writes.map(w => w.turn_id) }) as never });
   const ctx: AgentToolContext = { scenario_id: scenario, authenticated_user_id: null, request_id: 'native-correction', turn_id: randomUUID(),
     user_turn_text: message, user_text: message, verified_user_messages: [message], user_text_complete: true };
-  return { ctx, proposals, caps, graph: () => graph, writes, registers, responses,
+  return { dispatch, ctx, proposals, caps, graph: () => graph, writes, registers, responses,
     change: (fn: (g: Rec) => void) => fn(graph),
     offer: (tool: string, args: unknown) => dispatchTool(tool, JSON.stringify(args), ctx, caps()),
     press: (pid: string, store = proposals, own = true) => caps(store).authoriseChange({ ...ctx, turn_id: randomUUID(), user_turn_text: '',

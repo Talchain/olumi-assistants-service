@@ -615,6 +615,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // treating the quote as a value would make a risk nobody has confirmed look sized.
       "already_true_quote",
       "analysis_participation",
+      // #3441, 19 Oct (DL-3 re-scope after Codex R2) — THE VALUE-BEARING DECISION: `analysis_participation_reason` is NOT
+      // value-bearing and joins neither `carriesValue` nor `NODE_QUANTITY_FIELDS`. It names which rule owns a
+      // `retained_excluded` mark (`unsized_olumi_risk`), so that rule can re-evaluate its own mark at every save; it asserts no
+      // magnitude, and the node it sits on is by definition one nobody has sized.
+      "analysis_participation_reason",
       "category",
       // Science PR-4, 14 Oct (AIE same-cohort law) — THE VALUE-BEARING DECISION: `cohort_forecast` IS value-bearing in
       // meaning (people reached and a conversion range, attested by its REQUIRED `author` and the user's `same_cohort`
