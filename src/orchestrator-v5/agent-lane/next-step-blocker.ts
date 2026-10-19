@@ -7,9 +7,10 @@
  * producer can type yields nothing. Not yet typed here: the unread rate × count goal (its reading card is the AI's own
  * `propose_identity` step, and its writable-card unlock is `actions/state.ts`'s to share).
  */
-import { targetBlockerOf, targetTestabilityOf, untestableTargetParts } from '../admission/target-testability.js';
+import { targetBlockerOf, targetTestabilityOf, untestableTargetParts, type TargetTestability } from '../admission/target-testability.js';
 import { goalChanceLicenceForAgent } from '../goal-target/goal-chance-licence.js';
 import { chanceGoalBlockerOf, draftedTeamPartOf, eventByDateRefusalOf } from '../goal-target/event-by-date-model.js';
+import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 import { jointBlockerOf, olumiBaseTargetsOf } from '../goal-target/goal-targets-joint.js';
 import { goalTargetMissingBlockerOf, isChanceGoalModel } from './decision-input-ask.js';
 import { oneNextStep, type PressBlocker } from './press-next-step.js';
@@ -50,6 +51,18 @@ export function runWithheldBlockerOf(raw: unknown, analysisReady: unknown): Pres
     ...(factorGap ? { proposable_by: { tool: 'propose_assumptions', node_id: gap.factor_id as string, field: 'starting_value' } } : {}) };
 }
 
+/**
+ * ⭐ RE-RULED (DL-3, 19 Oct; PROMPT-INT underdefined-coaching trace, 3 of 8 drafts on 390a1dbe, served B2 on cae490f4): the
+ * target lacks the goal's OWN level today (P1 (a)). "Down by a third from today" has no figure without it, as a goal with no
+ * target has none, so its ask leads the Run's missing figure (which #3088 ranked ahead of every later-stage ask). A goal
+ * counted from launch has no level today (`launchWindowOf`): its (a) is a forecast or cohort question and keeps #3088's order.
+ */
+function goalLevelTodayMissing(raw: unknown, verdict: TargetTestability): boolean {
+  if (verdict.kind !== 'not_testable' || !verdict.failures.some((f) => f.code === 'missing_goal_baseline')) return false;
+  const goal = isRec(raw) && Array.isArray(raw.nodes) ? raw.nodes.find((n) => isRec(n) && n.id === verdict.goal_id) : undefined;
+  return launchWindowOf(goal) === undefined;
+}
+
 export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null {
   const result = isRec(read.analysis_result) ? read.analysis_result : undefined;
   const current = isRec(read.analysis_state) && isRec(read.analysis_state.run_state)
@@ -58,7 +71,9 @@ export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null
   const evaluations = Array.isArray(result?.identity_evaluations) ? result.identity_evaluations : undefined;
   // A goal met by an event by a date has no level target: its step is the event's own (`chanceGoalBlockerOf`), never
   // "today's level" of its share (Paul's hiring test: no "% today" question on any surface).
-  const parts = isChanceGoalModel(read.raw) ? null : untestableTargetParts(read.raw, targetTestabilityOf(read.raw, evaluations));
+  const verdict = targetTestabilityOf(read.raw, evaluations);
+  const parts = isChanceGoalModel(read.raw) ? null : untestableTargetParts(read.raw, verdict);
+  const target = parts === null ? null : targetBlockerOf(parts);
   // The joint is the selected CURRENT Run's own record; a stale Run's is said by the stale step.
   const targets = current ? goalChanceLicenceForAgent(read.analysis_result)?.targets : undefined;
   const joint = targets?.joint.status === 'withheld' ? targets.joint : undefined;
@@ -68,10 +83,11 @@ export function nextStepBlockerForAgent(read: NextStepRead): PressBlocker | null
   const eventHold = eventByDateRefusalOf(read.raw);
   return oneNextStep([
     eventHold !== null ? { kind: 'missing_input', ask: eventHold } : goalTargetMissingBlockerOf(read.raw),
+    goalLevelTodayMissing(read.raw, verdict) ? target : null,
     // Ahead of every later-stage ask (the first producer of a kind wins): only this figure lets the Run start.
     runWithheldBlockerOf(read.raw, read.analysis_ready),
     staleBlockerOf(read.analysis_state, read.analysis_ready, staleOnlyByRangeReading(read.raw, read.analysis_result)),
-    parts === null ? null : targetBlockerOf(parts),
+    target,
     joint === undefined ? null : jointBlockerOf(Math.max(named.length + (targets?.unsupported_targets?.length ?? 0), 2),
       joint.reason, targets?.unsupported_targets ?? [], olumiBaseTargetsOf(read.raw, named)),
     chanceGoalBlockerOf(read.raw),
