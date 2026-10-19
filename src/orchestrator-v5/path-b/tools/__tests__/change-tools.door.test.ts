@@ -158,6 +158,15 @@ describe('ROW 2: exactly once across a lost response and a restart', () => {
     expect(rows.size).toBe(1);
   });
 
+  it('a door that reports "already held" is said as unchanged only when a fresh readback holds the approved figure and source', async () => {
+    const { proposals, id } = await proposed([queueTo('user', 'about 20 minutes')]);
+    const noOp = vi.fn(async () => ({ status: 'committed' as const, graph_hash: 'h', receipt: null, already_applied: true, committed_levels: [] }));
+    // The stored queue time is still 30, of no recorded source: "unchanged" would be a false claim.
+    expect(await applyChange({ dispatch, proposals, commitOptionLevels: noOp }, ctx, { proposal_id: id }))
+      .toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(proposals.isApplied(id)).toBe(false);
+  });
+
   it('an id the store does not hold: refused, nothing read or written', async () => {
     const d = door();
     expect(await applyChange({ dispatch, proposals: new ProposalStore(), commitOptionLevels: d }, ctx, { proposal_id: 'prop_not_one' }))
