@@ -42,12 +42,12 @@ const Source = z.object({
   /** Who the figure comes from, as the AI read it: the user, a third party they named, Olumi, or not known. */
   origin: z.enum(['user', 'third_party', 'olumi', 'unknown']),
   /** The words it comes from, copied verbatim from the user's own messages; null for Olumi's estimate. */
-  quote: z.string().min(1).max(400).nullable(),
+  quote: z.string().nullable(),
   /** The third party the user named as its source; otherwise null. */
-  named_source: z.string().min(1).max(120).nullable(),
+  named_source: z.string().nullable(),
 }).strict();
-const id = z.string().min(1).max(200);
-const unit = z.string().min(1).max(40).nullable();
+const id = z.string();
+const unit = z.string().nullable();
 const Declared = z.object({ value: z.number(), unit, source: Source }).strict();
 export const ChangeOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, source: Source }).strict(),
@@ -55,12 +55,14 @@ export const ChangeOp = z.discriminatedUnion('op', [
 ]);
 export const ProposeChangeParams = z.object({
   /** What the approval card says, in a few plain words. */
-  public_label: z.string().min(1).max(200),
+  public_label: z.string(),
   /** Why, in Olumi's words. */
-  basis: z.string().min(1).max(400),
+  basis: z.string(),
   ops: z.array(ChangeOp).min(1).max(12),
 }).strict();
-export const ApplyChangeParams = z.object({ proposal_id: z.string().regex(/^prop_[0-9a-f]{32}$/) }).strict();
+/** No pattern: the SDK's strict schema drops it, so a malformed id would fail the parse and end the turn. An id the store
+ * does not hold is refused as `unknown_proposal` instead. */
+export const ApplyChangeParams = z.object({ proposal_id: z.string() }).strict();
 export type ProposeChangeArgs = z.infer<typeof ProposeChangeParams>;
 export type ApplyChangeArgs = z.infer<typeof ApplyChangeParams>;
 
@@ -171,6 +173,7 @@ const codeOf = (reason: string): string => {
 };
 
 export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
+  if (args.public_label.trim() === '') return refused('label_empty');
   for (const [i, o] of args.ops.entries()) {
     if (o.op === 'set_option_setting' && o.source.origin !== 'olumi') return refused('blocked_schema', undefined, { op: i, carrier: 'option_setting' });
     if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: i });
