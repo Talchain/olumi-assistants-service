@@ -190,7 +190,7 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
   const scales = [['thousand', 1_000], ['million', 1_000_000]] as const;
   const joins = [(a: string, b: string) => `${a} to ${b}`, (a: string, b: string) => `${a} or ${b}`, (a: string, b: string) => `${a} – ${b}`,
     (a: string, b: string) => `between ${a} and ${b}`];
-  const cases: { text: string; truth: [number, number] }[] = [];
+  const cases: { text: string; truth: readonly number[] }[] = [];
   for (const low of ['digits', 'words'] as const) for (const high of ['digits', 'words'] as const) for (const join of joins) for (const [word, s] of scales) {
     const [l, h] = [ends[low][0], ends[high][1]];
     for (const [lowScaled, highScaled] of [[false, false], [true, true], [false, true], [true, false]] as const) {
@@ -200,8 +200,8 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
   }
   // An end the grammar reads no figure from, on either side of every connector: the range has no true reading, so nothing.
   for (const unread of ['a dozen', 'a few', 'a zillion', 'several hundred']) for (const join of joins) for (const other of ['twenty', '20']) {
-    cases.push({ text: `We expect ${join(unread, other)} users.`, truth: [] as unknown as [number, number] });
-    cases.push({ text: `We expect ${join(other, unread)} users.`, truth: [] as unknown as [number, number] });
+    cases.push({ text: `We expect ${join(unread, other)} users.`, truth: [] });
+    cases.push({ text: `We expect ${join(other, unread)} users.`, truth: [] });
   }
   const bothOrNothing = (got: readonly number[], truth: readonly number[]): boolean =>
     got.length === 0 || [...got].sort((a, b) => a - b).join() === [...truth].join();
