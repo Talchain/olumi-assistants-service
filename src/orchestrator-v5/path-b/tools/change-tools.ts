@@ -349,11 +349,12 @@ async function proposeGoalLevel(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>
   if (prepared === undefined) {
     return refused(codeOf(typeof offered.refusal === 'string' ? offered.refusal : 'goal_level_refused'), typeof offered.detail === 'string' ? offered.detail : undefined, { op: 0 });
   }
-  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
-    operations: prepared.operations, provenance: { authored_by: 'user_stated', basis: o.source.quote }, validation: prepared.validation,
-    public_label: prepared.public_label });
+  // The same base as every core proposer and the card machinery (#3472, K7/K9): the graph hash, plus the model's full identity.
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash,
+    base_model_identity: read.identity, operations: prepared.operations, provenance: { authored_by: 'user_stated', basis: o.source.quote },
+    validation: prepared.validation, public_label: prepared.public_label });
   deps.proposals.put(p);
-  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.graphHash });
 }
 
 /** The goal's level as the model now holds it: the approved figure, unit and source on the goal; the user's words are not kept. */
@@ -780,8 +781,9 @@ function targetApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, 
   };
 }
 
-/** A change this path prepared (a goal target, or figures, links and structural members): `apply_change` commits it. */
-export const isChangeProposal = (p: StructuredProposal | undefined): boolean => p !== undefined && (targetOf(p) !== null || compoundOf(p) !== null);
+/** A change this path prepared (the goal's level or target, or figures, links and structural members): `apply_change` commits it. */
+export const isChangeProposal = (p: StructuredProposal | undefined): boolean =>
+  p !== undefined && (isGoalCurrentLevelProposal(p) || targetOf(p) !== null || compoundOf(p) !== null);
 
 export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyChangeArgs): Promise<ToolOutcome> {
   const p = deps.proposals.get(args.proposal_id);
