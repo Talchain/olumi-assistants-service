@@ -205,7 +205,9 @@ describe('journey E: the user\'s salaries, through the real door, are stored as 
     const ctx = { ...a.ctx, user_turn_text: text, verified_user_messages: [text] };
     const p = await a.caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Baseline monthly cloud spend', value: 36000, unit: 'GBP/month', user_stated: true, revise: true, basis: 'Olumi’s proposed field reading' }] });
     expect(p, JSON.stringify(p)).toMatchObject({ ok: false, mutated: false, refusal: 'nothing_to_adopt',
-      not_this_factors_figure: [{ label: 'Baseline monthly cloud spend', value: 36000 }] });
+      not_this_factors_figure: [{ label: 'Baseline monthly cloud spend', value: 36000, written_for: ['Monthly cloud spend'] }] });
+    // The ask is useful, never a bare refusal (DL-3): the Agent names the baseline and the spend ceiling, and asks which is meant.
+    expect(String(p.not_this_factors_figure_note)).toMatch(/Ask the user which they mean, naming this factor and, when written_for names one, that quantity too/);
     expect(rows.size).toBe(0);
     expect(JSON.stringify(persisted)).toBe(before);
   });

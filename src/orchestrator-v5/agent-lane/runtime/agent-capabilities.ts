@@ -167,10 +167,14 @@ const SCALE_AMBIGUOUS_NOTE =
   'Nothing was proposed for these: the figure was given in percent for a factor measured as a share from 0 to 1, and a figure '
   + 'of 1 or less could mean either reading (0.5% is 0.005; 0.5 as a share is 50%). Ask the user which they mean, quoting both.';
 
-/** A figure the user wrote, but never for this factor (`figureIsThisQuantitys`): nothing proposed for it; the user is asked. */
+/**
+ * A figure the user wrote, but never for this factor (`figureIsThisQuantitys`): nothing proposed for it, and the user is asked,
+ * never refused (DL-3: coach, don't refuse): the Agent names this factor and the quantity their words give the figure to.
+ */
 const NOT_THIS_FACTORS_FIGURE_NOTE =
-  'Nothing was proposed for these: the user wrote the figure, but their words give it to another quantity, in another unit, or '
-  + 'turn it down for this one. Never record it as this factor\u2019s value; ask the user which figure they mean for it.';
+  'Nothing was proposed for these: the user wrote the figure, but their words give it to another quantity (named in written_for), '
+  + 'write it in another unit, or turn it down for this one. Never record it as this factor\u2019s value. Ask the user which they '
+  + 'mean, naming this factor and, when written_for names one, that quantity too, and quote their words; never just refuse.';
 
 /** A figure compared the other way from what the factor measures (`relative-figure.ts`, AIQ 5907227964 B). */
 const DIRECTION_CONFLICT_NOTE =
@@ -7380,7 +7384,7 @@ export function createAgentCapabilities(
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const scaleAmbiguous: { label: string; value: number; as_percent: number; as_share: number }[] = [];
       const directionConflict: { label: string }[] = [];
-      const notThisFactors: { label: string; value: number }[] = [];
+      const notThisFactors: { label: string; value: number; written_for: readonly string[] }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; bindingUnverified?: true; asPercent?: true; kept?: true;
         confirmed?: { source: string; quote: string }; described?: { source: string; quote: string } }[] = [];
@@ -7574,7 +7578,7 @@ export function createAgentCapabilities(
         const rivalUnit = (label: string): unknown => factorUnitOf(g.raw, g.nodes.find((n) => n.label === label) as never);
         const identity = readable ? figureIsThisQuantitys(bindingWords, asWritten?.value ?? Number(a.value), asWritten?.unit ?? nodeUnit ?? a?.unit,
           ownerScope, (ownerScope.rivals ?? ownerScope.others).map((label) => ({ label, unit: rivalUnit(label) }))) : null;
-        const writtenAbout = identity === 'this';
+        const writtenAbout = identity?.verdict === 'this';
         // TL11:51: source belongs to each figure, never to the number of figures or the field-binding matcher.
         // Verified human evidence wins over a tool flag; a new estimate without that evidence stays Olumi's.
         const turnWords = ctx.user_turn_text ?? ctx.user_text;
@@ -7586,7 +7590,10 @@ export function createAgentCapabilities(
         if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⛔ The user wrote this figure, but their words give it to another quantity, in another unit, or turn it down for this
         // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not.
-        if (origin === 'human' && identity === 'not_this') { notThisFactors.push({ label: node.label, value: Number(a.value) }); continue; }
+        if (origin === 'human' && identity?.verdict === 'not_this') {
+          notThisFactors.push({ label: node.label, value: Number(a.value), written_for: identity.givenTo });
+          continue;
+        }
         // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
         // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
         if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
@@ -12153,7 +12160,7 @@ export function createAgentCapabilities(
       // ⛔ Recorded as the user's own figure, so it must be one the user wrote, ABOUT this limit's quantity (DL #72
       // 5862394804): "300 Pro paying subscribers" is never a £300 limit on the price.
       if (interpretation === null && figureIsThisQuantitys(ctx.user_text, value, unit, limitScopeIn(g, node.label),
-        otherLimitsThatCouldHold(g, node.id, unit)) !== 'this') {
+        otherLimitsThatCouldHold(g, node.id, unit)).verdict !== 'this') {
         return { ok: false, mutated: false, refusal: 'figure_not_stated',
           detail: `${figureOf(value)} is not a figure the user wrote, so nothing was prepared: it would be recorded as their limit. `
             + 'Ask them what the new limit is, in their own words, and never offer a figure of your own as theirs.' };

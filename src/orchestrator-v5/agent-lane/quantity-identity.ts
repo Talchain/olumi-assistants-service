@@ -36,7 +36,11 @@ import { amountsWrittenIn, amountTheUserWrote, figureTheUserWroteForSpan, sameWo
  * candidate named, a fragment two candidates share, another unit) or turn it down. `unclear`: written, but their words do not say
  * whose (no candidate named and more than one could hold it). `not_written`: not written in this text.
  */
-export type QuantityIdentity = 'this' | 'not_this' | 'unclear' | 'not_written';
+export interface QuantityIdentity {
+  readonly verdict: 'this' | 'not_this' | 'unclear' | 'not_written';
+  /** On `not_this`: the quantities the user's words give the figure to instead (named, or the only ones its unit fits), for the ask. */
+  readonly givenTo: readonly string[];
+}
 /** A quantity the door could write the figure into instead, with its unit (null when it has none). */
 export interface Candidate { readonly label: string; readonly unit: unknown }
 
@@ -91,7 +95,8 @@ export function figureIsThisQuantitys(
   text: string | null | undefined, value: number, unit: unknown, scope: EntityScope, candidates: readonly Candidate[],
 ): QuantityIdentity {
   const target = scope.target[0];
-  if (typeof text !== 'string' || target === undefined) return 'not_written';
+  const verdict = (v: QuantityIdentity['verdict'], givenTo: readonly string[] = []): QuantityIdentity => ({ verdict: v, givenTo });
+  if (typeof text !== 'string' || target === undefined) return verdict('not_written');
   const labels = [...new Set([target, ...scope.others, ...candidates.map((c) => c.label)])];
   const unitWords = typeof unit === 'string' ? tokensOf(unit) : [];
   const own = readUnitParts(unit);
@@ -105,21 +110,26 @@ export function figureIsThisQuantitys(
     const phrase = stop < 0 ? text : text.slice(0, end + stop);
     return { a, lead, phrase, tail: tokensOf(phrase.slice(end)), turnedDown: REJECTED_FIGURE.test(lead) };
   });
-  if (written.length === 0) return 'not_written';
+  if (written.length === 0) return verdict('not_written');
   // A figure the user turned down anywhere is this quantity's only where their words name it, never by default.
   const turnedDown = written.some((w) => w.turnedDown);
   let unclear = false;
+  const givenTo = new Set<string>();
   for (const { a, lead, phrase, tail } of written.filter((w) => !w.turnedDown)) {
     const next = /^\s*([A-Za-z][A-Za-z'-]*)/.exec(phrase.slice(a.index + a.matchedText.length))?.[1];
     const stated = a.kind !== 'currency' && a.kind !== 'percent' && next !== undefined && isProseAfterValue(next) ? null : statedTailParts(phrase, a);
-    if (!writtenInItsUnit(stated, own, share)) continue;
+    if (!writtenInItsUnit(stated, own, share)) {
+      // Written in another unit: the quantities that unit fits are the ones to ask about ("70 specialists": Additional specialists).
+      for (const c of candidates) if (c.label !== target && ((p) => p !== null && writtenInItsUnit(stated, p))(readUnitParts(c.unit))) givenTo.add(c.label);
+      continue;
+    }
     // A rival competes only for a figure written in a unit it can hold ("1,500 Pro subscribers" is no price's).
     const competing = candidates.filter((c) => c.label !== target
       && (stated === null || ((p) => p !== null && writtenInItsUnit(stated, p))(readUnitParts(c.unit)))).map((c) => c.label);
     const words = [...tokensOf(lead), ...tail.filter((w) => !unitWords.some((u) => sameWord(u, w)))];
     const named = quantitiesNamedIn(words, labels);
-    if (competing.some((c) => named.has(c))) continue;
-    if (named.has(target)) return 'this';
+    if (competing.some((c) => named.has(c))) { competing.filter((c) => named.has(c)).forEach((c) => givenTo.add(c)); continue; }
+    if (named.has(target)) return verdict('this');
     // Against each competing quantity, its own words decide: a word only this quantity has ("SENIOR engineers", against the
     // junior salary) and none only the rival has. A rival's own word gives the figure to the rival; the whole fragment both
     // share, with neither's own word, names neither ("support capacity": Annual or Monthly?). One shared word in passing
@@ -131,13 +141,13 @@ export function figureIsThisQuantitys(
       const tIn = holds(t.filter((w) => !o.some((x) => sameWord(x, w)))); const rIn = holds(o.filter((w) => !t.some((x) => sameWord(x, w))));
       return tIn && !rIn ? 'this' : rIn || (shared.length > 0 && shared.every((w) => holds([w]))) ? 'rival' : 'silent';
     });
-    if (versus.includes('rival')) continue;
-    if (versus.length > 0 && versus.every((v) => v === 'this')) return 'this';
+    if (versus.includes('rival')) { competing.filter((_, i) => versus[i] === 'rival').forEach((c) => givenTo.add(c)); continue; }
+    if (versus.length > 0 && versus.every((v) => v === 'this')) return verdict('this');
     // With no other candidate: words several quantities share name none of them ("the spend limit"), so they never give the
     // figure away; with no model word at all, the ordinary attribution of this occurrence decides ("Revenue was £6,000 …").
     if (!turnedDown && competing.length === 0 && ((named.size === 0 && labels.some((l) => holds(wordsOf(l))))
-      || figureTheUserWroteForSpan(value, unit, text, { ...scope, at: a.index }) !== null)) return 'this';
+      || figureTheUserWroteForSpan(value, unit, text, { ...scope, at: a.index }) !== null)) return verdict('this');
     unclear = true;
   }
-  return unclear ? 'unclear' : 'not_this';
+  return unclear ? verdict('unclear') : verdict('not_this', [...givenTo]);
 }

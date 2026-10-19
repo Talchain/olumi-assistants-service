@@ -36,7 +36,7 @@ const FAMILIES: readonly Family[] = [
 const nameOf = (label: string): string => label.toLowerCase();
 const decide = (f: Family, text: string, form: 'digits' | 'words' = 'digits'): boolean => figureIsThisQuantitys(
   form === 'words' && f.figWords !== undefined ? text.split(f.fig).join(f.figWords) : text, f.value, f.unit,
-  { target: [f.target], others: [f.rival, 'Mixer speed'] }, f.rivalCompetes ? [{ label: f.rival, unit: f.unit }] : []) === 'this';
+  { target: [f.target], others: [f.rival, 'Mixer speed'] }, f.rivalCompetes ? [{ label: f.rival, unit: f.unit }] : []).verdict === 'this';
 
 /** [case, sentence, expected]: the base names the quantity; every other row changes one thing about it. */
 function casesOf(f: Family): [string, string, boolean][] {
@@ -70,7 +70,7 @@ describe('the one quantity-identity rule: each flip alone decides (generated)', 
 
 describe('the full written unit: the same sentence names the quantity, and only the unit written after the figure changes', () => {
   const is = (text: string, unit: string): boolean =>
-    figureIsThisQuantitys(text, 2, unit, { target: ['Team capacity'], others: ['Shelf capacity'] }, []) === 'this';
+    figureIsThisQuantitys(text, 2, unit, { target: ['Team capacity'], others: ['Shelf capacity'] }, []).verdict === 'this';
   it.each([
     ['BASE: a headcount for a headcount', 'The team capacity limit should be at most 2 engineers.', 'engineers', true],
     ['BASE: a rate for a rate', 'The team capacity limit should be at most 2 engineers per week.', 'engineers per week', true],
@@ -88,7 +88,7 @@ describe('the full written unit: the same sentence names the quantity, and only 
 describe('the value door\'s shape (DL-3: "70 customers per week; the existing team capacity is unchanged")', () => {
   const scope = { target: ['Existing team capacity'], others: ['Weekly support capacity', 'Additional specialist capacity', 'Additional specialists'] };
   const candidates = [{ label: 'Weekly support capacity', unit: 'tickets per week' }, { label: 'Additional specialist capacity', unit: 'tickets per week' }];
-  const is = (text: string): boolean => figureIsThisQuantitys(text, 70, 'tickets per week', scope, candidates) === 'this';
+  const is = (text: string): boolean => figureIsThisQuantitys(text, 70, 'tickets per week', scope, candidates).verdict === 'this';
   it.each([
     ['BASE: the clause names it', 'Correction: our existing team resolves 70 tickets per week, not 80.', true],
     ['FLIP the figure counts another thing; the named clause says unchanged', 'We now have 70 customers per week; the existing team capacity is unchanged.', false],
