@@ -55,7 +55,7 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
-import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
+import { legacyLeaderGoalLinks, legacyGoalWarning, chanceSupportGoalPaths, placeholderGoalWarning, unsupportedSpreadWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
 import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
@@ -1939,7 +1939,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         .filter((id): id is string => typeof id === 'string' && id !== ''))];
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
       const scoredInterventions = new Map(finalWireOptions.map(o => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
-      const goalPaths = unsizedLeaderGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      // ONE chance-support walk: the unsized paths, and the user's sizes on Olumi's default spread (AIE `point_uncertainty`).
+      const support = chanceSupportGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      const goalPaths = support.unsized;
       rangeInputs = { ...rangeInputs, goalPaths };
       // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
       // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
@@ -1985,6 +1987,25 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
           },
           'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
+        );
+      }
+      // ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; DL-3 #94 6260306712 as AMENDED): an option whose path runs through a user's
+      // size on Olumi's default spread has no supported chance: withheld for that option only, with the AIE's exact words. Its
+      // range cannot return either: `goalChanceRangeOf` refuses beside any withhold code other than its own two. Gate 5 speaks alone.
+      if (support.unsupportedSpread.length > 0 && !productGateWithholds) {
+        // ONLY the dependent chance (DL-3, AMENDED): the point, joint and target claims and their outcome figures go; the comparison
+        // stays (`keepOrdering`), as it is no chance of meeting the goal.
+        response = withholdOptionGoalFigures(response, new Set(support.unsupportedSpread.map((p) => p.option_id)),
+          unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOrdering: true });
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_for_unsupported_spread',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            withheld: support.unsupportedSpread.map((p) => ({ option_id: p.option_id, links: p.links.length })),
+          },
+          'run_analysis: goal figures withheld where a user-sized link runs on the default spread',
         );
       }
       // #2613 CR (b): no "Set your own…" disclosure while Gate 5 withholds every figure it would describe.

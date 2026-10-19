@@ -29,7 +29,7 @@ import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.j
 import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
-import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from '../admission/identity-evaluations.js';
 import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
@@ -41,6 +41,8 @@ import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-
 import { sayDate } from '../goal-target/deadline-date.js';
 import { isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
 import { linkHoldsStatedRange } from '../statement-door/statements.js';
+import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
+import { GOAL_FIGURES_UNSUPPORTED_SPREAD } from '../../orchestrator/context/option-result-source.js';
 
 type Rec = Record<string, unknown>;
 
@@ -427,13 +429,76 @@ export function licenceUnsizedLink(edge: unknown): boolean {
 }
 
 export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): PlaceholderGoalPath[] {
+  return chanceSupportGoalPaths(graph, optionIds, identityEvaluations, scoredInterventions).unsized;
+}
+
+/**
+ * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768; DL-3 #94 6260306712 as AMENDED): a link the USER sized whose SPREAD nobody stated
+ * (`std_defaulted`, as the chat writers and construction mark it). Its size is theirs and stays theirs; the spread the engine
+ * draws is the D3 default, which supports no chance of meeting the goal. An explicit spread or a named band the user stated
+ * clears the flag at its writer, so it is never one. Exact links are decided by the walk (`chanceSupportGoalPaths`).
+ */
+export function unsupportedSpreadLink(edge: unknown): boolean {
+  return isRec(edge) && edge.std_defaulted === true && linkSizing(edge) === 'user';
+}
+
+/**
+ * ⭐ THE RUN'S ONE CHANCE-SUPPORT WALK (run-analysis.ts; `GOAL_CHANCE_RANGE` reads the same warnings): per option, the links on
+ * a path from what it actually moves to the goal that leave its chance unsupported — `unsized`, a link nobody sized
+ * (`licenceUnsizedLink`), exact links set aside as before (`reachedGoalPaths` `exactLinks`); `unsupportedSpread`, a user's
+ * size on Olumi's default spread, unless the Run draws no spread for it: a stated or evaluated identity's operand
+ * (`exactIdentityOperandLinks`) or a VALIDATED definition (held at the structural spread on the Run input, `held-user-links.ts`).
+ * A definitional flag alone is not that support (its spread stays D3 on the Run input). Off-path links and an option that
+ * moves nothing are never named. Pure.
+ */
+export function chanceSupportGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[],
+  scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): { readonly unsized: PlaceholderGoalPath[]; readonly unsupportedSpread: PlaceholderGoalPath[] } {
   const seeds = actualMoveSeeds(graph, optionIds, scoredInterventions);
   const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations);
-  return paths.flatMap(path => {
-    const links = path.links.filter(e => !exactLinks.has(e) && isPlaceholderLink(e))
+  const definition = validatedDefinitionForGraph(graph);
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const operands = exactIdentityOperandLinks(nodes, isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [], identityEvaluations);
+  const named = (test: (e: Rec) => boolean): PlaceholderGoalPath[] => paths.flatMap(path => {
+    const links = path.links.filter(test)
       .flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
     return links.length > 0 ? [{ option_id: path.option_id, links }] : [];
   });
+  return {
+    unsized: named(e => !exactLinks.has(e) && isPlaceholderLink(e)),
+    unsupportedSpread: named(e => unsupportedSpreadLink(e) && !operands.has(e)
+      && definition(`${String(e.from)}->${String(e.to)}`) === undefined),
+  };
+}
+
+/** The AIE's exact coaching (prompt/AIE-SPEAKER-CARRIER-AND-UNCERTAINTY-SUPPORT-20261019-v1.json `point_uncertainty`, 564fe768). */
+export const UNSUPPORTED_POINT_WORDS = 'You gave the size of this effect; I’ve kept it and its conditions. The calculation’s assumption about how much it varies is not yet supported, so I can’t give a supported chance of meeting the goal.';
+export const UNSUPPORTED_POINT_QUESTION = 'What evidence tells us how much this effect could vary?';
+export const UNSUPPORTED_RANGE_WORDS = 'I’ve kept your range and its conditions. They do not yet support the calculation’s assumption about how likely different effects are, so I can’t give a supported chance of meeting the goal.';
+export const UNSUPPORTED_RANGE_QUESTION = 'What evidence tells us how likely different values within your range are?';
+
+/**
+ * The ONE typed warning for a user's size on Olumi's default spread (`GOAL_FIGURES_UNSUPPORTED_SPREAD`), in the withheld carrier
+ * every chance reader keys on: which options, which links, and the AIE's exact words, each said once, the links named. A point
+ * gets the point line and question; a range or bound the user stated (held on the link, `natural_effect.stated_range`) gets the
+ * range line and its question. No acceptance of a starting strength is offered: accepting the same default cannot support it.
+ */
+export function unsupportedSpreadWarning(graph: unknown, paths: readonly PlaceholderGoalPath[]): {
+  code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>;
+} {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const labelOf = (id: string): string => text(nodes.find(n => n.id === id)?.label) ?? id;
+  const links = goalOrderedLinks(graph, [...new Map(paths.flatMap(p => p.links).map(l => [`${l.from}->${l.to}`, l] as const)).values()]);
+  const ranged = (l: { from: string; to: string }): boolean => {
+    const e = edges.find(x => x.from === l.from && x.to === l.to);
+    return isRec(e?.provenance) && isRec(e!.provenance.natural_effect) && isRec(e!.provenance.natural_effect.stated_range);
+  };
+  const said = (ls: readonly { from: string; to: string }[], words: string, question: string): string[] => ls.length === 0 ? []
+    : [`On the ${linkList(ls.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })))}: ${words} ${question}`];
+  const message = [...said(links.filter(l => !ranged(l)), UNSUPPORTED_POINT_WORDS, UNSUPPORTED_POINT_QUESTION),
+    ...said(links.filter(ranged), UNSUPPORTED_RANGE_WORDS, UNSUPPORTED_RANGE_QUESTION)].join(' ');
+  return { code: GOAL_FIGURES_UNSUPPORTED_SPREAD, message, severity: 'warning', links,
+    node_ids: [...new Set(links.flatMap(l => [l.from, l.to]))], option_ids: paths.map(p => p.option_id) };
 }
 
 /** R8 legacy disclosure uses the same actual-move licence walk; defaulted alone never withholds. */
