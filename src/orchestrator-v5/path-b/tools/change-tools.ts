@@ -20,7 +20,9 @@
  *    proves the bytes, never the speaker (PL 3b), so it is never "the user's, verified". The named third party stays in the
  *    hashed operation only: BLOCKED-SCHEMA for canonical state (no carrier holds a name).
  *  · option setting — Olumi's: `cee_hypothesis` (ai; a cell holds no acceptance marker). Any other origin: BLOCKED-SCHEMA —
- *    the level writer stamps only the user's verified figure or Olumi's, so nothing is proposed.
+ *    the level writer stamps only the user's verified figure or Olumi's, so nothing is proposed (`unavailable`).
+ * Changes this path does not make yet (the goal's target, a link's strength, add, remove, rename) come back `unavailable`,
+ * naming what is not available.
  */
 import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
@@ -49,10 +51,26 @@ const Source = z.object({
 const id = z.string();
 const unit = z.string().nullable();
 const Declared = z.object({ value: z.number(), unit, source: Source }).strict();
+/**
+ * Changes this path cannot make yet (DL-3 ruling, 19 Oct: one dispatch path, no interim wrapper). The AI can still name one,
+ * and is told truthfully that it is not available here, never refused as if a rule forbade it.
+ */
+const NOT_YET = {
+  set_goal_target: 'Changing the goal\'s target isn\'t available on this path yet.',
+  set_link_strength: 'Changing how strongly one factor affects another isn\'t available on this path yet.',
+  add_to_model: 'Adding a factor or an option isn\'t available on this path yet.',
+  remove_from_model: 'Removing something from the model isn\'t available on this path yet.',
+  rename: 'Renaming isn\'t available on this path yet.',
+} as const;
+type NotYet = keyof typeof NOT_YET;
+const notYet = (op: NotYet) => z.object({ op: z.literal(op), target_id: id }).strict();
 export const ChangeOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, source: Source }).strict(),
   z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, source: Source }).strict(),
+  notYet('set_goal_target'), notYet('set_link_strength'), notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
 ]);
+type FigureOp = Extract<z.infer<typeof ChangeOp>, { source: unknown }>;
+const isNotYet = (o: z.infer<typeof ChangeOp>): o is Extract<z.infer<typeof ChangeOp>, { op: NotYet }> => Object.hasOwn(NOT_YET, o.op);
 export const ProposeChangeParams = z.object({
   /** What the approval card says, in a few plain words. */
   public_label: z.string(),
@@ -86,7 +104,7 @@ const close = (a: unknown, b: number): boolean => typeof a === 'number' && Math.
 const cellOf = (option: Rec | undefined, factorId: string): unknown => (isRec(option?.interventions) ? option.interventions[factorId] : undefined);
 
 /** The operations as stored on the proposal: the declaration, hashed into its id. */
-const operationOf = (o: z.infer<typeof ChangeOp>): ProposalOperation => ({
+const operationOf = (o: FigureOp): ProposalOperation => ({
   op: o.op === 'set_factor_value' ? 'set_factor_value' : 'set_option_intervention',
   path: o.op === 'set_factor_value' ? o.factor_id : `${o.option_id}::${o.factor_id}`,
   value: { value: o.value, unit: o.unit, source: o.source },
@@ -103,7 +121,7 @@ function declaredOf(p: StructuredProposal): Op[] | null {
 }
 
 type Plan = Pick<CommitOptionLevelsInput, 'links' | 'levels' | 'values' | 'frames'> & { bindings: ApprovedAdoption[] };
-type Stop = { refusal: string; op: number; carrier?: string };
+type Stop = { refusal: string; op: number };
 /** The declared ops as the door's one input, on the read graph. Conversion (ranges, units) stays the writers'. */
 function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], graph: Rec): Plan | Stop {
   const byId = new Map(nodesOf(graph).map((n) => [n.id, n]));
@@ -121,7 +139,7 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
       continue;
     }
     if (byId.get(o.option_id)?.kind !== 'option') return { refusal: 'not_an_option', op: i };
-    if (!olumi) return { refusal: 'blocked_schema', op: i, carrier: 'option_setting' };
+    if (!olumi) return { refusal: 'blocked_schema', op: i };
     const frame = frameOf(factor) ?? plan.frames.find((f) => f.factor_id === o.factor_id)?.cap ?? null;
     if (frame === null && Math.abs(o.value) > 1) return { refusal: 'factor_has_no_range', op: i };
     plan.levels.push(frame === null ? { option_id: o.option_id!, factor_id: o.factor_id, value: o.value, author: 'model_proposed' }
@@ -167,26 +185,33 @@ async function ownReceipt(dispatch: InternalDispatch, scenarioId: string, turnId
   return null;
 }
 
+/** BLOCKED-SCHEMA: the level writer stamps only the user's verified figure or Olumi's, so a declared source cannot be kept. */
+const BLOCKED_SETTING = (i: number): string => `Change ${i + 1}: an option's setting can be saved only as Olumi's own estimate on this path yet; `
+  + 'the source you declared cannot be recorded with it, so nothing was proposed or saved.';
+
 const codeOf = (reason: string): string => {
   const c = reason.toLowerCase().replace(/[^a-z0-9_]/g, '_');
   return /^[a-z]/.test(c) ? c : 'change_refused';
 };
 
 export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
+  const later = args.ops.find(isNotYet);
+  if (later !== undefined) return unavailable(`${later.op}_not_available`, 'none', `${NOT_YET[later.op]} Nothing was proposed or saved.`);
+  const ops = args.ops.filter((o): o is FigureOp => !isNotYet(o));
   if (args.public_label.trim() === '') return refused('label_empty');
-  for (const [i, o] of args.ops.entries()) {
-    if (o.op === 'set_option_setting' && o.source.origin !== 'olumi') return refused('blocked_schema', undefined, { op: i, carrier: 'option_setting' });
+  for (const [i, o] of ops.entries()) {
+    if (o.op === 'set_option_setting' && o.source.origin !== 'olumi') return unavailable('blocked_schema', 'none', BLOCKED_SETTING(i));
     if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: i });
   }
   const read = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(read)) return read;
   if (read.identity === null) return unavailable('read_malformed');
   const content = { scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
-    operations: args.ops.map(operationOf), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
+    operations: ops.map(operationOf), provenance: { authored_by: 'model_proposed' as const, basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
   const p = createProposal(content);
   const plan = planOf(ctx.scenario_id, p.proposal_id, declaredOf(p) ?? [], read.graph);
-  if ('refusal' in plan) return refused(plan.refusal, undefined, { op: plan.op, ...(plan.carrier === undefined ? {} : { carrier: plan.carrier }) });
+  if ('refusal' in plan) return plan.refusal === 'blocked_schema' ? unavailable('blocked_schema', 'none', BLOCKED_SETTING(plan.op)) : refused(plan.refusal, undefined, { op: plan.op });
   deps.proposals.put(p);
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
 }
