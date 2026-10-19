@@ -87,7 +87,7 @@ describe('sources, as the ONE authority answers them', () => {
     const UNVERIFIED = { value: 0.2, raw_value: 20, unit: 'minutes', cap: 100, source: 'user_override', user_material_unverified: true };
     const g = graph() as { nodes: Rec[] };
     const d = await data(read({ graph: { ...g, nodes: g.nodes.map((n) => n.id === 'queue' ? { ...n, observed_state: UNVERIFIED } : n) } }));
-    expect(node(d, 'queue')).toMatchObject({ observed_source: { origin: 'human', role: 'unverified' }, observed_not_recorded: ['speaker', 'words'] });
+    expect(node(d, 'queue')).toMatchObject({ observed_source: { origin: 'human', role: 'unverified' }, observed_not_recorded: ['speaker', 'words', 'stance'] });
     expect(node(d, 'staff').observed_not_recorded).toBeUndefined();
   });
 
