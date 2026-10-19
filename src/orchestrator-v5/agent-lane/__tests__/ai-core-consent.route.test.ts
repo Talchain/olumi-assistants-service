@@ -28,7 +28,7 @@ vi.mock('../../path-b/tools/index.js', async (original) => {
       operations: [{ op: 'set_factor_value', path: 'wholesale_salespeople', value: { value: 2, unit: 'part-time salespeople', stance: 'estimate', source: { origin: 'olumi', quote: null, named_source: null } } }],
       provenance: { authored_by: 'model_proposed', basis: 'Synthetic probe' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Set the salesperson level' });
     deps.proposals.put(p); probe.proposalId = p.proposal_id;
-    return [tool({ name: 'apply_change', parameters: z.object({ proposal_id: z.string() }).strict(), needsApproval: true,
+    return [tool({ name: 'apply_change', description: 'A counted probe write.', parameters: z.object({ proposal_id: z.string() }).strict(), needsApproval: true,
       execute: async () => { probe.applied += 1; onCall({ name: 'apply_change', ok: true, mutated: true, outcome: 'ok', refusal: null, ran: null },
         { ok: true, mutated: true, outcome: 'ok', proposal_id: p.proposal_id }); return JSON.stringify({ saved: true }); } })];
   }};
