@@ -51,8 +51,9 @@ function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
     ...pick(n, ['id', 'kind', 'label', 'description', 'proposed_by', 'analysis_participation', 'option_status']),
     ...(n.provenance === undefined ? {} : { added_by: authorshipOf({ nodeTag: n.provenance }) }),
     ...(observed === undefined ? {} : { observed: pick(observed, ['value', 'raw_value', 'unit', 'cap', 'range']), observed_source: observedSource,
-      // A person's figure whose role is unverified: its carrier keeps neither who said it nor their words (PL AMEND 15:35).
-      ...(observedSource?.origin === 'human' && observedSource.role === 'unverified' ? { observed_not_recorded: ['speaker', 'words'] } : {}) }),
+      // A person's figure whose role is unverified: its carrier keeps neither who said it, their words, nor how they put it
+      // forward (PL AMEND 15:35; AIE stance 15:54).
+      ...(observedSource?.origin === 'human' && observedSource.role === 'unverified' ? { observed_not_recorded: ['speaker', 'words', 'stance'] } : {}) }),
     ...(settings.length === 0 ? {} : { settings }),
     ...(statements.length === 0 ? {} : { statements }),
   };

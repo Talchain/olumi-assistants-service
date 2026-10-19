@@ -95,17 +95,18 @@ const cellOf = (optionId: string, factorId: string): Rec => (nodeOf(optionId).in
 const SAID = 'On a Saturday the queue is about 20 minutes, and my manager reckons about 20 minutes too.';
 const ctx = { scenario_id: SCN, authenticated_user_id: 'user-a', request_id: 'req-c5', turn_id: 'turn-c5',
   user_turn_text: SAID, verified_user_messages: [SAID] };
-const queueTo = (origin: string, quote: string | null, named: string | null = null) => ({
-  op: 'set_factor_value' as const, factor_id: 'queue', value: 20, unit: 'minutes', source: { origin, quote, named_source: named } });
+const queueTo = (origin: string, quote: string | null, named: string | null = null, stance = origin === 'olumi' ? 'estimate' : 'stated_current') => ({
+  op: 'set_factor_value' as const, factor_id: 'queue', value: 20, unit: 'minutes', stance, source: { origin, quote, named_source: named } });
 
 type Mod = typeof import('../change-tools.js');
 let proposeChange: Mod['proposeChange'];
+let ProposeChangeParams: Mod['ProposeChangeParams'];
 let applyChange: Mod['applyChange'];
 let ProposalStore: typeof import('../../../agent-lane/proposal.js').ProposalStore;
 let authorisationTurnId: typeof import('../../../agent-lane/runtime/agent-capabilities.js').authorisationTurnId;
 let commitOptionLevelsInProcess: typeof import('../../../system-events/dispatch.js').commitOptionLevelsInProcess;
 beforeAll(async () => {
-  ({ proposeChange, applyChange } = await import('../change-tools.js'));
+  ({ proposeChange, applyChange, ProposeChangeParams } = await import('../change-tools.js'));
   ({ ProposalStore } = await import('../../../agent-lane/proposal.js'));
   ({ authorisationTurnId } = await import('../../../agent-lane/runtime/agent-capabilities.js'));
   ({ commitOptionLevelsInProcess } = await import('../../../system-events/dispatch.js'));
@@ -187,7 +188,7 @@ describe('ROW 3: each declared source, through the real writers, read back by th
     const { proposals, id } = await proposed([op]);
     const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id });
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: notKept.length === 0,
-      written: [{ op: 'set_factor_value', factor_id: 'queue', figure: 20, declared: op.source, stored_as: expected, not_kept: notKept }] } });
+      written: [{ op: 'set_factor_value', factor_id: 'queue', figure: 20, declared: { ...op.source, stance: op.stance }, stored_as: expected, not_kept: notKept }] } });
     const os = nodeOf('queue').observed_state as Rec;
     expect(os.raw_value).toBe(20);
     const read = provenanceOf({ value: os });
@@ -199,13 +200,13 @@ describe('ROW 3: each declared source, through the real writers, read back by th
   it('the declaration (origin, quote, named source) is part of the hashed operation', async () => {
     const { proposals, id } = await proposed([queueTo('third_party', 'my manager reckons about 20 minutes', 'their manager')]);
     expect(proposals.get(id)!.operations[0]).toMatchObject({ op: 'set_factor_value', path: 'queue',
-      value: { value: 20, unit: 'minutes', source: { origin: 'third_party', quote: 'my manager reckons about 20 minutes', named_source: 'their manager' } } });
+      value: { value: 20, unit: 'minutes', stance: 'stated_current', source: { origin: 'third_party', quote: 'my manager reckons about 20 minutes', named_source: 'their manager' } } });
     const other = await proposed([queueTo('third_party', 'my manager reckons about 20 minutes', 'their director')]);
     expect(other.id).not.toBe(id);
   });
 
   it('Olumi\'s option setting: stored as Olumi\'s (a cell holds no acceptance marker)', async () => {
-    const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people',
+    const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people', stance: 'estimate',
       source: { origin: 'olumi', quote: null, named_source: null } }]);
     const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id });
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true });
@@ -223,7 +224,7 @@ describe('ROW 3: each declared source, through the real writers, read back by th
   });
 
   it('a write the authority reads as another source is never reported saved: Olumi\'s setting stored as the user\'s → not verified', async () => {
-    const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people',
+    const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people', stance: 'estimate',
       source: { origin: 'olumi', quote: null, named_source: null } }]);
     // A writer fault: the level lands under the user's own stamp (no adoption context).
     const relabelling = vi.fn((input: Parameters<typeof commitOptionLevelsInProcess>[0]) =>
@@ -236,7 +237,7 @@ describe('ROW 3: each declared source, through the real writers, read back by th
   it.each(['user', 'third_party', 'unknown'])('BLOCKED-SCHEMA: an option setting declared %s cannot be stored as declared: unavailable, nothing proposed', async (origin) => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Set the assistants', basis: 'From what the user said.', ops: [{
-      op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people',
+      op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people', stance: 'hypothetical',
       source: { origin, quote: 'about 20 minutes', named_source: null } }] } as never);
     expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
     expect(proposals.size()).toBe(0);
@@ -285,7 +286,7 @@ describe('WITNESS: a mixed user + third-party change is saved whole or not at al
     const before = JSON.stringify(persisted);
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx2, { public_label: 'Queue time and price', basis: 'b',
-      ops: [mine, theirs({ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'price', value: 6, unit: 'GBP' })] } as never);
+      ops: [mine, theirs({ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'price', value: 6, unit: 'GBP', stance: 'stated_current' })] } as never);
     expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
     expect(proposals.size()).toBe(0);
     expect(rows.size).toBe(0);
@@ -296,7 +297,7 @@ describe('WITNESS: a mixed user + third-party change is saved whole or not at al
     const { proposals, id } = await (async () => {
       const store = new ProposalStore();
       const p = await proposeChange({ dispatch, proposals: store }, ctx2, { public_label: 'Queue time and price', basis: 'b',
-        ops: [mine, theirs({ op: 'set_factor_value', factor_id: 'price', value: 6, unit: 'GBP' })] } as never);
+        ops: [mine, theirs({ op: 'set_factor_value', factor_id: 'price', value: 6, unit: 'GBP', stance: 'stated_current' })] } as never);
       expect(p.status, JSON.stringify(p)).toBe('ok');
       return { proposals: store, id: String((p as { data: Rec }).data.proposal_id) };
     })();
@@ -315,11 +316,54 @@ describe('WITNESS: a mixed user + third-party change is saved whole or not at al
     const before = JSON.stringify(persisted);
     const store = new ProposalStore();
     const p = await proposeChange({ dispatch, proposals: store }, ctx2, { public_label: 'Queue time and price', basis: 'b',
-      ops: [mine, theirs({ op: 'set_factor_value', factor_id: 'price', value: 6, unit: 'kg' })] } as never);
+      ops: [mine, theirs({ op: 'set_factor_value', factor_id: 'price', value: 6, unit: 'kg', stance: 'stated_current' })] } as never);
     expect(p.status, JSON.stringify(p)).toBe('ok');
     const out = await applyChange({ dispatch, proposals: store, commitOptionLevels: door() }, ctx2, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
     expect(out.status, JSON.stringify(out)).toBe('refused');
     expect(rows.size).toBe(0);
     expect(JSON.stringify(persisted)).toBe(before);
+  });
+});
+
+/**
+ * STANCE (AIE 15:24 / 15:54): how a figure is put forward, separate from who said it. It rides the hashed operation and the
+ * receipt; a value holds a current level and an option's setting a what-if, so a target or a supposition is never saved as a
+ * value, and a stance the carrier does not mean is saved only with that stance named as not kept. SYNTHETIC wording.
+ */
+describe('STANCE: carried with each figure, never promoted to an operative current level', () => {
+  it.each([
+    ['a supposition', 'hypothetical'],
+    ['a target', 'target'],
+  ])('%s as a factor value would become its current level: unavailable, nothing proposed', async (_name, stance) => {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record the queue time', basis: 'b',
+      ops: [queueTo('user', 'about 20 minutes', null, stance)] } as never);
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+    expect(proposals.size()).toBe(0);
+    expect(rows.size).toBe(0);
+  });
+
+  it('a person\'s estimate is saved, with its stance named as not kept, never as faithful', async () => {
+    const { proposals, id } = await proposed([queueTo('user', 'about 20 minutes', null, 'estimate')]);
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id });
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { faithful: false,
+      written: [{ declared: { stance: 'estimate' }, not_kept: [{ what: 'stance', declared: 'estimate' }, { what: 'words', declared: 'about 20 minutes' }] }] } });
+  });
+
+  it('Olumi\'s setting declared as a target is not an option\'s setting: unavailable', async () => {
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Set the assistants', basis: 'b', ops: [{
+      op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people', stance: 'target',
+      source: { origin: 'olumi', quote: null, named_source: null } }] } as never);
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+  });
+
+  it('the stance is part of the hashed operation, and a figure without one is outside the schema', async () => {
+    const a = await proposed([queueTo('user', 'about 20 minutes', null, 'stated_current')]);
+    const b = await proposed([queueTo('user', 'about 20 minutes', null, 'estimate')]);
+    expect(a.proposals.get(a.id)!.operations[0]!.value).toMatchObject({ stance: 'stated_current' });
+    expect(b.id).not.toBe(a.id);
+    const { stance: _dropped, ...noStance } = queueTo('user', 'about 20 minutes');
+    expect(ProposeChangeParams.safeParse({ public_label: 'x', basis: 'b', ops: [noStance] }).success).toBe(false);
   });
 });

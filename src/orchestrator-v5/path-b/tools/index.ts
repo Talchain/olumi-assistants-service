@@ -21,6 +21,20 @@ import { traceRow, type ToolOutcome, type TraceRow } from './outcome.js';
 export { traceRow, type TraceRow, type ToolOutcome } from './outcome.js';
 export { readCanonicalContext } from './context-tool.js';
 
+/** The AIE's five descriptions, verbatim (prompt/AIE-PATH-B-FIVE-TOOL-DESCRIPTIONS-AND-STANCE-20261019-v1.json, sha256 e8b43291…). */
+export const TOOL_DESCRIPTIONS = {
+  read_canonical_context:
+    'Read the current saved scenario view, its revision, recorded sources, analysis readiness and selected Run. Use the returned saved facts rather than old conversation claims. Check the Run’s revision and staleness before using it; missing source or context remains unknown.',
+  build_model_from_brief:
+    'Create and save Olumi’s provisional first Living Model from the user’s actual brief, supplied verbatim from their messages. Use only when there is no existing model to replace. Preserve the brief’s known sources, assumptions, conditions and disagreement; creating the model does not verify its claims. Report creation only from the tool’s confirmed outcome.',
+  propose_change:
+    'Prepare the complete requested change for review without changing the operative saved model. Preserve supplied values, signs, units, periods, conditions and retain, replace or retract intent. Declare each figure’s actual source using the available fields; keep unknown source unknown and assumptions distinct from current claims. Quote only actual supplied words; do not invent a quote, source or estimate. If required meaning cannot be represented, report the specific unavailable capability rather than silently dropping part of the change or relabelling its source.',
+  apply_change:
+    'Commit the exact prepared change after the user approves that current proposal. Approval is permission to apply, not proof that a save succeeded or that its claims are verified. Use the operation’s own receipt and approved postimage readback. Distinguish an earlier completed save from a new write, honour stale or conflicting proposals, and report unknown outcomes without repeating a completed effect.',
+  run_analysis:
+    'Request a fresh scientific Run of the current saved model. Eligible committed changes and Undo use the existing automatic analysis and coaching path; do not issue a duplicate Run after them. Read actual readiness and the recorded Run, then explain only what its results support. Report refusal or unavailability honestly. Do not rerun analysis merely to retry an explanation.',
+} as const;
+
 export type PathBToolDeps = ChangeDeps & DraftDeps & RunDeps;
 export type PathBContext = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' | 'turn_id' | 'verified_user_messages' | 'user_turn_text'>;
 /** The route's tool result for one call: what `tool_results[i]` reads. `mutated` is false for an unknown write (the row says null). */
@@ -48,7 +62,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
 
   const read = tool({
     name: READ_CANONICAL_CONTEXT,
-    description: 'Read the saved scenario as it stands now: the model, where each figure came from, whether it can be run, and the latest Run.',
+    description: TOOL_DESCRIPTIONS.read_canonical_context,
     parameters: ReadCanonicalContextParams,
     execute: async () => record(READ_CANONICAL_CONTEXT, await readCanonicalContext(deps, ctx)),
     errorFunction: null,
@@ -59,21 +73,21 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     read,
     tool({
       name: BUILD_MODEL_FROM_BRIEF,
-      description: 'Draft Olumi\'s provisional first model from the user\'s brief, copied verbatim from their own messages. Only when the scenario has no model yet.',
+      description: TOOL_DESCRIPTIONS.build_model_from_brief,
       parameters: BuildModelParams,
       execute: async (args) => record(BUILD_MODEL_FROM_BRIEF, await buildModel(deps, ctx, args)),
       errorFunction: null,
     }),
     tool({
       name: PROPOSE_CHANGE,
-      description: 'Prepare a change to the model for the user to approve; nothing is saved. For each figure, declare where it came from: the user (with their exact words), a third party they named (with the user\'s exact words), Olumi\'s own estimate, or not known (with the user\'s exact words).',
+      description: TOOL_DESCRIPTIONS.propose_change,
       parameters: ProposeChangeParams,
       execute: async (args) => record(PROPOSE_CHANGE, await proposeChange(deps, ctx, args)),
       errorFunction: null,
     }),
     tool({
       name: APPLY_CHANGE,
-      description: 'Save a prepared change. The user approves it first; nothing is saved without their approval.',
+      description: TOOL_DESCRIPTIONS.apply_change,
       parameters: ApplyChangeParams,
       needsApproval: true,
       execute: async (args) => {
@@ -85,7 +99,7 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
     }),
     tool({
       name: RUN_ANALYSIS,
-      description: 'Run the analysis on the model as it stands now, when the user asks for it.',
+      description: TOOL_DESCRIPTIONS.run_analysis,
       parameters: RunAnalysisParams,
       execute: async (args) => record(RUN_ANALYSIS, await runAnalysis(deps, ctx, args, { approvalApplied })),
       errorFunction: null,
