@@ -11,7 +11,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { provenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { graph as fixtureGraph, type Rec } from '../../path-b/tools/__tests__/fixtures.js';
 
 const SCN = '5c5c5c5c-0000-4000-8000-000000000019';
@@ -86,7 +85,6 @@ function stored(): unknown {
   return projectGraphForPersistence({ ...GraphV3.parse({ ...g, nodes }), options: [] as Rec[] });
 }
 const nodeOf = (id: string): Rec => ((persisted as { nodes: Rec[] }).nodes.find((n) => n.id === id))!;
-const cellOf = (optionId: string, factorId: string): Rec => (nodeOf(optionId).interventions as Rec)[factorId] as Rec;
 
 const SAID = 'On a Saturday the queue is about 20 minutes, and my manager reckons about 20 minutes too.';
 const ctx = { scenario_id: SCN, authenticated_user_id: 'user-a', request_id: 'req-c5', turn_id: 'turn-c5',
@@ -98,12 +96,10 @@ type Mod = typeof import('../../path-b/tools/change-tools.js');
 let proposeChange: Mod['proposeChange'];
 let applyChange: Mod['applyChange'];
 let ProposalStore: typeof import('../proposal.js').ProposalStore;
-let authorisationTurnId: typeof import('../runtime/agent-capabilities.js').authorisationTurnId;
 let commitOptionLevelsInProcess: typeof import('../../system-events/dispatch.js').commitOptionLevelsInProcess;
 beforeAll(async () => {
   ({ proposeChange, applyChange } = await import('../../path-b/tools/change-tools.js'));
   ({ ProposalStore } = await import('../proposal.js'));
-  ({ authorisationTurnId } = await import('../runtime/agent-capabilities.js'));
   ({ commitOptionLevelsInProcess } = await import('../../system-events/dispatch.js'));
 });
 beforeEach(() => {
