@@ -84,6 +84,7 @@ import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-l
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { CoreStateUnavailableError, runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
+import { pathBTools } from '../orchestrator-v5/path-b/tools/index.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -96,7 +97,7 @@ import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/gr
 import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analysis-interpretation-identity.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionRenameInProcess, commitOptionStatusInProcess, commitStructuralDeleteInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitAddInProcess, commitLimitEditInProcess, commitOptionLevelsInProcess, type CommitOptionLevelsInput, type CommitOptionLevelsResult, commitOptionRenameInProcess, commitOptionStatusInProcess, commitStructuralDeleteInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, declineChipIdFor, displayedProposalsOf, shownAsHeldNow, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, heldRecordAppliesAt, heldRecordsApplyAt, issuedTurnIdsForProposalRecords, proposalIssuances, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -3129,12 +3130,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         elapsed_ms: Date.now() - startedAt,
       });
     };
+    // The objects the capabilities run on, named once so PATH-B's typed adapters (`pathBTools`) run on the SAME ones.
+    const capDispatch = bindHeldApprovalWriter(countingDispatch, (input) => {
+      writesDispatched += 1;
+      return undoRefusedWrite(() => readCache.around(async () => promoteRevisionConflictResponse(await commitHeldProposalInProcess(input, String(req.id)))));
+    });
+    const capCallStructured: CallStructuredModel = (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt);
+    const onCapAnalysis: NonNullable<Parameters<typeof createAgentCapabilities>[4]> = (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; };
+    // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
+    // S2b team_time uses this same fenced batch door and cached read-back.
+    const commitOptionLevelsDoor = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
+      // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
+      writesDispatched += 1;
+      return undoRefusedWrite(() => {
+        return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+      });
+    };
     const capabilities = createAgentCapabilities(
-      bindHeldApprovalWriter(countingDispatch, (input) => {
-        writesDispatched += 1;
-        return undoRefusedWrite(() => readCache.around(async () => promoteRevisionConflictResponse(await commitHeldProposalInProcess(input, String(req.id)))));
-      }), proposals, (reqBody, deadlineAt) => callStructured(reqBody, deadlineAt ?? constructionDeadlineAt), mode,
-      (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
+      capDispatch, proposals, capCallStructured, mode, onCapAnalysis,
       {
         turnAuthority: true,
         ...(recoveredRun !== undefined ? { recoveredRun } : {}),
@@ -3179,15 +3192,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
           : {}),
-        // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
-        // S2b team_time uses this same fenced batch door and cached read-back.
-        commitOptionLevels: async (input) => {
-          // F1b B8: the in-process graph write takes its place in the scenario's turn fence.
-          writesDispatched += 1;
-          return undoRefusedWrite(() => {
-            return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionLevelsInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
-          });
-        },
+        commitOptionLevels: commitOptionLevelsDoor,
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
         readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
@@ -4358,10 +4363,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && risksRun === undefined && (body['chip'] === undefined || body['chip'] === null)))) {
         // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
         // memory and its trace, with Olumi's capabilities as the tools. Presses and method turns keep their existing paths.
+        // The SDK turn's tools are the typed adapters, on the SAME verified typed-words carrier and the same primitives the
+        // capabilities above run on (dispatch, proposals, the drafter call, the fenced levels door and both observers).
+        const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+          ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
         const core = await runCoreTurn({
-          ctx: { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
-            ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
-          caps: loopCapabilities, mode, message, budget, userId,
+          ctx: coreCtx, message, budget, userId,
+          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured, onAnalysis: onCapAnalysis,
+            commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw) }, coreCtx, mode, onCall),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
           briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
@@ -6045,7 +6054,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     if (mode === 'core' && aiWroteReply) {
       const { _answer_shape: _hostShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
-      wireBody = { ...unshaped, assistant_text: withoutProposalIds(narratorWords ?? text) } as OlumiResponse & Record<string, unknown>;
+      // A replacement by the AI's own words (nothing appended): every host line above is dropped, not added to.
+      const aiOwnWords = withoutProposalIds(narratorWords ?? text);
+      wireBody = { ...unshaped, assistant_text: aiOwnWords } as OlumiResponse & Record<string, unknown>;
     } else if (aiWroteReply && noDirectLink === null && fastPath !== 'method') {
       const checked = withEstimateGoalPointsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, current: selectedRunCurrent,
