@@ -79,8 +79,8 @@ describe('every risk the drafter writes registers (DL 5916217417: structure is n
   });
 
   it('the drafter is told to keep material risks (never the goal\'s own failure), and no sentence tells it to leave the limit\'s risk out', () => {
-    // AIE risk-mechanism consolidation (0e20eb33): MATERIAL RISKS replaces the one-risk quota.
-    expect(BUILD_INSTRUCTIONS).toContain('Include material distinct adverse events, conditions or mechanisms; worthwhile additions remain visibly Olumi’s provisional hypotheses. Do not invent a mechanism merely to reach a risk count.');
+    // AIE risk-mechanism consolidation (0e20eb33, refined 5a909f57): MATERIAL RISKS replaces the one-risk quota.
+    expect(BUILD_INSTRUCTIONS).toContain('Keep useful additions visibly Olumi’s provisional hypotheses, with their uncertainty and what would test them; do not omit a useful concern merely because its size or causal path is unknown, and do not invent a mechanism merely to reach a count.');
     expect(BUILD_INSTRUCTIONS).not.toContain('ALWAYS KEEP AT LEAST ONE RISK');
     expect(BUILD_INSTRUCTIONS).not.toMatch(/do not ALSO keep that one risk as a node/);
     expect(BUILD_INSTRUCTIONS).toContain('keep that risk as a node, linked to the goal metric with all three size fields null');

@@ -10,9 +10,9 @@ import { describe, expect, it } from 'vitest';
 import { BUILD_INSTRUCTIONS } from '../runtime/build-model.js';
 import { COMPACT_MARKER, servedControlInstructions } from './compact-benchmark-control.js';
 
-// AIE risk-mechanism consolidation (0e20eb33): the user-risk obligation now opens the single MATERIAL RISKS paragraph.
-const K3 = 'MATERIAL RISKS AND THEIR CAUSES. Preserve every risk or concern the user names as its own visible item, with its complete attributed source, conditions, uncertainty and dissent. ';
-const MATERIAL_END = 'or silently remove an operative human or adopted risk. ';
+// AIE risk-mechanism consolidation (0e20eb33, refined 5a909f57): the user-risk obligation opens the single MATERIAL RISKS paragraph.
+const K3 = 'MATERIAL RISKS, CONCERNS AND TESTING STATUS. Preserve every risk or concern the user names as its own visible item, with its complete attributed source, conditions, uncertainty and dissent. ';
+const MATERIAL_END = 'or silently remove an operative human or adopted risk to make a Run possible. ';
 
 const K3_PRECEDENCE = 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. ';
 
@@ -32,6 +32,8 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(envelope < k3 && k3 < widen).toBe(true);
     expect(text).not.toContain('ALWAYS KEEP AT LEAST ONE RISK');
     expect(text).not.toContain('EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE');
+    // 5a909f57: an explicit absence of testing stays a visible concern, not only a question.
+    expect(text).toContain('retain what is untested and which claim it qualifies as a visible concern, not only as a question in unknowns.');
   });
 
   it('RED: user-named risks outrank the 4-to-6 envelope, stated once, directly after the MATERIAL RISKS paragraph and before the widening limit', () => {

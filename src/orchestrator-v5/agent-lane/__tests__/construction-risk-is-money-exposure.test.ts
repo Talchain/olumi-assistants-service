@@ -50,12 +50,14 @@ describe('A4b: a risk that cuts a money goal is drafted, and admitted, as that m
     const dispatch: InternalDispatch = async (path) => (path.endsWith('/graph/register')
       ? { status: 200, json: { model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } });
     await buildModelFromBrief('a4b0a4b0-0000-4a4b-8a4b-a4b0a4b0a4b0', PAUL, dispatch, call);
-    // AIE risk-mechanism consolidation (0e20eb33): the deduction is conditional on a genuinely distinct same-frame loss.
-    const rule = String(BUILD_INSTRUCTIONS).match(/A DISTINCT MONETARY LOSS CAN SUBTRACT FROM THE SAME MONEY GOAL\.[^']*?do not manufacture certainty to make a Run possible\./)?.[0];
+    // AIE risk-mechanism consolidation (0e20eb33, refined 5a909f57): a distinct same-frame loss of MORE-money only, in the
+    // supported -1 / per-1 / definitional shape.
+    const rule = String(BUILD_INSTRUCTIONS).match(/A DISTINCT MONETARY LOSS CAN SUBTRACT FROM THE SAME MONEY GOAL\.[^']*?do not run an undisclosed placeholder or invent certainty\./)?.[0];
     expect(rule).toBeDefined();
     expect(sent).toContain(rule);
-    expect(sent).toContain('Where a risk represents a distinct loss in the goal’s own money quantity, unit, reference and period, that loss may subtract one for one through the existing supported representation.');
-    expect(sent).toContain('A goal shortfall, missed revenue target or failure probability is not an extra monetary loss to subtract from that same goal.');
+    expect(sent).toContain('Apply this accounting shape only when the goal is an amount of money the user wants MORE of');
+    expect(sent).toContain('link that loss to the goal with effect_amount -1, effect_per_source_change 1 and definitional true');
+    expect(sent).toContain('A goal shortfall, missed target, absence of testing or failure probability is not an extra monetary loss to deduct.');
     expect(sent).not.toContain('A RISK THAT CUTS A MONEY GOAL IS THAT MONEY');
   });
 
