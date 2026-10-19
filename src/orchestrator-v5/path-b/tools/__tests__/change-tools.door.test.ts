@@ -85,6 +85,7 @@ function stored(): unknown {
   const g = fixtureGraph() as { nodes: Rec[] };
   const nodes = g.nodes.map((n) => n.id === 'queue' ? { ...n, observed_state: { value: 0.3, raw_value: 30, unit: 'minutes', cap: 100 } }
     : n.id === 'staff' ? { ...n, observed_state: { value: 0.1, raw_value: 1, unit: 'people', cap: 10, source: 'brief_extraction', extractionType: 'explicit' } }
+      : n.id === 'price' ? { ...n, observed_state: { value: 0.5, raw_value: 5, unit: 'GBP', cap: 10, source: 'cee_inference' } }
       : n);
   return projectGraphForPersistence({ ...GraphV3.parse({ ...g, nodes }), options: [] as Rec[] });
 }
@@ -175,16 +176,18 @@ describe('ROW 2: exactly once across a lost response and a restart', () => {
   });
 });
 
-describe('ROW 3: each declared origin, through the real writers, read back by the ONE provenance authority', () => {
+describe('ROW 3: each declared source, through the real writers, read back by the ONE provenance authority, with what was not kept', () => {
   it.each([
-    ['Olumi\'s estimate, adopted by the press', queueTo('olumi', null), { origin: 'ai', accepted: true }],
-    ['the user\'s declared words (literal bytes, speaker as declared)', queueTo('user', 'about 20 minutes'), { origin: 'human', role: 'unverified' }],
-    ['a named third party, in the user\'s words', queueTo('third_party', 'my manager reckons about 20 minutes', 'their manager'), { origin: 'human', role: 'unverified' }],
-    ['an unknown speaker, in the user\'s words', queueTo('unknown', 'about 20 minutes'), { origin: 'human', role: 'unverified' }],
-  ] as const)('a factor value from %s', async (_name, op, expected) => {
+    ['Olumi\'s estimate, adopted by the press', queueTo('olumi', null), { origin: 'ai', accepted: true }, []],
+    ['the user\'s declared words (literal bytes, speaker as declared)', queueTo('user', 'about 20 minutes'), { origin: 'human', role: 'unverified' },
+      [{ what: 'words', declared: 'about 20 minutes' }]],
+    ['a named third party, in the user\'s words', queueTo('third_party', 'my manager reckons about 20 minutes', 'their manager'), { origin: 'human', role: 'unverified' },
+      [{ what: 'speaker', declared: 'third_party' }, { what: 'name', declared: 'their manager' }, { what: 'words', declared: 'my manager reckons about 20 minutes' }]],
+  ] as const)('a factor value from %s', async (_name, op, expected, notKept) => {
     const { proposals, id } = await proposed([op]);
     const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id });
-    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true });
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: notKept.length === 0,
+      written: [{ op: 'set_factor_value', factor_id: 'queue', figure: 20, declared: op.source, stored_as: expected, not_kept: notKept }] } });
     const os = nodeOf('queue').observed_state as Rec;
     expect(os.raw_value).toBe(20);
     const read = provenanceOf({ value: os });
@@ -208,6 +211,26 @@ describe('ROW 3: each declared origin, through the real writers, read back by th
     expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true });
     expect(cellOf('add_staff', 'staff')).toMatchObject({ raw_value: 3, cap: 10 });
     expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') })).toMatchObject({ origin: 'ai' });
+  });
+
+  it('BLOCKED-SCHEMA: a factor value from an unknown speaker would read as a person\'s figure: unavailable, nothing proposed', async () => {
+    for (const quote of ['about 20 minutes', null]) {
+      const proposals = new ProposalStore();
+      const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record the queue time', basis: 'b', ops: [queueTo('unknown', quote)] } as never);
+      expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+      expect(proposals.size()).toBe(0);
+    }
+  });
+
+  it('a write the authority reads as another source is never reported saved: Olumi\'s setting stored as the user\'s → not verified', async () => {
+    const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'staff', value: 3, unit: 'people',
+      source: { origin: 'olumi', quote: null, named_source: null } }]);
+    // A writer fault: the level lands under the user's own stamp (no adoption context).
+    const relabelling = vi.fn((input: Parameters<typeof commitOptionLevelsInProcess>[0]) =>
+      commitOptionLevelsInProcess({ ...input, levels: input.levels.map((l) => ({ ...l, author: 'user_specified' as const })) }, 'req-c5'));
+    expect(await applyChange({ dispatch, proposals, commitOptionLevels: relabelling }, ctx, { proposal_id: id }))
+      .toEqual({ status: 'unavailable', reason: 'not_verified', write: 'unknown' });
+    expect(provenanceOf({ setting: cellOf('add_staff', 'staff'), target: nodeOf('staff') })).toMatchObject({ origin: 'human' });
   });
 
   it.each(['user', 'third_party', 'unknown'])('BLOCKED-SCHEMA: an option setting declared %s cannot be stored as declared: unavailable, nothing proposed', async (origin) => {
@@ -238,11 +261,65 @@ describe('ROW 3: each declared origin, through the real writers, read back by th
   it.each([
     ['a declared human source with no quote', queueTo('user', null), 'quote_not_in_users_words'],
     ['a quote that is not in the user\'s typed words', queueTo('user', 'about 25 minutes'), 'quote_not_in_users_words'],
-    ['an unknown speaker with no words to hold', queueTo('unknown', null), 'quote_not_in_users_words'],
+    ['a third party with no words to hold', queueTo('third_party', null, 'their manager'), 'quote_not_in_users_words'],
   ] as const)('%s: refused, nothing proposed', async (_name, op, reason) => {
     const proposals = new ProposalStore();
     const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Record the queue time', basis: 'b', ops: [op] } as never);
     expect(out).toMatchObject({ status: 'refused', reason, data: { op: 0 } });
     expect(proposals.size()).toBe(0);
+  });
+});
+
+/**
+ * WITNESS (#3436 R4, reviews/CODEX-3436-835ee9b0-probes/recovery-notes/r4): one message carries the user's own figure and a
+ * figure someone else gave. The approved change is saved WHOLE or not at all: never the user's half alone (the partial write
+ * #3436 reproduced), and never the other person's figure as the user's. SYNTHETIC wording in the same shape.
+ */
+describe('WITNESS: a mixed user + third-party change is saved whole or not at all', () => {
+  const SAID2 = 'Queue time is about 20 minutes. Our finance lead said "the ticket price should be £6". Add my queue time and the finance lead\'s price.';
+  const ctx2 = { ...ctx, user_turn_text: SAID2, verified_user_messages: [SAID2] };
+  const mine = queueTo('user', 'Queue time is about 20 minutes');
+  const theirs = (op: Rec): Rec => ({ ...op, source: { origin: 'third_party', quote: 'the ticket price should be £6', named_source: 'finance lead' } });
+
+  it('the other person\'s figure as an option setting cannot be kept as theirs: the WHOLE change is unavailable, nothing is proposed or written', async () => {
+    const before = JSON.stringify(persisted);
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx2, { public_label: 'Queue time and price', basis: 'b',
+      ops: [mine, theirs({ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'price', value: 6, unit: 'GBP' })] } as never);
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+    expect(proposals.size()).toBe(0);
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
+  it('both as factor values: ONE commit holds both; the other person\'s is never the user\'s, and the lost name is returned, not called faithful', async () => {
+    const { proposals, id } = await (async () => {
+      const store = new ProposalStore();
+      const p = await proposeChange({ dispatch, proposals: store }, ctx2, { public_label: 'Queue time and price', basis: 'b',
+        ops: [mine, theirs({ op: 'set_factor_value', factor_id: 'price', value: 6, unit: 'GBP' })] } as never);
+      expect(p.status, JSON.stringify(p)).toBe('ok');
+      return { proposals: store, id: String((p as { data: Rec }).data.proposal_id) };
+    })();
+    const out = await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx2, { proposal_id: id });
+    expect(out, JSON.stringify(out)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true, faithful: false } });
+    expect(rows.size, 'ONE commit').toBe(1);
+    expect((nodeOf('queue').observed_state as Rec).raw_value).toBe(20);
+    expect((nodeOf('price').observed_state as Rec).raw_value).toBe(6);
+    for (const id2 of ['queue', 'price']) expect(provenanceOf({ value: nodeOf(id2).observed_state })).toMatchObject({ origin: 'human', role: 'unverified' });
+    const written = out.status === 'ok' ? out.data.written as Rec[] : [];
+    expect(written[1]).toMatchObject({ factor_id: 'price', not_kept: expect.arrayContaining([{ what: 'name', declared: 'finance lead' },
+      { what: 'words', declared: 'the ticket price should be £6' }]) });
+  });
+
+  it('a writer refusal of either half refuses the whole change: nothing is written', async () => {
+    const before = JSON.stringify(persisted);
+    const store = new ProposalStore();
+    const p = await proposeChange({ dispatch, proposals: store }, ctx2, { public_label: 'Queue time and price', basis: 'b',
+      ops: [mine, theirs({ op: 'set_factor_value', factor_id: 'price', value: 6, unit: 'kg' })] } as never);
+    expect(p.status, JSON.stringify(p)).toBe('ok');
+    const out = await applyChange({ dispatch, proposals: store, commitOptionLevels: door() }, ctx2, { proposal_id: String((p as { data: Rec }).data.proposal_id) });
+    expect(out.status, JSON.stringify(out)).toBe('refused');
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
   });
 });
