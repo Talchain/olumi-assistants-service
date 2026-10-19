@@ -42,6 +42,9 @@ import { draftedTeamPartOf, eventModelAsk, unsizedEventOptions } from "../../orc
 import { unsizedOlumiRiskIds } from "../../orchestrator-v5/agent-lane/unsized-risk.js";
 import { alreadyTrueQuoteOf, riskOccurrenceAskWords, riskOccurrenceGoalLabel, riskOccurrenceIsCurrent, riskOccurrenceSubject, riskOccurrenceWindowFromToday, riskWindowHoldsAskWords } from "../../orchestrator-v5/agent-lane/risk-occurrence.js";
 import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
+import { recordsWithUnknownSpeakerOn } from "../../orchestrator-v5/statement-door/statements.js";
+import type { UserStatement } from "../../orchestrator-v5/agent-lane/user-statements.js";
+import { findStatedAmounts, readUnit } from "../../cee/provenance/stated-amounts.js";
 import { isRetainedExcluded } from "../../orchestrator-v5/tools/handlers/run-analysis-participation-guard.js";
 // The Run's own option chain (`run-analysis.ts` §2.55–2.7), so readiness judges the options the Run SUBMITS.
 import { projectRunOptionSubmission } from "../../orchestrator-v5/tools/handlers/analysable-option-gate.js";
@@ -1376,6 +1379,35 @@ const statusQuoLevelAsk = (label: string): string =>
   `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
 
 /**
+ * ⭐ STATED CASES, NOT A MISSING LEVEL (AIE 10:54, 19 Oct, exact words; VERIFIER C6). Where a factor's kept statements hold more than
+ * one level for the same quantity and period, and the user's words give the cases probabilities (percentages, other than the levels
+ * themselves, that sum to 100%), the user supplied a distribution. The draft schema cannot carry it yet, so the factor still has no
+ * level and still blocks; the ask never asks for a figure they gave, never offers zero or a mean, and claims no structured support.
+ * `null` for anything else: a single missing level keeps the status-quo ask.
+ */
+function statedCasesAsk(node: unknown, label: string): string | null {
+  const groups = new Map<string, UserStatement[]>();
+  for (const s of recordsWithUnknownSpeakerOn(node).filter((r) => r.field === 'level').flatMap((r) => r.statements)) {
+    const key = `${s.subject.quantity}|${s.period ?? ''}`;
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+  for (const cases of groups.values()) {
+    if (cases.length < 2) continue;
+    const levels = new Set(cases.filter((s) => /%|percent/i.test(s.unit ?? '')).flatMap((s) => [s.low, s.high]));
+    // A percentage, with its sign or its unit word after it ("25%", "25 percent": the one unit reader, `readUnit`).
+    const chances = [...new Set(cases.map((s) => s.quote))].flatMap((q) => findStatedAmounts(q).filter((a) => !levels.has(a.magnitude)
+      && (a.kind === 'percent' || readUnit(/^\s*([a-z]+)/i.exec(q.slice(a.index + a.matchedText.length))?.[1]).kind === 'percent')))
+      .map((a) => a.magnitude);
+    if (chances.length < 2 || Math.abs(chances.reduce((sum, p) => sum + p, 0) - 100) > 1) continue;
+    const period = cases[0]!.period?.trim();
+    const what = period && !label.toLowerCase().includes(period.toLowerCase()) ? `${label.trim()} ${period}` : label.trim();
+    return `You supplied a probability for each possible ‘${what}’. This calculation cannot yet use that distribution faithfully. `
+      + 'We can still reason through your stated cases and what each would mean.';
+  }
+  return null;
+}
+
+/**
  * ⭐ EBD E1 — ONE READINESS AUTHORITY FOR THE DEADLINE MODEL (Paul, 12 Oct, scenario 4184e877). Its team part
  * (`event_team`) is a root with no level until the team's time is held, so the gap is real and still refuses the Run.
  * But its question is the MODEL's own (`eventModelAsk`: the deadline, then the team's time), never "What is … today,
@@ -1396,9 +1428,9 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
    * route offers it (`briefHoldsNowArgs`: the event path, over a window from today); otherwise the reading stays and the ACTUAL
    * remaining blocker is said once. No "can’t run the numbers" promise: recording it can leave its effect unresolved.
    */
-  const riskNode = gap.kind === 'risk' && rawGraph !== null && typeof rawGraph === 'object' && Array.isArray((rawGraph as { nodes?: unknown }).nodes)
+  const node = rawGraph !== null && typeof rawGraph === 'object' && Array.isArray((rawGraph as { nodes?: unknown }).nodes)
     ? ((rawGraph as { nodes: unknown[] }).nodes).find((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === gap.id) : undefined;
-  const said = alreadyTrueQuoteOf(riskNode);
+  const said = alreadyTrueQuoteOf(gap.kind === 'risk' ? node : undefined);
   if (said !== undefined) {
     const reading = `Your brief says: “${said}”${/[.!?…]$/.test(said) ? '' : '.'} Olumi reads this as ‘${gap.label.trim()}’ already being true now.`;
     if (eventPath?.kind === 'eligible' && riskOccurrenceWindowFromToday(rawGraph)) {
@@ -1422,7 +1454,7 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
   // window, so no card, and the ask never promises one.
   if (gap.kind === 'risk') return `${question} Olumi can’t run the numbers until this risk has a figure.`
     + (eventPath?.kind === 'eligible' ? ' Or ask Olumi to suggest a starting estimate for you to review.' : '');
-  return statusQuoLevelAsk(gap.label);
+  return statedCasesAsk(node, gap.label) ?? statusQuoLevelAsk(gap.label);
 };
 
 function appendSemanticIssues(
