@@ -154,7 +154,7 @@ const AN_END_NOT_COMPLETE = [
   'a dozen or so to 30', 'twenty to thirty-odd', 'around 2 or so to 5', 'ten-ish to 20',
   'We expect twenty to thirty or so users.', 'We expect 20 to 30 or so users.', 'We expect 20 to 30-odd users.', 'We expect 20-odd to 30 users.',
   'We expect a dozen to thirty or so users.', 'We expect twenty or so to thirty users.', 'We expect between 20 and 30-odd users.',
-  'We expect between twenty and thirty or so users.',
+  'We expect between twenty and thirty or so users.', 'We expect 20 to 30 plus users.', 'We expect twenty to thirty plus users.',
 ];
 
 describe('⛔ a range end is complete, or the whole range gives nothing (Codex R4 on #3445)', () => {
@@ -172,6 +172,8 @@ describe('⛔ a range end is complete, or the whole range gives nothing (Codex R
     ['a hyphenated compound is one number', 'We sold twenty-five units.', [25]],
     ['a digit scalar keeps its own grammar', 'We signed a 3-year contract.', [3]],
     ['a complete range with its unit', 'Hire two to three engineers.', [2, 3]],
+    ['a connector into a new clause is no continuation, digits', 'Grow MRR from £20k to £30k and keep churn low.', [20_000, 30_000]],
+    ['a connector into a new clause is no continuation, words', 'Hire twenty to thirty engineers and train them.', [20, 30]],
   ] as const)('CONTROL %s: "%s"', (_case, text, expected) => { expect(read(text).map(([, v]) => v)).toEqual(expected); });
 });
 
