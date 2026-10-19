@@ -35,7 +35,7 @@ import { launchWindowOf } from '../goal-target/goal-target-basis.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, sharesOneMagnitude, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
-import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, cardinalReadings, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -879,15 +879,15 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
  * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
 export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
-  return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => {
-    const v = parseCardinalAmount(m[0]);
-    return v === null || m.index === undefined ? [] : [{ kind: 'words' as const, magnitude: v, index: m.index, matchedText: m[0] }];
-  });
+  // A range written in words gives its two ends, or nothing (`cardinalReadings`: the range class, C5 #3442).
+  return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => m.index === undefined ? []
+    : cardinalReadings(m[0], m.index).map((r) => ({ kind: 'words' as const, ...r })));
 }
 
 /**
  * ⭐ A RANGE'S CLOSING SCALE BELONGS TO BOTH ENDS, IN WORDS AS IN DIGITS (DL-3 on C5's finding, 19 Oct: a range in words closed by a
- * scale word read its low end as a bare count, a figure the user never wrote). Two amounts joined as one range or as alternatives
+ * scale word read its low end as a bare count, a figure the user never wrote). A range wholly in words is one capture whose two ends the
+ * grammar already reads (`cardinalReadings`, C5 #3442); this joins the rest: two amounts joined as one range or as alternatives
  * (`sharesOneMagnitude`, the digit reader's own joiner; a range in digits alone already shares its magnitude there): a low end with
  * no scale of its own reads at the scale its high end closes with (`closingScale`), when both are counts; where the high end closes
  * with no ONE scale, or is another kind of amount (money), the bare low end is refused, never credited. A low end with its own scale
