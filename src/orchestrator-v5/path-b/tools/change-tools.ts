@@ -14,13 +14,15 @@
  *     the declared origins stamped by the writers' own contexts;
  *  4. a save is claimed only on THIS commit's receipt AND the complete approved postimage read back afresh.
  *
- * HOW EACH CARRIER HOLDS A DECLARED ORIGIN (read back by the ONE authority, `provenanceOf`):
- *  · factor value — Olumi's: adopted by the press (`user_assumption` + review → ai, accepted). Any other origin, with the
- *    words literally the user's: an unverified binding (`user_material_unverified` → human, role unverified). A literal match
- *    proves the bytes, never the speaker (PL 3b), so it is never "the user's, verified". The named third party stays in the
- *    hashed operation only: BLOCKED-SCHEMA for canonical state (no carrier holds a name).
- *  · option setting — Olumi's: `cee_hypothesis` (ai; a cell holds no acceptance marker). Any other origin: BLOCKED-SCHEMA —
- *    the level writer stamps only the user's verified figure or Olumi's, so nothing is proposed (`unavailable`).
+ * HOW EACH CARRIER HOLDS A DECLARED SOURCE: ONE table (`holdingOf`), read back by the ONE authority (`provenanceOf`). What a
+ * carrier cannot hold is returned in the receipt as `not_kept`, with the original material; a save that lost anything is
+ * never called faithful (PL AMEND 15:35). A source a carrier could hold only by changing its origin is BLOCKED-SCHEMA.
+ *  · factor value — Olumi's: adopted by the press (`user_assumption` + review → ai, accepted). The user's or a third party's,
+ *    with the words literally the user's: an unverified binding (`user_material_unverified` → human, role unverified). A
+ *    literal match proves the bytes, never the speaker (PL 3b), so it is never "the user's, verified". Not kept: the words,
+ *    and for a third party that it was someone else, and their name. An unknown speaker: BLOCKED-SCHEMA (it would read human).
+ *  · option setting — Olumi's: `cee_hypothesis` (ai). Not kept: the user's approval (a cell holds no acceptance marker). Any
+ *    other source: BLOCKED-SCHEMA — the level writer stamps only the user's verified figure or Olumi's.
  * Changes this path does not make yet (the goal's target, a link's strength, add, remove, rename) come back `unavailable`,
  * naming what is not available.
  */
@@ -94,6 +96,24 @@ type ChangeCtx = Pick<AgentToolContext, 'scenario_id' | 'authenticated_user_id' 
 
 type Rec = Record<string, unknown>;
 type Op = { kind: 'value' | 'setting'; option_id?: string; factor_id: string } & z.infer<typeof Declared>;
+type DeclaredSource = z.infer<typeof Source>;
+/** What a carrier cannot hold of the declared source, with the declared material itself. */
+type NotKept = { readonly what: 'speaker' | 'name' | 'words' | 'approval'; readonly declared: string };
+type Holding = { readonly stored: Pick<Provenance, 'origin'> & { readonly accepted?: true; readonly role?: 'unverified' }; readonly not_kept: readonly NotKept[] }
+  | { readonly blocked: string };
+/** THE ONE TABLE: how each carrier holds a declared source, what the authority must read back, and what is not kept. */
+function holdingOf(kind: Op['kind'], s: DeclaredSource): Holding {
+  if (s.origin === 'olumi') {
+    return kind === 'value' ? { stored: { origin: 'ai', accepted: true }, not_kept: [] }
+      : { stored: { origin: 'ai' }, not_kept: [{ what: 'approval', declared: 'adopted_by_the_press' }] };
+  }
+  if (kind === 'setting') return { blocked: 'an option\'s setting can be saved only as Olumi\'s own estimate on this path yet' };
+  if (s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
+  const words: NotKept = { what: 'words', declared: s.quote ?? '' };
+  return { stored: { origin: 'human', role: 'unverified' }, not_kept: s.origin === 'user' ? [words]
+    : [{ what: 'speaker', declared: 'third_party' }, ...(s.named_source === null ? [] : [{ what: 'name' as const, declared: s.named_source }]), words] };
+}
+const isBlocked = (h: Holding): h is Extract<Holding, { blocked: string }> => 'blocked' in h;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const nodesOf = (g: Rec): Rec[] => (Array.isArray(g.nodes) ? g.nodes.filter(isRec) : []);
 const frameOf = (n: Rec): number | null => {
@@ -131,6 +151,7 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
   for (const [i, o] of ops.entries()) {
     const factor = byId.get(o.factor_id);
     if (factor?.kind !== 'factor') return { refusal: 'not_a_factor', op: i };
+    if (isBlocked(holdingOf(o.kind, o.source))) return { refusal: 'blocked_schema', op: i };
     const olumi = o.source.origin === 'olumi';
     if (o.kind === 'value') {
       plan.values.push({ factor_id: o.factor_id, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), author: olumi ? 'model_proposed' : 'user_specified' });
@@ -139,7 +160,6 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
       continue;
     }
     if (byId.get(o.option_id)?.kind !== 'option') return { refusal: 'not_an_option', op: i };
-    if (!olumi) return { refusal: 'blocked_schema', op: i };
     const frame = frameOf(factor) ?? plan.frames.find((f) => f.factor_id === o.factor_id)?.cap ?? null;
     if (frame === null && Math.abs(o.value) > 1) return { refusal: 'factor_has_no_range', op: i };
     plan.levels.push(frame === null ? { option_id: o.option_id!, factor_id: o.factor_id, value: o.value, author: 'model_proposed' }
@@ -149,22 +169,28 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
   return plan;
 }
 
-/** Each op as the model now holds it, with the source the ONE authority reads; `holds` when every op is there as approved. */
-function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; written: Rec[] } {
+/**
+ * Each op as the model now holds it: the declared source, the source the ONE authority reads, and what was not kept.
+ * `holds` only when every figure is there as approved AND the authority reads exactly the holding's source.
+ */
+function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; faithful: boolean; written: Rec[] } {
   const byId = new Map(nodesOf(read.graph).map((n) => [n.id, n]));
   const written = ops.map((o) => {
+    const holding = holdingOf(o.kind, o.source);
     const factor = byId.get(o.factor_id);
     const carrier = o.kind === 'value' ? factor?.observed_state : cellOf(byId.get(o.option_id), o.factor_id);
     const figure = typeof carrier === 'number' ? carrier : isRec(carrier) ? (typeof carrier.raw_value === 'number' ? carrier.raw_value : carrier.value) : undefined;
     const source: Provenance = o.kind === 'value' ? provenanceOf({ value: carrier }) : provenanceOf({ setting: carrier, target: factor });
     const storedUnit = isRec(carrier) && typeof carrier.unit === 'string' ? carrier.unit : null;
-    const asDeclared = o.source.origin === 'olumi' ? source.origin === 'ai' && (o.kind === 'setting' || source.accepted)
-      : source.origin === 'human' && source.role === 'unverified';
-    const holds = close(figure, o.value) && asDeclared && (o.unit === null || storedUnit?.trim().toLowerCase() === o.unit.trim().toLowerCase());
-    return { holds, row: { op: o.kind === 'value' ? 'set_factor_value' : 'set_option_setting', ...(o.option_id === undefined ? {} : { option_id: o.option_id }),
-      factor_id: o.factor_id, figure: figure ?? null, unit: storedUnit, source } };
+    const asHeld = !isBlocked(holding) && source.origin === holding.stored.origin
+      && (holding.stored.role === undefined || source.role === holding.stored.role)
+      && (holding.stored.accepted !== true || source.accepted);
+    const holds = close(figure, o.value) && asHeld && (o.unit === null || storedUnit?.trim().toLowerCase() === o.unit.trim().toLowerCase());
+    const notKept = isBlocked(holding) ? [] : holding.not_kept;
+    return { holds, notKept, row: { op: o.kind === 'value' ? 'set_factor_value' : 'set_option_setting', ...(o.option_id === undefined ? {} : { option_id: o.option_id }),
+      factor_id: o.factor_id, figure: figure ?? null, unit: storedUnit, declared: o.source, stored_as: source, not_kept: notKept } };
   });
-  return { holds: written.every((w) => w.holds), written: written.map((w) => w.row) };
+  return { holds: written.every((w) => w.holds), faithful: written.every((w) => w.notKept.length === 0), written: written.map((w) => w.row) };
 }
 
 /** THIS proposal's own committed version, by the turn id its write carries; 'unreadable' when the history cannot be read. */
@@ -185,9 +211,8 @@ async function ownReceipt(dispatch: InternalDispatch, scenarioId: string, turnId
   return null;
 }
 
-/** BLOCKED-SCHEMA: the level writer stamps only the user's verified figure or Olumi's, so a declared source cannot be kept. */
-const BLOCKED_SETTING = (i: number): string => `Change ${i + 1}: an option's setting can be saved only as Olumi's own estimate on this path yet; `
-  + 'the source you declared cannot be recorded with it, so nothing was proposed or saved.';
+/** BLOCKED-SCHEMA, said with the change it stopped: nothing is proposed or saved. */
+const blockedSaid = (i: number, why: string): string => `Change ${i + 1}: ${why}, so nothing was proposed or saved.`;
 
 const codeOf = (reason: string): string => {
   const c = reason.toLowerCase().replace(/[^a-z0-9_]/g, '_');
@@ -200,7 +225,8 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const ops = args.ops.filter((o): o is FigureOp => !isNotYet(o));
   if (args.public_label.trim() === '') return refused('label_empty');
   for (const [i, o] of ops.entries()) {
-    if (o.op === 'set_option_setting' && o.source.origin !== 'olumi') return unavailable('blocked_schema', 'none', BLOCKED_SETTING(i));
+    const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source);
+    if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(i, holding.blocked));
     if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: i });
   }
   const read = await readSaved(deps, ctx.scenario_id);
@@ -211,7 +237,7 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label };
   const p = createProposal(content);
   const plan = planOf(ctx.scenario_id, p.proposal_id, declaredOf(p) ?? [], read.graph);
-  if ('refusal' in plan) return plan.refusal === 'blocked_schema' ? unavailable('blocked_schema', 'none', BLOCKED_SETTING(plan.op)) : refused(plan.refusal, undefined, { op: plan.op });
+  if ('refusal' in plan) return refused(plan.refusal, undefined, { op: plan.op });
   deps.proposals.put(p);
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
 }
@@ -230,7 +256,8 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   if (!isSavedRead(before)) return before;
   const alreadySaved = (receipt: ReceiptSummary | null): ToolOutcome => {
     if (receipt !== null) deps.proposals.markApplied(p.proposal_id, [receipt]);
-    return ok({ already_saved: true, receipt, holds_now: readbackOf(before, ops).holds });
+    const now = readbackOf(before, ops);
+    return ok({ already_saved: true, receipt, holds_now: now.holds, faithful: now.faithful, written: now.written });
   };
   if (prior !== null) return alreadySaved(prior);
   if (before.identity === null) return unavailable('read_malformed');
@@ -266,8 +293,8 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
     }
     const receipt: ReceiptSummary = { ...res.receipt, source_turn_id: turnId };
     deps.proposals.markApplied(p.proposal_id, [receipt]);
-    return ok({ saved: true, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity }, written: back.written },
-      { mutated: true });
+    return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
+      written: back.written }, { mutated: true });
   };
   const reconcile = async (): Promise<ToolOutcome> => {
     const own = await ownReceipt(deps.dispatch, ctx.scenario_id, turnId);
