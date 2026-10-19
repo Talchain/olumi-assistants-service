@@ -13,11 +13,10 @@ import { namesBothEnds, speechReading } from '../goal-target/input-claim-context
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
-import { figuresWritten, saidByOf, userStatementOf, verifyStatement, verifyStatements, type ClaimStatus, type UserStatement } from '../agent-lane/user-statements.js';
+import { saidByOf, userStatementOf, verifyStatement, verifyStatements, type ClaimStatus, type UserStatement } from '../agent-lane/user-statements.js';
 import { plainQuoteWords, verbatimSourceLine } from '../agent-lane/quote-confirmation.js';
-import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
-import { comparatorTheUserWroteFor, countsInWords, figureTheUserWroteForSpan, figureTheUserWroteSpan, figuresWrittenIn, quoteSpansIn, withoutCorrectedFigureTail,
-  wordsTheUserWrote } from '../agent-lane/stated-by-user.js';
+import { amountsWrittenIn, amountTheUserWrote, comparatorTheUserWroteFor, figureTheUserWroteForSpan, figureTheUserWroteSpan, figuresWrittenIn, quoteSpansIn,
+  withoutCorrectedFigureTail, wordsTheUserWrote } from '../agent-lane/stated-by-user.js';
 import { normaliseFactorValue } from '../tools/handlers/d1-shared/normalise-factor-value.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
@@ -739,10 +738,11 @@ function replacementOf(v: unknown): { value: number; unit: string; span?: string
  * elliptical answer, the line's only figure: Olumi's reading, labelled). Else nobody's: an unnamed figure among several, or a line giving
  * this item two figures (a contradiction, as "day shifts take 70" read as the night figure where the model holds no day item).
  */
+const amountsAsFigures = (q: string): { low: number; high: number }[] => amountsWrittenIn(q).map((x) => ({ low: x.magnitude, high: x.magnitude }));
 function figureOwner(graph: unknown, subject: DoorSubject, line: string, quote: string, value: number, unit: string, at: number, phrase: string):
   { readonly kind: 'bound' | 'unbound' } | { readonly kind: 'another'; readonly owner: string } | undefined {
   const verified = verifyStatement({ quote, form: 'point', value, speaker: 'user' }, { now: line },
-    { subject: { quantity: subjectKey(subject), node_id: subject.id }, unit, forms: ['point'], figuresIn: figuresWritten, allowsZero: true });
+    { subject: { quantity: subjectKey(subject), node_id: subject.id }, unit, forms: ['point'], figuresIn: amountsAsFigures, allowsZero: true });
   if (verified.kind !== 'verified' || verified.statement.low !== value || comparatorTheUserWroteFor(line, value) !== null
     || quoteSpansIn(line, phrase).length !== 1 || !wordsTheUserWrote(phrase, line)) return undefined;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -752,8 +752,8 @@ function figureOwner(graph: unknown, subject: DoorSubject, line: string, quote: 
   const reads = (target: string, named: boolean): boolean => figureTheUserWroteForSpan(value, unit, text,
     { target: [target], others: [label, ...others].filter((x) => x !== target), strict: true, at, ...(named ? { requireNamed: true } : {}) }) !== null;
   const owner = [label, ...others].find((target) => reads(target, true));
-  const contradicted = figuresWritten(text).some((f) => f.low === f.high && f.low !== value && figureTheUserWroteForSpan(f.low, unit, text,
-    { target: [label], others, strict: true, requireNamed: true }) !== null);
+  const contradicted = amountsWrittenIn(text).some((x) => x.magnitude !== value && figureTheUserWroteForSpan(x.magnitude, unit, text,
+    { target: [label], others, strict: true, requireNamed: true, at: x.index }) !== null);
   if (contradicted && owner !== undefined && owner !== label) return { kind: 'another', owner };
   return contradicted ? undefined : owner === label ? { kind: 'bound' } : owner !== undefined ? { kind: 'another', owner } : reads(label, false) ? { kind: 'unbound' } : undefined;
 }
@@ -766,13 +766,16 @@ function readReplacement(graph: unknown, source: UserStatement, e: Pick<Correcti
   if (r === undefined) return undefined;
   const line = source.source;
   const starts = r.span === undefined ? [] : quoteSpansIn(line, r.span);
-  const inSpan = r.span === undefined ? null : figureTheUserWroteSpan(r.value, r.unit, r.span);
   if (r.span === undefined || saidByOf(source) !== 'user' || source.checks?.words_found === false || !source.quote.includes(r.span)
-    || figuresWrittenIn(r.span) !== 1 || starts.length !== 1 || inSpan === null) return { kind: 'refused' };
-  // The line's own written amount at the span's figure (a reader's amount may carry the space before it).
-  const from = starts[0]! + inSpan.start;
-  const at = [...findStatedAmounts(line), ...countsInWords(line)].find((a) => a.index < starts[0]! + inSpan.end && from < a.index + a.matchedText.length)?.index;
-  const read = at === undefined ? undefined : figureOwner(graph, e.subject, line, r.span, r.value, r.unit, at, line.slice(from, starts[0]! + r.span.length));
+    || starts.length !== 1) return { kind: 'refused' };
+  // THE one located-amount reader (#3429), on the WHOLE line: the span writes this figure in this unit exactly ONCE, digits or words, as
+  // the user's own (never another speaker's quotation, never an ordinal, a word that counts something). Other figures in the span (the
+  // old one in "45 hours per week, not 40") are context: whose THIS occurrence is, `figureOwner` reads.
+  const end = starts[0]! + r.span.length;
+  const own = amountsWrittenIn(line).filter((x) => x.index < end && starts[0]! < x.index + x.matchedText.length && amountTheUserWrote(x, r.value, r.unit, line));
+  const a = own.length === 1 ? own[0]! : undefined;
+  const from = a === undefined ? 0 : a.index + a.matchedText.length - a.matchedText.trimStart().length;
+  const read = a === undefined ? undefined : figureOwner(graph, e.subject, line, r.span, r.value, r.unit, a.index, line.slice(from, end));
   return read === undefined ? { kind: 'refused' } : read.kind === 'another' ? { kind: 'refused', owner: read.owner }
     : { kind: 'verified', value: r.value, unit: r.unit, span: r.span, bound: read.kind === 'bound' };
 }
