@@ -1,4 +1,5 @@
 import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
+import { deriveTodayParts } from './agent-lane/goal-definition-sum.js';
 import { ANALYSIS_READ_SETTLE_MS, ANALYSIS_REREAD_TIMEOUT_MS, AnalysisReadDeadlineError } from './session/analysis-read-deadline.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
@@ -617,6 +618,8 @@ export interface BuildTurnContextOptions {
 export interface RunAnalysisScenarioSnapshot {
   /** Scenario revision from the same persisted read as the analysed graph (B2). */
   readonly evaluatedScenarioRevision?: number;
+  /** STEP 8: what the compute copy corrected on a compiled today part (`deriveTodayParts`), said with the Run. */
+  readonly todayPartNotes?: readonly string[];
   readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
@@ -2976,7 +2979,10 @@ export async function loadScenarioSnapshotForRunAnalysis(
   //       contract-valid; anything still out of range refuses honestly below.
   // Telemetry is code-keyed: field path + floor written, never the offending
   // value, never a label (PII rule).
-  const sigmaFloor = floorGraphSigmaForCompute(persistedGraph);
+  // ⭐ STEP 8: each compiled today part is derived from its goal's current level, and an option's setting of it or a link
+  // into it is dropped, on this compute copy only (`deriveTodayParts`): Undo, legacy rows and canvas-direct saves included.
+  const todayParts = deriveTodayParts(persistedGraph);
+  const sigmaFloor = floorGraphSigmaForCompute(todayParts.graph);
   for (const repair of sigmaFloor.repairs) {
     emit(TelemetryEvents.ComputeSigmaFloor, {
       path: repair.path,
@@ -3155,6 +3161,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,
+    ...(todayParts.notes.length > 0 ? { todayPartNotes: todayParts.notes } : {}),
     // Canonical admitted graph — keeps graph_hash_at_run consistent with the
     // freshness-side canonical hash without retaining a flag-off authority.
     // Canonical carrier projection with the persisted numeric bytes intact:

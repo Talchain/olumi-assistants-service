@@ -340,6 +340,8 @@ export function wireGoalConstraints<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  /** STEP 8: what the loader's compute copy corrected on a compiled today part (`deriveTodayParts`), said with the Run. */
+  readonly todayPartNotes?: readonly string[];
   readonly evaluatedScenarioRevision?: number;
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
@@ -2976,8 +2978,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       estimatesOnChance ? [] : deriveOlumiAuthoredValues(graphForAnalysis, submittedIds),
     );
     const headlineDisclosures = headlineParts.disclosures;
+    // STEP 8: a stored today part the compute copy corrected (`deriveTodayParts`) is said with the Run, never silently used or dropped.
+    const todayPartDisclosure = (snapshot.todayPartNotes ?? []).map((n) => ` ${n}`).join('');
     const composedSummary = (() => {
-      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}${todayPartDisclosure}`;
       return summary;
     })();
     factCandidate.result.summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;

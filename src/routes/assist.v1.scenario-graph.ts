@@ -5,6 +5,7 @@
  * The handler retains payload validation, persisted-graph fidelity and analysis projection. */
 
 import { toOutboundGraph } from '../orchestrator-v5/goal-target/outbound-graph.js';
+import { deriveTodayParts } from '../orchestrator-v5/agent-lane/goal-definition-sum.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 
@@ -527,7 +528,8 @@ export default async function route(app: FastifyInstance) {
         ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
         ...(changedSinceRun !== undefined ? { changed_since_run: changedSinceRun } : {}),
         scenario_id: scenarioId,
-        graph: graphPresent ? toOutboundGraph(graph) : null,
+        // STEP 8: the same derived today part the Run computes with (`deriveTodayParts`); the hashes below stay the stored bytes'.
+        graph: graphPresent ? toOutboundGraph(deriveTodayParts(graph).graph) : null,
         graph_present: graphPresent,
         brief_text: briefText,
         scenario_created_at: snapshot?.createdAt ?? null,

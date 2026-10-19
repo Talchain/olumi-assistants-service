@@ -29,6 +29,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 import registerRoute from '../../../routes/assist.v1.scenario-graph-register.js';
+import readRoute from '../../../routes/assist.v1.scenario-graph.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -101,6 +102,7 @@ async function harness(initial: Rec, said = 'We now make 50 widgets per hour.', 
   const app = Fastify();
   apps.push(app);
   await registerRoute(app);
+  await app.register(readRoute);
   await app.ready();
   const dispatch: InternalDispatch = async (path, body) => {
     if (path === `/assist/v1/scenarios/${SCENARIO}/graph`) {
@@ -121,7 +123,11 @@ async function harness(initial: Rec, said = 'We now make 50 widgets per hour.', 
     return dispatch(`/assist/v1/scenarios/${SCENARIO}/graph/register`, { graph,
       expected_graph_hash: computeAnalysisAffectingGraphHash(g as never), expected_graph_identity_hash: computeGraphIdentityHash(g as never) });
   };
-  return { appends, call, register, stored: () => row.graph as Rec };
+  const read = async () => {
+    const res = await injectAsCeeWriter(app, { method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
+    return { status: res.statusCode, json: res.json() as Rec };
+  };
+  return { appends, call, register, read, stored: () => row.graph as Rec };
 }
 
 beforeEach(() => { resolveUserIdentity.mockResolvedValue({ mode: 'verified', userId: OWNER }); });
@@ -205,6 +211,19 @@ describe('STEP 8 Route A — a goal-level edit writes the sum\'s today part with
     const at = (factorId: string) => prepareOptionInterventionEdit({ persistedGraph: clone(g), optionId: 'option_a', factorId, modelValue: 0.5, expectedGraphHash: hash });
     expect(at(TODAY)).toEqual({ kind: 'refused', reason: 'goal_today_part_owned' });
     expect(at('net_change_in_widgets_per_hour').kind).not.toBe('refused');
+  });
+
+  it('RED (DL-3 ruling on Codex R2): the scenario read shows the same derived today part the Run uses — 40, not a canvas-direct 41', async () => {
+    const initial = await constructed(true);
+    const canvas = clone(initial);
+    const os = nodeOf(canvas, TODAY)!.observed_state;
+    nodeOf(canvas, TODAY)!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    const h = await harness(canvas);
+    const read = await h.read();
+    expect(read.status, JSON.stringify(read.json).slice(0, 300)).toBe(200);
+    const shown = read.json.graph as Rec;
+    expect(nodeOf(shown, TODAY)!.observed_state.raw_value).toBe(40);
+    expect(nodeOf(h.stored(), TODAY)!.observed_state.raw_value).toBe(41); // the stored bytes are untouched
   });
 
   it('CONTRAST: an ordinary sum part (not the part construction minted for the goal\'s level today) is never moved', async () => {

@@ -14,7 +14,6 @@ import { log } from '../utils/telemetry.js';
 import { assertUntouchedLevelQuantities } from './untouched-level-invariant.js';
 import { GuestCopyStoreError } from './guest-copy/index.js';
 import type { GuestCopyStorePort, GuestCopyOutcome } from './guest-copy/index.js';
-import { PersistedGraphInvariantError as GuestGraphInvariantError } from './persisted-graph-invariants.js';
 import { readVerifiedWriteCaller, assertDoorOwnership } from './ownership/door-ownership.js';
 import { computeGraphIdentityHash } from './context/graph-identity.js';
 import { ModelVersionSignInRequiredError, ModelVersionStoreError } from './model-management/store-adapter.js';
@@ -462,7 +461,7 @@ export async function commitModelChange(params: ModelChange): Promise<VersionWri
         assertNoIntroducedGraphViolations({ graph, writesGraph: true,
           identity: { scenario_id: params.sourceScenarioId }, baseGraphForInvariants: null, source: 'guest_copy' });
       } catch (error) {
-        if (error instanceof GuestGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
+        if (error instanceof PersistedGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
           return { kind: 'refused', reason: 'no_model' };
         }
         throw error;

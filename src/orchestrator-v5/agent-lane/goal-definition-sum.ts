@@ -145,3 +145,46 @@ export function todayPartsApartFromGoal(graph: unknown): string[] {
       || edges.some((e) => e.to === part.id)) ? [part.id] : [];
   });
 }
+
+/**
+ * ⭐ THE NUMBER'S SAFETY AT THE REVISION → REQUEST BOUNDARY (DL-3 ruling on Codex R2 of #3421): whatever is stored — an Undo to a
+ * legacy row, a canvas save straight to the database — each compiled today part is DERIVED from its goal's current level, an
+ * option's setting of it is dropped and a link into it is dropped, on a copy. The Run's compute snapshot and the scenario read
+ * both use this one derivation, so the screen and the number agree; each correction is said in `notes`. The stored bytes
+ * (and their hashes) are untouched. The same graph and no notes when nothing differs. Pure.
+ */
+export function deriveTodayParts<G>(graph: G): { readonly graph: G; readonly notes: readonly string[] } {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? (graph.edges as EdgeIn[]) : [];
+  const notes: string[] = [];
+  const parts = new Map<string, NodeIn>();
+  for (const goal of nodes.filter((n) => n.kind === 'goal')) {
+    const part = goalSumTodayPart(nodes, goal.id);
+    if (part === undefined) continue;
+    parts.set(part.id, goal);
+    const level = isRec(goal.observed_state) ? goal.observed_state : undefined;
+    const said = (os: unknown): string => (isRec(os) && finite(os.raw_value) ? `${os.raw_value}${typeof os.unit === 'string' ? ` ${os.unit}` : ''}` : 'no figure');
+    if (stableStringify(part.observed_state) !== stableStringify(level)) {
+      notes.push(`"${part.label}" is the current level of "${goal.label}", so Olumi used ${said(level)}, not the ${said(part.observed_state)} stored on it.`);
+    }
+    for (const o of nodes.filter((n) => n.kind === 'option' && isRec(n.interventions) && part.id in n.interventions)) {
+      notes.push(`"${o.label}" set "${part.label}" to ${said((o.interventions as Rec)[part.id])}; that was not used: it changes only with the current level of "${goal.label}".`);
+    }
+    for (const e of edges.filter((x) => x.to === part.id)) {
+      notes.push(`The link from "${nodes.find((n) => n.id === e.from)?.label ?? e.from}" into "${part.label}" was not used: it changes only with the current level of "${goal.label}".`);
+    }
+  }
+  if (notes.length === 0) return { graph, notes };
+  const levelled = withTodayPartsAtGoalLevel(graph) as Rec;
+  return {
+    graph: {
+      ...levelled,
+      nodes: (levelled.nodes as NodeIn[]).map((n) => {
+        if (n.kind !== 'option' || !isRec(n.interventions) || ![...parts.keys()].some((id) => id in (n.interventions as Rec))) return n;
+        return { ...n, interventions: Object.fromEntries(Object.entries(n.interventions).filter(([id]) => !parts.has(id))) };
+      }),
+      edges: (levelled.edges as EdgeIn[]).filter((e) => !parts.has(e.to)),
+    } as G,
+    notes,
+  };
+}

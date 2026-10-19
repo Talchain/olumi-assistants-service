@@ -19,6 +19,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { whoSized } from '../../../agent-lane/strength-authorship-words.js';
+import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 import { labelHoldsQuantity } from '../../../goal-target/held-user-links.js';
 
 type Rec = Record<string, any>;
@@ -142,6 +143,63 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
 
   it('RED: £ a month, +£50,000 / +£49,999 on a gap of £50,000 (second brief)', async () => {
     expectExactSum(await request(await build(candidate(REVENUE), REVENUE.say(REVENUE.a, REVENUE.b))), REVENUE, REVENUE.a, REVENUE.b);
+  });
+
+  // ⭐ THE REVISION → REQUEST BOUNDARY (DL-3 ruling on Codex R2): whatever is stored — an Undo to a legacy row, a canvas save
+  // straight to the database — the Run derives the today part from the goal's current level and drops an option's setting of it.
+  const snapshotNotes = async (stored: Rec): Promise<readonly string[]> => {
+    const bytes = JSON.stringify(stored);
+    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
+    return (await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-step8a', port as never)).todayPartNotes ?? [];
+  };
+  it('RED: Undo to a legacy row where Option B set the today part to 50 — the request uses 40 and B\'s own +19 (59, short of 60), and says so', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const legacy = structuredClone(stored);
+    const os = node(legacy, 'widgets_per_hour_today')!.observed_state;
+    const b = (legacy.nodes as Rec[]).find((n) => n.id === 'option_b')!;
+    b.interventions = { ...b.interventions, widgets_per_hour_today: { ...os, raw_value: 50, value: 50 / os.cap } };
+    const p = await request(legacy);
+    expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
+    expect(((p.options as Rec[]).find((o) => o.id === 'option_b')!.interventions as Rec).widgets_per_hour_today).toBeUndefined();
+    expect(setting(p, 'option_b', netId(WIDGETS))).toBe(19);
+    expect(40 + 19 >= 60).toBe(false);
+    expect(await snapshotNotes(legacy)).toEqual(['"Option B" set "Widgets per hour today" to 50 widgets/hour; that was not used: it changes only with the current level of "Widgets per hour".']);
+  });
+
+  it('RED: a canvas save straight to the database left the today part at 41 — the request uses the goal\'s 40, and says so', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const canvas = structuredClone(stored);
+    const os = node(canvas, 'widgets_per_hour_today')!.observed_state;
+    node(canvas, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    const p = await request(canvas);
+    expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
+    expectExactSum(p, WIDGETS, 20, 19);
+    expect(await snapshotNotes(canvas)).toEqual(['"Widgets per hour today" is the current level of "Widgets per hour", so Olumi used 40 widgets/hour, not the 41 widgets/hour stored on it.']);
+  });
+
+  it('RED: the Run\'s own readback says what it used — the stored 41 is named and the goal\'s 40 is the figure used', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const canvas = structuredClone(stored);
+    const os = node(canvas, 'widgets_per_hour_today')!.observed_state;
+    node(canvas, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    const bytes = JSON.stringify(canvas);
+    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 })), readMostRecentPendingActions: vi.fn(async () => []) };
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-step8-readback', port as never);
+    const row = (id: string, p: number): Rec => ({ option_id: id, probability_of_goal: p, outcome: { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 } });
+    const run = vi.fn(async () => ({ ...structuredClone(minimalFixture), option_comparison: [row('option_a', 1), row('option_b', 0), row('carry_on_as_now', 0)] }));
+    const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn() } as never, scenarioReader: async () => snapshot });
+    const outcome = await handler({ payload: { scenario_id: SCENARIO, turn_id: 't-step8-readback' }, requestId: 'req-step8-readback',
+      signal: new AbortController().signal, context: {}, orientationText: '' } as never) as Rec;
+    expect(run).toHaveBeenCalledTimes(1);
+    const sent = (run.mock.calls[0] as unknown as [Rec])[0];
+    expect(raw(node(sent.graph, 'widgets_per_hour_today')!)).toBe(40);
+    expect(String((outcome.handler_facts[0] as Rec).result.summary)).toContain(
+      '"Widgets per hour today" is the current level of "Widgets per hour", so Olumi used 40 widgets/hour, not the 41 widgets/hour stored on it.');
+  });
+
+  it('CONTRAST: the graph as built is used as stored, with nothing said', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    expect(await snapshotNotes(stored)).toEqual([]);
   });
 
   it('RED: the definition keeps every authorship tag and reads as a definition; the sum is Olumi\'s reading', async () => {
