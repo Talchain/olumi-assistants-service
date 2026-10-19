@@ -821,6 +821,7 @@ export default async function route(app: FastifyInstance) {
             scenarioId,
             turnClass: "direct_answer",
             source: "graph_registration",
+            storedBase: baseGraphForInvariants ?? undefined,
           }));
           return committed.request_hash === registrationRequestHash(bytes, brief.value);
         } catch {
@@ -1089,10 +1090,12 @@ export default async function route(app: FastifyInstance) {
         log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
         return unavailable();
       }
+      // The stored graph this registration replaces: the persisted form reconciles the participation it ends (#3441).
       const projected = projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",
+        storedBase: baseGraphForInvariants ?? undefined,
       });
       if (hasNewInterventionRanges(baseGraphForInvariants, projected)
         && !(callerExpectsNoGraph && onlyBriefStatedCountRanges(projected, brief.value))) {
@@ -1102,7 +1105,7 @@ export default async function route(app: FastifyInstance) {
       }
       const graphForStore = withEntityRefs(projectGraphForPersistence(
         clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
-          scenarioId, turnClass: "direct_answer", source: "graph_registration",
+          scenarioId, turnClass: "direct_answer", source: "graph_registration", storedBase: baseGraphForInvariants ?? undefined,
         }));
 
       prepareHorizonBasisForWrite(graphForStore, baseGraphForInvariants, scenarioId);

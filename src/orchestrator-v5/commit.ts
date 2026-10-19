@@ -1301,6 +1301,8 @@ export async function commitDirectAnswer(
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
+    // The stored graph this write replaces: the persisted form reconciles the participation this write ends (#3441).
+    storedBase: baseForWrite ?? undefined,
   }), baseForWrite).graph;
   if (graphWasProvided(metadata.graph)) assertShareByDatePreserved(baseForWrite, projectedGraphForStore);
   if (graphWasProvided(metadata.graph)) {

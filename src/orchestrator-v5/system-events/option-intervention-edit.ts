@@ -1548,6 +1548,14 @@ export async function prepareOptionInterventionBatchExecution(
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
   }
+  // The persisted form against the stored graph this batch replaces (the participation it ends, #3441), so the ONE read-back
+  // after the commit compares the bytes the commit stores.
+  const stored = projectGraphForPersistence(plan.graph, { storedBase: before });
+  if (stored !== plan.graph) {
+    const analysisGraphHash = computeAnalysisAffectingGraphHash(stored);
+    if (!isEditableGraph(stored) || !analysisGraphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    plan = { ...plan, graph: stored, analysisGraphHash };
+  }
   return { kind: 'candidate', ...plan, targets, optionGaps, values, frames, valueConfirmations, linksResized,
     reencodedSiblings: siblingBase.reencoded, gapsChanged, horizonBasisWrite, teamTime, goalHorizon };
 }

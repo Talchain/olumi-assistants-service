@@ -29,7 +29,7 @@ import { readGoalRecord } from '../goal-target/goal-record.js';
 import { goalReadingProjectionOf } from '../goal-target/goal-reading-write.js';
 import { EventRiskV1, type EventRiskV1T } from '../../schemas/event-risk.js';
 import { userStatementOf, type UserStatement } from './user-statements.js';
-import { reconcileUnsizedOlumiRiskMarks, riskHoldsAPlainLevel } from './unsized-risk.js';
+import { riskHoldsAPlainLevel, withUnsizedOlumiRiskMarksReconciled } from './unsized-risk.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -307,8 +307,9 @@ export const riskStatedOccurrenceRecordedWords = (label: string, s: UserStatemen
   + `${effect.charAt(0).toUpperCase()}${effect.slice(1)}.`;
 /**
  * The risk node as the S2 write leaves it: its block, and (for the user's own statement) its durable record beside it. Given the
- * graph it is (or was) written in, also with the participation the SAME write reconciles (`reconcileUnsizedOlumiRiskMarks`, DL-3
- * on #3441): an unsized Olumi risk's "not included" mark ends when this block sizes it. Read-backs pass the graph they read.
+ * graph it is (or was) written in, also as the saved write stores it: the persisted-form preparation ends an unsized Olumi risk's
+ * "not included" mark when this block sizes it (`withUnsizedOlumiRiskMarksReconciled`, DL-3 on #3441). Read-backs pass the graph
+ * they read, so they recognise exactly the stored postimage.
  */
 export function riskOccurrencePostimageNode(approved: ApprovedRiskOccurrence, graph?: unknown): Rec {
   const node = withStatementRecord({ ...approved.expected_node, event_risk: approved.event_risk }, approved);
@@ -317,8 +318,7 @@ export function riskOccurrencePostimageNode(approved: ApprovedRiskOccurrence, gr
   if (at < 0) return node;
   const g = graph as Rec & { nodes: unknown[] };
   const before = { ...g, nodes: g.nodes.map((n, i) => (i === at ? approved.expected_node : n)) };
-  const after = { ...before, nodes: before.nodes.map((n, i) => (i === at ? node : n)) };
-  reconcileUnsizedOlumiRiskMarks(before, after as never);
+  const after = withUnsizedOlumiRiskMarksReconciled(before, { ...before, nodes: before.nodes.map((n, i) => (i === at ? node : n)) });
   return after.nodes[at] as Rec;
 }
 /** The goal the window belongs to, by label (the card and receipt name it). */
@@ -370,8 +370,6 @@ export function applyRiskOccurrenceEdit(persistedGraph: unknown, approved: Appro
   // AIE 6179240850 / 6180193788: the user's complete statement (source, speaker, qualifier, period) is kept beside their block,
   // in the ONE door's store (`user_statements[]`), for reopen, read-back and the AI.
   graph.nodes[at] = withStatementRecord({ ...(graph.nodes[at] as Rec), event_risk: structuredClone(approved.event_risk) }, approved);
-  // ⭐ DL-3 on #3441: the SAME write reconciles the unsized-risk mark this block ends (a sized risk is no longer that rule's).
-  reconcileUnsizedOlumiRiskMarks(persistedGraph, graph as never);
   const risk = graph.nodes[at] as Rec;
   const label = String(risk.label).trim();
   const fact = EditGraphHandlerFactSchema.parse({

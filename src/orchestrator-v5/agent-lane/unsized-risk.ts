@@ -14,12 +14,15 @@
  *    and one of unknown origin keep today's path and still ask (AIE: a missing or unknown stamp never enters this exception);
  *  · nobody has sized: no level by readiness's own rule (`riskHoldsALevel`; with no occurrence block it is `riskHoldsAPlainLevel`);
  *  · is still provisional (no participation choice, or an unsized omission already retained; an adopted `included` risk asks);
- *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it, and a directed path to a goal;
+ *  · is a ROOT on the goal's path, in the graph the Run sends: no cause drawn into it, and a directed path to a goal. Once its
+ *    omission is persisted (`retained_excluded`), a cause drawn into it later does not end it: a cause does not calibrate the risk's
+ *    own effect (PL 19 Oct 05:35Z on #3441), so it stays the rule's while it still has a path to a goal;
  *    ⭐ OR is an UNLINKED CONCERN construction kept out: no link at all, in or out, and the persisted `retained_excluded` mark that
  *    admission writes only on Olumi's own unlinked concern (AIE 19 Oct 04:53Z on #3441: it stays visible outside the calculation,
  *    with this Run's omission item, reason and scope; never wired into the goal at a placeholder). Zero links alone never select a
  *    risk: an unmarked one (a human, adopted or unknown-origin risk, or one whose direction was declined) keeps its question, and a
- *    server-stamped precondition or widening risk has its own line (`graph/inert-risk.ts`);
+ *    server-stamped precondition or widening risk has its own line (`graph/inert-risk.ts`). A cause drawn into it with nothing
+ *    onward is K3's inert branch (`inert-risk.ts`), which keeps it out under its own line;
  *  · is not something the Run needs: no option sets or links to it, and no limit names it (those keep asking, as before).
  * Pure; read on the model as saved by readiness, the Run's and what-if's compute projection, and the host's line.
  */
@@ -50,8 +53,12 @@ const olumiSuggested = (n: Rec): boolean => {
   return author.origin === 'ai' || (author.origin === 'unknown' && nodeIntroductionOf(n).origin === 'olumi_added');
 };
 
-export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
-  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return new Set();
+/**
+ * The rule read once on `graph`: `holds` is every risk meeting its conditions on the node itself (Olumi's, unsized, still
+ * provisional, a unique id, and nothing the Run needs), `selected` those that also meet its topology ({@link unsizedOlumiRiskIds}).
+ */
+function readUnsizedRule(graph: unknown): { readonly holds: ReadonlySet<string>; readonly selected: ReadonlySet<string> } {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return { holds: new Set(), selected: new Set() };
   const nodes = graph.nodes.filter(isRec);
   const counts = new Map<unknown, number>();
   for (const n of nodes) counts.set(n.id, (counts.get(n.id) ?? 0) + 1);
@@ -90,29 +97,43 @@ export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
   const stamped = preconditionRiskIds(nodes as never, graph.edges.filter(isRec) as never, limitNodeIds(graph));
   const unlinkedConcern = (n: Rec): boolean => n.analysis_participation === 'retained_excluded' && !linked.has(n.id) && !stamped.has(n.id as string)
     && n.relies_on === undefined && n.draft_widening === undefined;
-  return new Set(candidates.filter((n) => typeof n.id === 'string' && counts.get(n.id) === 1 && !needed.has(n.id)
-    && ((!edges.some((e) => e.to === n.id) && reachesGoal(n.id)) || unlinkedConcern(n))).map((n) => n.id as string));
+  const holding = candidates.filter((n) => typeof n.id === 'string' && counts.get(n.id) === 1 && !needed.has(n.id));
+  const kept = (n: Rec): boolean => n.analysis_participation === 'retained_excluded';
+  return {
+    holds: new Set(holding.map((n) => n.id as string)),
+    selected: new Set(holding.filter((n) => ((kept(n) || !edges.some((e) => e.to === n.id)) && reachesGoal(n.id)) || unlinkedConcern(n))
+      .map((n) => n.id as string)),
+  };
+}
+
+export function unsizedOlumiRiskIds(graph: unknown): ReadonlySet<string> {
+  return readUnsizedRule(graph).selected;
 }
 
 /**
- * ⭐ THE MARK FOLLOWS THE RULE THAT SET IT (DL-3 ruling + AIE 04:53Z ruling 2 on #3441): a write that changes a risk's links or
- * level re-evaluates every omission {@link unsizedOlumiRiskIds} selected before it, in the SAME saved candidate. A mark the rule no
- * longer supports (the risk is now sized, is drawn from a cause, or an option or a limit needs it) is cleared, so the next Run reads
- * the risk through its own link and sign; one it still supports stays (an Olumi suggestion linked but still unsized is still
- * unresolved). Never cleared merely because an edge appeared, and never set here. Replaces entries of `after.nodes` in place (each
- * caller passes its own clone).
+ * ⭐ THE MARK ENDS WHEN ITS RULE'S CONDITIONS END, IN THE WRITE THAT ENDS THEM (DL-3 + Codex R1 on #3441, PL 19 Oct 05:35Z). Read by
+ * the ONE persisted-form preparation (`projectGraphForPersistence`, given the stored graph the write replaces), so every writer that
+ * reaches the store (a canvas edit, an approved change, a limit, a figure, a registration) reconciles in the same saved candidate.
+ *
+ * A `retained_excluded` mark this rule explained in `storedBase` is removed from `graph` when the risk no longer meets the rule's
+ * conditions on the node itself: it is sized (a level or an occurrence block), an option or a limit now needs it, or it is no
+ * longer Olumi's. The next Run then reads the risk through its own link and sign. A change of links alone never ends it: a cause
+ * drawn in does not calibrate the risk's effect, and a link onward without a size does not size it. A mark another rule set (one
+ * this rule did not explain in `storedBase`), and a stored graph with no base (a first write, a restore), are left exactly as they
+ * are, so no stored history is rewritten. Pure: returns `graph` itself when nothing ends.
  */
-export function reconcileUnsizedOlumiRiskMarks<N extends { id: string; analysis_participation?: unknown }>(
-  before: unknown, after: { nodes: N[]; edges: readonly unknown[]; goal_constraints?: unknown },
-): void {
-  const was = unsizedOlumiRiskIds(before);
-  if (was.size === 0) return;
-  const now = unsizedOlumiRiskIds(after);
-  after.nodes.forEach((n, i) => {
-    if (!was.has(n.id) || now.has(n.id) || n.analysis_participation !== 'retained_excluded') return;
+export function withUnsizedOlumiRiskMarksReconciled<T>(storedBase: unknown, graph: T): T {
+  const was = unsizedOlumiRiskIds(storedBase);
+  if (was.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  const { holds } = readUnsizedRule(graph);
+  const ends = (n: unknown): n is Rec => isRec(n) && was.has(n.id as string) && !holds.has(n.id as string)
+    && n.analysis_participation === 'retained_excluded';
+  if (!graph.nodes.some(ends)) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => {
+    if (!ends(n)) return n;
     const { analysis_participation: _ruleNoLongerHolds, ...rest } = n;
-    after.nodes[i] = rest as N;
-  });
+    return rest;
+  }) } as T;
 }
 
 /** Persist only the omissions selected by the existing scientific/participation rule. */

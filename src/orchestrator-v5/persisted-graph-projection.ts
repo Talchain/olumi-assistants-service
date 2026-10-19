@@ -56,6 +56,7 @@ import { normaliseOptionInterventionContract } from './normalise-option-interven
 import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options.js';
 import { reindexInterventionKeys } from './reindex-intervention-keys.js';
 import { refuseInadmissibleInterventionRanges } from './intervention-range.js';
+import { withUnsizedOlumiRiskMarksReconciled } from './agent-lane/unsized-risk.js';
 import { log } from '../utils/telemetry.js';
 
 export interface PersistedGraphProjectionContext {
@@ -64,6 +65,12 @@ export interface PersistedGraphProjectionContext {
   readonly turnClass?: string;
   /** Originating handler id (e.g. `edit_graph`) — non-sensitive. */
   readonly source?: string;
+  /**
+   * The stored graph this write replaces (the base the writer CAS-checks), never logged. Given, the persisted form ends every
+   * unsized Olumi risk mark this write ends (`withUnsizedOlumiRiskMarksReconciled`). Absent (a first write, a restore, a read-only
+   * fixed-point check), nothing is reconciled, so a stored graph projects to itself.
+   */
+  readonly storedBase?: unknown;
 }
 
 /**
@@ -125,6 +132,9 @@ export function projectGraphForPersistence<T>(
   const admitted = admitInterventionRanges(normalised, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(admitted, ctx);
   const reindexed = reindexInterventionKeys(reconciled);
+  // DL-3 + Codex R1 on #3441: the ONE place every saved write passes ends an unsized Olumi risk's mark in the write that sizes it or
+  // makes an option or a limit need it, against the stored graph it replaces.
+  const participation = ctx.storedBase === undefined ? reindexed : withUnsizedOlumiRiskMarksReconciled(ctx.storedBase, reindexed);
   // PL 6135017311 item 3: every committed revision recompiles each capacity ratio from the saved figures.
-  return withCompiledCapacityRatios(dropNullOptionalGraphFields(reindexed, ctx));
+  return withCompiledCapacityRatios(dropNullOptionalGraphFields(participation, ctx));
 }
