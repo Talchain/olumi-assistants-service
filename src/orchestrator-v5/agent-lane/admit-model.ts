@@ -83,7 +83,7 @@ import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/
 import { figureSource, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks, UNSIZED_OLUMI_RISK_REASON, unsizedOlumiRiskIds } from './unsized-risk.js';
 import { amountsWrittenIn } from './stated-by-user.js';
-import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
+import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, briefSentencesRead, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
 import { goalDefinitionSum } from './goal-definition-sum.js';
@@ -1424,7 +1424,12 @@ const ISL_IDENTITY_RECONCILIATION_TOLERANCE = 0.05;
  *    (|total − Σ parts| ≤ 5% × max(|total|, Σ |parts|)), so a stated sum is never one ISL would refuse the Run over. A
  *    constant is only ever a part with its own level: the candidate has no other place for one.
  * DL L3b ruling: an explicit declaration with located, bound brief evidence retains original user authorship.
- * This trusts the drafter's relation reading: a falsely declared denial can pass (accepted AI-misreading residual).
+ * ⭐ THE RELATION'S SOURCE (Codex #3440 BLOCK; AIE L2-RELATION 18bf4f8c): a quote that merely names the quantities is not support.
+ * The user's sum needs their AFFIRMATIVE statement of it: the located sentence is no question or denial, read whole by the existing
+ * context reader (`briefSentencesRead`), and the ONE source authority (`sourceMapOf`) verifies the user's own `relation` statement
+ * on that very sentence, about the total or a part. A brief sentence naming the total and every part that DENIES it is a
+ * contradictory source: it withholds the sum on every path, Olumi's reading included, so a denied relation is never operative nor
+ * relabelled as Olumi's. The links then stay as drafted (base), and the reason is said once.
  * No declaration means no declared sum. A quote CEE cannot locate or bind is rejected as before. Any failure writes
  * nothing: the links stay as drafted, and the refusal is said once (`nonlinear_identity_rejected`). Pure.
  */
@@ -1435,10 +1440,16 @@ function checkDeclaredSums(
   edges: readonly { from: string; to: string; strength?: { mean: number }; effect_direction?: string; provenance?: AdmittedEdge['provenance'] }[],
   frameOf: (id: string) => number | undefined,
   brief: string | undefined,
+  statements: unknown,
 ): { accepted: AcceptedDeclaredSum[]; loss: RepairEntry[] } {
   const accepted: AcceptedDeclaredSum[] = [];
   const loss: RepairEntry[] = [];
   const declared = allDeclared.filter((d) => d?.operation === 'sum');
+  const read = declared.length === 0 || typeof brief !== 'string' ? [] : briefSentencesRead(brief);
+  const relations = read.length === 0 ? [] : [...sourceMapOf(statements, brief!).verified]
+    .filter(([key]) => key.endsWith('|relation'))
+    .flatMap(([key, said]) => said.filter((st) => st.speaker === 'user' && st.negated !== true)
+      .map((st) => ({ about: key.split('|')[1]!, sentence: locatedBriefSentence(brief, st.quote) })));
   if (declared.length === 0) return { accepted, loss };
   const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
   const unitOf = nodeUnitOf(nodes);
@@ -1481,6 +1492,12 @@ function checkDeclaredSums(
     if (why !== null) { reject(why); continue; }
     const totalLabel = nodeOf.get(totalId)!.label;
     const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
+    // A sentence names the total and every part: each by its quantity words, a part also by its own figure today.
+    const namesEach = (s: string | null): boolean => s !== null && [totalId, ...partIds].every((id) => labelHoldsQuantity(s, labelOf(id))
+      || (id !== totalId && findStatedAmounts(s).some((a) => a.magnitude === Math.abs(todayRaw(id) ?? Number.NaN))));
+    // The brief's denial comes first: whatever else holds, a sum the user's own sentence denies is never taken (AIE L2-RELATION).
+    if (read.some((s) => s.miss === 'denied' && namesEach(s.text))) { reject('your brief says that is not so'); continue; }
+    const quantities = new Set([totalId, ...partIds].map((id) => labelOf(id).trim().replace(/\s+/g, ' ').toLowerCase()));
     const definitional = edges.filter((e) => e.to === totalId && holdsByDefinition(e as Record<string, unknown>, unitOf));
     const plusOne = (id: string): boolean => {
       const links = edges.filter((e) => e.from === id && e.to === totalId);
@@ -1504,18 +1521,19 @@ function checkDeclaredSums(
       reject(`today "${totalLabel}" is ${sayFigure(total, '')} while those parts add up to ${sayFigure(sum, '')}`);
       continue;
     }
-    // Bind the drafter's declaration to its source; relation polarity remains the drafter's responsibility (DL L3b).
     const quoted = d.evidence?.quote;
     if (quoted === undefined || quoted === null) {
       accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: false });
       continue;
     }
     const sentence = locatedBriefSentence(brief, quoted);
-    const figures = sentence === null ? [] : findStatedAmounts(sentence).map((a) => a.magnitude);
-    const names = (id: string): boolean => sentence !== null && (labelHoldsQuantity(sentence, labelOf(id))
-      || (id !== totalId && figures.includes(Math.abs(todayRaw(id)!))));
-    if (sentence === null || ![totalId, ...partIds].every(names)) {
+    if (sentence === null || !namesEach(sentence)) {
       reject('the sentence it was read from is not one Olumi can find in your brief naming each of them');
+      continue;
+    }
+    if (read.find((s) => s.text === sentence)?.miss !== null
+      || !relations.some((r) => r.sentence === sentence && quantities.has(r.about))) {
+      reject('that sentence does not state it in your own words');
       continue;
     }
     accepted.push({ outcome_id: totalId, factor_ids: [...partIds], stated_in_brief: d.provenance === 'explicit', quote: sentence });
@@ -6007,7 +6025,7 @@ function admitOnce(
   // wins over R3-2's minted tally. Said once among what was done with the brief (`declaredSumSentence`).
   const frameOfNode = (id: string): number | undefined => { const m = magnitudeNodeById.get(id); return m === undefined ? undefined : resolveMagnitudeFrame(m); };
   const declaredSums = checkDeclaredSums(Array.isArray(model.identities) ? model.identities : [], resolveEntity, levers.nodes,
-    finalEdges, frameOfNode, brief);
+    finalEdges, frameOfNode, brief, (model as { statements?: unknown }).statements);
   loss.push(...declaredSums.loss);
   // ⭐ STEP 8 ROUTE A (`goal-definition-sum.ts`): the goal's validated definitional parts plus its level today, proposed as ONE
   // Olumi-read sum and checked by the same `checkDeclaredSums`, in its own call so every drafter declaration is judged exactly as
@@ -6018,7 +6036,8 @@ function admitOnce(
     const { part, link, declaration } = definitionSum;
     const compiled = checkDeclaredSums([declaration],
       (label) => (canonicalLabel(label) === canonicalLabel(part.label) ? part.id : resolveEntity(label)),
-      [...levers.nodes, part], [...finalEdges, link], (id) => (id === part.id ? frameOfNode(goalForReach!.id) : frameOfNode(id)), brief);
+      [...levers.nodes, part], [...finalEdges, link], (id) => (id === part.id ? frameOfNode(goalForReach!.id) : frameOfNode(id)), brief,
+      (model as { statements?: unknown }).statements);
     if (compiled.accepted.length === 1) {
       levers.nodes.push(part);
       finalEdges = [...finalEdges, link];

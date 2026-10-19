@@ -545,10 +545,13 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   if (link.definitional === true && stated && per !== 0 && Math.abs(amount / per) === 1
     && sourceUnit !== undefined && sourceUnit !== '' && sourceUnit === targetUnit
     && beta !== null && Math.sign(beta) === sign) {
+    // ⭐ STEP 8 (capacity, Codex SUMLEVELS pair): a definition is said per the part's OWN unit. A part held at 0 with no
+    // frame reads as a 0–1 switch (`isSwitch`), and "per switch" failed the one-unit check that keeps a declared sum.
+    const n = natural(beta, per).natural_effect;
     return {
       outcome: link.user_stated ? 'user_stated' : 'estimate', mean: beta, std: Math.abs(beta) / 2,
       magnitude: link.user_stated ? 'user_stated' : 'olumi_estimate', statement, stated_strength: beta,
-      ...natural(beta, per),
+      ...(n === undefined ? {} : { natural_effect: { ...n, per_source_change_unit: unitOf(source)! } }),
     };
   }
 
