@@ -289,6 +289,14 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthReplacesUserFigureAuthority?: true;
   /**
+   * ⭐ STEP 8 PRODUCER (AIE df3304b7) — the supported uncertainty the approved card records for the user's own size on this link.
+   *
+   * Present only on the strict `edge_strength_edit` path, and only when the approval that sent it carried it in-process for
+   * this exact link (`stated-link-band-context.ts` `statedLinkUncertaintyFor`). The writer then records it with
+   * `std_defaulted: false`, keeping the size and its source (`stated-uncertainty.ts`). Not a proposal parameter.
+   */
+  readonly edgeStrengthStatedUncertaintyAuthority?: import('../../cee/magnitude/stated-uncertainty.js').StatedUncertainty;
+  /**
    * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
    * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
    *

@@ -833,6 +833,57 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "ACCEPTED — the same warrant as its `low` sibling (settled together): in `natural_effect.amount_unit`, sourced by " +
       "`text`, written only on the user's own size by `writtenRangeFor`, and never an analysis input.",
   },
+  // ── ADJUDICATED: a supported uncertainty for the user's own size (19 Oct 2026, STEP 8 producer, AIE df3304b7) ──
+  {
+    id: "scope-ambiguous:cee.EdgeV3::provenance.natural_effect.uncertainty.sd",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — STEP 8 producer (AIE df3304b7): the standard deviation of the user's own size, in `natural_effect.amount_unit` per the same source change (by the one writer's rule): stated, or derived from the stated quantiles by the AIE's equation (`normalQuantilesSd`). Its warrant is the object it sits in: `uncertainty` lives INSIDE " +
+      "`natural_effect` (the user's own size), is written ONLY by the chat strength writer with `std_defaulted: false` after it " +
+      "validated the statement against that size's own conversion frames (`stated-uncertainty.ts`, `adjust-edge-strength.ts`), " +
+      "and is sourced by its `source_quote`, `assessor` and `basis`. It goes whenever a writer drops or replaces `natural_effect`; " +
+      "malformed, it is dropped and the size's chance stays withheld.",
+  },
+  {
+    id: "scope-ambiguous:cee.EdgeV3::provenance.natural_effect.uncertainty.lower",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — STEP 8 producer (AIE df3304b7): the lower stated value, in `natural_effect.amount_unit` per the same source change, signed as the size is. Its warrant is the object it sits in: `uncertainty` lives INSIDE " +
+      "`natural_effect` (the user's own size), is written ONLY by the chat strength writer with `std_defaulted: false` after it " +
+      "validated the statement against that size's own conversion frames (`stated-uncertainty.ts`, `adjust-edge-strength.ts`), " +
+      "and is sourced by its `source_quote`, `assessor` and `basis`. It goes whenever a writer drops or replaces `natural_effect`; " +
+      "malformed, it is dropped and the size's chance stays withheld.",
+  },
+  {
+    id: "scope-ambiguous:cee.EdgeV3::provenance.natural_effect.uncertainty.p_lower",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — STEP 8 producer (AIE df3304b7): the cumulative probability the source gave below `lower`, a unitless fraction in (0, 1). Its warrant is the object it sits in: `uncertainty` lives INSIDE " +
+      "`natural_effect` (the user's own size), is written ONLY by the chat strength writer with `std_defaulted: false` after it " +
+      "validated the statement against that size's own conversion frames (`stated-uncertainty.ts`, `adjust-edge-strength.ts`), " +
+      "and is sourced by its `source_quote`, `assessor` and `basis`. It goes whenever a writer drops or replaces `natural_effect`; " +
+      "malformed, it is dropped and the size's chance stays withheld.",
+  },
+  {
+    id: "scope-ambiguous:cee.EdgeV3::provenance.natural_effect.uncertainty.upper",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — STEP 8 producer (AIE df3304b7): the upper stated value, in `natural_effect.amount_unit` per the same source change, signed as the size is. Its warrant is the object it sits in: `uncertainty` lives INSIDE " +
+      "`natural_effect` (the user's own size), is written ONLY by the chat strength writer with `std_defaulted: false` after it " +
+      "validated the statement against that size's own conversion frames (`stated-uncertainty.ts`, `adjust-edge-strength.ts`), " +
+      "and is sourced by its `source_quote`, `assessor` and `basis`. It goes whenever a writer drops or replaces `natural_effect`; " +
+      "malformed, it is dropped and the size's chance stays withheld.",
+  },
+  {
+    id: "scope-ambiguous:cee.EdgeV3::provenance.natural_effect.uncertainty.p_upper",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — STEP 8 producer (AIE df3304b7): the cumulative probability at `upper` (one minus the share the source gave above it), a unitless fraction in (0, 1). Its warrant is the object it sits in: `uncertainty` lives INSIDE " +
+      "`natural_effect` (the user's own size), is written ONLY by the chat strength writer with `std_defaulted: false` after it " +
+      "validated the statement against that size's own conversion frames (`stated-uncertainty.ts`, `adjust-edge-strength.ts`), " +
+      "and is sourced by its `source_quote`, `assessor` and `basis`. It goes whenever a writer drops or replaces `natural_effect`; " +
+      "malformed, it is dropped and the size's chance stays withheld.",
+  },
   // ── UNWARRANTED, ADJUDICATED: event_risk.v1 (declared 7 Oct 2026, Science 393023 pilot §4; src/schemas/event-risk.ts) ──
   {
     id: "unwarranted:cee.NodeV3::event_risk.occurrence.p_low",

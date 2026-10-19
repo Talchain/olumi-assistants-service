@@ -122,7 +122,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectConversionFrames, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken, identityPartLevelAsk, identityPartsWithoutLevel } from '../../system-events/identity-confirm-edit.js';
@@ -430,6 +430,7 @@ import { approvalSizes, isAcceptedOlumiSize, linkSizing, sizedByApproval, type L
 import { ADJUST_EDGE_STRENGTH_STD_MAX } from '../../../cee/magnitude/olumi-spread.js';
 import { linkWorkingPointOf, linkWorkingPointWords } from '../link-working-point.js';
 import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
+import { centreAgrees, currentUserSize, linkSpreadOf, missingBasisWords, missingIntervalMeaningWords, normalQuantilesSd, sizeQuoteOf, sizeWords, statedUncertaintyAttested, uncertaintyCardWords, uncertaintyReceiptWords, UNSUPPORTED_UNCERTAINTY_WORDS, type StatedUncertainty } from '../../../cee/magnitude/stated-uncertainty.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -5281,6 +5282,119 @@ export function createAgentCapabilities(
       };
   };
 
+  /**
+   * ⭐ STEP 8 PRODUCER (DL-3 19 Oct; AIE df3304b7): a supported uncertainty for a size the user ALREADY gave on one link, on ONE
+   * card ("Save uncertainty"), written by the chat strength writer at the stored strength. The size never moves. Every figure
+   * and phrase is checked against this turn's words; what the AIE does not accept (a bare interval with no tail allocation, no
+   * stated basis, a centre that disagrees with the size, a spread the engine cannot hold) prepares nothing and returns the
+   * AIE's exact question or limitation for the user.
+   */
+  const proposeLinkUncertainty = async (ctx: AgentToolContext, args: Record<string, unknown>): Promise<ToolResult> => {
+    const u = (args.uncertainty !== null && typeof args.uncertainty === 'object' ? args.uncertainty : {}) as Record<string, unknown>;
+    const turn = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
+    const said = (w: unknown): string | undefined => typeof w === 'string' && w.trim() !== '' && quoteSpansIn(turn, w.trim()).length > 0 ? w.trim() : undefined;
+    const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const tell = (refusal: string, words: string): ToolResult => ({ ok: false, mutated: false, refusal,
+      detail: `Nothing was prepared. Tell the user exactly this: "${words}"` });
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+    const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
+    const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+    const from = fromRes.kind === 'one' ? fromRes.node : undefined;
+    const to = toRes.kind === 'one' ? toRes.node : undefined;
+    if (from === undefined || to === undefined) {
+      return { ok: false, mutated: false, refusal: fromRes.kind === 'ambiguous' || toRes.kind === 'ambiguous' ? 'ambiguous_entity' : 'unresolved_entity',
+        detail: 'Nothing was prepared: name both ends of the link exactly as get_canonical_state labels them.' };
+    }
+    const raw = Array.isArray((g.raw as { edges?: unknown }).edges) ? (g.raw as { edges: Record<string, unknown>[] }).edges : [];
+    const edge = raw.find((e) => e?.from === from.id && e?.to === to.id);
+    if (edge === undefined || definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) !== null) {
+      return { ok: false, mutated: false, refusal: 'no_such_link', detail: `Nothing was prepared: the model has no link from "${from.label}" to "${to.label}" whose size can vary.` };
+    }
+    const size = currentUserSize(edge);
+    if (size === undefined) {
+      return { ok: false, mutated: false, refusal: 'no_user_size',
+        detail: 'Nothing was prepared: this link holds no current size the user gave, so there is no size to record an uncertainty for. Ask for the size first.' };
+    }
+    // The same quantity: the values are in the size's own unit (or the target's own), per the same change in the cause.
+    const ends = linkEffectEndUnits(g.raw, from.id, to.id);
+    const own = [size.amount_unit, ...(ends === null ? [] : [...ends.target.own, ...(ends.target.adopted !== undefined ? [ends.target.adopted] : [])])];
+    const fromWords = said(u.from_words);
+    if (fromWords === undefined || typeof u.unit !== 'string' || !statedInOneOf(u.unit, own)) {
+      return { ok: false, mutated: false, refusal: 'not_the_same_quantity',
+        detail: `Nothing was prepared: the values must be the user's own words in this message, in "${size.amount_unit}" per ${size.per_source_change_unit}, the unit of the size they gave. Ask which unit they meant if it is unclear.` };
+    }
+    const written = (v: number | undefined, unit?: string): boolean => v !== undefined && figureTheUserWrote(Math.abs(v), unit, fromWords);
+    const basis = said(u.basis_words);
+    const shapeWords = said(u.shape_words);
+    const assessor = typeof u.source === 'string' && u.source.trim() !== '' ? said(u.source) : 'you';
+    if (assessor === undefined) return { ok: false, mutated: false, refusal: 'source_not_stated', detail: 'Nothing was prepared: name the source exactly as the user wrote it.' };
+    let record: StatedUncertainty;
+    if (u.stated_as === 'standard_deviation') {
+      const sd = num(u.sd);
+      if (sd === undefined || sd <= 0 || !written(sd)) {
+        return { ok: false, mutated: false, refusal: 'figure_not_stated', detail: 'Nothing was prepared: give the standard deviation exactly as the user wrote it in this message.' };
+      }
+      if (basis === undefined) return tell('uncertainty_meaning_missing', missingBasisWords);
+      record = { stated_as: 'standard_deviation', sd, distribution: 'normal', distribution_origin: shapeWords !== undefined ? 'stated' : 'olumi_provisional',
+        assessor, basis, source_quote: fromWords };
+    } else if (u.stated_as === 'normal_quantiles') {
+      const lower = num(u.lower); const upper = num(u.upper);
+      const inside = num(u.probability_inside); const below = num(u.probability_below); const above = num(u.probability_above);
+      const tails = said(u.tails_words);
+      if (!written(lower) || !written(upper) || (inside !== undefined && !written(inside, '%') && !figureTheUserWrote(inside, '%', turn))) {
+        return { ok: false, mutated: false, refusal: 'figure_not_stated', detail: 'Nothing was prepared: give the values and the probability exactly as the user wrote them in this message.' };
+      }
+      // The tail allocation is the user's, in their words; never assumed equal (AIE: no invented equal tails).
+      const tailsStated = below !== undefined && above !== undefined && tails !== undefined
+        && figureTheUserWrote(below, '%', tails) && figureTheUserWrote(above, '%', tails);
+      const pLower = tailsStated ? (below as number) / 100 : undefined;
+      const pUpper = tailsStated ? 1 - (above as number) / 100 : undefined;
+      if (inside !== undefined && tailsStated && Math.abs((pUpper as number) - (pLower as number) - inside / 100) > 1e-9) {
+        return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
+      }
+      if (!tailsStated || basis === undefined) {
+        const words = inside === undefined ? undefined : missingIntervalMeaningWords({ probability: inside / 100, lower: lower as number, upper: upper as number,
+          tailsMissing: !tailsStated, basisMissing: basis === undefined });
+        return words === undefined ? tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS) : tell('uncertainty_meaning_missing', words);
+      }
+      const fit = normalQuantilesSd({ lower: lower as number, p_lower: pLower as number, upper: upper as number, p_upper: pUpper as number });
+      if (fit === undefined) return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
+      if (!centreAgrees(fit.centre, size.amount)) {
+        const fmt = (n: number): string => String(Number(n.toPrecision(6)));
+        return tell('centre_conflict', `I’ve kept your size and its source. Your range from ${fmt(lower as number)} to ${fmt(upper as number)} ${u.unit} is centred on ${fmt(fit.centre)}, but the size you gave is ${fmt(size.amount)} ${size.amount_unit}. Which should the calculation use?`);
+      }
+      record = { stated_as: 'normal_quantiles', sd: fit.sd, lower: lower as number, p_lower: pLower as number, upper: upper as number, p_upper: pUpper as number,
+        distribution: 'normal', distribution_origin: shapeWords !== undefined ? 'stated' : 'olumi_provisional', assessor, basis, source_quote: fromWords };
+    } else {
+      return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
+    }
+    // Dry run: the spread the writer will store, through the size's own conversion frames, inside what the engine holds.
+    if (linkSpreadOf(record.sd, size, linkEffectConversionFrames(g.raw, from.id, to.id)) === undefined) {
+      return tell('uncertainty_not_representable', UNSUPPORTED_UNCERTAINTY_WORDS);
+    }
+    const mean = (edge.strength as { mean: number }).mean;
+    const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
+      ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
+    const effect = `‘${from.label}’ → ‘${to.label}’`;
+    const proposal = createProposal({
+      scenario_id: ctx.scenario_id,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: g.graph_hash,
+      operations: [{ op: 'update_edge', path: `${from.id}::${to.id}`,
+        value: { magnitude: Math.abs(mean), intent: 'set', direction_intent: 'preserve', expected: { mean, effect_direction: current }, uncertainty: record } }],
+      provenance: { authored_by: assessor === 'you' ? 'user_stated' : 'model_proposed', basis: String(args.rationale ?? '') },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: uncertaintyCardWords(effect, sizeWords(size, sizeQuoteOf(edge)), record, size.amount_unit, size.amount),
+    });
+    proposals.put(proposal);
+    return {
+      ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+      note: `Nothing has changed yet. Show the user this card exactly: "${proposal.public_label}" — never the id, never a number it does not show. `
+        + 'Its size stays as it is. Call authorise_change with this proposal_id once they press Save uncertainty.',
+    };
+  };
+
   const caps: AgentCapabilities = {
     async getCanonicalState(ctx: AgentToolContext, options?: { section: 'run_explanation' }): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id, options?.section);
@@ -5374,6 +5488,7 @@ export function createAgentCapabilities(
      */
     async proposeLinkStrength(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      if (args?.uncertainty !== undefined) return proposeLinkUncertainty(ctx, args as unknown as Record<string, unknown>);
       if (!isInfluenceBand(args?.strength)) {
         return { ok: false, mutated: false, refusal: 'unreadable_strength',
           detail: 'The strength must be one of the tool\u2019s values: weak (the canvas\u2019s Slight), moderate, strong, very strong. Nothing was prepared; '
@@ -8702,7 +8817,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'update_edge') {
         const op = ops[0]!;
         const [fromId, toId] = op.path.split('::') as [string, string];
-        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown; replaces_user_figure?: { quote?: unknown } };
+        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown; replaces_user_figure?: { quote?: unknown }; uncertainty?: StatedUncertainty };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         const send = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
@@ -8715,10 +8830,14 @@ export function createAgentCapabilities(
         // ⭐ F1: the user's explicit replace rides the same verified, in-process context — only on a user-authored proposal
         // that stored it. One prepared before F1 carries none, and the writer refuses to drop the figure.
         const replacedQuote = statedBand !== undefined && typeof v.replaces_user_figure?.quote === 'string' ? v.replaces_user_figure.quote : undefined;
-        const res = statedBand !== undefined
+        // ⭐ STEP 8 PRODUCER: the approved card's uncertainty rides the same verified, in-process context (never the wire).
+        const statedUncertainty = v.uncertainty !== null && typeof v.uncertainty === 'object' ? v.uncertainty : undefined;
+        const res = statedBand !== undefined || statedUncertainty !== undefined
           ? await runWithStatedLinkBand(
-            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId, band: statedBand,
-              ...(replacedQuote !== undefined ? { replacesUserFigure: true as const } : {}) },
+            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId,
+              ...(statedBand !== undefined ? { band: statedBand } : {}),
+              ...(replacedQuote !== undefined ? { replacesUserFigure: true as const } : {}),
+              ...(statedUncertainty !== undefined ? { uncertainty: statedUncertainty } : {}) },
             send,
           )
           : await send();
@@ -8738,7 +8857,11 @@ export function createAgentCapabilities(
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
           const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : linkSizing(x) === 'user';
-          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
+          // ⭐ STEP 8 PRODUCER: an uncertainty save is applied only when the link reads back with exactly the approved record, its
+          // attestation and the spread it maps to (`statedUncertaintyAttested`).
+          const uncertaintyHeld = statedUncertainty === undefined || (statedUncertaintyAttested(x)
+            && isDeepStrictEqual((p as { natural_effect?: { uncertainty?: unknown } } | undefined)?.natural_effect?.uncertainty, statedUncertainty));
+          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded && uncertaintyHeld
             // B1: a same-band confirm reviews the unchanged mean; it may still be an unsized placeholder.
             && (v.intent === 'confirm_current' || !approvalSizes(x));
         };
@@ -8788,7 +8911,11 @@ export function createAgentCapabilities(
         const sizing = storedEdge === undefined ? undefined : linkSizing(storedEdge);
         const fromLabel = after.nodes.find((n) => n.id === fromId)?.label;
         const toLabel = after.nodes.find((n) => n.id === toId)?.label;
-        const followUp = sizing === 'user' && replacedQuote !== undefined && statedBand !== undefined
+        const savedSize = statedUncertainty !== undefined && storedEdge !== undefined ? currentUserSize(storedEdge) : undefined;
+        const followUp = statedUncertainty !== undefined && savedSize !== undefined && typeof fromLabel === 'string' && typeof toLabel === 'string'
+          // ⭐ STEP 8 PRODUCER (AIE `receipt_after_confirmed_exact_readback`): said only now, after the exact readback above.
+          ? uncertaintyReceiptWords(`‘${fromLabel}’ → ‘${toLabel}’`, sizeWords(savedSize, sizeQuoteOf(storedEdge)), statedUncertainty, savedSize.amount)
+          : sizing === 'user' && replacedQuote !== undefined && statedBand !== undefined
           // ⭐ F1 (d5 6006667946): the receipt names exactly what was replaced, and with what.
           ? userFigureReplacedReceipt({ quote: replacedQuote }, linkBandWord(statedBand))
           : sizing === 'user'

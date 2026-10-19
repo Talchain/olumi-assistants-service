@@ -839,6 +839,23 @@ export const EdgeProvenanceV3 = z.object({
      * user's point inside it ("about 150, between 80 and 250"; d5 6009282279). Malformed: dropped.
      */
     stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high", "centre"]) }).optional().catch(undefined),
+    /**
+     * STEP 8 producer (AIE df3304b7): a supported uncertainty for THIS size, written only by the chat strength writer with its
+     * `std_defaulted: false` (`stated-uncertainty.ts`). CEE-owned. Malformed: dropped, and the size's chance stays withheld.
+     */
+    uncertainty: z.object({
+      stated_as: z.enum(["standard_deviation", "normal_quantiles"]),
+      sd: z.number().finite().positive(),
+      lower: z.number().finite().optional(),
+      p_lower: z.number().finite().gt(0).lt(1).optional(),
+      upper: z.number().finite().optional(),
+      p_upper: z.number().finite().gt(0).lt(1).optional(),
+      distribution: z.literal("normal"),
+      distribution_origin: z.enum(["stated", "olumi_provisional"]),
+      assessor: z.string().min(1),
+      basis: z.string().min(1),
+      source_quote: z.string().min(1),
+    }).optional().catch(undefined),
   }).optional().catch(undefined),
   /**
    * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL

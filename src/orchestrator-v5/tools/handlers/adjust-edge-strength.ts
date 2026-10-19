@@ -36,6 +36,8 @@ import { parseEdgeAddress } from '../../compose/edge-address.js';
 import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
 import { edgeStrengthWords } from '../../format/edge-strength-words.js';
 import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
+import { currentUserSize, linkSpreadOf, sizeQuoteOf, sizeWords, statedUncertaintyOf, uncertaintyReceiptWords, UNSUPPORTED_UNCERTAINTY_WORDS } from '../../../cee/magnitude/stated-uncertainty.js';
+import { linkEffectConversionFrames } from '../../system-events/link-effect-edit.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -455,8 +457,33 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           },
         );
       }
-      const keepsStrength = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction && newStd === undefined;
-      const finalStd = keepsStrength
+      // ⭐ STEP 8 PRODUCER (AIE df3304b7 `writer_reader_contract`): a REAL uncertainty edit, neither a review nor a replace. It
+      // keeps the user's size, its unit, source change, source and quote, and records the supported uncertainty the approved card
+      // carried (`edgeStrengthStatedUncertaintyAuthority`) with the spread it maps to through the size's own conversion frames.
+      // Anything it cannot hold exactly (a moved strength, no current size, a clamped or unbound size, a spread outside what the
+      // engine and the writer hold) is refused with the AIE's words, and nothing is written: never clamped, floored or defaulted.
+      const uncertaintyAuthority = invocation.edgeStrengthStatedUncertaintyAuthority;
+      const userSize = uncertaintyAuthority === undefined ? undefined : currentUserSize(rawTargetEdge ?? targetEdge);
+      const uncertainty = userSize === undefined ? undefined : statedUncertaintyOf(uncertaintyAuthority, userSize.amount);
+      const uncertaintyStd = uncertainty === undefined || userSize === undefined ? undefined
+        : linkSpreadOf(uncertainty.sd, userSize, linkEffectConversionFrames(rawGraph, parsed.from, parsed.to));
+      if (uncertaintyAuthority !== undefined && (uncertaintyStd === undefined || drawn !== undefined || replacesHeldFigure
+        || bandAuthority !== undefined || newStd !== undefined || invocation.edgeStrengthAdoptedEstimateAuthority !== undefined
+        || newMean !== beforeMean || newDirection !== targetEdge.effect_direction)) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          `adjust_edge_strength: ${parsed.from}→${parsed.to} — the stated uncertainty cannot be recorded on this size.`,
+          {
+            details: { handler_id: 'adjust_edge_strength', reason: 'uncertainty_not_representable', from: parsed.from, to: parsed.to },
+            userGuidance: UNSUPPORTED_UNCERTAINTY_WORDS,
+          },
+        );
+      }
+      const keepsStrength = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction && newStd === undefined
+        && uncertaintyStd === undefined;
+      const finalStd = uncertaintyStd !== undefined
+        ? uncertaintyStd
+        : keepsStrength
         ? targetEdge.strength.std
         : statedStd ??
           olumiSpreadForMean({
@@ -472,14 +499,15 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         effect_direction: newDirection,
       };
       // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
-      const reviewOnly = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction;
+      const reviewOnly = drawn === undefined && !replacesHeldFigure && uncertaintyStd === undefined && newMean === beforeMean
+        && newDirection === targetEdge.effect_direction;
       // Batch A ruling 2: placeholder confirmation succeeds as review and preserves its sizing.
       // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's
       // own figure would drop that figure (below: the magnitude contract strips `natural_effect` + `magnitude`). Refused
       // for every caller, nothing written, the figure quoted — unless the approval carried the user's explicit replace
       // (`edgeStrengthReplacesUserFigureAuthority`). The canvas adapter and the Agent's proposal doors refuse first, in
       // these words (`user-figure-held.ts`). Read off the RAW edge, which keeps the passthrough `source_quote`.
-      const heldFigure = reviewOnly ? null : heldNow;
+      const heldFigure = reviewOnly || uncertaintyStd !== undefined ? null : heldNow;
       // These words describe the explicit proposed result, not the stored before-edge's prior.
       const resultBandWord = edgeStrengthWords({ ...afterSnapshot, sizing: 'user' });
       if (heldFigure !== null && !replacesHeldFigure) {
@@ -508,6 +536,20 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         if (!keepsStrength) edge.strength = { mean: newMean, std: finalStd };
         edge.effect_direction = newDirection;
 
+        // ⭐ STEP 8 PRODUCER: the uncertainty edit. Every provenance byte stays (the size, its source and quote, who sized it); the
+        // record joins the size it belongs to, so it goes whenever a writer drops or replaces `natural_effect`; and the writer's
+        // attestation is written with it, only here.
+        if (uncertainty !== undefined && uncertaintyStd !== undefined) {
+          const provenance = (edge.provenance ?? {}) as Record<string, unknown>;
+          const naturalEffect = provenance.natural_effect as Record<string, unknown>;
+          edge.provenance = { ...provenance, natural_effect: { ...naturalEffect, uncertainty: { ...uncertainty } } } as typeof edge.provenance;
+          edge.std_defaulted = false;
+          return {
+            before: beforeSnapshot as Record<string, unknown>,
+            after: afterSnapshot as Record<string, unknown>,
+          };
+        }
+
         // ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the DL; storage by the
         // Canonical lead, accepted in the #2235 verdict). A write whose result keeps the current strength — the canvas
         // `confirm_current`, an in-band pick, or a `set` to the value already stored — changed nothing the user
@@ -518,6 +560,16 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // user named one; the strength itself is kept byte-equal (#2473 CR, above). An edge with no provenance
         // has no source to keep, and none may be invented, so nothing is recorded on it.
         if (reviewOnly) {
+          // ⭐ STEP 8: a review that stores an explicit spread (no attestation reaches this writer for one) ends any attested
+          // spread: the flag and the uncertainty record go with the spread they described, so no reader keeps calling it supported.
+          if (!keepsStrength && edge.std_defaulted === false) {
+            delete edge.std_defaulted;
+            const ne = (edge.provenance as { natural_effect?: Record<string, unknown> } | undefined)?.natural_effect;
+            if (ne !== undefined && 'uncertainty' in ne) {
+              const { uncertainty: _endedUncertainty, ...keptSize } = ne;
+              edge.provenance = { ...edge.provenance, natural_effect: keptSize } as typeof edge.provenance;
+            }
+          }
           if (edge.provenance !== undefined) {
             // Batch A ruling 2: confirmation records review only, including unsized placeholders.
             edge.provenance = {
@@ -650,7 +702,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // ⭐ F1: an explicit replace says exactly what it replaced (d5 6006667946), never only the band move.
       const savedEdge = (result.mutatedGraph as { edges?: Array<{ from?: unknown; to?: unknown }> }).edges
         ?.find((e) => e.from === parsed.from && e.to === parsed.to);
-      const assistantText = replacesHeldFigure && heldFigure !== null
+      const assistantText = uncertainty !== undefined && userSize !== undefined
+        ? uncertaintyReceiptWords(`‘${fromLabel}’ → ‘${toLabel}’`, sizeWords(userSize, sizeQuoteOf(rawTargetEdge ?? targetEdge)), uncertainty, userSize.amount)
+        : replacesHeldFigure && heldFigure !== null
         ? userFigureReplacedReceipt(heldFigure, resultBandWord)
         : noop && reviewOnly && linkSizing(savedEdge) === 'olumi_accepted'
         ? `Confirmed Olumi's estimate for the link between ${fromLabel} and ${toLabel} without a numerical change.`
