@@ -6,7 +6,8 @@
  * figure list, the verifier and its speaker check. SYNTHETIC wording, as the probes were.
  */
 import { describe, expect, it } from 'vitest';
-import { amountsWrittenIn, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteSpan, timesTheUserWrote } from '../stated-by-user.js';
+import { amountsWrittenIn, ceilingTheUserWroteFor, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteSpan, linkEffectTheUserStated, quoteOfFigure,
+  timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { figureIsThisQuantitys } from '../quantity-identity.js';
 import { figuresWritten, userStated } from '../user-statements.js';
 
@@ -142,6 +143,8 @@ describe('the tolerance class: neither the value nor its tolerance is a standalo
   const VALUES: [string, number][] = [['twenty', 20], ['20', 20], ['a hundred and twenty', 120], ['120', 120]];
   const TOLERANCES: [string, number][] = [['five', 5], ['5', 5]];
   const SHAPES = [(v: string, t: string) => `${v} give or take ${t}`, (v: string, t: string) => `${v}, give or take ${t}`,
+    (v: string, t: string) => `${v} (give or take ${t})`,
+    (v: string, t: string) => `${v} give or take about ${t}`, (v: string, t: string) => `${v} or so ${t}`,
     (v: string, t: string) => `${v} plus or minus ${t}`, (v: string, t: string) => `${v} ± ${t}`, (v: string, t: string) => `${v} +/- ${t}`,
     (v: string, t: string) => `within ${t} of ${v}`];
   const UNITS: [string, string][] = [['hours', 'hours'], ['hours per week', 'hours'], ['engineers', 'engineers'], ['people', 'engineers']];
@@ -164,6 +167,11 @@ describe('the tolerance class: neither the value nor its tolerance is a standalo
     ['a length with no count before it', 'Night shifts are 5-hour shifts.', 5, 'hours'],
     ['a range in digits keeps its own grammar', 'Night shifts take between 20 and 30 hours.', 30, 'hours'],
     ['the first amount names a unit word', 'Hire two engineers or maybe five analysts.', 2, 'engineers'],
+    ['two statements joined by "and" (the capacity brief)', 'Hire a specialist to take support capacity to 3 specialists and resolve 100 tickets per week.', 100, 'tickets per week'],
+    ['the first of them', 'Hire a specialist to take support capacity to 3 specialists and resolve 100 tickets per week.', 3, 'specialists'],
+    ['two options joined by "or"', 'Hire 2 seniors or recruit 4 juniors.', 4, 'juniors'],
+    ['a lead hedge on the next figure is no tolerance', 'In 2024, around 400 customers renewed.', 400, 'customers'],
+    ['a line break separates two statements', 'Night shift load is 20\n5 hours of overtime are normal.', 5, 'hours'],
   ])('CONTROL %s: "%s" credits %d', (_case, quote, value, unit) => {
     expect(credits(quote, value, unit)).toContain('one check');
   });
@@ -207,4 +215,40 @@ describe("C5's range property: two true ends or nothing, never one end alone", (
       expect(both(points), JSON.stringify(points)).toBe(true);
       expect(both([2000, 3000].filter((v) => figureTheUserWrote(v, 'users', text))), 'one check').toBe(true);
     });
+});
+
+/**
+ * ⛔ EVERY CREDIT READER OF THE ONE MODULE READS THE SAME ELIGIBILITY (Codex #3438 R7: the add-factor quote read a raw match).
+ * The quoted sentence, a brief's baseline, a ceiling and a link's stated size credit only a standalone, complete amount; the
+ * same text with the figure written alone is credited. (The add-factor door's real path is agent-add-factor-door-seam.)
+ */
+describe('every credit reader: the quote, the baseline, the ceiling and the link size', () => {
+  it('the quote for a figure to confirm: never a tolerance, an operand or a range end; the figure alone is quoted', () => {
+    for (const [text, value, unit] of [['Night shift load is 20 ± 5 hours.', 5, 'hours'], ['Night shift load is a hundred and twenty give or take five hours.', 120, 'hours'],
+      ['Night shift load is two to three users.', 3, 'users']] as const) expect(quoteOfFigure(value, unit, text), text).toBeNull();
+    expect(quoteOfFigure(5, 'hours', 'Night shift load is 5 hours.')).toBe('Night shift load is 5 hours.');
+  });
+  const stamped = (brief: string, raw: number) => withdrawUnstatedBaselineStamps([{ kind: 'factor', label: 'Night shift engineers',
+    observed_state: { source: 'brief_extraction', raw_value: raw, value: raw, unit: 'engineers' } }], brief)[0]!.observed_state as { source: string };
+  it.each([
+    ['digits', 'We run 20 ± 5 night shift engineers.', 5],
+    ['words', 'We run twenty give or take five night shift engineers.', 5],
+  ])('a brief\'s baseline in %s: a tolerance is Olumi\'s, never the user\'s', (_form, brief, raw) => {
+    expect(stamped(brief, raw).source).toBe('cee_inference');
+  });
+  it('CONTROL a baseline written alone stays the user\'s', () => {
+    expect(stamped('We run 5 night shift engineers.', 5).source).toBe('brief_extraction');
+  });
+  it('a ceiling: an operand of a joined expression is no ceiling; the figure alone is', () => {
+    expect(ceilingTheUserWroteFor(20, 'hours', 'Keep night shift load to at most 20 plus or minus 5 hours.')).toBe(false);
+    expect(ceilingTheUserWroteFor(20, 'hours', 'Keep night shift load to at most 20 hours.')).toBe(true);
+  });
+  it('a link\'s stated size: a tolerance is never the size; the size alone is', () => {
+    const scope = { quantities: ['Additional specialists', 'Resolved tickets'], link_selected: false, target_units: ['tickets per week'],
+      target_unitless: false, source_unitless: false } as never;
+    const ends = { source: 'Additional specialists', target: 'Resolved tickets' };
+    const size = (amount: number) => ({ amount, amount_unit: 'tickets per week', per_source_change: 1, per_source_change_unit: 'specialists' });
+    expect(linkEffectTheUserStated('Each additional specialist resolves 20 ± 5 tickets per week.', size(5), ends, scope)).not.toBeNull();
+    expect(linkEffectTheUserStated('Each additional specialist resolves 20 tickets per week.', size(20), ends, scope)).toBeNull();
+  });
 });

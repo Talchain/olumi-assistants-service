@@ -183,7 +183,7 @@ const CQE_APPROX_HEDGES = 'roughly|about|approximately|around|nearly|circa';
  *     measurement that opened this lane.
  *   · "Set it to about 0.12."                   — this file's own pinned set.
  */
-const HEDGE_WORD =
+export const HEDGE_WORD =
   `${CQE_APPROX_HEDGES}`
   // ⭐ `approx` / `approx.` — MEASURED DEAD at `de58cff3`, and it is the
   // ABBREVIATION of `approximately`, which CQE already owns. Admitting the long
@@ -195,8 +195,8 @@ const HEDGE_WORD =
   + `|i'?d say|i would say|i think|i reckon|i guess|i'?d go with`
   + `|let'?s say|lets say|say|call it`;
 
-/** Hedges that FOLLOW the figure — "0.6ish", "0.6 (ish)", "0.6, say". */
-const HEDGE_TAIL_WORD =
+/** Hedges that FOLLOW the figure — "0.6ish", "0.6 (ish)", "0.6, say". Also read by the one eligibility (stated-by-user.ts). */
+export const HEDGE_TAIL_WORD =
   `${CQE_APPROX_HEDGES}`
   + `|ish|or so|or thereabouts|give or take`
   + `|say|maybe|perhaps|i think|i guess|i reckon`
