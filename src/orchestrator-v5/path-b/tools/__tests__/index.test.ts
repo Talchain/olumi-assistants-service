@@ -17,11 +17,13 @@ import { read } from './fixtures.js';
 
 const PROPOSAL = `prop_${'a'.repeat(32)}`;
 const ctx = { scenario_id: 'scn_1', authenticated_user_id: 'user-a', turn_id: 'turn-1', verified_user_messages: [], user_turn_text: '' };
-function setup(mode: 'core' | 'preview' = 'core') {
+function setup(mode: 'core' | 'preview' = 'core', analyseAfterCommit?: () => Promise<{ run?: Record<string, unknown>; ready?: unknown }>) {
   const dispatch = vi.fn(async () => ({ status: 200, json: read() }));
+  const runAnalysis = vi.fn(async () => ({ ok: true, mutated: false, ran: true }));
   const calls: Parameters<OnToolCall>[] = [];
-  const tools = pathBTools({ dispatch, proposals: new ProposalStore() }, ctx, mode, (row, result) => { calls.push([row, result]); });
-  return { dispatch, calls, tools };
+  const tools = pathBTools({ dispatch, proposals: new ProposalStore(), runAnalysis, ...(analyseAfterCommit === undefined ? {} : { analyseAfterCommit }) },
+    ctx, mode, (row, result) => { calls.push([row, result]); });
+  return { dispatch, runAnalysis, calls, tools };
 }
 const named = (tools: Tool[], name: string): FunctionTool => tools.find((t) => t.name === name) as FunctionTool;
 
@@ -55,12 +57,30 @@ describe('the adapters as SDK function tools', () => {
   });
 
   it('after an applied approval, a Run in the same turn is refused; the approved proposal\'s id is on its result', async () => {
-    const { tools, calls, dispatch } = setup();
+    const { tools, calls, dispatch, runAnalysis } = setup();
     await named(tools, 'apply_change').invoke(new RunContext(), JSON.stringify({ proposal_id: PROPOSAL }));
     expect(calls[0]?.[1]).toEqual({ ok: true, mutated: true, proposal_id: PROPOSAL, outcome: 'ok' });
     const run = await named(tools, 'run_analysis').invoke(new RunContext(), JSON.stringify({ reason: 'Run it.', effects_timing: null }));
     expect(JSON.parse(String(run))).toEqual({ status: 'refused', reason: 'run_not_requested' });
     expect(dispatch).not.toHaveBeenCalled();
+    expect(runAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('⭐ gap 4: a committed change carries the automatic Run\'s outcome in its own result, asked for once', async () => {
+    const auto = vi.fn(async () => ({ run: { ok: true, mutated: false, ran: true, result: { headline: 'synthetic' },
+      run_identity: { graph_hash_at_run: 'h_one', computed_at: '2026-10-19T10:00:00.000Z' } } }));
+    const { tools, calls } = setup('core', auto);
+    const out = JSON.parse(String(await named(tools, 'apply_change').invoke(new RunContext(), JSON.stringify({ proposal_id: PROPOSAL }))));
+    expect(auto).toHaveBeenCalledTimes(1);
+    expect(out).toMatchObject({ status: 'ok', mutated: true, data: { saved: true,
+      analysis: { status: 'ok', ran: true, data: { run_id: 'run_1', result: { headline: 'synthetic' } } } } });
+    expect(calls[0]?.[0]).toMatchObject({ name: 'apply_change', mutated: true });
+  });
+
+  it('⭐ gap 4: a saved model whose readiness admits no Run says so in the same result, with its readiness', async () => {
+    const { tools } = setup('core', vi.fn(async () => ({ ready: { status: 'blocked' } })));
+    const out = JSON.parse(String(await named(tools, 'apply_change').invoke(new RunContext(), JSON.stringify({ proposal_id: PROPOSAL }))));
+    expect(out.data.analysis).toEqual({ status: 'refused', reason: 'run_not_ready', data: { analysis_ready: { status: 'blocked' } } });
   });
 });
 

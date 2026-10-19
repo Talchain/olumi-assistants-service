@@ -937,7 +937,12 @@ export const CORE_REPLY_INSTRUCTION = 'In this mode Olumi adds nothing to your r
   + 'Give at most one next step, chosen from the current readiness facts, and never ask for something the user has already said. '
   + 'Keep every must_say disclosure and the licences in run_facts: never call a win share a chance, and never call an option best, a winner or recommended. '
   + 'When a calculation rests on Olumi\u2019s own untested assumptions, say \u201cIllustrative calculation \u2014 uses untested Olumi assumptions.\u201d and name the assumptions that matter most. '
-  + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author.';
+  + 'Keep each item\u2019s recorded source: the user\u2019s words stay the user\u2019s, another person\u2019s stay theirs, an unknown source stays unknown, and Olumi\u2019s readings stay Olumi\u2019s; approving a reading adopts it but does not make the user its author. '
+  + 'When a tool result carries a Run of the saved model (run_analysis, or the analysis apply_change returns after a saved change), give that Run\u2019s results first, then coach on that same Run: '
+  + 'what its result implies for the user\u2019s goal in the current model, what it rests on most, what is still uncertain or missing, and one thing worth checking or testing next, using only the supplied analysis; '
+  + 'where run_comparison is given, follow its note. A Run that did not complete leaves a saved change saved: say both.';
+/** A `core` Run press permits calculation and reading only: every tool but the reader and the Run (`withheldToolsOf`). */
+export const CORE_RUN_PRESS_WITHHELD: readonly string[] = ['build_model_from_brief', 'propose_change', 'apply_change'];
 /** The instructions for one call in this lane mode: unchanged outside `core`. */
 export function instructionsForMode(mode: AgentLaneMode, instructions: string): string {
   return mode === 'core' ? `${instructions}\n\n${CORE_REPLY_INSTRUCTION}` : instructions;
@@ -3426,6 +3431,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
       },
     };
+    /**
+     * ⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456: "run analysis and science-based AI coaching after every
+     * implemented change"; supersedes the explicit-Run-only rule for this flow). A change this turn COMMITTED runs the
+     * EXISTING Run path once, on the saved revision, when that revision's readiness admits a Run. ONE per request: on `core`
+     * the committing tool asks for it (its outcome rides that tool's result, so the AI that writes the reply has it: PATH-B
+     * gap 4), and the turn's end below gets the same answer, never a second Run.
+     */
+    let committedAnalysis: Promise<{ readonly run?: Awaited<ReturnType<typeof capabilities.runAnalysis>>; readonly ready?: unknown }> | undefined;
+    let analysisToCore = false;
+    const analyseCommittedChange = () => committedAnalysis ??= (async () => {
+      const savedRead = await readBackState(readingDispatch, scenarioId);
+      if (!admitsRunOffer(savedRead.analysisReady)) return { ready: savedRead.analysisReady };
+      // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
+      const turnStart = (await readCache.turnStartRead())?.json as { graph?: unknown; analysis_result?: unknown } | undefined;
+      return { run: await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.',
+        effects_timing: carriedEffectsTiming(turnStart, savedRead.graph) }, { afterCommittedChange: true }) };
+    })();
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow, toolCtx.user_text_complete);
     // Publishing typed words to in-memory session history is not a durable save, but "Nothing was saved" can't cover it.
     if (typedNow !== null) recordUnsavableEffect();
@@ -4257,7 +4279,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const loopStartedAt = Date.now();
     let runPressProviderMs = 0;
     let runPressProviderCalls = 0;
-    if (result === undefined && mode !== 'preview' && recoveredRun !== undefined && runPress) {
+    if (result === undefined && mode === 'full' && recoveredRun !== undefined && runPress) {
       // The operation already ran. Reuse its proven capability result directly; only its existing interpreter calls AI.
       const started = Date.now();
       const recorded = await loopCapabilities.runAnalysis(toolCtx, { reason: message, effects_timing: null });
@@ -4379,24 +4401,30 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
-      } else if (mode === 'core' && (corePress !== undefined || coreOwns || (!runPress && methodTurn === null && widenRun === undefined
+      } else if (mode === 'core' && (corePress !== undefined || coreOwns || runPress || (methodTurn === null && widenRun === undefined
         && risksRun === undefined && (body['chip'] === undefined || body['chip'] === null)))) {
         // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
-        // memory and its trace, with Olumi's capabilities as the tools. Presses and method turns keep their existing paths.
+        // memory and its trace, with Olumi's capabilities as the tools. So does the Run press (the canvas's Run after an edit
+        // or Undo): its first call spends the press's ONE Run on `run_analysis` and the same run narrates it (gap 4). Other
+        // presses and method turns keep their existing paths.
         // The SDK turn's tools are the typed adapters, on the SAME verified typed-words carrier and the same primitives the
         // capabilities above run on (dispatch, proposals, the drafter call, the fenced levels door and both observers).
         const coreCtx = { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
           ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) };
         const core = await runCoreTurn({
           ctx: coreCtx, message, budget, userId,
-          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured, onAnalysis: onCapAnalysis,
-            commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw) }, coreCtx, mode,
+          tools: (onCall) => pathBTools({ dispatch: capDispatch, proposals, callStructured: capCallStructured,
+            commitOptionLevels: commitOptionLevelsDoor, onModelRegistered: (raw) => emitGraphReady(raw),
+            runAnalysis: (args) => loopCapabilities.runAnalysis(toolCtx, args),
+            analyseAfterCommit: () => { analysisToCore = true; return analyseCommittedChange(); } }, coreCtx, mode,
             (row, result) => onCall(row, { ...result })),
           instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
           briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
             .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
           canonicalState: canonicalContext?.packet?.state,
-          withheldTools: withheldToolsOf(body),
+          // A Run press permits calculation and reading only (`withheldToolsOf`), on this lane's own tool names.
+          withheldTools: runPress ? CORE_RUN_PRESS_WITHHELD : withheldToolsOf(body),
+          ...(runPress ? { firstTool: 'run_analysis' } : {}),
           ...(corePress !== undefined ? { press: corePress } : {}),
           ...(canonicalContext?.packet?.graph_revision !== undefined ? { traceMeta: { revision: canonicalContext.packet.graph_revision } } : {}),
           // A run paused for the person's approval is saved on the scenario, so the press (any later request) resumes it.
@@ -4537,13 +4565,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     /**
-     * ⭐ ANALYSE AFTER EVERY COMMITTED CHANGE (Paul, #94 6166259456: "run analysis and science-based AI coaching after every
-     * implemented change"; supersedes the explicit-Run-only rule for this flow). A change this turn COMMITTED (a tool result
-     * `ok && mutated`: an approval, an edit) runs the EXISTING Run path once, on the saved revision, when that revision's
-     * readiness admits a Run. Its blocks and coaching ride this same response through `lastRun`, bound to the final read
-     * below like any Run. Never on a draft or a held proposal (nothing committed), a refusal, or a failed or unconfirmed
-     * save (`ok` false); never twice (a Run press, the Agent's own Run or the first analysis already ran). The construction
-     * keeps its own first analysis. A Run that fails says so (`interpretationUnavailableText`) and borrows no older result:
+     * ⭐ THE AUTOMATIC RUN AFTER A COMMITTED CHANGE (`analyseCommittedChange`, above). A change this turn COMMITTED (a tool
+     * result `ok && mutated`: an approval, an edit) gets it here unless the committing tool already asked for it (`core`).
+     * Its blocks and coaching ride this same response through `lastRun`, bound to the final read below like any Run. Never
+     * on a draft or a held proposal (nothing committed), a refusal, or a failed or unconfirmed save (`ok` false); never
+     * twice (a Run press, the Agent's own Run or the first analysis already ran). The construction keeps its own first
+     * analysis. A Run that fails says so (`interpretationUnavailableText`; on `core` the AI, from its tool's outcome) and borrows no older result:
      * the final read binds only a Run current for its graph.
      */
     let autoRun: Awaited<ReturnType<typeof capabilities.runAnalysis>> | undefined;
@@ -4553,24 +4580,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const analysedThisTurn = runPress || result.tool_results.some((r) => r?.ran === true)
       || result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')
       || firstAnalysis?.outcome.ran === true || firstAnalysis?.outcome.reason === 'already_ran_for_construction';
-    const savedRead = committedChange && !analysedThisTurn ? await readBackState(readingDispatch, scenarioId) : undefined;
-    if (savedRead !== undefined && admitsRunOffer(savedRead.analysisReady)) {
-      // The AI's timing reading, carried from the Run current when the turn began while this change left its subject as it was.
-      const turnStart = (await readCache.turnStartRead())?.json as { graph?: unknown; analysis_result?: unknown } | undefined;
-      const effectsTiming = carriedEffectsTiming(turnStart, savedRead.graph);
-      autoRun = await capabilities.runAnalysis(toolCtx, { reason: 'Analyse the model as just saved.', effects_timing: effectsTiming },
-        { afterCommittedChange: true });
+    if (committedChange && (analysisToCore || !analysedThisTurn)) {
+      autoRun = (await analyseCommittedChange()).run;
       // ⭐ THE AUTOMATIC RUN IS THIS TURN'S RUN (principle review C.md, after #3038): recorded as the Agent's own Run is, so
       // every reader of "this turn ran an analysis" (the chance lines, what it rests on, break-even, the bound card, the
       // Run's outcome chips) reads it. A Run that did not complete is not recorded: its own sentence below says so, and the Run chip stays.
-      if (autoRun.ran === true) {
+      if (autoRun?.ran === true) {
         result = { ...result, tool_calls: [...result.tool_calls, { name: 'run_analysis', ok: autoRun.ok === true, mutated: false }],
           tool_results: [...result.tool_results, autoRun] };
       }
     }
     const runPressFailed = runPress && runPressResult?.refusal === 'run_failed';
     // Preserve the existing typed engine refusal/failure on a Run press, even if the model invents another cause.
-    if (runPress && !result.tool_results.some(r => r.ran === true)) {
+    if (runPress && mode !== 'core' && !result.tool_results.some(r => r.ran === true)) {
       const outcome = result.tool_results.map(r => (r as { run_outcome?: RunOutcome }).run_outcome)
         .find((value): value is RunOutcome => value !== undefined);
       if (outcome !== undefined) { runOutcomeText = outcome.text; runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
@@ -4595,7 +4617,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * and what changed since the preceding Run (the selected delta, #3036's comparison). Only when the canonical read selects
      * THIS Run (its identity); with no interpretation, the Explain press's own fallback words.
      */
-    const autoRunIdentity = autoRun?.ran === true ? (autoRun as { run_identity?: unknown }).run_identity : undefined;
+    // On `core` the SDK run that wrote the reply had this Run in its own tool result: no second, interpreting call.
+    const autoRunIdentity = autoRun?.ran === true && !analysisToCore ? (autoRun as { run_identity?: unknown }).run_identity : undefined;
     // ⭐ THE SAME FOR A RUN PRESS AFTER A CHANGE (DL 14 Oct, joined-flow witness): the canvas's own automatic Run after an
     // edit or Undo (DGAI #2767) reaches CEE as a Run press, which answered only "Your results are ready", so its coaching
     // never came. Each eligible completed selected Run gets this same one call, including the first Run.

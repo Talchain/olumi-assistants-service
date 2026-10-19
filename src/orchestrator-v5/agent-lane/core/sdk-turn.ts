@@ -135,6 +135,8 @@ export interface CoreTurnInput {
   /** The model state as this turn began (the route's canonical packet state), given to the agent, never stored. */
   readonly canonicalState?: unknown;
   readonly withheldTools?: readonly string[];
+  /** A press that names its tool (the Run press): the run's first call must call it (`toolChoice`; the SDK resets it after). */
+  readonly firstTool?: string;
   readonly userId: string | null;
   /** Where the scenario's Conversation id is saved (the session store); absent → the turn stops (CoreStateUnavailableError). */
   readonly conversationStore?: ConversationIdStore;
@@ -198,6 +200,7 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       maxTokens: input.budget.max_output_tokens,
       ...(input.budget.reasoning_effort !== undefined ? { reasoning: { effort: input.budget.reasoning_effort } } : {}),
       parallelToolCalls: false,
+      ...(input.firstTool !== undefined ? { toolChoice: input.firstTool } : {}),
       // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
       contextManagement: [{ type: 'compaction', compactThreshold: CORE_COMPACT_THRESHOLD }],
     },
