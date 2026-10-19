@@ -22,7 +22,7 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
-import { figureTheUserWroteFor, timesTheUserWrote } from './stated-by-user.js';
+import { figureTheUserWroteFor } from './stated-by-user.js';
 import { goalTargetIdentity } from './construction-size-gate.js';
 
 /**
@@ -259,21 +259,13 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
     && (typeof st.low === 'number' && typeof st.high === 'number' ? st.low === st.high && st.low === value
       : typeof st.low === 'number' ? st.low === value : typeof st.high === 'number' && st.high === value);
   const map = sourceMapOf(drafted, brief);
-  // ⭐ ONE FIGURE PER OCCURRENCE (PROMPT-INT first-loss trace; DL-3): other subjects claiming this figure in the same sentence are
-  // rivals only for the SAME writing of it. The sentence may write it once per claimant (each option its own "60 tickets a week"), read
-  // by the one reader (`timesTheUserWrote`); and a setting and the link FROM the factor it sets are one quantity read twice ("hiring a
-  // contractor would add 60 tickets a week" is the setting and what it adds), so such a link is never a claimant of its own.
-  const settingFactor = new Map((Array.isArray(drafted) ? drafted : []).flatMap((e) => {
-    const sub = subjectOf(e !== null && typeof e === 'object' && !Array.isArray(e) ? (e as Record<string, unknown>)['subject'] : undefined);
-    return sub?.kind === 'option' && sub.factor_label !== undefined ? [[subjectKey(sub, 'level'), `link|${norm(sub.factor_label)}|`] as const] : [];
-  }));
-  return (map.verified.get(key) ?? []).some((st) => {
-    if (!states(st)) return false;
-    const others = [...map.verified.entries()].filter(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))).map(([other]) => other);
-    const carried = [key, ...others].flatMap((k) => settingFactor.get(k) ?? []);
-    const rivals = others.filter((k) => !carried.some((prefix) => k.startsWith(prefix))).length;
-    return rivals === 0 || timesTheUserWrote(value, st.unit, st.quote) > rivals;
-  }) ? 'user' : 'unverified';
+  // ⭐ ONE QUANTITY READ TWICE IS NO RIVAL (PROMPT-INT first-loss trace; DL-3; Codex pair AMEND): an option's setting and the link FROM
+  // the factor it sets, stated in the setting's own unit, are one quantity ("hiring a contractor would add 60 tickets a week" is the
+  // setting and what it adds), so that link never contests the setting. In another unit ("60 tickets a week per contractor") it does.
+  const carried = subject.kind === 'option' && subject.factor_label !== undefined ? `link|${norm(subject.factor_label)}|` : undefined;
+  return (map.verified.get(key) ?? []).some((st) => states(st) && [...map.verified.entries()].every(([other, said]) => other === key
+    || !said.some((o) => o.quote === st.quote && states(o) && !(carried !== undefined && other.startsWith(carried) && sameUnit(o.unit, st.unit)))))
+    ? 'user' : 'unverified';
 }
 
 /**
