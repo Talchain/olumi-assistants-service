@@ -161,7 +161,9 @@ export function transformOptionToAnalysisReady(
   let extractionMetadata: ExtractionMetadataT | undefined;
   const firstIntervention = Object.values(option.interventions ?? {})[0];
   if (firstIntervention) {
-    extractionMetadata = {
+    // R3: a setting of unestablished origin (`cee_hypothesis` beside `user_material_unverified`) is attributed to no one —
+    // never to Olumi by its stamp alone, never to the option's own provenance.
+    extractionMetadata = isUnverifiedUserMaterial(firstIntervention) ? undefined : {
       source: firstIntervention.source,
       confidence: firstIntervention.value_confidence ?? firstIntervention.target_match.confidence,
       reasoning: firstIntervention.reasoning,
@@ -1184,7 +1186,9 @@ export function buildAnalysisReadyPayload(
       // meaningful human-readable string was produced.
       if (detail.display_value === bareFallback) continue;
       const v3Intervention = v3Option?.interventions?.[factorId];
-      const source = v3Intervention && typeof (v3Intervention as { source?: unknown }).source === 'string'
+      // R3: the stamp beside `user_material_unverified` is not an attribution; the UI reads this projection, so omit it.
+      const source = v3Intervention && !isUnverifiedUserMaterial(v3Intervention)
+        && typeof (v3Intervention as { source?: unknown }).source === 'string'
         ? (v3Intervention as { source: string }).source
         : undefined;
       (analysisOpt.interventions as Record<string, unknown>)[factorId] = {

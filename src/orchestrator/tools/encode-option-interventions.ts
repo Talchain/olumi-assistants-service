@@ -189,6 +189,8 @@ interface RawIntervention {
   readonly cap?: number;
   /** A NON-user provenance the writer stated explicitly; absent ⇒ default. */
   readonly source?: string;
+  /** R3: words of unestablished origin — ONLY ever beside a preserved `source`, replaced or cleared with it. */
+  readonly user_material_unverified?: true;
   readonly value_confidence?: string;
   readonly reasoning?: string;
   /** TEMPORAL: a stated range the writer supplied with THIS figure (validated at persist, `intervention-range.ts`). */
@@ -225,6 +227,7 @@ function toRawIntervention(src: unknown): RawIntervention {
     unit?: string;
     cap?: number;
     source?: string;
+    user_material_unverified?: true;
     value_confidence?: string;
     reasoning?: string;
     range?: Dict;
@@ -241,6 +244,7 @@ function toRawIntervention(src: unknown): RawIntervention {
   // through to the unchanged default in `buildInterventionV3`.
   if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
     out.source = src.source;
+    if (src.user_material_unverified === true) out.user_material_unverified = true;
     if (typeof src.value_confidence === 'string' && INTERVENTION_CONFIDENCES.has(src.value_confidence)) {
       out.value_confidence = src.value_confidence;
     }
@@ -383,6 +387,9 @@ const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
   'reasoning',
   // The range the OLD figure was read against: it travels with `raw_value`, so a new number never inherits it.
   'cap',
+  // R3 (PL 16:05, ONE provenance replacement): the marker is a claim about whose words gave the OLD figure. It is replaced or
+  // cleared together with `source`, from the NEW record only, never inherited by a new figure.
+  'user_material_unverified',
 ]);
 
 const QUOTED_FIGURE_KEYS = ['value', 'raw_value', 'unit', 'cap', 'value_type', 'encoding_map'] as const;
@@ -445,6 +452,7 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
     // writer stated explicitly (see `PRESERVED_INTERVENTION_SOURCES`), so this
     // can narrow the claim but never widen it to user-authored.
     source: rec.source ?? 'user_specified',
+    ...(rec.source !== undefined && rec.user_material_unverified === true ? { user_material_unverified: true } : {}),
     target_match:
       isPlainObject(existing) && isPlainObject(existing.target_match)
         ? existing.target_match
