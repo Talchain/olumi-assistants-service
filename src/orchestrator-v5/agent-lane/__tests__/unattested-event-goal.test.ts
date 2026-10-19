@@ -6,7 +6,9 @@
  * First loss: the drafter (raw 9d75b605) chose `event_by_date` "Urgent launch"; the brief reader does not attest the event.
  * That text is PROMPT's, and a draw can repeat it, so construction asks the ONE existing retry to re-choose the goal, with the
  * reason and the brief's own words; a redraft is adopted only when its goal is no longer an unattested event and every
- * user-material guard holds; otherwise nothing is saved and the AI asks the user (`construction_needs_redraft`).
+ * user-material guard holds. ⭐ RE-RULED (signed change 6, DL-3 19 Oct; Paul's live test dd904404 13:01Z): otherwise the FIRST
+ * draft is saved as a labelled provisional draft (K6 `withOpenAim`) instead of nothing: the event is never the goal, the aim
+ * is Olumi's open question with no figure, and every row the user stated is kept whole (`expectOpenAimKeepingTheUser`).
  *
  * Construction replayed for real (`buildModelFromBrief`) from the PERSISTED first answer
  * (`fixtures/hiring-unattested-event-raw-20261014.json`, byte-exact, sha256 checked). Scripted: the provider, and the
@@ -15,7 +17,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief, UNATTESTED_GOAL_CLARIFICATION, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
+import { buildModelFromBrief, OPEN_AIM_GOAL_LABEL, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import type { CandidateModel } from '../admit-model.js';
 import { briefAttestsEventByDate, unattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 
@@ -65,8 +67,18 @@ async function construct(answers: readonly string[], brief = FX.brief): Promise<
   return { graph, result, calls, registeredBrief };
 }
 const goalOf = (g: Rec): Rec => (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+/** The user's own "increase productivity by at least 10%", as the first draft's target row registers it. */
+const USER_TARGET = { node_id: 'productivity_change_by_launch', operator: '>=', value: 10, unit: '%', value_frame: 'change_abs', provenance: 'explicit', role: 'goal_target' };
+/** The open-aim draft: ONE goal, Olumi's open question with no figure; never the event; each of the user's rows kept whole. */
+function expectOpenAimKeepingTheUser(graph: Rec | undefined, result: Rec, rows: readonly Rec[] = [USER_TARGET]): void {
+  expect(result, JSON.stringify(result).slice(0, 600)).toMatchObject({ ok: true, open_aim: true });
+  const goals = (graph!.nodes as Rec[]).filter((n) => n.kind === 'goal');
+  expect(goals).toEqual([expect.objectContaining({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' })]);
+  expect('goal_threshold_raw' in goals[0]!, 'no figure is invented for the open aim').toBe(false);
+  for (const row of rows) expect(graph!.goal_constraints).toContainEqual(expect.objectContaining(row));
+}
 
-describe('an unattested event is never saved as the goal; the one existing retry re-chooses it, else the user is asked', () => {
+describe('an unattested event is never saved as the goal; the one existing retry re-chooses it, else the aim is left open', () => {
   it('PRECONDITION: the persisted answer is byte-exact and takes the launch as the goal, which the brief does not attest', () => {
     expect(createHash('sha256').update(FX.raw_text, 'utf8').digest('hex')).toBe(FX.raw_sha256);
     const d = draft();
@@ -91,12 +103,11 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect((graph!.goal_constraints as Rec[]).map((c) => [c.label, c.operator, c.value])).toEqual([['Hiring cost', '<=', 200000]]);
   });
 
-  it('a redraft that still takes the unattested event as the goal saves nothing; the AI asks the user, with the reason and the words', async () => {
+  it('⭐ RE-RULED: a redraft that still takes the unattested event as the goal → the first draft is saved with the aim open, never the event, the user\'s target kept whole', async () => {
     const { graph, result, calls } = await construct([FX.raw_text, FX.raw_text]);
-    expect(calls).toHaveLength(2);
-    expect(graph).toBeUndefined();
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
-    expect(result.detail).toBe(`${UNATTESTED_GOAL_CLARIFICATION} Retained event wording: "${EVENT_WORDS}". Retained intent wording: "${GOVERNING}".`);
+    expect(calls, 'draft + goal retry; the open-aim pass makes no provider call').toHaveLength(2);
+    expectOpenAimKeepingTheUser(graph, result);
+    expect((graph!.nodes as Rec[]).map((n) => n.label)).not.toContain('Urgent launch');
   });
 
   /** ⛔ Codex post-merge 3026, probe 1: the redraft's own target is credited only as admission RETAINED it. */
@@ -105,8 +116,8 @@ describe('an unattested event is never saved as the goal; the one existing retry
     r.goal.target_stated = false;
     const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(r)]);
     expect(calls).toHaveLength(2);
-    expect(graph, 'productivity must never register without its ≥ 10 % target').toBeUndefined();
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    // ⭐ RE-RULED: not adopted; the first draft saves with the aim open, and productivity keeps its ≥ 10 % target row.
+    expectOpenAimKeepingTheUser(graph, result);
   });
 
   it('a retained-wording clause is omitted when its words are not a complete statement of the brief (the core text stays whole)', async () => {
@@ -117,16 +128,16 @@ describe('an unattested event is never saved as the goal; the one existing retry
     expect(calls).toHaveLength(2);
     expect(calls[1]!.input).toContain(JSON.stringify(`${UNATTESTED_GOAL_RETRY_ISSUE} Retained intent wording: "${GOVERNING}".`).slice(1, -1));
     expect(String(calls[1]!.input)).not.toContain('Retained event wording');
-    expect(result.detail).toBe(`${UNATTESTED_GOAL_CLARIFICATION} Retained intent wording: "${GOVERNING}".`);
+    expect(result).toMatchObject({ ok: true, open_aim: true });
   });
 
-  it('a redraft that loses the user\'s figure (≥ 12 % for their 10 %) is not adopted: nothing is saved and the user is asked', async () => {
+  it('a redraft that loses the user\'s figure (≥ 12 % for their 10 %) is not adopted: the aim is left open and their 10 % is kept, never 12 %', async () => {
     const r = redraft();
     r.goal.value = 12;
     const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(r)]);
     expect(calls).toHaveLength(2);
-    expect(graph).toBeUndefined();
-    expect(result).toMatchObject({ ok: false, refusal: 'construction_needs_redraft' });
+    expectOpenAimKeepingTheUser(graph, result);
+    expect((graph!.goal_constraints as Rec[]).some((c) => c.value === 12)).toBe(false);
   });
 
   /**
@@ -134,24 +145,22 @@ describe('an unattested event is never saved as the goal; the one existing retry
    * quantity carrying the same "≥ +10 %" consumed productivity's target and was saved, stamped `from_brief`. The user's
    * target is kept only by its FULL identity: the same quantity and the same terms.
    */
-  it.each(['Code quality', 'Revenue', 'Urgent launch'])('a redraft whose goal is another quantity with the user\'s terms (%s, at least +10 per cent) is not adopted: nothing is saved', async (metric) => {
+  it.each(['Code quality', 'Revenue', 'Urgent launch'])('a redraft whose goal is another quantity with the user\'s terms (%s, at least +10 per cent) is not adopted: the aim is left open, never that quantity', async (metric) => {
     const r = redraft();
     r.goal.metric = metric;
     r.links = (r.links as Rec[]).map((l) => (l.to === 'Productivity change by launch' ? { ...l, to: metric } : l));
     const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(r)]);
     expect(calls).toHaveLength(2);
-    expect(graph).toBeUndefined();
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expectOpenAimKeepingTheUser(graph, result);
   });
 
-  it('a redraft that keeps the unattested event under another kind ("Urgent launch", kind null, every user limit kept) is still unattested: nothing is saved', async () => {
+  it('a redraft that keeps the unattested event under another kind ("Urgent launch", kind null, every user limit kept) is still unattested: never saved as the goal', async () => {
     const d = draft();
     d.goal = { ...d.goal, kind: null, deliverable: null };
     expect(unattestedEventGoal(d as unknown as CandidateModel, FX.brief, false), 'PRECONDITION: no longer typed as an event').toBeNull();
     const { graph, result, calls } = await construct([FX.raw_text, JSON.stringify(d)]);
     expect(calls).toHaveLength(2);
-    expect(graph).toBeUndefined();
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expectOpenAimKeepingTheUser(graph, result);
   });
 
   /**
@@ -175,12 +184,11 @@ describe('an unattested event is never saved as the goal; the one existing retry
   const PAIR_QUESTION = 'Should I hire a Tech lead or two developers to increase productivity by at least 10% and code quality by at least 10%?';
   const withQualityTarget = (d: Rec): Rec => ({ ...d, decision_question: PAIR_QUESTION, constraints: [...(d.constraints as Rec[]),
     { metric: 'Code quality score', operator: '>=', value: 10, unit: '%', provenance: 'explicit', frame: 'change_abs', role: 'target' }] });
-  it('two same-terms targets never collapse: a redraft that takes one as its goal and drops the other is not adopted', async () => {
+  it('two same-terms targets never collapse: a redraft that takes one as its goal and drops the other is not adopted; both rows are kept, the aim left open', async () => {
     const r = { ...redraft(), decision_question: PAIR_QUESTION };
     const { graph, result, calls } = await construct([JSON.stringify(withQualityTarget(draft())), JSON.stringify(r)], FX.brief.replace(GOVERNING, PAIR_QUESTION));
     expect(calls).toHaveLength(2);
-    expect(graph).toBeUndefined();
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expectOpenAimKeepingTheUser(graph, result, [USER_TARGET, { node_id: 'code_quality_score', operator: '>=', value: 10, unit: '%', provenance: 'explicit' }]);
   });
 
   it('CONTRAST: the same redraft keeping the other target is adopted, with the goal and both of the user\'s rows', async () => {
