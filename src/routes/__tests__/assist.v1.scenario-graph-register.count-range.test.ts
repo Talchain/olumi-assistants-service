@@ -164,6 +164,30 @@ describe('K2 on path B: a range its own construction record states, at real grap
     expect(Object.values(option.interventions as Rec)[0]).toMatchObject({ raw_value: 40, range: B_RANGE });
   });
 
+  it('⭐ REAL PATH (level today): a factor\'s recorded level range registers create-only on observed_state.range', async () => {
+    const LEVEL = 'We bake between 200 and 300 loaves a day now.';
+    const draft = {
+      goal: { kind: null, deliverable: null, metric: 'Loaves sold a day', operator: '>=', target_stated: true, value: 300, unit: 'loaves a day',
+        horizon_months: 6, provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 250, baseline_provenance: 'explicit',
+        scope: null, quantity_frame: 'level', basis: null },
+      constraints: [], risks: [], outcomes: [], identities: [], unknowns: [], unknown_concerns: [], decision_question: null,
+      options: [{ label: 'Hire a second baker', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
+        interventions: [{ factor_label: 'Daily baking', value: 290, value_kind: 'absolute', unit: 'loaves a day', provenance: 'explicit', stated_evidence: null }] },
+      { label: 'Carry on as now', provenance: 'ai_proposed', changes: [], interventions: [], added_capacity: null, is_status_quo: true }],
+      factors: [{ label: 'Daily baking', role: 'controllable', baseline_known: true, baseline_value: 250, unit: 'loaves a day', provenance: 'explicit', plausible_max: 600 }],
+      links: [{ from: 'Daily baking', to: 'Loaves sold a day', direction: 'positive', provenance: 'ai_proposed', effect_amount: 1,
+        effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: true, basis: null, source_quote: null }],
+      statements: [{ quote: LEVEL, subject: { kind: 'factor', label: 'Daily baking', to_label: null, factor_label: null },
+        field: 'level', form: 'range', value: null, low: 200, high: 300, unit: 'loaves a day', qualifier: null, conditions: null, speaker: 'user' }],
+    };
+    const out = candidateToGraph(draft, { words: LEVEL, recorded_at: '2026-10-19T22:00:00.000Z' });
+    if ('refused' in out) throw new Error(out.refused);
+    const response = await register(out.graph as Rec, LEVEL);
+    expect(response.statusCode, response.body).toBe(200);
+    const factor = ((store.append.mock.calls[0]![0].graph as Rec).nodes as Rec[]).find((n) => n.label === 'Daily baking')!;
+    expect(factor.observed_state).toMatchObject({ raw_value: 250, range: { low: 200, high: 300, meaning: 'min_max', source: 'brief_extraction', source_quote: LEVEL } });
+  });
+
   it('A UNCHANGED: A\'s request shapes give what they gave (a brief-stated range 200; an unstated one 409)', async () => {
     expect((await register(graph(), BRIEF)).statusCode).toBe(200);
     vi.mocked(store.append).mockClear();
