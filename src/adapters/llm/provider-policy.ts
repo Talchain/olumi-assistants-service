@@ -124,14 +124,22 @@ export interface GenerativeCall {
   readonly environment_source?: string;
   /** T1 (b): where the Agent instructions rode — `developer_breakpoint` (an explicit cache breakpoint) or `instructions`. */
   readonly instructions_carrier?: string;
+  /**
+   * PATH-B core-acceptance witness (set by the Agents SDK transport, `agent-lane/core/sdk-turn.ts`): the function tools the
+   * call declared, by name, and a sha256 of the `input` it sent; and, after the response, the model the provider says served it.
+   */
+  readonly tool_names?: readonly string[];
+  readonly input_sha256?: string;
+  returned_model?: string;
 }
 
 /** What a caller may say about its call; every field is optional and recorded only when given. */
 export type ProviderCallDetail = Readonly<Partial<Pick<GenerativeCall,
   'model' | 'purpose' | 'prompt_alias' | 'prompt_sha256' | 'tools_sha256' | 'schema_sha256' | 'reasoning_effort'
-  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source' | 'instructions_carrier' | 'settings'>>>;
+  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source' | 'instructions_carrier' | 'settings'
+  | 'tool_names' | 'input_sha256'>>>;
 /** The identity fields, in the order a row carries them. */
-const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source', 'instructions_carrier', 'settings'] as const;
+const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source', 'instructions_carrier', 'settings', 'tool_names', 'input_sha256'] as const;
 
 /**
  * ⭐ WHAT A CALL COST, SO CACHING CAN BE MEASURED RATHER THAN ASSUMED.
@@ -371,6 +379,14 @@ export function recordProviderAttempt(handle: ProviderCallHandle, attempt: NonNu
   if (call === undefined || call.outcome !== 'allowed') return;
   call.attempt = { ...attempt };
   recordProviderUsage(handle, undefined);
+}
+
+/** The model the provider's response names (`response.model`), on the call's own row; anything but a string is ignored. */
+export function recordProviderReturnedModel(handle: ProviderCallHandle, model: unknown): void {
+  if (handle === undefined || typeof model !== 'string' || model === '') return;
+  const call = store.getStore()?.calls[handle];
+  if (call === undefined || call.outcome !== 'allowed') return;
+  call.returned_model = model;
 }
 
 /** The caller may retry an explicitly refused carrier; record that existing fallback on the failed attempt. */
