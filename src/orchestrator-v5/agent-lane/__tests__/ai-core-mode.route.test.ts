@@ -13,6 +13,8 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
+import { approvalChipIdFor } from '../approval-chips.js';
+import { editsRefusedSentence } from '../proposal-object/reply.js';
 
 type Json = Record<string, any>;
 const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB9-unseen1-df15c8c-readback-pre-challenge.json', import.meta.url), 'utf8')) as { j: Json }).j;
@@ -44,6 +46,10 @@ const store = {
     if (!conversationIds.has(sid)) conversationIds.set(sid, id);
     return conversationIds.get(sid);
   }),
+  // The scenario's paused SDK run (`scenarios.openai_paused_run`); none unless a row sets one.
+  readOpenAiPausedRun: vi.fn(async (): Promise<{ pause_id: string; proposal_id: string | null; call_id: string; tool: string; state: string } | null> => null),
+  saveOpenAiPausedRun: vi.fn(async () => true),
+  takeOpenAiPausedRun: vi.fn(async () => true),
 };
 const conversationIds = new Map<string, string>();
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -108,7 +114,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); conversationIds.clear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; });
+  beforeEach(() => { rows.clear(); conversationIds.clear(); store.takeOpenAiPausedRun.mockClear(); sent.length = 0; graph = READ.graph; state = READ.analysis_state; outputs = []; });
 
   const typed = async (message: string, headers: Record<string, string> = {}, turnId = randomUUID()): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers, payload: {
@@ -164,6 +170,24 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     // Contrast: the same store with the column continues normally.
     await typed('What next?', CORE);
     expect(conversationIds.get(SCENARIO)).toBe('conv_route');
+  });
+
+  it('⛔ a core press on the paused change that carries edits (here malformed) is refused before anything resumes: nothing written', async () => {
+    const pid = `prop_${'c'.repeat(32)}`;
+    store.readOpenAiPausedRun.mockImplementation(async () => ({ pause_id: 'pause-1', proposal_id: pid, call_id: 'call-1', tool: 'apply_change', state: '{}' }));
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: CORE, payload: {
+        kind: 'message', turn_id: randomUUID(), scenario_id: SCENARIO, stage: 'analyse', turn_class: 'frame', source: 'chip',
+        message: 'Yes, make this change.', chip: { id: approvalChipIdFor(pid) },
+        proposal_edits: { proposal_id: pid, revision: 7, digest: 42, graph_hash: 'h', fields: 'not-a-list' } } });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(String((r.json() as Json).assistant_text).startsWith(editsRefusedSentence('malformed')), 'the existing refusal, first').toBe(true);
+      expect((r.json() as Json)._agent.mutated).toBe(false);
+      expect(store.takeOpenAiPausedRun, 'the paused run is never taken, so nothing resumes').not.toHaveBeenCalled();
+      expect(sent.filter((b) => b.includes(CORE_RULE)), 'no model call').toHaveLength(0);
+    } finally {
+      store.readOpenAiPausedRun.mockImplementation(async () => null);
+    }
   });
 
   it('a core turn\'s durable row holds the AI\'s words, and resending the same turn replays those exact bytes', async () => {
