@@ -277,6 +277,23 @@ function leftOutClause(notAFactor: readonly { label: string; kind: string }[]): 
   return ` (left out, not a factor so it cannot hold a value: ${notAFactor.map((n) => `${n.label} — a ${n.kind}`).join('; ')})`;
 }
 
+/**
+ * The words the AI quotes as the user's CURRENT request (`explicit_rebuild_request`, `explicit_draft_request`) are a WHOLE
+ * statement of this turn's verified typed message, never a fragment, an earlier message or a card press. No word list:
+ * the AI reads the request; the host checks only that it quotes the user. The failed checks (none: verified).
+ */
+export function currentRequestChecks(ctx: Pick<AgentToolContext, 'user_turn_text' | 'typed_approval_of' | 'verified_user_messages'>, request: string): string[] {
+  const currentRequest = ctx.user_turn_text ?? '';
+  const matchCurrent = plainQuoteWords(currentRequest).toLocaleLowerCase('en-GB');
+  const matchRequest = plainQuoteWords(request).toLocaleLowerCase('en-GB');
+  // History authorship coverage is not current-turn authority; the durable ledger below still checks retained work.
+  return [
+    !request.trim() && 'empty_rebuild_signal', ctx.typed_approval_of !== undefined && 'card_press',
+    !wholeStatementIn(matchCurrent, matchRequest) && 'not_whole_current_statement',
+    !ctx.verified_user_messages?.includes(currentRequest) && 'current_turn_unverified',
+  ].filter((check): check is string => typeof check === 'string');
+}
+
 export function authorisationTurnId(proposalId: string): string {
   const h = createHash('sha256').update(`agent_authorise:${proposalId}`).digest();
   const b = Buffer.from(h.subarray(0, 16));
@@ -4138,14 +4155,7 @@ export function createAgentCapabilities(
     const refused = (refusal: string, detail: string): ToolResult => ({ ok: false, mutated: false, refusal, detail });
     if (readOnly) return refuseReadOnly();
     const currentRequest = ctx.user_turn_text ?? '';
-    const matchCurrent = plainQuoteWords(currentRequest).toLocaleLowerCase('en-GB');
-    const matchRequest = plainQuoteWords(request).toLocaleLowerCase('en-GB');
-    // History authorship coverage is not current-turn authority; the durable ledger below still checks retained work.
-    const failedRequestChecks = [
-      !request.trim() && 'empty_rebuild_signal', ctx.typed_approval_of !== undefined && 'card_press',
-      !wholeStatementIn(matchCurrent, matchRequest) && 'not_whole_current_statement',
-      !ctx.verified_user_messages?.includes(currentRequest) && 'current_turn_unverified',
-    ].filter((check): check is string => typeof check === 'string');
+    const failedRequestChecks = currentRequestChecks(ctx, request);
     if (failedRequestChecks.length > 0) {
       diagnostic.failed_checks = failedRequestChecks;
       return refused('current_request_required', 'No replacement was prepared. The complete current typed request must be verified; an earlier request or another card’s press cannot authorise a rebuild.');
@@ -10639,8 +10649,11 @@ export function createAgentCapabilities(
         }
         const constructionContext = { history: opts.readTurnHistory?.() ?? [], verified_user_messages: ctx.verified_user_messages,
           request: ctx.user_turn_text ?? brief };
+        // ⭐ K6 (PL amendment 2, DL ack 18 Oct): the user's explicit "draft it now", quoted by the AI and verified as a whole
+        // statement of this turn, lets a brief with no stated aim be drafted provisionally (`withOpenAim`).
+        const draftNow = typeof args.explicit_draft_request === 'string' && currentRequestChecks(ctx, args.explicit_draft_request).length === 0;
         built = await buildWithDrafterRawRecord(ctx, brief, constructionOperationId(ctx.scenario_id, brief), callStructured, (drafter) => buildModelFromBrief(ctx.scenario_id, brief, dispatch, drafter, opts.onConstructionTrace, opts.deadlineAt, callStructured,
-          undefined, constructionContext, undefined, undefined, opts.onDraftAdmitted));
+          undefined, constructionContext, undefined, undefined, opts.onDraftAdmitted, draftNow));
         if (built.ok !== true) return built;
       }
 

@@ -14,7 +14,6 @@ import { log } from '../utils/telemetry.js';
 import { assertUntouchedLevelQuantities } from './untouched-level-invariant.js';
 import { GuestCopyStoreError } from './guest-copy/index.js';
 import type { GuestCopyStorePort, GuestCopyOutcome } from './guest-copy/index.js';
-import { PersistedGraphInvariantError as GuestGraphInvariantError } from './persisted-graph-invariants.js';
 import { readVerifiedWriteCaller, assertDoorOwnership } from './ownership/door-ownership.js';
 import { computeGraphIdentityHash } from './context/graph-identity.js';
 import { ModelVersionSignInRequiredError, ModelVersionStoreError } from './model-management/store-adapter.js';
@@ -30,6 +29,7 @@ import {
 import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
 import { withoutAgentSubturnText } from './session/agent-subturn-context.js';
 import { preconditionRiskLinkViolations } from '../orchestrator/graph-structure-validator.js';
+import { todayPartsApartFromGoal } from './agent-lane/goal-definition-sum.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
 /** A semantic representation refusal; its label-based reason is safe for the authorised writer's reply. */
@@ -199,6 +199,10 @@ export function assertNoIntroducedGraphViolations(
 
   // RC3 is an absolute representation rule, independent of baseline absorption or GM mode.
   if (writesGraph) assertNoPreconditionRiskLinks(graph);
+  // ⭐ STEP 8: so is a goal's compiled today part: exactly its goal's level today, set by no option, with no link into it. Every
+  // caller (append, save, restore, copy) reaches this one check; the register route sets the part before hashing.
+  const apart = writesGraph ? todayPartsApartFromGoal(graph) : [];
+  if (apart.length > 0) throw new PersistedGraphInvariantError([{ code: 'GOAL_TODAY_PART_NOT_GOAL_LEVEL', entity_ids: [...apart].sort(), count: apart.length }]);
 
   const persistedInvariants = checkPersistedGraphInvariants(graph, {
     baseGraph: params.baseGraphForInvariants,
@@ -457,7 +461,7 @@ export async function commitModelChange(params: ModelChange): Promise<VersionWri
         assertNoIntroducedGraphViolations({ graph, writesGraph: true,
           identity: { scenario_id: params.sourceScenarioId }, baseGraphForInvariants: null, source: 'guest_copy' });
       } catch (error) {
-        if (error instanceof GuestGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
+        if (error instanceof PersistedGraphInvariantError || error instanceof PreconditionRiskLinkWriteError) {
           return { kind: 'refused', reason: 'no_model' };
         }
         throw error;

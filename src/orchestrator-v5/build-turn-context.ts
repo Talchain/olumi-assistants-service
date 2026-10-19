@@ -1,4 +1,5 @@
 import { withReadTimeHorizonGate } from './goal-target/goal-horizon-verdict.js';
+import { deriveTodayParts } from './agent-lane/goal-definition-sum.js';
 import { ANALYSIS_READ_SETTLE_MS, ANALYSIS_REREAD_TIMEOUT_MS, AnalysisReadDeadlineError } from './session/analysis-read-deadline.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { readWriteRefusal, readSuccessfulDoorEntries } from './ownership/door-ownership.js';
@@ -617,6 +618,8 @@ export interface BuildTurnContextOptions {
 export interface RunAnalysisScenarioSnapshot {
   /** Scenario revision from the same persisted read as the analysed graph (B2). */
   readonly evaluatedScenarioRevision?: number;
+  /** STEP 8: what the derivation set aside on a stored today part (`deriveTodayParts`); said with the Run. */
+  readonly todayPartNotes?: readonly string[];
   readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
@@ -1519,7 +1522,8 @@ export function deriveDecisionContextGraphHash(graph: unknown | null, projection
     // new Run is admitted. The unconditional Run reader below owns admission.
     // The former flag-off branch remains removed; every freshness path applies
     // the same value-preserving canonicalisation.
-    toHash = canonicaliseForAnalysis(graph);
+    // STEP 8: the analysis identity attests the derived today part (`deriveTodayParts`), as the Run's stamp does.
+    toHash = canonicaliseForAnalysis(deriveTodayParts(graph).graph);
     const parsed = GraphStateIngressSchema.safeParse(toHash);
     return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data, projection) : null;
   } catch {
@@ -2900,7 +2904,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // delegated to loadGraphAndBriefText and discarded the brief), so the snapshot
   // can surface it for the flag-gated run_analysis → PLoT brief leg with no extra
   // DB traffic and identical error semantics.
-  const { graph: persistedGraph, briefText, revision } = await loadPersistedScenarioStateStrict(
+  const { graph: storedGraph, briefText, revision } = await loadPersistedScenarioStateStrict(
     scenarioId,
     sessionStore,
   );
@@ -2923,7 +2927,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     boundSnapshot.scenarioId === scenarioId &&
     boundSnapshot.analysisGraphHash !== NO_CLAIM
   ) {
-    const observedGraphHash = analysisGraphIdentityOf(persistedGraph);
+    const observedGraphHash = analysisGraphIdentityOf(storedGraph);
     if (
       observedGraphHash !== NO_CLAIM &&
       observedGraphHash !== boundSnapshot.analysisGraphHash
@@ -2935,6 +2939,12 @@ export async function loadScenarioSnapshotForRunAnalysis(
       });
     }
   }
+  // ⭐ STEP 8: each compiled today part is derived from its goal's current level, and an option's setting of it or a link
+  // into it is dropped, on this copy only (`deriveTodayParts`): the compute snapshot and the Run's analysis identity
+  // below attest these derived inputs, Undo, legacy rows and canvas-direct saves included. The race check above keeps
+  // the stored bytes.
+  const todayParts = deriveTodayParts(storedGraph);
+  const persistedGraph = todayParts.graph;
   // `== null` (not a truthy check): scope the recovery to a GENUINELY absent graph
   // (null/undefined). A present-but-corrupt falsy value (e.g. `0` / `""`) is malformed,
   // not missing — it falls through to GraphV3.safeParse below and fails into
@@ -3155,6 +3165,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,
+    ...(todayParts.notes.length > 0 ? { todayPartNotes: todayParts.notes } : {}),
     // Canonical admitted graph — keeps graph_hash_at_run consistent with the
     // freshness-side canonical hash without retaining a flag-off authority.
     // Canonical carrier projection with the persisted numeric bytes intact:
