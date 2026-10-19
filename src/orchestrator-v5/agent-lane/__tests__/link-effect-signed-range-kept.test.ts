@@ -113,9 +113,9 @@ const BASIS = 'Uses the stated lower end as a provisional planning effect.';
 const beside = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_beside_estimate'));
 /** The sentence for a range in another unit than the link's: theirs, and why the link is not sized from it (PL 13:22Z). */
 const otherUnit = (out: { loss: readonly Rec[] }): Rec | undefined => out.loss.find((l) => l.field_path.endsWith('.stated_range_other_unit'));
-// The AIE's words (prompt/AIE-UNIT-REFERENCE-WORDING-20261017-v1.json, 16:04Z).
-const otherUnitWords = (quote: string, unit: string): string => `"${PRE}" → "${WASTE}": "${quote}", as stated in the brief. Olumi has not `
-  + `converted this range into "${unit}" for this effect. Olumi uses a placeholder strength for this link, not an estimate and not the stated range.`;
+// The AIE's words (prompt/AIE-RATE-PLACEHOLDER-WORDING-20261019-v1.json): the range set aside, the link on its placeholder strength.
+const otherUnitWords = (quote: string, _unit: string): string => `"${PRE}" → "${WASTE}": "${quote}", as stated in the brief. The stated range `
+  + 'has not been applied to this effect. The link still uses an unsupported starting strength. A chance that depends on this strength is not yet supported.';
 const recordOn = (graph: Rec): Rec | undefined => {
   const pre = graph.nodes.find((n: Rec) => n.label === PRE);
   const waste = graph.nodes.find((n: Rec) => n.label === WASTE);

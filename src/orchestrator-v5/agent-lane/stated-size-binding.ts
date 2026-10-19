@@ -233,10 +233,10 @@ export function bindStatedLinkSizes(
     });
     if (rates.length !== 1) return false;
     const rate = rates[0]!;
-    const named = [nodeById.get(l.from)?.label, nodeById.get(l.to)?.label, rate.label].filter((s): s is string => typeof s === 'string');
     const others = nodes.filter((n) => n.id !== l.from && n.id !== l.to && n.id !== rate.id && n.kind !== 'option' && n.kind !== 'decision')
       .flatMap((n) => (typeof n.label === 'string' ? [n.label] : []));
-    return !sentenceNamesOtherQuantity(sentence, d.amount_unit, { target: named, others });
+    // The reader reads only `others` (Codex R1 SIMPLER: no target list is built for it).
+    return !sentenceNamesOtherQuantity(sentence, d.amount_unit, { target: [], others });
   }
 
   /**

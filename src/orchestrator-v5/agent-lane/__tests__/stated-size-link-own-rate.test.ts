@@ -29,6 +29,8 @@ async function savedAndRun(): Promise<{ saved: Rec; run: Rec }> {
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   }) as never, (async () => ({ text: FX.raw_text })) as never) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
+  // The set-aside warning (the AIE's words) is said only while the range is set aside; the bound link never reaches that branch.
+  expect(JSON.stringify(out.not_represented ?? []), 'no set-aside warning once the binder sizes the link').not.toContain('has not been applied');
   const bytes = JSON.stringify(saved);
   const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: FX.brief, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SC, 'req-own-rate', port as never);
