@@ -27,6 +27,7 @@ import {
 import { prepareProvisionalCandidate } from '../../agent-lane/runtime/build-model.js';
 import { admitCandidateLinks, type CandidateLink } from '../../agent-lane/admit-candidate.js';
 import { sameUnit } from '../../agent-lane/same-unit.js';
+import { oneRoutePerEffect } from '../../agent-lane/one-route-per-effect.js';
 import { sayFigure } from '../../agent-lane/say-figure.js';
 import { admitAccumulationIdentities, withAdmittedAccumulations } from '../../agent-lane/accumulation-identity.js';
 import { clampForPersist, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
@@ -267,6 +268,7 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   const aEdgeOf = new Map<string, Rec>(a.edges.map((e) => [`${e.from}::${e.to}`, e]));
   const causal: CandidateLink[] = [];
   const placeholder = new Set<CandidateLink>();
+  const drawnByPair = new Map<string, Who>();
   for (const l of c.links) {
     const from = idFor(l.from), to = idFor(l.to);
     if (from === undefined || to === undefined || from === to) {
@@ -276,10 +278,7 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     if (kindOf(from) === 'option') continue;
     const said = (field: string) => (st: Rec): boolean => st.field === field && canonicalLabel(String(st.subject.to_label ?? '')) === canonicalLabel(l.to);
     const drawnBy = whoOf(l.provenance, speakerOf('link', l.from, said('relation')));
-    // SCIENCE (structure, signs): a factor → risk link that only re-draws the factor's own direct links counts that effect
-    // twice, so A leaves it out (`oneRoutePerEffect`); its authorship exemption is read by the DECLARED origin (a person's link stays).
-    const folded = aSaid(`edges[${aPair(from, to)}].one_route`);
-    if (folded.length > 0 && drawnBy !== 'user') { loss.push(...folded); continue; }
+    drawnByPair.set(`${from}::${to}`, drawnBy);
     if (drawnBy === 'other' || drawnBy === 'unknown') blocked.push({ field_path: `edges[${from}::${to}]`, declared: drawnBy, missing: 'link_origin' });
     const { strength_mean: _mean, strength_std: _std, ...drafted } = l;
     const link: CandidateLink = { ...drafted, from, to };
@@ -330,9 +329,9 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     if (from === undefined || to === undefined || kindOf(from) !== 'option') return [];
     return held(e) && (from !== sq || sqActs) ? [] : [{ ...e, from, to }];
   });
-  if (optionEdges.some(held)) {
-    nodeById.get(sq!)!.is_baseline = true;
-    loss.push(...aSaid(`nodes[${aIdOf.get(sq!)}].status_quo_held`));
+  for (const from of new Set(optionEdges.filter(held).map((e) => e.from))) {
+    nodeById.get(from)!.is_baseline = true;
+    loss.push(...aSaid(`nodes[${aIdOf.get(from)}].status_quo_held`));
   }
   for (const w of a.withheld) {
     const from = bIdOfA.get(String(w.from)) ?? idFor(String(w.from));
@@ -343,8 +342,19 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   const goalId = nodes.find((n) => n.kind === 'goal')!.id;
   // A loop is broken where A broke it (A's own withheld links), then by `breakLoops` for any loop only this draft has.
   const aLeftOut = new Set(a.withheld.filter((w) => w.loop !== undefined).map((w) => `${w.from}::${w.to}`));
-  const keptLinks = linkEdges.filter((e) => !aLeftOut.has(aPair(e.from, e.to)));
-  loss.push(...linkEdges.filter((e) => !keptLinks.includes(e)).map((e) => note(`edges[${e.from}::${e.to}].loop_withheld`, { from: e.from, to: e.to },
+  // SCIENCE (structure, signs), its authorship exemption read by the DECLARED origin: a factor → risk link that only re-draws
+  // the factor's own direct links counts that effect twice, so it is left out (A's rule and words, `oneRoutePerEffect`); a link
+  // the AI declared the user's is their claim and stays.
+  const routes = oneRoutePerEffect(linkEdges.map((e) => ({ from: String(e.from), to: String(e.to), effect_direction: e.effect_direction as string | undefined,
+    provenance: { source: drawnByPair.get(`${e.from}::${e.to}`) === 'user' ? 'user' : 'olumi' } })),
+    new Map(nodes.map((n) => [n.id, n.kind] as const)), new Map(nodes.map((n) => [n.id, n.label] as const)), new Set(['user']));
+  const routed = new Set(routes.edges.map((e) => `${e.from}::${e.to}`));
+  const folded = linkEdges.map((e) => `edges[${e.from}::${e.to}]`).filter((p) => !routed.has(p.slice(6, -1)));
+  const aboutFolded = (path: string): boolean => folded.some((p) => path === p || path.startsWith(`${p}.`));
+  blocked.splice(0, blocked.length, ...blocked.filter((x) => !aboutFolded(x.field_path)));
+  loss.splice(0, loss.length, ...loss.filter((x) => !aboutFolded(String(x.field_path))), ...routes.loss);
+  const keptLinks = linkEdges.filter((e) => routed.has(`${e.from}::${e.to}`) && !aLeftOut.has(aPair(e.from, e.to)));
+  loss.push(...linkEdges.filter((e) => routed.has(`${e.from}::${e.to}`) && !keptLinks.includes(e)).map((e) => note(`edges[${e.from}::${e.to}].loop_withheld`, { from: e.from, to: e.to },
     a.withheld.find((w) => `${w.from}::${w.to}` === aPair(e.from, e.to))?.detail ?? 'This link closes a loop, which the analysis cannot run, so it is left out.', 'warn')));
   const loops = breakLoops([...topology, ...keptLinks] as { from: string; to: string }[], {
     mayWithhold: (e) => kindOf(e.from) !== 'option' && kindOf(e.from) !== 'decision', goalId, kindOf });

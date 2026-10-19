@@ -116,25 +116,27 @@ const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Re
 const sciOption = (label: string, provenance: string, ivs: Rec[] = [], changes: string[] = [], sq: boolean | null = null): Rec =>
   ({ label, provenance, changes, interventions: ivs, added_capacity: null, is_status_quo: sq });
 const sciLevel = (factor_label: string, value: number, unit: string): Rec => ({ factor_label, value, value_kind: 'absolute', unit, provenance: 'explicit', stated_evidence: null });
-const scienceDraft = (opts: { userFold?: boolean; undeclaredStatusQuo?: boolean; otherRisk?: boolean } = {}): Rec => ({
+const scienceDraft = (opts: { userFold?: boolean; otherFold?: boolean; undeclaredStatusQuo?: boolean; otherRisk?: boolean } = {}): Rec => ({
   goal: { kind: null, deliverable: null, metric: 'Monthly revenue', operator: '>=', target_stated: true, value: 30000, unit: '£', horizon_months: 6,
     provenance: 'explicit', frame: 'level', baseline_known: true, baseline_value: 20000, baseline_provenance: 'explicit', scope: null, quantity_frame: 'level', basis: null },
-  constraints: [],
+  constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level', role: 'limit' }],
   identities: [{ operation: 'product', outcome: 'Monthly revenue', factors: ['Price', 'Customers'], provenance: 'inferred', evidence: null }],
   options: [sciOption('Raise the price', 'explicit', [sciLevel('Price', 25, '£')]), sciOption('Run a referral scheme', 'explicit', [sciLevel('Customers', 1200, 'customers')]),
     sciOption('Promote more', 'inferred', [], ['Customers']), sciOption('Advertise more', 'inferred', [], ['Customers']),
-    sciOption('Carry on as now', 'explicit', [], [], opts.undeclaredStatusQuo === true ? null : true)],
+    sciOption('Status quo', 'explicit', [], [], opts.undeclaredStatusQuo === true ? null : true)],
   factors: [{ ...factor('Price', 20, '£', 'explicit'), role: 'controllable', plausible_max: 50 }, { ...factor('Customers', 1000, 'customers', 'explicit'), role: 'controllable', plausible_max: 3000 },
     { ...factor('Brand awareness', 30, '%', 'explicit'), role: 'controllable', plausible_max: 100 }],
   risks: [{ label: 'Competitor price cut', provenance: 'inferred' }, { label: 'Key supplier failure', provenance: opts.otherRisk === true ? 'inferred' : 'explicit' },
     { label: 'Churn spike', provenance: 'inferred' }],
-  outcomes: [],
+  outcomes: [{ label: 'Monthly churn', provenance: 'inferred' }],
   links: [link('Price', 'Monthly revenue', 'positive'), link('Customers', 'Monthly revenue', 'positive'), link('Brand awareness', 'Customers', 'positive'),
-    { ...link('Price', 'Churn spike', 'positive'), ...(opts.userFold === true ? { provenance: 'explicit' } : {}) }, link('Churn spike', 'Customers', 'negative'),
-    link('Price', 'Customers', 'negative')],
+    { ...link('Price', 'Churn spike', 'positive'), ...(opts.userFold === true || opts.otherFold === true ? { provenance: 'explicit' } : {}) },
+    link('Churn spike', 'Customers', 'negative'), link('Price', 'Customers', 'negative'), link('Monthly churn', 'Customers', 'negative')],
   unknowns: [], decision_question: 'How do we grow revenue?', unknown_concerns: [],
-  statements: opts.otherRisk === true ? [{ quote: 'Our buyer warns a key supplier could fail.', subject: { kind: 'risk', label: 'Key supplier failure', to_label: null,
-    factor_label: null }, field: 'level', form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker: 'other' }] : [],
+  statements: [...(opts.otherRisk === true ? [{ quote: 'Our buyer warns a key supplier could fail.', subject: { kind: 'risk', label: 'Key supplier failure', to_label: null,
+    factor_label: null }, field: 'level', form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker: 'other' }] : []),
+  ...(opts.otherFold === true ? [{ quote: 'Our analyst says higher prices cause churn spikes.', subject: { kind: 'link', label: 'Price', to_label: 'Churn spike',
+    factor_label: null }, field: 'relation', form: 'point', value: null, low: null, high: null, unit: null, qualifier: null, conditions: null, speaker: 'other' }] : [])],
 });
 
 // ROUTE A (`goal-definition-sum.ts`): a lever the options set, 0 today, declared as the complete net change in the goal's own quantity.
@@ -180,9 +182,10 @@ const declaredWho = (draft: Rec, kind: string, label: string, provenance: unknow
  *    category, Run participation, identity carrier and held status quo equal A's.
  * Counted apart, never as equal, each by its rule: a person's link size (ruling (a)); a level in another unit than its factor
  * or set on something that is not a factor (B says so); and A's GATES, which B reads by the declared origin instead — an
- * unsized risk the AI declared a person's or of unclear origin stays in the Run; a person's factor → risk link A folds stays;
- * A's label reading of an option as "carrying on" is not taken; a declared sum A refuses only for its quote is kept; Route A's
- * part (it needs the person's own verified figure). A draft B refuses as unreadable is reported with A's figures it does not carry.
+ * unsized risk the AI declared another person's or of unclear origin stays in the Run; a double route the AI declared another person's
+ * is folded where A keeps it as the user's; A's label reading of an option as the status quo is not taken; a declared sum A refuses
+ * only for its quote is kept; a reference A on the raw draft leaves unresolved only for its case is bound. A draft B refuses as
+ * unreadable is reported with A's figures it does not carry.
  */
 function differential(draft: Rec): { compared: number; equal: number; mismatches: string[]; not_used: string[]; a_created: string[]; refused?: { reason: string; figures: number } } {
   const prepared = prepareProvisionalCandidate(draft as never).candidate as Rec;
@@ -263,8 +266,7 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
     }
     const aId = identity(n.nonlinear_identity, bIdFor) as Rec | undefined;
     const bId = identity(bn.nonlinear_identity, (x) => x) as Rec | undefined;
-    if (aId !== undefined && (aId.factor_ids as string[]).some((f) => f.startsWith('A:')) && bId === undefined) not_used.push(`gate_route_a_unverified: ${key(n)}`);
-    else if (aId === undefined && bId?.operation === 'sum' && b.loss.some((l) => l.field_path === `nodes[${bn.id}].sum_identity`)) not_used.push(`gate_sum_quote: ${key(n)}`);
+    if (aId === undefined && bId?.operation === 'sum' && b.loss.some((l) => l.field_path === `nodes[${bn.id}].sum_identity`)) not_used.push(`gate_sum_quote: ${key(n)}`);
     else checkBoth(`node ${key(n)}.nonlinear_identity`, aId, bId);
   }
   // A node only B has would be structure A does not keep: none is allowed.
@@ -292,6 +294,8 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
     if (aCreated.has(e.from) || aCreated.has(e.to)) { a_created.push(where); continue; }
     const be = (bg.edges as Rec[]).find((x) => x.from === bIdFor(e.from) && x.to === bIdFor(e.to));
     if (be === undefined && e.origin === 'repair' && aIsLabelHeld(e.from)) { not_used.push(`gate_label_status_quo: ${where}`); continue; }
+    // A keeps a double route as the user's link (`explicit`); the AI declared it another person's or of unclear origin, so B folds it.
+    if (be === undefined && b.loss.some((x) => x.field_path === `edges[${bIdFor(e.from)}::${bIdFor(e.to)}].one_route`)) { not_used.push(`gate_link_origin: ${where}`); continue; }
     compared += 1;
     if (be === undefined) { mismatches.push(`${where}: in A, not in B`); continue; }
     equal += 1;
@@ -301,13 +305,11 @@ function differential(draft: Rec): { compared: number; equal: number; mismatches
     check(`${where}.strength`, e.strength, be?.strength, ['mean', 'std']);
     check(`${where}.natural_effect`, e.provenance?.natural_effect, be?.provenance?.natural_effect, ['amount', 'per_source_change', 'amount_unit', 'per_source_change_unit']);
   }
-  // A link only B has: a person's link A folds as a second route (a gate read by the declared origin), else a mismatch.
+  // A link only B has: a reference A on the raw draft leaves unresolved only for its case; else a mismatch.
   const label = (id: string): string => String((bg.nodes as Rec[]).find((n) => n.id === id)?.description ?? (bg.nodes as Rec[]).find((n) => n.id === id)?.label ?? id);
   for (const e of (bg.edges as Rec[]).filter((x) => !bDecision.has(x.from) && !bEdgeKeys.has(`${x.from}::${x.to}`))) {
     const where = `edge ${canonicalLabel(label(e.from))} → ${canonicalLabel(label(e.to))}`;
     const l = ((draft.links ?? []) as Rec[]).find((x) => canonicalLabel(String(x.from)) === canonicalLabel(label(e.from)) && canonicalLabel(String(x.to)) === canonicalLabel(label(e.to)));
-    const folded = (a.loss as Rec[]).some((x) => String(x.field_path).endsWith('.one_route') && String(x.field_path).includes(`${e.from}::${e.to}`));
-    if (folded && l !== undefined && declaredWho(draft, 'link', String(l.from), l.provenance, 'relation') === 'user') { not_used.push(`gate_user_link: ${where}`); continue; }
     // A on the raw draft leaves a reference unresolved that differs from its entity's own label only by A's canonicalLabel
     // (case, spacing); B writes every reference with the entity's own label first, so A binds it there.
     const unresolved = l !== undefined && (a.withheld as Rec[]).some((w) => w.reason === 'unresolved_endpoint' && w.from === l.from && w.to === l.to);
@@ -600,7 +602,8 @@ describe('candidateToGraph: conversion + science only', () => {
 
   it('⭐ DIFFERENTIAL (synthetic drafts): every figure A admits, B carries with the same number, unit, frame and sign', () => {
     const drafts = [dilemmaDraft(), salesDraft(), salesDraft('user'), sumDraft(400), sumDraft(500), sumDraft(400, 'user'), structureDraft(),
-      scienceDraft(), scienceDraft({ userFold: true }), scienceDraft({ undeclaredStatusQuo: true }), scienceDraft({ otherRisk: true }), definitionDraft()];
+      scienceDraft(), scienceDraft({ userFold: true }), scienceDraft({ otherFold: true }), scienceDraft({ undeclaredStatusQuo: true }), scienceDraft({ otherRisk: true }),
+      definitionDraft()];
     const results = drafts.map(differential);
     expect(results.flatMap((r) => r.mismatches)).toEqual([]);
     expect(results.filter((r) => r.refused !== undefined)).toEqual([]);
@@ -645,33 +648,45 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(edge(graph, 'Price', 'Churn spike')).toBeUndefined();
     expect(reasons.some((r) => r.startsWith('The link from "Price" to "Churn spike" was left out: "Price" already moves "Customers" straight'))).toBe(true);
     // Olumi's options alike as drafted (each sets nothing the referral scheme does not) are left out, kept in `declared`; the user's stay.
-    expect(ofKind(graph, 'option').map((o) => o.label)).toEqual(['Raise the price', 'Run a referral scheme', 'Carry on as now']);
+    expect(ofKind(graph, 'option').map((o) => o.label)).toEqual(['Raise the price', 'Run a referral scheme', 'Status quo']);
     expect(['Promote more', 'Advertise more'].map((o) => reasons.some((r) => r.startsWith(`I left out "${o}" as a separate option`)))).toEqual([true, true]);
     // The user's unsized risk stays in the Run (A and B agree: it is not Olumi's).
     expect(byLabel(graph, 'Key supplier failure').analysis_participation).toBeUndefined();
     // The declared status quo is held at today's levels, as A holds it.
-    expect(byLabel(graph, 'Carry on as now').is_baseline).toBe(true);
-    expect(['Price', 'Customers'].map((f) => edge(graph, 'Carry on as now', f)?.origin)).toEqual(['repair', 'repair']);
+    expect(byLabel(graph, 'Status quo').is_baseline).toBe(true);
+    expect(['Price', 'Customers'].map((f) => edge(graph, 'Status quo', f)?.origin)).toEqual(['repair', 'repair']);
+    // An outcome a percentage limit holds is a factor that can hold its level (A's re-kind).
+    expect(byLabel(graph, 'Monthly churn')).toMatchObject({ kind: 'factor', category: 'observable' });
     const diff = differential(scienceDraft());
     expect(diff.mismatches).toEqual([]);
   });
 
-  it('⛔ GATES read by the DECLARED origin (DL 19 Oct): another person\'s unsized risk stays in the Run; the user\'s link stays; A\'s label reading of "carrying on" is not taken', () => {
+  it('⛔ GATES read by the DECLARED origin (DL 19 Oct): another person\'s unsized risk stays in the Run; a double route is folded unless it is the user\'s; no status quo by its label', () => {
     // A risk the AI declared another person's: A reads its tag as Olumi's and leaves it out; here it stays in (readiness holds what needs it).
     const other = scienceDraft({ otherRisk: true });
     expect(byLabel(converted(other).graph, 'Key supplier failure').analysis_participation).toBeUndefined();
     expect(differential(other)).toMatchObject({ mismatches: [] });
     expect(differential(other).not_used).toContain('gate_risk_origin: risk key supplier failure');
-    // The same double route, declared as the user's link, is their claim: it stays.
+    // The same double route, declared as the user's link, is their claim: it stays (as A keeps it).
     const userFold = scienceDraft({ userFold: true });
     expect(edge(converted(userFold).graph, 'Price', 'Churn spike')).toBeDefined();
     expect(differential(userFold).mismatches).toEqual([]);
-    // An option that only READS as carrying on (not declared the status quo) is not held: no label reading.
+    // Declared as ANOTHER person's link: A reads `explicit` as the user's and keeps it; here it is not the user's claim, so the
+    // double route is left out, in A's words.
+    const otherFold = scienceDraft({ otherFold: true });
+    const folded = converted(otherFold);
+    expect(edge(folded.graph, 'Price', 'Churn spike')).toBeUndefined();
+    expect(folded.loss.some((l) => String(l.reason).startsWith('The link from "Price" to "Churn spike" was left out'))).toBe(true);
+    expect(folded.blocked_schema.filter((x) => String(x.field_path).includes('churn_spike'))).toEqual([]);
+    expect(differential(otherFold)).toMatchObject({ mismatches: [] });
+    expect(differential(otherFold).not_used).toContain('gate_link_origin: edge price → churn spike');
+    // An option that only READS as the status quo (not declared it) is not held: A holds it by its label; no label reading here.
     const undeclared = scienceDraft({ undeclaredStatusQuo: true });
     const { graph } = converted(undeclared);
-    expect(byLabel(graph, 'Carry on as now').is_baseline).toBeUndefined();
-    expect(['Price', 'Customers'].map((f) => edge(graph, 'Carry on as now', f))).toEqual([undefined, undefined]);
+    expect(byLabel(graph, 'Status quo').is_baseline).toBeUndefined();
+    expect(['Price', 'Customers'].map((f) => edge(graph, 'Status quo', f))).toEqual([undefined, undefined]);
     expect(differential(undeclared).mismatches).toEqual([]);
+    expect(differential(undeclared).not_used).toEqual(['gate_label_status_quo: edge status quo → price', 'gate_label_status_quo: edge status quo → customers']);
   });
 
   it('⭐ ROUTE A from A: a validated definition into the goal is worked out exactly — the goal\'s own level today as a part, plus the change', () => {
