@@ -10,11 +10,10 @@
  * only by their ends: a bound is never turned into a point, and Olumi adds no spread beside a user's bound. Pure.
  */
 import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import { CARDINAL_AMOUNT_SOURCE, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
-import { endsInQuotedSpeech, quoteIsNotTheUsersClaim, sentenceAroundSpan, speechReading, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
+import { endsInQuotedSpeech, quoteIsNotTheUsersClaim, sentenceAroundSpan, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
-import { comparatorTheUserWroteFor, figureTheUserWroteSpan } from './stated-by-user.js';
+import { amountsWrittenIn, comparatorTheUserWroteFor, figureTheUserWroteSpan, inAnotherSpeakersWords } from './stated-by-user.js';
 import { unitPhraseFamily, unitPhraseHead } from './unit-conflict.js';
 import { classifyValueUnitAgainstFactor } from '../routing/value-unit-resolution.js';
 
@@ -194,11 +193,8 @@ function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentCor
  * AI's own `form`. Unjoined figures never pair.
  */
 export function figuresWritten(quote: string): readonly { readonly low: number; readonly high: number }[] {
-  const spelled = [...quote.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) => {
-    const magnitude = parseCardinalAmount(m[0]);
-    return magnitude === null ? [] : [{ magnitude, matchedText: m[0], index: m.index! }];
-  });
-  const amounts = [...findStatedAmounts(quote), ...spelled].sort((a, b) => a.index - b.index);
+  // The ONE located-amount reader (`amountsWrittenIn`): digits and words, a fraction or an ordinal never a count (Codex #3427 R4 SIMPLER).
+  const amounts = [...amountsWrittenIn(quote)].sort((a, b) => a.index - b.index);
   return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
     ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
     ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
@@ -209,11 +205,9 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
  * ("A colleague said: “we lose 5% a month”"): the figure is that speaker's, never the user's, though the user typed the report.
  */
 function figureOnlyInSpeech(quote: string, figure: number): boolean {
-  const { text, inSpeech } = speechReading(quote);
-  const spelled = [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, 'gi'))].flatMap((m) =>
-    (parseCardinalAmount(m[0]) === Math.abs(figure) ? [m.index!] : []));
-  const at = [...findStatedAmounts(text).filter((a) => Math.abs(a.magnitude) === Math.abs(figure)).map((a) => a.index), ...spelled];
-  return at.length > 0 && at.every(inSpeech);
+  // The one reader's amounts and its ONE speaker rule (`inAnotherSpeakersWords`, every quote style, both forms; Codex #3427 R4 SIMPLER).
+  const at = amountsWrittenIn(quote).filter((a) => Math.abs(a.magnitude) === Math.abs(figure));
+  return at.length > 0 && at.every((a) => inAnotherSpeakersWords(quote, a));
 }
 
 
