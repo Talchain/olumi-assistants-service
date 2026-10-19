@@ -182,8 +182,8 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     fixture(); rows.clear(); pending.clear(); recent = []; scripts.length = 0; modelBodies.length = 0; doorCalls.length = 0; linkDoorEntries.length = 0; runCalls = 0; omitGraphHash = false; graphHashOverride = undefined;
     carrySizingReceiptOnRun = false; actualSizingReceipt = undefined; info.mockClear();
   });
-  const turn = async (message: string, extra: Json = {}): Promise<Json> => {
-    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+  const turn = async (message: string, extra: Json = {}, headers: Record<string, string> = {}): Promise<Json> => {
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers, payload: {
       kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess_${SCENARIO}`, turn_id: randomUUID(), message, ...extra,
     } });
     expect(response.statusCode, response.body).toBe(200);
@@ -352,6 +352,20 @@ describe('GUIDED PATH reply wiring and the existing sizing commit door', () => {
     const body = await run();
     expect(body.guided_sizing.total).toBe(3);
     expect(body.guided_sizing.links.map((l: Json) => [l.from, l.to])).toEqual(ORDERED_PAIRS.map(pair => [...pair]));
+  });
+
+  it('PATH-B core (PL 00:18): a replay with the core header re-derives no host sizing panel (it re-sends only the turn\u2019s own stored offers); without it, the panel is re-derived as before', async () => {
+    const turnId = randomUUID();
+    const first = await run({ turn_id: turnId });
+    const sizing = (body: Json) => (body.suggested_actions as Json[]).filter((c) => String(c.id).startsWith('agent-size-link:'));
+    expect(first.guided_sizing?.total, 'PRECONDITION: the A-lane turn offers sizing').toBe(3);
+    const core = await turn('Run analysis', { source: 'chip_click', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId },
+      { 'x-olumi-ai-mode': 'core' });
+    expect(core.guided_sizing, 'core: no host sizing panel').toBeUndefined();
+    expect(sizing(core), 'core: only the stored offers this turn already carried, nothing produced again').toEqual(sizing(first));
+    const again = await run({ turn_id: turnId });
+    expect(again.guided_sizing, 'the A lane is unchanged').toEqual(first.guided_sizing);
+    expect(sizing(again)).toEqual(sizing(first));
   });
 
   it('typed Run replay preserves the same hook and identity presses without another Run', async () => {

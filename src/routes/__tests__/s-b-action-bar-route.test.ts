@@ -191,8 +191,8 @@ const turn = async (payload: Record<string, unknown>): Promise<Body> => {
 // is told apart by it (SR-5). Ids the registry does not map keep a neutral message.
 const USER_LINE_BY_PRESS = new Map(Object.values(ACTION_REGISTRY).flatMap((e) => (e.press.kind === 'fixed' ? [[e.press.id, e.user_line] as const] : [])));
 const press = (id: string, extra: Record<string, unknown> = {}) => turn({ message: USER_LINE_BY_PRESS.get(id) ?? 'pressed', source: 'chip', chip: { id, ...extra } });
-const reload = async (): Promise<{ action_bar?: Bar }> => {
-  const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${scenario}/graph`, payload: { include_conversation_turns: true } });
+const reload = async (headers: Record<string, string> = {}): Promise<{ action_bar?: Bar }> => {
+  const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${scenario}/graph`, headers, payload: { include_conversation_turns: true } });
   expect(r.statusCode, r.body).toBe(200);
   return r.json();
 };
@@ -330,6 +330,13 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     coldStore();
     const again = await reload();
     expect(JSON.stringify(again.action_bar)).toBe(JSON.stringify(live.action_bar));
+  });
+  it('PATH-B core (PL 00:18): a cold reopen with the core header carries no host action bar; the same reopen without it still does', async () => {
+    setState('licensed');
+    await turn({ message: 'Where are we?' });
+    coldStore();
+    expect((await reload({ 'x-olumi-ai-mode': 'core' })).action_bar, 'core: the AI is the one voice').toBeUndefined();
+    expect((await reload()).action_bar?.v, 'the A lane is unchanged').toBe(1);
   });
   it('RED (Codex r1 P2-4): live === reload also when this answer pushes an older guidance event out of the history window', async () => {
     // One own option besides doing nothing: RC-WIDEN W2 ranks More options into priority unless pressed at this state.

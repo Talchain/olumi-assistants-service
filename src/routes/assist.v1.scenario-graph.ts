@@ -38,6 +38,8 @@ import { answerOffersForReload } from '../orchestrator-v5/agent-lane/answer-offe
 import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
 import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
+import { laneModeFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { getRuntimeEnv } from '../config/env-resolver.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
 import { readChangedSinceRun } from '../orchestrator-v5/context/changed-since-run.js';
@@ -484,7 +486,8 @@ export default async function route(app: FastifyInstance) {
        * history read ranks with no cooldown; a failed ranking carries no bar and never costs the read.
        */
       let actionBar: ActionBarV1 | undefined;
-      if (conversationRequested) {
+      // PATH-B core (#3487's rule, PL 00:18): a cold reopen in core carries no host action bar, as no core turn does.
+      if (conversationRequested && laneModeFor('full', req.headers['x-olumi-ai-mode'], getRuntimeEnv()) !== 'core') {
         let guidance: GuidanceState | null = null;
         try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
         try {

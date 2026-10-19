@@ -159,7 +159,10 @@ it('product copy and source wiring: one selection boundary before offeredNow, sa
   assert.ok(source.indexOf('const nextStepOffers = nextStepOffersForTurn(') < source.indexOf('const offeredNow:'));
   // S-D (#2743): a held proposal's own card (approve, change, not now) goes BESIDE the one selection, never instead of it.
   assert.ok(source.includes('const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);'));
-  assert.ok(source.includes('const guidance = nextStepOffers.selection;'));
+  // #3487 (PATH-B core, the AI is the ONE voice): the same ONE selection goes on the wire; only a core turn carries none.
+  assert.ok(source.includes('const guidance = hostCards ? nextStepOffers.selection : undefined;'));
+  // CONTRAST: every other lane keeps the selection unchanged, since `hostCards` is false only in core.
+  assert.ok(source.includes("const hostCards = mode !== 'core';"));
   assert.ok(source.indexOf('let guidanceHistory:') < source.indexOf('const nextStepOffers = nextStepOffersForTurn('));
   assert.equal(source.includes('turnGuidanceFor('), false);
 });
