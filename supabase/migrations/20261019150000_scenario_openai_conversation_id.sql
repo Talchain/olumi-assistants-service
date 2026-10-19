@@ -12,9 +12,10 @@
 -- 503 CORE_STATE_UNAVAILABLE (the store reads 42703 / PGRST204 as "cannot hold it"). Other lanes never read either column.
 -- Additive: two nullable columns, each with its own CHECK. No existing function, grant, constraint or policy changes, so
 -- every existing reader and writer (production CEE and the UI included) resolves exactly as before.
+-- Owned: no IF NOT EXISTS, so a column that already exists fails the whole transaction instead of being silently adopted.
 -- Rollback: rollback/20261019150000_scenario_openai_conversation_id_rollback.sql.do-not-apply (drops exactly these).
-ALTER TABLE public.scenarios ADD COLUMN IF NOT EXISTS openai_conversation_id TEXT;
-ALTER TABLE public.scenarios ADD COLUMN IF NOT EXISTS openai_paused_run JSONB;
+ALTER TABLE public.scenarios ADD COLUMN openai_conversation_id TEXT;
+ALTER TABLE public.scenarios ADD COLUMN openai_paused_run JSONB;
 COMMENT ON COLUMN public.scenarios.openai_conversation_id IS
   'PATH-B core lane: the scenario''s one OpenAI Conversation id (conv_...). NULL = no core turn yet.';
 COMMENT ON COLUMN public.scenarios.openai_paused_run IS
