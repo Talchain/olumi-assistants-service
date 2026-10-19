@@ -5284,7 +5284,7 @@ export function createAgentCapabilities(
    * stated basis, a centre that disagrees with the size, a spread the engine cannot hold) prepares nothing and returns the
    * AIE's exact question or limitation for the user.
    */
-  const proposeLinkUncertainty = async (ctx: AgentToolContext, args: Record<string, unknown>): Promise<ToolResult> => {
+  const proposeLinkUncertainty = async (ctx: AgentToolContext, args: Parameters<NonNullable<AgentCapabilities['proposeLinkStrength']>>[1]): Promise<ToolResult> => {
     const u = (args.uncertainty !== null && typeof args.uncertainty === 'object' ? args.uncertainty : {}) as Record<string, unknown>;
     const turn = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
     const said = (w: unknown): string | undefined => typeof w === 'string' && w.trim() !== '' && quoteSpansIn(turn, w.trim()).length > 0 ? w.trim() : undefined;
@@ -5484,7 +5484,7 @@ export function createAgentCapabilities(
      */
     async proposeLinkStrength(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      if (args?.uncertainty !== undefined) return proposeLinkUncertainty(ctx, args as unknown as Record<string, unknown>);
+      if (args?.uncertainty !== undefined) return proposeLinkUncertainty(ctx, args);
       if (!isInfluenceBand(args?.strength)) {
         return { ok: false, mutated: false, refusal: 'unreadable_strength',
           detail: 'The strength must be one of the tool\u2019s values: weak (the canvas\u2019s Slight), moderate, strong, very strong. Nothing was prepared; '
