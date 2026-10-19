@@ -13,7 +13,7 @@ import { findJoinedRanges, findStatedAmounts, readCurrencyUnitWithQualifiers } f
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { endsInQuotedSpeech, quoteIsNotTheUsersClaim, sentenceAroundSpan, usersSpanIn, withdrawnLater } from '../goal-target/input-claim-context.js';
 import { plainQuoteWords, verbatimSourceLine } from './quote-confirmation.js';
-import { amountsWrittenIn, comparatorTheUserWroteFor, figureTheUserWroteSpan, inAnotherSpeakersWords } from './stated-by-user.js';
+import { amountsWrittenIn, comparatorTheUserWroteFor, figureTheUserWroteSpan, inAnotherSpeakersWords, wordsAmountComplete } from './stated-by-user.js';
 import { unitPhraseFamily, unitPhraseHead } from './unit-conflict.js';
 import { classifyValueUnitAgainstFactor } from '../routing/value-unit-resolution.js';
 
@@ -111,8 +111,8 @@ export interface StatementRules {
   readonly forms: readonly StatementForm[];
   readonly reference?: string;
   readonly period?: string;
-  /** The figures the quote states, in `unit`, each as its two ends (a single figure has both equal). */
-  readonly figuresIn: (quote: string) => readonly { readonly low: number; readonly high: number }[];
+  /** The figures the quote states, in `unit` (passed: the one eligibility reads it), each as its two ends (a single figure has both equal). */
+  readonly figuresIn: (quote: string, unit: string) => readonly { readonly low: number; readonly high: number }[];
   /** This description grounds an Olumi numeric estimate; a stated figure for its quantity must use a figure-bearing form. */
   readonly describesNumericEstimate?: true;
   /** Whether the Agent's figure is the stated one (the server keeps the stated one, never the Agent's rendering). */
@@ -192,9 +192,11 @@ function usersOwnSpan(texts: StatementTexts, quote: string, current?: CurrentCor
  * and "six developers and 25% legacy" is not joined, so neither is a range; whether a joined pair is a range or a change is the
  * AI's own `form`. Unjoined figures never pair.
  */
-export function figuresWritten(quote: string): readonly { readonly low: number; readonly high: number }[] {
-  // The ONE located-amount reader (`amountsWrittenIn`): digits and words, a fraction or an ordinal never a count (Codex #3427 R4 SIMPLER).
-  const amounts = [...amountsWrittenIn(quote)].sort((a, b) => a.index - b.index);
+export function figuresWritten(quote: string, unit?: string): readonly { readonly low: number; readonly high: number }[] {
+  // The ONE located-amount reader (`amountsWrittenIn`): digits and words, a fraction or an ordinal never a count (Codex #3427 R4 SIMPLER),
+  // through the SAME complete-span eligibility as the one check (`wordsAmountComplete`, in the statement's own unit where it has one;
+  // Codex #3438 R5: no raw-word bypass at the verifier).
+  const amounts = amountsWrittenIn(quote).filter((a) => wordsAmountComplete(a, unit, quote)).sort((a, b) => a.index - b.index);
   return [...amounts.flatMap((a) => [{ low: a.magnitude, high: a.magnitude },
     ...(a.magnitude > 0 && statesLossBefore(quote, a.index) ? [{ low: -a.magnitude, high: -a.magnitude }] : [])]),
     ...findJoinedRanges(quote).map((r) => ({ low: r.low.magnitude, high: r.high.magnitude }))];
@@ -204,10 +206,14 @@ export function figuresWritten(quote: string): readonly { readonly low: number; 
  * ⭐ LEAN CORE (check 3; #3389 probe P2): every place the quote writes `figure` sits inside another speaker's paired quotation marks
  * ("A colleague said: “we lose 5% a month”"): the figure is that speaker's, never the user's, though the user typed the report.
  */
-function figureOnlyInSpeech(quote: string, figure: number): boolean {
+function figureOnlyInSpeech(quote: string, figure: number, unit: string): boolean {
   // The one reader's amounts and its ONE speaker rule (`inAnotherSpeakersWords`, every quote style, both forms; Codex #3427 R4 SIMPLER).
+  // Where the quote writes the figure as a complete span (`wordsAmountComplete`, the figure list's own eligibility), only those places
+  // count: words never credited ("… and twenty-odd hours") cannot make a quoted "120 hours" the user's (Codex #3438 R5).
   const at = amountsWrittenIn(quote).filter((a) => Math.abs(a.magnitude) === Math.abs(figure));
-  return at.length > 0 && at.every((a) => inAnotherSpeakersWords(quote, a));
+  const complete = at.filter((a) => wordsAmountComplete(a, unit, quote));
+  const places = complete.length > 0 ? complete : at;
+  return places.length > 0 && places.every((a) => inAnotherSpeakersWords(quote, a));
 }
 
 
@@ -383,17 +389,17 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
     ...(negated ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
     ...(answering !== undefined ? { answering } : {}), reading: 'olumi' as const };
   // Recording a measure/source may retain numbers in its words; using them to ground a figure-free estimate may not.
-  if (form === 'describes' && rules.describesNumericEstimate === true && rules.figuresIn(quote).length > 0) return { kind: 'refused', refusal: 'figure_not_in_quote',
+  if (form === 'describes' && rules.describesNumericEstimate === true && rules.figuresIn(quote, rules.unit).length > 0) return { kind: 'refused', refusal: 'figure_not_in_quote',
     detail: 'These words state a figure for this quantity. Use the figure-bearing form in its stated unit, rather than a figure-free description. Nothing was prepared.' };
   // No figure of the user's to check: a condition that holds now, or words that describe the quantity (never a number of theirs).
   if (FIGURE_FREE.has(form)) return { kind: 'verified', statement: base };
-  const stated = rules.figuresIn(quote);
+  const stated = rules.figuresIn(quote, rules.unit);
   if (form === 'range') {
     const low = figure(given?.low, rules.allowsZero), high = figure(given?.high, rules.allowsZero);
     if (low === undefined || high === undefined || !(low < high)) return malformed(`A range needs low below high, as “${quote}” states them. Nothing was prepared.`);
     const read = stated.find((r) => r.low < r.high && same(quote, low, r.low) && same(quote, high, r.high));
     if (read === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${low}–${high} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-    if (figureOnlyInSpeech(quote, read.high)) return anotherSpeaker(`${low}–${high}`);
+    if (figureOnlyInSpeech(quote, read.high, rules.unit)) return anotherSpeaker(`${low}–${high}`);
     if (dropsBound(read.low) || dropsBound(read.high)) return boundDropped(`${low}–${high}`);
     if (givenUnit !== undefined && !unitWrittenAfter(quote, read.high, givenUnit)) return unitRefused(`${low}–${high}`);
     return { kind: 'verified', statement: { ...base, low: read.low, high: read.high } };
@@ -405,7 +411,7 @@ export function verifyStatement(given: StatementArgs | null | undefined, texts: 
   if (value === undefined) return malformed(`A ${form.replace('_', ' ')} needs the one figure “${quote}” states, as value. Nothing was prepared.`);
   const end = stated.flatMap((r) => (r.low === r.high ? [r.low] : [r.low, r.high])).find((s) => same(quote, value, s));
   if (end === undefined) return { kind: 'refused', refusal: 'figure_not_in_quote', detail: `“${quote}” does not state ${value} ${rules.unit}. Quote the words that state it. Nothing was prepared.` };
-  if (figureOnlyInSpeech(quote, end)) return anotherSpeaker(String(value));
+  if (figureOnlyInSpeech(quote, end, rules.unit)) return anotherSpeaker(String(value));
   if (dropsBound(end)) return boundDropped(String(value));
   if (givenUnit !== undefined && !unitWrittenAfter(quote, end, givenUnit)) return unitRefused(String(value));
   return { kind: 'verified', statement: { ...base, ...(form === 'point' ? { low: end, high: end } : form === 'lower_bound' ? { low: end } : { high: end }) } };

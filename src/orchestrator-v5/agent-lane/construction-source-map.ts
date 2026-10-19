@@ -104,6 +104,7 @@ function subjectOf(v: unknown): DraftedSubject | undefined {
 
 /** The one figure reader of a span, now the authorship rule's own (`user-statements.ts`); re-exported for its existing readers. */
 export { figuresWritten, statesLossBefore } from './user-statements.js';
+export { amountsWrittenIn } from './stated-by-user.js';
 
 /** Two negative ends as the magnitudes they stand for (−6 to −4 → 4 to 6); anything else is no such range. */
 function writtenEndsOfNegativeRange(low: unknown, high: unknown): { readonly low: number; readonly high: number } | undefined {
