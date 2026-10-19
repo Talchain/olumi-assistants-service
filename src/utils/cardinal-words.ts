@@ -115,26 +115,33 @@ const TOKEN_ALTERNATION = alternation([
 /** A decimal's digits in words, read one by one after "point" ("seven point five" is 7.5; "one point two five" 1.25). */
 const DECIMAL_DIGITS: Readonly<Record<string, number>> = Object.freeze({ zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 });
 const DECIMAL_DIGIT_ALTERNATION = alternation(Object.keys(DECIMAL_DIGITS));
+const FRACTION_ALTERNATION = "halves|half|quarters|quarter|thirds|third";
 
 /** The words that multiply a group: the compounder and every scale word. */
 const MULTIPLIER_ALTERNATION = alternation([CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)]);
 
 /**
- * ONE number in words: a small cardinal, then hundred/scale/small tokens joined by whitespace or hyphens, then an optional
- * decimal ("seven POINT FIVE", "two point five MILLION"). "and" joins ONLY right after "hundred" or a scale word ("two hundred
- * AND fifty", "one thousand AND five"); after a small cardinal it is a connector between two numbers, never part of one ("two
- * and three"). No guard on what precedes it: for a pattern that embeds it straight after its own words ("a hundred AND
- * twenty"). A reader of free text uses `CARDINAL_AMOUNT_SOURCE`, which never starts a number right after a multiplier word
- * (the fragment "one" of "a hundred and one") or right after "point".
+ * ONE number in words: a small cardinal, then hundred/scale/small tokens joined by whitespace, hyphens or "and", then an optional
+ * decimal ("seven POINT FIVE", "two point five MILLION"). The capture takes every "and" so the parser sees the whole: "and"
+ * joins only right after "hundred" or a scale word ("two hundred AND fifty"), so "two and three" is one capture that reads no
+ * number, never 5. No guard on what precedes or follows it: for a pattern that embeds it straight after its own words ("a
+ * hundred AND twenty") and takes any continuation into its own capture. A reader of free text uses `CARDINAL_AMOUNT_SOURCE`,
+ * which never starts a number right after a multiplier word (the fragment "one" of "a hundred and one") or right after
+ * "point", and never reads the start of a longer amount (`NO_LONGER_AMOUNT`).
  */
 export const CARDINAL_NUMBER_SOURCE =
   `(?:${SMALL_ALTERNATION})` +
-  `(?:(?:(?<=\\b(?:${MULTIPLIER_ALTERNATION}))\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*` +
-  `(?:\\s+point(?:\\s+(?:${DECIMAL_DIGIT_ALTERNATION}))+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*)?` +
-  `(?![\\s-]+(?:(?:${TOKEN_ALTERNATION})[\\s-]+)*point\\b)`;
+  `(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*` +
+  `(?:\\s+point(?:\\s+(?:${DECIMAL_DIGIT_ALTERNATION}))+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*)?`;
 const NUMBER_CORE = CARDINAL_NUMBER_SOURCE;
 const START_GUARD = `(?<!\\b(?:${MULTIPLIER_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint\\s+)`;
-const ONE_NUMBER = `${START_GUARD}${NUMBER_CORE}`;
+/**
+ * In free text, a number is never the start of a longer amount it cannot read whole: a decimal whose digits are not read one
+ * by one ("seven point twenty five"), or the whole part of a fraction written with a numeral ("two thirds", "forty five AND TWO
+ * THIRDS"). A pattern that embeds `CARDINAL_NUMBER_SOURCE` takes such a continuation into its own capture instead.
+ */
+const NO_LONGER_AMOUNT = `(?!(?:[\\s-]+(?:${TOKEN_ALTERNATION}|and))*[\\s-]+(?:point|${FRACTION_ALTERNATION})\\b)`;
+const ONE_NUMBER = `${START_GUARD}${NUMBER_CORE}${NO_LONGER_AMOUNT}`;
 /** The number just matched ends on "hundred" or a scale word. */
 const ENDS_ON_A_MULTIPLIER = `(?<=\\b(?:${MULTIPLIER_ALTERNATION}))`;
 /** The number just matched is whole: nothing that would continue it, or start another, follows ("… two hundred AND FIFTY"). */
@@ -181,10 +188,10 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
  * The phrase grammar, as a SOURCE string with NO capture groups so one pattern can embed it twice under different named
  * wrappers (the same constraint that shaped `MAGNITUDE_SUFFIX_ANON`).
  *
- * Shape: ONE number (above), or a RANGE written in words whose ends a reader of single captures would misread, consumed
- * WHOLE: a shared scale ("two to three million", "between twenty and thirty thousand": never 2 and 3,000,000) and a
- * "between" whose low end closes on a multiplier ("between two hundred and three thousand": never 203,000). Every other
- * range's ends are single captures as before ("two to three": 2 and 3). `parseCardinalAmount` refuses a whole range (its
+ * Shape: ONE number (above), or a RANGE written in words, consumed WHOLE where single captures would misread it: every
+ * "between X and Y" (its "and" is the range's, never a compound's: "between two hundred and three thousand" is never
+ * 203,000), and "X to Y" / "X or Y" with a shared scale ("two to three million": never 2 and 3,000,000). Any other "X to Y"
+ * keeps its ends as single captures, as before ("two to three": 2 and 3). `parseCardinalAmount` refuses a whole range (its
  * connector is outside the vocabulary); `cardinalReadings` reads its two ends. The repetition is greedy, so "two hundred
  * and fifty thousand" is consumed whole.
  *
@@ -197,9 +204,8 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
  * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as it does for the magnitude alternation.
  */
 export const CARDINAL_AMOUNT_SOURCE =
-  `(?:between\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}\\s+and\\s+${NUMBER_CORE}${WHOLE}`
-  + `|between\\s+${BARE_END}\\s+and\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}`
-  + `|${START_GUARD}${BARE_END}\\s+(?:to|or)\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}`
+  `(?:between\\s+${NUMBER_CORE}\\s+and\\s+${NUMBER_CORE}${WHOLE}${NO_LONGER_AMOUNT}`
+  + `|${START_GUARD}${BARE_END}\\s+(?:to|or)\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}${NO_LONGER_AMOUNT}`
   + `|${ONE_NUMBER})`;
 
 /**

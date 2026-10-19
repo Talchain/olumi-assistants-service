@@ -220,7 +220,7 @@ describe("the range class: two ends or nothing", () => {
     ["seven point five (a decimal, whole)", "We waited seven point five weeks.", [7.5]],
     ["one point five to two million (a decimal low end shares the scale)", "Revenue is one point five to two million pounds.", [1_500_000, 2_000_000]],
     ["between twenty and two hundred and fifty thousand (a shared scale read two ways)", "Between twenty and two hundred and fifty thousand.", []],
-    ["between three and two (two figures as written)", "Between three and two bakers.", [3, 2]],
+    ["between three and two (low not below high)", "Between three and two bakers.", []],
     ["between three and two thousand (a shared scale that would make no range)", "Between three and two thousand bakers.", [3, 2_000]],
     ["CONTROL a compound with and", "We sell two hundred and fifty loaves.", [250]],
     ["CONTROL two numbers in two clauses", "We have two ovens and three mixers.", [2, 3]],
@@ -256,9 +256,8 @@ describe("the range class: two ends or nothing", () => {
         const low = both ? lw + sw : lw;
         const high = hw + sw;
         const highValue = hv * sv;
-        // The agreed reading. A range single captures would misread is read WHOLE: a bare low end before a high end that closes
-        // on a scale (the scale is shared where that makes a range), or "between" with a low end that closes on one. Every other
-        // range's ends are two figures, each as written.
+        // The agreed reading. Every "between" range, and a bare low end before a high end that closes on a scale, is read WHOLE
+        // (the scale is shared where that makes a range); any other "X to Y" / "X or Y" is two figures, each as written.
         const MULT = ["hundred", "thousand", "million"];
         const highWords = high.split(" ");
         const lowWords = low.split(" ");
@@ -266,7 +265,7 @@ describe("the range class: two ends or nothing", () => {
         const shared = closing.reduce((m, w) => m * (w === "hundred" ? 100 : w === "thousand" ? 1_000 : 1_000_000), 1);
         const lowLiteral = both ? lv * sv : lv;
         const lowBare = !lowWords.some((w) => MULT.includes(w) || w === "and");
-        const whole = (lowBare && closing.length > 0) || (join === CONNECTORS[0] && MULT.includes(lowWords[lowWords.length - 1]!));
+        const whole = (lowBare && closing.length > 0) || join === CONNECTORS[0];
         const highHead = highWords.slice(0, highWords.length - closing.length);
         const ascending = (a: number): number[] => (a < highValue ? [a, highValue] : []);
         const oracle = !whole ? [lowLiteral, highValue]
