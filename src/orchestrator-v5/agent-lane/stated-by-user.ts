@@ -43,6 +43,7 @@ import { labelHeadUnit } from './label-head-unit.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
 import { speechReading } from '../goal-target/input-claim-context.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
+import { HEDGE_TAIL_WORD, HEDGE_WORD } from '../routing/missing-value-answer.js';
 import { countedNoun } from './counted-nouns.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -103,7 +104,7 @@ export function amountComplete(a: WrittenAmount, unit: unknown, text: string): b
 }
 
 /** The words half of the one eligibility (`amountComplete`): an amount in words is a complete span naming the held unit. Digits: true. */
-export function wordsSpanComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
+function wordsSpanComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
   if (a.kind !== 'words') return true;
   const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
   const said = namingWords(counted), held = namingWords(unit);
@@ -113,10 +114,10 @@ export function wordsSpanComplete(a: WrittenAmount, unit: unknown, text: string)
 /**
  * Whether `a` and the amount right before or after it, in one clause, are ONE JOINED EXPRESSION (DL-3 class rule on Codex #3438 R6):
  * the first carries no unit of its own and the words between them only join the two: nothing but joining words ("20 plus or minus
- * 5", "20 ± 5", "5 or 6"), or one word that is no unit followed by a joining word and more words ("twenty give or take five"). Both
+ * 5", "20 ± 5", "5 or 6"), or nothing but the shared trailing approximation hedges ("twenty give or take five"). Both
  * are refused. Never joined: a range in digits (`joinedAsRange`, the range grammar's: "10 to 30", "between 10 and 30", "from 400 to 500"), an
  * amount with its own unit (money, a percentage: "that one £62"; or a unit word after the first: "two engineers or five analysts"),
- * or across a sentence.
+ * or across a line break.
  */
 function joinedToAnother(a: WrittenAmount, text: string): boolean {
   // The touching rule's other part (`touchesAnotherNumber`): a number in words joined to plain digits ("ten 5-hour shifts", "twenty
@@ -131,7 +132,7 @@ function joinedPair(p: WrittenAmount, b: WrittenAmount, text: string): boolean {
   const end = p.index + p.matchedText.length;
   const between = text.slice(end, b.index);
   const bare = (x: WrittenAmount): boolean => x.kind === 'plain' || x.kind === 'words';
-  if (end > b.index || /[.;:!?()\n]/.test(between) || !bare(p) || !bare(b)) return false;
+  if (end > b.index || between.includes('\n') || !bare(p) || !bare(b)) return false;
   const asStated = (x: WrittenAmount): StatedAmount => ({ kind: 'plain', magnitude: x.magnitude, index: x.index, matchedText: x.matchedText });
   // A range in digits keeps its own grammar. A range with an end in words is the range class's to read as its two ends (#3445); until
   // then neither end is a standalone value ("two to three users": "three users" is a complete span, never the user's 3 alone).
@@ -141,10 +142,13 @@ function joinedPair(p: WrittenAmount, b: WrittenAmount, text: string): boolean {
   // Nothing between them but joining words, or a plus-minus sign: "5 or 6", "20 plus or minus 5", "20 ± 5", "20 +/- 5". Any other
   // sign keeps its own grammar (a ratio "4.2/5", a product "2×2", a sum "0.45+0.55").
   if (words.every(joins) && /^(?:±|\+\/?-)?$/.test(between.replace(/[A-Za-z]+|\s+/g, ''))) return true;
-  const [first, second, ...rest] = words;
-  return first !== undefined && second !== undefined && joins(second) && namingWords(first).length > 0 && unitFamilyOf(first) === null
-    && rest.length > 0 && namingWords(rest.join(' ')).length > 0 && !rest.some((w) => PHRASE_BREAK.has(w.toLowerCase()));
+  // Nothing between them but the shared approximation hedges that only ever FOLLOW a figure (`HEDGE_TAIL_WORD`, never only those that
+  // can lead one, `HEDGE_WORD`): "twenty give or take five", "twenty, give or take about five", "20 or so 30". "In 2024, around 400"
+  // is a lead hedge on 400, never a tolerance. The hedges' own words, consumed, never a new list.
+  return HEDGED_BETWEEN.test(between) && !LEAD_HEDGED_BETWEEN.test(between);
 }
+const HEDGED_BETWEEN = new RegExp(`^(?:[,\\s]*\\(?(?:${HEDGE_TAIL_WORD})\\)?)+[,\\s]*$`, 'i');
+const LEAD_HEDGED_BETWEEN = new RegExp(`^(?:[,\\s]*(?:${HEDGE_WORD}))+[,\\s]*$`, 'i');
 
 /** Every amount `text` writes, in order (one reading per text: the eligibility asks it once per amount). */
 let amountsMemo: { readonly text: string; readonly amounts: readonly WrittenAmount[] } | undefined;
@@ -271,7 +275,10 @@ export function ceilingTheUserWroteFor(
   // as today's level when the goal's current level is that same figure ("Monthly spend is £36k; keep it to at most
   // £36k"). "Monthly spend target £36k; tax below £36k" writes the target once with no ceiling and once as an
   // unmodelled quantity's: which writing is the goal's is unknown, so nothing is held.
+  // The ceiling itself is credited through the one eligibility (`amountComplete`); every raw writing still counts below, so a
+  // refused writing withholds, never frees, the ceiling.
   const ceilings = writings.filter((a) => {
+    if (!amountComplete(a, unit, userText)) return false;
     const before = userText.slice(0, a.index);
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const clauseBefore = before.slice(clauseStart);
@@ -435,11 +442,12 @@ function touchesAnotherNumber(text: string, start: number, end: number): boolean
 function baselineTheBriefStates(value: number, unit: unknown, brief: string, label: unknown): boolean {
   // Digits first, as before; words keep this function's own stricter binding below (Codex SPELLED pair: "hire three engineers"
   // never states three enterprise customers).
-  if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, unitPhraseFamily(unit), brief))) return true;
+  if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, unitPhraseFamily(unit), brief) && amountComplete(a, unit, brief))) return true;
   if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m.index! + m[0].length, label, unit));
   const family = unitPhraseFamily(unit);
   if (family === 'currency' || family === 'percent') return false;
-  return countsInWords(brief).some((w) => same(w.magnitude, value) && wordsNameThisFactor(brief, w.index + w.matchedText.length, label, unit));
+  return countsInWords(brief).some((w) => same(w.magnitude, value) && amountComplete(w, undefined, brief)
+    && wordsNameThisFactor(brief, w.index + w.matchedText.length, label, unit));
 }
 
 /** Words that name no quantity: they cannot tie "three … each month" to a factor measured per month. */
@@ -983,14 +991,14 @@ export const FIGURE_QUOTE_MAX = 160;
  * When a message writes two figures or more, WHOSE each one is cannot be read from word proximity (three review rounds:
  * each fix moved the failure to another common phrasing). The add-factor door then credits nothing by itself: it shows
  * each pairing on the approval card with the sentence the figure was written in, verbatim, and the user's approval makes
- * it theirs. This is that sentence: the first written amount that IS `value` in `unit` (the `figureTheUserWrote` rules),
- * cut at . ! ? (before a space) or a new line; over FIGURE_QUOTE_MAX, a window around the figure on word boundaries with
- * "…". Null when the figure is not written.
+ * it theirs. This is that sentence: the first written amount that IS `value` in `unit`, by THE ONE CHECK
+ * (`amountTheUserWrote`: its eligibility, counted noun and speaker rule; Codex #3438 R7: a raw match quoted a tolerance or a
+ * range end as a figure to confirm, and the approval made it the user's), cut at . ! ? (before a space) or a new line; over
+ * FIGURE_QUOTE_MAX, a window around the figure on word boundaries with "…". Null when the user did not write the figure.
  */
 export function quoteOfFigure(value: number, unit: unknown, userText: string | null | undefined): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
-  const family = unitPhraseFamily(unit);
-  const a = amountsWrittenIn(userText).find((x) => amountIs(x, value, unit, family, userText));
+  const a = amountsWrittenIn(userText).find((x) => amountTheUserWrote(x, value, unit, userText));
   if (a === undefined || typeof a.index !== 'number') return null;
   const end = a.index + a.matchedText.length;
   const starts = [...userText.slice(0, a.index).matchAll(/[.!?](?=\s)|\n/g)];
@@ -1010,6 +1018,16 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
   const words = userText.slice(from, to).replace(/\s+/g, ' ').trim();
   if (words === '') return null;
   return `${from > start ? '…' : ''}${words}${to < stopAt ? '…' : ''}`;
+}
+
+/**
+ * Whether `text` writes `value` in `unit` anywhere, as a located amount, credited or not (`amountIs` alone). For WITHHOLDING and
+ * source retention only ("is this figure in unverified words?"): a figure the one check refuses still counts here. Never a credit.
+ */
+export function figureAppearsIn(value: number, unit: unknown, text: string | null | undefined): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof text !== 'string') return false;
+  const family = unitPhraseFamily(unit);
+  return amountsWrittenIn(text).some((a) => amountIs(a, value, unit, family, text));
 }
 
 /**
@@ -1877,7 +1895,7 @@ type LinkEffectFigures = { readonly amount: number; readonly amount_unit: string
 
 /** The written amounts of ONE sentence that are the stated `value` in `unit`: literal raw amounts, never a fraction fallback. */
 function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], value: number, unit: string): StatedAmount[] {
-  return amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), sentence)
+  return amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), sentence) && amountComplete(a, unit, sentence)
     && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
 }
 
