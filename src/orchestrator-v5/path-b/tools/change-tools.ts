@@ -23,6 +23,8 @@
  *    and for a third party that it was someone else, and their name. An unknown speaker: BLOCKED-SCHEMA (it would read human).
  *  · option setting — Olumi's: `cee_hypothesis` (ai). Not kept: the user's approval (a cell holds no acceptance marker). Any
  *    other source: BLOCKED-SCHEMA — the level writer stamps only the user's verified figure or Olumi's.
+ *  · stance (AIE 15:24/15:54, separate from source): a value holds a current level, a setting a what-if. A target or a
+ *    supposition is never saved as a value; a stance the carrier does not mean is saved with the stance named as not kept.
  * Changes this path does not make yet (the goal's target, a link's strength, add, remove, rename) come back `unavailable`,
  * naming what is not available.
  */
@@ -52,7 +54,11 @@ const Source = z.object({
 }).strict();
 const id = z.string();
 const unit = z.string().nullable();
-const Declared = z.object({ value: z.number(), unit, source: Source }).strict();
+/** The AIE's per-figure stance, verbatim (prompt/AIE-MULTIMODEL-SCOPE-AND-STANCE-REPLY-20261019-v1.json, 15:24). */
+export const STANCE_DESCRIPTION =
+  'How this particular figure is put forward in its full source context, not whether it is true and not who authored it. hypothetical: a supposition, conditional scenario or what-if, including numbers embedded inside that assumed situation. target: a desired or required outcome or threshold, rather than an observed level. estimate: a tentative assessment, approximation or prediction offered as such, rather than an asserted current fact. stated_current: the speaker asserts an actual current or already observed level for this subject at the relevant time, outside a supposition, target or estimate. Read the whole proposition and its conditions: indicative wording inside a supposition does not make its embedded figure stated_current. Classify each figure by its own proposition; one statement\'s status must not transfer to a different quantity or subject. Preserve the original source, wording, sign, units, period and conditions. stated_current describes the assertion; it does not mean verified, accurate or adopted.';
+const Stance = z.enum(['stated_current', 'hypothetical', 'target', 'estimate']).describe(STANCE_DESCRIPTION);
+const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Source }).strict();
 /**
  * Changes this path cannot make yet (DL-3 ruling, 19 Oct: one dispatch path, no interim wrapper). The AI can still name one,
  * and is told truthfully that it is not available here, never refused as if a rule forbade it.
@@ -67,8 +73,8 @@ const NOT_YET = {
 type NotYet = keyof typeof NOT_YET;
 const notYet = (op: NotYet) => z.object({ op: z.literal(op), target_id: id }).strict();
 export const ChangeOp = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, source: Source }).strict(),
-  z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, source: Source }).strict(),
+  z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
+  z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
   notYet('set_goal_target'), notYet('set_link_strength'), notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
 ]);
 type FigureOp = Extract<z.infer<typeof ChangeOp>, { source: unknown }>;
@@ -98,20 +104,32 @@ type Rec = Record<string, unknown>;
 type Op = { kind: 'value' | 'setting'; option_id?: string; factor_id: string } & z.infer<typeof Declared>;
 type DeclaredSource = z.infer<typeof Source>;
 /** What a carrier cannot hold of the declared source, with the declared material itself. */
-type NotKept = { readonly what: 'speaker' | 'name' | 'words' | 'approval'; readonly declared: string };
+type NotKept = { readonly what: 'speaker' | 'name' | 'words' | 'approval' | 'stance'; readonly declared: string };
+type DeclaredStance = z.infer<typeof Stance>;
 type Holding = { readonly stored: Pick<Provenance, 'origin'> & { readonly accepted?: true; readonly role?: 'unverified' }; readonly not_kept: readonly NotKept[] }
   | { readonly blocked: string };
-/** THE ONE TABLE: how each carrier holds a declared source, what the authority must read back, and what is not kept. */
-function holdingOf(kind: Op['kind'], s: DeclaredSource): Holding {
+/**
+ * THE ONE TABLE: how each carrier holds a declared source and stance, what the authority must read back, and what is not kept.
+ * A factor value IS the factor's current level; an option's setting IS the level under that option (a what-if). A figure whose
+ * stance that carrier would change into an operative current level (a supposition or a target as a value) is BLOCKED (AIE
+ * 15:54: a hypothetical never becomes an operative current level).
+ */
+function holdingOf(kind: Op['kind'], s: DeclaredSource, stance: DeclaredStance): Holding {
+  if (kind === 'setting' && s.origin !== 'olumi') return { blocked: 'an option\'s setting can be saved only as Olumi\'s own estimate on this path yet' };
+  if (kind === 'value' && s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
+  if (stance === 'target') return { blocked: kind === 'value' ? 'a target would become this factor\'s current level; setting a target isn\'t available on this path yet' : 'a target is not an option\'s setting' };
+  if (kind === 'value' && stance === 'hypothetical') return { blocked: 'a supposed figure would become this factor\'s current level; it cannot be kept as a supposition on this path yet' };
+  // What the carrier means for this source: Olumi's figure is held as Olumi's estimate; a person's value as a stated level;
+  // an option's setting as a what-if. Any other declared stance is saved with its stance named as not kept.
+  const held: readonly DeclaredStance[] = s.origin === 'olumi' ? (kind === 'value' ? ['estimate'] : ['estimate', 'hypothetical']) : ['stated_current'];
+  const stanceLost: NotKept[] = held.includes(stance) ? [] : [{ what: 'stance', declared: stance }];
   if (s.origin === 'olumi') {
-    return kind === 'value' ? { stored: { origin: 'ai', accepted: true }, not_kept: [] }
-      : { stored: { origin: 'ai' }, not_kept: [{ what: 'approval', declared: 'adopted_by_the_press' }] };
+    return kind === 'value' ? { stored: { origin: 'ai', accepted: true }, not_kept: stanceLost }
+      : { stored: { origin: 'ai' }, not_kept: [...stanceLost, { what: 'approval', declared: 'adopted_by_the_press' }] };
   }
-  if (kind === 'setting') return { blocked: 'an option\'s setting can be saved only as Olumi\'s own estimate on this path yet' };
-  if (s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
   const words: NotKept = { what: 'words', declared: s.quote ?? '' };
-  return { stored: { origin: 'human', role: 'unverified' }, not_kept: s.origin === 'user' ? [words]
-    : [{ what: 'speaker', declared: 'third_party' }, ...(s.named_source === null ? [] : [{ what: 'name' as const, declared: s.named_source }]), words] };
+  return { stored: { origin: 'human', role: 'unverified' }, not_kept: [...stanceLost, ...(s.origin === 'user' ? [words]
+    : [{ what: 'speaker' as const, declared: 'third_party' }, ...(s.named_source === null ? [] : [{ what: 'name' as const, declared: s.named_source }]), words])] };
 }
 const isBlocked = (h: Holding): h is Extract<Holding, { blocked: string }> => 'blocked' in h;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -127,7 +145,7 @@ const cellOf = (option: Rec | undefined, factorId: string): unknown => (isRec(op
 const operationOf = (o: FigureOp): ProposalOperation => ({
   op: o.op === 'set_factor_value' ? 'set_factor_value' : 'set_option_intervention',
   path: o.op === 'set_factor_value' ? o.factor_id : `${o.option_id}::${o.factor_id}`,
-  value: { value: o.value, unit: o.unit, source: o.source },
+  value: { value: o.value, unit: o.unit, stance: o.stance, source: o.source },
 });
 function declaredOf(p: StructuredProposal): Op[] | null {
   const out: Op[] = [];
@@ -151,7 +169,7 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
   for (const [i, o] of ops.entries()) {
     const factor = byId.get(o.factor_id);
     if (factor?.kind !== 'factor') return { refusal: 'not_a_factor', op: i };
-    if (isBlocked(holdingOf(o.kind, o.source))) return { refusal: 'blocked_schema', op: i };
+    if (isBlocked(holdingOf(o.kind, o.source, o.stance))) return { refusal: 'blocked_schema', op: i };
     const olumi = o.source.origin === 'olumi';
     if (o.kind === 'value') {
       plan.values.push({ factor_id: o.factor_id, value: o.value, ...(o.unit === null ? {} : { unit: o.unit }), author: olumi ? 'model_proposed' : 'user_specified' });
@@ -176,7 +194,7 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
 function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; faithful: boolean; written: Rec[] } {
   const byId = new Map(nodesOf(read.graph).map((n) => [n.id, n]));
   const written = ops.map((o) => {
-    const holding = holdingOf(o.kind, o.source);
+    const holding = holdingOf(o.kind, o.source, o.stance);
     const factor = byId.get(o.factor_id);
     const carrier = o.kind === 'value' ? factor?.observed_state : cellOf(byId.get(o.option_id), o.factor_id);
     const figure = typeof carrier === 'number' ? carrier : isRec(carrier) ? (typeof carrier.raw_value === 'number' ? carrier.raw_value : carrier.value) : undefined;
@@ -188,7 +206,7 @@ function readbackOf(read: SavedRead, ops: readonly Op[]): { holds: boolean; fait
     const holds = close(figure, o.value) && asHeld && (o.unit === null || storedUnit?.trim().toLowerCase() === o.unit.trim().toLowerCase());
     const notKept = isBlocked(holding) ? [] : holding.not_kept;
     return { holds, notKept, row: { op: o.kind === 'value' ? 'set_factor_value' : 'set_option_setting', ...(o.option_id === undefined ? {} : { option_id: o.option_id }),
-      factor_id: o.factor_id, figure: figure ?? null, unit: storedUnit, declared: o.source, stored_as: source, not_kept: notKept } };
+      factor_id: o.factor_id, figure: figure ?? null, unit: storedUnit, declared: { ...o.source, stance: o.stance }, stored_as: source, not_kept: notKept } };
   });
   return { holds: written.every((w) => w.holds), faithful: written.every((w) => w.notKept.length === 0), written: written.map((w) => w.row) };
 }
@@ -225,7 +243,7 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   const ops = args.ops.filter((o): o is FigureOp => !isNotYet(o));
   if (args.public_label.trim() === '') return refused('label_empty');
   for (const [i, o] of ops.entries()) {
-    const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source);
+    const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
     if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(i, holding.blocked));
     if (o.source.origin !== 'olumi' && (o.source.quote === null || !inTheUsersWords(o.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: i });
   }
