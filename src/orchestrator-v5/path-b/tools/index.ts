@@ -53,6 +53,8 @@ export interface ToolCallResult {
   readonly proposal_id?: string;
   readonly outcome: ToolOutcome['status'];
   readonly refusal?: string;
+  /** The commit's own receipt, as every writer reports one (`turn-receipts.ts` lifts it onto `_agent.receipts`). */
+  readonly receipts?: readonly Record<string, unknown>[];
 }
 export type OnToolCall = (row: TraceRow, result: ToolCallResult) => void;
 
@@ -61,9 +63,11 @@ export function pathBTools(deps: PathBToolDeps, ctx: PathBContext, mode: AgentLa
   const record = (name: string, outcome: ToolOutcome, proposalId?: string): string => {
     const row = traceRow(name, outcome);
     const pid = outcome.status === 'ok' && typeof outcome.data.proposal_id === 'string' ? outcome.data.proposal_id : proposalId;
+    const receipt = outcome.status === 'ok' ? outcome.data.receipt : undefined;
     try {
       onCall(row, { ok: row.ok, mutated: row.mutated === true, ...(row.ran === true ? { ran: true as const } : {}),
-        ...(pid === undefined ? {} : { proposal_id: pid }), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }) });
+        ...(pid === undefined ? {} : { proposal_id: pid }), outcome: row.outcome, ...(row.refusal === null ? {} : { refusal: row.refusal }),
+        ...(receipt !== null && typeof receipt === 'object' ? { receipts: [receipt as Record<string, unknown>] } : {}) });
     } catch { /* a recorder never decides the outcome */ }
     return JSON.stringify(outcome);
   };

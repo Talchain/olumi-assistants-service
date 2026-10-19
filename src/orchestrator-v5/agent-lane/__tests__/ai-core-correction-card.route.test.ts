@@ -290,6 +290,9 @@ describe('PATH-B: a core correction shows its card in THAT turn; a press on it c
     expect(outputOf('apply_call')).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
     expect(commits(), 'ONE commit').toHaveLength(1);
     expect(queueRaw()).toBe(20);
+    // VERIFIER 22:26Z (3): the press turn carries THAT commit's own receipt on the wire, not only the readback.
+    expect(t2._agent.receipts, 'the commit\'s own receipt rides the reply').toEqual([expect.objectContaining({ version_id: commits()[0]!.receipt!.version_id,
+      version: commits()[0]!.receipt!.version_number })]);
   });
 
   it('⛔ (P0 negatives) an envelope that is not THIS card as issued is still refused before anything runs: nothing is committed', async () => {
