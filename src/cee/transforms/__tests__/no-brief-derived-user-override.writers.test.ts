@@ -341,7 +341,7 @@ const REVIEWED_EDGE_SIZE_WRITERS: Readonly<Record<string, string>> = {
   'cee/magnitude/link-effect.ts': 'existing converter: emits user_stated magnitude only for its caller-earned user_stated size, preserving the natural effect',
   'cee/magnitude/frame-defaulted-links.ts': 'existing converter caller: explicitly passes user_stated false; only projects Olumi sizes',
   'orchestrator-v5/system-events/link-effect-edit.ts': 'existing user edit: a user_specified structured link effect, checked against the endpoints and converted unchanged',
-  'orchestrator-v5/path-b/tools/candidate-to-graph.ts': 'Step 8 path-B draft conversion (DL ruling, 19 Oct 2026): sizes ONLY Olumi-declared sizes and checked one-for-one definitions, as Olumi\'s; every sizeLink call here passes the literal user_stated: false (pinned below), so it never stamps user_stated; a person\'s declared size stays unsized and is listed BLOCKED-SCHEMA link_size_origin',
+  'orchestrator-v5/path-b/tools/candidate-to-graph.ts': 'Step 8 path-B draft conversion (DL ruling, 19 Oct 2026): sizes Olumi-declared sizes and checked one-for-one definitions as Olumi\'s (user_stated: false); EXCEPTION GRANTED (DL-3 K5 P0 ruling (a), 19 Oct 2026): "On B, a person\'s declared link size is USED when the record backs it: declared speaker = user (not other/unknown), a user statement on that exact link whose quote is a byte substring of the brief and contains the declared figure or range. Size it through A\'s existing sizing with user_stated:true. Anything not record-backed keeps the placeholder." Exactly one sizeLink call passes user_stated: true (pinned below); every other person\'s size stays unsized and is listed BLOCKED-SCHEMA link_size_origin',
   'orchestrator-v5/agent-lane/admit-model.ts': 'Fi reviewed by Science 5 Oct 2026: user edit wins; existing strict label door unchanged OR one C2 sentence/link pair under W3, equal node units under C1, and SIGN-1/direction checks; stores that exact sentence as provenance.source_quote through the existing user_stated size path, never changes any value/sign/unit or stamps user_override',
 };
 
@@ -372,8 +372,9 @@ function writesEdgeUserSize(file: string): boolean {
 }
 
 describe('Science Fi — edge user_stated sizing writers are DERIVED and reviewed', () => {
-  // DL lease 19 Oct (Step 8): the path-B conversion is a sizing door only because it NEVER passes user_stated: true.
-  it('path-B conversion: every sizeLink call passes the literal user_stated: false', () => {
+  // DL lease 19 Oct (Step 8): the path-B conversion passes a LITERAL user_stated at every sizeLink call: false, except the ONE
+  // record-backed person size (DL-3 K5 P0 ruling (a), 19 Oct: census exception granted for B's placeholder site).
+  it('path-B conversion: every sizeLink call passes a literal user_stated; exactly one true, the record-backed person size', () => {
     const file = resolve(SRC_ROOT, 'orchestrator-v5/path-b/tools/candidate-to-graph.ts');
     const tree = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, false);
     const flags: string[] = [];
@@ -387,8 +388,8 @@ describe('Science Fi — edge user_stated sizing writers are DERIVED and reviewe
       ts.forEachChild(n, visit);
     };
     visit(tree);
-    expect(flags.length).toBeGreaterThan(0);
-    expect(flags).toEqual(flags.map(() => 'false'));
+    expect(flags.length).toBeGreaterThan(1);
+    expect([...flags].sort()).toEqual([...flags.filter((f) => f === 'false').map(() => 'false'), 'true']);
   });
 
   it('pins every actual magnitude stamp or converter sizing door, including shorthand', () => {
