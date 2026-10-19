@@ -37,7 +37,11 @@ import { defaultFrameFor } from '../../agent-lane/admit-model.js';
 import { GraphStaleWriteError } from '../../build-turn-context.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import { verbatimSourceLine } from '../../agent-lane/quote-confirmation.js';
+import { approvedGraphHeld } from '../../agent-lane/runtime/draft-replacement.js';
 import { isSavedRead, readSaved, type SavedRead } from './context-tool.js';
+import { targetCandidate, targetReadback, type TargetDeclaration } from './goal-target.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
@@ -64,7 +68,6 @@ const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Sou
  * and is told truthfully that it is not available here, never refused as if a rule forbade it.
  */
 const NOT_YET = {
-  set_goal_target: 'Changing the goal\'s target isn\'t available on this path yet.',
   set_link_strength: 'Changing how strongly one factor affects another isn\'t available on this path yet.',
   add_to_model: 'Adding a factor or an option isn\'t available on this path yet.',
   remove_from_model: 'Removing something from the model isn\'t available on this path yet.',
@@ -75,9 +78,16 @@ const notYet = (op: NotYet) => z.object({ op: z.literal(op), target_id: id }).st
 export const ChangeOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
   z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
-  notYet('set_goal_target'), notYet('set_link_strength'), notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
+  /** The goal's success target. The comparator, figure, unit, what it measures and its frame are the AI's, carried literally. */
+  z.object({ op: z.literal('set_goal_target'), goal_id: id, comparator: z.enum(['<', '<=', '>', '>=']), value: z.number(), unit: z.string(),
+    quantity: z.string(), frame: z.enum(['level', 'change']), stance: Stance, source: Source }).strict(),
+  notYet('set_link_strength'), notYet('add_to_model'), notYet('remove_from_model'), notYet('rename'),
 ]);
-type FigureOp = Extract<z.infer<typeof ChangeOp>, { source: unknown }>;
+type FigureOp = Extract<z.infer<typeof ChangeOp>, { op: 'set_factor_value' | 'set_option_setting' }>;
+type TargetArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_target' }>;
+/** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
+const TargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
+  frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
 const isNotYet = (o: z.infer<typeof ChangeOp>): o is Extract<z.infer<typeof ChangeOp>, { op: NotYet }> => Object.hasOwn(NOT_YET, o.op);
 export const ProposeChangeParams = z.object({
   /** What the approval card says, in a few plain words. */
@@ -104,7 +114,7 @@ type Rec = Record<string, unknown>;
 type Op = { kind: 'value' | 'setting'; option_id?: string; factor_id: string } & z.infer<typeof Declared>;
 type DeclaredSource = z.infer<typeof Source>;
 /** What a carrier cannot hold of the declared source, with the declared material itself. */
-type NotKept = { readonly what: 'speaker' | 'name' | 'words' | 'approval' | 'stance'; readonly declared: string };
+type NotKept = { readonly what: 'origin' | 'speaker' | 'name' | 'words' | 'approval' | 'stance'; readonly declared: string };
 type DeclaredStance = z.infer<typeof Stance>;
 type Holding = { readonly stored: Pick<Provenance, 'origin'> & { readonly accepted?: true; readonly role?: 'unverified' }; readonly not_kept: readonly NotKept[] }
   | { readonly blocked: string };
@@ -114,7 +124,14 @@ type Holding = { readonly stored: Pick<Provenance, 'origin'> & { readonly accept
  * stance that carrier would change into an operative current level (a supposition or a target as a value) is BLOCKED (AIE
  * 15:54: a hypothetical never becomes an operative current level).
  */
-function holdingOf(kind: Op['kind'], s: DeclaredSource, stance: DeclaredStance): Holding {
+function holdingOf(kind: Op['kind'] | 'target', s: DeclaredSource, stance: DeclaredStance): Holding {
+  // A goal's target figure is held as Olumi's reading of the binding (the existing target carrier has no unverified-human
+  // stamp); a person's words are kept as theirs beside it, and the declared origin of the figure is named as not kept.
+  if (kind === 'target') {
+    if (stance !== 'target') return { blocked: `a figure put forward as ${stance === 'hypothetical' ? 'a supposition' : stance === 'estimate' ? 'an estimate' : 'a current level'} is not a target` };
+    return { stored: { origin: 'ai' }, not_kept: s.origin === 'olumi' ? [{ what: 'approval', declared: 'adopted_by_the_press' }]
+      : [{ what: 'origin', declared: s.origin }, ...(s.origin === 'third_party' && s.named_source !== null ? [{ what: 'name' as const, declared: s.named_source }] : [])] };
+  }
   if (kind === 'setting' && s.origin !== 'olumi') return { blocked: 'an option\'s setting can be saved only as Olumi\'s own estimate on this path yet' };
   if (kind === 'value' && s.origin === 'unknown') return { blocked: 'a figure whose speaker is not known cannot be saved as unknown on this path yet; it would read as a person\'s figure' };
   if (stance === 'target') return { blocked: kind === 'value' ? 'a target would become this factor\'s current level; setting a target isn\'t available on this path yet' : 'a target is not an option\'s setting' };
@@ -247,11 +264,59 @@ const codeOf = (reason: string): string => {
   return /^[a-z]/.test(c) ? c : 'change_refused';
 };
 
+const MIXED_TARGET = 'Changing the goal\'s target together with other changes isn\'t available on this path yet; propose the target on its own. Nothing was proposed or saved.';
+const CHANGE_TARGET = 'A target stated as a change from today isn\'t available on this path yet. Nothing was proposed or saved.';
+
+/** The one goal-target declaration a proposal holds, as stored (hashed); `null` when the proposal is not a target change. */
+function targetOf(p: StructuredProposal): (TargetDeclaration & { readonly stored: z.infer<typeof TargetStored> }) | null {
+  const op = p.operations.length === 1 && p.operations[0]!.op === 'set_goal_target' ? p.operations[0]! : undefined;
+  const v = op === undefined ? undefined : TargetStored.safeParse(op.value);
+  if (op === undefined || v === undefined || !v.success) return null;
+  return { goal_id: op.path, comparator: v.data.comparator, value: v.data.value, unit: v.data.unit, origin: v.data.source.origin,
+    quote: v.data.source.quote, said_in: v.data.said_in, recorded_at: v.data.recorded_at, stored: v.data };
+}
+
+/** A target's receipt row: the figure as held, the declaration (source, stance, what it measures) and what was not kept. */
+function targetRead(read: SavedRead, t: NonNullable<ReturnType<typeof targetOf>>): { holds: boolean; faithful: boolean; written: Rec[] } {
+  const holding = holdingOf('target', t.stored.source, t.stored.stance);
+  const notKept = isBlocked(holding) ? [] : holding.not_kept;
+  const back = targetReadback(read.graph, t);
+  return { holds: back.holds && !isBlocked(holding), faithful: notKept.length === 0,
+    written: [{ ...back.row, declared: { ...t.stored.source, stance: t.stored.stance, quantity: t.stored.quantity }, not_kept: notKept }] };
+}
+
+async function proposeTarget(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs, t: TargetArgs): Promise<ToolOutcome> {
+  if (t.frame === 'change') return unavailable('change_target_not_available', 'none', CHANGE_TARGET);
+  const holding = holdingOf('target', t.source, t.stance);
+  if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(0, holding.blocked));
+  if (t.source.origin !== 'olumi' && (t.source.quote === null || !inTheUsersWords(t.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: 0 });
+  const read = await readSaved(deps, ctx.scenario_id);
+  if (!isSavedRead(read)) return read;
+  if (read.identity === null) return unavailable('read_malformed');
+  if (nodesOf(read.graph).find((n) => n.id === t.goal_id)?.kind !== 'goal') return refused('not_a_goal', undefined, { op: 0 });
+  const saidIn = t.source.quote === null ? null : verbatimSourceLine({ now: ctx.user_turn_text ?? null,
+    conversation: (ctx.verified_user_messages ?? []).join('\n') }, t.source.quote) ?? null;
+  const stored: z.infer<typeof TargetStored> = { value: t.value, unit: t.unit, comparator: t.comparator, quantity: t.quantity, frame: 'level',
+    stance: t.stance, source: t.source, said_in: saidIn, recorded_at: new Date().toISOString() };
+  const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.identity,
+    operations: [{ op: 'set_goal_target', path: t.goal_id, value: stored }], provenance: { authored_by: 'model_proposed', basis: args.basis },
+    validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: args.public_label });
+  // The writer's own gates, run once on this read before any card exists (nothing is written).
+  const dry = await targetCandidate(ctx.scenario_id, authorisationTurnId(p.proposal_id), authorisationTurnId(p.proposal_id), targetOf(p)!, read.graph, read.graphHash);
+  if ('refusal' in dry) {
+    return dry.refusal === 'goal_is_a_change' ? unavailable('change_target_not_available', 'none', CHANGE_TARGET) : refused(codeOf(dry.refusal), undefined, { op: 0 });
+  }
+  deps.proposals.put(p);
+  return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
+}
+
 export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
   const later = args.ops.find(isNotYet);
   if (later !== undefined) return unavailable(`${later.op}_not_available`, 'none', `${NOT_YET[later.op]} Nothing was proposed or saved.`);
-  const ops = args.ops.filter((o): o is FigureOp => !isNotYet(o));
   if (args.public_label.trim() === '') return refused('label_empty');
+  const target = args.ops.find((o): o is TargetArgs => o.op === 'set_goal_target');
+  if (target !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_TARGET) : proposeTarget(deps, ctx, args, target);
+  const ops = args.ops.filter((o): o is FigureOp => o.op === 'set_factor_value' || o.op === 'set_option_setting');
   for (const [i, o] of ops.entries()) {
     const holding = holdingOf(o.op === 'set_factor_value' ? 'value' : 'setting', o.source, o.stance);
     if (isBlocked(holding)) return unavailable('blocked_schema', 'none', blockedSaid(i, holding.blocked));
@@ -271,21 +336,110 @@ export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposa
   return ok({ proposal_id: p.proposal_id, public_label: p.public_label, base_revision: read.identity });
 }
 
+/** One kind of approved change: where its own receipt is recorded, how it reads back, and its ONE write. */
+interface Applier {
+  readonly receiptTurn: string;
+  readonly readNow: (read: SavedRead) => { holds: boolean; faithful: boolean; written: Rec[] };
+  readonly commit: (before: SavedRead, reconcile: () => Promise<ToolOutcome>) => Promise<ToolOutcome>;
+}
+
+/** Figures (values and option settings): ONE batch-door commit, idempotent on the proposal's authorisation turn. */
+function figuresApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, ops: readonly Op[], turnId: string): Applier | ToolOutcome {
+  if (deps.commitOptionLevels === undefined) return unavailable('writer_unavailable');
+  const commitOptionLevels = deps.commitOptionLevels;
+  return {
+    receiptTurn: turnId,
+    readNow: (read) => readbackOf(read, ops),
+    commit: async (before) => {
+      const plan = planOf(ctx.scenario_id, p.proposal_id, ops, before.graph);
+      if ('refusal' in plan) return stopped(plan, ops);
+      const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
+        links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}) };
+      let res: CommitOptionLevelsResult;
+      try {
+        res = await runWithApprovedBindings(plan.bindings, () => commitOptionLevels(input));
+      } catch (err) {
+        return err instanceof GraphStaleWriteError ? refused('superseded') : unavailable('not_confirmed', 'unknown');
+      }
+      if (res.status === 'stale') return refused('superseded');
+      if (res.status === 'unconfirmed') return unavailable('not_confirmed', 'unknown');
+      if (res.status === 'refused') return refused(codeOf(res.reason), undefined, { ...(res.value ?? res.frame ?? res.pair ?? {}) });
+      // ONE success predicate for every arm (buddy 16:0x): the complete approved postimage, read back afresh. A verified no-op
+      // ("the model already held it") is said as unchanged, with no receipt, and only when the readback holds as approved.
+      const after = await readSaved(deps, ctx.scenario_id);
+      const back = isSavedRead(after) ? readbackOf(after, ops) : null;
+      if (back === null || !back.holds || !isSavedRead(after)) return unavailable('not_verified', 'unknown');
+      if (res.already_applied) {
+        deps.proposals.markApplied(p.proposal_id, []);
+        return ok({ unchanged: true, faithful: back.faithful, written: back.written });
+      }
+      if (res.receipt === null || res.receipt.source_turn_id !== turnId) return unavailable('not_verified', 'unknown');
+      const receipt: ReceiptSummary = { ...res.receipt, source_turn_id: turnId };
+      deps.proposals.markApplied(p.proposal_id, [receipt]);
+      return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
+        written: back.written }, { mutated: true });
+    },
+  };
+}
+
+/** A goal target: ONE complete candidate, ONE registration (CAS on both base hashes, `operation_id` = the authorisation turn). */
+function targetApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, t: NonNullable<ReturnType<typeof targetOf>>, operationId: string): Applier {
+  const receiptTurn = registrationTurnId(ctx.scenario_id, operationId);
+  return {
+    receiptTurn,
+    readNow: (read) => targetRead(read, t),
+    commit: async (before, reconcile) => {
+      const built = await targetCandidate(ctx.scenario_id, operationId, operationId, t, before.graph, before.graphHash);
+      if ('refusal' in built) return built.refusal === 'superseded' ? refused('superseded') : refused(codeOf(built.refusal));
+      const candidate = built.candidate;
+      let reg: Awaited<ReturnType<InternalDispatch>>;
+      try {
+        reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, { graph: candidate,
+          expected_graph_hash: before.graphHash, expected_graph_identity_hash: before.identity, operation_id: operationId });
+      } catch {
+        return unavailable('not_confirmed', 'unknown');
+      }
+      if (reg.status >= 400 && reg.status < 500) {
+        const code = String((isRec(reg.json.details) ? reg.json.details.code : undefined) ?? reg.json.code ?? '');
+        // This very operation registered before (a lost response): its own receipt answers, never a second write.
+        if (/OPERATION_ID_REUSED/.test(code)) return reconcile();
+        return /STALE/.test(code) ? refused('superseded') : refused('register_refused');
+      }
+      if (reg.status !== 200) return unavailable('not_confirmed', 'unknown');
+      const ack = isRec(reg.json.graph_identity_hash) ? reg.json.graph_identity_hash.value : reg.json.graph_identity_hash;
+      const after = await readSaved(deps, ctx.scenario_id);
+      const mv = isRec(reg.json.model_version) ? reg.json.model_version : undefined;
+      if (!isSavedRead(after) || typeof ack !== 'string' || after.identity !== ack || !approvedGraphHeld(candidate, after.graph)
+        || !targetRead(after, t).holds || mv === undefined || typeof mv.version_id !== 'string') return unavailable('not_verified', 'unknown');
+      const receipt: ReceiptSummary = { version: Number(mv.version_number), version_id: mv.version_id,
+        mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '', source_turn_id: receiptTurn };
+      deps.proposals.markApplied(p.proposal_id, [receipt]);
+      const back = targetRead(after, t);
+      return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
+        written: back.written }, { mutated: true });
+    },
+  };
+}
+
 export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyChangeArgs): Promise<ToolOutcome> {
   const p = deps.proposals.get(args.proposal_id);
   if (p === undefined) return refused('unknown_proposal');
   if (p.scenario_id !== ctx.scenario_id || p.user_id !== ctx.authenticated_user_id) return refused('not_authorised');
-  const ops = declaredOf(p);
-  if (ops === null) return refused('not_a_change_proposal');
-  if (deps.commitOptionLevels === undefined) return unavailable('writer_unavailable');
   const turnId = authorisationTurnId(p.proposal_id);
-  const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, turnId);
+  const target = targetOf(p);
+  const ops = target === null ? declaredOf(p) : null;
+  if (target === null && ops === null) return refused('not_a_change_proposal');
+  const applier = target !== null ? targetApplier(deps, ctx, p, target, turnId) : figuresApplier(deps, ctx, p, ops!, turnId);
+  if (!('commit' in applier)) return applier;
+  const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
   if (prior === 'unreadable') return unavailable('read_failed');
   const before = await readSaved(deps, ctx.scenario_id);
   if (!isSavedRead(before)) return before;
+  // SAVED EARLIER (PL 16:05): this operation's own receipt proves an earlier completed save; what the model holds NOW is said
+  // beside it (`holds_now`), never as a new write, and the change is never repeated.
   const alreadySaved = (receipt: ReceiptSummary | null): ToolOutcome => {
     if (receipt !== null) deps.proposals.markApplied(p.proposal_id, [receipt]);
-    const now = readbackOf(before, ops);
+    const now = applier.readNow(before);
     return ok({ already_saved: true, receipt, holds_now: now.holds, faithful: now.faithful, written: now.written });
   };
   if (prior !== null) return alreadySaved(prior);
@@ -294,42 +448,10 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
     authenticated_user_id: ctx.authenticated_user_id, current_graph_identity_hash: before.identity, typed_approval_of: p.proposal_id });
   if (decision.status === 'already_applied') return alreadySaved(decision.receipts[0] ?? null);
   if (decision.status !== 'execute') return refused(decision.status);
-  const plan = planOf(ctx.scenario_id, p.proposal_id, ops, before.graph);
-  if ('refusal' in plan) return stopped(plan, ops);
-  const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
-    links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}) };
-
-  const commit = async (): Promise<ToolOutcome> => {
-    let res: CommitOptionLevelsResult;
-    try {
-      res = await runWithApprovedBindings(plan.bindings, () => deps.commitOptionLevels!(input));
-    } catch (err) {
-      return err instanceof GraphStaleWriteError ? refused('superseded') : unavailable('not_confirmed', 'unknown');
-    }
-    if (res.status === 'stale') return refused('superseded');
-    if (res.status === 'unconfirmed') return unavailable('not_confirmed', 'unknown');
-    if (res.status === 'refused') {
-      return refused(codeOf(res.reason), undefined, { ...(res.value ?? res.frame ?? res.pair ?? {}) });
-    }
-    // ONE success predicate for every arm (buddy 16:0x): the complete approved postimage, read back afresh. A verified no-op
-    // ("the model already held it") is said as unchanged, with no receipt, and only when the readback holds as approved.
-    const after = await readSaved(deps, ctx.scenario_id);
-    const back = isSavedRead(after) ? readbackOf(after, ops) : null;
-    if (back === null || !back.holds || !isSavedRead(after)) return unavailable('not_verified', 'unknown');
-    if (res.already_applied) {
-      deps.proposals.markApplied(p.proposal_id, []);
-      return ok({ unchanged: true, faithful: back.faithful, written: back.written });
-    }
-    if (res.receipt === null || res.receipt.source_turn_id !== turnId) return unavailable('not_verified', 'unknown');
-    const receipt: ReceiptSummary = { ...res.receipt, source_turn_id: turnId };
-    deps.proposals.markApplied(p.proposal_id, [receipt]);
-    return ok({ saved: true, faithful: back.faithful, receipt, revision: { graph_hash: after.graphHash, graph_identity_hash: after.identity },
-      written: back.written }, { mutated: true });
-  };
   const reconcile = async (): Promise<ToolOutcome> => {
-    const own = await ownReceipt(deps.dispatch, ctx.scenario_id, turnId);
+    const own = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
     return own !== null && own !== 'unreadable' ? alreadySaved(own) : unavailable('not_confirmed', 'unknown');
   };
-  return deps.proposals.executeApproved(p, ctx.turn_id ?? turnId, commit,
+  return deps.proposals.executeApproved(p, ctx.turn_id ?? turnId, () => applier.commit(before, reconcile),
     (o) => (o.status === 'ok' ? 'applied' : o.status === 'unavailable' && o.write === 'unknown' ? 'unknown' : 'none'), reconcile);
 }
