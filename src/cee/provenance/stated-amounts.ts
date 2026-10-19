@@ -82,6 +82,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { joinedToARangeEndInWords } from "../../utils/cardinal-words.js";
 import { resolveExistingRawValue } from "../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js";
 import { recoverScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
@@ -223,23 +224,32 @@ export function findStatedAmounts(text: string | null | undefined, options?: { r
  *    "£1–2m", "£1 to 2m", "between £1 and £2m", and each with its magnitude written as a word);
  *  · a PLAIN low end before a plain high end: the low end reads at that magnitude, in digits as the words reader reads it
  *    (`countsInWords`);
- *  · any other PLAIN low end (before a currency end) is REFUSED: never credited as a bare figure.
- * A low end with its own magnitude ("2k to 3m"; `£2–3m` whose first end has its own suffix already reads both) or its own unit (a
- * percent, or a noun between the two: "2 sites to 3m customers" is not one range) is left exactly as read.
+ *  · any other PLAIN low end (before a currency end) is REFUSED with its high end ("2 to £3m"): a range gives its two ends or
+ *    nothing, never one end alone (DL-3 on Codex R2 #3442).
+ * A low end with its own magnitude before a high end with NONE ("5m to 7", "£2m or 3") is REFUSED whole: the low end's
+ * magnitude is never given to the high end, and the bare high end is never the user's figure. An end joined to a number in words
+ * ("2 to three" closed by a scale word, "5m to seven") is REFUSED (`joinedToARangeEndInWords`): two forms never share one scale. A low end
+ * with its own magnitude before one with its own ("2k to 3m"; `£2–3m` whose first end has its own suffix already reads both) or
+ * its own unit (a percent, or a noun between the two: "2 sites to 3m customers" is not one range) is left exactly as read.
  */
 function shareRangeMagnitude(
   text: string,
   amounts: StatedAmount[],
   parts: readonly { digits: number; mag: string }[],
 ): readonly StatedAmount[] {
-  const refused = new Set<number>();
+  const refused = new Set<number>(amounts.flatMap((a, i) => (joinedToARangeEndInWords(text, a.index, a.index + a.matchedText.length) ? [i] : [])));
   for (let i = 0; i + 1 < amounts.length; i += 1) {
     const low = amounts[i]!;
     const high = amounts[i + 1]!;
-    if (parts[i]!.mag !== "" || parts[i + 1]!.mag === "" || !sharesOneMagnitude(text, low, high)) continue;
+    if (!sharesOneMagnitude(text, low, high)) continue;
+    if (parts[i]!.mag !== "" && parts[i + 1]!.mag === "" && low.kind !== "percent" && high.kind !== "percent") {
+      refused.add(i).add(i + 1);
+      continue;
+    }
+    if (parts[i]!.mag !== "" || parts[i + 1]!.mag === "") continue;
     const currency = low.kind === "currency" && (high.kind === "plain" || (high.kind === "currency" && high.currencyCode === low.currencyCode));
     if (!currency && !(low.kind === "plain" && high.kind === "plain")) {
-      if (low.kind === "plain") refused.add(i);
+      if (low.kind === "plain") refused.add(i).add(i + 1);
       continue;
     }
     const lowAtScale = parts[i]!.digits * resolveMagnitude(parts[i + 1]!.mag);
@@ -252,9 +262,9 @@ function shareRangeMagnitude(
 
 /**
  * Two amounts that carry ONE magnitude between them: written as one range (`joinedAsRange`), or as two alternatives of it ("2 or
- * 3" closed by a magnitude word). The located-amount reader reads digits and words by this same joiner.
+ * 3" closed by a magnitude word).
  */
-export function sharesOneMagnitude(
+function sharesOneMagnitude(
   text: string,
   low: Pick<StatedAmount, "index" | "matchedText">,
   high: Pick<StatedAmount, "index">,

@@ -1,12 +1,15 @@
 /**
  * ⭐ A RANGE'S CLOSING SCALE BELONGS TO BOTH ENDS (DL-3 ruling on C5's finding, 19 Oct). "two to three" closed by a scale word,
- * and its digits, read the low end as a bare 2: a wrong number, credited as the user's. The ONE located-amount reader now reads a
- * low end with no scale of its own at the scale its high end closes with, in words, in digits and across the two. A low end with
- * its own scale keeps it; a low end with its own unit is another quantity; where no ONE scale closes the range, or the high end is
- * money and the low end a bare count, the low end is refused, never credited bare. SYNTHETIC wording.
+ * and its digits, read the low end as a bare 2: a wrong number, credited as the user's. Every reader now reads a low end with no
+ * scale of its own at the scale its high end closes with, in words and in digits. A low end with its own scale keeps it; a low end
+ * with its own unit is another quantity.
+ * ⛔ NEVER ONE END ALONE (DL-3 on Codex R2 #3442: "between 2 and three thousand" credited 2, "five million to seven" 7). A range
+ * with no ONE shared scale gives nothing: written across the two forms, with the scale on its low end only, closed by no ONE scale,
+ * or a bare count before money. SYNTHETIC wording.
  */
 import { describe, expect, it } from 'vitest';
 import { amountsWrittenIn, figureTheUserWrote, timesTheUserWrote } from '../stated-by-user.js';
+import { figuresWritten, userStated } from '../user-statements.js';
 import { findJoinedRanges, findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 
 const read = (text: string): [string, number][] =>
@@ -24,8 +27,7 @@ describe('the one reader: a range closed by a scale word shares it with its low 
     ['words, a compound scale', 'We expect two to three hundred thousand users.', [['words', 200_000], ['words', 300_000]]],
     ['words, a compound lead', 'We expect ten to twenty-five thousand users.', [['words', 10_000], ['words', 25_000]]],
     ['words, a scale of a hundred', 'We expect two to three hundred visitors.', [['words', 200], ['words', 300]]],
-    ['across forms, words then digits', 'We expect two to 3 million users.', [['words', 2_000_000], ['plain', 3_000_000]]],
-    ['across forms, digits then words', 'We expect 2 to three million users.', [['plain', 2_000_000], ['words', 3_000_000]]],
+    ['words, a dash', 'We expect two – three million users.', [['words', 2_000_000], ['words', 3_000_000]]],
   ])('%s: "%s"', (_case, text, expected) => { expect(read(text)).toEqual(expected); });
 });
 
@@ -48,11 +50,48 @@ describe('the one reader: what a range does NOT share', () => {
   it.each([
     // A range gives its two ends or nothing (DL-3 range rule; C5 #3442): with no ONE scale to share, neither end is read alone.
     ['no ONE scale closes the range', 'We expect two to three hundred and fifty thousand users.', []],
-    // Across forms the two ends are two captures: the bare low end is refused, the high end is read whole as written.
-    ['no ONE scale closes the range, across forms', 'We expect 2 to three hundred and fifty thousand users.', [['words', 350_000]]],
-    ['a bare digit before money', 'We need 2 to £3m.', [['currency', 3_000_000]]],
-    ['a bare word before money', 'We need two to £3m.', [['currency', 3_000_000]]],
-  ])('REFUSED, never credited bare: %s: "%s"', (_case, text, expected) => { expect(read(text)).toEqual(expected); });
+    ['no ONE scale closes the range, across forms', 'We expect 2 to three hundred and fifty thousand users.', []],
+    ['a bare digit before money', 'We need 2 to £3m.', []],
+    ['a bare word before money', 'We need two to £3m.', []],
+  ])('REFUSED whole, never one end alone: %s: "%s"', (_case, text, expected) => { expect(read(text)).toEqual(expected); });
+});
+
+/** Codex R2 on #3442 @74770078 (held-out probes, adopted verbatim), then the rest of the class: across forms, and reversed. */
+const NO_ONE_SHARED_SCALE = [
+  'between 2 and three thousand',
+  'five million to seven',
+  'We expect two to 3 million users.',
+  'We expect 2 to three million users.',
+  'We expect between two and 3 thousand users.',
+  'We expect two or 3k users.',
+  'We expect 2 or three thousand users.',
+  'We expect five million to 7 users.',
+  'We expect 5 million to seven users.',
+  'We expect 5 million to 7 users.',
+  'We expect between 5 million and 7 users.',
+  'We expect five million or seven users.',
+  'We expect five million - seven users.',
+  'We need £5m to 7.',
+];
+
+describe('⛔ a range with no ONE shared scale gives nothing, never one end alone (Codex R2 on #3442)', () => {
+  it.each(NO_ONE_SHARED_SCALE)('"%s": the located-amount reader reads neither end', (text) => {
+    expect(read(text)).toEqual([]);
+  });
+  it.each(NO_ONE_SHARED_SCALE)('"%s": the authorship rule\'s span reader reads neither end', (text) => {
+    expect(figuresWritten(text)).toEqual([]);
+  });
+  const texts = (m: string) => ({ now: m, conversation: m, messages: [m] });
+  it.each([
+    ['between 2 and three thousand', 2], ['between 2 and three thousand', 3_000], ['five million to seven', 7], ['five million to seven', 5_000_000],
+  ] as const)('"%s": %d is never the user\'s point', (quote, value) => {
+    expect(userStated({ quote, value }, texts(`We think ${quote} is right.`), { quantity: 'level', node_id: 'fac_1' }).origin).not.toBe('human');
+  });
+  it('CONTRAST: a range with one shared scale is the user\'s at both ends, in words and in digits', () => {
+    const texts1 = texts('We think between 2 and 3 thousand is right.');
+    expect(userStated({ quote: 'between 2 and 3 thousand', value: 2_000 }, texts1, { quantity: 'level', node_id: 'fac_1' }).origin).toBe('human');
+    expect(read('We expect between two and three thousand users.')).toEqual([['words', 2_000], ['words', 3_000]]);
+  });
 });
 
 describe('what the user wrote: a bare low end is never their figure', () => {
@@ -82,8 +121,9 @@ describe('what the user wrote: a bare low end is never their figure', () => {
     expect(figureTheUserWrote(2_000_000, undefined, text)).toBe(false);
   });
 
-  it('a refused low end is no figure at all', () => {
+  it('a refused range is no figure at all, at either end', () => {
     expect(figureTheUserWrote(2, undefined, 'We need 2 to £3m.')).toBe(false);
+    expect(figureTheUserWrote(3_000_000, '£', 'We need 2 to £3m.')).toBe(false);
     expect(figureTheUserWrote(2, undefined, 'We expect two to three hundred and fifty thousand users.')).toBe(false);
   });
 });
@@ -95,6 +135,37 @@ describe('the digit reader: every consumer reads the range at its scale', () => 
   });
   it('the digit reader itself never reads the bare low end', () => {
     expect(findStatedAmounts('We expect 2 to 3 million users.').map((a) => a.magnitude)).toEqual([2_000_000, 3_000_000]);
-    expect(findStatedAmounts('We need 2 to £3m.').map((a) => a.magnitude)).toEqual([3_000_000]);
+    expect(findStatedAmounts('We need 2 to £3m.').map((a) => a.magnitude)).toEqual([]);
+  });
+});
+
+describe('⭐ GENERATED: every two-ended range gives its two true ends or nothing, in every reader (never one end alone)', () => {
+  // Each end in digits or in words, joined four ways, with the scale on neither end, both, the high end only (it closes the range
+  // for both) or the low end only (reversed: the true range is read at that scale, so a bare high end is never a figure).
+  const ends = { digits: ['2', '3'], words: ['two', 'three'] } as const;
+  const scales = [['thousand', 1_000], ['million', 1_000_000]] as const;
+  const joins = [(a: string, b: string) => `${a} to ${b}`, (a: string, b: string) => `${a} or ${b}`, (a: string, b: string) => `${a} – ${b}`,
+    (a: string, b: string) => `between ${a} and ${b}`];
+  const cases: { text: string; truth: [number, number] }[] = [];
+  for (const low of ['digits', 'words'] as const) for (const high of ['digits', 'words'] as const) for (const join of joins) for (const [word, s] of scales) {
+    const [l, h] = [ends[low][0], ends[high][1]];
+    for (const [lowScaled, highScaled] of [[false, false], [true, true], [false, true], [true, false]] as const) {
+      const text = `We expect ${join(lowScaled ? `${l} ${word}` : l, highScaled ? `${h} ${word}` : h)} users.`;
+      cases.push({ text, truth: lowScaled || highScaled ? [2 * s, 3 * s] : [2, 3] });
+    }
+  }
+  const bothOrNothing = (got: readonly number[], truth: readonly number[]): boolean =>
+    got.length === 0 || [...got].sort((a, b) => a - b).join() === [...truth].join();
+
+  it.each(cases.map((c) => [c.text, c.truth] as const))('"%s"', (text, truth) => {
+    expect(bothOrNothing(read(text).map(([, v]) => v), truth), JSON.stringify(read(text))).toBe(true);
+    const points = [...new Set(figuresWritten(text).filter((f) => f.low === f.high).map((f) => f.low))];
+    expect(bothOrNothing(points, truth), JSON.stringify(figuresWritten(text))).toBe(true);
+  });
+
+  it('CONTROL the property is not vacuous: one form with one shared scale reads both ends', () => {
+    const read2 = cases.filter((c) => read(c.text).length === 2);
+    expect(read2.length).toBeGreaterThan(cases.length / 4);
+    expect(read2.some((c) => /\btwo\b/.test(c.text)) && read2.some((c) => /\b2\b/.test(c.text))).toBe(true);
   });
 });

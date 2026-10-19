@@ -272,7 +272,10 @@ describe("the range class: two ends or nothing", () => {
         const whole = (lowBare && closing.length > 0) || join === CONNECTORS[0];
         const highHead = highWords.slice(0, highWords.length - closing.length);
         const ascending = (a: number): number[] => (a < highValue ? [a, highValue] : []);
-        const oracle = !whole ? [lowLiteral, highValue]
+        // A low end with its own scale before a bare high end ("two hundred to three") never gives that scale away, and a bare high
+        // end is never a figure alone: the range gives nothing (DL-3 on Codex R2 #3442).
+        const reversed = join !== CONNECTORS[0] && lm && sw === "" && !hm;
+        const oracle = reversed ? [] : !whole ? [lowLiteral, highValue]
           : lowBare && closing.length > 0
             ? (highHead.some((w) => w === "and" || MULT.includes(w)) ? [] : lowLiteral * shared < highValue ? [lowLiteral * shared, highValue] : ascending(lowLiteral))
             : ascending(lowLiteral);

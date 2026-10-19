@@ -224,12 +224,10 @@ describe('pairs that already agreed about scale are untouched', () => {
  * rather than left invisible — the suite REDs if this set grows OR shrinks.
  */
 describe('KNOWN GAP — a cardinal-words amount is outside the shared-suffix rule', () => {
-  it('still reads "from eight to 11 million" on two scales', () => {
-    const pair = extractGoalTargetWithBaseline('grow ARR from eight to 11 million within 12 months');
-    expect(pair).not.toBeNull();
-    // RECORDED, NOT ENDORSED: 8 against 11,000,000.
-    expect(pair!.baseline).toBe(8);
-    expect(pair!.value).toBe(11_000_000);
+  it('CLOSED (DL-3 on Codex R2 #3442): "from eight to 11 million" is never read on two scales; it reads no pair', () => {
+    // Was RECORDED, NOT ENDORSED: 8 against 11,000,000. Two forms never share one scale, so the words end is not read beside a
+    // digits end and the pair refuses whole (the goal is asked for), never a wrong baseline.
+    expect(extractGoalTargetWithBaseline('grow ARR from eight to 11 million within 12 months')).toBeNull();
   });
 
   it('still reads a words baseline against a words target correctly', () => {

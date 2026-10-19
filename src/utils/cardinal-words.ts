@@ -18,7 +18,8 @@
  * (a spelled zero target would silently bypass the direction refusal's
  * zero-pair carve-out), no fractions ("two and a half million" must REFUSE,
  * never mint 2 — word-numbers.ts learned that the expensive way), no "a
- * hundred" (an article is not a count), no ordinals, no "point five". Every
+ * hundred" (an article is not a count), no ordinals. A decimal is read whole
+ * ("seven point five" is 7.5, never 7: DL-3 ruling, 19 Oct). Every
  * shape outside the grammar yields NO MATCH, and the failure direction is the
  * honest one everywhere in this estate: an unreadable amount asks the user; a
  * confident fragment does not.
@@ -33,7 +34,7 @@
  *     supersedes the other; ship both.
  */
 
-import { MAGNITUDE_MULTIPLIERS } from "./magnitude-alphabet.js";
+import { MAGNITUDE_ALTERNATION, MAGNITUDE_MULTIPLIERS } from "./magnitude-alphabet.js";
 
 /**
  * THE CANONICAL SMALL-CARDINAL MAP — the only place a cardinal word below one
@@ -112,8 +113,14 @@ const TOKEN_ALTERNATION = alternation([
   ...Object.keys(CARDINAL_SCALE_MULTIPLIERS),
 ]);
 
-/** A decimal's digits in words, read one by one after "point" ("seven point five" is 7.5; "one point two five" 1.25). */
-const DECIMAL_DIGITS: Readonly<Record<string, number>> = Object.freeze({ zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 });
+/**
+ * A decimal's digits in words, read one by one after "point" ("seven point five" is 7.5; "one point two five" 1.25): the canonical
+ * cardinals below ten, and "zero" (Codex R2 on #3442: one word-value authority, never a second copy of the map).
+ */
+const DECIMAL_DIGITS: Readonly<Record<string, number>> = Object.freeze({
+  zero: 0,
+  ...Object.fromEntries(Object.entries(CARDINAL_WORD_VALUES).filter(([, value]) => value < 10)),
+});
 const DECIMAL_DIGIT_ALTERNATION = alternation(Object.keys(DECIMAL_DIGITS));
 const FRACTION_ALTERNATION = "halves|half|quarters|quarter|thirds|third";
 
@@ -143,11 +150,36 @@ const START_GUARD = `(?<!\\b(?:${TOKEN_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bp
  * THIRDS"). A pattern that embeds `CARDINAL_NUMBER_SOURCE` takes such a continuation into its own capture instead.
  */
 const NO_LONGER_AMOUNT = `(?!(?:[\\s-]+(?:${TOKEN_ALTERNATION}|and))*[\\s-]+(?:point|${FRACTION_ALTERNATION})\\b)`;
-const ONE_NUMBER = `${START_GUARD}${NUMBER_CORE}${NO_LONGER_AMOUNT}`;
 /** The number just matched ends on "hundred" or a scale word. */
 const ENDS_ON_A_MULTIPLIER = `(?<=\\b(?:${MULTIPLIER_ALTERNATION}))`;
 /** The number just matched is whole: nothing that would continue it, or start another, follows ("… two hundred AND FIFTY"). */
 const WHOLE = `(?![\\s-]+(?:${TOKEN_ALTERNATION})\\b|\\s+and\\s+(?:${SMALL_ALTERNATION})\\b)`;
+/** The number just matched has "hundred" or a scale word in it ("five million", "two hundred and fifty", "one point five million"). */
+const HAS_A_MULTIPLIER = `(?<=\\b(?:${MULTIPLIER_ALTERNATION})(?:(?:\\s+and\\s+|\\s+point\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}|zero))*)`;
+/** What joins a range's two ends in words: "to", "or", or a dash (a hyphen only with space around it: "twenty-five" is one number). */
+const RANGE_JOIN = `(?:\\s+(?:to|or)\\s+|\\s+-\\s+|\\s*[–—]\\s*)`;
+/** What joins a range end in digits to the next end: "to", "or", or any dash ("2-3"). */
+const DIGIT_RANGE_JOIN = `(?:\\s+(?:to|or)\\s+|\\s*[-–—]\\s*)`;
+/** An amount in digits begins: an optional currency mark ("£", "US$"), then a digit. */
+const DIGIT_AMOUNT_START = `(?:[A-Z]{0,3}[^\\s\\w])?\\d`;
+/** An amount in digits ends: its last digit, then its own magnitude and percent sign, if written. */
+const DIGIT_AMOUNT_END = `\\d(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?%?`;
+/**
+ * ⛔ TWO FORMS NEVER SHARE ONE SCALE (DL-3 on Codex R2 #3442: "between 2 and three thousand" credited 2, "five million to 7" 7).
+ * A number in words is never read alone as one end of a range whose other end is in digits, joined by "to", "or", a dash, or "and"
+ * after "between": before it ("2 to three million", "between 2 and three thousand") or after it ("two to 3 million", "between two
+ * and 3 thousand"). The digit reader refuses the digits end of the same range (`joinedToARangeEndInWords`), so such a range gives
+ * nothing, never one end alone.
+ */
+const NOT_AFTER_A_DIGIT_END = `(?<!${DIGIT_AMOUNT_END}${DIGIT_RANGE_JOIN})`
+  + `(?<!\\bbetween\\s+${DIGIT_AMOUNT_START}[\\d,.]*(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?%?\\s+and\\s+)`
+  + `(?!(?<=\\bbetween\\s+)(?:${NUMBER_CORE})\\s+and\\s+${DIGIT_AMOUNT_START})`;
+const NOT_BEFORE_A_DIGIT_END = `(?!${DIGIT_RANGE_JOIN}${DIGIT_AMOUNT_START})`;
+/**
+ * ONE number in free text. `WHOLE` keeps a refusal after it from shortening the capture into a fragment ("two hundred to 3": never
+ * "two").
+ */
+const ONE_NUMBER = `${START_GUARD}${NOT_AFTER_A_DIGIT_END}${NUMBER_CORE}${NO_LONGER_AMOUNT}${WHOLE}${NOT_BEFORE_A_DIGIT_END}`;
 
 /**
  * The fraction words whose arrival after a cardinal phrase means the phrase
@@ -192,10 +224,12 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
  *
  * Shape: ONE number (above), or a RANGE written in words, consumed WHOLE where single captures would misread it: every
  * "between X and Y" (its "and" is the range's, never a compound's: "between two hundred and three thousand" is never
- * 203,000), and "X to Y" / "X or Y" with a shared scale ("two to three million": never 2 and 3,000,000). Any other "X to Y"
- * keeps its ends as single captures, as before ("two to three": 2 and 3). `parseCardinalAmount` refuses a whole range (its
- * connector is outside the vocabulary); `cardinalReadings` reads its two ends. The repetition is greedy, so "two hundred
- * and fifty thousand" is consumed whole.
+ * 203,000), "X to Y" / "X or Y" / "X – Y" with a shared scale ("two to three million": never 2 and 3,000,000), and the same
+ * with a scale on the low end only ("five million to seven", "two hundred and fifty to three": never 7 or 3). Any other "X to Y" keeps its ends as single
+ * captures, as before ("two to three": 2 and 3; "two thousand to three million": 2,000 and 3,000,000). A number in words is
+ * never one end of a range whose other end is in digits (`NOT_AFTER_A_DIGIT_END`). `parseCardinalAmount` refuses a whole
+ * range (its connector is outside the vocabulary); `cardinalReadings` reads its two ends, or nothing. The repetition is
+ * greedy, so "two hundred and fifty thousand" is consumed whole.
  *
  * ⚠ CORRECTED CLAIM (adversarial review F1, executed at `42fe683a`): a fraction-shaped tail ("from one to a target of
  * two and a half million") once committed the fragment 2. The repair is `CARDINAL_FRACTION_CONTINUATION` below, which
@@ -207,7 +241,8 @@ const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?
  */
 export const CARDINAL_AMOUNT_SOURCE =
   `(?:between\\s+${NUMBER_CORE}\\s+and\\s+${NUMBER_CORE}${WHOLE}${NO_LONGER_AMOUNT}`
-  + `|${START_GUARD}${BARE_END}\\s+(?:to|or)\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}${NO_LONGER_AMOUNT}`
+  + `|${START_GUARD}${BARE_END}${RANGE_JOIN}${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}${NO_LONGER_AMOUNT}`
+  + `|${START_GUARD}${NUMBER_CORE}${HAS_A_MULTIPLIER}${RANGE_JOIN}${BARE_END}${WHOLE}${NO_LONGER_AMOUNT}`
   + `|${ONE_NUMBER})`;
 
 /**
@@ -233,6 +268,9 @@ export const CARDINAL_AMOUNT_SOURCE =
  */
 export function parseCardinalAmount(phrase: string | undefined): number | null {
   if (phrase === undefined) return null;
+  // A dash with space beside it, or an en or em dash, joins a range's two ends, never the parts of one number ("five million -
+  // seven" is never 5,000,007; "twenty-five" is one number).
+  if (/\s-|-\s|[–—]/.test(phrase)) return null;
   const tokens = phrase
     .toLowerCase()
     .split(/[\s-]+/)
@@ -343,9 +381,10 @@ function endsSharingScale(low: string, high: string, valueOf: (phrase: string) =
  * ⭐ THE ONE READING OF A NUMBER-WORDS CAPTURE (DL-3: the range class; Codex R1 on #3442). What a `CARDINAL_AMOUNT_SOURCE`
  * capture says, as figures:
  *  · ONE number → its value (`valueOf`; by default `parseCardinalAmount`), or nothing.
- *  · A RANGE ("between X and Y", "X to Y", "X or Y") → its two ends (`endsSharingScale`), each carrying the WHOLE capture as
- *    written, so the unit after the range is read for both; or nothing. "between X and Y" splits at the one "and" that leaves
- *    two readable ends, low below high ("between one hundred and fifty and two hundred": 150 and 200); two such splits, none.
+ *  · A RANGE ("between X and Y", "X to Y", "X or Y", "X – Y") → its two ends (`endsSharingScale`), each carrying the WHOLE
+ *    capture as written, so the unit after the range is read for both; or nothing ("five million to seven": the low end's own
+ *    scale is never given to the high end). "between X and Y" splits at the one "and" that leaves two readable ends, low below
+ *    high ("between one hundred and fifty and two hundred": 150 and 200); two such splits, none.
  * Never a sum of the ends, a glue of them, or one end alone.
  */
 export function cardinalReadings(
@@ -353,10 +392,10 @@ export function cardinalReadings(
   index: number,
   valueOf: (phrase: string) => number | null = parseCardinalAmount,
 ): readonly CardinalReading[] {
-  const words = matched.trim().split(/\s+/);
+  const words = matched.trim().replace(/\s*([–—])\s*/g, " $1 ").split(/\s+/);
   const between = words[0]?.toLowerCase() === "between";
   const body = between ? words.slice(1) : words;
-  const connectors = between ? ["and"] : ["to", "or"];
+  const connectors = between ? ["and"] : ["to", "or", "-", "–", "—"];
   const splits = body.flatMap((w, i) => (i > 0 && i < body.length - 1 && connectors.includes(w.toLowerCase()) ? [i] : []));
   if (!between && splits.length === 0) {
     const value = valueOf(matched);
@@ -369,4 +408,22 @@ export function cardinalReadings(
   if (readings.length !== 1) return [];
   const [low, high] = readings[0]!;
   return [{ magnitude: low, index, matchedText: matched }, { magnitude: high, index, matchedText: matched }];
+}
+
+const WORDS_RANGE_END_AFTER = new RegExp(`^(?:${DIGIT_RANGE_JOIN}(?:${NUMBER_CORE})\\b)`, "i");
+const WORDS_RANGE_END_BEFORE = new RegExp(`(?:\\b(?:${NUMBER_CORE})${DIGIT_RANGE_JOIN}|\\bbetween\\s+(?:${NUMBER_CORE})\\s+and\\s+)$`, "i");
+const WORDS_RANGE_END_AFTER_BETWEEN = new RegExp(`^\\s+and\\s+(?:${NUMBER_CORE})\\b`, "i");
+
+/**
+ * ⛔ TWO FORMS NEVER SHARE ONE SCALE, at the digit reader (DL-3 on Codex R2 #3442). Whether the amount in digits written at
+ * `[start, end)` is one end of a range whose other end is a number in words: joined by "to", "or" or a dash ("2 to three
+ * million", "five million to 7"), or by "and" after "between" ("between 2 and three thousand"). The words end is never read
+ * alone there (`CARDINAL_AMOUNT_SOURCE`), so the digit reader refuses this end too: such a range gives nothing, never one end
+ * alone. Pure.
+ */
+export function joinedToARangeEndInWords(text: string, start: number, end: number): boolean {
+  const before = text.slice(Math.max(0, start - 160), start);
+  const after = text.slice(end, end + 160);
+  return WORDS_RANGE_END_AFTER.test(after) || WORDS_RANGE_END_BEFORE.test(before)
+    || (/\bbetween\s+$/i.test(before) && WORDS_RANGE_END_AFTER_BETWEEN.test(after));
 }
