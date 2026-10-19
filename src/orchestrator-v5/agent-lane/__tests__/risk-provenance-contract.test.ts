@@ -283,4 +283,39 @@ describe('draft source → risk admission → retained participation → readine
       if (fault === 'duplicate id') g.nodes.push(structuredClone(r));
       expect([...unsizedOlumiRiskIds(g)]).toEqual([]);
     });
+
+  // ⭐ DL-3 19 Oct (verifier K-WORDS, capacity journey): a quote is a source for the CLAIM, not a change of author. The drafter labels its
+  // own risk `inferred` and cites, as the risk's measure, only the user's sentence that the LINK's verified effect statement owns. RED at
+  // 390a1dbe: construction made it unverified human material (`unverified_brief`), so readiness withheld the whole Run for its figure.
+  const RANGE = 'Each extra team adds about 20 projects per week, between 10 and 30.';
+  const linkRange = { subject: { kind: 'link', label: 'Teams', to_label: 'Output' }, field: 'effect', form: 'range', quote: RANGE,
+    low: 10, high: 30, unit: 'projects per week' };
+  const borrowedMeasure = riskStatement(RANGE, { field: 'measure', form: 'describes' });
+  const withTag = (tag: string, statements: unknown[]) => { const m = draft(statements); m.risks[0].provenance = tag; return m; };
+  it.each(['inferred', 'ai_proposed'] as const)('an Olumi (%s) risk citing only another subject\u2019s verified figure sentence stays Olumi\u2019s, left out, blocking nothing', tag => {
+    const { graph, risk, out } = admitted(withTag(tag, [linkRange, borrowedMeasure]), `${BASE} ${RANGE}`);
+    expect(risk.provenance).toBe('ai_inferred');
+    expect(risk.user_statements).toBeUndefined();
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([risk.id]);
+    expect(issuesFor(graph, risk.id)).toEqual([]);
+    expect(resolveRunAdmission(graph).willProceed, JSON.stringify(resolveRunAdmission(graph).assessment.issues)).toBe(true);
+    // The user's sentence stays with the link that owns it, as theirs.
+    const link = graph.edges.find((e: Rec) => e.from === 'teams' && e.to === 'output');
+    expect(JSON.stringify(link)).toContain(RANGE);
+    expect(JSON.stringify(out.loss)).not.toContain('The risk’s claimed source could not be verified');
+  });
+  it('CONTROL: the same borrowed sentence on a risk the drafter calls the user\u2019s keeps today\u2019s path (unverified human material, asks)', () => {
+    const { graph, risk } = admitted(withTag('explicit', [linkRange, borrowedMeasure]), `${BASE} ${RANGE}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect(risk.user_statements).toBeUndefined();
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+  });
+  it('CONTROL (AIE 396071d7): an Olumi-tagged risk the user also names in a sentence of its own stays human material and asks; never relabelled Olumi\u2019s', () => {
+    const own = 'Specialist capacity below target is a concern for us.';
+    const { graph, risk } = admitted(withTag('inferred', [linkRange, borrowedMeasure, riskStatement(own)]), `${BASE} ${RANGE} ${own}`);
+    expect(risk.provenance).toBe('unverified_brief');
+    expect([...unsizedOlumiRiskIds(graph)]).toEqual([]);
+    expect(issuesFor(graph, risk.id).some(i => i.code === 'MISSING_FACTOR_LEVEL')).toBe(true);
+  });
 });
