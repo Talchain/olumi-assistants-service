@@ -112,3 +112,27 @@ describe('DL ruling on #2235: on the reviewer\'s 32-message corpus, the door nev
     expect(held![0]!.basis).toBe('olumi_estimate');
   }, 60_000);
 });
+
+/**
+ * ⛔ WITHHOLDING READS THE RAW AMOUNTS (DL-3 on Codex #3438 R7: "raw readers stay raw for withholding and source retention"). A
+ * figure the brief holds only as a refused fragment (a tolerance) is still in the user's words, so its origin stays unknown and
+ * nothing is held; it never becomes Olumi's estimate because the one check refused to credit it.
+ */
+it('a refused fragment in the brief keeps the figure’s origin unknown: nothing held, never Olumi’s estimate', async () => {
+  const brief = 'We run twenty give or take five night shift engineers.';
+  let held = false;
+  const d: InternalDispatch = async (path) => (path.endsWith('/graph')
+    ? { status: 200, json: { graph: { nodes: E07.nodes, edges: E07.edges }, graph_hash: 'h1', brief_text: brief } }
+    : { status: 404, json: {} });
+  const caps = createAgentCapabilities(d, new ProposalStore(), undefined, 'full', undefined, {
+    holdAddFactor: async (input: HoldAddFactorInput): Promise<HoldAddFactorResult> => {
+      held = true;
+      return { status: 'held', proposal_id: gmHeldProposalRef(SID, `node:${input.factors[0]!.id!}`), factor_ids: input.factors.map((f) => f.id!), public_label: 'Add', held_message: 'Yes' };
+    },
+  } as never) as unknown as { proposeNewFactor: (ctx: unknown, args: unknown) => Promise<Record<string, unknown>> };
+  const msg = 'Add the night shift engineers to the model.';
+  const r = await caps.proposeNewFactor({ scenario_id: SID, authenticated_user_id: null, request_id: 'r', user_text: msg, user_turn_text: msg },
+    { factors: [{ label: 'Night shift engineers', unit: 'engineers', today: { value: 5 }, affects: TARGET, direction: 'positive' }], rationale: 'probe' });
+  expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'origin_unknown' });
+  expect(held).toBe(false);
+});
