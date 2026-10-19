@@ -7,7 +7,7 @@
  *  · revision: the read's analysis hash, identity hash and scenario revision;
  *  · the model as stored (nodes, option settings, links) with each figure's source as the ONE authority answers it
  *    (`provenanceOf` / `authorshipOf`: origin human | ai | unknown, `accepted` kept apart from origin, the role) and each
- *    node's kept statements (speaker and verbatim quote, `recordsWithUnknownSpeakerOn`). Unknown stays unknown; a person's
+ *    node's kept claims (who said it and the verbatim quote, `claimRecordsOn`, the one claim reader since #3427). Unknown stays unknown; a person's
  *    figure whose role is unverified says what its carrier does not record (`observed_not_recorded`);
  *  · readiness: the run admission's verdict and the typed blocking codes (`resolveRunAdmission`), with no ask text;
  *  · the selected Run: its id, the hash it ran on, its currency and leader permission, and the licensed Run facts
@@ -19,7 +19,7 @@ import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabiliti
 import { FRESH_READ } from '../../agent-lane/turn-read-cache.js';
 import { readRunEvidence } from '../../agent-lane/run-evidence.js';
 import { runFactsOf } from '../../agent-lane/run-facts.js';
-import { recordsWithUnknownSpeakerOn } from '../../statement-door/statements.js';
+import { claimRecordsOn } from '../../statement-door/statements.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { authorshipOf, provenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
@@ -45,8 +45,8 @@ function nodeOf(n: Rec, byId: ReadonlyMap<string, Rec>): Rec {
     factor_id: factorId, cell, source: provenanceOf({ setting: cell, target: byId.get(factorId) }),
   })) : [];
   const observedSource = observed === undefined ? undefined : provenanceOf({ value: observed });
-  const statements = recordsWithUnknownSpeakerOn(n).map((r) => ({ subject_key: r.subject_key, field: r.field,
-    statements: r.statements.map((s) => pick(s, ['speaker', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated'])) }));
+  const statements = claimRecordsOn(n).map((r) => ({ subject_key: r.subject_key, field: r.field,
+    statements: r.statements.map((s) => pick(s, ['speaker', 'said_by', 'party', 'quote', 'form', 'low', 'high', 'unit', 'period', 'conditions', 'qualifier', 'negated'])) }));
   return {
     ...pick(n, ['id', 'kind', 'label', 'description', 'proposed_by', 'analysis_participation', 'option_status']),
     ...(n.provenance === undefined ? {} : { added_by: authorshipOf({ nodeTag: n.provenance }) }),
