@@ -67,7 +67,9 @@ describe('B2: an assumption claimed as the user\'s figure WITH its statement is 
       user_material_unverified: true, not_the_users_statement: source }] });
     expect((r.assumptions as Rec[])[0]).not.toHaveProperty('your_figure');
     expect(r.public_label).toBe(`${source}. The quoted source is retained as shown; approving does not make it your own statement of the figure. `
-      + 'Revise 1 value you asked to change: Team effort: 30 hours a week → 40 hours a week (not verified as a figure you stated)');
+      + 'Revise 1 value: Team effort: 30 hours a week → 40 hours a week (not verified as a figure you stated)');
+    // NEGATIVE: a reported figure is Olumi's reading of the binding, never a change the user asked for.
+    expect(r.public_label).not.toContain('you asked to change');
     const p = store.get(String(r.proposal_id))!;
     expect(p.provenance.authored_by).toBe('model_proposed');
     expect(p.operations).toEqual([expect.objectContaining({ op: 'set_factor_value', path: 'effort',

@@ -7764,7 +7764,9 @@ export function createAgentCapabilities(
       const freshOlumis = fresh.filter((a) => !a.userWrote);
       const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
       const acts = [
-        ...(revisions.length > 0 ? [`revise ${plural(revisions.length, 'value')}${fresh.length === 0 ? ' you asked to change' : ''}`] : []),
+        // "you asked to change" only where every revision is bound to its item by the user's words: a revision whose binding is Olumi's
+        // reading (a figure inside a company name, a reported figure) was never asked for by the user (8b on #3429 7abd1c82).
+        ...(revisions.length > 0 ? [`revise ${plural(revisions.length, 'value')}${fresh.length === 0 && !revisions.some((a) => a.bindingUnverified) ? ' you asked to change' : ''}`] : []),
         ...(freshYours.length > 0 ? [`record ${plural(freshYours.length, 'figure')} you gave`] : []),
         ...(freshReported.length > 0 ? [`use ${plural(freshReported.length, 'figure')} from the quoted words`] : []),
         ...(freshOlumis.length > 0 ? [`adopt ${plural(freshOlumis.length, 'starting assumption')}`] : []),

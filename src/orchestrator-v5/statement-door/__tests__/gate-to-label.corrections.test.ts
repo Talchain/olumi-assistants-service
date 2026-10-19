@@ -661,6 +661,14 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
     expect(claimRecordFor(r.g, NIGHT)!.statements.some((st) => st.low === 70 && saidByOf(st) === 'user' && st.checks === undefined)).toBe(false);
   });
 
+  it('FULL-CONTEXT SPAN (AIE span text): the old figure beside the new one is context; the night figure is written from its own occurrence', async () => {
+    const words = 'Correction: night shifts take 45 hours per week, not 40; day shifts take 70 hours per week.';
+    const span = 'night shifts take 45 hours per week, not 40';
+    const r = await run(graph(), words, [nightEdit('retracted', { value: 45, unit: 'hours per week', span })]);
+    expect(nodeOf(r.g, 'night').observed_state).toMatchObject({ raw_value: 45, source: 'user_override' });
+    expect(nodeOf(r.g, 'day').observed_state).toEqual(nodeOf(graph(), 'day').observed_state);
+  });
+
   it('P1-1 CONTRAST: the night figure stated in its own span is written, with that span as the claim\'s quote', async () => {
     const words = 'Correction: night shifts take 45 hours per week, not 40; day shifts take 70 hours per week.';
     const span = 'night shifts take 45 hours per week';
@@ -750,8 +758,22 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
       'night shifts take 45 hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['another speaker’s quoted words (digits, straight marks)', 'Correction: our matron said "night shifts take 45 hours per week", not 40.',
       'night shifts take 45 hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
-    // The count-in-words variant returns WITH its own-words positive when the shared located-amount reader lands (#3429): until then
-    // this branch reads no words, so a words negative would pass vacuously (Codex R3 §1).
+    // Words, on THE one located-amount reader (#3429): each negative stands beside its own-words POSITIVE (OWN WORDS rows below), so
+    // none passes vacuously (Codex R3 §1).
+    ['another speaker’s quoted words (a count in words)', 'Correction: our matron said “night shifts take forty-five hours per week”, not 40.',
+      'night shifts take forty-five hours per week', 45, true, 'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['a denied figure in words', 'Night shifts do not take forty-five hours per week.', 'Night shifts do not take forty-five hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['a bound in words, not a point', 'Night shifts take at least forty-five hours per week.', 'Night shifts take at least forty-five hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    // ⛔ KNOWN RED on this wip (handed to the reader's owner, #3429): `comparatorTheUserWroteFor` locates figures in digits only, so a
+    // bound written in words beside the item's name is dropped and the point saved. The digit twin below is refused.
+    ['a bound in words beside the item’s name', 'Correction: at least forty-five night shift hours per week.', 'at least forty-five night shift hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['a bound in digits beside the item’s name', 'Correction: at least 45 night shift hours per week.', 'at least 45 night shift hours per week', 45, true,
+      'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
+    ['an ordinal, never a figure', 'Correction: night shifts take the twenty-first slot, hours per week unknown.', 'night shifts take the twenty-first slot', 20, true,
+      'I could not confirm that 20 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['a denied figure', 'Night shifts do not take 45 hours per week.', 'Night shifts do not take 45 hours per week', 45, true,
       'I could not confirm that 45 hours per week describes “Night shift hours” in this source, so this card will not save it there.'],
     ['a bound, not a point', 'Night shifts take at least 45 hours per week.', 'Night shifts take at least 45 hours per week', 45, true,
@@ -762,6 +784,16 @@ describe('RE-SCOPE: one correction authority binds each figure to its quantity a
     expect(nodeOf(r.g, 'night')).not.toHaveProperty('observed_state');
     expect(r.card.public_label).toContain(line);
     expect(claimRecordFor(r.g, NIGHT)!.statements[0]).toMatchObject({ low: value, checks: { figure_found: false } });
+  });
+
+  it.each([
+    ['Correction: night shifts take forty-five hours per week, not 40.', 'night shifts take forty-five hours per week'],
+    ['Night shifts take forty five hours per week.', 'Night shifts take forty five hours per week'],
+  ] as const)('OWN WORDS (positive for every words negative): “%s” writes the user’s 45, bound to its item', async (words, span) => {
+    const r = await run(graph(), words, [nightEdit('retracted', { value: 45, unit: UNIT, span })]);
+    expect(nodeOf(r.g, 'night').observed_state).toMatchObject({ raw_value: 45, source: 'user_override' });
+    expect(claimRecordFor(r.g, NIGHT)!.statements[0]).toMatchObject({ quote: span, low: 45, high: 45 });
+    expect(claimRecordFor(r.g, NIGHT)!.statements[0]!.checks).toBeUndefined();
   });
 
   it.each(['Correction: it is 45 hours per week, not 40.', 'Correction: 45 hours per week.'])('LABELLED READING CONTROL (DL-3 21:26Z): an elliptical answer naming no item, the only figure in its line, is written as Olumi’s reading, labelled (“%s”)', async (words) => {
