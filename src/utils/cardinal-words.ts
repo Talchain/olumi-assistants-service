@@ -468,7 +468,8 @@ function rangeAround(text: string, start: number, end: number): readonly [number
  *  · its other end is an amount this grammar reads no figure from (`UNREAD_AMOUNT`: "a hundred to 200", "two to a few hundred");
  *  · it sits in a "between … and" it does not span ("between 20 and thirty"; "between two and three" is read whole);
  *  · a scale belongs to one end only ("five million to seven", "a million to seven": never 7);
- *  · an end is not complete (`ENDPOINT_CONTINUATION`: "twenty to thirty or so", "a dozen or so to thirty").
+ *  · an end is not complete (`ENDPOINT_CONTINUATION`: "twenty to thirty or so", "a dozen or so to thirty"), or is an amount opened
+ *    by an article, which a reader reads on its own only ("a hundred to two hundred": never 100 alone).
  * The free-text readers apply it through `cardinalReadings`; the goal extractor to each amount it captures. The digit reader refuses
  * its own end of the same ranges (`rangeEndWithoutItsPair`). Pure.
  */
@@ -482,6 +483,8 @@ export function cardinalEndStandsAlone(text: string, start: number, end: number)
   const range = A_RANGE_INSIDE.test(matched);
   if (!range && (tokensOf(matched).some(isMultiplier) ? A_BARE_END_AFTER.test(after) : A_SCALED_END_BEFORE.test(before))) return true;
   const anEnd = range || AN_END_BEFORE.test(before) || AN_END_AFTER.test(after);
+  // An amount opened by an article (a reader's own: "a hundred and twenty", #3438) is read on its own only, never as a range end.
+  if (anEnd && !range && /^an?\s/i.test(matched)) return true;
   const continues = CONTINUES.exec(after);
   const pair = A_NUMBER_END_AFTER.exec(after);
   return (continues !== null && (anEnd || AN_END_AFTER.test(after.slice(continues[0].length))))

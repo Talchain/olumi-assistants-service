@@ -10,6 +10,7 @@ import {
   planPickChipId, settleMethodTurn, type MethodReadback, type MethodTurn, type RunMethodTurn,
 } from '../method-turn.js';
 import { withApprovedMethodWords } from './helpers/approved-method-words.js';
+import { assertUserLinkStories } from './helpers/user-link-stories.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[]; goal_constraints?: unknown };
 type Read = {
@@ -145,7 +146,8 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     assert.equal(cardCallFor(fallback.target, c.graph), null);
   });
 
-  it('W9 all-user-sized links/values still refuse', () => {
+  // ⭐ RE-RULED (AIE 19 Oct AMEND, DL-3 order; was "still refuse", pinned to base.A): the user's own links ground story-only stories.
+  it('W9 all-user-sized links/values ground story-only stories on their own links (was: refuse)', () => {
     const c = JSON.parse(readFileSync(new URL('./fixtures/scout-premortem-paths.json', import.meta.url), 'utf8')).draw1;
     const graph: Graph = structuredClone(c.graph);
     graph.nodes = graph.nodes.filter(n => n.kind !== 'risk');
@@ -157,20 +159,23 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
       ...n, observed_state: { ...n.observed_state, source: 'user_specified' },
     } : n);
     delete graph.goal_constraints;
-    const out = methodTurnForReadback(PREMORTEM_PRESS_ID, { ...c, graph });
-    assert.equal(out?.kind, 'unavailable');
-    assert.equal(out?.kind === 'unavailable' && out.reason, 'no_grounded_item');
-    // Base A is the same complete decision refusal; pin the entire output, including its actions and copy.
-    assert.equal(JSON.stringify(out), JSON.stringify(withApprovedMethodWords(base.A)));
+    const out = assertUserLinkStories(methodTurnForReadback(PREMORTEM_PRESS_ID, { ...c, graph }), graph);
+    assert.equal(out.context.decision_level, true);
+    assert.equal(out.context.not_cited, 'no_identified_plan');
   });
 
-  it('explicit unlicensed A pick retains the base empty-path refusal', () => {
-    const out = turn(captured('A'), planPickChipId('raise_prices_by_10'));
-    assert.equal(out?.kind, 'unavailable');
-    assert.equal(out?.kind === 'unavailable' && out.reason, 'no_grounded_item');
-    assert.ok(out?.kind === 'unavailable' && out.reply.includes('‘Raise prices by 10%’'));
+  // ⭐ RE-RULED (AIE 19 Oct AMEND; was "retains the base empty-path refusal"): the pick stays on its own plan and path, and that
+  // path's user-sized links ground story-only stories.
+  it('explicit unlicensed A pick stays on its plan; its own user-sized links ground story-only stories (was: refusal)', () => {
+    const c = captured('A');
+    const out = assertUserLinkStories(turn(c, planPickChipId('raise_prices_by_10')), c.graph);
+    assert.deepEqual(out.context.plan, { option_id: 'raise_prices_by_10', label: 'Raise prices by 10%', basis: 'user_selected' });
+    const onPick = new Set(signalsOf(c)['model.goal_path_links'].filter(l => l.option_ids.includes('raise_prices_by_10')).map(l => l.link_id));
+    for (const item of out.context.supplied_items) assert.ok(onPick.has(item.id), `${item.id} is off the picked plan's path`);
   });
 
+  // ⭐ RE-RULED (AIE 19 Oct AMEND): the status-quo-only lever and its link still never ground anything (the boundary this row
+  // protects); the own options' user-sized links now ground story-only stories, so the turn runs without them.
   it('a status-quo-only lever on a real goal path cannot rescue the own-option union', () => {
     const c = captured('A');
     for (const n of c.graph.nodes.filter(n => n.kind === 'factor')) n.observed_state.source = 'user_specified';
@@ -183,13 +188,18 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     assert.ok(signals['model.goal_path_factors'].some(f => f.factor_id === 'off_path' && f.value_authorship === 'unknown'));
     assert.deepEqual(signals['model.goal_path_links'].find(l => l.link_id === 'off_path->monthly_recurring_revenue')?.option_ids,
       ['keep_pricing_as_it_is']);
-    assert.equal(turn(c)?.kind, 'unavailable');
+    const statusQuoOnly = ['off_path', 'off_path->monthly_recurring_revenue'];
+    const first = assertUserLinkStories(turn(c), c.graph);
+    assert.deepEqual(first.context.supplied_items.filter(i => statusQuoOnly.includes(i.id)), []);
     // Ownership and path are independent inputs to science. Bind the target as an own lever in the graph while
     // retaining the typed status-quo-only path, so this probe isolates the path guard rather than the lever guard.
     c.graph.nodes.find(n => n.id === 'raise_prices_by_10')!.interventions.off_path = 10;
-    assert.equal(methodTurnFromSignals(PREMORTEM_PRESS_ID, signals, c.graph)?.kind, 'unavailable');
+    const second = assertUserLinkStories(methodTurnFromSignals(PREMORTEM_PRESS_ID, signals, c.graph), c.graph);
+    assert.deepEqual(second.context.supplied_items.filter(i => statusQuoOnly.includes(i.id)), []);
   });
 
+  // ⭐ RE-RULED (AIE 19 Oct AMEND): the lever fallback stays conservative (no such factor is ever grounded, with or without a card);
+  // a current decision's own user-sized links now ground story-only stories instead; a stale Run keeps the full refusal.
   for (const change of ['user_source', 'brief_source', 'explicit_type', 'node_explicit_type', 'accepted', 'no_value', 'no_source', 'stale'] as const) {
     it(`empty union stays conservative: ${change}`, () => {
       const c = captured('A');
@@ -203,7 +213,8 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
         if (change === 'no_source') delete n.observed_state.source;
       }
       if (change === 'stale') (c.analysis_state as { run_state: { kind: string } }).run_state.kind = 'complete_stale';
-      assert.equal(turn(c)?.kind, 'unavailable');
+      if (change === 'stale') { assert.equal(turn(c)?.kind, 'unavailable'); return; }
+      assertUserLinkStories(turn(c), c.graph);
     });
   }
 });

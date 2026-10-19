@@ -44,17 +44,21 @@ const DRAFT = {
 };
 
 describe('A4b: a risk that cuts a money goal is drafted, and admitted, as that money', () => {
-  it('the rule is in what the drafter is SENT, scoped to money the user wants MORE of (never a cost or a spend)', async () => {
+  it('the rule is in what the drafter is SENT: a distinct same-frame loss only, never the goal\'s own shortfall', async () => {
     let sent = '';
     const call = (async (req: { instructions: string }) => { sent = req.instructions; return { text: JSON.stringify(DRAFT) }; }) as unknown as CallStructuredModel;
     const dispatch: InternalDispatch = async (path) => (path.endsWith('/graph/register')
       ? { status: 200, json: { model_version: { version_number: 1 } } } : { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } });
     await buildModelFromBrief('a4b0a4b0-0000-4a4b-8a4b-a4b0a4b0a4b0', PAUL, dispatch, call);
-    const rule = String(BUILD_INSTRUCTIONS).match(/A RISK THAT CUTS A MONEY GOAL IS THAT MONEY[^']*?LESS of \(a cost or a spend\)\./)?.[0];
+    // AIE risk-mechanism consolidation (0e20eb33, refined 5a909f57): a distinct same-frame loss of MORE-money only, in the
+    // supported -1 / per-1 / definitional shape.
+    const rule = String(BUILD_INSTRUCTIONS).match(/A DISTINCT MONETARY LOSS CAN SUBTRACT FROM THE SAME MONEY GOAL\.[^']*?do not run an undisclosed placeholder or invent certainty\./)?.[0];
     expect(rule).toBeDefined();
-    expect(sent).toContain('A RISK THAT CUTS A MONEY GOAL IS THAT MONEY');
-    expect(sent).toContain('money the user wants MORE of');
-    expect(sent).toContain('effect_amount -1, effect_per_source_change 1 and definitional true');
+    expect(sent).toContain(rule);
+    expect(sent).toContain('Apply this accounting shape only when the goal is an amount of money the user wants MORE of');
+    expect(sent).toContain('link that loss to the goal with effect_amount -1, effect_per_source_change 1 and definitional true');
+    expect(sent).toContain('A goal shortfall, missed target, absence of testing or failure probability is not an extra monetary loss to deduct.');
+    expect(sent).not.toContain('A RISK THAT CUTS A MONEY GOAL IS THAT MONEY');
   });
 
   it('the shape it asks for is admitted `definitional` into Paul\'s frameless £ goal (−£1 per £1, natural size exact)', async () => {

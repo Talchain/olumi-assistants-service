@@ -32,10 +32,10 @@
  */
 import { requestWasTyped } from '../../cee/provenance/provenance-of.js';
 import { launchWindowOf } from '../goal-target/goal-target-basis.js';
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, joinedAsRange, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
-import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, cardinalReadings, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_WORDS, CARDINAL_HUNDRED_WORD, CARDINAL_SCALE_MULTIPLIERS, CARDINAL_WORD_VALUES, cardinalReadings, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -48,6 +48,7 @@ import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modell
 import { isProportionScaledFactor } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { readCount } from './same-unit.js';
+import { periodNoun } from '../../utils/unit-alphabet.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -73,16 +74,100 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
  *  · A count followed by its COUNTED NOUN PHRASE (`countedPhraseAfter`) counts THAT: where the phrase names something and no word of
  *    the held unit, it is another quantity, in digits as in words ("45 nurses" is no figure of hours, "300 Pro seats" none of £/month;
  *    DL-3 on #3429). A headcount unit counts any phrase; a figure with no noun after it ("45 now", "all 6 on a prototype") reads as before.
- *  · A word is a figure only where it counts something: "one OF them", "the one WHO" and "not twelve." are no figures.
+ *  · An amount is credited only as a standalone, complete span (`amountComplete`): never part of a joined expression; in words, its
+ *    quantity's word right after it.
  */
 export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string): boolean {
-  const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
+  const end = a.index + a.matchedText.length;
+  const counted = countedPhraseAfter(text, end);
   const held = namingWords(unit), said = namingWords(counted);
-  // A headcount unit (`unitFamilyOf` 'count': people, hires, FTE, seats…) counts whatever its phrase names ("300 subscribers" are people).
-  const another = (a.kind === 'plain' || a.kind === 'words') && held.length > 0 && !held.some((h) => unitFamilyOf(h) === 'count')
-    && said.length > 0 && !said.some((w) => held.some((h) => sameWord(w, h)));
-  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && (a.kind !== 'words' || counted !== '')
+  // An amount in words reads the same rule (`countsHeldUnit`) inside the one eligibility (`amountComplete`).
+  const another = a.kind === 'plain' && said.length > 0 && !countsHeldUnit(said, held);
+  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && amountComplete(a, unit, text)
     && !inAnotherSpeakersWords(text, a);
+}
+
+/**
+ * ⛔ THE ONE ELIGIBILITY of a written amount (DL-3 decisions on Codex #3438 R4–R6), read by the one check, the verifier's figure list
+ * (`figuresWritten`) and its speaker check. An amount is credited only as a standalone, complete span:
+ *  · never one part of a JOINED EXPRESSION, in digits or words (`joinedToAnother`; R6: "… twenty give or take five hours" credited 5
+ *    as the hours, a tolerance, never the quantity's value);
+ *  · a number in words: its quantity's noun phrase starts IMMEDIATELY after it (`countedPhraseAfter`: a space, no punctuation, cut at a
+ *    preposition or conjunction), names something ("one OF them", "the one WHO", "forty-five now" and "not twelve." are no figures),
+ *    holds no other number word ("forty-five extra FIVE hours") and, where `unit` has words, names the held unit (a headcount unit
+ *    counts any noun; R5: "… and twenty-odd hours" credited 120).
+ * Anything else, and it is not credited: an under-claim, never a prefix value or an operand. Digits otherwise keep their own grammar.
+ */
+export function amountComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
+  return !joinedToAnother(a, text) && wordsSpanComplete(a, unit, text);
+}
+
+/** The words half of the one eligibility (`amountComplete`): an amount in words is a complete span naming the held unit. Digits: true. */
+export function wordsSpanComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
+  if (a.kind !== 'words') return true;
+  const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
+  const said = namingWords(counted), held = namingWords(unit);
+  return said.length > 0 && !counted.split(/\s+/).some((w) => /\d/.test(w) || COUNTING_WORDS.has(w.toLowerCase())) && countsHeldUnit(said, held);
+}
+
+/**
+ * Whether `a` and the amount right before or after it, in one clause, are ONE JOINED EXPRESSION (DL-3 class rule on Codex #3438 R6):
+ * the first carries no unit of its own and the words between them only join the two: nothing but joining words ("20 plus or minus
+ * 5", "20 ± 5", "5 or 6"), or one word that is no unit followed by a joining word and more words ("twenty give or take five"). Both
+ * are refused. Never joined: a range in digits (`joinedAsRange`, the range grammar's: "10 to 30", "between 10 and 30", "from 400 to 500"), an
+ * amount with its own unit (money, a percentage: "that one £62"; or a unit word after the first: "two engineers or five analysts"),
+ * or across a sentence.
+ */
+function joinedToAnother(a: WrittenAmount, text: string): boolean {
+  // The touching rule's other part (`touchesAnotherNumber`): a number in words joined to plain digits ("ten 5-hour shifts", "twenty
+  // plus 5", "3 and a half") is one expression. The reader refuses the words, and these digits go with them.
+  if (a.kind === 'plain' && (NUMBER_WORD_BEFORE.test(text.slice(0, a.index)) || NUMBER_WORD_AFTER.test(text.slice(a.index + a.matchedText.length)))) return true;
+  const all = writtenAmountsInOrder(text);
+  const i = all.findIndex((x) => x.index === a.index && x.matchedText.length === a.matchedText.length);
+  return i !== -1 && ((i > 0 && joinedPair(all[i - 1]!, a, text)) || (i + 1 < all.length && joinedPair(a, all[i + 1]!, text)));
+}
+
+function joinedPair(p: WrittenAmount, b: WrittenAmount, text: string): boolean {
+  const end = p.index + p.matchedText.length;
+  const between = text.slice(end, b.index);
+  const bare = (x: WrittenAmount): boolean => x.kind === 'plain' || x.kind === 'words';
+  if (end > b.index || /[.;:!?()\n]/.test(between) || !bare(p) || !bare(b)) return false;
+  const asStated = (x: WrittenAmount): StatedAmount => ({ kind: 'plain', magnitude: x.magnitude, index: x.index, matchedText: x.matchedText });
+  // A range in digits keeps its own grammar. A range with an end in words is the range class's to read as its two ends (#3445); until
+  // then neither end is a standalone value ("two to three users": "three users" is a complete span, never the user's 3 alone).
+  if (joinedAsRange(text, asStated(p), asStated(b))) return p.kind === 'words' || b.kind === 'words';
+  const words = between.match(/[A-Za-z][A-Za-z-]*/g) ?? [];
+  const joins = (w: string): boolean => JOINING_WORDS.has(w.toLowerCase());
+  // Nothing between them but joining words, or a plus-minus sign: "5 or 6", "20 plus or minus 5", "20 ± 5", "20 +/- 5". Any other
+  // sign keeps its own grammar (a ratio "4.2/5", a product "2×2", a sum "0.45+0.55").
+  if (words.every(joins) && /^(?:±|\+\/?-)?$/.test(between.replace(/[A-Za-z]+|\s+/g, ''))) return true;
+  const [first, second, ...rest] = words;
+  return first !== undefined && second !== undefined && joins(second) && namingWords(first).length > 0 && unitFamilyOf(first) === null
+    && rest.length > 0 && namingWords(rest.join(' ')).length > 0 && !rest.some((w) => PHRASE_BREAK.has(w.toLowerCase()));
+}
+
+/** Every amount `text` writes, in order (one reading per text: the eligibility asks it once per amount). */
+let amountsMemo: { readonly text: string; readonly amounts: readonly WrittenAmount[] } | undefined;
+function writtenAmountsInOrder(text: string): readonly WrittenAmount[] {
+  if (amountsMemo?.text !== text) amountsMemo = { text, amounts: [...amountsWrittenIn(text)].sort((x, y) => x.index - y.index) };
+  return amountsMemo.amounts;
+}
+
+/**
+ * Whether a counted phrase (its naming words `said`) counts the held unit: no unit words to hold, a headcount unit (`unitFamilyOf`
+ * 'count': people, hires, FTE, seats…, which counts whatever its phrase names: "300 subscribers" are people), or the held unit named.
+ */
+function countsHeldUnit(said: readonly string[], held: readonly string[]): boolean {
+  return held.length === 0 || held.some((h) => unitFamilyOf(h) === 'count') || namesHeldUnit(said, held);
+}
+
+/**
+ * Whether a counted phrase's naming words name the held unit itself: the same word, or one spelling of the same period noun in THE ONE
+ * UNIT VOCABULARY (`periodNoun`: "hrs" is "hours", "mins" is "minutes"; Codex #3438 R1: "45 hrs per week" is a figure of hours).
+ */
+function namesHeldUnit(said: readonly string[], held: readonly string[]): boolean {
+  const period = (w: string): string | null => periodNoun(w) ?? periodNoun(`${w}s`);
+  return said.some((w) => held.some((h) => sameWord(w, h) || (period(w) !== null && period(w) === period(h))));
 }
 
 /**
@@ -90,7 +175,7 @@ export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknow
  * and either form. The speech reader opens a single mark only before a word, so the amount is read AS a word there (its characters,
  * same length): "'70 tickets per week'" is quoted speech exactly as "'seventy tickets per week'" is (Codex #3429 R3).
  */
-function inAnotherSpeakersWords(text: string, a: WrittenAmount): boolean {
+export function inAnotherSpeakersWords(text: string, a: WrittenAmount): boolean {
   const asWord = text.slice(0, a.index) + 'n'.repeat(a.matchedText.length) + text.slice(a.index + a.matchedText.length);
   return speechReading(asWord).inSpeech(speechReading(asWord.slice(0, a.index)).text.length);
 }
@@ -277,16 +362,66 @@ export function moneyUnitScale(unit: unknown): number {
 }
 
 /**
- * An ORDINAL ending a cardinal's words ("twenty-FIRST", "forty FIFTH", "... and FIRST", a scale word + "th") is consumed with them,
- * so `parseCardinalAmount` refuses the whole capture, as the fraction tail does (Codex #3429 BLOCK: an ordinal compound saved its
- * cardinal part as a capacity). Never "twenty seconds" or "two second-hand cars".
+ * An ORDINAL beside a cardinal's words ("twenty-FIRST", "forty FIFTH", "... and FIRST", a scale word + "th") makes them part of a
+ * longer number, so the capture is refused (`touchesAnotherNumber`; Codex #3429 BLOCK: an ordinal compound saved its cardinal part
+ * as a capacity). Never "twenty seconds" or "two second-hand cars".
  */
 const ORDINAL_WORDS = [...'first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth'.split(' '),
   ...['thir', 'four', 'fif', 'six', 'seven', 'eigh', 'nine'].map((w) => `${w}teenth`), ...['twen', 'thir', 'for', 'fif', 'six', 'seven', 'eigh', 'nine'].map((w) => `${w}tieth`),
   ...[CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)].map((w) => `${w}th`)];
-/** A number the text writes in words ("three engineers"), read by the repo's one cardinal grammar; a fraction or an ordinal refuses. */
-const CARDINAL_PHRASE = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})${CARDINAL_FRACTION_CONTINUATION}`
-  + `(?:[\\s-]+(?:and\\s+)?(?:${ORDINAL_WORDS.join('|')})(?![\\w-]))?\\b`, 'gi');
+const SCALE_WORDS = [CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)];
+/**
+ * A number the text writes in words ("three engineers"; an article, a scale word and "and twenty"; "seven point five"), read by the
+ * repo's one cardinal grammar (`wordsAmount`): an article before a scale word is "one", and "point" + digit words are its decimals.
+ */
+// ⛔ READ WHOLE OR NOT AT ALL (Codex #3438 R2–R4: an article, a scale word and "and twenty", + "and a half", "plus five", ", and a quarter" or
+// "-and-a-half" read 120, and "the two and a half …th ticket" 2.5, each credited as the user's). The class, not a list of tails: a
+// capture TOUCHING another number word through what joins one number's parts (`touchesAnotherNumber`: a dash, a comma, "and", "plus",
+// "point", "of", an article) is part of a longer number, so it is refused, and so is that other part. A fraction is no figure at all
+// (DL-3 fail-safe: an under-claim, never a wrong number).
+const SCALE = SCALE_WORDS.join('|');
+const DIGIT_WORDS = Object.keys(CARDINAL_WORD_VALUES).filter((w) => CARDINAL_WORD_VALUES[w]! < 10).join('|');
+const AND_MORE = `(?:[\\s,]+and\\s+(?:${CARDINAL_AMOUNT_SOURCE}))?`;
+const DECIMALS = `(?:\\s+point(?:\\s+(?:${DIGIT_WORDS}))+(?:\\s+(?:${SCALE}))?)?`;
+const CARDINAL_PHRASE = new RegExp(`\\b(?:an?\\s+(?:${SCALE})${AND_MORE}|(?:${CARDINAL_AMOUNT_SOURCE}))${DECIMALS}\\b`, 'gi');
+const DECIMAL_READING = new RegExp(`^(.+?) point ((?:(?:${DIGIT_WORDS}) )*(?:${DIGIT_WORDS}))(?: (${SCALE}))?$`);
+/**
+ * The value of a `CARDINAL_PHRASE` capture by the cardinal grammar (`parseCardinalAmount`): an opening article is "one", and
+ * "point" + digit words are the decimals of a whole with no scale word, before an optional scale ("two point five" + a scale word).
+ * Anything else refuses (null).
+ */
+function wordsAmount(phrase: string): number | null {
+  const t = phrase.trim().toLowerCase().replace(/[\s-]+/g, ' ');
+  const read = /^an? /.test(t) ? `one ${t.replace(/^an? /, '')}` : t;
+  const decimal = DECIMAL_READING.exec(read);
+  if (decimal === null) return parseCardinalAmount(read);
+  const whole = parseCardinalAmount(decimal[1]);
+  if (whole === null || decimal[1]!.split(' ').some((w) => SCALE_WORDS.includes(w))) return null;
+  const digits = decimal[2]!.split(' ').map((w) => CARDINAL_WORD_VALUES[w]!).join('');
+  const scale = decimal[3] === undefined ? 1 : decimal[3] === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[decimal[3]]!;
+  return (whole + Number(`0.${digits}`)) * scale;
+}
+/**
+ * One number word (THE ONE VOCABULARY: a cardinal, a scale word, a fraction; after the amount an ordinal too) or a digit, never part
+ * of a longer word. An ordinal BEFORE a count starts no longer number ("the first three months" is 3).
+ */
+const NUMBER_WORDS_BEFORE = [...Object.keys(CARDINAL_WORD_VALUES), ...SCALE_WORDS, ...CARDINAL_FRACTION_WORDS].join('|');
+const NUMBER_WORDS = `${NUMBER_WORDS_BEFORE}|${ORDINAL_WORDS.join('|')}`;
+/** The words that count (a cardinal or a scale word): another of them inside a counted noun phrase starts another amount. */
+const COUNTING_WORDS = new Set([...Object.keys(CARDINAL_WORD_VALUES), ...SCALE_WORDS]);
+/** What joins two parts of ONE written number: a dash, a comma or a space, then at most one joining word, then an article. */
+const JOIN = `[\\s,\\u2013\\u2014-]+(?:(?:and|plus|minus|point|times|of)[\\s,\\u2013\\u2014-]+)?(?:an?[\\s-]+)?`;
+// A word ends at anything but a letter or digit, or at a hyphen into another number word ("twenty-five"; never "second-hand").
+const WORD_END = `(?=$|[^\\p{L}\\d-]|-(?:${NUMBER_WORDS}|and|an?)(?![\\p{L}]))`;
+const NUMBER_AFTER = new RegExp(`^${JOIN}(?:(?:${NUMBER_WORDS})${WORD_END}|\\d)`, 'iu');
+const NUMBER_BEFORE = new RegExp(`(?:(?<![\\p{L}\\d])(?:${NUMBER_WORDS_BEFORE})|\\d)${JOIN}$`, 'iu');
+// A scale word straight after digits is that amount's own magnitude, never a number word joined to the next end (C5 on #3438 R7).
+const NUMBER_WORD_BEFORE = new RegExp(`(?<![\\p{L}\\d])(?<!\\d\\s*)(?:${NUMBER_WORDS_BEFORE})${JOIN}$`, 'iu');
+const NUMBER_WORD_AFTER = new RegExp(`^${JOIN}(?:${NUMBER_WORDS})${WORD_END}`, 'iu');
+/** Whether the words at [start, end) touch another number word or digit through a join: they are part of a longer number. */
+function touchesAnotherNumber(text: string, start: number, end: number): boolean {
+  return NUMBER_AFTER.test(text.slice(end)) || NUMBER_BEFORE.test(text.slice(0, start));
+}
 
 /**
  * Whether the brief states `value` as today's level: `figureTheUserWrote`, else a number written in words or "zero"
@@ -301,13 +436,10 @@ function baselineTheBriefStates(value: number, unit: unknown, brief: string, lab
   // Digits first, as before; words keep this function's own stricter binding below (Codex SPELLED pair: "hire three engineers"
   // never states three enterprise customers).
   if (findStatedAmounts(brief).some((a) => amountIs(a, value, unit, unitPhraseFamily(unit), brief))) return true;
-  if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m, label, unit));
+  if (value === 0) return [...brief.matchAll(/\bzero\b/gi)].some((m) => wordsNameThisFactor(brief, m.index! + m[0].length, label, unit));
   const family = unitPhraseFamily(unit);
   if (family === 'currency' || family === 'percent') return false;
-  return [...brief.matchAll(CARDINAL_PHRASE)].some((m) => {
-    const v = parseCardinalAmount(m[0]);
-    return v !== null && same(v, value) && wordsNameThisFactor(brief, m, label, unit);
-  });
+  return countsInWords(brief).some((w) => same(w.magnitude, value) && wordsNameThisFactor(brief, w.index + w.matchedText.length, label, unit));
 }
 
 /** Words that name no quantity: they cannot tie "three … each month" to a factor measured per month. */
@@ -324,9 +456,14 @@ function namingWords(text: unknown): string[] {
 }
 
 /** Words that end the counted noun phrase: what follows them names another quantity ("three engineers FOR enterprise customers"). */
+/**
+ * The words of the phrase breaks that JOIN two amounts into one expression: the touching rule's own (`JOIN`: "and", "plus", "minus",
+ * "times", "of") and "or".
+ */
+const JOINING_WORDS = new Set(['and', 'or', 'plus', 'minus', 'times', 'of']);
 const PHRASE_BREAK = new Set([
-  'for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
-  'and', 'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because',
+  'for', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than',
+  'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', ...JOINING_WORDS,
 ]);
 
 /** The COUNTED NOUN PHRASE right after an amount ending at `end`: up to three words, to the first preposition or conjunction. */
@@ -342,9 +479,8 @@ function countedPhraseAfter(text: string, end: number): string {
  * the (up to three) words before the first preposition or conjunction (PR Review 5881529306: "three engineers for
  * enterprise customers" counts engineers) is in the factor's label or unit.
  */
-function wordsNameThisFactor(brief: string, m: RegExpMatchArray, label: unknown, unit: unknown): boolean {
-  if (typeof m.index !== 'number') return false;
-  const phrase = countedPhraseAfter(brief, m.index + m[0].length);
+function wordsNameThisFactor(brief: string, end: number, label: unknown, unit: unknown): boolean {
+  const phrase = countedPhraseAfter(brief, end);
   // EVERY naming word in the phrase must name the factor, or it withholds. What a number counts is not reliably the first
   // word ("zero CUSTOMER complaints" counts complaints, PR Review 5881730098) nor the last (past a verb: "zero downtime
   // affects ENTERPRISE", 5881612484), so any word naming something else makes the reading uncertain: it withholds. Filler
@@ -730,7 +866,9 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
   const severalFigures = written.length >= 2;
   const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;
-    if (!amountIs(a, value, unit, family, userText) || inAnotherSpeakersWords(userText, a)) return false;
+    // ⭐ ONE CHECK, BOTH FORMS (Codex #3427 R4; PL): every amount passes the one check (unit and kind, counted noun, a word that counts
+    // something, never another speaker's words) before it binds.
+    if (!amountTheUserWrote(a, value, unit, userText)) return false;
     const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
     const amountEnd = a.index + a.matchedText.length;
     const before = userText.slice(0, a.index);
@@ -807,12 +945,13 @@ export function figureTheUserWroteForSpan(value: number, unit: unknown, userText
     // £120k as the juniors'). Rule 1 then finds nothing and the nearest word before it decides; the words after the
     // conjunction still count last. Opt-in (DL ruling (a)): every other door reads the two words after it, as before.
     const rightAfter = strict && /^(?:and|or|but|plus|while|whereas)$/.test(afterRate[0] ?? '') ? [] : afterRate.slice(0, 2);
-    if (a.kind === 'words') {
-      // ⭐ A count in WORDS is an idiom far more often than a digit is ("That's one option we could try", "One more
-      // thing"; AIQ #70 5859477600). It is the user's only when a label word of THIS entity sits within two words of it:
-      // never by the "names nothing, so theirs" fallback below that a written digit gets.
-      const near = firstMention(rightAfter) ?? firstMention([...left].reverse().slice(0, 2));
-      return near === 'target';
+    // ⭐ ONE BINDING, BOTH FORMS (Codex #3427 R4 first loss: the user's own elliptical "it is forty-five hours per week" withdrew 40 and
+    // saved no 45). A count in words followed by its own unit word ("forty-five HOURS per week", "twelve ENGINEERS") is a measured figure:
+    // it binds below, named or unbound, exactly as its digits. Without its unit word a count in words is an idiom far more often than a
+    // digit is ("That's one option we could try", "One more thing"; AIQ #70 5859477600): it is the user's only when a label word of THIS
+    // entity sits within two words of it, never by the "names nothing, so theirs" fallback.
+    if (a.kind === 'words' && !namesHeldUnit(namingWords(countedPhraseAfter(userText, amountEnd)), namingWords(unit))) {
+      return (firstMention(rightAfter) ?? firstMention([...left].reverse().slice(0, 2))) === 'target';
     }
     // `nearOnly` skips the far words ONLY when a comparator opens them (R3 CR on #2330): "25% cheaper THAN AWS for our
     // workload" names what the figure is compared with; "3% for our enterprise customers" still names its owner.
@@ -879,9 +1018,12 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
  * journey E07 (DL pj-20260927T181846Z): the user's 1 and 2 were dropped as "not written" (Canonical #70 5859331002).
  */
 export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
-  // A range written in words gives its two ends, or nothing (`cardinalReadings`: the range class, C5 #3442).
+  // A range written in words gives its two ends, or nothing (`cardinalReadings`: the range class, C5 #3442), read whole or not at all
+  // (`touchesAnotherNumber`), a range as its one span.
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => m.index === undefined ? []
-    : cardinalReadings(text, m.index, m.index + m[0].length).map((r) => ({ kind: 'words' as const, ...r })));
+    : cardinalReadings(text, m.index, m.index + m[0].length, wordsAmount)
+      .filter((r) => !touchesAnotherNumber(text, r.index, r.index + r.matchedText.length))
+      .map((r) => ({ kind: 'words' as const, ...r })));
 }
 
 /**

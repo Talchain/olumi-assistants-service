@@ -51,27 +51,31 @@ const CANDIDATE = {
 const admit = () => admitCandidateModel(CANDIDATE as unknown as CandidateModel);
 const labels = (ns: readonly { label: string }[]) => ns.map((n) => n.label).sort();
 
-describe('risks are wired in, not deleted', () => {
-  it('connects every unlinked risk to the goal, negatively and disclosed', () => {
+/**
+ * ⭐ RE-RULED (AIE 19 Oct 02:54Z and 04:12Z): "a risk is by definition something that threatens the goal" no longer wires an
+ * unlinked risk into the goal at Olumi's placeholder size. This very fixture shows why: "MRR target miss" is the goal's own
+ * failure, an outcome, not a cause of it. A concern left unlinked is RETAINED, visible as untested, and NOT auto-wired.
+ */
+describe('unlinked risks are kept, not wired in and not deleted', () => {
+  it('keeps every unlinked risk OLUMI drafted, with no link invented, left out of the calculation under the unsized-risk rule (retained_excluded)', () => {
     const a = admit();
-    const goal = a.nodes.find((n) => n.kind === 'goal')!;
     const riskIds = a.nodes.filter((n) => n.kind === 'risk').map((n) => n.id);
-    // ⭐ Bound by IDENTITY: both risks, each to the goal, each negative.
+    // ⭐ Bound by IDENTITY: both risks kept, neither with any edge, both marked untested.
     expect(riskIds).toHaveLength(2);
     for (const id of riskIds) {
-      const e = a.edges.find((x) => x.from === id && x.to === goal.id);
-      expect(e, `risk ${id} has no link to the goal`).toBeDefined();
-      expect(e!.effect_direction).toBe('negative');
-      expect((e as { defaulted?: boolean }).defaulted).toBe(true);
-      expect(e!.provenance!.magnitude).toBe('olumi_placeholder');
+      expect(a.edges.filter((x) => x.from === id || x.to === id), `risk ${id} was wired`).toEqual([]);
+      expect(a.nodes.find((n) => n.id === id)!.analysis_participation).toBe('retained_excluded');
     }
   });
 
-  it('records the repair rather than performing it silently', () => {
+  it('records why each is left out, and never claims a link', () => {
     const a = admit();
-    const said = a.loss.filter((l) => /was named but never connected/.test(l.reason));
-    expect(said).toHaveLength(2);
-    expect(said[0].reason).toMatch(/not from anything you said/);
+    const said = a.loss.filter((l) => l.field_path.endsWith('.left_out_of_analysis')).map((l) => l.reason);
+    expect(said).toEqual([
+      '"Churn constraint breach" is Olumi’s suggestion and is kept in the model but left out of this analysis, because nothing in the model says how it affects "Monthly recurring revenue". It has not been connected to "Monthly recurring revenue" as a cause.',
+      '"MRR target miss" is Olumi’s suggestion and is kept in the model but left out of this analysis, because nothing in the model says how it affects "Monthly recurring revenue". It has not been connected to "Monthly recurring revenue" as a cause.',
+    ]);
+    expect(a.loss.some((l) => /was named but never connected|as a negative influence/.test(l.reason))).toBe(false);
   });
 
   /**
@@ -83,7 +87,7 @@ describe('risks are wired in, not deleted', () => {
    * 5793252993: where direction is unknown, ASK instead of defaulting. The risk
    * stays in the model, unconnected and named, and the withheld link is the
    * question. The contrast is in the same run: the two risks with NO stated link
-   * at all are still wired exactly as before.
+   * at all are kept out of the calculation, unwired (AIE 19 Oct).
    */
   const withUnknownRisk = (to: string) => admitCandidateModel({
     ...CANDIDATE,
@@ -94,7 +98,6 @@ describe('risks are wired in, not deleted', () => {
   for (const [what, to] of [['the goal', 'Monthly recurring revenue'], ['a factor', 'Pro plan price']] as const) {
     it(`does NOT invent a sign for a risk whose link to ${what} was stated UNKNOWN`, () => {
       const a = withUnknownRisk(to);
-      const goal = a.nodes.find((n) => n.kind === 'goal')!;
       const attrition = a.nodes.find((n) => n.label === 'Attrition')!;
       // Vacuity guard: the drafter really stated the link, and it was withheld.
       expect(a.withheld).toContainEqual(expect.objectContaining({ from: attrition.id, reason: 'no_authored_direction' }));
@@ -103,10 +106,12 @@ describe('risks are wired in, not deleted', () => {
       // Kept, and named, so the Agent asks rather than the analysis guessing.
       expect(a.nodes.map((n) => n.label)).toContain('Attrition');
       expect(a.loss.filter((l) => /no chain of causes runs from it/.test(l.reason)).map((l) => l.before)).toContain('Attrition');
-      // CONTRAST, same run: the risks with no stated link are still wired.
+      // CONTRAST, same run: the declined risk keeps its question, unmarked; the risks with no stated link are kept out, unwired.
+      expect(attrition.analysis_participation).toBeUndefined();
       for (const label of ['Churn constraint breach', 'MRR target miss']) {
         const id = a.nodes.find((n) => n.label === label)!.id;
-        expect(a.edges.find((e) => e.from === id && e.to === goal.id)?.effect_direction, label).toBe('negative');
+        expect(a.edges.filter((e) => e.from === id || e.to === id), label).toEqual([]);
+        expect(a.nodes.find((n) => n.id === id)!.analysis_participation, label).toBe('retained_excluded');
       }
     });
   }

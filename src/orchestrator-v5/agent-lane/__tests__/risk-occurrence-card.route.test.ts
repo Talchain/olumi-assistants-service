@@ -215,6 +215,31 @@ describe('Hiring path (a): Olumi’s starting assumption for the risk root, thro
     expect(JSON.stringify(readiness.needs_from_user ?? [])).not.toContain(LABEL);
   }, ROUTE_MS);
 
+  // ⭐ DL-3 + Codex R1/R2 on #3441: admission persists Olumi's unsized risk as left out, with the rule's reason. Sizing it through
+  // this card ends that mark in the SAME saved write (the persisted form re-evaluates it on the candidate), and the press's own
+  // read-back confirms exactly those bytes: no false "not confirmed", no second write on a duplicate press.
+  it('RED (the mark ends with the size): the risk kept out as Olumi’s unsized suggestion → the press → saved with its block and no longer left out → confirmed; a duplicate press writes nothing; the Run takes it', async () => {
+    const marked = structuredClone(SERVED) as Rec;
+    Object.assign(riskOf(marked.graph), { analysis_participation: 'retained_excluded', analysis_participation_reason: 'unsized_olumi_risk' });
+    expect(unsizedOlumiRiskIds(marked.graph).has(RISK), 'PRECONDITION: the rule keeps it out').toBe(true);
+    const w = world(marked);
+    const turn = await route(w);
+    const { offer, pid, chip } = await offerCard(turn);
+    expect(chip, JSON.stringify(offer.suggested_actions)).toMatchObject({ message: 'Yes, use that.', detail: CARD });
+    const pressed = await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect((pressed._agent.tool_calls as Rec[]).filter(c => c.name === 'authorise_change'), JSON.stringify(pressed._agent.tool_calls))
+      .toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: pid })]);
+    const expected = structuredClone(SERVED.graph) as Rec;
+    riskOf(expected).event_risk = BLOCK;
+    expect(w.graph(), 'ONLY its block moved, and it is no longer left out').toEqual(expected);
+    expect(JSON.stringify(w.writes)).toContain(JSON.stringify(RECEIPT).slice(1, -1));
+    const graphWrites = w.writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
+    await turn({ message: chip!.message, source: 'chip_click', chip: { id: chip!.id }, agent_session_id: offer._agent.session_id });
+    expect(w.graph()).toEqual(expected);
+    expect(w.writes.filter((x) => x.graph !== undefined && x.graph !== null)).toHaveLength(graphWrites);
+    expect(guardAnalysisParticipation(w.graph(), { goalNodeId: 'productivity' })).toMatchObject({ excludedNodeIds: [], refusals: [] });
+  }, ROUTE_MS);
+
   // Words typed that EXACTLY equal the one waiting card's button ARE that press (R2 T1, `agent-v1-turn.ts`); any other yes is not.
   it('CONTRAST: a typed yes that is not the card’s own words is not the press (card-only): nothing is written', async () => {
     const w = world(SERVED);
