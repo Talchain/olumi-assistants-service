@@ -42,9 +42,10 @@ import type { AgentToolContext, ToolResult } from '../../agent-lane/runtime/agen
 import { authorisationTurnId, prepareStructuralOp, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from '../../agent-lane/proposal.js';
 import { runWithApprovedBindings, type ApprovedAdoption } from '../../agent-lane/approved-adoption-context.js';
-import { defaultFrameFor } from '../../agent-lane/admit-model.js';
+import { defaultFrameFor, framedObservedState } from '../../agent-lane/admit-model.js';
+import { buildAddFactorTransaction, USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
 import { GraphStaleWriteError } from '../../build-turn-context.js';
-import { compoundMembersConflict, type CommitOptionLevelsInput, type CommitOptionLevelsResult, type CompoundStructuralMember } from '../../system-events/dispatch.js';
+import { compoundMembersConflict, type CommitOptionLevelsInput, type CommitOptionLevelsResult, type CompoundAddFactor, type CompoundStructuralMember } from '../../system-events/dispatch.js';
 import { linkProvenanceOf, linkSizing, provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
@@ -74,15 +75,6 @@ export const STANCE_DESCRIPTION =
   'How this particular figure is put forward in its full source context, not whether it is true and not who authored it. hypothetical: a supposition, conditional scenario or what-if, including numbers embedded inside that assumed situation. target: a desired or required outcome or threshold, rather than an observed level. estimate: a tentative assessment, approximation or prediction offered as such, rather than an asserted current fact. stated_current: the speaker asserts an actual current or already observed level for this subject at the relevant time, outside a supposition, target or estimate. Read the whole proposition and its conditions: indicative wording inside a supposition does not make its embedded figure stated_current. Classify each figure by its own proposition; one statement\'s status must not transfer to a different quantity or subject. Preserve the original source, wording, sign, units, period and conditions. stated_current describes the assertion; it does not mean verified, accurate or adopted.';
 const Stance = z.enum(['stated_current', 'hypothetical', 'target', 'estimate']).describe(STANCE_DESCRIPTION);
 const Declared = z.object({ value: z.number(), unit, stance: Stance, source: Source }).strict();
-/**
- * Changes this path cannot make yet (DL-3 ruling, 19 Oct: one dispatch path, no interim wrapper). The AI can still name one,
- * and is told truthfully that it is not available here, never refused as if a rule forbade it.
- */
-const NOT_YET = {
-  add_to_model: 'Adding a factor or an option isn\'t available on this path yet.',
-} as const;
-type NotYet = keyof typeof NOT_YET;
-const notYet = (op: NotYet) => z.object({ op: z.literal(op), target_id: id }).strict();
 export const ChangeOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set_factor_value'), factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
   z.object({ op: z.literal('set_option_setting'), option_id: id, factor_id: id, value: z.number(), unit, stance: Stance, source: Source }).strict(),
@@ -95,16 +87,21 @@ export const ChangeOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('rename'), kind: z.enum(['option', 'factor', 'risk']), target_id: id, new_label: z.string(), quote: z.string() }).strict(),
   /** Remove a factor or a risk (`to_id` null), or the direct link from `target_id` to `to_id`: the user's own request, quoted exactly. */
   z.object({ op: z.literal('remove_from_model'), kind: z.enum(['factor', 'risk', 'link']), target_id: id, to_id: id.nullable(), quote: z.string() }).strict(),
-  notYet('add_to_model'),
+  /**
+   * A NEW factor the model does not hold yet: its name, the ONE existing part it acts on and which way, and its figure with its
+   * declared source (the add-factor door: its id, name and target rules; Olumi's placeholder strength for the link).
+   */
+  z.object({ op: z.literal('add_to_model'), kind: z.literal('factor'), label: z.string(), acts_on: id, direction: z.enum(['positive', 'negative']),
+    value: z.number(), unit, stance: Stance, source: Source }).strict(),
 ]);
 type FigureOp = Extract<z.infer<typeof ChangeOp>, { op: 'set_factor_value' | 'set_option_setting' }>;
 type TargetArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_goal_target' }>;
 type LinkArgs = Extract<z.infer<typeof ChangeOp>, { op: 'set_link_strength' }>;
 type StructuralArgs = Extract<z.infer<typeof ChangeOp>, { op: 'rename' | 'remove_from_model' }>;
+type AddArgs = Extract<z.infer<typeof ChangeOp>, { op: 'add_to_model' }>;
 /** A target as stored on the proposal: the declaration plus the literal source line and when it was proposed (hashed). */
 const TargetStored = z.object({ value: z.number(), unit: z.string(), comparator: z.enum(['<', '<=', '>', '>=']), quantity: z.string(),
   frame: z.literal('level'), stance: Stance, source: Source, said_in: z.string().nullable(), recorded_at: z.string() }).strict();
-const isNotYet = (o: z.infer<typeof ChangeOp>): o is Extract<z.infer<typeof ChangeOp>, { op: NotYet }> => Object.hasOwn(NOT_YET, o.op);
 export const ProposeChangeParams = z.object({
   /** What the approval card says, in a few plain words. */
   public_label: z.string(),
@@ -459,22 +456,24 @@ function membersOf(operations: readonly ProposalOperation[]): CompoundStructural
 }
 
 /** This path's change: figures, Olumi's link bands, renames and removals, as stored on its ONE proposal. */
-type Compound = { readonly figures: Op[]; readonly links: StoredLink[]; readonly structural: CompoundStructuralMember[] };
+type Compound = { readonly figures: Op[]; readonly links: StoredLink[]; readonly structural: CompoundStructuralMember[]; readonly adds: CompoundAddFactor[] };
 function compoundOf(p: StructuredProposal): Compound | null {
   const of = (ops: readonly string[]) => p.operations.filter((o) => ops.includes(o.op));
   const figureOps = of(['set_factor_value', 'set_option_intervention']);
   const linkOps = of(['set_link_strength']);
   const structuralOps = of(['rename_option', 'remove_node', 'remove_edge']);
-  if (p.operations.length === 0 || figureOps.length + linkOps.length + structuralOps.length !== p.operations.length) return null;
+  const addOps = of(['add_node']);
+  if (p.operations.length === 0 || figureOps.length + linkOps.length + structuralOps.length + addOps.length !== p.operations.length) return null;
   const figures = declaredOf(figureOps);
   const links = linkOps.length === 0 ? [] : linksOf(linkOps);
   const structural = membersOf(structuralOps);
-  return figures === null || links === null || structural === null ? null : { figures, links, structural };
+  const adds = addsOf(addOps);
+  return figures === null || links === null || structural === null || adds === null ? null : { figures, links, structural, adds };
 }
 
 /** The whole change as read back: every figure, link, rename and removal holding as approved. */
 function compoundRead(read: SavedRead, c: Compound): { holds: boolean; faithful: boolean; written: Rec[] } {
-  const parts = [readbackOf(read, c.figures), linksRead(read, c.links), structuralRead(read, c.structural)];
+  const parts = [readbackOf(read, c.figures), linksRead(read, c.links), structuralRead(read, c.structural), addsRead(read, c.adds)];
   return { holds: parts.every((x) => x.holds), faithful: parts.every((x) => x.faithful), written: parts.flatMap((x) => x.written) };
 }
 
@@ -488,6 +487,68 @@ function figuresAllowed(ops: readonly FigureOp[], ctx: ChangeCtx, at: (i: number
   return null;
 }
 
+/**
+ * add_to_model: each new factor as the add-factor door holds one. Its id, name and link come from that door's own builder on this
+ * read (name taken, target kind, reaches the goal); its figure is framed by the ONE framing rule and stamped as the declared
+ * source's: the person's figure when their own words hold it, or Olumi's estimate. Any other source or stance is BLOCKED, never
+ * relabelled (the door holds a new factor's figure as the person's or Olumi's only).
+ */
+function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx, at: (i: number) => number): CompoundAddFactor[] | ToolOutcome {
+  if (adds.length === 0) return [];
+  for (const [i, a] of adds.entries()) {
+    const person = a.source.origin === 'user' && a.stance === 'stated_current';
+    if (!person && !(a.source.origin === 'olumi' && a.stance === 'estimate')) {
+      return unavailable('blocked_schema', 'none', blockedSaid(at(i), 'a new factor\'s figure is held only as the person\'s current level or as Olumi\'s estimate; put forward as anything else it would be relabelled'));
+    }
+    if (person && (a.source.quote === null || !inTheUsersWords(a.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
+  }
+  const view = { nodes: nodesOf(read.graph).map((n) => ({ id: String(n.id), kind: String(n.kind), ...(typeof n.label === 'string' ? { label: n.label } : {}),
+    ...(typeof n.category === 'string' ? { category: n.category } : {}) })),
+    edges: (Array.isArray(read.graph.edges) ? read.graph.edges.filter(isRec) : []).map((e) => ({ from: String(e.from), to: String(e.to) })) };
+  const built = buildAddFactorTransaction({ factors: adds.map((a) => ({ label: a.label, link: { to_id: a.acts_on, effect_direction: a.direction } })) }, view);
+  if (!built.matched) return refused(codeOf(`add_${built.reason}`), undefined, { op: at(0) });
+  return adds.map((a, i) => {
+    const person = a.source.origin === 'user';
+    const observed = { ...framedObservedState({ baseline_value: a.value, unit: a.unit, provenance: person ? 'explicit' : 'inferred',
+      plausible_max: a.value > 1 ? defaultFrameFor(Math.abs(a.value)) : null }), source: person ? USER_TODAY_SOURCE : 'cee_inference',
+      extractionType: person ? 'explicit' : 'inferred' };
+    return { id: built.proposal.factors[i]!.id, label: built.proposal.factors[i]!.label, link: { to_id: a.acts_on, effect_direction: a.direction },
+      observed_state: observed, basis: person ? 'written_about' : 'olumi_estimate', ...(person ? { quote: a.source.quote! } : {}) };
+  });
+}
+
+/** The new factors as stored on the proposal (`add_node`, its value the door's member); else `null`. */
+function addsOf(operations: readonly ProposalOperation[]): CompoundAddFactor[] | null {
+  const out: CompoundAddFactor[] = [];
+  for (const o of operations) {
+    const v = isRec(o.value) ? o.value : {};
+    const link = isRec(v.link) ? v.link : {};
+    if (v.id !== o.path || typeof v.label !== 'string' || typeof link.to_id !== 'string' || (link.effect_direction !== 'positive' && link.effect_direction !== 'negative')
+      || !isRec(v.observed_state) || (v.basis !== 'written_about' && v.basis !== 'olumi_estimate') || (v.quote !== undefined && typeof v.quote !== 'string')) return null;
+    out.push({ id: o.path, label: v.label, link: { to_id: link.to_id, effect_direction: link.effect_direction }, observed_state: v.observed_state, basis: v.basis,
+      ...(typeof v.quote === 'string' ? { quote: v.quote } : {}) });
+  }
+  return out;
+}
+
+/** Each new factor as the model now holds it: by its id, with its name, its ONE link and its figure; the person's words are not kept on it. */
+function addsRead(read: SavedRead, adds: readonly CompoundAddFactor[]): { holds: boolean; faithful: boolean; written: Rec[] } {
+  const nodes = nodesOf(read.graph);
+  const edges = Array.isArray(read.graph.edges) ? read.graph.edges.filter(isRec) : [];
+  const figureOf = (os: unknown): unknown => (isRec(os) ? (typeof os.raw_value === 'number' ? os.raw_value : os.value) : undefined);
+  const written = adds.map((a) => {
+    const node = nodes.find((n) => n.id === a.id);
+    const figure = figureOf(node?.observed_state);
+    const holds = node !== undefined && node.kind === 'factor' && node.label === a.label && close(figure, Number(figureOf(a.observed_state)))
+      && edges.some((e) => e.from === a.id && e.to === a.link.to_id);
+    const notKept: NotKept[] = a.quote === undefined ? [] : [{ what: 'words', declared: a.quote }];
+    return { holds, notKept, row: { op: 'add_to_model', id: a.id, label: node?.label ?? null, acts_on: a.link.to_id, figure: figure ?? null,
+      unit: isRec(node?.observed_state) && typeof node.observed_state.unit === 'string' ? node.observed_state.unit : null,
+      stored_as: node === undefined ? null : provenanceOf({ value: node.observed_state }), not_kept: notKept } };
+  });
+  return { holds: written.every((w) => w.holds), faithful: written.every((w) => w.notKept.length === 0), written: written.map((w) => w.row) };
+}
+
 const LINK_LEFT_OUT = 'Not every link in this change could be prepared as asked, so nothing was proposed or saved. Propose those links on their own to see which are left out and why.';
 
 /**
@@ -497,7 +558,7 @@ const LINK_LEFT_OUT = 'Not every link in this change could be prepared as asked,
  * must be in its set). One refused or left-out member, or members acting on a part another removes, and nothing is proposed.
  */
 async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs,
-  figures: readonly FigureOp[], links: readonly LinkArgs[], structural: readonly StructuralArgs[]): Promise<ToolOutcome> {
+  figures: readonly FigureOp[], links: readonly LinkArgs[], structural: readonly StructuralArgs[], adds: readonly AddArgs[] = []): Promise<ToolOutcome> {
   const at = (members: readonly unknown[]) => (i: number): number => args.ops.indexOf(members[i] as z.infer<typeof ChangeOp>);
   const stop = figuresAllowed(figures, ctx, at(figures));
   if (stop !== null) return stop;
@@ -509,7 +570,7 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   const plan = planOf(ctx.scenario_id, '', declared, read.graph);
   if ('refusal' in plan) return stopped(plan, declared, at(figures));
   const prepared: ProposalOperation[] = [];
-  const cards: string[] = figures.length > 0 ? [args.public_label] : [];
+  const cards: string[] = figures.length + adds.length > 0 ? [args.public_label] : [];
   for (const [i, m] of structural.entries()) {
     const raw = m.op === 'rename' ? { op: 'rename', kind: m.kind, id: m.target_id, new_label: m.new_label, quote: m.quote }
       : { op: 'remove', kind: m.kind, id: m.target_id, ...(m.to_id === null ? {} : { to_id: m.to_id }), quote: m.quote };
@@ -537,11 +598,15 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
   }
   const members = membersOf(prepared);
   if (members === null) return refused('unsupported_change');
+  const added = newFactorsOf(adds, read, ctx, at(adds));
+  if (!Array.isArray(added)) return added;
   const written = { nodes: [...plan.levels.flatMap((l) => [l.option_id, l.factor_id]), ...(plan.values ?? []).map((v) => v.factor_id), ...(plan.frames ?? []).map((f) => f.factor_id)],
-    links: [...plan.links.map((l) => ({ from: l.option_id, to: l.factor_id })), ...links.map((l) => ({ from: l.from, to: l.to }))] };
+    links: [...plan.links.map((l) => ({ from: l.option_id, to: l.factor_id })), ...links.map((l) => ({ from: l.from, to: l.to })),
+      ...added.map((a) => ({ from: a.id, to: a.link.to_id }))] };
   if (compoundMembersConflict(written, members)) return refused('compound_members_conflict');
   const p = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: read.graphHash, base_model_identity: read.identity,
-    operations: [...figureOps, ...linkOps, ...prepared], provenance: { authored_by: 'model_proposed', basis: args.basis },
+    operations: [...figureOps, ...linkOps, ...prepared, ...added.map((a): ProposalOperation => ({ op: 'add_node', path: a.id, value: a }))],
+    provenance: { authored_by: 'model_proposed', basis: args.basis },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label: cards.length === 1 ? cards[0]! : `Save these changes together:\n${cards.join('\n')}` });
   deps.proposals.put(p);
@@ -549,15 +614,14 @@ async function proposeCompound(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' |
 }
 
 export async function proposeChange(deps: Pick<ChangeDeps, 'dispatch' | 'proposals' | 'proposeLinkStrengths'>, ctx: ChangeCtx, args: ProposeChangeArgs): Promise<ToolOutcome> {
-  const later = args.ops.find(isNotYet);
-  if (later !== undefined) return unavailable(`${later.op}_not_available`, 'none', `${NOT_YET[later.op]} Nothing was proposed or saved.`);
   if (args.public_label.trim() === '') return refused('label_empty');
   const target = args.ops.find((o): o is TargetArgs => o.op === 'set_goal_target');
   if (target !== undefined) return args.ops.length > 1 ? unavailable('mixed_change_not_available', 'none', MIXED_TARGET) : proposeTarget(deps, ctx, args, target);
   const links = args.ops.filter((o): o is LinkArgs => o.op === 'set_link_strength');
   const structural = args.ops.filter((o): o is StructuralArgs => o.op === 'rename' || o.op === 'remove_from_model');
   const ops = args.ops.filter((o): o is FigureOp => o.op === 'set_factor_value' || o.op === 'set_option_setting');
-  if (structural.length > 0 || (links.length > 0 && ops.length > 0)) return proposeCompound(deps, ctx, args, ops, links, structural);
+  const adds = args.ops.filter((o): o is AddArgs => o.op === 'add_to_model');
+  if (structural.length + adds.length > 0 || (links.length > 0 && ops.length > 0)) return proposeCompound(deps, ctx, args, ops, links, structural, adds);
   if (links.length > 0) return proposeLinks(deps, ctx, args, links);
   const stop = figuresAllowed(ops, ctx);
   if (stop !== null) return stop;
@@ -629,7 +693,7 @@ function doorApplier(deps: ChangeDeps, ctx: ChangeCtx, p: StructuredProposal, c:
       const input: CommitOptionLevelsInput = { scenario_id: ctx.scenario_id, base_graph_hash: before.graphHash, turn_id: turnId,
         links: plan.links, levels: plan.levels, ...(plan.values!.length > 0 ? { values: plan.values } : {}), ...(plan.frames!.length > 0 ? { frames: plan.frames } : {}),
         ...(c.links.length > 0 ? { link_strengths: linkStrengthsIn(c.links) } : {}),
-        ...(c.links.length + c.structural.length > 0 ? { compound: { structural: c.structural } } : {}) };
+        ...(c.links.length + c.structural.length + c.adds.length > 0 ? { compound: { structural: c.structural, ...(c.adds.length > 0 ? { adds: c.adds } : {}) } } : {}) };
       return viaDoor(deps, ctx, p, turnId, readNow, () => runWithApprovedBindings(plan.bindings, () => commitOptionLevels(input)));
     },
   };
@@ -687,7 +751,7 @@ export async function applyChange(deps: ChangeDeps, ctx: ChangeCtx, args: ApplyC
   if (target === null && c === null) return refused('not_a_change_proposal');
   // The capability's own link set keeps its `#links` turn; every other change is this path's ONE door commit.
   const applier = target !== null ? targetApplier(deps, ctx, p, target, turnId)
-    : c!.figures.length + c!.structural.length === 0 ? linksApplier(deps, ctx, p, c!.links) : doorApplier(deps, ctx, p, c!, turnId);
+    : c!.figures.length + c!.structural.length + c!.adds.length === 0 ? linksApplier(deps, ctx, p, c!.links) : doorApplier(deps, ctx, p, c!, turnId);
   if (!('commit' in applier)) return applier;
   const prior = await ownReceipt(deps.dispatch, ctx.scenario_id, applier.receiptTurn);
   if (prior === 'unreadable') return unavailable('read_failed');
