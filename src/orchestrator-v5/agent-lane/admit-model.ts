@@ -3834,7 +3834,8 @@ function retainEventContextForReview(model: AdmittedModel, candidate: CandidateM
       : `"${n.label}" is kept as reasoning context; this deadline forecast uses option-level added capacity.`,
   } as RepairEntry));
   const nodes = model.nodes.map(n => {
-    if (excluded.has(n.id)) return { ...n, analysis_participation: 'retained_excluded' as const };
+    // This rule owns its mark: an unsized-risk reason set earlier in admission does not stay on it (#3441).
+    if (excluded.has(n.id)) { const { analysis_participation_reason: _notThatRule, ...rest } = n; return { ...rest, analysis_participation: 'retained_excluded' as const }; }
     if (n.kind !== 'option' || !n.interventions) return n;
     const held = Object.entries(n.interventions).filter(([id]) => excluded.has(id));
     if (held.length === 0) return n;

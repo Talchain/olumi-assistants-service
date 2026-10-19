@@ -144,10 +144,13 @@ export function withUnsizedOlumiRiskMarksReconciled<T>(graph: T): T {
   }) } as T;
 }
 
-/** Persist only the omissions selected by the existing scientific/participation rule, each with this rule's reason. */
+/**
+ * Persist only the omissions selected by the existing scientific/participation rule, each with this rule's reason. A node another
+ * rule already keeps out (an event's context, a demoted aim's branch) keeps that rule's mark, unclaimed: this rule never tags it.
+ */
 export function retainUnsizedOlumiRisks<T extends { nodes: readonly unknown[] }>(graph: T): T {
   const ids = unsizedOlumiRiskIds(graph);
-  return ids.size === 0 ? graph : { ...graph, nodes: graph.nodes.map(n => isRec(n) && ids.has(String(n.id))
+  return ids.size === 0 ? graph : { ...graph, nodes: graph.nodes.map(n => isRec(n) && ids.has(String(n.id)) && n.analysis_participation === undefined
     ? { ...n, analysis_participation: 'retained_excluded', analysis_participation_reason: UNSIZED_OLUMI_RISK_REASON } : n) };
 }
 
