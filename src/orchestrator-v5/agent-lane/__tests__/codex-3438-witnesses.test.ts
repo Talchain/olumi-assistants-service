@@ -251,4 +251,13 @@ describe('every credit reader: the quote, the baseline, the ceiling and the link
     expect(linkEffectTheUserStated('Each additional specialist resolves 20 ± 5 tickets per week.', size(5), ends, scope)).not.toBeNull();
     expect(linkEffectTheUserStated('Each additional specialist resolves 20 tickets per week.', size(20), ends, scope)).toBeNull();
   });
+  it('a range in the verifier\'s figure list: written only when both ends are complete (Codex R8 P1); the capacity 20 with its 10–30 kept', () => {
+    for (const q of ['The deal would add 20 ± 5 to 10 attendance points.', 'The deal would add 20 plus or minus 5 to 10 attendance points.',
+      'The deal would add 5 to 10 ± 2 attendance points.'])
+      expect(figuresWritten(q, 'attendance points'), q).not.toContainEqual({ low: 5, high: 10 });
+    expect(figuresWritten('The deal would add between 5 and 10 attendance points.', 'attendance points')).toContainEqual({ low: 5, high: 10 });
+    const capacity = figuresWritten('Each additional specialist resolves about 20 tickets per week, between 10 and 30.', 'tickets per week');
+    expect(capacity).toContainEqual({ low: 20, high: 20 });
+    expect(capacity).toContainEqual({ low: 10, high: 30 });
+  });
 });
