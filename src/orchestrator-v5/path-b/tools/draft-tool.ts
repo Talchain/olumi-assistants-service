@@ -1,7 +1,8 @@
 /**
  * ⭐ PATH-B: THE DRAFT ADAPTER (C5, 19 Oct 2026; Step 8 gap 3, DL 19 Oct). Olumi's PROVISIONAL first model from the user's brief.
  *  1. literal check only: the brief is in the user's own typed words (`inTheUsersWords`);
- *  2. ONE drafter call with the construction's model and strict schema, its STATIC instructions (`BUILD_INSTRUCTIONS`) and the
+ *  2. ONE drafter call with the construction's model and strict schema, its STATIC instructions (`BUILD_INSTRUCTIONS` plus the
+ *     AIE's one B-only sentence, `B_DRAFTER_SENTENCE`; A's instructions are untouched) and the
  *     literal brief in the shared turn context (`turnContextItems`): no host reading of the brief changes what the AI is told
  *     (#3473 R1: no event-by-date attestation, no range notes). The drafter's JSON becomes the model through Step 8's pure `candidateToGraph`:
  *     A's numbers and structure science on a label-blind copy, each figure with the origin the AI declared, no reading of the
@@ -44,6 +45,12 @@ export interface DraftDeps {
 
 const nodesIn = (graph: Record<string, unknown>): number => (Array.isArray(graph.nodes) ? graph.nodes.length : 0);
 
+/**
+ * ⭐ THE AIE'S B-ONLY DRAFTER SENTENCE (19 Oct 2026, verbatim; sha256 cfbe03aa8d84e1ed6452817987d331bbf15596be25487da26b93978316d95f49):
+ * an option's stated effect is a setting on the factor it changes, and an additive goal is a declared sum. Sent on B's request only.
+ */
+export const B_DRAFTER_SENTENCE = 'Represent each option\'s stated effect as a setting on the factor it changes rather than a sized link from the option, retaining every supplied point and complete range with the literal words, named speaker, source, stance, units, period and conditions; where the source meaning establishes that the goal quantity equals its current level plus additions, declare a sum in identities with bound current-level and addition operands and supported current levels for every operand and the total in the same quantity, units, period and reference; keep derived arithmetic visibly Olumi\'s, use zero only for a structurally defined increment at its stated reference, and leave unsupported levels or probability laws unknown.';
+
 /** The ONE drafter call, on the static instructions and the literal brief: the draft, or why there is none. Nothing is written. */
 async function drafted(callStructured: CallStructuredModel, brief: string): Promise<{ readonly draft: unknown } | { readonly outcome: ToolOutcome }> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
@@ -51,7 +58,7 @@ async function drafted(callStructured: CallStructuredModel, brief: string): Prom
   try {
     out = await callStructured({
       model: budget.model,
-      instructions: BUILD_INSTRUCTIONS,
+      instructions: `${BUILD_INSTRUCTIONS} ${B_DRAFTER_SENTENCE}`,
       input: turnContextItems({ now: new Date(), briefText: brief, conversation: [], construction: {} }).map(turnContextText).join('\n\n'),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
