@@ -22,7 +22,8 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
 import { wholeStatementIn, quoteIsNotTheUsersClaim } from '../goal-target/input-claim-context.js';
 import { readUnitParts, sameUnit, statedTailParts } from './same-unit.js';
-import { figureTheUserWroteFor } from './stated-by-user.js';
+import { factorTheUserNamed, figureTheUserWroteFor } from './stated-by-user.js';
+import { coordinateClausesOf } from './link-effect-option-statement.js';
 import { goalTargetIdentity } from './construction-size-gate.js';
 
 /**
@@ -197,8 +198,6 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
   readonly statements: readonly { readonly field: StatementField; readonly statement: UserStatement }[];
   readonly claimed: readonly GivenStatement[];
   readonly holdsNowReading?: string;
-  /** Every user sentence claimed for this subject is another subject's verified figure statement: a source for THAT claim only. */
-  readonly borrowed?: true;
 } {
   const entries = draftStatements(model);
   const kept: GivenStatement[] = retained.map((quote) => ({ quote }));
@@ -241,21 +240,41 @@ export function subjectSource(model: unknown, brief: string | undefined, subject
   // Known human words (or only Olumi's holds-now reading) remain human material, never an Olumi estimate.
   const own = claims.flatMap(c => (typeof c.quote === 'string' && usersWords(c.quote) ? [c.quote] : []));
   if (own.length === 0 && !keptWords) return unknown(claimed);
-  // ⭐ DL-3 19 Oct (verifier K-WORDS, capacity journey): a quote is a source for the CLAIM, not a change of author. Where the drafter
-  // itself labels the risk Olumi's (`inferred` / `ai_proposed`) and every user sentence it cites is another subject's verified
-  // figure statement (the one cross-subject check, `rivalled`: "about 20, between 10 and 30" is the LINK's effect), the risk stays
-  // Olumi's: its source is unknown here, so admission honours the drafter's own tag. The user's words stay with the subject that owns
-  // them. Any user sentence of the risk's own (unrivalled), retained words, or a risk the drafter calls the user's keep today's path.
-  const borrowed = !keptWords && own.every(rivalled);
-  if (borrowed && subject.kind === 'risk' && drafterCallsOlumis(model, subject.label)) return { ...unknown(claimed), borrowed: true as const };
-  return { ...unverifiedHuman(claimed), ...(borrowed ? { borrowed: true as const } : {}) };
+  // ⭐ AIE 19 Oct 10:54Z + 11:25Z AMEND (#3450 Codex R1): a quote is a source for the CLAIM, not a change of author, and removing human
+  // credit does not by itself make a risk Olumi's. Only a risk the drafter itself says it ADDED beyond the source (`ai_proposed`; never
+  // `inferred`, which is a reformulation or an unresolved introduction) stays Olumi's, and only where EVERY claim on it is a description
+  // and EVERY user sentence it cites is another subject's verified figure statement (`rivalled`) with no clause naming the risk (the
+  // existing naming authority, `factorTheUserNamed`, per coordinated clause). A clause that raises, sizes or adopts the risk names it, so
+  // another figure in the same sentence never erases the user's concern; that sentence keeps today's path, with its record.
+  if (!keptWords && subject.kind === 'risk' && drafterAddedIt(model, subject.label)
+    && claims.every((c) => c['form'] === 'describes' && c['field'] !== 'holds_now' && c['field'] !== 'occurrence')
+    && own.every((q) => rivalled(q) && !namesTheRisk(model, subject.label, q))) return unknown(claimed);
+  return unverifiedHuman(claimed);
 }
 
-/** The drafter's own label on its risk says it is Olumi's (read out of the brief, or added beyond it). Positive evidence only. */
-function drafterCallsOlumis(model: unknown, label: string): boolean {
+/** The admitted node is Olumi's by its own provenance (the one authorship reader). */
+function olumisNode(graph: { nodes: unknown[] }, id: string): boolean {
+  const n = graph.nodes.find((x) => x !== null && typeof x === 'object' && (x as { id?: unknown }).id === id) as { provenance?: unknown } | undefined;
+  return n !== undefined && authorshipOf({ nodeTag: n.provenance }).origin === 'ai';
+}
+
+/** The drafter's own introduction tag says it ADDED this risk beyond the source (`ai_proposed`). Positive evidence only. */
+function drafterAddedIt(model: unknown, label: string): boolean {
   const risks = model !== null && typeof model === 'object' ? (model as { risks?: unknown }).risks : undefined;
   return Array.isArray(risks) && risks.some((r) => r !== null && typeof r === 'object' && typeof (r as { label?: unknown }).label === 'string'
-    && norm((r as { label: string }).label) === norm(label) && ['inferred', 'ai_proposed'].includes((r as { provenance?: unknown }).provenance as string));
+    && norm((r as { label: string }).label) === norm(label) && (r as { provenance?: unknown }).provenance === 'ai_proposed');
+}
+
+/** Some coordinated clause of `quote` names the risk by its own words (the model's other labels' shared words never count). */
+function namesTheRisk(model: unknown, label: string, quote: string): boolean {
+  const m = model !== null && typeof model === 'object' ? model as Record<string, unknown> : {};
+  const labelsOf = (v: unknown): string[] => (Array.isArray(v) ? v : []).flatMap((x: unknown) => {
+    const l = x !== null && typeof x === 'object' ? (x as { label?: unknown; metric?: unknown }).label ?? (x as { metric?: unknown }).metric : undefined;
+    return typeof l === 'string' && norm(l) !== norm(label) ? [l] : [];
+  });
+  const goal = m.goal !== null && typeof m.goal === 'object' ? [(m.goal as { metric?: unknown }).metric].filter((x): x is string => typeof x === 'string') : [];
+  const scope = { options: labelsOf(m.options), others: [...labelsOf(m.factors), ...labelsOf(m.outcomes), ...labelsOf(m.risks), ...goal] };
+  return coordinateClausesOf(quote).some((clause) => factorTheUserNamed(label, clause, scope));
 }
 
 export function figureSource(model: unknown, brief: string | undefined, subject: DraftedSubject, field: StatementField, value: number): FigureSource | undefined {
@@ -503,8 +522,7 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
       // (`already_true_quote`), and a risk's chance only by the door's occurrence card: never a construction record of either.
       if (field === 'holds_now' || field === 'occurrence') continue;
       const source = subjectSource({ statements: entries }, brief, drafted);
-      // Another subject's verified figure sentence is that subject's record, never this risk's words (DL-3 19 Oct, K-WORDS).
-      if (source.author.origin !== 'human' || source.borrowed === true) continue;
+      if (source.author.origin !== 'human') continue;
     }
     const map = sourceMapOf([entry], brief);
     // ⛔ DL-3 16:14Z (#3363 R3; first loss P07/P09): words the brief writes verbatim, refused ONLY as not a whole statement there, are
@@ -518,6 +536,9 @@ export function withConstructionStatements<G extends { nodes: unknown[] }>(graph
       : { kind: drafted.kind, label: drafted.label, ...(drafted.to_label !== undefined ? { to_label: drafted.to_label } : {}), field };
     const resolved = resolveSubject(graph, ref);
     if (resolved.kind !== 'resolved') continue;
+    // A risk admission made Olumi's carries no record of the user's words as ITS statement: those words stay with the subject they
+    // state (#3450). Every other risk's record is unchanged.
+    if (drafted.kind === 'risk' && olumisNode(graph, resolved.subject.id)) continue;
     const key = doorSubjectKey(resolved.subject);
     const group = groups.get(key) ?? { subject: resolved.subject, statements: [] };
     group.statements.push(...said);
