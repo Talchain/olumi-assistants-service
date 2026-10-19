@@ -91,7 +91,10 @@ describe('the read cache sees every write the Agent turn can make', () => {
 
   it('the capabilities write through the counting dispatch, and it reads through the cache', () => {
     // C1: decorate the counting dispatch with its held port; ordinary writes still use that same dispatch.
-    expect(ROUTE).toMatch(/createAgentCapabilities\(\s*bindHeldApprovalWriter\(countingDispatch,/);
+    // ⛔ CHANGED EXPECTATION (PATH-B, 19 Oct): the decorated dispatch is named once (`capDispatch`) so the capabilities and
+    // PATH-B's typed adapters write through the SAME counting dispatch; the capabilities still take exactly it.
+    expect(ROUTE).toMatch(/const capDispatch = bindHeldApprovalWriter\(countingDispatch,/);
+    expect(ROUTE).toMatch(/createAgentCapabilities\(\s*capDispatch,/);
     expect(ROUTE).toMatch(/const countingDispatch[^]*?return readingDispatch\(path, body\);/);
     expect(ROUTE).toMatch(/const readingDispatch: typeof dispatch = readCache\.dispatch;/);
   });
