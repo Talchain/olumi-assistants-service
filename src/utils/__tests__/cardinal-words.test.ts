@@ -119,6 +119,12 @@ describe("L67 — the hand-written cardinal corpus", () => {
     ["twelve hundred", 1_200],
     ["nineteen hundred and ninety", 1_990],
     ["one thousand and five hundred", 1_500],
+    // Decimals in words (DL-3 ruling): the complete value, never its two halves.
+    ["seven point five", 7.5],
+    ["two point five million", 2_500_000],
+    ["one point two five", 1.25],
+    ["one point one million", 1_100_000],
+    ["twenty three point zero five", 23.05],
   ];
   for (const [phrase, value] of CORPUS) {
     it(`"${phrase}" → ${value}`, () => {
@@ -152,7 +158,6 @@ describe("L67 — the parser fails closed", () => {
     ["two thirds", "direct fraction — never 2"],
     ["three quarters", "direct fraction — never 3"],
     ["a hundred", "'a' is an article, not a count"],
-    ["two point five million", "'point' decimals are not folded"],
     ["banana", "not a number at all"],
     // ⛔ A range is never summed (8b on #3438: "between two and three" read 5).
     // Two numbers are never one: the phrase refuses, never their sum.
@@ -170,7 +175,10 @@ describe("L67 — the parser fails closed", () => {
     ["twenty twenty-six", "two numbers — never 46"],
     ["one two three", "three numbers — never 6"],
     ["a hundred and one", "an article is not a count — never 1, never 100"],
-    ["seven point five", "decimals in words are not folded — never 7, never 5"],
+    ["seven point", "a point with no digits"],
+    ["seven point twenty", "decimal digits are read one by one — never 7.20 as twenty"],
+    ["point five", "no whole number before the point"],
+    ["two million point five thousand", "a whole number with its own scale takes none after its decimal"],
     ["two or three thousand", "a range — never 2, never 3,000"],
     ["two to three million", "a range — never 2, never 3,000,000"],
     ["between two and three", "a range — never 5"],
@@ -209,9 +217,11 @@ describe("the range class: two ends or nothing", () => {
     ["twenty to one hundred (a shared scale that would make no range)", "We need twenty to one hundred more.", [20, 100]],
     ["two to three", "We need two to three more bakers.", [2, 3]],
     ["a hundred and one", "We sold a hundred and one loaves.", []],
-    ["seven point five", "We waited seven point five weeks.", []],
+    ["seven point five (a decimal, whole)", "We waited seven point five weeks.", [7.5]],
+    ["one point five to two million (a decimal low end shares the scale)", "Revenue is one point five to two million pounds.", [1_500_000, 2_000_000]],
     ["between twenty and two hundred and fifty thousand (a shared scale read two ways)", "Between twenty and two hundred and fifty thousand.", []],
-    ["between three and two (low not below high)", "Between three and two bakers.", []],
+    ["between three and two (two figures as written)", "Between three and two bakers.", [3, 2]],
+    ["between three and two thousand (a shared scale that would make no range)", "Between three and two thousand bakers.", [3, 2_000]],
     ["CONTROL a compound with and", "We sell two hundred and fifty loaves.", [250]],
     ["CONTROL two numbers in two clauses", "We have two ovens and three mixers.", [2, 3]],
   ])("%s", (_case, text, expected) => { expect(readAll(text)).toEqual(expected); });
@@ -246,15 +256,23 @@ describe("the range class: two ends or nothing", () => {
         const low = both ? lw + sw : lw;
         const high = hw + sw;
         const highValue = hv * sv;
-        // The agreed reading: a scale the high end closes on is shared by a bare low end where that makes a range.
+        // The agreed reading. A range single captures would misread is read WHOLE: a bare low end before a high end that closes
+        // on a scale (the scale is shared where that makes a range), or "between" with a low end that closes on one. Every other
+        // range's ends are two figures, each as written.
+        const MULT = ["hundred", "thousand", "million"];
         const highWords = high.split(" ");
-        const closing = highWords.filter((w, i) => i > 0 && ["hundred", "thousand", "million"].includes(w) && highWords.slice(i).every((x) => ["hundred", "thousand", "million"].includes(x)));
+        const lowWords = low.split(" ");
+        const closing = highWords.filter((w, i) => i > 0 && MULT.includes(w) && highWords.slice(i).every((x) => MULT.includes(x)));
         const shared = closing.reduce((m, w) => m * (w === "hundred" ? 100 : w === "thousand" ? 1_000 : 1_000_000), 1);
         const lowLiteral = both ? lv * sv : lv;
-        const bare = !both && !lm && shared > 1 && !highWords.slice(0, highWords.length - closing.length).some((w) => w === "and" || ["hundred", "thousand", "million"].includes(w));
-        const oracle = bare && lowLiteral * shared < highValue ? [lowLiteral * shared, highValue]
-          : !both && !lm && shared > 1 && !bare ? []
-          : lowLiteral < highValue ? [lowLiteral, highValue] : [];
+        const lowBare = !lowWords.some((w) => MULT.includes(w) || w === "and");
+        const whole = (lowBare && closing.length > 0) || (join === CONNECTORS[0] && MULT.includes(lowWords[lowWords.length - 1]!));
+        const highHead = highWords.slice(0, highWords.length - closing.length);
+        const ascending = (a: number): number[] => (a < highValue ? [a, highValue] : []);
+        const oracle = !whole ? [lowLiteral, highValue]
+          : lowBare && closing.length > 0
+            ? (highHead.some((w) => w === "and" || MULT.includes(w)) ? [] : lowLiteral * shared < highValue ? [lowLiteral * shared, highValue] : ascending(lowLiteral))
+            : ascending(lowLiteral);
         const text = `We plan ${join(low, high)} units.`;
         const read = readAll(text);
         cases += 1;

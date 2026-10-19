@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { amountsWrittenIn } from '../stated-by-user.js';
+import { findLinkEffectAmounts, hasLinkEffectRange } from '../link-effect-figures.js';
 
 const inWords = (text: string): number[] => amountsWrittenIn(text).filter((a) => a.kind === 'words').map((a) => a.magnitude);
 
@@ -24,9 +25,12 @@ describe('the located-amount reader: a range written in words is its two ends or
     expect([[], ends]).toContainEqual(read);
   });
   it.each([
-    ['a hundred and one', 'We sold a hundred and one loaves.'],
-    ['seven point five', 'We waited seven point five weeks.'],
-  ])('%s: no fragment of it', (_case, text) => { expect(inWords(text)).toEqual([]); });
+    ['a hundred and one', 'We sold a hundred and one loaves.', [101]],
+    ['seven point five', 'We waited seven point five weeks.', [7.5]],
+  ])('%s: the whole value or nothing, never a fragment', (_case, text, whole) => { expect([[], whole]).toContainEqual(inWords(text)); });
+  it('seven point five is its value (DL-3 ruling: a decimal in words is complete)', () => {
+    expect(inWords('We have seven point five months of runway.')).toEqual([7.5]);
+  });
   it.each([
     ['CONTROL a compound with "and" still reads whole', 'We sell two hundred and fifty loaves a day.', [250]],
     ['CONTROL a ten and a unit still read whole', 'We sell twenty five loaves a day.', [25]],
@@ -49,5 +53,18 @@ describe('the located-amount reader: a range written in words is its two ends or
       if (read.some((v) => !allowed.has(v)) || read.length === 1) failures.push(`${text} → ${JSON.stringify(read)}`);
     }
     expect(failures).toEqual([]);
+  });
+});
+
+describe('the link-size reader: a range written in words is a range of its two ends', () => {
+  it.each([
+    ['two to three', 'It cuts churn by two to three points.', true, [2, 3]],
+    ['between two and three (never 5)', 'It cuts churn by between two and three points.', true, [2, 3]],
+    ['twenty to thirty thousand (the shared scale)', 'It adds twenty to thirty thousand pounds.', true, [20_000, 30_000]],
+    ['two point five (a decimal is one figure)', 'It cuts churn by two point five points.', false, [2.5]],
+    ['CONTROL one figure', 'It cuts churn by two points.', false, [2]],
+  ])('%s', (_case, quote, range, amounts) => {
+    expect(hasLinkEffectRange(quote)).toBe(range);
+    expect(findLinkEffectAmounts(quote).map((a) => a.magnitude)).toEqual(amounts);
   });
 });

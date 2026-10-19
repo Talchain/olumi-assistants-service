@@ -112,20 +112,33 @@ const TOKEN_ALTERNATION = alternation([
   ...Object.keys(CARDINAL_SCALE_MULTIPLIERS),
 ]);
 
+/** A decimal's digits in words, read one by one after "point" ("seven point five" is 7.5; "one point two five" 1.25). */
+const DECIMAL_DIGITS: Readonly<Record<string, number>> = Object.freeze({ zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 });
+const DECIMAL_DIGIT_ALTERNATION = alternation(Object.keys(DECIMAL_DIGITS));
+
 /** The words that multiply a group: the compounder and every scale word. */
 const MULTIPLIER_ALTERNATION = alternation([CARDINAL_HUNDRED_WORD, ...Object.keys(CARDINAL_SCALE_MULTIPLIERS)]);
 
 /**
- * ONE number in words: a small cardinal, then hundred/scale/small tokens joined by whitespace or hyphens. "and" joins
- * ONLY right after "hundred" or a scale word ("two hundred AND fifty", "one thousand AND five"); after a small cardinal
- * it is a connector between two numbers, never part of one ("two and three"). It never starts right after a
- * multiplier word (the fragment "one" of "a hundred and one") or next to "point" ("seven point five" is no 7 and no 5).
+ * ONE number in words: a small cardinal, then hundred/scale/small tokens joined by whitespace or hyphens, then an optional
+ * decimal ("seven POINT FIVE", "two point five MILLION"). "and" joins ONLY right after "hundred" or a scale word ("two hundred
+ * AND fifty", "one thousand AND five"); after a small cardinal it is a connector between two numbers, never part of one ("two
+ * and three"). No guard on what precedes it: for a pattern that embeds it straight after its own words ("a hundred AND
+ * twenty"). A reader of free text uses `CARDINAL_AMOUNT_SOURCE`, which never starts a number right after a multiplier word
+ * (the fragment "one" of "a hundred and one") or right after "point".
  */
-const NUMBER_CORE =
+export const CARDINAL_NUMBER_SOURCE =
   `(?:${SMALL_ALTERNATION})` +
   `(?:(?:(?<=\\b(?:${MULTIPLIER_ALTERNATION}))\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*` +
+  `(?:\\s+point(?:\\s+(?:${DECIMAL_DIGIT_ALTERNATION}))+(?:[\\s-]+(?:${MULTIPLIER_ALTERNATION}))*)?` +
   `(?![\\s-]+(?:(?:${TOKEN_ALTERNATION})[\\s-]+)*point\\b)`;
-const ONE_NUMBER = `(?<!\\b(?:${MULTIPLIER_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint\\s+)${NUMBER_CORE}`;
+const NUMBER_CORE = CARDINAL_NUMBER_SOURCE;
+const START_GUARD = `(?<!\\b(?:${MULTIPLIER_ALTERNATION})(?:\\s+and)?[\\s-]+)(?<!\\bpoint\\s+)`;
+const ONE_NUMBER = `${START_GUARD}${NUMBER_CORE}`;
+/** The number just matched ends on "hundred" or a scale word. */
+const ENDS_ON_A_MULTIPLIER = `(?<=\\b(?:${MULTIPLIER_ALTERNATION}))`;
+/** The number just matched is whole: nothing that would continue it, or start another, follows ("… two hundred AND FIFTY"). */
+const WHOLE = `(?![\\s-]+(?:${TOKEN_ALTERNATION})\\b|\\s+and\\s+(?:${SMALL_ALTERNATION})\\b)`;
 
 /**
  * The fraction words whose arrival after a cardinal phrase means the phrase
@@ -159,14 +172,21 @@ export const CARDINAL_FRACTION_CONTINUATION =
   `(?:\\s+and\\s+a\\s+(?:${alternation([...CARDINAL_FRACTION_WORDS])})\\b` +
   `|[\\s-]+(?:${alternation([...CARDINAL_FRACTION_WORDS])})\\b)?`;
 
+/** A range's low end with no scale of its own: small cardinals, a decimal, or a fraction ("two", "twenty five", "one point
+ * five", "one and a half"). */
+const BARE_END = `(?:${SMALL_ALTERNATION})(?:[\\s-]+(?:${SMALL_ALTERNATION}))*(?:\\s+point(?:\\s+(?:${DECIMAL_DIGIT_ALTERNATION}))+)?`
+  + `${CARDINAL_FRACTION_CONTINUATION}`;
+
 /**
  * The phrase grammar, as a SOURCE string with NO capture groups so one pattern can embed it twice under different named
  * wrappers (the same constraint that shaped `MAGNITUDE_SUFFIX_ANON`).
  *
- * Shape: ONE number (above), or a RANGE written in words, consumed WHOLE so no end, sum or fragment of it can be read as
- * one figure: "between X and Y", "X to Y", "X or Y". `parseCardinalAmount` refuses a range capture (its connector is
- * outside the vocabulary); `cardinalReadings` reads its two ends. The repetition is greedy, so "two hundred and fifty
- * thousand" is consumed whole.
+ * Shape: ONE number (above), or a RANGE written in words whose ends a reader of single captures would misread, consumed
+ * WHOLE: a shared scale ("two to three million", "between twenty and thirty thousand": never 2 and 3,000,000) and a
+ * "between" whose low end closes on a multiplier ("between two hundred and three thousand": never 203,000). Every other
+ * range's ends are single captures as before ("two to three": 2 and 3). `parseCardinalAmount` refuses a whole range (its
+ * connector is outside the vocabulary); `cardinalReadings` reads its two ends. The repetition is greedy, so "two hundred
+ * and fifty thousand" is consumed whole.
  *
  * ⚠ CORRECTED CLAIM (adversarial review F1, executed at `42fe683a`): a fraction-shaped tail ("from one to a target of
  * two and a half million") once committed the fragment 2. The repair is `CARDINAL_FRACTION_CONTINUATION` below, which
@@ -177,8 +197,10 @@ export const CARDINAL_FRACTION_CONTINUATION =
  * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as it does for the magnitude alternation.
  */
 export const CARDINAL_AMOUNT_SOURCE =
-  `(?:between\\s+${NUMBER_CORE}${CARDINAL_FRACTION_CONTINUATION}\\s+and\\s+${NUMBER_CORE}`
-  + `|${ONE_NUMBER}(?:${CARDINAL_FRACTION_CONTINUATION}\\s+(?:to|or)\\s+${NUMBER_CORE})?)`;
+  `(?:between\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}\\s+and\\s+${NUMBER_CORE}${WHOLE}`
+  + `|between\\s+${BARE_END}\\s+and\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}`
+  + `|${START_GUARD}${BARE_END}\\s+(?:to|or)\\s+${NUMBER_CORE}${ENDS_ON_A_MULTIPLIER}${WHOLE}`
+  + `|${ONE_NUMBER})`;
 
 /**
  * Fold a matched cardinal phrase to its number, or `null` for anything the
@@ -208,6 +230,28 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
     .split(/[\s-]+/)
     .filter((token) => token.length > 0);
   if (tokens.length === 0) return null;
+  // A decimal in words is its value, never its two halves ("seven point five" is 7.5, never 7 and 5): the whole number, its
+  // digits one by one, then any scale words ("two point five million"); a whole number with its own scale takes none.
+  const point = tokens.indexOf("point");
+  if (point >= 0) {
+    const whole = parseCardinalAmount(tokens.slice(0, point).join(" "));
+    const rest = tokens.slice(point + 1);
+    let digits = 0;
+    while (digits < rest.length && DECIMAL_DIGITS[rest[digits]!] !== undefined) digits += 1;
+    const scales = rest.slice(digits);
+    if (whole === null || digits === 0 || !scales.every(isMultiplier)) return null;
+    if (scales.length > 0 && tokens.slice(0, point).some(isMultiplier)) return null;
+    // In whole units of the last digit, so "one point one million" is exactly 1,100,000.
+    let units = whole * 10 ** digits + Number(rest.slice(0, digits).map((d) => DECIMAL_DIGITS[d]).join(""));
+    let previous = Infinity;
+    for (const w of scales) {
+      const factor = w === CARDINAL_HUNDRED_WORD ? 100 : CARDINAL_SCALE_MULTIPLIERS[w]!;
+      if (factor >= previous) return null;
+      units *= factor;
+      previous = factor;
+    }
+    return units / 10 ** digits;
+  }
 
   let total = 0;
   let group = 0;
