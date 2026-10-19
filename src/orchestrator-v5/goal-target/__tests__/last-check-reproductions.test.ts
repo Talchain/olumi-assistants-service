@@ -31,17 +31,6 @@ import { actionFactsOf } from '../../agent-lane/actions/state.js';
 import { decidePress } from '../../agent-lane/actions/handlers.js';
 import { sayOlumiEstimates } from '../../agent-lane/olumi-estimates-feeding-result.js';
 
-/**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
- * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
- * the Check estimates census, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
- */
-vi.mock('../../agent-lane/goal-certainty.js', async (original) => {
-  const actual = await original<typeof import('../../agent-lane/goal-certainty.js')>();
-  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
-    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
-});
-
 type Rec = Record<string, any>;
 const clone = <T>(x: T): T => structuredClone(x);
 const sid = '9c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c';

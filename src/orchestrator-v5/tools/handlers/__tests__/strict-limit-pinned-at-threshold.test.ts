@@ -31,17 +31,6 @@ import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
-/**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768): a chance resting on a user's size whose spread nobody stated is withheld
- * (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This file tests
- * the strict limit at its threshold, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
- */
-vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
-  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
-  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
-    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
-});
-
 type Rec = Record<string, unknown>;
 const U2 = readFileSync('tests/fixtures/cross-service/c50-level-demo/U2.plot-response.json', 'utf8');
 const SCENARIO_ID = 'a2f0a2f0-a2f0-4a2f-8a2f-a2f0a2f0a2f0';

@@ -80,6 +80,7 @@ import {
   collectLeaderEstimatedTargetIds,
   collectLimitLevelOwners,
   withholdOptionGoalFigures,
+  withholdConditionalRows,
   withholdOptionLimitScores,
   deriveConstraintVerdict,
   readRatifiedConstraints,
@@ -166,7 +167,7 @@ import {
   resolveRunAdmission,
 } from './analysis-ready-core.js';
 import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
-import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
+import { RUN_EVALUATED_BEFORE_SUPPORT_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
@@ -1222,6 +1223,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
+    /** STEP 8 (Codex R2 #3443): the evaluated result before the recorded-support projection, kept whole in the saved Run. */
+    let evaluatedBeforeSupport: unknown;
     // Fix 4 review fix (round 2): every timing site is gated on the flag.
     // Default-OFF production runs make zero `Date.now()` calls, allocate no
     // RunAnalysisTimings object, and emit no `v5.run_analysis.timings`
@@ -1860,14 +1863,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const wireInterventions = new Map(finalWireOptions.map((o) => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
     const unsupportedSpreadTo = (nodeId: string) =>
       chanceSupportGoalPaths(graphForAnalysis, wireIds, limitIdentityEvaluations, wireInterventions, nodeId).unsupportedSpread;
+    const ratifiedForSupport = readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph);
     const limitOwners = collectLimitLevelOwners(
       graphForAnalysis,
-      readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph),
+      ratifiedForSupport,
       finalWireOptions,
       limitIdentityEvaluations,
       unsupportedSpreadTo,
     );
     const placeholderMovedByLimit = limitOwners.placeholderMovedOptionIds;
+    // ⭐ STEP 8 (Codex R2 #3443 P1): the saved Run keeps the engine's evaluated result whole, as it stood before the projection
+    // withholds what rests on an unsupported spread (`RUN_EVALUATED_BEFORE_SUPPORT_KEY`); the enrichment is that projection.
+    if (limitOwners.unsupportedSpreadByLimit.size > 0) evaluatedBeforeSupport ??= structuredClone(response);
     for (const [constraintId, paths] of limitOwners.unsupportedSpreadByLimit) {
       response = appendInferenceWarning(response, { ...unsupportedSpreadWarning(graphForAnalysis, paths),
         code: CONDITION_FIGURES_UNSUPPORTED_SPREAD, severity: 'info', constraint_ids: [constraintId] });
@@ -2009,8 +2016,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // drawn on the same unsupported spread has no warrant of its own, and never stands in for the withheld chance). The
         // outcome stays in the saved Run for the structural challenge (`keepOutcome`); its range never reaches a public block or
         // the AI (`unsupportedIntervalOptionIds`, AIE 764e9c72).
+        evaluatedBeforeSupport ??= structuredClone(response);
         response = withholdOptionGoalFigures(response, new Set(support.unsupportedSpread.map((p) => p.option_id)),
           unsupportedSpreadWarning(graphForAnalysis, support.unsupportedSpread), { keepOutcome: true });
+        // The pooled conditional rows that name the goal's own conditions rest on those withheld chances (Codex R2 P1).
+        const goalConditions = new Set(ratifiedForSupport.filter((c) => c.node_id === snapshot.goal_node_id).map((c) => c.constraint_id));
+        const conditional = withholdConditionalRows((response as Record<string, unknown>).conditional_probabilities, goalConditions);
+        if (conditional !== (response as Record<string, unknown>).conditional_probabilities) {
+          response = { ...response, conditional_probabilities: conditional } as typeof response;
+        }
         log.info(
           {
             event: 'run_analysis.goal_figures_withheld_for_unsupported_spread',
@@ -2816,7 +2830,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        enrichment: stampRunAnalysisProjection({ ...(response as Record<string, unknown>),
+          ...(evaluatedBeforeSupport !== undefined ? { [RUN_EVALUATED_BEFORE_SUPPORT_KEY]: evaluatedBeforeSupport } : {}) }),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

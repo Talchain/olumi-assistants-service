@@ -22,18 +22,6 @@ import {
 } from '../../../compose/analysis-state-v1.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 
-/**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance, share or leader resting on a user's size whose spread is
- * not attested is withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This
- * fixture's user sizes have no attested spread, and no positive is invented for them. This file tests
- * that an untestable target keeps the separation evidence, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
- */
-vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
-  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
-  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
-    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
-});
-
 type Json = Record<string, any>;
 const F = JSON.parse(readFileSync(new URL('./fixtures/r6-target-keeps-separation.json', import.meta.url), 'utf8')) as {
   brief_text: string; graph: Json; plot_body: Json;

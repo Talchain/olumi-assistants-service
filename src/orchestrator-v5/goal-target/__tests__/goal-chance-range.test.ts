@@ -20,18 +20,6 @@ import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 
-/**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance resting on a user's size whose spread is not attested is
- * withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This fixture's user sizes
- * have no attested spread, and no positive is invented for them. This file tests
- * the chance range itself, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
- */
-vi.mock('../../agent-lane/goal-certainty.js', async (original) => {
-  const actual = await original<typeof import('../../agent-lane/goal-certainty.js')>();
-  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
-    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
-});
-
 type Json = Record<string, any>;
 const clone = <T>(v: T): T => structuredClone(v);
 const A = 'raise', B = 'keep', FROM = 'price', TO = 'revenue';

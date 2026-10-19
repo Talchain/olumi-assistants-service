@@ -13,18 +13,6 @@ import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
 
-/**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance resting on a user's size whose spread is not attested is
- * withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This fixture's user sizes
- * have no attested spread, and no positive is invented for them. This file tests
- * the accumulation horizon, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
- */
-vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
-  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
-  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
-    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
-});
-
 type Rec = Record<string, any>;
 const served = JSON.parse(readFileSync(new URL('../../../../../tests/fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')).graph as Rec;
 const clone = <T>(value: T): T => structuredClone(value);

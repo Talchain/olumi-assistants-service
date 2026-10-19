@@ -10,18 +10,6 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
 
-/**
- * ⭐ STEP 8 (AIE `point_uncertainty` 564fe768, cc9fbadf): a chance, win share or leader resting on a user's size whose spread is
- * not attested is withheld (`run-analysis-unsupported-spread.test.ts` pins that rule, its words and every surface). This served
- * graph's user sizes have no attested spread, and no positive is invented for them. This file tests
- * the target-independent path licence, not that rule, so the Run's spread selection is held empty here; the rest of the support walk runs as served.
- */
-vi.mock('../../../agent-lane/goal-certainty.js', async (original) => {
-  const actual = await original<typeof import('../../../agent-lane/goal-certainty.js')>();
-  return { ...actual, chanceSupportGoalPaths: (...args: Parameters<typeof actual.chanceSupportGoalPaths>) =>
-    ({ ...actual.chanceSupportGoalPaths(...args), unsupportedSpread: [] }) };
-});
-
 type R = Record<string, any>;
 const brief = readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
 const licence = (g: R, ids: string[]) => (certainty as any).unsizedLeaderGoalPaths?.(g, ids) ?? [];
