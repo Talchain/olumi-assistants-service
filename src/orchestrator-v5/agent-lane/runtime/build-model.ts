@@ -79,7 +79,7 @@ import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } fr
 import { clampForPersist, frameOf, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { amountsWrittenIn, amountTheUserWrote, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
 import { heldEventRiskLine, holdStatedEventRisks, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
@@ -1845,26 +1845,23 @@ export function goalPathsCarryTheUsersFigures(graph: { readonly nodes: readonly 
 export const REVISED_DRAFT_MORE_LINKS = 'This model has more links than usual, because it tracks everything your goals depend on.';
 
 /**
- * ⭐ K6 (PL amendment 2; DL ack 18 Oct; AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1, sha256 ab6a2d6f…). On the user's
- * explicit request for a provisional draft (`draftNow`, verified by the caller), a brief that states no figure and whose ONE
+ * ⭐ K6 (PL amendment 2; DL ack 18 Oct; AIE packet AIE-K6-EXISTING-C5-WORDING-20261018-v1, sha256 ab6a2d6f…). A brief whose ONE
  * goal retry still holds the unattested event is drafted instead of refused: the first draft again, with the event as an
  * option (when it weighs no choice of its own) and the aim an open question (`withOpenAim`). The retry runs FIRST, so a
- * stated aim, qualitative included, is kept whenever the drafter can name it; a stated figure keeps the refusal and ask.
+ * stated aim, qualitative included, is kept whenever the drafter can name it.
+ * ⭐ RE-RULED (signed change 6, DL-3 19 Oct; Paul's live test dd904404 13:01Z: a good draft refused twice, nothing shown): for
+ * EVERY brief, with no "draft it now" request and whatever figures it states. The request and no-figure gates are retired.
  */
 export async function buildModelFromBrief(
   scenarioId: string, brief: string, dispatch: InternalDispatch, callStructured: CallStructuredModel,
   observeConstruction?: (t: ConstructionTrace) => void, deadlineAt?: number, wideningCallStructured?: CallStructuredModel,
   observeAdmissionForTests?: (snapshot: { candidate: CandidateModel; admitted: AdmittedModel; admit: (model: CandidateModel) => AdmittedModel; admitBase: (model: CandidateModel) => AdmittedModel }) => void,
   context?: ConstructionContext, attestedDeliverable?: string, revisedDraft?: boolean, onDraftAdmitted?: (graph: unknown) => void,
-  draftNow?: boolean,
 ): Promise<ToolResult> {
   const k6: OpenAimFallback = {};
   const first = await buildModelFromBriefOnce(scenarioId, brief, dispatch, callStructured, observeConstruction, deadlineAt, wideningCallStructured,
-    observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted, draftNow === true ? k6 : undefined);
-  if (draftNow !== true || first.refusal !== 'construction_needs_redraft' || k6.openAim === undefined || k6.firstText === undefined
-    // A figure the user wrote, in digits or words, is a figure (Codex on #3426 @a36d8e6b: "we currently have five cafés"
-    // drafted an open aim), and one only another speaker said is not theirs (R2 @9cad55e7: a quoted "5 cafés"): the ONE check.
-    || amountsWrittenIn(brief).some((a) => amountTheUserWrote(a, a.magnitude, undefined, brief))) return first;
+    observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted, k6);
+  if (first.refusal !== 'construction_needs_redraft' || k6.openAim === undefined || k6.firstText === undefined) return first;
   const drafted = JSON.stringify(withOpenAim(JSON.parse(k6.firstText) as CandidateModel, k6.openAim));
   let answered = false;
   // The first draft again, with the aim open, and NO further provider call: a repair or size retry it would need answers empty,

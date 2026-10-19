@@ -22,7 +22,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   return { ...actual, log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } };
 });
 
-import { buildModelFromBrief, type CallStructuredModel, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
+import { buildModelFromBrief, type CallStructuredModel, OPEN_AIM_GOAL_LABEL, UNATTESTED_GOAL_RETRY_ISSUE } from '../runtime/build-model.js';
 import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { goalLevelTheUserWrote } from '../stated-by-user.js';
@@ -102,12 +102,18 @@ describe('L1: the drafter\'s horizon picks the brief\'s own span (D2: six months
     expect(brief.indexOf('three months')).toBeLessThan(brief.indexOf('six months'));
   });
 
-  it.each(['D2_r1', 'D2_r2'])('⭐ the served %s answers take an unattested "Feature launch" as the goal: the one retry is asked with the reason, T5\'s recorded retry is still the event, and nothing is saved', async (key) => {
+  // ⭐ RE-RULED (signed change 6, DL-3 19 Oct; was "nothing is saved"): the first draft saves with the aim open, never the event,
+  // and the user's two stated targets stay their own rows, whole.
+  it.each(['D2_r1', 'D2_r2'])('⭐ the served %s answers take an unattested "Feature launch" as the goal: the one retry is asked with the reason, T5\'s recorded retry is still the event, and the draft saves with the aim open', async (key) => {
     const { result, stored, next, inputs } = await run(ep(key));
     expect(next).toBe(2);
     expect(inputs[1]).toContain(UNATTESTED_GOAL_RETRY_ISSUE);
-    expect(stored).toBeUndefined();
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_redraft' });
+    expect(result, JSON.stringify(result).slice(0, 400)).toMatchObject({ ok: true, open_aim: true });
+    const goals = ((stored!.nodes ?? []) as Rec[]).filter((n) => n.kind === 'goal');
+    expect(goals).toEqual([expect.objectContaining({ label: OPEN_AIM_GOAL_LABEL, provenance: 'ai_inferred' })]);
+    const targets = ((stored!.goal_constraints ?? []) as Rec[]).filter((c) => c.role === 'goal_target')
+      .map((c) => [c.operator_as_stated ?? c.operator, c.value, c.unit, c.provenance]);
+    expect(targets).toEqual([['>', 15, '%', 'explicit'], ['>=', 20, 'customers', 'explicit']]);
   });
 
   it.each(['D2_r1', 'D2_r2'])('⭐ RED %s (brief stating the launch as an event): the saved goal holds "six months", the count is not held silently, and no "within 3 months" is asked', async (key) => {

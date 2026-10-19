@@ -7,10 +7,10 @@
  */
 /**
  * ⭐ K6 (PL amendment 2; DL ack 18 Oct): a one-line "should we do X?" brief states no aim, so the drafter takes the ACTION as
- * an event goal, which #3026 rightly never saves as the goal. On the user's explicit "draft it now" (the AI quotes it,
- * `explicit_draft_request`; the host checks it is a whole statement of this turn's typed message), the draft is kept as a
- * labelled provisional model: the event becomes an option and the aim an open question. A brief that states a figure keeps
- * the retry-then-ask path, so an attested aim always wins (#3026's hiring case).
+ * an event goal, which #3026 rightly never saves as the goal. The draft is kept as a labelled provisional model: the event
+ * becomes an option and the aim an open question.
+ * ⭐ RE-RULED (signed change 6, DL-3 19 Oct): for EVERY brief. The word/speaker contrasts below pinned the retired no-figure
+ * condition; they now pin that no figure, in any form or from any speaker, withholds the draft or makes a third call.
  *
  * Construction replayed for real (`buildModelFromBrief`). Scripted: the drafter. SYNTHETIC wording (a café). 0 provider calls.
  */
@@ -44,7 +44,7 @@ const cafeDraft = (): Rec => ({
   identities: [], unknowns: [], decision_question: BRIEF, unknown_concerns: [],
 });
 
-async function construct(answers: readonly string[], brief: string, draftNow?: boolean, widen = false, writeMode = "confirmed"): Promise<{ graph: Rec | undefined; result: Rec; calls: number }> {
+async function construct(answers: readonly string[], brief: string, widen = false, writeMode = "confirmed"): Promise<{ graph: Rec | undefined; result: Rec; calls: number }> {
   let graph: Rec | undefined; let calls = 0;
   const dispatch = async (path: string, body: unknown) => {
     if (path.endsWith('/graph/register')) {
@@ -57,18 +57,18 @@ async function construct(answers: readonly string[], brief: string, draftNow?: b
   };
   const drafter = async () => { calls += 1; return { text: answers[Math.min(calls, answers.length) - 1]!, status: 'completed' }; };
   const result = await buildModelFromBrief('00000000-0000-4000-8000-0000000000k6', brief, dispatch as never, drafter as never,
-    undefined, undefined, widen ? drafter as never : undefined, undefined, undefined, undefined, undefined, undefined, draftNow) as Rec;
+    undefined, undefined, widen ? drafter as never : undefined) as Rec;
   return { graph, result, calls };
 }
 
 
 const phrasings = [
- ['own-five','We currently have five cafés. Should we open another in Bristol next spring?', false],
- ['own-twelve','We employ twelve baristas. Should we open another café in Bristol next spring?', false],
- ['own-twenty-five','We serve twenty-five customers daily. Should we open another café in Bristol next spring?', false],
- ['own-fifty-percent','We have fifty percent occupancy. Should we open another café in Bristol next spring?', false],
- ['own-seven-point-five','We have seven point five months of runway. Should we open another café in Bristol next spring?', false],
- ['own-digits-half','We have 500000 pounds available. Should we open another café in Bristol next spring?', false],
+ ['own-five','We currently have five cafés. Should we open another in Bristol next spring?', true],
+ ['own-twelve','We employ twelve baristas. Should we open another café in Bristol next spring?', true],
+ ['own-twenty-five','We serve twenty-five customers daily. Should we open another café in Bristol next spring?', true],
+ ['own-fifty-percent','We have fifty percent occupancy. Should we open another café in Bristol next spring?', true],
+ ['own-seven-point-five','We have seven point five months of runway. Should we open another café in Bristol next spring?', true],
+ ['own-digits-half','We have 500000 pounds available. Should we open another café in Bristol next spring?', true],
  ['one-of','Opening in Bristol is one of the options. Should we open a second café there next spring?', true],
  ['quote-words','My manager said "we currently have five cafés." Should we open another café in Bristol next spring?', true],
  ['quote-digits','My manager said "we currently have 5 cafés." Should we open another café in Bristol next spring?', true],
@@ -77,7 +77,7 @@ const phrasings = [
 ];
 describe('Independent K6 word/speaker contrasts',()=>{
  it.each(phrasings)('%s', async (name, brief, open)=>{
-  const r = await construct([JSON.stringify(cafeDraft()),JSON.stringify(cafeDraft())], brief as string, true, true);
+  const r = await construct([JSON.stringify(cafeDraft()),JSON.stringify(cafeDraft())], brief as string, true);
   console.log('PROBE',name,JSON.stringify({ok:r.result.ok,open:r.result.open_aim,calls:r.calls,saved:!!r.graph}));
   expect(r.calls).toBe(2);
   expect(r.result.open_aim===true).toBe(open);
@@ -91,7 +91,7 @@ describe('Independent K6 additional call-budget paths',()=>{
   else bad.options[0].interventions=[];
   const good=cafeDraft(); good.goal={...good.goal, metric:OPEN_AIM_GOAL_LABEL,unit:'',kind:null,value:null,target_stated:false,deliverable:null,provenance:'ai_inferred',basis:null};
   good.links=good.links.map((l:Rec)=>({...l,to:l.to===EVENT?OPEN_AIM_GOAL_LABEL:l.to}));
-  const r=await construct([JSON.stringify(bad),JSON.stringify(bad),JSON.stringify(good)],BRIEF,true,true);
+  const r=await construct([JSON.stringify(bad),JSON.stringify(bad),JSON.stringify(good)],BRIEF,true);
   console.log('BUDGET',kind,JSON.stringify({ok:r.result.ok,open:r.result.open_aim,calls:r.calls,saved:!!r.graph,refusal:r.result.refusal}));
   expect(r.calls).toBe(2);
  });
@@ -100,7 +100,7 @@ describe('Independent K6 additional call-budget paths',()=>{
 import {narrateWriteOutcome,OPEN_AIM_SAVED_LINE} from '../write-outcome.js';
 describe('Independent confirmed-write truth',()=>{
  it.each(['confirmed','failed','conflict','duplicate'])('%s',async mode=>{
-  const r=await construct([JSON.stringify(cafeDraft()),JSON.stringify(cafeDraft())],BRIEF,true,true,mode);
+  const r=await construct([JSON.stringify(cafeDraft()),JSON.stringify(cafeDraft())],BRIEF,true,mode);
   const n=narrateWriteOutcome('',[{name:'build_model_from_brief'}],[r.result as never]);
   expect((n.status||'').includes(OPEN_AIM_SAVED_LINE)).toBe(mode==='confirmed');
  });
