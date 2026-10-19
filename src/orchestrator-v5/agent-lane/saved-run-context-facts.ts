@@ -47,7 +47,7 @@ export function savedRunContextFacts(
   const checks = !runToolOutputLicensesLeader({ claim_permissions: permissions })
     ? limitChecksForAgent(read.raw, read.limit_verdicts, read.identity_evaluated,
       new Set((read.run_option_set ?? runOptionSetForCopy(undefined, read.option_participation, read.raw)).leftOut
-        .map(o => o.option_id))) : undefined;
+        .map(o => o.option_id)), read.analysis_result) : undefined;
   return {
     ...revision,
     selected_run_reference: selected.id,

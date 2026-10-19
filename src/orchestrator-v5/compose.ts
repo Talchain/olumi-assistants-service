@@ -1340,12 +1340,11 @@ function buildAnalysisResultBlockUnconfined(
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
   // cloned in the first place. Pure work-avoidance: the projection below still
   // runs and still owns the policy, and it would drop these keys anyway.
-  // STEP 8 (AIE 764e9c72): no simulated range rests on an unsupported spread in the public block (the fact keeps it).
-  const safeTransport = projectGoalProbabilitiesForTransport(
-    toSafeTransportEnrichment(projectUnsupportedIntervalsForTransport(enrichment as Record<string, unknown> | undefined) as typeof enrichment,
-      !mayNameLeadingOption),
+  // STEP 8 (AIE 764e9c72): no simulated range resting on an unsupported spread in the public block (the fact keeps it).
+  const safeTransport = projectUnsupportedIntervalsForTransport(projectGoalProbabilitiesForTransport(
+    toSafeTransportEnrichment(enrichment, !mayNameLeadingOption),
     fact.result.goal_certainty,
-  );
+  ), enrichment as Record<string, unknown> | undefined);
   // TIED-OPTION ORDERING — only on the branch that is allowed to present a
   // ranking at all. A tie in `win_probability` is currently broken ARBITRARILY:
   // on capture 20260828T141150Z "keep what we have" is presented ABOVE "Phased

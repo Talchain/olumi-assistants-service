@@ -85,6 +85,9 @@ describe('real range Run writer keeps its recorded target before any cold projec
     for (const edge of graph.edges) {
       if (edge.to === 'monthly_churn_rate' || edge.to === 'paying_subscribers_at_12_months') {
         edge.provenance = { ...edge.provenance, source: 'user_specified' };
+        // STEP 8 (AIE 764e9c72): the user's band, attested by the chat writer; an unattested spread would withhold the chance
+        // and bar its range (`run-analysis-unsupported-spread.test.ts`). This row tests the range writer's recorded target.
+        edge.std_defaulted = false;
       }
       if (edge.from === 'pro_plan_price' && edge.to === 'monthly_churn_rate') {
         edge.provenance = { ...edge.provenance, source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };

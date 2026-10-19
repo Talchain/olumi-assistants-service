@@ -114,7 +114,9 @@ describe('Run accumulation horizon drift — the wire copy uses the current dead
       Object.assign(node(graph, 'mrr'), { goal_threshold: 0.8, goal_threshold_raw: 85000,
         goal_threshold_cap: 106250, goal_threshold_unit: 'GBP/month', goal_threshold_frame: 'level', goal_direction: '>=' });
       const ratePath = graph.edges.find((e: Rec) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
-      Object.assign(ratePath, { exists_probability: 1, defaulted: false, provenance: { source: 'user_specified' } });
+      // STEP 8 (AIE 764e9c72): the user's band on it, attested by the chat writer (`std_defaulted: false`); unattested, its chance
+      // would be withheld for the spread (`run-analysis-unsupported-spread.test.ts`). This row tests the accumulation horizon.
+      Object.assign(ratePath, { exists_probability: 1, defaulted: false, provenance: { source: 'user_specified' }, provenance_display: 'user_set', std_defaulted: false });
       graph.edges.find((e: Rec) => e.from === 'monthly_churn' && e.to === CARRIER_ID).exists_probability = 0.5;
       const { result } = await run(graph, body);
       const licence = result.enrichment.inference_warnings.find((w: Rec) => w.code === GOAL_CHANCE_LICENSED);
