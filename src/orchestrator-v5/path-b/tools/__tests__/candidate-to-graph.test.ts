@@ -82,7 +82,7 @@ const salesDraft = (size: 'olumi' | 'user' = 'olumi'): Rec => ({
 });
 
 // A goal the AI declared to be two parts added together, with the sentence it read it from.
-const sumDraft = (totalToday: number): Rec => ({
+const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Rec => ({
   ...salesDraft(),
   goal: { ...salesDraft().goal, metric: 'Total orders', baseline_value: totalToday },
   options: [{ label: 'Open a market stall', provenance: 'explicit', changes: ['Shop orders'], interventions: [], added_capacity: null, is_status_quo: null }],
@@ -91,7 +91,8 @@ const sumDraft = (totalToday: number): Rec => ({
     { label: 'Shop orders', role: 'observable', baseline_known: true, baseline_value: 100, unit: 'orders', provenance: 'explicit', plausible_max: null },
   ],
   links: ['Online orders', 'Shop orders'].map((part) => link(part, 'Total orders', 'positive', null,
-    { provenance: 'explicit', effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'explicit', definitional: true })),
+    { provenance: definedBy === 'user' ? 'explicit' : 'inferred', effect_amount: 1, effect_per_source_change: 1,
+      effect_provenance: definedBy === 'user' ? 'explicit' : 'inferred', definitional: true })),
   identities: [{ operation: 'sum', outcome: 'Total orders', factors: ['Online orders', 'Shop orders'],
     evidence: { quote: 'All our orders come either online or from the shop.' } }],
 });
@@ -195,6 +196,53 @@ describe('candidateToGraph: conversion + science only', () => {
     const off = converted(sumDraft(500));
     expect(ofKind(off.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
     expect(off.loss.map((l) => l.reason).join(' ')).toContain('while those parts add up to');
+    // Definitions the AI declared as the user's are a person's sizes: Olumi's placeholder, listed, so no sum is carried on them.
+    const theirs = converted(sumDraft(400, 'user'));
+    expect(ofKind(theirs.graph, 'goal')[0]!.nonlinear_identity).toBeUndefined();
+    expect(theirs.blocked_schema.filter((b) => b.missing === 'link_size_origin').map((b) => b.declared)).toEqual(['user', 'user']);
+  });
+
+  // ⭐ GENERATIVE (DL, 19 Oct): at every derivation site, flip one input's origin; the derived figure's origin follows the ONE
+  // rule — the inputs' shared origin, else Olumi's derived reading — and a mixed total says both inputs' origins.
+  const ORIGINS = ['user', 'olumi', 'other', 'unknown'] as const;
+  type O = typeof ORIGINS[number];
+  const readAs: Record<O, string> = { user: 'human', olumi: 'ai', other: 'unknown', unknown: 'unknown' };
+  const statementBy = (subject: Rec, speaker: O): Rec[] => (speaker === 'other' || speaker === 'unknown' ? [{ quote: 'synthetic',
+    subject: { to_label: null, factor_label: null, ...subject }, field: 'level', form: 'point', value: null, low: null, high: null, unit: null,
+    qualifier: null, conditions: null, speaker }] : []);
+  it.each(ORIGINS.flatMap((today) => ORIGINS.map((added) => [today, added] as const)))(
+    'GENERATIVE (addition): today\'s £2,000 by %s + £1,000 by %s = £3,000, whose origin follows the one rule', (today, added) => {
+      const draft = salesDraft();
+      draft.factors[0].provenance = today === 'olumi' ? 'inferred' : 'explicit';
+      draft.factors[0].baseline_known = today !== 'olumi';
+      draft.options[1].interventions[0].provenance = added === 'olumi' ? 'ai_proposed' : 'explicit';
+      draft.statements = [...statementBy({ kind: 'factor', label: 'Ad spend' }, today),
+        ...statementBy({ kind: 'option', label: 'Add £1,000 of ad spend', factor_label: 'Ad spend' }, added)];
+      const { graph, loss } = converted(draft);
+      const total = byLabel(graph, 'Add £1,000 of ad spend').interventions[byLabel(graph, 'Ad spend').id];
+      const expected: O = today === added ? today : 'olumi';
+      expect(total).toMatchObject({ raw_value: 3000, value: 0.3 });
+      expect(settingProvenanceOf(total).origin).toBe(readAs[expected]);
+      const said = loss.filter((l) => String(l.field_path).endsWith('.derived_total')).map((l) => l.reason);
+      expect(said).toHaveLength(today === added ? 0 : 1);
+      if (today !== added) expect(said[0]).toContain('sets "Ad spend" to £3,000, Olumi\'s derived reading: ');
+    });
+  it('GENERATIVE (addition): the mixed note says each input with its own origin', () => {
+    const draft = salesDraft();
+    draft.factors[0].provenance = 'inferred'; draft.factors[0].baseline_known = false;
+    const { loss } = converted(draft);
+    expect(loss.map((l) => l.reason)).toContain('"Add £1,000 of ad spend" sets "Ad spend" to £3,000, Olumi\'s derived reading: '
+      + 'Olumi\'s £2,000 estimate + your £1,000.');
+  });
+  it.each(ORIGINS)('GENERATIVE (definition): a one-for-one definition declared by %s is sized only when it is Olumi\'s', (by) => {
+    const draft = sumDraft(400, by === 'olumi' ? 'olumi' : 'user');
+    draft.statements = (draft.links as Rec[]).flatMap((l) => (by === 'other' || by === 'unknown' ? [{ quote: 'synthetic',
+      subject: { kind: 'link', label: l.from, to_label: l.to, factor_label: null }, field: 'effect', form: 'point', value: null, low: null,
+      high: null, unit: null, qualifier: null, conditions: null, speaker: by }] : []));
+    const { graph } = converted(draft);
+    const part = edge(graph, 'Online orders', 'Total orders')!;
+    expect(part.provenance.magnitude === 'olumi_estimate').toBe(by === 'olumi');
+    expect(linkProvenanceOf(part).origin).not.toBe('human');
   });
 
   it('BLOCKED-SCHEMA: a target another person stated and a size from an unclear source are listed, never relabelled', () => {
