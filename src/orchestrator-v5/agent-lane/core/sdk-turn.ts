@@ -2,15 +2,18 @@
  * ⭐ PATH-B: AN ORDINARY `core` TURN RUNS ON THE OPENAI AGENTS SDK (Paul 19 Oct 13:44Z: "If there's anything we can utilise
  * that OpenAI provides out of the box, we should ensure that that is our starting solution"; DL-3 fit decision 13:5xZ).
  *
- * The SDK owns the tool loop (`run`), the conversation memory (ONE strategy: an SDK `MemorySession` per scenario and user)
- * and the trace (its built-in tracing, one trace per turn, grouped by scenario). ONE agent owns the reply, on the existing
+ * The SDK owns the tool loop (`run`) and the trace (its built-in tracing, one trace per turn, grouped by scenario). The
+ * conversation lives in ONE durable OpenAI Conversation per scenario (Paul via AIE 14:10Z): created on the first `core` turn,
+ * its id saved on the scenario (`scenarios.openai_conversation_id`) and reused on reopen. Each turn sends only the new user
+ * input and that turn's tool outcomes (the SDK's `conversationId`), and the server compacts the window as it grows. ONE agent owns the reply, on the existing
  * role models (`model-budgets.ts`). Olumi's existing capabilities are its tools: `toolsFor(mode)` declares them with their
  * existing JSON schemas, and `dispatchTool` runs them, so construction (drafter → registration), proposals, approval with
  * digest, CAS and readback, the Run (PLoT/ISL) and the canonical read are the same code the product uses. Each tool's typed
  * result goes back to the model as its own licensed view (`modelFacingToolResult`): real outcomes, and refusals as refusals.
  *
- * The SDK's memory holds only the conversation. The model, its proposals and its Runs stay in Olumi's stores, and every turn
- * the agent is given the CURRENT model state afresh (`turnContextItems`), ephemerally, never written into the session.
+ * The Conversation holds only the conversation. The model, its proposals and its Runs stay in Olumi's stores. Every model
+ * call is given today's date and the CURRENT model state afresh (`turnContextItems`), in its instructions, which the
+ * Conversation never stores: conversation history never overrides saved state (after Undo, the restored state is given).
  *
  * Retained bridges, each for a requirement the SDK does not meet on its own:
  *   1. TRANSPORT. The SDK's Responses model calls `responses.create` on a client we hand it; ours posts through Olumi's
@@ -19,13 +22,14 @@
  *   2. CONSENT. Three protocol checks on a tool call, as the existing loop makes them: a change proposed this turn is never
  *      approved by the AI in the same turn; one approval carries one change; only this turn's own card may be withdrawn.
  *
- * ⚠ Memory is per process: after a restart the agent starts the conversation again from the durable model state and brief.
+ * No local session, no previous_response_id and no transcript of our own: the Conversation is the one state strategy. A store
+ * that cannot hold the id yet (the column not migrated) keeps it in process memory, so a restart then starts a new one.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  Agent, MaxTurnsExceededError, MemorySession, OpenAIResponsesModel, run, setTracingDisabled, system, tool, ToolCallError, user, withTrace,
-  type AgentInputItem, type OpenAIClient,
+  Agent, MaxTurnsExceededError, OpenAIResponsesModel, run, setTracingDisabled, tool, ToolCallError, withTrace, type OpenAIClient,
 } from '@openai/agents';
+import { config } from '../../../config/index.js';
 import { getRuntimeEnv } from '../../../config/env-resolver.js';
 import { postResponses } from '../../../adapters/llm/openai.js';
 import { recordProviderReturnedModel } from '../../../adapters/llm/provider-policy.js';
@@ -34,7 +38,7 @@ import { agentRequestIdentity } from '../runtime/prompt-identity.js';
 import { dispatchTool, toolsFor, type AgentCapabilities, type AgentLaneMode, type AgentToolContext, type ToolResult } from '../runtime/agent-tools.js';
 import type { AgentTurnResult } from '../runtime/agent-loop.js';
 import type { CallBudget } from '../model-budgets.js';
-import { runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
+import { BRIEF_LABEL, runFactsContext, turnContextItems, turnContextText } from '../turn-context.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import {
   earlierTurnWithdrawal, isProposingTool, NOT_ON_NARRATION, NOT_PROPOSED_THIS_TURN, ONE_CHANGE_PER_APPROVAL,
@@ -45,43 +49,65 @@ import {
 export const AGENTS_SDK = '@openai/agents@0.18.0';
 /** Model calls one core turn may make before it stops (the SDK's `maxTurns`). */
 export const CORE_MAX_MODEL_CALLS = 8;
-/** Conversations held in memory at once; the oldest is dropped past this. */
-const SESSIONS_CAP = 500;
+/** Rendered tokens past which the server compacts the Conversation (native compaction; the window grows every turn). */
+export const CORE_COMPACT_THRESHOLD = 100_000;
+/** Conversation ids held in process memory at once (a cache of the saved id, or the id itself when it cannot be saved). */
+const CONVERSATIONS_CAP = 500;
 const LIMIT_CHANGE_TOOL = 'propose_limit_change';
 const AUTHORISE_CHANGE = 'authorise_change';
 
 // Tests never export traces; a deployed runtime uses the SDK's built-in exporter, which reads the lane's OPENAI_API_KEY.
 if (getRuntimeEnv() === 'test') setTracingDisabled(true);
 
-const sessions = new Map<string, MemorySession>();
-/** The scenario's conversation for this user, kept in the SDK's own session store (process memory). */
-export function coreSession(scenarioId: string, userId: string | null): MemorySession {
-  const key = `${scenarioId}:${userId ?? 'guest'}`;
-  const held = sessions.get(key);
-  if (held !== undefined) {
-    sessions.delete(key);
-    sessions.set(key, held);
-    return held;
-  }
-  const session = new MemorySession({ sessionId: key });
-  sessions.set(key, session);
-  if (sessions.size > SESSIONS_CAP) sessions.delete(sessions.keys().next().value!);
-  return session;
+const conversations = new Map<string, string>();
+const remember = (scenarioId: string, id: string): string => {
+  conversations.delete(scenarioId);
+  conversations.set(scenarioId, id);
+  if (conversations.size > CONVERSATIONS_CAP) conversations.delete(conversations.keys().next().value!);
+  return id;
+};
+/** Test-only: forget the process cache (a restart). */
+export function resetCoreConversationsForTests(): void { conversations.clear(); }
+
+/** Where a scenario's Conversation id is saved: `undefined` = this store cannot hold it (keep it in memory). */
+export interface ConversationIdStore {
+  read(scenarioId: string): Promise<string | null | undefined>;
+  /** Save `id` unless the scenario already has one; returns the scenario's id after the call (the winner of a race). */
+  claim(scenarioId: string, id: string): Promise<string | null | undefined>;
 }
-/** Test-only: forget every held conversation. */
-export function resetCoreSessionsForTests(): void { sessions.clear(); }
+
+/** Create the scenario's OpenAI Conversation. A brief written apart from this message is its first item, once. */
+async function createConversation(scenarioId: string, firstItems: readonly unknown[], signal: AbortSignal | undefined): Promise<string> {
+  const r = await fetch('https://api.openai.com/v1/conversations', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ metadata: { olumi_scenario_id: scenarioId, olumi_lane: 'core' }, items: firstItems }),
+    signal: signal ?? AbortSignal.timeout(15_000),
+  });
+  if (!r.ok) throw new Error(`openai_conversation_${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`);
+  const id = ((await r.json()) as { id?: unknown }).id;
+  if (typeof id !== 'string' || id === '') throw new Error('openai_conversation_no_id');
+  return id;
+}
+
+/** The scenario's Conversation: the cached or saved one, else a new one, saved so a reopen continues it. */
+async function scenarioConversation(scenarioId: string, store: ConversationIdStore | undefined, firstItems: readonly unknown[],
+  signal: AbortSignal | undefined): Promise<{ readonly id: string; readonly created: boolean; readonly saved: boolean }> {
+  const cached = conversations.get(scenarioId);
+  if (cached !== undefined) return { id: remember(scenarioId, cached), created: false, saved: store !== undefined };
+  const saved = await store?.read(scenarioId).catch(() => undefined);
+  if (typeof saved === 'string' && saved !== '') return { id: remember(scenarioId, saved), created: false, saved: true };
+  const created = await createConversation(scenarioId, firstItems, signal);
+  const winner = await store?.claim(scenarioId, created).catch(() => undefined);
+  return typeof winner === 'string' && winner !== ''
+    ? { id: remember(scenarioId, winner), created: winner === created, saved: true }
+    : { id: remember(scenarioId, created), created: true, saved: false };
+}
 
 const sha256 = (value: unknown): string => {
   let text = '';
   try { text = JSON.stringify(value) ?? ''; } catch { text = ''; }
   return createHash('sha256').update(text, 'utf8').digest('hex');
-};
-/** A message item's text, in either content form (a string, or parts with `text`). */
-const itemText = (item: unknown): string => {
-  const content = item !== null && typeof item === 'object' ? (item as { content?: unknown }).content : undefined;
-  if (typeof content === 'string') return content;
-  return Array.isArray(content) ? content.map((part) => (part !== null && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
-    ? (part as { text: string }).text : '')).join('\n') : '';
 };
 const toolNamesOf = (tools: unknown): string[] => (Array.isArray(tools) ? tools : [])
   .map((t) => (t !== null && typeof t === 'object' ? (t as { name?: unknown }).name : undefined))
@@ -133,12 +159,24 @@ export interface CoreTurnInput {
   readonly canonicalState?: unknown;
   readonly withheldTools?: readonly string[];
   readonly userId: string | null;
+  /** Where the scenario's Conversation id is saved (the session store); absent → process memory only. */
+  readonly conversationStore?: ConversationIdStore;
   readonly signal?: AbortSignal;
   readonly now?: () => number;
 }
 
-/** What the route adds to `_agent` for a core turn: the runtime and its trace (the witness reads both). */
-export interface CoreTurnSdk { readonly runtime: string; readonly trace_id: string; readonly session: 'sdk_memory_session' }
+/** What the route adds to `_agent` for a core turn: the runtime, its trace and its Conversation (the witness reads all three). */
+export interface CoreTurnSdk {
+  readonly runtime: string;
+  readonly trace_id: string;
+  readonly state: 'openai_conversation';
+  readonly conversation_id: string;
+  /** This turn created the Conversation (the scenario's first `core` turn, or the first since its id was lost). */
+  readonly conversation_created: boolean;
+  /** The id is saved on the scenario, so a reopen continues it; false = process memory only. */
+  readonly conversation_saved: boolean;
+  readonly compact_threshold: number;
+}
 
 /** One ordinary `core` turn: the agent, its tools and its memory, run by the SDK. Returns the loop's result shape. */
 export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult & { readonly sdk: CoreTurnSdk }> {
@@ -210,34 +248,26 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       maxTokens: input.budget.max_output_tokens,
       ...(input.budget.reasoning_effort !== undefined ? { reasoning: { effort: input.budget.reasoning_effort } } : {}),
       parallelToolCalls: false,
+      // Native server-side compaction of the Conversation as it grows: no transcript trim of our own.
+      contextManagement: [{ type: 'compaction', compactThreshold: CORE_COMPACT_THRESHOLD }],
     },
     tools,
   });
 
-  // The CURRENT state, today's date and the brief: this turn's context, given before the user's message and never saved.
-  const stateContext = runFactsContext(input.canonicalState);
-  // The SAME items the existing loop sends, in the SDK's message form: Olumi's own facts as system items, the user's words
-  // (the brief) as a user item — the authority rule `turn-context.ts` states.
-  const contextItems: AgentInputItem[] = turnContextItems({
-    now: new Date(startedAt), briefText: input.briefText, conversation: [],
-    verifiedUserMessages: input.ctx.verified_user_messages, unknownUserText: input.ctx.unverified_user_text,
-    currentRequestOrigin: input.ctx.user_turn_text ? 'typed' : 'unknown',
-    canonicalState: stateContext.facts, runFactsUse: stateContext.use,
-  }).map((item) => ((item as { role?: unknown }).role === 'user' ? user(turnContextText(item)) : system(turnContextText(item))));
-  const session = coreSession(input.ctx.scenario_id, input.userId);
-  const remembered = (await session.getItems()).length;
   /**
-   * The SDK persists what the model was sent, injected items included. This turn's context is taken back out once the run
-   * ends, so the session holds only the conversation and the next turn gets its own context, fresh.
+   * Olumi's own facts for THIS turn, given fresh on every model call in its instructions (never stored in the Conversation):
+   * today's date, the CURRENT model state as the turn began, and the Run-facts rule when a Run is in it. The user's own
+   * words are the Conversation's: the brief is its first item when it was written apart from this message.
    */
-  const contextTexts = new Set(contextItems.map(itemText));
-  const forgetContext = async (): Promise<void> => {
-    const all = await session.getItems();
-    const kept = all.filter((item) => !contextTexts.has(itemText(item)));
-    if (kept.length === all.length) return;
-    await session.clearSession();
-    await session.addItems(kept);
-  };
+  const stateContext = runFactsContext(input.canonicalState);
+  const turnFacts = turnContextItems({
+    now: new Date(startedAt), briefText: undefined, conversation: [],
+    canonicalState: stateContext.facts, runFactsUse: stateContext.use,
+  }).map(turnContextText).filter((t) => t !== '');
+  const brief = typeof input.briefText === 'string' ? input.briefText.trim() : '';
+  const firstItems = brief !== '' && brief !== input.message.trim()
+    ? [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: `${BRIEF_LABEL}\n${brief}` }] }] : [];
+  const conversation = await scenarioConversation(input.ctx.scenario_id, input.conversationStore, firstItems, input.signal);
 
   let traceId = `trace_${randomUUID().replace(/-/g, '')}`;
   const finish = (text: string, stopped: AgentTurnResult['stopped_reason'], calls: number, author: 'ai' | 'host'): AgentTurnResult & { sdk: CoreTurnSdk } => {
@@ -247,28 +277,27 @@ export async function runCoreTurn(input: CoreTurnInput): Promise<AgentTurnResult
       mutated: toolResults.some((r) => r.mutated === true), hops: calls, stopped_reason: stopped, reply_author: author,
       timing: { total_ms: total, provider_ms: Math.max(0, total - toolMs), tool_ms: toolMs, tool_provider_ms: 0, overhead_ms: 0,
         provider_calls: calls, tool_calls: toolCalls.length, hops: calls },
-      sdk: { runtime: AGENTS_SDK, trace_id: traceId, session: 'sdk_memory_session' },
+      sdk: { runtime: AGENTS_SDK, trace_id: traceId, state: 'openai_conversation', conversation_id: conversation.id,
+        conversation_created: conversation.created, conversation_saved: conversation.saved, compact_threshold: CORE_COMPACT_THRESHOLD },
     };
   };
   try {
     return await withTrace('Olumi core turn', async (trace) => {
       traceId = trace.traceId;
       const result = await run(agent, input.message, {
-        session,
+        conversationId: conversation.id,
         maxTurns: CORE_MAX_MODEL_CALLS,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
-        // Ephemeral context: inserted after the remembered conversation, before this turn's message, on every model call.
+        // This turn's facts ride the instructions of every call; the input stays exactly what the SDK sends.
         callModelInputFilter: ({ modelData }) => ({
           ...modelData,
-          input: [...modelData.input.slice(0, remembered), ...contextItems, ...modelData.input.slice(remembered)],
+          instructions: [modelData.instructions ?? '', ...turnFacts].filter((t) => t !== '').join('\n\n'),
         }),
       });
-      await forgetContext();
       const text = typeof result.finalOutput === 'string' ? result.finalOutput : '';
       return finish(text, text.trim() === '' ? 'incomplete' : 'answered', result.rawResponses.length, text.trim() === '' ? 'host' : 'ai');
     }, { groupId: input.ctx.scenario_id, metadata: { request_id: String(input.ctx.request_id ?? ''), turn_id: String(input.ctx.turn_id ?? '') } });
   } catch (err) {
-    await forgetContext().catch(() => undefined);
     if (err instanceof MaxTurnsExceededError) return finish('', 'hop_limit', CORE_MAX_MODEL_CALLS, 'host');
     // The capability's own error, unwrapped, so the route's existing handlers see the same error the loop would raise.
     if (err instanceof ToolCallError && err.error !== undefined) throw err.error;
