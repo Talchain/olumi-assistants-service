@@ -3506,7 +3506,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let coreSdk: CoreTurnSdk | undefined;
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
-        (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: instructionsForMode(mode, AGENT_INSTRUCTIONS), maxOutputTokens: budget.max_output_tokens, mode },
+        (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
         (await readBackState(readingDispatch, scenarioId)).graph, capabilities, callModelFor(budget));
       fastPath = 'method';
     }
