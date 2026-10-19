@@ -1004,6 +1004,38 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(GraphV3.safeParse(g).success).toBe(true);
   });
 
+  // ⭐ K2 ON B (the AIE's mapping B; DL 19 Oct: B only): an option's setting carries the range the user's RECORDED statement gives for it,
+  // through the existing setting-range input; registration accepts exactly this (`onlyRecordedSettingRanges`).
+  it('⭐ K2 ON B: the user\'s recorded range for an option\'s setting is that setting\'s range; nothing else is', () => {
+    const RANGE_WORDS = 'Doubling it would mean between £3,500 and £4,500 a month.';
+    const ranged = (statements: Rec[], words = `${SALES_WORDS} ${RANGE_WORDS}`, option = 'Double the ad spend'): { cell: Rec; record: Rec | undefined } => {
+      const out = candidateToGraph({ ...salesDraft(), statements }, { words, recorded_at: AT });
+      if ('refused' in out) throw new Error(out.refused);
+      const g = out.graph as Rec;
+      return { cell: byLabel(g, option).interventions[byLabel(g, 'Ad spend').id],
+        record: ((byLabel(g, 'Ad spend').user_statements ?? []) as Rec[]).find((r) => String(r.subject_key).includes(`|${byLabel(g, option).id}|`)) };
+    };
+    const range = (over: Rec = {}, speaker: string | null = 'user', quote = RANGE_WORDS, option = 'Double the ad spend'): Rec =>
+      said(quote, { kind: 'option', label: option, factor_label: 'Ad spend' }, 'level', 'range', { low: 3500, high: 4500, unit: '£', ...over }, speaker);
+    expect(ranged([range()]).cell.range).toEqual({ low: 3500, high: 4500, meaning: 'likely_range', source: 'brief_extraction', source_quote: RANGE_WORDS });
+    // Not carried, while the record keeps the words: another person's or an unclear range, one that does not bracket the setting, two
+    // ranges, and words the user's text holds only once typographic dashes are read alike (registration matches bytes).
+    for (const statements of [[range({}, 'other')], [range({}, null)], [range({ low: 4100 })], [range(), range({ low: 3000 })]]) {
+      const { cell, record } = ranged(statements);
+      expect(cell.range).toBeUndefined();
+      expect(record?.statements).toHaveLength(statements.length);
+    }
+    const dashed = ranged([range({}, 'user', 'Doubling it would mean £3,500-£4,500 a month.')], `${SALES_WORDS} Doubling it would mean £3,500–£4,500 a month.`);
+    expect([dashed.record?.statements.length, dashed.cell.range]).toEqual([1, undefined]);
+    // A range of a declared ADDITION is not the computed total's (£2,000 today + £1,000 = £3,000); a range of the total is.
+    const ADD = 'Adding £1,000 means between £800 and £1,200 more.', TOTAL = 'That takes us to between £2,800 and £3,200 a month.';
+    expect(ranged([range({ low: 800, high: 1200 }, 'user', ADD, 'Add £1,000 of ad spend')], `${SALES_WORDS} ${ADD}`, 'Add £1,000 of ad spend').cell.range).toBeUndefined();
+    expect(ranged([range({ low: 2800, high: 3200 }, 'user', TOTAL, 'Add £1,000 of ad spend')], `${SALES_WORDS} ${TOTAL}`, 'Add £1,000 of ad spend').cell.range)
+      .toMatchObject({ low: 2800, high: 3200, source_quote: TOTAL });
+    // Without the user's words nothing is recorded, so nothing is carried.
+    expect(byLabel(converted({ ...salesDraft(), statements: [range()] }).graph, 'Double the ad spend').interventions[byLabel(converted(salesDraft()).graph, 'Ad spend').id].range).toBeUndefined();
+  });
+
   it('STATEMENTS CARRIED (contrast): without the user\'s words nothing is recorded, and the rest of the model is the same', () => {
     const bare = converted(carriedDraft());
     expect((bare.graph.nodes as Rec[]).filter((n) => n.user_statements !== undefined)).toEqual([]);

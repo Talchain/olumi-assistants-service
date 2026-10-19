@@ -50,6 +50,7 @@ import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../
 import { isStatementField, subjectKey, type DoorSubject } from '../../statement-door/subject.js';
 import { userStatementOf, type UserStatement } from '../../agent-lane/user-statements.js';
 import { verbatimSourceLine } from '../../agent-lane/quote-confirmation.js';
+import { admitInterventionRange, interventionPoint } from '../../intervention-range.js';
 
 type Rec = Record<string, any>;
 /** Whose figure the AI declared it to be. */
@@ -567,7 +568,40 @@ function withDeclaredStatements(graph: Rec, input: unknown, carry: StatementCarr
   for (const { subject, statements } of groups.values()) {
     out = withUserStatement(out, userStatementRecord(subject, statements, carry.recorded_at, CONSTRUCTION_ATTEST), subject) ?? out;
   }
-  return out;
+  return withStatedSettingRanges(out, input, carry.words, [...groups.values()]);
+}
+
+/**
+ * ⭐ K2 ON B (the AIE's mapping B; DL 19 Oct: B only): an option's setting carries the range the user's recorded statement gives for
+ * exactly that option and factor, through the existing setting-range input (`interventions[f].range`, `likely_range`, admitted by
+ * `admitInterventionRange` against the setting's own figure), never a reading of the brief. Exactly what registration accepts as
+ * that record's range (`onlyRecordedSettingRanges`): one user range, its quote byte for byte in the user's words. A range of a
+ * declared ADDITION on the total Olumi computed is not carried (the setting is the total), nor one that brackets both readings.
+ * Another person's or an unclear range stays in the record, since the range cannot say whose it is. The range is an interval; how
+ * the analysis reads it is its existing, disclosed law (an equal-tail approximation the person adopts before any chance is shown).
+ */
+function withStatedSettingRanges(graph: Rec & { nodes: unknown[] }, input: unknown, words: string,
+  said: readonly { subject: DoorSubject; statements: UserStatement[] }[]): Rec & { nodes: unknown[] } {
+  const nodes = list<Rec>(graph.nodes).map((n) => ({ ...n }));
+  const nameOf = (id: string | undefined): string => canonicalLabel(String(nodes.find((n) => n.id === id)?.description ?? nodes.find((n) => n.id === id)?.label ?? ''));
+  for (const { subject, statements } of said) {
+    const ranges = statements.filter((st) => st.speaker === 'user' && st.form === 'range' && finite(st.low) && finite(st.high));
+    const option = nodes.find((n) => n.id === subject.option_id && n.kind === 'option');
+    const cell = (option?.interventions as Rec | undefined)?.[subject.id] as Rec | undefined;
+    const point = interventionPoint(cell);
+    if (subject.kind !== 'factor' || subject.field !== 'level' || ranges.length !== 1 || cell === undefined || point === undefined) continue;
+    const { low, high, quote, unit } = ranges[0]!;
+    if (!words.includes(quote) || (typeof unit === 'string' && typeof cell.unit === 'string' && !sameUnit(unit, cell.unit))) continue;
+    const declared = list<Rec>((input as Rec).options).find((o) => canonicalLabel(String(o?.label)) === nameOf(option!.id as string));
+    const addition = list<Rec>(declared?.interventions).find((iv) => canonicalLabel(String(iv?.factor_label)) === nameOf(subject.id) && iv.value_kind === 'additional');
+    const today = addition === undefined ? undefined : list<Rec>((input as Rec).factors).find((f) => canonicalLabel(String(f?.label)) === nameOf(subject.id))?.baseline_value;
+    const within = (at: number): boolean => low! <= at && at <= high!;
+    if (!within(point) || (finite(today) && today !== 0 && within(point - today))) continue;
+    const range = { low, high, meaning: 'likely_range', source: 'brief_extraction', source_quote: quote };
+    const admitted = admitInterventionRange({ ...cell, range });
+    if (admitted !== undefined && 'range' in admitted) option!.interventions = { ...(option!.interventions as Rec), [subject.id]: { ...cell, range: admitted.range } };
+  }
+  return { ...graph, nodes };
 }
 
 /**
