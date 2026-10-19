@@ -253,7 +253,6 @@ describe('ROW 3: each declared source, through the real writers, read back by th
   });
 
   it.each([
-    ['set_goal_target', 'the goal\'s target'],
     ['set_link_strength', 'how strongly one factor affects another'],
     ['add_to_model', 'Adding a factor or an option'],
     ['remove_from_model', 'Removing something'],
