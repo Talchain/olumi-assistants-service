@@ -9,6 +9,7 @@
 
 import { subjectKey, type DoorSubject } from '../../orchestrator-v5/statement-door/subject.js';
 import { recordsWithUnknownSpeakerOn } from '../../orchestrator-v5/statement-door/statements.js';
+import { INTAKE_OPTION_LABEL_MAX_CHARS } from '../../orchestrator-v5/coaching/intake-option-disclosure.js';
 import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
@@ -1374,12 +1375,15 @@ function hasSampledPrior(prior: unknown): boolean {
 }
 
 /**
- * ⭐ ONE quotable-label rule for the level asks (Codex R1 on #3454: a schema-valid label holding a closing quote ended the quotation
- * and spoke for Olumi). As the scaffold disclosure's label slot (`[^'\n]`), a label is quoted only when it is one line with no
- * quotation mark of any kind, a word's own ending excepted ("customer’s", "don’t"); otherwise the ask names "this factor", unquoted.
+ * ⭐ ONE quotable-label rule for the level asks: an ALLOWLIST (Codex R1 and R2 on #3454: a schema-valid label ended its quotation and
+ * spoke for Olumi; a denylist of quotation marks lost to `’s` and Unicode line separators). A label is quoted only when it holds a
+ * letter or digit, fits the shared label-slot cap (`INTAKE_OPTION_LABEL_MAX_CHARS`), and every character is a letter (not a modifier
+ * letter, which can look like a quotation mark), a digit, a plain space or one of . , : % ( ) £ $ € & / -. Any other label is named
+ * "this factor", unquoted: no label can end its quotation or begin a line.
  */
-const quotable = (label: string): boolean => label.trim() !== ''
-  && !/[\r\n"“”‘’']/u.test(label.trim().replace(/(?<=\p{L})['’](?:s|t|re|ve|ll|d|m)(?!\p{L})/gu, ''));
+const QUOTABLE_LABEL = /^[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Nd} .,:%()£$€&/-]+$/u;
+const quotable = (label: string): boolean =>
+  label.length <= INTAKE_OPTION_LABEL_MAX_CHARS && /[\p{L}\p{Nd}]/u.test(label) && QUOTABLE_LABEL.test(label);
 
 const statusQuoLevelAsk = (label: string): string =>
   `What is ${quotable(label) ? `"${label}"` : 'this factor’s level'} today, before any option changes it? Without a current level the analysis would treat it as zero.`;
@@ -1438,11 +1442,13 @@ const levelGapAsk = (gap: { id: string; label: string; kind?: string }, rawGraph
    * limitation, and never offers zero. The slot is the node's label, as the status-quo ask renders it: no stored statement text reaches
    * it (Codex R2 on #3451), and no writer sets a level statement's period; it is quoted only where `quotable`.
    */
-  // Only a VALID kept record (Codex R1 on #3454): its key and field both name this factor's level, and every statement keeps words
-  // (a non-blank quote and source line). The stored reader checks only their types.
+  // Only a VALID kept record, bound by IDENTITY (Codex R1 and R2 on #3454): its key and field name this factor's level, and every
+  // statement is bound to THIS node by the id its writer stamped (`subject.node_id`, never an option's setting) and keeps words (a
+  // non-blank quote and source line). No label or drafted-quantity text is matched: a statement without that id does not count.
   const ownLevel = subjectKey({ kind: 'factor', id: gap.id, field: 'level' });
   const kept = recordsWithUnknownSpeakerOn(node).some((r) => r.subject_key === ownLevel && r.field === 'level'
-    && r.statements.every((st) => st.quote.trim() !== '' && st.source.trim() !== ''));
+    && r.statements.every((st) => st.subject.node_id === gap.id && st.subject.option_id === undefined
+      && st.quote.trim() !== '' && st.source.trim() !== ''));
   if (gap.kind === 'factor' && kept) {
     return `This calculation does not yet have a supported starting level for ${quotable(gap.label) ? `‘${gap.label.trim()}’` : 'this factor'}. `
       + 'We can still reason through what is already recorded.';
