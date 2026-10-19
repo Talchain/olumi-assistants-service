@@ -9,6 +9,7 @@ import {
   type MethodReadback, type MethodTurn, type RunMethodTurn,
 } from '../../method-turn.js';
 import { withApprovedMethodWords } from './approved-method-words.js';
+import { assertUserLinkStories } from './user-link-stories.js';
 
 type Graph = { nodes: Record<string, any>[]; edges: Record<string, any>[]; goal_constraints?: unknown };
 type Read = {
@@ -114,7 +115,9 @@ rows['must-not-fire: Run with no option paths retains the entire refusal'] = () 
   c.graph.edges = [];
   assert.equal(JSON.stringify(methodTurnForReadback(PREMORTEM_PRESS_ID, readback(c))), JSON.stringify(load('w9c/base-controls').noPath));
 };
-rows['W9: all-user-sized model retains the entire refusal'] = () => {
+// ⭐ RE-RULED (AIE 19 Oct AMEND, DL-3 order; was "retains the entire refusal", `w9c/base-controls.allUser`): an all-user-sized
+// model grounds story-only stories on its own links; the citation stays unearned and nothing offers an approval or a write.
+rows['W9: all-user-sized model grounds story-only stories on its own links (was: the entire refusal)'] = () => {
   const c = load('scout-premortem-paths').draw1;
   const graph: Graph = structuredClone(c.graph);
   graph.nodes = graph.nodes.filter(n => n.kind !== 'risk');
@@ -126,7 +129,12 @@ rows['W9: all-user-sized model retains the entire refusal'] = () => {
     ...n, observed_state: { ...n.observed_state, source: 'user_specified' },
   } : n);
   delete graph.goal_constraints;
-  assert.equal(JSON.stringify(methodTurnForReadback(PREMORTEM_PRESS_ID, { ...c, graph })), JSON.stringify(load('w9c/base-controls').allUser));
+  const before = JSON.stringify(graph);
+  const out = assertUserLinkStories(methodTurnForReadback(PREMORTEM_PRESS_ID, { ...c, graph }), graph);
+  assert.equal(out.context.plan, null);
+  assert.equal(out.context.decision_level, true);
+  assert.equal(out.context.not_cited, 'no_identified_plan');
+  assert.equal(JSON.stringify(graph), before, 'nothing is written');
 };
 rows['decision items without intervention metadata still prepare no approval card'] = () => {
   const c = capture('w9b-2');
