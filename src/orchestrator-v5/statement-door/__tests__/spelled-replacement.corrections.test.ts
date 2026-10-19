@@ -77,16 +77,25 @@ describe('REPLACEMENT: a corrected figure spelled in words is written exactly as
     expect(postimage(spelled.cold)).toEqual(postimage(spelled.w.graph()));
   });
 
-  it('ANOTHER QUANTITY: "forty-five nurses" goes exactly where "45 nurses" goes (one check for both forms)', async () => {
-    // ⛔ FINDING for the door's owner (statements.ts, #3427): the shared check reads a noun it does not know ("nurses") as no unit, as it
-    // always has for digits, so this span's 45 is written as hours for BOTH forms (the claim keeps subject_bound: false). The span's own
-    // unit is the door's binding to add; this row pins only that words never diverge from digits, never that the write is right.
-    const words = await replaced('Correction: forty-five nurses cover the night shifts, not forty.', 'night shifts take 45 hours per week',
-      { value: 45, unit: 'hours per week', span: 'forty-five nurses cover the night shifts' });
-    const digits = await replaced('Correction: 45 nurses cover the night shifts, not 40.', 'night shifts take 45 hours per week',
-      { value: 45, unit: 'hours per week', span: '45 nurses cover the night shifts' });
-    expect(postimage(words.w.graph())).toEqual(postimage(digits.w.graph()));
-    expect(postimage(words.cold)).toEqual(postimage(digits.cold));
+  it.each([
+    ['words', 'Correction: forty-five nurses cover the night shifts, not forty.', 'forty-five nurses cover the night shifts'],
+    ['digits', 'Correction: 45 nurses cover the night shifts, not 40.', '45 nurses cover the night shifts'],
+  ])('ANOTHER QUANTITY (%s): "45 nurses" counts nurses, so 45 hours per week is never written, and the card says so (DL-3 on #3429)',
+    async (_form, FIX, span) => {
+      const { w, card, cold } = await replaced(FIX, 'night shifts take 45 hours per week', { value: 45, unit: 'hours per week', span });
+      expect(card.public_label).toContain(NOT_FOUND('45 hours per week'));
+      expect(card.public_label).not.toContain(WRITTEN);
+      for (const g of [w.graph(), cold]) {
+        expect(nodeIn(g, 'night_hours').observed_state?.raw_value).not.toBe(45);
+        expect(claimRecordFor(g, NIGHT)!.statements[0]).toMatchObject({ low: 45, checks: { figure_found: false } });
+      }
+    });
+
+  it('the held noun in digits, "45 hours a week", is written exactly as "forty-five hours per week" is', async () => {
+    const { w, card } = await replaced('Correction: night shifts take 45 hours a week, not 40.', 'night shifts take 45 hours a week',
+      { value: 45, unit: 'hours per week', span: 'night shifts take 45 hours a week' });
+    expect(card.public_label).toContain(WRITTEN);
+    expect(nodeIn(w.graph(), 'night_hours').observed_state).toMatchObject({ raw_value: 45, unit: 'hours per week', source: 'user_override' });
   });
 
   it.each([
