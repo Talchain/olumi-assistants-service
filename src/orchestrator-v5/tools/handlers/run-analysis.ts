@@ -58,7 +58,7 @@ import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../.
 import { legacyLeaderGoalLinks, legacyGoalWarning, chanceSupportGoalPaths, placeholderGoalWarning, unsupportedSpreadWarning } from '../../agent-lane/goal-certainty.js';
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
 import { sayDate } from '../../goal-target/deadline-date.js';
-import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_MISSING_CURRENT_LEVEL, GOAL_FIGURES_OPTIONS_IDENTICAL, CONDITION_FIGURES_UNSUPPORTED_SPREAD, appendInferenceWarning, goalFiguresWithheldWarnings, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { submittedOptionsForMethod } from '../../goal-target/goal-horizon-detail.js';
@@ -1854,12 +1854,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // off the same analysed graph and the options PLoT scored — the one predicate the verdict's R-c reads.
     const limitIdentityEvaluations = Array.isArray((response as Record<string, unknown>).identity_evaluations)
       ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
-    const placeholderMovedByLimit = collectLimitLevelOwners(
+    // ⭐ STEP 8 (Codex R1 #3443; DL-3: targets AND limits): the Run's one chance-support walk, pointed at each condition's own
+    // node, so a target or limit moved through a user's size on Olumi's default spread is withheld per option, as above.
+    const wireIds = finalWireOptions.map((o) => optionIdOf(o as Record<string, unknown>)).filter((id): id is string => typeof id === 'string' && id !== '');
+    const wireInterventions = new Map(finalWireOptions.map((o) => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
+    const unsupportedSpreadTo = (nodeId: string) =>
+      chanceSupportGoalPaths(graphForAnalysis, wireIds, limitIdentityEvaluations, wireInterventions, nodeId).unsupportedSpread;
+    const limitOwners = collectLimitLevelOwners(
       graphForAnalysis,
       readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph),
       finalWireOptions,
       limitIdentityEvaluations,
-    ).placeholderMovedOptionIds;
+      unsupportedSpreadTo,
+    );
+    const placeholderMovedByLimit = limitOwners.placeholderMovedOptionIds;
+    for (const [constraintId, paths] of limitOwners.unsupportedSpreadByLimit) {
+      response = appendInferenceWarning(response, { ...unsupportedSpreadWarning(graphForAnalysis, paths),
+        code: CONDITION_FIGURES_UNSUPPORTED_SPREAD, severity: 'info', constraint_ids: [constraintId] });
+    }
     if (placeholderMovedByLimit.size > 0) {
       response = withholdOptionLimitScores(response, placeholderMovedByLimit);
       log.info(
@@ -2319,7 +2331,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
       // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
-      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations, unsupportedSpreadTo),
       strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
