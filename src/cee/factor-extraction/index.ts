@@ -51,6 +51,7 @@ import {
 import {
   CARDINAL_AMOUNT_SOURCE,
   CARDINAL_FRACTION_CONTINUATION,
+  cardinalEndStandsAlone,
   parseCardinalAmount,
 } from "../../utils/cardinal-words.js";
 
@@ -1403,7 +1404,7 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
     pattern: new RegExp(
       `\\bfrom\\s+${amountPattern('from')}\\s+to\\s+(?:a|an|the)?\\s*` +
         `${GOAL_WORD}\\s*(?:of|is|:)?\\s*${amountPattern('to')}${trailingMetricLookahead('to')}`,
-      'i',
+      'di',
     ),
   },
   // "target is 800 customers, currently at 500" — both amounts capture their
@@ -1413,7 +1414,7 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
     pattern: new RegExp(
       `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}` +
         `${CLAUSE_BRIDGE}\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}`,
-      'i',
+      'di',
     ),
   },
   // "currently at 500, target 800"
@@ -1422,7 +1423,7 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
     pattern: new RegExp(
       `\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}` +
         `${CLAUSE_BRIDGE}\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}`,
-      'i',
+      'di',
     ),
   },
   // ROADMAP 2.353 — "Increase annual revenue from £4 million today to £6
@@ -1480,7 +1481,7 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
         // `isAdverbShaped`, so the two cannot disagree about what an adverb is.
         `(?:\\s*(?!${HORIZON}\\b)[A-Za-z]{2,}ly\\b)?` +
         `(?:\\s*(?<horizon>${HORIZON}))?`,
-      'gi',
+      'dgi',
     ),
   },
 ];
@@ -1518,15 +1519,19 @@ export const GOAL_BASELINE_PATTERN_SOURCES_FOR_DRIFT_GUARD: Readonly<Record<stri
  * see BOTH sides before deciding the pair's unit.
  */
 function resolveAmount(
-  groups: Record<string, string | undefined>,
+  m: RegExpExecArray,
   prefix: string,
 ): { readonly raw: number; readonly isPercent: boolean; readonly currency?: string } | null {
+  const groups = m.groups ?? {};
   // L67 — the words branch resolves through the ONE cardinal parser. A phrase
   // the parser cannot fold returns null and the whole match yields nothing:
   // fail closed, never a fragment ("two and a half million" must not become 2).
+  // Nor is one end of a range no reader reads whole an amount here
+  // (`cardinalEndStandsAlone`: "from eight to 11 million", "five million to seven").
   const words = groups[`${prefix}Words`];
   if (words !== undefined) {
-    const parsed = parseCardinalAmount(words);
+    const at = m.indices?.groups?.[`${prefix}Words`];
+    const parsed = at === undefined || cardinalEndStandsAlone(m.input, at[0], at[1]) ? null : parseCardinalAmount(words);
     if (parsed === null) return null;
     return {
       raw: parsed,
@@ -1795,8 +1800,8 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
   if (!groups) return undefined;
   const span: readonly [number, number] = [m.index, m.index + m[0].length];
   {
-    const to = resolveAmount(groups, "to");
-    const from = resolveAmount(groups, "from");
+    const to = resolveAmount(m, "to");
+    const from = resolveAmount(m, "from");
     if (!to || !from) return undefined;
 
     // A MIXED percent pair is refused, not reconciled (adversarial review, PR

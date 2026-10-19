@@ -82,6 +82,7 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
+import { rangeEndWithoutItsPair } from "../../utils/cardinal-words.js";
 import { resolveExistingRawValue } from "../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js";
 import { recoverScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 
@@ -209,43 +210,74 @@ export function findStatedAmounts(text: string | null | undefined, options?: { r
     });
     parts.push({ digits, mag: typeof groups.mag === "string" ? groups.mag.trim() : "" });
   }
-  return distributeCurrencyRanges(text, out, parts);
+  return shareRangeMagnitude(text, out, parts);
 }
 
 /**
- * ⭐ A CURRENCY RANGE SHARES ITS CURRENCY AND ITS MAGNITUDE WITH BOTH ENDS (R3 #75 5918453000 A4; MG 5918487838).
+ * ⭐ A RANGE'S CLOSING MAGNITUDE BELONGS TO BOTH ENDS (R3 #75 5918453000 A4; MG 5918487838; DL-3 on C5's finding, 19 Oct).
  * Paul's funding brief: "investment firms that do deals between £1-2m" was read as `£1` (currency, 1) and
  * `2` with its magnitude word (plain), so the deal size could not be the user's at either end: £1m was nowhere, and £2m was not money.
- * Only the narrow written shape is read: a CURRENCY amount with NO magnitude of its own, joined by a dash ("-", "–",
- * "—"), "to", or (after "between") "and" to the very next amount, which carries a magnitude and is plain or in the SAME currency
- * ("£1-2m", "£1–2m", "£1 to 2m", "between £1 and £2m", and each with its magnitude written as a word). Both ends then read as that currency at
- * that magnitude. Anything else is left exactly as read (`£2–3m` whose first end has its own suffix already reads both).
+ * The same loss read "2 to 3" closed by a magnitude word as a bare 2 at its low end, a figure the user never wrote (C5, 19 Oct).
+ * Only the narrow written shape is read: an amount with NO magnitude of its own, joined to the very next amount, which carries one
+ * (`sharesOneMagnitude`: a dash, "to", "or", or "and" after "between"):
+ *  · a CURRENCY low end before a plain or SAME-currency high end: both ends read as that currency at that magnitude ("£1-2m",
+ *    "£1–2m", "£1 to 2m", "between £1 and £2m", and each with its magnitude written as a word);
+ *  · a PLAIN low end before a plain high end: the low end reads at that magnitude, in digits as the words reader reads it
+ *    (`countsInWords`);
+ *  · any other PLAIN low end (before a currency end) is REFUSED with its high end ("2 to £3m"): a range gives its two ends or
+ *    nothing, never one end alone (DL-3 on Codex R2 #3442).
+ * A low end with its own magnitude before a high end with NONE ("5m to 7", "£2m or 3") is REFUSED whole: the low end's
+ * magnitude is never given to the high end, and the bare high end is never the user's figure. An end joined to a number in words
+ * ("2 to three" closed by a scale word, "5m to seven") is REFUSED (`rangeEndWithoutItsPair`): two forms never share one scale; so is
+ * a range whose end is not complete ("20 to 30 or so"). A low end
+ * with its own magnitude before one with its own ("2k to 3m"; `£2–3m` whose first end has its own suffix already reads both) or
+ * its own unit (a percent, or a noun between the two: "2 sites to 3m customers" is not one range) is left exactly as read.
  */
-function distributeCurrencyRanges(
+function shareRangeMagnitude(
   text: string,
   amounts: StatedAmount[],
   parts: readonly { digits: number; mag: string }[],
 ): readonly StatedAmount[] {
+  const refused = new Set<number>(amounts.flatMap((a, i) => (rangeEndWithoutItsPair(text, a.index, a.index + a.matchedText.length) ? [i] : [])));
   for (let i = 0; i + 1 < amounts.length; i += 1) {
     const low = amounts[i]!;
     const high = amounts[i + 1]!;
-    if (low.kind !== "currency" || parts[i]!.mag !== "" || parts[i + 1]!.mag === "") continue;
-    if (!(high.kind === "plain" || (high.kind === "currency" && high.currencyCode === low.currencyCode))) continue;
-    if (!joinedAsRange(text, low, high)) continue;
-    const scale = resolveMagnitude(parts[i + 1]!.mag);
-    const lowAtScale = parts[i]!.digits * scale;
+    if (!sharesOneMagnitude(text, low, high)) continue;
+    if (parts[i]!.mag !== "" && parts[i + 1]!.mag === "" && low.kind !== "percent" && high.kind !== "percent") {
+      refused.add(i).add(i + 1);
+      continue;
+    }
+    if (parts[i]!.mag !== "" || parts[i + 1]!.mag === "") continue;
+    const currency = low.kind === "currency" && (high.kind === "plain" || (high.kind === "currency" && high.currencyCode === low.currencyCode));
+    if (!currency && !(low.kind === "plain" && high.kind === "plain")) {
+      if (low.kind === "plain") refused.add(i).add(i + 1);
+      continue;
+    }
+    const lowAtScale = parts[i]!.digits * resolveMagnitude(parts[i + 1]!.mag);
     if (!Number.isFinite(lowAtScale)) continue;
     amounts[i] = { ...low, magnitude: lowAtScale };
-    amounts[i + 1] = { ...high, kind: "currency", ...(low.currencyCode !== undefined && { currencyCode: low.currencyCode }) };
+    if (currency) amounts[i + 1] = { ...high, kind: "currency", ...(low.currencyCode !== undefined && { currencyCode: low.currencyCode }) };
   }
-  return amounts;
+  return amounts.filter((_, i) => !refused.has(i));
+}
+
+/**
+ * Two amounts that carry ONE magnitude between them: written as one range (`joinedAsRange`), or as two alternatives of it ("2 or
+ * 3" closed by a magnitude word).
+ */
+function sharesOneMagnitude(
+  text: string,
+  low: Pick<StatedAmount, "index" | "matchedText">,
+  high: Pick<StatedAmount, "index">,
+): boolean {
+  return joinedAsRange(text, low, high) || /^\s*or\s*$/i.test(text.slice(low.index + low.matchedText.length, high.index));
 }
 
 /**
  * Two amounts written as ONE range: joined by a dash ("-", "–", "—"), "to", or (after "between") "and". "£1 and 2m
  * customers" is two amounts, not a range (R3 5918513716).
  */
-function joinedAsRange(text: string, low: StatedAmount, high: StatedAmount): boolean {
+function joinedAsRange(text: string, low: Pick<StatedAmount, "index" | "matchedText">, high: Pick<StatedAmount, "index">): boolean {
   const between = text.slice(low.index + low.matchedText.length, high.index);
   return /^\s*(?:[-–—]|to)\s*$/i.test(between)
     || (/^\s*and\s*$/i.test(between) && /\bbetween\s*$/i.test(text.slice(0, low.index)));
