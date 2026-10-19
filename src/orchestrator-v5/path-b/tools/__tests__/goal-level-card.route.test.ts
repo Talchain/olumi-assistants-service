@@ -184,4 +184,24 @@ describe('PATH-B: the goal’s current level, typed as a correction, shows its c
     expect(goalRaw()).toBe(110);
     expect(pausedRun, 'nothing is left paused').toBeNull();
   });
+
+  it('⭐ RED→GREEN (P0, served efa5c543 K5-LOOP turn-03): the UI\'s normal press, with the issued card\'s envelope and NO fields, saves ONCE', async () => {
+    outputs = [[{ type: 'function_call', name: 'propose_change', call_id: 'prop_call', args: CORRECTION }], [{ type: 'message', text: PREPARED_WORDS }]];
+    const t1 = (await post({ turn_id: randomUUID(), message: SAID, source: 'composer' })).json() as Json;
+    preparedId = String((t1._agent.tool_calls as Json[]).find((c) => c.name === 'propose_change' && c.ok)?.proposal_id ?? '');
+    const rec = (t1._proposal_fields?.proposals as Json[] | undefined)?.find((f) => f.proposal_id === preparedId);
+    expect(rec, `PRECONDITION: the issued card ${JSON.stringify(t1._proposal_fields)}`).toBeDefined();
+    // The served request body, byte for byte in shape (redteam/core-accept/runs/20261019T213721Z/K5-LOOP/turn-03.json): source
+    // `chip`, the card's own id and words, and `proposal_edits` carrying the issued id, revision, digest and graph hash, fields [].
+    calls = [];
+    outputs = [[{ type: 'function_call', name: 'apply_change', call_id: 'apply_call' }], [{ type: 'message', text: SAVED_WORDS }]];
+    const second = await post({ turn_id: randomUUID(), message: rec!.approve_action.message, source: 'chip', chip: { id: rec!.approve_action.id },
+      proposal_edits: { proposal_id: rec!.proposal_id, revision: rec!.revision, digest: rec!.digest, graph_hash: t1._proposal_fields.graph_hash, fields: [] } });
+    expect(second.statusCode, second.body).toBe(200);
+    const t2 = second.json() as Json;
+    expect(t2.assistant_text, 'never "Those values could not be applied"').toBe(SAVED_WORDS);
+    expect(outputOf('apply_call'), JSON.stringify(t2._agent.tool_calls)).toMatchObject({ status: 'ok', mutated: true, data: { saved: true } });
+    expect(registered, 'ONE registration').toHaveLength(1);
+    expect(goalRaw()).toBe(110);
+  });
 });
