@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { userStatementsOn } from '../../statement-door/statements.js';
+import { withDeclaredStance } from './helpers/declared-stance.js';
 
 type Rec = Record<string, any>;
 type Case = { brief: string; call1_text: string; call2_text: string; _source: Rec };
@@ -20,7 +21,8 @@ afterEach(() => { vi.useRealTimers(); });
 
 async function registered(c: Case, edit: (raw: Rec) => Rec = (r) => r, brief = c.brief): Promise<Rec> {
   let graph: Rec | undefined;
-  const answers = [c.call1_text, c.call2_text].map((t) => JSON.stringify(edit(JSON.parse(t))));
+  // INPUT CHANGE (stance, AIE 543db8bb): the served drafts predate the field; each statement gets the stance its sentence states.
+  const answers = [c.call1_text, c.call2_text].map((t) => JSON.stringify(edit(withDeclaredStance(JSON.parse(t)))));
   let call = 0;
   const result = await buildModelFromBrief('6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c', brief, (async (path: string, body: Rec) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { registered: true, model_version: { version_number: 1 } } }; }

@@ -33,6 +33,7 @@ import registerRoute from '../assist.v1.scenario-graph-register.js';
 import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { draftStatements, figureSource, sourceMapOf, subjectKey } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
 import { goalLevelOwner, type CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
+import { withDeclaredStance } from '../../orchestrator-v5/agent-lane/__tests__/helpers/declared-stance.js';
 import { settingAuthorshipOf, settingDisplayOf } from '../../cee/provenance/provenance-of.js';
 
 type Rec = Record<string, any>;
@@ -41,7 +42,8 @@ const closed: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const close of closed.splice(0)) await close(); });
 const COSTS = JSON.parse(readFileSync(new URL('./fixtures/g3-unseen-c89d53d8-first-draft.json', import.meta.url), 'utf8')) as { brief_text: string; raw_text: string };
 const SCRAP = JSON.parse(readFileSync(new URL('./fixtures/g3-unseen-1663fe34-first-draft.json', import.meta.url), 'utf8')) as { brief_text: string; raw_text: string };
-const draftOf = (fx: { raw_text: string }): Rec => JSON.parse(fx.raw_text) as Rec;
+// INPUT CHANGE (stance, AIE 543db8bb): the served drafts predate the field; each statement gets the stance its sentence states.
+const draftOf = (fx: { raw_text: string }): Rec => withDeclaredStance(JSON.parse(fx.raw_text) as Rec);
 async function construct(brief: string, drafts: CandidateModel[]) {
   let stored: Rec | null = null;
   const writes: Rec[] = [];
@@ -286,7 +288,7 @@ describe('the one authorship owner: a figure the user wrote is theirs, whatever 
    */
   it('CONTROL (served capacity cfa31dfb, row 5d0a23b7): a goal level with no goal-level statement is not theirs through a quoted sum (owed)', async () => {
     const fx = JSON.parse(readFileSync(new URL('./fixtures/capacity-cfa31dfb-first-draft.json', import.meta.url), 'utf8')) as { brief: string; raw_text: string };
-    const m = JSON.parse(fx.raw_text) as Rec;
+    const m = withDeclaredStance(JSON.parse(fx.raw_text) as Rec);
     expect(figureSource(m, fx.brief, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 80)).toBe('unclaimed');
     expect(goalLevelOwner(m as never, fx.brief, 80), 'no owner through a quoted sum').toBe('unclaimed');
     const out = await construct(fx.brief, [m as unknown as CandidateModel]);

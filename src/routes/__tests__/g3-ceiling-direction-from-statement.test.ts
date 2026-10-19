@@ -33,6 +33,7 @@ import { buildModelFromBrief } from '../../orchestrator-v5/agent-lane/runtime/bu
 import type { CandidateModel } from '../../orchestrator-v5/agent-lane/admit-model.js';
 import { resolveGoalDirection } from '../../orchestrator-v5/goal-target/goal-direction.js';
 import { figuresWritten } from '../../orchestrator-v5/agent-lane/construction-source-map.js';
+import { withDeclaredStance } from '../../orchestrator-v5/agent-lane/__tests__/helpers/declared-stance.js';
 
 type Rec = Record<string, any>;
 const SID = '00000000-0000-4000-8000-000000000063';
@@ -41,7 +42,8 @@ afterEach(async () => { for (const close of closed.splice(0)) await close(); });
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/g3-unseen-1663fe34-first-draft.json', import.meta.url), 'utf8')) as { brief_text: string; raw_text: string };
 const BRIEF = SERVED.brief_text;
 const TARGET_SENTENCE = 'I want to bring it down to 4% or lower by the end of June next year.';
-const served = (): CandidateModel => JSON.parse(SERVED.raw_text) as CandidateModel;
+// INPUT CHANGE (stance, AIE 543db8bb): the served drafts predate the field; each statement gets the stance its sentence states.
+const served = (): CandidateModel => withDeclaredStance(JSON.parse(SERVED.raw_text) as CandidateModel);
 /** The served draft with the AI's reading of the user's target sentence changed. */
 const withTargetForm = (form: string): CandidateModel => {
   const m = served() as unknown as Rec;

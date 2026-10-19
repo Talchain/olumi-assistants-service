@@ -8,7 +8,12 @@
 import type { StatementStance } from '../../construction-source-map.js';
 
 type Rec = Record<string, unknown>;
-export const byField = (st: Rec): StatementStance => (st['field'] === 'target' ? 'target' : 'stated_current');
+/**
+ * The stance a recorded statement's sentence supports, by what it states: a target is a target, an option's setting a what-if,
+ * a link's effect an estimate, and a level or other fact the speaker's current assertion. Rows whose meaning differs say so.
+ */
+export const byField = (st: Rec): StatementStance => (st['field'] === 'target' ? 'target'
+  : (st['subject'] as Rec | undefined)?.['kind'] === 'option' ? 'hypothetical' : st['field'] === 'effect' ? 'estimate' : 'stated_current');
 
 export function withDeclaredStance<T>(draft: T, stanceOf: (st: Rec) => StatementStance = byField): T {
   const d = draft as Rec;

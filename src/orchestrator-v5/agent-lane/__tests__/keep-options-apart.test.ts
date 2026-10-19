@@ -52,7 +52,9 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     const c = structuredClone(FX.candidate) as Rec;
     c.factors = (c.factors as Rec[]).map((f) => (f.label === 'Enterprise discount' ? { ...f, baseline_known: true, baseline_value: 8, provenance: 'explicit' } : f));
     c.statements = [{ quote: said, subject: { kind: 'factor', label: 'Enterprise discount', to_label: null, factor_label: null }, field: 'level',
-      form: 'point', value: 8, low: null, high: null, unit: '%', qualifier: null, conditions: null, speaker: 'user' }];
+      form: 'point', value: 8, low: null, high: null, unit: '%', qualifier: null, conditions: null, speaker: 'user',
+      // INPUT CHANGE (stance, AIE 543db8bb): "today is 8%" is put forward as a current assertion.
+      stance: 'stated_current' }];
     const { r, g } = await build(c, `${FX.brief} ${said}`);
     expect(r).toMatchObject({ ok: true });
     const factor = (g.nodes as Rec[]).find((n) => n.kind === 'factor' && n.label === 'Enterprise discount level')!;
