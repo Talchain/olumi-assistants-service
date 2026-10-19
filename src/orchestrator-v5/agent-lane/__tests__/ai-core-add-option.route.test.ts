@@ -217,10 +217,23 @@ describe('PATH-B gap 2: a new option the person names is prepared on a card in t
     expect(cell?.user_material_unverified).toBeUndefined();
   });
 
-  it('⛔ a target as a setting is BLOCKED, never relabelled: nothing prepared', async () => {
-    const { out } = await prepared(PREPARE({}, { stance: 'target' }));
-    expect(out).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+  it('⛔ (Codex #3482 R1) add_to_model\'s who-rule: a target, a supposition or someone else\'s figure is BLOCKED, never relabelled', async () => {
+    for (const setting of [{ stance: 'target' }, { stance: 'hypothetical' },
+      { source: { origin: 'third_party', quote: 'three people on shift', named_source: 'Alex' } }]) {
+      const { out } = await prepared(PREPARE({}, setting));
+      expect(out, JSON.stringify(setting)).toMatchObject({ status: 'unavailable', reason: 'blocked_schema', write: 'none' });
+      expect(preparedId).toBe('');
+    }
+    expect(commits()).toHaveLength(0);
+  });
+
+  it('⛔ (Codex #3482 R1) a setting in another unit than its factor\'s ("40 seconds" on a minutes factor) is refused, never rescaled', async () => {
+    persisted = { ...persisted, nodes: (persisted.nodes as Json[]).map((n) => n.id === 'queue' ? { ...n, observed_state: { value: 0.3, raw_value: 30, unit: 'minutes', cap: 100 } } : n) };
+    const { out } = await prepared(PREPARE({ label: 'Faster handling' },
+      { factor_id: 'queue', value: 40, unit: 'seconds', source: { origin: 'user', quote: 'three people on shift', named_source: null } }));
+    expect(out).toMatchObject({ status: 'refused', reason: 'unit_mismatch' });
     expect(preparedId).toBe('');
+    expect(commits()).toHaveLength(0);
   });
 
   it('⛔ a quote the person never wrote is refused: nothing prepared', async () => {

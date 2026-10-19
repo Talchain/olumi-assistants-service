@@ -50,6 +50,8 @@ import { runWithApprovedBindings, type ApprovedAdoption } from '../../agent-lane
 import { defaultFrameFor, framedObservedState } from '../../agent-lane/admit-model.js';
 import { buildAddFactorTransaction, USER_TODAY_SOURCE } from '../../routing/add-factor-transaction.js';
 import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
+import { factorUnitOf } from '../../agent-lane/unit-conflict.js';
+import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { GraphStaleWriteError } from '../../build-turn-context.js';
 import { compoundMembersConflict, type CommitOptionLevelsInput, type CommitOptionLevelsResult, type CompoundAddFactor, type CompoundAddOption, type CompoundStructuralMember } from '../../system-events/dispatch.js';
 import { linkProvenanceOf, linkSizing, provenanceOf, type Provenance } from '../../../cee/provenance/provenance-of.js';
@@ -294,6 +296,10 @@ function planOf(scenarioId: string, proposalId: string, ops: readonly Op[], grap
       continue;
     }
     if (byId.get(o.option_id)?.kind !== 'option') return { refusal: 'not_an_option', op: i };
+    // A setting is read on its factor's range only in the factor's own unit: the door's coordinate rule (an option inherits
+    // its factor's declared unit, `factorValuesPostimageIsScoped`), on the estate's same-unit key. Never rescaled here.
+    const factorUnit = factorUnitOf(graph, factor);
+    if (o.unit !== null && factorUnit !== undefined && unitComparisonKey(o.unit) !== unitComparisonKey(factorUnit)) return { refusal: 'unit_mismatch', op: i };
     const frame = frameOf(factor) ?? plan.frames.find((f) => f.factor_id === o.factor_id)?.cap ?? null;
     // #3461 R1: only a unitless share may take the model's 0–1 scale on a factor with no range. A figure with a unit (or above 1)
     // would lose its figure and unit there, so it is not proposed at all (`needs_range`), never written and found short after.
@@ -700,14 +706,24 @@ function figuresAllowed(ops: readonly FigureOp[], ctx: ChangeCtx, at: (i: number
  * source's: the person's figure when their own words hold it, or Olumi's estimate. Any other source or stance is BLOCKED, never
  * relabelled (the door holds a new factor's figure as the person's or Olumi's only).
  */
+/**
+ * add_to_model's ONE who-rule, for every new part's figure (a new factor's level, a new option's setting): held only as the
+ * person's stated figure in their own words, or as Olumi's estimate. Any other declared source or stance is BLOCKED.
+ */
+function newFigureAllowed(f: { readonly source: DeclaredSource; readonly stance: DeclaredStance }, ctx: ChangeCtx, op: number): ToolOutcome | null {
+  const person = f.source.origin === 'user' && f.stance === 'stated_current';
+  if (!person && !(f.source.origin === 'olumi' && f.stance === 'estimate')) {
+    return unavailable('blocked_schema', 'none', blockedSaid(op, 'a new part\'s figure is held only as the person\'s stated figure or as Olumi\'s estimate; put forward as anything else it would be relabelled'));
+  }
+  if (person && (f.source.quote === null || !inTheUsersWords(f.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op });
+  return null;
+}
+
 function newFactorsOf(adds: readonly AddArgs[], read: SavedRead, ctx: ChangeCtx, at: (i: number) => number): CompoundAddFactor[] | ToolOutcome {
   if (adds.length === 0) return [];
   for (const [i, a] of adds.entries()) {
-    const person = a.source.origin === 'user' && a.stance === 'stated_current';
-    if (!person && !(a.source.origin === 'olumi' && a.stance === 'estimate')) {
-      return unavailable('blocked_schema', 'none', blockedSaid(at(i), 'a new factor\'s figure is held only as the person\'s current level or as Olumi\'s estimate; put forward as anything else it would be relabelled'));
-    }
-    if (person && (a.source.quote === null || !inTheUsersWords(a.source.quote, ctx))) return refused('quote_not_in_users_words', undefined, { op: at(i) });
+    const stop = newFigureAllowed(a, ctx, at(i));
+    if (stop !== null) return stop;
   }
   const built = buildAddFactorTransaction({ factors: adds.map((a) => ({ label: a.label, link: { to_id: a.acts_on, effect_direction: a.direction } })) }, graphViewOf(read.graph));
   if (!built.matched) return refused(codeOf(`add_${built.reason}`), undefined, { op: at(0) });
@@ -735,8 +751,10 @@ function newOptionsOf(options: readonly AddOptionArgs[], read: SavedRead, ctx: C
   const out: StoredOption[] = [];
   let graph = read.graph;
   for (const [i, o] of options.entries()) {
-    const stop = figuresAllowed(o.settings.map((st) => ({ op: 'set_option_setting' as const, option_id: '', ...st })), ctx, () => at(i));
-    if (stop !== null) return stop;
+    for (const st of o.settings) {
+      const stop = newFigureAllowed(st, ctx, at(i));
+      if (stop !== null) return stop;
+    }
     // Each setting read on its factor's range by the batch door's own plan, as an option's setting is today.
     const declared: Op[] = o.settings.map((st) => ({ kind: 'setting', option_id: NEW_OPTION, ...st }));
     const plan = planOf(ctx.scenario_id, '', declared, { ...graph, nodes: [...nodesOf(graph), { id: NEW_OPTION, kind: 'option' }] });
