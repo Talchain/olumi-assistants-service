@@ -6,9 +6,9 @@
  * construction's own helpers are real). SYNTHETIC brief.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { BuildModelParams, buildModel } from '../draft-tool.js';
+import { BuildModelParams, buildModel, type DraftDeps } from '../draft-tool.js';
 import { candidateToGraph } from '../candidate-to-graph.js';
-import { constructionOperationId } from '../../../agent-lane/runtime/build-model.js';
+import { constructionOperationId, type CallStructuredModel } from '../../../agent-lane/runtime/build-model.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
 import { traceRow } from '../outcome.js';
 import { read, type Rec } from './fixtures.js';
@@ -44,15 +44,15 @@ const OURS = { version_id: 'v_1', version_number: 1, created_at: '2026-10-19T18:
 function product(routes: { graph?: Reply[]; register?: (Reply | Error)[]; versions?: Reply[] }, text: string | Error = JSON.stringify(DRAFT)) {
   const scripts = { graph: [...(routes.graph ?? [])], register: [...(routes.register ?? [])], versions: [...(routes.versions ?? [])] };
   const sent: { path: string; body: Rec }[] = [];
-  const dispatch = vi.fn(async (path: string, body: Rec) => {
-    sent.push({ path, body });
+  const dispatch = vi.fn<DraftDeps['dispatch']>(async (path, body) => {
+    sent.push({ path, body: body as Rec });
     const key = path.endsWith('/graph/register') ? 'register' : path.endsWith('/versions') ? 'versions' : 'graph';
     const next = scripts[key].shift();
     if (next === undefined) throw new Error(`unscripted ${path}`);
     if (next instanceof Error) throw next;
     return next;
   });
-  const callStructured = vi.fn(async () => {
+  const callStructured = vi.fn<CallStructuredModel>(async () => {
     if (text instanceof Error) throw text;
     return { text, status: 'completed' };
   });
@@ -65,7 +65,8 @@ describe('Olumi\'s provisional first model: ONE draft, converted by candidateToG
   it('the conversion\'s graph is registered create-only under the construction\'s own operation; the draft travels beside the receipt', async () => {
     const p = product({ graph: [EMPTY, MODEL], register: [SAVED], versions: [VERSIONS(true)] });
     const out = await buildModel(p, ctx, { brief: BRIEF });
-    const converted = candidateToGraph(DRAFT) as { graph: Rec; declared: unknown; loss: { reason: string }[]; blocked_schema: unknown[] };
+    const converted = candidateToGraph(DRAFT);
+    if ('refused' in converted) throw new Error(converted.refused);
     expect(registerCalls(p)).toEqual([{ path: `/assist/v1/scenarios/${SID}/graph/register`, body: {
       graph: converted.graph, brief_text: BRIEF, operation_id: constructionOperationId(SID, BRIEF), expected_graph_identity_hash: null } }]);
     expect(out).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', model_version: OURS, revision: { graph_hash: 'h_new' },
