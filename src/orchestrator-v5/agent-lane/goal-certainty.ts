@@ -40,6 +40,7 @@ import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.j
 import { chanceGoalSentence, goalDeadlineFromRecord, goalKindOf } from '../goal-target/goal-kind.js';
 import { sayDate } from '../goal-target/deadline-date.js';
 import { hasUserStatedSize, isUsersLevelOrApproved } from '../../cee/provenance/provenance-of.js';
+import { statedUncertaintyAttested } from '../../cee/magnitude/stated-uncertainty.js';
 import { linkHoldsStatedRange } from '../statement-door/statements.js';
 import { validatedDefinitionForGraph } from '../goal-target/held-user-links.js';
 import { GOAL_FIGURES_UNSUPPORTED_SPREAD } from '../../orchestrator/context/option-result-source.js';
@@ -437,11 +438,15 @@ export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly strin
  * is not attested. Its size is theirs and stays theirs; the spread the engine draws is Olumi's, which supports no chance of
  * meeting the goal. Support is only the writer's attestation for THIS link (`std_defaulted: false`, written by
  * `adjust-edge-strength.ts` for the band the user named): never the std's value, `defaulted`, or a missing flag. A size
- * stated in the user's own units (`magnitude: 'user_stated'`) is never attested: its writers state no spread (construction's
- * D3 default, the chat statement writer, a held range: Science C1). Exact links are decided by the walk.
+ * stated in the user's own units (`magnitude: 'user_stated'`) is attested only by the uncertainty the same writer records for
+ * it (`stated-uncertainty.ts`); its other writers state no spread (construction's D3 default, the chat statement writer, a held
+ * range: Science C1). Exact links are decided by the walk.
  */
 function unsupportedSpreadLink(edge: unknown): boolean {
-  return isRec(edge) && linkSizing(edge) === 'user' && (hasUserStatedSize(edge) || edge.std_defaulted !== false);
+  if (!isRec(edge) || linkSizing(edge) !== 'user') return false;
+  // ⭐ STEP 8 PRODUCER (AIE df3304b7): a size stated in the user's own units is supported once the chat writer recorded a
+  // supported uncertainty for it, with its attestation and the spread that record maps to (`statedUncertaintyAttested`).
+  return hasUserStatedSize(edge) ? !statedUncertaintyAttested(edge) : edge.std_defaulted !== false;
 }
 
 /**

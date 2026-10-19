@@ -26,6 +26,7 @@
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+import type { StatedUncertainty } from '../../cee/magnitude/stated-uncertainty.js';
 import { edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 
@@ -34,14 +35,19 @@ export interface StatedLinkBand {
   readonly proposalId: string;
   readonly from: string;
   readonly to: string;
-  /** The band the user named, in the tool's words. */
-  readonly band: InfluenceBand;
+  /** The band the user named, in the tool's words. Absent on an uncertainty-only approval (below). */
+  readonly band?: InfluenceBand;
   /**
    * ⭐ F1 (#87 6006627551; d5 6006667946): the user asked in their own words, this turn, to REPLACE the figure this link
    * holds (`replaceFigureTheUserWrote`). Held on the approved proposal and carried here, never on the wire
    * (`EdgeStrengthEditIntent` is closed), so no client can claim it.
    */
   readonly replacesUserFigure?: true;
+  /**
+   * ⭐ STEP 8 PRODUCER (AIE df3304b7): the supported uncertainty the approved card records for the user's own size on this link
+   * (`stated-uncertainty.ts`). Held on the approved proposal and carried here, never on the wire, so no client can claim it.
+   */
+  readonly uncertainty?: StatedUncertainty;
 }
 
 const store = new AsyncLocalStorage<StatedLinkBand>();
@@ -64,7 +70,7 @@ export function statedLinkBandFor(
 ): InfluenceBand | undefined {
   const s = store.getStore();
   if (s === undefined) return undefined;
-  if (s.scenarioId !== scenarioId || s.from !== from || s.to !== to) return undefined;
+  if (s.scenarioId !== scenarioId || s.from !== from || s.to !== to || s.band === undefined) return undefined;
   if (typeof magnitude !== 'number' || !Number.isFinite(magnitude)) return undefined;
   return edgeBandFromMagnitude(Math.abs(magnitude)) === s.band ? s.band : undefined;
 }
@@ -77,4 +83,13 @@ export function statedLinkBandFor(
 export function statedLinkReplacesUserFigureFor(scenarioId: string, from: string, to: string): boolean {
   const s = store.getStore();
   return s !== undefined && s.scenarioId === scenarioId && s.from === from && s.to === to && s.replacesUserFigure === true;
+}
+
+/**
+ * ⭐ STEP 8 PRODUCER: the uncertainty the approved card records for THIS write — only when the context names this scenario and
+ * this exact `(from, to)` link. Anything else (every UI write, another link) carries none, and the writer records none.
+ */
+export function statedLinkUncertaintyFor(scenarioId: string, from: string, to: string): StatedUncertainty | undefined {
+  const s = store.getStore();
+  return s !== undefined && s.scenarioId === scenarioId && s.from === from && s.to === to ? s.uncertainty : undefined;
 }
