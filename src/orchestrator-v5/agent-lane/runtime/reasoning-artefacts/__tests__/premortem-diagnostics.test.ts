@@ -1,7 +1,8 @@
 import { timingGated, timingIt } from '../../../../../../tests/helpers/scaling-ratio.js';
 import { describe, expect, it } from 'vitest';
 import { authoredBanAfterMasking, PremortemWorksheetV1Schema, premortemProducerDirective, premortemWorksheetDiagnosticsFor, premortemWorksheetFor } from '../premortem.js';
-import { b9ScopedTurns, b9Served, boldCases, diagnosticsCases, eligibilityCases, exitCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
+import { b9Read, b9ScopedTurns, b9Served, boldCases, diagnosticsCases, eligibilityCases, exitCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
+import { assertUserLinkStories } from '../../../method-turn/__tests__/helpers/user-link-stories.js';
 import { performance } from 'node:perf_hooks';
 
 describe('pre-mortem story completeness and coded diagnostics', () => {
@@ -74,11 +75,13 @@ describe('pre-mortem story completeness and coded diagnostics', () => {
     }
   });
 
-  it('A2-ELIG served B9: the scoped press refuses the user-sized option, the decision turn supplies its lever', () => {
-    // The diagnosis, pinned: a SCOPED press on 'Raise prices by 10%' has no item (its links are user-sized, its factors
-    // of unknown authorship); the decision turn the producer ran under supplies that option's own lever for stories.
+  // ⭐ RE-RULED (AIE 19 Oct AMEND, DL-3 order; was "the scoped press refuses the user-sized option"): the scoped press on
+  // 'Raise prices by 10%' now grounds story-only stories on that option's own user-sized links (its unknown-authorship factors
+  // are still never grounded); the decision turn the producer ran under still supplies that option's own lever for stories.
+  it('A2-ELIG served B9: the scoped press grounds story-only stories on the user-sized option\u2019s own links, the decision turn supplies its lever', () => {
     const { price, starter } = b9ScopedTurns();
-    expect(price).toMatchObject({ kind: 'unavailable', reason: 'no_grounded_item' });
+    const scoped = assertUserLinkStories(price, b9Read().graph as never);
+    expect(scoped.context.plan).toMatchObject({ option_id: 'raise_prices_by_10', basis: 'user_selected' });
     expect(starter?.kind).toBe('run');
     const decision = b9Served().turn!;
     expect(decision.context.supplied_items.find(i => i.id === 'price_rise_from_current_price'))
