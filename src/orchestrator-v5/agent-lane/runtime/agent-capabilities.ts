@@ -7597,13 +7597,15 @@ export function createAgentCapabilities(
         const origin = statementOrigin(writtenFigure,
           figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.unverified_user_text)
           || figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, g.brief_text), ctx.user_text_complete, explicitEstimate);
-        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⛔ The user wrote this figure, but their words give it to another quantity, in another unit, or turn it down for this
-        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not.
-        if (origin === 'human' && identity?.verdict === 'not_this') {
+        // one (`figureIsThisQuantitys`, Codex R3 on #3433): this factor is never written with it, labelled or not, and the user is
+        // asked which they mean. The verdict's own presence is the user's words (Codex R6: "70 tickets" for a factor counted in
+        // nurses was "origin unknown", so the ask was generic); an estimate Olumi offers as its own is not the user's claim.
+        if (!explicitEstimate && identity?.verdict === 'not_this') {
           notThisFactors.push({ label: node.label, value: Number(a.value), written_for: identity.givenTo });
           continue;
         }
+        if (origin === 'unknown') return { ok: false, mutated: false, refusal: 'origin_unknown', detail: UNKNOWN_ORIGIN_DETAIL };
         // ⭐ LEAN CORE P2 (Codex B2 on #3395): a figure claimed as the user's WITH its statement is theirs only through the ONE statement
         // verifier (`verifyStatements`: the literal span, the AI's own speaker reading, reported speech), never by the figure search alone.
         if (a.user_stated === true && Array.isArray(a?.statements) && origin === 'human') {
