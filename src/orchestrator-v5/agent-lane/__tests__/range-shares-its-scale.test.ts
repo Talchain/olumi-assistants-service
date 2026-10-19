@@ -152,6 +152,7 @@ describe('"dozen" is a compounder like "hundred" (DL-3, 19 Oct): Codex R3\'s wit
     ['between a dozen and twenty (Codex R3)', 'People total between a dozen and twenty people.', [['words', 12], ['words', 20]]],
     ['two dozen', 'We ordered two dozen laptops.', [['words', 24]]],
     ['dozens of: vague', 'We have dozens of customers.', []],
+    ['a plural compounder after a number: vague, never the fragment 2', 'We ordered two dozens of laptops.', []],
     ['half a dozen: the complete 6 or nothing, never 0.5 or 12', 'We need half a dozen engineers.', []],
     ['half a dozen in a range: never 12', 'We expect half a dozen to twenty users.', []],
     ['CONTROL a compound keeps its value', 'We sold two hundred and fifty thousand units.', [['words', 250_000]]],
