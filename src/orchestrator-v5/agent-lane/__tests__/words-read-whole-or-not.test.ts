@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { amountsWrittenIn, figureTheUserWrote, figureTheUserWroteFor } from '../stated-by-user.js';
 import { CARDINAL_FRACTION_WORDS, CARDINAL_WORD_VALUES } from '../../../utils/cardinal-words.js';
-import { figuresWritten } from '../user-statements.js';
+import { figuresWritten, userStated } from '../user-statements.js';
 
 const inWords = (text: string) => amountsWrittenIn(text).filter((a) => a.kind === 'words');
 
@@ -56,16 +56,19 @@ describe('the located-amount reader: articles read, fractions refused (C5\'s row
  * and conjunction, every number word of the one cardinal vocabulary, fractions, ordinals, digits, punctuation), never a list of the
  * continuations found so far. Adjacent: credited. X between: never credited, at the shared check and at the binder.
  */
+const AMOUNTS: [string, number][] = [['two', 2], ['forty-five', 45], ['twenty five', 25], ['one hundred and five', 105],
+  ['a hundred and twenty', 120], ['three thousand', 3000], ['seven point five', 7.5]];
+const UNITS: [string, string][] = [['hours per week', 'hours'], ['tickets per week', 'tickets'], ['minutes', 'minutes'], ['engineers', 'engineers']];
+const BREAKS = ['for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than', 'and',
+  'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', 'plus', 'minus', 'times'];
+const NUMBERS = [...Object.keys(CARDINAL_WORD_VALUES), ...CARDINAL_FRACTION_WORDS, 'first', 'second', 'third', 'fifth', 'twentieth',
+  'hundredth', 'millionth', '5', '12', '3.5', 'and a half', 'and a quarter', 'plus five', 'point two'];
+// Codex R5's "-odd" joins the broad set ("give or take" is its own row below: a headcount unit reads any word after the amount as the
+// noun it counts, so "two give or take engineers" is that rule's, not this property's).
+const PUNCTUATION = [',', ';', ':', ' -', '.', ' (', ', and', ', and a quarter', '-and-a-half', '-odd', ' or so'];
+const X = [...BREAKS.map((w) => ` ${w}`), ...NUMBERS.map((w) => ` ${w}`), ...PUNCTUATION];
+
 describe('adjacency property: a number in words is credited only with its unit right after it', () => {
-  const AMOUNTS: [string, number][] = [['two', 2], ['forty-five', 45], ['twenty five', 25], ['one hundred and five', 105],
-    ['a hundred and twenty', 120], ['three thousand', 3000], ['seven point five', 7.5]];
-  const UNITS: [string, string][] = [['hours per week', 'hours'], ['tickets per week', 'tickets'], ['minutes', 'minutes'], ['engineers', 'engineers']];
-  const BREAKS = ['for', 'of', 'to', 'in', 'on', 'at', 'with', 'by', 'from', 'into', 'across', 'over', 'under', 'within', 'per', 'than', 'and',
-    'or', 'but', 'while', 'which', 'that', 'who', 'as', 'so', 'if', 'when', 'before', 'after', 'because', 'plus', 'minus', 'times'];
-  const NUMBERS = [...Object.keys(CARDINAL_WORD_VALUES), ...CARDINAL_FRACTION_WORDS, 'first', 'second', 'third', 'fifth', 'twentieth',
-    'hundredth', 'millionth', '5', '12', '3.5', 'and a half', 'and a quarter', 'plus five', 'point two'];
-  const PUNCTUATION = [',', ';', ':', ' -', '.', ' (', ', and', ', and a quarter', '-and-a-half'];
-  const X = [...BREAKS.map((w) => ` ${w}`), ...NUMBERS.map((w) => ` ${w}`), ...PUNCTUATION];
   const scope = (label: string) => ({ target: [label], others: ['Day shift load'] });
   it('adjacent: credited; any inserted token: never credited, at the shared check and the binder', () => {
     let credited = 0, refused = 0;
@@ -96,5 +99,66 @@ describe('adjacency property: a number in words is credited only with its unit r
       for (const v of [120, 5, 125]) expect(figureTheUserWrote(v, 'hours', text), `${text} ${v}`).toBe(false);
       expect(figuresWritten(text).some((f) => f.low === 120 && f.high === 120), `${text} figuresWritten`).toBe(false);
     }
+  });
+});
+
+/**
+ * ⛔ THE VERIFIER READS THE SAME ELIGIBILITY (Codex #3438 R5 BLOCK: `figuresWritten` listed every amount in words with no span check,
+ * so `userStated` verified 120 from "a hundred and twenty-odd hours" and "a hundred and twenty give or take five hours"). Its figure
+ * list now goes through the one complete-span eligibility (`wordsAmountComplete`), in the statement's own unit. No phrase, parser or
+ * refusal rule: the same adjacency property, at the verifier, beside the held-unit and own-source positives.
+ */
+describe('the verifier: the same complete-span eligibility as the one check', () => {
+  const subject = { quantity: 'Night shift load' };
+  const verified = (quote: string, value: number, unit: string): boolean =>
+    userStated({ quote, form: 'point', value, unit }, { now: quote }, subject).origin === 'human';
+  const listed = (quote: string, value: number, unit: string): boolean => figuresWritten(quote, unit).some((f) => f.low === value && f.high === value);
+  it.each([
+    ['CODEX R5 "-odd" after the amount', 'It takes a hundred and twenty-odd hours.', 120, 'hours'],
+    ['CODEX R5 "give or take" after the amount', 'It takes a hundred and twenty give or take five hours.', 120, 'hours'],
+    ['CODEX R5 "give or take", per week', 'Night shifts take forty-five give or take five hours per week.', 45, 'hours per week'],
+    ['CODEX R5 "-odd", per week', 'Night shifts take forty-odd hours per week.', 40, 'hours per week'],
+    ['another counted noun, words', 'Correction: forty-five nurses cover the night shifts.', 45, 'hours per week'],
+    ['no unit after the words', 'Night shifts are forty-five now.', 45, 'hours per week'],
+  ])('%s: "%s" never verifies %d', (_case, quote, value, unit) => {
+    expect(listed(quote, value, unit), 'figuresWritten').toBe(false);
+    expect(verified(quote, value, unit), 'userStated').toBe(false);
+    expect(figureTheUserWrote(value, unit, quote), 'the one check reads the same').toBe(false);
+  });
+  it.each([
+    ['45 the held unit, words', 'Night shifts take forty-five hours per week.', 45, 'hours per week'],
+    ['45 the held unit, digits', 'Night shifts take 45 hours per week.', 45, 'hours per week'],
+    ['70 the held unit after a modifier, words', 'We now have seventy support tickets per week.', 70, 'tickets per week'],
+    ['70 the held unit, digits', 'Our team resolves 70 tickets per week.', 70, 'tickets per week'],
+    ['£59 the user\'s own price', 'We charge £59 per month for new Pro customers.', 59, 'GBP per month'],
+    ['a headcount unit counts any noun', 'We have twelve support engineers.', 12, 'people'],
+  ])('%s: "%s" verifies %d as the user\'s', (_case, quote, value, unit) => {
+    expect(listed(quote, value, unit), 'figuresWritten').toBe(true);
+    expect(verified(quote, value, unit), 'userStated').toBe(true);
+    expect(figureTheUserWrote(value, unit, quote), 'the one check reads the same').toBe(true);
+  });
+  it('the speaker check reads the same places: words never credited cannot make another speaker\'s quoted figure the user\'s', () => {
+    for (const own of ['a hundred and twenty-odd hours', 'a hundred and twenty give or take five hours']) {
+      const quote = `It takes ${own}, as our manager said: \u201C120 hours\u201D.`;
+      expect(verified(quote, 120, 'hours'), quote).toBe(false);
+    }
+    const control = 'It takes a hundred and twenty hours, as our manager said: \u201C120 hours\u201D.';
+    expect(verified(control, 120, 'hours'), 'CONTROL the user\'s own complete span').toBe(true);
+  });
+  it('ADJACENCY at the verifier: adjacent verifies; any inserted token never does', () => {
+    let credited = 0, refused = 0;
+    for (const [amount, value] of AMOUNTS) for (const [unit, noun] of UNITS) {
+      const own = `Night shift load is ${amount} ${noun} this week.`;
+      expect(listed(own, value, unit), own).toBe(true);
+      expect(verified(own, value, unit), own).toBe(true);
+      credited += 1;
+      for (const x of X) {
+        const text = `Night shift load is ${amount}${x} ${noun} this week.`;
+        expect(listed(text, value, unit), text).toBe(false);
+        expect(verified(text, value, unit), text).toBe(false);
+        refused += 1;
+      }
+    }
+    expect({ credited, refused }).toEqual({ credited: AMOUNTS.length * UNITS.length, refused: AMOUNTS.length * UNITS.length * X.length });
   });
 });

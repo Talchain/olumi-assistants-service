@@ -74,30 +74,40 @@ export function amountsWrittenIn(text: string | null | undefined): readonly Writ
  *  · A count followed by its COUNTED NOUN PHRASE (`countedPhraseAfter`) counts THAT: where the phrase names something and no word of
  *    the held unit, it is another quantity, in digits as in words ("45 nurses" is no figure of hours, "300 Pro seats" none of £/month;
  *    DL-3 on #3429). A headcount unit counts any phrase; a figure with no noun after it ("45 now", "all 6 on a prototype") reads as before.
- *  · A number in words is credited only as a COMPLETE SPAN (`wordsSpanComplete`): its quantity's word right after it.
+ *  · A number in words is credited only as a COMPLETE SPAN (`wordsAmountComplete`): its quantity's word right after it.
  */
 export function amountTheUserWrote(a: WrittenAmount, value: number, unit: unknown, text: string, names: readonly string[] = []): boolean {
   const end = a.index + a.matchedText.length;
   const counted = countedPhraseAfter(text, end);
   const held = namingWords(unit), said = namingWords(counted);
-  // A headcount unit (`unitFamilyOf` 'count': people, hires, FTE, seats…) counts whatever its phrase names ("300 subscribers" are people).
-  const another = (a.kind === 'plain' || a.kind === 'words') && held.length > 0 && !held.some((h) => unitFamilyOf(h) === 'count')
-    && said.length > 0 && !namesHeldUnit(said, held);
-  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && (a.kind !== 'words' || wordsSpanComplete(text, end))
+  // An amount in words reads the same rule (`countsHeldUnit`) inside its complete-span eligibility (`wordsAmountComplete`).
+  const another = a.kind === 'plain' && said.length > 0 && !countsHeldUnit(said, held);
+  return amountIs(a, value, unit, unitPhraseFamily(unit), text) && !another && wordsAmountComplete(a, unit, text)
     && !inAnotherSpeakersWords(text, a, names);
 }
 
 /**
- * ⛔ A NUMBER IN WORDS IS CREDITED ONLY AS A COMPLETE SPAN (DL-3 decision on Codex #3438 R4, outbox/DL-DECISION-COMPLETE-SPAN):
- * its quantity's noun phrase starts IMMEDIATELY after it (`countedPhraseAfter`: a space, no punctuation, cut at a preposition or
- * conjunction), names something ("one OF them", "the one WHO", "forty-five now" and "not twelve." are no figures) and holds no other
- * number word ("forty-five extra FIVE hours"); the one check then requires that noun to be the held unit's (`another`). Anything else
- * between the number and its unit, or no unit at all, and it is not credited: an under-claim, never a prefix value. Digits keep
- * their own grammar.
+ * ⛔ THE ONE COMPLETE-SPAN ELIGIBILITY of an amount in words (DL-3 decision outbox/DL-DECISION-COMPLETE-SPAN on Codex #3438 R4; R5:
+ * the verifier's figure list read words past it, so "… and twenty-odd hours" and "… and twenty give or take five hours" credited
+ * 120). Its quantity's noun phrase starts IMMEDIATELY after it (`countedPhraseAfter`: a space, no punctuation, cut at a preposition
+ * or conjunction), names something ("one OF them", "the one WHO", "forty-five now" and "not twelve." are no figures), holds no other
+ * number word ("forty-five extra FIVE hours") and, where `unit` has words, names the held unit (a headcount unit counts any noun).
+ * Anything else between the number and its unit, or no unit at all, and it is not credited: an under-claim, never a prefix value.
+ * The one check and the verifier's figure list (`figuresWritten`) both read it. Digits keep their own grammar.
  */
-function wordsSpanComplete(text: string, end: number): boolean {
-  const counted = countedPhraseAfter(text, end);
-  return namingWords(counted).length > 0 && !counted.split(/\s+/).some((w) => /\d/.test(w) || COUNTING_WORDS.has(w.toLowerCase()));
+export function wordsAmountComplete(a: WrittenAmount, unit: unknown, text: string): boolean {
+  if (a.kind !== 'words') return true;
+  const counted = countedPhraseAfter(text, a.index + a.matchedText.length);
+  const said = namingWords(counted), held = namingWords(unit);
+  return said.length > 0 && !counted.split(/\s+/).some((w) => /\d/.test(w) || COUNTING_WORDS.has(w.toLowerCase())) && countsHeldUnit(said, held);
+}
+
+/**
+ * Whether a counted phrase (its naming words `said`) counts the held unit: no unit words to hold, a headcount unit (`unitFamilyOf`
+ * 'count': people, hires, FTE, seats…, which counts whatever its phrase names: "300 subscribers" are people), or the held unit named.
+ */
+function countsHeldUnit(said: readonly string[], held: readonly string[]): boolean {
+  return held.length === 0 || held.some((h) => unitFamilyOf(h) === 'count') || namesHeldUnit(said, held);
 }
 
 /**
