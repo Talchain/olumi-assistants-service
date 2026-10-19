@@ -271,9 +271,40 @@ describe('S-D slice 2 Agent proposals', () => {
     const again = await turn({ ...press(p), proposal_edits: edits });
     expect(again._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: false, proposal_id: p.proposal_id })]);
     expect(again.assistant_text).not.toContain(stalePlainApprovalWords);
-    // The narrator's own already-saved status leads; the readiness line that follows is the route's, unchanged.
-    expect(again.assistant_text).toMatch(/^That change was already saved; nothing was written again\. /);
+    // A replay from memory is not a read-back (Codex, #3453 post-merge): nothing written again, the current model is the check.
+    expect(again.assistant_text).toMatch(/^Nothing was written again\. Check the current model to confirm whether this change is saved\. /);
+    expect(again.assistant_text).not.toContain('already saved');
     expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO)).toBe(1); expect(openAiCalls).toBe(calls);
+  }, 120_000);
+  /** Codex post-merge check of #3453 (cae490f4), probe 6: the applied change was undone (the model restored to before it). */
+  it('REC-WRITE Undo RED: a re-press after the change was undone never says "already saved" or "out of date", and writes nothing', async () => {
+    seed(); const b = await assumptions(); const p = shown(b);
+    const original = bytes();
+    const edits = { proposal_id: p.proposal_id, revision: p.revision, digest: p.digest, graph_hash: b._proposal_fields!.graph_hash, fields: [] };
+    const applied = await turn({ ...press(p), proposal_edits: edits });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    expect(bytes()).not.toBe(original);
+    graphOf.set(SCENARIO, JSON.parse(original));
+    const writes = graphWrites.get(SCENARIO); const calls = openAiCalls;
+    const again = await turn({ ...press(p), proposal_edits: edits });
+    expect(again._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', mutated: false, proposal_id: p.proposal_id })]);
+    expect(again.assistant_text).not.toContain('already saved');
+    expect(again.assistant_text).not.toContain(stalePlainApprovalWords);
+    expect(again.assistant_text).toMatch(/^Nothing was written again\. Check the current model to confirm whether this change is saved\./);
+    expect(bytes()).toBe(original); expect(graphWrites.get(SCENARIO)).toBe(writes); expect(openAiCalls).toBe(calls);
+  }, 120_000);
+  /** Codex post-merge check of #3453, probe 7: an applied flag with no write behind it is never said as "saved". */
+  it('REC-WRITE flag-only RED: an applied mark with no write says nothing was written again, never "already saved", and writes nothing', async () => {
+    seed(); const b = await assumptions(); const p = shown(b);
+    const before = bytes(); const writes = graphWrites.get(SCENARIO) ?? 0; const calls = openAiCalls;
+    proposalsForApp.markApplied(p.proposal_id, []);
+    const again = await turn({ ...press(p), proposal_edits: { proposal_id: p.proposal_id, revision: p.revision, digest: p.digest,
+      graph_hash: b._proposal_fields!.graph_hash, fields: [] } });
+    expect(again._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', mutated: false, proposal_id: p.proposal_id })]);
+    expect(again.assistant_text).not.toContain('already saved');
+    expect(again.assistant_text).not.toContain(stalePlainApprovalWords);
+    expect(again.assistant_text).toMatch(/^Nothing was written again\. Check the current model to confirm whether this change is saved\./);
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(writes); expect(openAiCalls).toBe(calls);
   }, 120_000);
   it('A1 edits RED: one user value, untouched Olumi value, one commit and both receipt lines', async () => {
     seed(); const b = await assumptions();

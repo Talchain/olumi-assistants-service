@@ -3890,7 +3890,8 @@ export function createAgentCapabilities(
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'These hiring timings are set only by pressing their own card, so nothing was changed.');
     if (hiringTimesHeld(before.raw, a)) {
       proposals.markApplied(pid, []);
-      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
+      // Read back from the stored model (`hiringTimesHeld` on this read): durable proof, so "saved" may be said.
+      return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: pid, receipts: [], follow_up: HIRING_TIMES_APPLIED };
     }
     if (!hiringTimesStillApply(a, before.raw)) {
       return notApplied('superseded', 'The hiring timings in the model changed after this card was offered, so nothing was set. Offer it again only if it still applies.');
@@ -3942,7 +3943,8 @@ export function createAgentCapabilities(
     if (ctx.typed_approval_of !== pid) return notApplied('not_applied', 'This change is made only by pressing its own card, so nothing was changed.');
     if (optionCapacityChangeHeld(before.raw, a)) {
       proposals.markApplied(pid, []);
-      return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: pid, receipts: [], follow_up: done, note };
+      // Read back from the stored model (`optionCapacityChangeHeld` on this read): durable proof, so "saved" may be said.
+      return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: pid, receipts: [], follow_up: done, note };
     }
     if (!optionCapacityChangeStillApplies(a, before.raw)) {
       return notApplied('superseded', `The model changed after this card was offered, so nothing was set for ‘${a.option_label}’. Offer it again only if it still applies.`);
@@ -8569,8 +8571,12 @@ export function createAgentCapabilities(
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
         // the retry is bound to the same proposal by identity, and the ORIGINAL
         // receipts, so the Agent can say which version it already became.
+        // "Saved" is said only with durable proof (Codex, #3453 post-merge): the deadline's committed operation and native
+        // read-back above, or a prepared correction's own registration plus its whole postimage. Otherwise it is memory only.
+        const savedStateConfirmed = op?.op === 'set_goal_deadline' || (isPreparedSavedCorrection(op) && correctionSaved);
         return {
           ok: true, mutated: false, applied: true, already_applied: true,
+          ...(savedStateConfirmed ? { saved_state_confirmed: true } : {}),
           proposal_id: decision.proposal.proposal_id,
           receipts: decision.receipts,
           detail:
@@ -8586,7 +8592,7 @@ export function createAgentCapabilities(
       }
       if (correctionSaved) {
         proposals.markApplied(decision.proposal.proposal_id, []);
-        return { ok: true, mutated: false, applied: true, already_applied: true, proposal_id: decision.proposal.proposal_id, receipts: [],
+        return { ok: true, mutated: false, applied: true, already_applied: true, saved_state_confirmed: true, proposal_id: decision.proposal.proposal_id, receipts: [],
           follow_up: 'The changes on that card are already saved in the model. Nothing was applied twice.' };
       }
 
