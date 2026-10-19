@@ -48,14 +48,20 @@ export const MIXER = { interventions: [{ option_label: 'Buy a faster mixer', fac
   basis: 'The user: the faster mixer cuts prep time by 15%.' }] };
 export const MIXER_WORDS = 'The faster mixer cuts prep time by 15%.';
 
-export function world(live: { store: unknown }) {
-  const sid = randomUUID(); let bytes = JSON.stringify(GRAPH);
+/**
+ * The world. `empty` (K6): a scenario with no model yet and that brief; a registration (`register`) saves the drafted model,
+ * as the graph register route does.
+ */
+export function world(live: { store: unknown }, empty?: { brief: string }) {
+  const sid = randomUUID(); let bytes = JSON.stringify(empty === undefined ? GRAPH : { nodes: [], edges: [] });
+  const brief = empty?.brief ?? BRIEF;
+  let registered = empty === undefined;
   const read = (): Rec => JSON.parse(bytes);
-  const rows: SessionTurnWithContent[] = [makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: registrationTurnId(sid, constructionOperationId(sid, BRIEF)),
+  const rows: SessionTurnWithContent[] = empty !== undefined ? [] : [makeSessionTurnRow({ id: randomUUID(), scenario_id: sid, turn_id: registrationTurnId(sid, constructionOperationId(sid, BRIEF)),
     request_hash: 'graph_registration:draft', turn_class: 'direct_answer', handler_id: null, response_emitted: false, created_at: STAMP })];
   const writes: Rec[] = []; const latest = () => rows.find(r => !r.turn_id.endsWith(':claim'));
   live.store = createMockSessionStore({
-    loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: BRIEF }),
+    loadGraph: async () => read(), loadGraphAndBriefText: async () => ({ graph: read(), briefText: brief }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readCommittedTurn: async (_sid, id) => { const r = rows.find(x => x.turn_id === id); return r ? { id: r.id, request_hash: r.request_hash,
       user_message: r.user_message ?? null, assistant_message: r.assistant_message ?? null, llm_calls_used: r.llm_calls_used, pending_actions: (r as Rec).pending_actions ?? [] } : null; },
@@ -71,9 +77,16 @@ export function world(live: { store: unknown }) {
       return { id };
     },
   });
-  const graphWire = () => ({ graph: read(), graph_hash: hash(read()), brief_text: BRIEF, scenario_created_at: STAMP });
-  const versions = () => ({ versions: [{ version_id: 'draft-r1', sequence: 1, created_at: STAMP,
-    creation: { kind: 'initial', source_turn_id: registrationTurnId(sid, constructionOperationId(sid, BRIEF)) } }] });
+  const graphWire = () => ({ graph: read(), graph_hash: hash(read()) ?? 'empty', brief_text: brief, scenario_created_at: STAMP });
+  let registeredBy = registrationTurnId(sid, constructionOperationId(sid, BRIEF));
+  const versions = () => ({ versions: registered ? [{ version_id: 'draft-r1', sequence: 1, created_at: STAMP,
+    creation: { kind: 'initial', mutation_id: 'm1', source_turn_id: registeredBy } }] : [], next_cursor: null });
+  /** The graph register route: the drafted model is saved under its construction's own operation. */
+  const register = (body: Rec): Rec => {
+    bytes = JSON.stringify(body.graph); registered = true;
+    registeredBy = registrationTurnId(sid, String(body.operation_id));
+    return { registered: true, graph_hash: hash(read()) ?? 'empty', model_version: { version_id: 'draft-r1', version_number: 1 } };
+  };
   const onLatestRow = (chipId: string): boolean => ((latest() as Rec | undefined)?.pending_actions ?? []).some((p: Rec) => p.chip_id === chipId);
   /** A card the user was never shown: its carrier is taken off the latest row (the proposal stays in the process's store). */
   /** An edit outside the conversation (as a canvas edit lands): the stored model changes, no row is written. */
@@ -81,7 +94,7 @@ export function world(live: { store: unknown }) {
   const latestPendings = (): Rec[] => structuredClone((latest() as Rec | undefined)?.pending_actions ?? []);
   /** The graph writes committed so far (each answer row that carried a model). */
   const graphWrites = (): number => writes.filter((x) => x.graph !== undefined && x.graph !== null).length;
-  return { sid, read, graphWire, versions, onLatestRow, edit, latestPendings, graphWrites };
+  return { sid, read, graphWire, versions, onLatestRow, register, edit, latestPendings, graphWrites };
 }
 
 /** The open apps, closed by the spec's `afterEach` (`closeApps`). */
@@ -100,13 +113,15 @@ export async function route(w: ReturnType<typeof world>, fallback?: Respond): Pr
     if (!String(url).includes('openai')) throw new Error(`Network forbidden: ${String(url)}`);
     const req = JSON.parse(String(init?.body ?? '{}')) as Rec;
     if (req.text?.format?.name === 'brief_spans') return new Response('{}', { status: 500 });
-    if (script.length > 0) return new Response(JSON.stringify(script.shift()), { status: 200 });
+    // A turn's script is the Agent's own outputs: a construction (structured) request never takes one (K6).
+    if (script.length > 0 && req.text?.format?.type !== 'json_schema') return new Response(JSON.stringify(script.shift()), { status: 200 });
     return fallback !== undefined ? fallback(req, String(url), init) : new Response(JSON.stringify(say('Noted.')), { status: 200 });
   }));
   const { agentV1TurnRoute } = await import('../../../../routes/agent-v1-turn.js');
   const app = Fastify({ logger: false }); apps.push(app);
   app.post('/assist/v1/scenarios/:id/graph', async () => w.graphWire());
   app.post('/assist/v1/scenarios/:id/versions', async () => w.versions());
+  app.post('/assist/v1/scenarios/:id/graph/register', async (req) => w.register(req.body as Rec));
   app.post('/orchestrate/v2/turn', async (_req, reply) => reply.code(500).send({}));
   await app.register(agentV1TurnRoute); await app.ready();
   // As the client does: a typed turn sends the cards its last reply showed (`shownBy`), unless the turn names its own set.

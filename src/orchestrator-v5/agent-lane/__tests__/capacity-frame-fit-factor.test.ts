@@ -14,6 +14,10 @@ import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { clampForPersist, frameOf, refitFramesForOlumiEstimates, refitFramesForStatedEffects } from '../refit-frames.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+import { vi } from 'vitest';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 type Rec = Record<string, any>;
 
@@ -166,5 +170,91 @@ describe('through the real build: the drafter\'s tight intermediate frame no lon
     const { cap, link: l } = users(await built(300));
     expect(frameOf(cap)).toBe(300);
     expect(l.provenance?.clamped_from).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐ STEP 8 (capacity, served CEE 19ce8e4a, `redteam/lens-witness/runs/new-scenario.json`): the drafter gave the intermediate
+ * part NO frame (no `plausible_max`, nothing held today), so `frameOf` had none, the stated pass never saw the pair, and
+ * `clampForPersist` cut the user's 20 per specialist to 1 (`clamped_from: 20`): one specialist moved the goal by 1 ticket.
+ * A part held at 0 with no spread now reads on the frame its link was sized on (1), so the stated pass widens it. Synthetic
+ * text in the served shape; every hop is real, to the Run's PLoT request.
+ */
+describe('a stated per-unit effect into a part the drafter left unframed reaches the engine as the user\'s, uncut', () => {
+  const BRIEF = 'We are comparing two crewing options, labelled exactly "Keep current crew" and "Add one packer". Use the exact goal '
+    + 'label "Daily order throughput". Our current crew ships 50 orders per day. We need at least 70 orders per day. Keep current '
+    + 'crew adds no packer. Add one packer adds one packer. Each packer adds 15 orders per day. Daily order throughput is the '
+    + 'existing 50 orders per day plus the additional packer output.';
+  const factor = (label: string, role: string, unit: string, baseline: number | null, max: number | null, provenance = 'inferred') =>
+    ({ label, role, baseline_known: baseline !== null, baseline_value: baseline, unit, provenance, plausible_max: max });
+  const link = (from: string, to: string, amount: number, definitional: true | null, quote: string | null, by = 'explicit') => ({ from, to, direction: 'positive',
+    provenance: by, effect_amount: amount, effect_per_source_change: 1, effect_provenance: by, definitional, basis: null, source_quote: quote });
+  const DRAFT = {
+    goal: { metric: 'Daily order throughput', operator: '>=', target_stated: true, value: 70, unit: 'orders per day', horizon_months: null, provenance: 'explicit',
+      frame: 'level', baseline_known: true, baseline_value: 50, baseline_provenance: 'explicit', scope: null },
+    constraints: [],
+    options: [
+      { label: 'Keep current crew', provenance: 'explicit', changes: [], is_status_quo: true, interventions: [] },
+      { label: 'Add one packer', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+        { factor_label: 'Additional packers', value: 1, value_kind: 'absolute', unit: 'packers', provenance: 'explicit' }] },
+    ],
+    // The served shape: the existing part framed; the per-unit source and the intermediate part held at 0 with NO frame.
+    factors: [factor('Existing crew output', 'observable', 'orders per day', 50, 100, 'explicit'),
+      factor('Additional packers', 'controllable', 'packers', 0, null), factor('Additional packer output', 'observable', 'orders per day', 0, null)],
+    risks: [], outcomes: [],
+    links: [
+      link('Existing crew output', 'Daily order throughput', 1, true, 'Daily order throughput is the existing 50 orders per day plus the additional packer output.'),
+      link('Additional packers', 'Additional packer output', 15, null, 'Each packer adds 15 orders per day.'),
+      // As served: the part's own link into the goal is not flagged definitional (a drafter loss, PROMPT-INT): Olumi's 1 per 1.
+      link('Additional packer output', 'Daily order throughput', 1, null, null, 'inferred'),
+    ],
+    identities: [], unknowns: [], decision_question: null,
+  };
+  const SCENARIO = '5e8e8e8e-0000-4000-8000-0000000000b8';
+  async function stored(): Promise<Rec> {
+    let graph: Rec | undefined;
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, (async (path: string, body: Rec) => {
+      if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    }) as never, (async () => ({ text: JSON.stringify(DRAFT) })) as never) as Rec;
+    expect(out.ok, JSON.stringify(out).slice(0, 1500)).toBe(true);
+    return graph!;
+  }
+  async function request(g: Rec): Promise<Rec> {
+    const bytes = JSON.stringify(g);
+    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-perunit', port as never);
+    let payload: Rec | undefined;
+    const handler = createRunAnalysisHandler({ plotClient: { run: vi.fn(), validatePatch: vi.fn() } as never,
+      scenarioReader: async () => snapshot, probe: async (sent) => { payload = sent.plotPayload as Rec; } });
+    await handler({ context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [], session_id: SCENARIO,
+      request_id: 'req-perunit', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 }, prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+      payload: makeMessagePayload({ turn_id: 't-perunit', scenario_id: SCENARIO, message: 'Run analysis.', turn_class: 'decide', stage: 'analyse' }),
+      requestId: 'req-perunit', signal: new AbortController().signal, orientationText: '' } as never);
+    expect(payload, 'the Run handler built a PLoT request').toBeDefined();
+    return payload!;
+  }
+  /** Natural size of a link on the graph it sits in: β × F(target) / F(source), on the one frame authority. */
+  const natural = (g: Rec, from: string, to: string): number => link2(g, from, to).strength.mean * frameOf(node(g, to))! / frameOf(node(g, from))!;
+  const link2 = (g: Rec, from: string, to: string): Rec => (g.edges as Rec[]).find((e) => e.from === from && e.to === to)!;
+
+  it('⭐ RED→GREEN: "each packer adds 15 orders per day" is stored as the user\'s, uncut, and the Run sends it inside the contract', async () => {
+    const g = await stored();
+    const users = link2(g, 'additional_packers', 'additional_packer_output');
+    expect(users.provenance.magnitude).toBe('user_stated');
+    expect(users.provenance.clamped_from).toBeUndefined();
+    expect(Math.abs(users.strength.mean)).toBeLessThanOrEqual(1);
+    expect(users.provenance.natural_effect).toMatchObject({ amount: 15, per_source_change: 1 });
+    expect(natural(g, 'additional_packers', 'additional_packer_output')).toBeCloseTo(15, 9);
+    const sent = (await request(g)).graph as Rec;
+    const wire = link2(sent, 'additional_packers', 'additional_packer_output');
+    expect(Math.abs(wire.strength.mean), 'the engine receives the user\'s effect inside the contract (PLoT does not cut it)').toBeLessThanOrEqual(1);
+    expect(wire.strength.mean).toBeCloseTo(users.strength.mean, 12);
+  });
+  it('the part\'s own link into the goal keeps its size when the part is widened: one packer moves the goal by 15 orders per day', async () => {
+    const g = await stored();
+    expect(link2(g, 'additional_packer_output', 'daily_order_throughput').provenance.magnitude).toBe('olumi_estimate');
+    expect(natural(g, 'additional_packer_output', 'daily_order_throughput')).toBeCloseTo(1, 9);
+    expect(natural(g, 'additional_packers', 'additional_packer_output') * natural(g, 'additional_packer_output', 'daily_order_throughput')).toBeCloseTo(15, 9);
   });
 });

@@ -31,6 +31,7 @@ import {
 } from '../coaching/analysis-result-headline.js';
 import { legacyGoalWarning } from '../agent-lane/goal-certainty.js';
 import { goalReadingTailOf } from '../coaching/goal-reading-disclosure.js';
+import { passesAssistantTextContentDefences } from '../coaching/assistant-text-defences.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -137,7 +138,7 @@ function legacyFiguresDisclosureOf(outcome: unknown): string {
   return ` ${legacyGoalWarning(graph, links).message}`;
 }
 
-const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
+const confirmRunAnalysisText = (outcome: unknown): string => {
   if (
     outcome === null ||
     typeof outcome !== 'object' ||
@@ -210,6 +211,28 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
     if (tail !== '' && isAllowedRunAnalysisAssistantText(RUN_ANALYSIS_FALLBACK_TEXT + tail, tail)) return RUN_ANALYSIS_FALLBACK_TEXT + tail;
   }
   return RUN_ANALYSIS_FALLBACK_TEXT;
+};
+
+/** Said instead when the exact note cannot pass the content defences (a decimal figure, say): never silent. */
+const TODAY_PART_NOTE_FALLBACK = ' A saved value on the current level of the goal is not valid; the Run used the goal\'s own current level instead.';
+
+/**
+ * ⭐ STEP 8 (DL-3 on Codex R3 of #3421): the Run's note on a stored today part it set aside (`__today_part_disclosure`, the
+ * handler's exact suffix, never reply prose) rides EVERY path. The rest of the reply is confirmed exactly as before, then the
+ * note follows whatever was admitted, the fallback included.
+ */
+const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
+  const o = outcome !== null && typeof outcome === 'object' ? (outcome as Record<string, unknown>) : undefined;
+  const note = o?.__today_part_disclosure;
+  if (o === undefined || typeof note !== 'string' || note === '') return confirmRunAnalysisText(outcome);
+  const strip = (t: unknown): unknown => (typeof t === 'string' && t.endsWith(note) ? t.slice(0, -note.length) : t);
+  const facts = Array.isArray(o.handler_facts) ? o.handler_facts.map((f: unknown) => {
+    const fact = f !== null && typeof f === 'object' ? (f as Record<string, unknown>) : undefined;
+    const result = fact?.fact_type === 'run_analysis' && fact.result !== null && typeof fact.result === 'object' ? (fact.result as Record<string, unknown>) : undefined;
+    return result === undefined ? f : { ...fact, result: { ...result, summary: strip(result.summary) } };
+  }) : o.handler_facts;
+  const said = passesAssistantTextContentDefences(note) ? note : TODAY_PART_NOTE_FALLBACK;
+  return `${confirmRunAnalysisText({ ...o, assistant_text: strip(o.assistant_text), handler_facts: facts })}${said}`;
 };
 
 export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {

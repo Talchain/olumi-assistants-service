@@ -60,7 +60,9 @@ export function frameOf(n: Rec | undefined): number | undefined {
     const f = os.raw_value / os.value;
     if (Number.isFinite(f) && f > 0) return f;
   }
-  return undefined;
+  // ⭐ STEP 8 (capacity, served 19ce8e4a): a node held at exactly 0 with no spread reads on the frame its links were sized
+  // on (`resolveMagnitudeFrame`: a level of 0 → 1), so a stated size into it is fitted, never cut to 1.
+  return heldAtZero(n) ? 1 : undefined;
 }
 
 /** The smallest {1, 2, 5}·10^k at or above x. */
@@ -186,6 +188,7 @@ function reframed(graph: Rec, id: string, F: number): Rec {
   }
   if (above1(node.scale_frame)) node.scale_frame = F;
   else if (os !== undefined && above1(os.cap)) os.cap = F;
+  else if (node.kind !== 'goal') node.scale_frame = F; // an implicit frame is stored once widened (a goal's lives in its cap)
   if (node.kind === 'goal') {
     node.goal_threshold_cap = F;
     node.goal_threshold_cap_provenance = 'stated_effect_fit';
