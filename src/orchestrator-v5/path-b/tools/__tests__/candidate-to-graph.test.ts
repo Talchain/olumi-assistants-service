@@ -1032,6 +1032,9 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(ranged([range({ low: 800, high: 1200 }, 'user', ADD, 'Add £1,000 of ad spend')], `${SALES_WORDS} ${ADD}`, 'Add £1,000 of ad spend').cell.range).toBeUndefined();
     expect(ranged([range({ low: 2800, high: 3200 }, 'user', TOTAL, 'Add £1,000 of ad spend')], `${SALES_WORDS} ${TOTAL}`, 'Add £1,000 of ad spend').cell.range)
       .toMatchObject({ low: 2800, high: 3200, source_quote: TOTAL });
+    // A range that brackets both the addition and the total could be either: nothing is carried.
+    const EITHER = 'Somewhere between £900 and £3,100.';
+    expect(ranged([range({ low: 900, high: 3100 }, 'user', EITHER, 'Add £1,000 of ad spend')], `${SALES_WORDS} ${EITHER}`, 'Add £1,000 of ad spend').cell.range).toBeUndefined();
     // Without the user's words nothing is recorded, so nothing is carried.
     expect(byLabel(converted({ ...salesDraft(), statements: [range()] }).graph, 'Double the ad spend').interventions[byLabel(converted(salesDraft()).graph, 'Ad spend').id].range).toBeUndefined();
   });
