@@ -264,7 +264,8 @@ export type StatementRecordEditResult =
  * sources' claims on the subject stay beside it (`withClaimsKept`).
  */
 export function isFigureClaimRecord(subject: DoorSubject, record: UserStatementRecord): boolean {
-  return subject.kind === 'factor' && subject.field === 'level' && subject.to_id === undefined && record.attest === undefined
+  return (subject.kind === 'factor' || (subject.kind === 'goal' && subject.option_id === undefined)) && subject.field === 'level'
+    && subject.to_id === undefined && record.attest === undefined
     && record.statements.some((st) => st.form === 'point' && saidByOf(st) !== 'olumi' && st.low !== undefined && st.low === st.high);
 }
 
