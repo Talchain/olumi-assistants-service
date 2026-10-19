@@ -877,13 +877,16 @@ describe('candidateToGraph: conversion + science only', () => {
   });
 
   it('⛔ AUTHORSHIP (factor level): a level the AI declared known and `inferred` is of unknown origin; a level it did not declare known is Olumi\'s estimate', () => {
-    const origin = (provenance: string, known: boolean): string => {
+    const origin = (provenance: string, known: boolean, speaker?: 'other' | 'unknown'): string => {
       const draft = salesDraft(); draft.factors[0] = { ...draft.factors[0], provenance, baseline_known: known };
+      if (speaker !== undefined) draft.statements = [statement('synthetic', 'Ad spend', speaker, 2000, '£')];
       return valueProvenanceOf(byLabel(converted(draft).graph, 'Ad spend').observed_state).origin;
     };
     expect([origin('explicit', true), origin('ai_proposed', true), origin('inferred', true)]).toEqual(['human', 'ai', 'unknown']);
     // The item's introducer is not the level's author: a factor the user named, with a level the AI did not declare known.
     expect([origin('explicit', false), origin('inferred', false)]).toEqual(['ai', 'ai']);
+    // A declared speaker of another person, or an unknown one, still wins over "not declared known".
+    expect([origin('explicit', false, 'other'), origin('ai_proposed', false, 'unknown')]).toEqual(['unknown', 'unknown']);
   });
 
   it('⛔ AUTHORSHIP (goal): today\'s level and the target the AI declared `inferred` are of unknown origin, listed where GraphV3 cannot hold it', () => {
