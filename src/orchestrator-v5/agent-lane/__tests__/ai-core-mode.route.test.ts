@@ -44,6 +44,22 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
+/** A whole Responses API body around scripted output items (the SDK reads ids, roles and status as the API sends them). */
+let served = 0;
+const responsesBody = (output: Record<string, unknown>[]): Json => {
+  served += 1;
+  return {
+    id: `resp_${served}`, object: 'response', model: RETURNED_MODEL, status: 'completed',
+    output: output.map((item, i) => item.type === 'message'
+      ? { id: `msg_${served}_${i}`, type: 'message', role: 'assistant', status: 'completed',
+          content: (item.content as Json[]).map((c) => ({ ...c, annotations: [] })) }
+      : { id: `fc_${served}_${i}`, status: 'completed', ...item }),
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } },
+  };
+};
+/** The model the scripted provider says served each call (`response.model`). */
+const RETURNED_MODEL = 'gpt-scripted-returned';
+
 /** The b9-1 graph with its goal target removed: the host would add its own ask and lines after the AI's words. */
 const NO_TARGET_GRAPH = ((): Json => {
   const g = structuredClone(READ.graph) as Json;
@@ -64,7 +80,7 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
       if (runCall) return runCall;
       sent.push(typeof init?.body === 'string' ? init.body : '');
       const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: AI_WORDS }] }];
-      return new Response(JSON.stringify({ output }), { status: 200 });
+      return new Response(JSON.stringify(responsesBody(output)), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -105,6 +121,16 @@ describe('PATH-B core: the AI\'s own words are the reply; protocol, cards, resul
     sent.length = 0;
     const core = await typed('What should I look at next?', CORE);
     expect(core._agent.mode, 'the witness reads the mode on the wire').toBe('core');
+    // The ordinary typed turn ran on the Agents SDK: its runtime on the wire, and each provider row's witness fields.
+    expect(core._agent.sdk?.runtime).toBe('@openai/agents@0.18.0');
+    const rows = (core._provider_calls as Json[]).filter((c) => c.site === 'agent-core.sdk');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.returned_model).toBe(RETURNED_MODEL);
+      expect(row.tool_names).toContain('build_model_from_brief');
+      expect(row.input_sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(full._agent.sdk, 'the full lane keeps its own loop').toBeUndefined();
     expect(core._diagnostic_trace.reply_author).toBe('ai');
     expect(core.assistant_text).toBe(AI_WORDS);
     // The facts the host would have said reach the AI as typed context instead, with the core rule.
