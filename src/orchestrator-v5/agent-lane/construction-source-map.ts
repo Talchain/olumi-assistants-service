@@ -16,7 +16,7 @@
  * never from the drafter's value. `statements` is optional: a missing or malformed list never fails a draft. Pure.
  */
 import { findJoinedRanges } from '../../cee/provenance/stated-amounts.js';
-import { figuresWritten, STATEMENT_FORMS, unitWrittenAfter, unknownSpeakerWords, verifyStatements, type StatementForm, type UserStatement } from './user-statements.js';
+import { figuresWritten, STATEMENT_FORMS, STATEMENT_STANCES, unitWrittenAfter, unknownSpeakerWords, verifyStatements, type StatementForm, type StatementStance, type UserStatement } from './user-statements.js';
 import { resolveSubject, subjectKey as doorSubjectKey, type DoorSubject } from '../statement-door/subject.js';
 import { CONSTRUCTION_ATTEST, userStatementRecord, withUserStatement } from '../statement-door/statements.js';
 import { authorshipOf } from '../../cee/provenance/provenance-of.js';
@@ -34,20 +34,16 @@ export type StatementField = typeof STATEMENT_FIELDS[number];
 export const SUBJECT_KINDS = ['goal', 'factor', 'option', 'risk', 'link'] as const;
 export type SubjectKind = typeof SUBJECT_KINDS[number];
 
-/** The drafted item a statement is about, by the drafter's own labels: the host binds labels to ids after admission. */
 /**
- * ⭐ STANCE (AIE reply 20261019 v1, sha 543db8bb): how the drafter declares THIS figure is put forward: a current assertion, a
- * supposition, a target or an estimate. The AI declares it; the host never reads mood words for it. Only `stated_current` can earn
- * current-level credit; a missing, unknown or contradictory stance never does (`declaresCurrent`).
+ * ⭐ STANCE (AIE reply 20261019 v1, sha 543db8bb): the drafter declares how THIS figure is put forward; the host never reads mood
+ * words for it. Carried on the exact verified entry, saved on the claim and read back (`userStatementOf`).
  */
-export const STATEMENT_STANCES = ['stated_current', 'hypothetical', 'target', 'estimate'] as const;
-export type StatementStance = typeof STATEMENT_STANCES[number];
-/** A verified statement with the drafter's own declared stance for it, carried on the EXACT entry it was verified from. */
-export type StancedStatement = UserStatement & { readonly stance?: StatementStance };
+export { STATEMENT_STANCES, type StatementStance } from './user-statements.js';
 const stanceOf = (v: unknown): StatementStance | undefined => STATEMENT_STANCES.find((s) => s === v);
 /** Current-level credit needs the drafter's own declaration that this figure is a current assertion. */
 export const declaresCurrent = (st: { readonly stance?: unknown }): boolean => st.stance === 'stated_current';
 
+/** The drafted item a statement is about, by the drafter's own labels: the host binds labels to ids after admission. */
 export interface DraftedSubject {
   readonly kind: SubjectKind;
   readonly label: string;
@@ -74,7 +70,7 @@ export interface GivenStatement {
 
 export interface SourceMap {
   /** Verified statements by subject key (`subjectKey`), in brief order. */
-  readonly verified: ReadonlyMap<string, readonly StancedStatement[]>;
+  readonly verified: ReadonlyMap<string, readonly UserStatement[]>;
   /**
    * Authorship UNKNOWN: every entry the host could not verify, kept WHOLE with why (a refusal, or `not_checked` past the
    * per-draft limit): out of verified numerical use, never out of the reasoning, never relabelled as Olumi's.
@@ -129,7 +125,7 @@ function writtenEndsOfNegativeRange(low: unknown, high: unknown): { readonly low
  * unknown. A statement the AI marks `negated` keeps that denial (the verifier's own carrier), so it never reads as a supplied effect.
  */
 export function sourceMapOf(raw: unknown, brief: string): SourceMap {
-  const verified = new Map<string, StancedStatement[]>();
+  const verified = new Map<string, UserStatement[]>();
   const refused: RefusedStatement[] = [];
   const entries = Array.isArray(raw) ? raw : [];
   entries.forEach((entry: unknown, index) => {
@@ -288,7 +284,7 @@ export function figureSource(model: unknown, brief: string | undefined, subject:
   const map = sourceMapOf(drafted, brief);
   // ⭐ STANCE: a goal's or factor's LEVEL is the user's current level only on their declared current assertion; a supposition, a
   // target or an estimate stays visible on the unverified path. An option's setting is a what-if by nature and keeps its rule.
-  const current = (st: StancedStatement): boolean => subject.kind === 'option' || field !== 'level' || declaresCurrent(st);
+  const current = (st: UserStatement): boolean => subject.kind === 'option' || field !== 'level' || declaresCurrent(st);
   return (map.verified.get(key) ?? []).some((st) => states(st) && current(st)
     && ![...map.verified.entries()].some(([other, said]) => other !== key && said.some((o) => o.quote === st.quote && states(o))))
     ? 'user' : 'unverified';

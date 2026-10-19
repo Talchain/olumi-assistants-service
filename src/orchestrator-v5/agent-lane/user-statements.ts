@@ -54,6 +54,13 @@ export interface ClaimChecks {
   readonly subject_bound?: boolean;
 }
 
+/**
+ * How the drafter declares this figure is put forward (AIE 543db8bb): a current assertion, a supposition, a target or an estimate.
+ * Only `stated_current` earns current-level credit; a missing or unknown stance earns none. Kept on the saved claim and read back.
+ */
+export const STATEMENT_STANCES = ['stated_current', 'hypothetical', 'target', 'estimate'] as const;
+export type StatementStance = typeof STATEMENT_STANCES[number];
+
 export interface UserStatement {
   /**
    * `'unknown'` (the estate's speaker-unknown label, DL-3 16:14Z on #3363): words the brief writes verbatim that the quote check cannot
@@ -92,6 +99,7 @@ export interface UserStatement {
   readonly qualifier_in_quote?: boolean;
   readonly negated?: true;
   readonly conditions?: string;
+  readonly stance?: StatementStance;
   /** The question Olumi asked that this statement answers ("the likely upper end"), in Olumi's words: context, never the user's. */
   readonly answering?: string;
   /** The form and figure are Olumi's reading of the words until the user's press adopts it. */
@@ -644,6 +652,7 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
   const claim = claimFieldsOf(r);
   if (claim === undefined) return undefined;
   const low = end('low'), high = end('high'), qualifier = optional('qualifier'), conditions = optional('conditions');
+  const stance = STATEMENT_STANCES.find((s) => s === r.stance);
   return { ...(legacy !== undefined ? { speaker: legacy } : {}), ...(saidBy !== undefined ? { said_by: saidBy } : {}),
     ...(party !== undefined ? { party } : {}), ...(relayedBy !== undefined ? { relayed_by: relayedBy } : {}),
     ...(end('value') !== undefined ? { value: end('value') } : {}), ...claim,
@@ -655,6 +664,7 @@ export function userStatementOf(v: unknown): UserStatement | undefined {
     ...(optional('period') !== undefined ? { period: optional('period') } : {}),
     ...(qualifier !== undefined ? { qualifier, ...(typeof r.qualifier_in_quote === 'boolean' ? { qualifier_in_quote: r.qualifier_in_quote } : {}) } : {}),
     ...(r.negated === true ? { negated: true as const } : {}), ...(conditions !== undefined ? { conditions } : {}),
+    ...(stance !== undefined ? { stance } : {}),
     ...(optional('answering') !== undefined ? { answering: optional('answering') } : {}) };
 }
 

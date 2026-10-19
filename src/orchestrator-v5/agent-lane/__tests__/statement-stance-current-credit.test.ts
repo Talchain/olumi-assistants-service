@@ -9,6 +9,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
+import { USER_STATEMENTS_KEY, userStatementRecordOf } from '../../statement-door/statements.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/stance-hs3-raw.json', import.meta.url), 'utf8')) as { brief: string; raw: Rec };
@@ -61,6 +63,15 @@ describe('a figure is credited as the user\'s current level only when its statem
     const raw = structuredClone(FX.raw);
     for (const s of raw.statements as Rec[]) if (s.subject.kind === 'goal' && s.field === 'level') s.stance = 'hypothetical';
     expect(credited(goalOf(await admit(raw)))).toBe(false);
+  }, 120_000);
+
+  it('RED: the declared stance survives save and readback: the saved claim holds it, and the one stored-claim reader returns it', async () => {
+    // The bytes the register call saved, through the stored schema and back, then read by the reader every later turn uses.
+    const saved = JSON.parse(JSON.stringify(GraphV3.parse(await admit(structuredClone(FX.raw))))) as Rec;
+    const stancesOn = (label: string): unknown[] => ((node(saved, label)[USER_STATEMENTS_KEY] ?? []) as unknown[])
+      .flatMap((r) => userStatementRecordOf(r)?.statements ?? []).map((st) => st.stance);
+    expect(stancesOn('Orders packed per temporary picker per day')).toEqual(['hypothetical']);
+    expect(stancesOn('Warehouse staff')).toEqual(['stated_current']);
   }, 120_000);
 
   it('CONTROL: an option\'s setting stated inside the supposition stays the user\'s setting (a what-if is what an option is)', async () => {
