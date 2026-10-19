@@ -552,7 +552,9 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
   const RISK_SAID = 'There is about a 20% chance that delivery slips.';
   const RISK_BRIEF = `${BRIEF} ${RISK_SAID}`;
   const userRisk = (d: Draft): Draft => ({ ...d, risks: d.risks.map((r) => (r.label === 'Delivery slip' ? { ...r, provenance: 'explicit' } : r)),
-    statements: [{ subject: { kind: 'risk', label: 'Delivery slip', to_label: null, factor_label: null }, field: 'occurrence', form: 'point', quote: RISK_SAID, value: 20, low: null, high: null, unit: '%', qualifier: null, conditions: null, speaker: null }] }) as Draft;
+    statements: [{ subject: { kind: 'risk', label: 'Delivery slip', to_label: null, factor_label: null }, field: 'occurrence', form: 'point', quote: RISK_SAID, value: 20, low: null, high: null, unit: '%', qualifier: null, conditions: null, speaker: null,
+      // INPUT CHANGE (stance, AIE 543db8bb): "about a 20% chance" is put forward as an estimate.
+      stance: 'estimate' }] }) as Draft;
   /** Every occurrence of one exact label (a JSON string), respelled. */
   const respell = (d: Draft, from: string, to: string): Draft => JSON.parse(JSON.stringify(d).replaceAll(`"${from}"`, `"${to}"`)) as Draft;
   /** The risk's own direction into the goal, reversed ("Delivery slip" RAISES delivery velocity). */

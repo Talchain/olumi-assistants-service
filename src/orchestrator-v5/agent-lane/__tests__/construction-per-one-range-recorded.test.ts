@@ -53,9 +53,9 @@ function draft(withRange: 'recorded' | 'denied' | 'none'): Rec {
     links: [link('Salespeople', COUNT), { ...link(COUNT, GOAL), provenance: 'explicit' }],
     statements: [
       { quote: AIM, speaker: 'user', subject: { kind: 'goal', label: GOAL, to_label: null, factor_label: null }, field: 'target', form: 'lower_bound',
-        value: 600000, low: null, high: null, unit: '£', qualifier: null, conditions: null },
+        value: 600000, low: null, high: null, unit: '£', qualifier: null, conditions: null, stance: 'target' },
       ...(withRange === 'none' ? [] : [{ quote: SIZE, speaker: 'user', subject: { kind: 'link', label: COUNT, to_label: GOAL, factor_label: null },
-        field: 'effect', form: 'range', value: null, low: 40000, high: 60000, unit: '£', qualifier: null, conditions: null,
+        field: 'effect', form: 'range', value: null, low: 40000, high: 60000, unit: '£', qualifier: null, conditions: null, stance: 'estimate',
         ...(withRange === 'denied' ? { negated: true } : {}) }]),
     ],
   };
@@ -87,7 +87,7 @@ function isolated(): Rec {
   const d = draft('recorded');
   Object.assign(d.goal, { baseline_known: true, baseline_value: 300000, baseline_provenance: 'explicit' });
   d.statements.push({ quote: TODAY, speaker: 'user', subject: { kind: 'goal', label: GOAL, to_label: null, factor_label: null }, field: 'level',
-    form: 'point', value: 300000, low: null, high: null, unit: '£', qualifier: null, conditions: null });
+    form: 'point', value: 300000, low: null, high: null, unit: '£', qualifier: null, conditions: null, stance: 'stated_current' });
   d.options.push({ label: 'Start a referral scheme', provenance: 'explicit', changes: [], added_capacity: null, is_status_quo: null,
     interventions: [{ factor_label: 'Referral income', value: 100000, value_kind: 'absolute', unit: '£', provenance: 'ai_proposed' }] });
   d.factors.push({ label: 'Referral income', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '£', provenance: 'inferred', plausible_max: 500000 });

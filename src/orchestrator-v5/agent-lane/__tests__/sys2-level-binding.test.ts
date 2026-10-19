@@ -13,10 +13,12 @@ import { statementBindsFactorLevel } from '../verified-option-setting.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { valueProvenanceOf } from '../../../cee/provenance/provenance-of.js';
 import { goalLevelIsOlumisEstimate } from '../../goal-target/goal-chance-licence.js';
+import { withDeclaredStance } from './helpers/declared-stance.js';
 
 type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync('tests/fixtures/sys2/served-capacity-e4ff6039.json', 'utf8')) as { brief: string; raw_text: string };
-const RAW = JSON.parse(SERVED.raw_text) as Rec;
+// INPUT CHANGE (stance, AIE 543db8bb): the served sentences are current assertions or targets, declared as the drafter now does.
+const RAW = withDeclaredStance(JSON.parse(SERVED.raw_text) as Rec);
 const LEGACY = JSON.parse(readFileSync('tests/fixtures/drafter-capacity-chain/served-c1494f4d.json', 'utf8')) as { brief: string; draft: Rec };
 const HIRING = { brief: (JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007.json', 'utf8')) as Rec).brief as string,
   draft: JSON.parse(readFileSync('tests/fixtures/introduction-stamp/served-hiring-post3007-draft.json', 'utf8')) as Rec };
@@ -37,7 +39,7 @@ const asksForToday = (g: Rec): boolean => JSON.stringify(targetTestabilityOf(g))
 /** The user states the total's level today directly (DL-3's genuine affirmative), as the SYSTEM 2 drafter records it. */
 const HANDLE = 'Today we handle 80 tickets per week (60 + 20).';
 const handled = (): Rec => ({ ...RAW, statements: [...RAW.statements, { quote: HANDLE, subject: { kind: 'goal', label: 'Weekly support capacity', to_label: null,
-  factor_label: null }, field: 'level', form: 'point', value: 80, low: null, high: null, unit: 'tickets per week', qualifier: null, conditions: null }] });
+  factor_label: null }, field: 'level', form: 'point', value: 80, low: null, high: null, unit: 'tickets per week', qualifier: null, conditions: null, stance: 'stated_current' }] });
 
 /**
  * ⛔ CHANGED (Codex #3440 R3; DL-3 ruling by measurement): the goal's level today was DERIVED from the user's quoted sum (80 + 0).
@@ -95,7 +97,7 @@ describe('SYSTEM 2 step 2: the stated level is the user\'s; the goal\'s level to
 
   it('SECOND BRIEF (Paul\'s served hiring brief post3007, served labels): "six mid-weight developers" binds 6 to "Mid-weight developers"', () => {
     const stmt = (label: string, quote: string, value: number, unit: string): Rec => ({ quote, subject: { kind: 'factor', label, to_label: null, factor_label: null },
-      field: 'level', form: 'point', value, low: null, high: null, unit, qualifier: null, conditions: null });
+      field: 'level', form: 'point', value, low: null, high: null, unit, qualifier: null, conditions: null, stance: 'stated_current' });
     const devs = HIRING.draft.factors.find((f: Rec) => f.label === 'Mid-weight developers');
     expect(statementBindsFactorLevel({ ...HIRING.draft, statements: [stmt(devs.label, devs.baseline_evidence.quote, 6, 'developers')] } as never, devs, HIRING.brief)).toBe(true);
     // CONTRAST, same brief: bound to another same-frame-free factor ("Tech lead hires", people) the frame test refuses it.

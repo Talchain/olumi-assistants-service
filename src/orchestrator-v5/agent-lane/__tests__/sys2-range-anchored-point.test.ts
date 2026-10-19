@@ -13,10 +13,14 @@ import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief } from '../runtime/build-model.js';
 import { admitCandidateModel } from '../admit-model.js';
 import { verifiedFactorLevel } from '../verified-option-setting.js';
+import { withDeclaredStance } from './helpers/declared-stance.js';
 
 type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync('tests/fixtures/sys2/served-capacity-e4ff6039.json', 'utf8')) as { brief: string; raw_text: string };
-const RAW = JSON.parse(SERVED.raw_text) as Rec;
+// INPUT CHANGE (stance, AIE 543db8bb): declared as the drafter now does. The anchored point's sentence ("about 20 …, between 10 and 30")
+// is declared stated_current here so the point-in-range MECHANICS stay under test; whether the drafter reads "about" as an estimate
+// is its own declaration (an estimate is never current credit: statement-stance-current-credit.test.ts).
+const RAW = withDeclaredStance(JSON.parse(SERVED.raw_text) as Rec);
 const D3 = JSON.parse(readFileSync('tests/fixtures/sys2/pre-h0h1-d3r1.json', 'utf8')) as { brief: string; call2_text: string };
 const LABEL = 'Tickets resolved per additional specialist';
 const SENTENCE = 'Each additional specialist resolves about 20 tickets per week, between 10 and 30.';
@@ -29,7 +33,7 @@ async function registered(): Promise<Rec> {
   const result = await buildModelFromBrief('8e8e8e8e-8e8e-4e8e-8e8e-8e8e8e8e8e8e', SERVED.brief, (async (path: string, body: Rec) => {
     if (path.endsWith('/graph/register')) { graph = structuredClone(body.graph); return { status: 200, json: { registered: true, model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
-  }) as never, (async () => ({ text: SERVED.raw_text, status: 'completed' })) as never) as Rec;
+  }) as never, (async () => ({ text: JSON.stringify(RAW), status: 'completed' })) as never) as Rec;
   if (result.ok !== true || graph === undefined) throw new Error(JSON.stringify(result).slice(0, 2000));
   return graph;
 }
@@ -67,7 +71,7 @@ describe('a point the user states inside a range is theirs (DL 05:46Z, capacity 
   });
 
   it('D3r1 (second brief): "£20 per customer per month" is theirs; "10–20% churn" is a different-frame repeat, the goal sentence is about the goal', () => {
-    const raw = JSON.parse(D3.call2_text) as Rec;
+    const raw = withDeclaredStance(JSON.parse(D3.call2_text) as Rec);
     expect(D3.brief).toContain('could cause 10–20% churn');
     const nodes = admitCandidateModel(raw as never, {}, D3.brief).nodes as unknown as Rec[];
     expect(nodes.find((n) => n.label === 'Monthly price')?.observed_state).toMatchObject({ raw_value: 20, source: 'brief_extraction' });
@@ -76,7 +80,7 @@ describe('a point the user states inside a range is theirs (DL 05:46Z, capacity 
   });
 
   it('CONTROL (D3r1): a SAME-frame repeat still refuses the £20', () => {
-    const raw = JSON.parse(D3.call2_text) as Rec;
+    const raw = withDeclaredStance(JSON.parse(D3.call2_text) as Rec);
     const brief = D3.brief.replace('could cause 10–20% churn', 'could cause churn even at £20 per customer per month');
     const price = raw.factors.find((f: Rec) => f.label === 'Monthly price') as never;
     expect(verifiedFactorLevel(raw as never, price, D3.brief)).toBe(true);

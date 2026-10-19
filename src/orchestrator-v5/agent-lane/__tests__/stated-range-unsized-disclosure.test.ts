@@ -19,8 +19,11 @@ const EFFECT = 'Option one is a corporate wellness deal with two offices nearby,
 const LEVEL = 'We run a 300-member gym and weekday attendance is about 45% at the moment.';
 const TARGET = 'We need weekday attendance to reach at least 55% by the end of March next year.';
 const BRIEF = `${LEVEL} ${TARGET} ${EFFECT} Option two is a referral scheme for existing members.`;
+// INPUT CHANGE (stance, AIE 543db8bb): each figure's stance as the drafter now declares it, by the sentence's meaning.
+// A level here is a current assertion, a target a target, and an effect someone "thinks" or "estimates" an estimate.
+const STANCE: Record<string, string> = { level: 'stated_current', target: 'target', effect: 'estimate' };
 const statement = (quote: string, subject: Rec, field: string, form: string, figures: Rec, unit: string): Rec =>
-  ({ quote, subject: { to_label: null, factor_label: null, ...subject }, field, form, value: null, low: null, high: null, ...figures, unit, qualifier: null, conditions: null });
+  ({ quote, subject: { to_label: null, factor_label: null, ...subject }, field, form, value: null, low: null, high: null, ...figures, unit, qualifier: null, conditions: null, stance: STANCE[field] });
 function draft(withRange: boolean): string {
   return JSON.stringify({
     goal: { kind: null, deliverable: null, metric: 'weekday attendance', operator: '>=', target_stated: true, value: 55, unit: '%', horizon_months: null,

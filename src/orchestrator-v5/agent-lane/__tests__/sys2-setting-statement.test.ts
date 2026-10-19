@@ -4,6 +4,7 @@
  * `baseline_evidence` apply only to a draft with no `statements[]` at all, never as a per-subject fallback. Both carriers
  * retire together once fresh served raws exist (DL condition 2). Corpus: served raws only (md5 = the DB's).
  */
+import { withDeclaredStance } from './helpers/declared-stance.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { verifiedFactorLevel, verifiedOptionSetting } from '../verified-option-setting.js';
@@ -12,7 +13,8 @@ import { census, censusInput, level } from './fixtures/r5-verified-cases.js';
 type Rec = Record<string, any>;
 const load = (f: string): { brief: string; raw: Rec } => {
   const fx = JSON.parse(readFileSync(f, 'utf8')) as { brief: string; raw_text: string };
-  return { brief: fx.brief, raw: JSON.parse(fx.raw_text) as Rec };
+  // INPUT CHANGE (stance, AIE 543db8bb): the served sentences are current assertions or targets, declared as the drafter now does.
+  return { brief: fx.brief, raw: withDeclaredStance(JSON.parse(fx.raw_text) as Rec) };
 };
 const CAPACITY = load('tests/fixtures/sys2/served-capacity-e4ff6039.json');
 const PRICING = load('tests/fixtures/sys2/served-pricing-30d64bc7.json');

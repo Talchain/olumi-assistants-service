@@ -27,8 +27,10 @@ const DEFINED = 'The queue strain index is the share of next week\'s appointment
 const SETTING = 'Evening appointments would bring the queue strain index to 70 points.';
 const QUESTION = 'Olumi holds 45 for “Queue strain index”, with its meaning or scale unresolved. What does this figure measure, and what scale, if any, does it use?';
 const ID = 'queue_strain_index';
-const statement = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null): Rec =>
-  ({ quote, subject: { kind: 'factor', to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null, speaker: null });
+// INPUT CHANGE (stance, AIE 543db8bb): each figure's stance as the drafter now declares it, by the sentence's meaning.
+const statement = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null,
+  stance = 'stated_current'): Rec =>
+  ({ quote, subject: { kind: 'factor', to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null, speaker: null, stance });
 const QSI = { label: 'Queue strain index' };
 
 type Row = { level?: string; unit?: string; definition?: boolean; setting?: 'olumi' | 'stated' };
@@ -64,8 +66,8 @@ function wire(o: Row): Rec {
     statements: [
       statement(o.level ?? UNITLESS, QSI, 'level', 'point', 45, unit),
       ...(o.definition === true ? [statement(DEFINED, QSI, 'measure', 'describes', null, null)] : []),
-      ...(o.setting === 'stated' ? [statement(SETTING, { kind: 'option', label: 'Open evening appointments', factor_label: 'Queue strain index' }, 'level', 'point', 70, unit)] : []),
-      statement('Evening appointments would add 40 slots a week.', { label: 'Evening slots' }, 'level', 'point', 40, 'slots per week'),
+      ...(o.setting === 'stated' ? [statement(SETTING, { kind: 'option', label: 'Open evening appointments', factor_label: 'Queue strain index' }, 'level', 'point', 70, unit, 'hypothetical')] : []),
+      statement('Evening appointments would add 40 slots a week.', { label: 'Evening slots' }, 'level', 'point', 40, 'slots per week', 'hypothetical'),
     ],
   };
 }

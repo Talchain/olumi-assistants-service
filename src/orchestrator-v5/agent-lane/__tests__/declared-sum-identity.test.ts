@@ -22,6 +22,8 @@
  */
 import { Ajv } from 'ajv';
 import { readFileSync } from 'node:fs';
+import type { StatementStance } from '../construction-source-map.js';
+import { withDeclaredStance } from './helpers/declared-stance.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AIE_APPROVED_DECLARED_SUM, BUILD_INSTRUCTIONS, buildCandidateSchema, strictForTheDrafter, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
@@ -56,9 +58,22 @@ const SYS2 = JSON.parse(readFileSync(new URL('../../../routes/__tests__/fixtures
 };
 const EXISTING2 = 'existing_team_support_capacity';
 const OPERANDS2 = [`${EXISTING2}→${GOAL}`, `${PART}→${GOAL}`];
+/**
+ * INPUT CHANGE (stance, AIE 543db8bb): each statement's stance as the drafter now declares it, by meaning. The team's 80 is a
+ * current assertion; the options' settings are what-ifs; the specialist's "about 20, between 10 and 30" an estimate; the goal a
+ * target. The defining sentence is a current assertion only as the affirmative; a supposition, question or denial put in its place
+ * asserts no current relation (a relation statement earns no credit either way: only a level does).
+ */
+const stanceIn = (st: Rec, sentence: string): StatementStance => {
+  if (st.field === 'target') return 'target';
+  if ((st.subject as Rec).kind === 'option') return 'hypothetical';
+  if (st.form === 'range') return 'estimate';
+  if (st.field === 'relation') return sentence === SENTENCE ? 'stated_current' : 'hypothetical';
+  return 'stated_current';
+};
 /** That draft with the defining sentence replaced in the brief and wherever the drafter quoted it (its relation statement too). */
 const sys2 = (sentence = SENTENCE, o: { declared?: boolean; relation?: boolean } = {}): { raw: Rec; brief: string } => {
-  const raw = JSON.parse(SYS2.raw_text.split(SENTENCE).join(sentence)) as Rec;
+  const raw = withDeclaredStance(JSON.parse(SYS2.raw_text.split(SENTENCE).join(sentence)) as Rec, (st) => stanceIn(st, sentence));
   if (o.declared === false) raw.identities = raw.identities.filter((i: Rec) => i.operation !== 'sum');
   if (o.relation === false) raw.statements = raw.statements.filter((x: Rec) => x.field !== 'relation');
   return { raw, brief: SYS2.brief.split(SENTENCE).join(sentence) };
@@ -81,7 +96,8 @@ const declare = (c: Rec, evidence?: Rec | null): Rec => ({ ...c, identities: [..
   provenance: 'explicit', reading: null, ...(evidence === undefined ? {} : { evidence }) }] });
 /** One drafter statement, as the SYSTEM 2 drafter writes it. */
 const said = (quote: string, subject: Rec, field: string, form: string, value: number | null, unit: string | null): Rec => ({ quote,
-  subject: { to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null });
+  subject: { to_label: null, factor_label: null, ...subject }, field, form, value, low: null, high: null, unit, qualifier: null, conditions: null,
+  stance: 'stated_current' });
 /**
  * The goal's level today stated in its own sentence, apart from any sum, with the drafter's statement of it: the sum is then
  * judged at its own quote, past "has no figure today" (a level is no longer derived from a quoted sum: Codex #3440 R3).
