@@ -28,6 +28,8 @@ import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from
 import { admitInterventionRange, interventionPoint } from "../orchestrator-v5/intervention-range.js";
 import { statedCountInterventionRange } from "../orchestrator-v5/agent-lane/stated-by-user.js";
 import { sameUnit } from "../orchestrator-v5/agent-lane/same-unit.js";
+import { claimRecordFor } from "../orchestrator-v5/statement-door/statements.js";
+import { saidByOf } from "../orchestrator-v5/agent-lane/user-statements.js";
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
 import { ModelWriteOwnershipRefused } from "../orchestrator-v5/ownership/door-ownership.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations, PreconditionRiskLinkWriteError } from "../orchestrator-v5/persist-graph-write.js";
@@ -85,6 +87,21 @@ function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | un
     }
   }
   return true;
+}
+
+/**
+ * K2 on path B (DL ruling (a), 19 Oct): create-only construction may also retain a range that IS the registered graph's own
+ * construction record of the user's range for that exact option and factor, its quote a byte substring of the brief. No reading.
+ */
+function onlyRecordedSettingRanges(graph: GraphStateIngress, brief: string | undefined): boolean {
+  const rows = [...graph.nodes, ...(Array.isArray(graph.options) ? graph.options : [])] as Record<string, unknown>[];
+  return brief !== undefined && rows.every((row) => Object.entries((row?.interventions ?? {}) as Record<string, Record<string, unknown>>).every(([factorId, cell]) => {
+    if (cell?.range === undefined) return true;
+    const record = claimRecordFor(graph, { kind: 'factor', id: factorId, option_id: String(row.id), field: 'level' });
+    const said = record?.attest?.recorded_by === 'construction' ? record.statements.filter((st) => st.form === 'range' && saidByOf(st) === 'user') : [];
+    return said.length === 1 && brief.includes(said[0]!.quote) && isDeepStrictEqual(cell.range,
+      { low: said[0]!.low, high: said[0]!.high, meaning: 'likely_range', source: 'brief_extraction', source_quote: said[0]!.quote });
+  }));
 }
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
@@ -1095,7 +1112,7 @@ export default async function route(app: FastifyInstance) {
         source: "graph_registration",
       });
       if (hasNewInterventionRanges(baseGraphForInvariants, projected)
-        && !(callerExpectsNoGraph && onlyBriefStatedCountRanges(projected, brief.value))) {
+        && !(callerExpectsNoGraph && (onlyBriefStatedCountRanges(projected, brief.value) || onlyRecordedSettingRanges(projected, brief.value)))) {
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'A new or changed likely range needs approval on its stored change card. Nothing was written.',
           { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
