@@ -618,7 +618,7 @@ export interface BuildTurnContextOptions {
 export interface RunAnalysisScenarioSnapshot {
   /** Scenario revision from the same persisted read as the analysed graph (B2). */
   readonly evaluatedScenarioRevision?: number;
-  /** STEP 8: what the compute copy corrected on a compiled today part (`deriveTodayParts`), said with the Run. */
+  /** STEP 8: what the derivation set aside on a stored today part (`deriveTodayParts`); said with the Run. */
   readonly todayPartNotes?: readonly string[];
   readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
@@ -2904,7 +2904,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // delegated to loadGraphAndBriefText and discarded the brief), so the snapshot
   // can surface it for the flag-gated run_analysis → PLoT brief leg with no extra
   // DB traffic and identical error semantics.
-  const { graph: persistedGraph, briefText, revision } = await loadPersistedScenarioStateStrict(
+  const { graph: storedGraph, briefText, revision } = await loadPersistedScenarioStateStrict(
     scenarioId,
     sessionStore,
   );
@@ -2927,7 +2927,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     boundSnapshot.scenarioId === scenarioId &&
     boundSnapshot.analysisGraphHash !== NO_CLAIM
   ) {
-    const observedGraphHash = analysisGraphIdentityOf(persistedGraph);
+    const observedGraphHash = analysisGraphIdentityOf(storedGraph);
     if (
       observedGraphHash !== NO_CLAIM &&
       observedGraphHash !== boundSnapshot.analysisGraphHash
@@ -2939,6 +2939,12 @@ export async function loadScenarioSnapshotForRunAnalysis(
       });
     }
   }
+  // ⭐ STEP 8: each compiled today part is derived from its goal's current level, and an option's setting of it or a link
+  // into it is dropped, on this copy only (`deriveTodayParts`): the compute snapshot and the Run's analysis identity
+  // below attest these derived inputs, Undo, legacy rows and canvas-direct saves included. The race check above keeps
+  // the stored bytes.
+  const todayParts = deriveTodayParts(storedGraph);
+  const persistedGraph = todayParts.graph;
   // `== null` (not a truthy check): scope the recovery to a GENUINELY absent graph
   // (null/undefined). A present-but-corrupt falsy value (e.g. `0` / `""`) is malformed,
   // not missing — it falls through to GraphV3.safeParse below and fails into
@@ -2980,10 +2986,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
   //       contract-valid; anything still out of range refuses honestly below.
   // Telemetry is code-keyed: field path + floor written, never the offending
   // value, never a label (PII rule).
-  // ⭐ STEP 8: each compiled today part is derived from its goal's current level, and an option's setting of it or a link
-  // into it is dropped, on this compute copy only (`deriveTodayParts`): Undo, legacy rows and canvas-direct saves included.
-  const todayParts = deriveTodayParts(persistedGraph);
-  const sigmaFloor = floorGraphSigmaForCompute(todayParts.graph);
+  const sigmaFloor = floorGraphSigmaForCompute(persistedGraph);
   for (const repair of sigmaFloor.repairs) {
     emit(TelemetryEvents.ComputeSigmaFloor, {
       path: repair.path,
@@ -3168,7 +3171,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // Canonical carrier projection with the persisted numeric bytes intact:
     // hash/readback see the same model identity as freshness, while the
     // compute-only sigma floor cannot silently rewrite that identity.
-    rawPersistedGraph: canonicaliseForAnalysis(todayParts.graph),
+    rawPersistedGraph: canonicaliseForAnalysis(persistedGraph),
     // V5 D1 P0-2: forward graph.goal_constraints so PLoT receives
     // constraints added via `add_constraint`. Omitted when absent so
     // run-analysis can use the existing optional-field idiom.

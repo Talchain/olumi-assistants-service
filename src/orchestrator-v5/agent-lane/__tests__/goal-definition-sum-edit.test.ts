@@ -289,12 +289,15 @@ describe('STEP 8 Route A — the today part is enforced once, at the shared pers
     const set50 = clone(g);
     const a = nodeOf(set50, 'option_a')!;
     a.interventions = { ...a.interventions, [TODAY]: { ...os, raw_value: 50, value: 50 / os.cap } };
-    return [['today 41 beside a goal of 40', at41], ['an option\'s override of 50', set50]];
+    // Codex R3: a setter in a nested carrier is read where the engine reads it (the Run candidate's carrier canonicalisation).
+    const nested50 = clone(g);
+    nodeOf(nested50, 'option_a')!.data = { interventions: { [TODAY]: { ...os, raw_value: 50, value: 50 / os.cap } } };
+    return [['today 41 beside a goal of 40', at41], ['an option\'s override of 50', set50], ['a nested override of 50', nested50]];
   };
   const refusedFor = (e: unknown): boolean => e instanceof PersistedGraphInvariantError
     && e.violations.some((v) => v.code === 'GOAL_TODAY_PART_NOT_GOAL_LEVEL' && v.entity_ids.includes(TODAY));
 
-  it('RED: the turn append refuses both, and appends nothing', async () => {
+  it('RED: the turn append refuses each, and appends nothing', async () => {
     for (const [why, graph] of await variants()) {
       const append = vi.fn();
       const err = await bindWriteCaller({ userId: OWNER_ID, verified: true }, () => appendCheckedGraphWrite({
@@ -306,7 +309,7 @@ describe('STEP 8 Route A — the today part is enforced once, at the shared pers
     }
   });
 
-  it('RED: version save and restore refuse both, and call no writing RPC', async () => {
+  it('RED: version save and restore refuse each, and call no writing RPC', async () => {
     for (const [why, graph] of await variants()) {
       const saveVersion = vi.fn(); const restoreVersionAtomic = vi.fn();
       const store = { getScenarioOwner: async () => OWNER_ID, saveVersion, restoreVersionAtomic } as never;
@@ -321,7 +324,7 @@ describe('STEP 8 Route A — the today part is enforced once, at the shared pers
     }
   });
 
-  it('RED: a guest copy refuses both, and copies nothing', async () => {
+  it('RED: a guest copy refuses each, and copies nothing', async () => {
     for (const [why, graph] of await variants()) {
       const copyGuestScenarioChecked = vi.fn();
       const out = await bindWriteCaller({ userId: OWNER_ID, verified: true }, () => commitModelChange({ operation: 'COPY_GUEST_SCENARIO',

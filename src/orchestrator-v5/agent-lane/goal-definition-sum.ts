@@ -30,6 +30,7 @@ import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { canonicalLabel } from './model-primitives.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { encodeOptionInterventionsForEdit } from '../../orchestrator/tools/encode-option-interventions.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -123,11 +124,13 @@ export function withTodayPartsAtGoalLevel<G>(graph: G): G {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
   const levelOf = new Map(nodes.filter((n) => n.kind === 'goal').flatMap((goal) => {
     const part = goalSumTodayPart(nodes, goal.id);
-    return part !== undefined && isRec(goal.observed_state) && stableStringify(part.observed_state) !== stableStringify(goal.observed_state)
+    return part !== undefined && stableStringify(part.observed_state) !== stableStringify(goal.observed_state)
       ? [[part.id, goal.observed_state] as const] : [];
   }));
+  // A goal with no level today leaves its part with none (Codex R3): the existing missing-baseline refusal answers it.
+  const at = ({ observed_state: _old, ...n }: NodeIn, level: unknown): NodeIn => (isRec(level) ? { ...n, observed_state: { ...level } } : n);
   return levelOf.size === 0 ? graph
-    : { ...graph, nodes: nodes.map((n) => (levelOf.has(n.id) ? { ...n, observed_state: { ...levelOf.get(n.id)! } } : n)) } as G;
+    : { ...graph, nodes: nodes.map((n) => (levelOf.has(n.id) ? at(n, levelOf.get(n.id)) : n)) } as G;
 }
 
 /**
@@ -138,12 +141,23 @@ export function withTodayPartsAtGoalLevel<G>(graph: G): G {
 export function todayPartsApartFromGoal(graph: unknown): string[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? (graph.edges as EdgeIn[]) : [];
-  return nodes.filter((n) => n.kind === 'goal').flatMap((goal) => {
-    const part = goalSumTodayPart(nodes, goal.id);
-    return part !== undefined && (stableStringify(part.observed_state) !== stableStringify(goal.observed_state)
-      || nodes.some((o) => o.kind === 'option' && isRec(o.interventions) && part.id in o.interventions)
-      || edges.some((e) => e.to === part.id)) ? [part.id] : [];
-  });
+  const parts = nodes.filter((n) => n.kind === 'goal').flatMap((goal) => { const part = goalSumTodayPart(nodes, goal.id); return part === undefined ? [] : [{ goal, part }]; });
+  const options = parts.length === 0 ? [] : canonicalOptions(graph);
+  return parts.filter(({ goal, part }) => stableStringify(part.observed_state) !== stableStringify(goal.observed_state)
+    || options.some((o) => isRec(o.interventions) && part.id in o.interventions)
+    || edges.some((e) => e.to === part.id)).map(({ part }) => part.id);
+}
+
+/**
+ * Each node of the graph with every option's setters read where the engine reads them: the Run candidate's own carrier
+ * canonicalisation (`encodeOptionInterventionsForEdit`, what `canonicaliseForAnalysis` runs) promotes `data.interventions`
+ * and slash- or dot-keyed setters to `interventions` (Codex R3 of #3421: a nested setter of the today part reached the engine).
+ * Index-aligned with `graph.nodes`; options only (other kinds are `{}`).
+ */
+function canonicalOptions(graph: unknown): NodeIn[] {
+  const canonical = encodeOptionInterventionsForEdit(graph).graph;
+  const nodes = isRec(canonical) && Array.isArray(canonical.nodes) ? (canonical.nodes as NodeIn[]) : [];
+  return nodes.map((n) => (isRec(n) && n.kind === 'option' ? n : ({} as NodeIn)));
 }
 
 /**
@@ -157,18 +171,20 @@ export function todayPartsApartFromGoal(graph: unknown): string[] {
 export function deriveTodayParts<G>(graph: G): { readonly graph: G; readonly notes: readonly string[] } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? (graph.nodes as NodeIn[]) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? (graph.edges as EdgeIn[]) : [];
+  const owned = nodes.filter((n) => n.kind === 'goal').flatMap((goal) => { const part = goalSumTodayPart(nodes, goal.id); return part === undefined ? [] : [{ goal, part }]; });
+  if (owned.length === 0) return { graph, notes: [] };
+  const parts = new Set(owned.map(({ part }) => part.id));
+  const options = canonicalOptions(graph);
+  const setsPart = (o: NodeIn | undefined): boolean => o !== undefined && isRec(o.interventions) && Object.keys(o.interventions).some((id) => parts.has(id));
+  const said = (os: unknown): string => (isRec(os) && finite(os.raw_value) ? `${os.raw_value}${typeof os.unit === 'string' ? ` ${os.unit}` : ''}` : 'no figure');
   const notes: string[] = [];
-  const parts = new Map<string, NodeIn>();
-  for (const goal of nodes.filter((n) => n.kind === 'goal')) {
-    const part = goalSumTodayPart(nodes, goal.id);
-    if (part === undefined) continue;
-    parts.set(part.id, goal);
-    const level = isRec(goal.observed_state) ? goal.observed_state : undefined;
-    const said = (os: unknown): string => (isRec(os) && finite(os.raw_value) ? `${os.raw_value}${typeof os.unit === 'string' ? ` ${os.unit}` : ''}` : 'no figure');
-    if (stableStringify(part.observed_state) !== stableStringify(level)) {
-      notes.push(`"${part.label}" is the current level of "${goal.label}": the ${said(part.observed_state)} saved on it is not valid, and every Run uses ${said(level)}.`);
+  for (const { goal, part } of owned) {
+    if (stableStringify(part.observed_state) !== stableStringify(goal.observed_state)) {
+      notes.push(isRec(goal.observed_state)
+        ? `"${part.label}" is the current level of "${goal.label}": the ${said(part.observed_state)} saved on it is not valid, and every Run uses ${said(goal.observed_state)}.`
+        : `"${part.label}" is the current level of "${goal.label}", which has no figure yet: the ${said(part.observed_state)} saved on it is not valid and no Run uses it.`);
     }
-    for (const o of nodes.filter((n) => n.kind === 'option' && isRec(n.interventions) && part.id in n.interventions)) {
+    for (const o of options.filter((x) => isRec(x.interventions) && part.id in x.interventions)) {
       notes.push(`"${o.label}" sets "${part.label}" to ${said((o.interventions as Rec)[part.id])} in the saved model; that is not valid and no Run uses it: "${part.label}" changes only with the current level of "${goal.label}".`);
     }
     for (const e of edges.filter((x) => x.to === part.id)) {
@@ -180,11 +196,10 @@ export function deriveTodayParts<G>(graph: G): { readonly graph: G; readonly not
   return {
     graph: {
       ...levelled,
-      nodes: (levelled.nodes as NodeIn[]).map((n) => {
-        if (n.kind !== 'option' || !isRec(n.interventions) || ![...parts.keys()].some((id) => id in (n.interventions as Rec))) return n;
-        return { ...n, interventions: Object.fromEntries(Object.entries(n.interventions).filter(([id]) => !parts.has(id))) };
-      }),
-      edges: (levelled.edges as EdgeIn[]).filter((e) => !parts.has(e.to)),
+      // An option that sets a part leaves in its canonical form without that setter, so no later canonicalisation restores it.
+      nodes: (levelled.nodes as NodeIn[]).map((n, i) => (setsPart(options[i])
+        ? { ...options[i]!, interventions: Object.fromEntries(Object.entries(options[i]!.interventions as Rec).filter(([id]) => !parts.has(id))) } : n)),
+      edges: edges.filter((e) => !parts.has(e.to)),
     } as G,
     notes,
   };

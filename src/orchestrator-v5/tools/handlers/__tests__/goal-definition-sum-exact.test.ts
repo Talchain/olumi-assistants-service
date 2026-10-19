@@ -22,7 +22,11 @@ import { canonicaliseForAnalysis } from '../analysis-ready-core.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { whoSized } from '../../../agent-lane/strength-authorship-words.js';
+import { deriveTodayParts } from '../../../agent-lane/goal-definition-sum.js';
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json';
+import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
+import { deriveAnalysisFreshness } from '../../../context/freshness.js';
+import { ANALYSIS_PROJECTION_VERSION, RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/graph-identity.js';
 import { labelHoldsQuantity } from '../../../goal-target/held-user-links.js';
 
 type Rec = Record<string, any>;
@@ -150,11 +154,8 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
 
   // ⭐ THE REVISION → REQUEST BOUNDARY (DL-3 ruling on Codex R2): whatever is stored — an Undo to a legacy row, a canvas save
   // straight to the database — the Run derives the today part from the goal's current level and drops an option's setting of it.
-  const snapshotNotes = async (stored: Rec): Promise<readonly string[]> => {
-    const bytes = JSON.stringify(stored);
-    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
-    return (await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-step8a', port as never)).todayPartNotes ?? [];
-  };
+  // What the scenario read says beside the stored bytes (`today_part_notes`, the one derivation).
+  const snapshotNotes = async (stored: Rec): Promise<readonly string[]> => deriveTodayParts(stored).notes;
   it('RED: Undo to a legacy row where Option B set the today part to 50 — the request uses 40 and B\'s own +19 (59, short of 60), and says so', async () => {
     const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
     const legacy = structuredClone(stored);
@@ -178,26 +179,6 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
     expectExactSum(p, WIDGETS, 20, 19);
     expect(await snapshotNotes(canvas)).toEqual(['"Widgets per hour today" is the current level of "Widgets per hour": the 41 widgets/hour saved on it is not valid, and every Run uses 40 widgets/hour.']);
-  });
-
-  it('RED: the Run\'s own readback says what it used — the stored 41 is named and the goal\'s 40 is the figure used', async () => {
-    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
-    const canvas = structuredClone(stored);
-    const os = node(canvas, 'widgets_per_hour_today')!.observed_state;
-    node(canvas, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
-    const bytes = JSON.stringify(canvas);
-    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 3 })), readMostRecentPendingActions: vi.fn(async () => []) };
-    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-step8-readback', port as never);
-    const row = (id: string, p: number): Rec => ({ option_id: id, probability_of_goal: p, outcome: { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 } });
-    const run = vi.fn(async () => ({ ...structuredClone(minimalFixture), option_comparison: [row('option_a', 1), row('option_b', 0), row('carry_on_as_now', 0)] }));
-    const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn() } as never, scenarioReader: async () => snapshot });
-    const outcome = await handler({ payload: { scenario_id: SCENARIO, turn_id: 't-step8-readback' }, requestId: 'req-step8-readback',
-      signal: new AbortController().signal, context: {}, orientationText: '' } as never) as Rec;
-    expect(run).toHaveBeenCalledTimes(1);
-    const sent = (run.mock.calls[0] as unknown as [Rec])[0];
-    expect(raw(node(sent.graph, 'widgets_per_hour_today')!)).toBe(40);
-    expect(String((outcome.handler_facts[0] as Rec).result.summary)).toContain(
-      '"Widgets per hour today" is the current level of "Widgets per hour": the 41 widgets/hour saved on it is not valid, and every Run uses 40 widgets/hour.');
   });
 
   it('RED: a saved link into the today part never reaches the engine request (the operand has no setter but its goal)', async () => {
@@ -224,6 +205,96 @@ describe('STEP 8 Route A — a validated definition into the goal is worked out 
     expect(computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(snap.rawPersistedGraph) as never)).toBe(deriveDecisionContextGraphHash(legacy));
     // CONTRAST: on the graph as built nothing is derived, so every historical stamp keeps its identity.
     expect(deriveDecisionContextGraphHash(stored)).toBe(computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(canonicaliseForAnalysis(stored)) as never));
+  });
+
+  // ⭐ Codex R3: every carrier spelling the Run candidate's canonicalisation reads (`data.interventions`, slash and dot keys).
+  const carriers: Array<[string, (b: Rec, v: Rec) => void]> = [
+    ['data.interventions', (b, v) => { b.data = { interventions: { widgets_per_hour_today: v } }; }],
+    ['a slash key', (b, v) => { b['data/interventions/widgets_per_hour_today'] = v; }],
+    ['a dot key', (b, v) => { b['data.interventions.widgets_per_hour_today'] = v; }],
+  ];
+  it.each(carriers)('RED (Codex R3): Option B setting the today part to 50 through %s never reaches the engine (40 + 19 = 59) nor keeps an old Run current', async (_how, put) => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const legacy = structuredClone(stored);
+    const os = node(legacy, 'widgets_per_hour_today')!.observed_state;
+    put((legacy.nodes as Rec[]).find((n) => n.id === 'option_b')!, { ...os, raw_value: 50, value: 50 / os.cap });
+    const p = await request(legacy);
+    expect(raw(node(p.graph, 'widgets_per_hour_today')!)).toBe(40);
+    expect(((p.options as Rec[]).find((o) => o.id === 'option_b')!.interventions as Rec).widgets_per_hour_today).toBeUndefined();
+    expect(setting(p, 'option_b', netId(WIDGETS))).toBe(19);
+    expect(await snapshotNotes(legacy)).toEqual(['"Option B" sets "Widgets per hour today" to 50 widgets/hour in the saved model; that is not valid and no Run uses it: "Widgets per hour today" changes only with the current level of "Widgets per hour".']);
+    const oldStamp = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(canonicaliseForAnalysis(legacy)) as never);
+    expect(deriveDecisionContextGraphHash(legacy)).not.toBe(oldStamp);
+  });
+
+  it('RED (Codex R3): with no level saved on the goal, the today part keeps no old figure — the Run refuses for the missing level, and the read says so', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const missing = structuredClone(stored);
+    delete goalOf(missing).observed_state;
+    const bytes = JSON.stringify(missing);
+    const port = { loadGraphAndBriefText: vi.fn(async () => ({ graph: JSON.parse(bytes), briefText: null, revision: 2 })), readMostRecentPendingActions: vi.fn(async () => []) };
+    // The existing unavailability answers it: the Run refuses for the missing level before any engine request.
+    await expect(loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-step8-missing', port as never)).rejects.toThrow(/MISSING_FACTOR_LEVEL/);
+    expect(node(deriveTodayParts(missing).graph, 'widgets_per_hour_today')!.observed_state).toBeUndefined();
+    expect(await snapshotNotes(missing)).toEqual(['"Widgets per hour today" is the current level of "Widgets per hour", which has no figure yet: the 40 widgets/hour saved on it is not valid and no Run uses it.']);
+  });
+
+  it('RED (Codex R3 probe): an old wrong Run on a nested override of 50 loses currentness; its recorded fact is untouched', async () => {
+    const g = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const os = node(g, 'widgets_per_hour_today')!.observed_state;
+    node(g, 'option_b')!.data = { interventions: { widgets_per_hour_today: { ...os, raw_value: 50, value: 50 / os.cap } } };
+    const oldStamp = computeAnalysisAffectingGraphHash(GraphStateIngressSchema.parse(canonicaliseForAnalysis(g)) as never);
+    const oldFact = { fact_type: 'run_analysis', noop: false, result: { graph_hash_at_run: oldStamp, computed_at: '2026-10-18T23:00:00.000Z',
+      enrichment: { [RUN_ANALYSIS_PROJECTION_KEY]: ANALYSIS_PROJECTION_VERSION } } };
+    const factBytes = JSON.stringify(oldFact);
+    const freshness = deriveAnalysisFreshness([oldFact] as never, deriveDecisionContextGraphHash(g), undefined, { currentGraph: g });
+    expect(freshness.freshness).not.toBe('fresh');
+    expect(JSON.stringify(oldFact)).toBe(factBytes);
+  });
+
+  // ⭐ DL-3 on Codex R3: the note is said on EVERY path — the composed summary and a retained limit's withheld line — and the
+  // forwarder (the egress authority) admits exactly that note, never a sentence shaped like it.
+  const runOn = async (g: Rec, turn: string): Promise<Rec> => {
+    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, turn, { loadGraphAndBriefText: async () => ({ graph: structuredClone(g), briefText: null, revision: 3 }),
+      readMostRecentPendingActions: async () => [] } as never);
+    const row = (id: string, p: number): Rec => ({ option_id: id, probability_of_goal: p, outcome: { mean: 0, std: 0, p10: 0, p50: 0, p90: 0 } });
+    const run = vi.fn(async () => ({ ...structuredClone(minimalFixture), option_comparison: [row('option_a', 1), row('option_b', 0), row('carry_on_as_now', 0)] }));
+    const handler = createRunAnalysisHandler({ scenarioReader: async () => snapshot, plotClient: { run, validatePatch: vi.fn() } as never });
+    const outcome = await handler({ payload: { scenario_id: SCENARIO, turn_id: turn }, requestId: turn, signal: new AbortController().signal, context: {}, orientationText: '' } as never) as Rec;
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(raw(node((run.mock.calls[0] as unknown as [Rec])[0].graph, 'widgets_per_hour_today')!)).toBe(40);
+    return outcome;
+  };
+  const NOTE41 = '"Widgets per hour today" is the current level of "Widgets per hour": the 41 widgets/hour saved on it is not valid, and every Run uses 40 widgets/hour.';
+  const at41 = async (): Promise<Rec> => {
+    const g = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const os = node(g, 'widgets_per_hour_today')!.observed_state;
+    node(g, 'widgets_per_hour_today')!.observed_state = { ...os, raw_value: 41, value: 41 / os.cap, baseline: 41 / os.cap };
+    return g;
+  };
+  const confirm = (outcome: Rec): string => HANDLER_VALIDATION_REGISTRY.run_analysis!.confirmation_template!(outcome as never);
+  it('RED (Codex R3 probe): a canvas-stored 41 is said with the Run, and the reply the user receives carries it', async () => {
+    const outcome = await runOn(await at41(), 'r3-composed');
+    expect(String(outcome.handler_facts[0].result.summary).endsWith(` ${NOTE41}`)).toBe(true);
+    expect(confirm(outcome).endsWith(` ${NOTE41}`)).toBe(true);
+  });
+  it('RED (Codex R3 probe): a retained unresolved limit does not suppress it — the withheld line is followed by the note', async () => {
+    const g = await at41();
+    g.goal_constraints = [{ constraint_id: 'legacy-limit', node_id: 'legacy_quantity', operator: '<=', value: 100, unit: 'GBP',
+      retained_unresolved_limit: { state: 'unscored', role: 'original', reason: 'retained_limit_quantity_unresolved', previous_constraint_id: 'legacy-limit',
+        proposed_constraint_ids: [], question: 'What forecast and basis should be used to evaluate this retained limit?' } }];
+    const outcome = await runOn(g, 'r3-retained');
+    expect(String(outcome.handler_facts[0].result.summary).endsWith(` ${NOTE41}`)).toBe(true);
+    const said = confirm(outcome);
+    expect(said.startsWith('The result for the full goal')).toBe(true);
+    expect(said.endsWith(` ${NOTE41}`)).toBe(true);
+  });
+  it('NEGATIVE: a sentence shaped like the note, without the handler\'s own note, is not admitted', async () => {
+    const stored = await build(candidate({ ...WIDGETS, a: 20, b: 19 }), WIDGETS.say(20, 19));
+    const outcome = await runOn(stored, 'r3-forged');
+    expect(outcome.__today_part_disclosure).toBeUndefined();
+    const forged = { ...outcome, assistant_text: `${outcome.assistant_text} ${NOTE41}` };
+    expect(confirm(forged)).not.toContain(NOTE41);
   });
 
   it('CONTRAST: the graph as built is used as stored, with nothing said', async () => {

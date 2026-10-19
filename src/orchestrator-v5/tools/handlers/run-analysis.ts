@@ -340,9 +340,9 @@ export function wireGoalConstraints<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
-  /** STEP 8: what the loader's compute copy corrected on a compiled today part (`deriveTodayParts`), said with the Run. */
-  readonly todayPartNotes?: readonly string[];
   readonly evaluatedScenarioRevision?: number;
+  /** STEP 8: what the derivation set aside on a stored today part (`deriveTodayParts`); said with the Run on every path. */
+  readonly todayPartNotes?: readonly string[];
   /** Production reader attests current scope; a failed pending read throws before PLoT. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /** The current graph (PLoT consumes as-is). */
@@ -2978,13 +2978,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       estimatesOnChance ? [] : deriveOlumiAuthoredValues(graphForAnalysis, submittedIds),
     );
     const headlineDisclosures = headlineParts.disclosures;
-    // STEP 8: a stored today part the compute copy corrected (`deriveTodayParts`) is said with the Run, never silently used or dropped.
-    const todayPartDisclosure = (snapshot.todayPartNotes ?? []).map((n) => ` ${n}`).join('');
     const composedSummary = (() => {
-      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}${todayPartDisclosure}`;
+      const summary = `${summaryHeadline ?? template}${legacyFiguresDisclosure}${headlineDisclosures}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
       return summary;
     })();
-    factCandidate.result.summary = unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary;
+    // ⭐ STEP 8 (DL-3 on Codex R3): the derivation's note rides every path, last, and the forwarder admits it exactly.
+    const todayPartDisclosure = (snapshot.todayPartNotes ?? []).map((n) => ` ${n}`).join('');
+    factCandidate.result.summary = `${unresolvedLimits.length > 0 ? retainedLimitReason : composedSummary}${todayPartDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -3138,6 +3138,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ...(legacyFiguresDisclosure !== ''
         ? { __legacy_figures_source: { graph: graphForAnalysis, links: legacyFiguresLinks } }
         : {}),
+      // Server-only: the exact note the summary ends with, so the forwarder admits that note and nothing shaped like it.
+      ...(todayPartDisclosure !== '' ? { __today_part_disclosure: todayPartDisclosure } : {}),
       ...(goalReadingDisclosure !== ''
         ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id,
           ...(runIdentityEvaluations !== undefined ? { identity_evaluations: runIdentityEvaluations } : {}) } }
