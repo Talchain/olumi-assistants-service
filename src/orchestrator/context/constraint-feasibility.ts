@@ -222,6 +222,10 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
       return rest;
     });
   }
+  // ⭐ STEP 8 (Codex R2 #3443 P1): PLoT's `conditional_probabilities` are POOLED over the options' draws, one row per pair of
+  // conditions. A row naming a condition whose P is withheld for any option rests on that withheld P, so it goes with it.
+  const conditional = withholdConditionalRows(env.conditional_probabilities, new Set(byLimit.keys()));
+  if (conditional !== env.conditional_probabilities) out.conditional_probabilities = conditional;
   const robustness = readRecord(env.robustness);
   if (robustness !== null) {
     const crowned = readString(robustness.recommended_option_id);
@@ -232,6 +236,20 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
     }
   }
   return out as E;
+}
+
+/**
+ * ⭐ STEP 8 (Codex R2 #3443 P1): PLoT's pooled `conditional_probabilities` rows (`constraint_a_id`, `constraint_b_id`,
+ * `conditional_probability`, `marginal_probability`) without every row that names a condition in `conditions`. Any other shape,
+ * and a carrier with no such row, is returned as it is. Pure.
+ */
+export function withholdConditionalRows(carrier: unknown, conditions: ReadonlySet<string>): unknown {
+  if (!Array.isArray(carrier) || conditions.size === 0) return carrier;
+  const names = (row: unknown): boolean => {
+    const r = readRecord(row);
+    return r !== null && [r.constraint_a_id, r.constraint_b_id].some((id) => typeof id === 'string' && conditions.has(id));
+  };
+  return carrier.some(names) ? carrier.filter((row) => !names(row)) : carrier;
 }
 
 /** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
