@@ -11,7 +11,7 @@ import { z } from 'zod-v4';
 import type { AgentToolContext } from '../../agent-lane/runtime/agent-tools.js';
 import type { InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from '../../agent-lane/runtime/build-model.js';
-import { isSavedRead, readSaved } from './context-tool.js';
+import { isNoModelYet, isSavedRead, readSaved } from './context-tool.js';
 import { ok, refused, unavailable, type ToolOutcome } from './outcome.js';
 import { inTheUsersWords, type TypedWords } from './user-words.js';
 
@@ -35,9 +35,10 @@ export async function buildModel(deps: DraftDeps, ctx: Pick<AgentToolContext, 's
   if (!inTheUsersWords(args.brief, ctx)) return refused('brief_not_users_words');
   if (deps.callStructured === undefined) return unavailable('drafter_unavailable');
   const before = await readSaved(deps, ctx.scenario_id);
-  if (!isSavedRead(before)) return before;
+  // A new scenario has no model yet (`graph: null`, `graph_present: false`): that is where a first draft starts.
+  if (!isSavedRead(before) && !isNoModelYet(before)) return before;
   const ownVersion = () => findConstructionVersion(deps.dispatch, ctx.scenario_id, args.brief).catch(() => null);
-  if (nodesIn(before.graph) > 0) {
+  if (isSavedRead(before) && nodesIn(before.graph) > 0) {
     const prior = await ownVersion();
     return prior === null ? refused('model_exists') : ok({ already_saved: true, model_version: prior }, { mutated: false });
   }

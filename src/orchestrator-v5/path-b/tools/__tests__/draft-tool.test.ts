@@ -85,6 +85,17 @@ describe('refusals and unknowns, said as such', () => {
     expect(p.dispatch).not.toHaveBeenCalled();
   });
 
+  it('a NEW scenario (the served read: graph null, graph_present false) is where the draft starts, never "malformed"', async () => {
+    const p = product([{ status: 200, json: { graph: null, graph_present: false, graph_hash: null, graph_identity_hash: null } }, MODEL]);
+    expect(await buildModel(p, ctx, { brief: BRIEF })).toMatchObject({ status: 'ok', mutated: true });
+  });
+
+  it('CONTRAST: a read with no graph flag and no graph is still malformed: nothing is built', async () => {
+    const p = product([{ status: 200, json: { graph: null, graph_hash: null } }]);
+    expect(await buildModel(p, ctx, { brief: BRIEF })).toEqual({ status: 'unavailable', reason: 'read_malformed', write: 'none' });
+    expect(bridge.build).not.toHaveBeenCalled();
+  });
+
   it('no drafter: unavailable', async () => {
     expect(await buildModel({ ...product([EMPTY]), callStructured: undefined }, ctx, { brief: BRIEF }))
       .toEqual({ status: 'unavailable', reason: 'drafter_unavailable', write: 'none' });

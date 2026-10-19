@@ -105,18 +105,26 @@ export async function readSaved(deps: { readonly dispatch: InternalDispatch }, s
   }
   if (r.status === 404) return refused('not_found');
   if (r.status !== 200) return unavailable('read_failed', 'none', `HTTP ${r.status}`);
+  // A NEW scenario reads `graph: null, graph_present: false` (assist.v1.scenario-graph.ts: "An EMPTY graph is a valid answer"):
+  // no model yet, a valid state, never malformed. A non-null read that is not a graph stays malformed.
+  if (r.json.graph === null && r.json.graph_present === false) return refused(NO_MODEL_YET);
   const graphHash = str(r.json.graph_hash);
   if (graphHash === null || !isRec(r.json.graph)) return unavailable('read_malformed');
   const identity = isRec(r.json.graph_identity_hash) ? str(r.json.graph_identity_hash.value) : str(r.json.graph_identity_hash);
   return { json: r.json, graph: r.json.graph, graphHash, identity };
 }
 export const isSavedRead = (v: SavedRead | ToolOutcome): v is SavedRead => 'graphHash' in v;
+export const NO_MODEL_YET = 'no_model_yet';
+/** The scenario has no model yet: the draft proceeds, the AI's view is empty, and a change says there is nothing to change. */
+export const isNoModelYet = (v: SavedRead | ToolOutcome): boolean => !isSavedRead(v) && v.status === 'refused' && v.reason === NO_MODEL_YET;
+const NO_MODEL: Pick<SavedRead, 'json' | 'graph'> & { readonly graphHash: null; readonly identity: null } = { json: {}, graph: { nodes: [], edges: [] }, graphHash: null, identity: null };
 
 /** The ONE reader's AI view: a fresh read of the saved scenario, as typed facts. Mutates nothing. */
 export async function readCanonicalContext(deps: { readonly dispatch: InternalDispatch }, ctx: Pick<AgentToolContext, 'scenario_id'>): Promise<ToolOutcome> {
   const saved = await readSaved(deps, ctx.scenario_id);
-  if (!isSavedRead(saved)) return saved;
-  const { json, graph, graphHash, identity } = saved;
+  if (!isSavedRead(saved) && !isNoModelYet(saved)) return saved;
+  // No model yet: the same view of an empty model, revision none.
+  const { json, graph, graphHash, identity } = isSavedRead(saved) ? saved : NO_MODEL;
   const nodes = recs(graph.nodes);
   const byId = new Map(nodes.filter((n) => typeof n.id === 'string').map((n) => [n.id as string, n]));
   const view = isRec(json.canonical_analysis_view) ? json.canonical_analysis_view : {};
