@@ -30,6 +30,7 @@ import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { currentDefinitionalCarrier } from '../../goal-target/held-user-links.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
+import { assertionContextMiss, linkEffectQuoteContextMiss } from '../stated-by-user.js';
 
 type Rec = Record<string, any>;
 
@@ -317,6 +318,35 @@ describe('CONTRASTS', () => {
     expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
     expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
     expect(result.not_represented).toContain(refused2('that sentence does not state it in your own words'));
+  });
+
+  /**
+   * ⭐ Codex R2 #3440 BLOCK (DL-3 class rule): a sum the user only SUPPOSES is not stated. Codex's own probe: the defining sentence a
+   * conditional, the drafter's relation statement on it, and the goal's level today stated separately (so no earlier check masks
+   * it). A conditional clause is read once, by the context reader, for an assertion; it never reaches the Run as the user's sum.
+   */
+  const HYPOTHETICALS = [
+    'If total weekly support capacity were the existing 80 tickets per week plus the additional specialist capacity, we could compare the options.',
+    'Suppose total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity.',
+    'Total weekly support capacity is the existing 80 tickets per week plus the additional specialist capacity, assuming we hire one.',
+  ];
+  it.each(HYPOTHETICALS)('⭐ RED→GREEN: a conditional or hypothetical sum is no statement of it, even with the drafter\'s relation statement and the level stated apart: %s', async (hypothetical) => {
+    const today = 'Weekly support capacity today is 80 tickets per week.';
+    const withLevel = (raw: Rec): Rec => ({ ...raw, statements: [...raw.statements, said(today, { kind: 'goal', label: 'Weekly support capacity' }, 'level', 'point', 80, 'tickets per week')] });
+    const { raw, brief } = sys2(hypothetical);
+    const { graph, result } = await construct(withLevel(raw), `${brief} ${today}`);
+    const { graph: drafted } = await construct(withLevel(sys2(hypothetical, { declared: false }).raw), `${brief} ${today}`);
+    expect(node(graph, GOAL).nonlinear_identity).toBeUndefined();
+    expect(naturalLinks(graph)).toEqual(naturalLinks(drafted));
+    const wire = (await runRequest(graph)).graph as Rec;
+    expect(node(wire, GOAL).nonlinear_identity).toBeUndefined();
+    expect(result.not_represented).toContain(refused2('that sentence does not state it in your own words'));
+  });
+  it('CONTRAST (the reader): a conditional is how a causal EFFECT is stated, so only an assertion reads it as supposed', () => {
+    const effect = 'If we add one packer, daily order throughput rises by 15 orders per day.';
+    expect(linkEffectQuoteContextMiss(effect, effect)).toBeNull();
+    expect(assertionContextMiss(effect, effect)).toBe('hypothetical');
+    expect(assertionContextMiss(SENTENCE, SENTENCE), 'the genuine definition stays a statement').toBeNull();
   });
 
   it('⭐ PAIR with GREEN: the served draft WITHOUT its relation statement (a quote that only names them) is no sum, said', async () => {

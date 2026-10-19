@@ -1470,15 +1470,32 @@ export function withoutCorrectedFigureTail(sentence: string): string {
   return `${kept}${/[.!]\s*$/.test(tail) ? tail.trim().slice(-1) : ''}`;
 }
 /**
+ * ⭐ Codex R2 #3440 (DL-3 class rule): a clause that SUPPOSES rather than asserts. English marks a conditional or hypothetical
+ * clause with one of a closed set of subordinators; what a sentence says inside one is supposed, not stated ("If total capacity
+ * were 80 plus the specialists, we could compare the options"). Read only for an ASSERTION (`assertionContextMiss`): a causal
+ * effect is ordinarily stated as a conditional ("If we raise the price by £1, we lose 50 subscribers"), so the effect readers
+ * keep their reading.
+ */
+const CONDITIONAL_CLAUSE = /(?:^|[\s,;:(\u2014\u2013])(?:if|unless|suppose|supposing|assuming|imagine|provided\s+that|providing\s+that|in\s+case)\b/iu;
+/**
  * A quoted fragment cannot omit the question or denial surrounding it in the user's actual sentence. The WHOLE sentence
  * counts: "I do not believe this claim: Each 1 point …" denies what follows its colon (Codex buddy r1 HIGH). A trailing
- * corrected figure is not that denial (`withoutCorrectedFigureTail`).
+ * corrected figure is not that denial (`withoutCorrectedFigureTail`). For an assertion (a definition the user states), a
+ * conditional or hypothetical clause is no statement either (`CONDITIONAL_CLAUSE`, `assertionContextMiss`).
  */
-export function linkEffectQuoteContextMiss(quote: string, userText: string): 'question' | 'denied' | null {
+function contextMiss(quote: string, userText: string, mood: 'effect' | 'assertion'): 'question' | 'denied' | 'hypothetical' | null {
   const enclosing = enclosingSentences(userText, quote);
   const misses = enclosing.map(sentence => sentence.includes('?') || (AUXILIARY_FIRST.test(sentence) && !REQUEST_FORM.test(sentence))
-    ? 'question' as const : NEGATOR.test(withoutCorrectedFigureTail(sentence)) ? 'denied' as const : null);
+    ? 'question' as const : NEGATOR.test(withoutCorrectedFigureTail(sentence)) ? 'denied' as const
+      : mood === 'assertion' && CONDITIONAL_CLAUSE.test(sentence) ? 'hypothetical' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
+}
+export function linkEffectQuoteContextMiss(quote: string, userText: string): 'question' | 'denied' | null {
+  return contextMiss(quote, userText, 'effect') as 'question' | 'denied' | null;
+}
+/** The same reader for an ASSERTION (a definition the user states): a conditional or hypothetical clause is no statement. */
+export function assertionContextMiss(quote: string, userText: string): 'question' | 'denied' | 'hypothetical' | null {
+  return contextMiss(quote, userText, 'assertion');
 }
 /**
  * A sentence that ENDS by denying any change at all: "It doesn't change.", "No, it doesn't really move.", "It has no effect

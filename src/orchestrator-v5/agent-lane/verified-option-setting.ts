@@ -7,7 +7,7 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { findLinkEffectAmounts } from './link-effect-figures.js';
-import { figureTheUserWroteForSpan, isChangeWord, linkEffectQuoteContextMiss } from './stated-by-user.js';
+import { assertionContextMiss, figureTheUserWroteForSpan, isChangeWord } from './stated-by-user.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 import { STATE_VERBS as STATE_MARKERS } from '../../cee/signals/brief-signals.js';
 import { occurrenceRoleOf } from '../../cee/factor-extraction/goal-label-target.js';
@@ -101,12 +101,13 @@ const ARMS = new Set([...ACTIONS, 'provide', 'offer', 'raise', 'lower', 'hold', 
 const MAX_ASSERTION = 1000;
 /**
  * ⭐ #3440 (Codex BLOCK; AIE L2-RELATION 18bf4f8c): the brief's sentences as `locatedBriefSentence` locates them, each with whether
- * the user's WHOLE sentence asks or denies what it says, read by the estate's existing context reader (`linkEffectQuoteContextMiss`),
- * never a new phrase list. Read on the same normalised text the sentences come from, so a sentence is always found in it.
+ * the user's WHOLE sentence asks, denies or only supposes what it says (a conditional clause: Codex R2), read by the estate's
+ * existing context reader (`linkEffectQuoteContextMiss`, as `assertionContextMiss`), never a new phrase list. Read on the same normalised
+ * text the sentences come from, so a sentence is always found in it.
  */
-export function briefSentencesRead(brief: string): { readonly text: string; readonly miss: 'question' | 'denied' | null }[] {
+export function briefSentencesRead(brief: string): { readonly text: string; readonly miss: 'question' | 'denied' | 'hypothetical' | null }[] {
   const whole = canonical(brief);
-  return assertions(brief).map((a) => ({ text: a.text, miss: linkEffectQuoteContextMiss(a.text, whole) }));
+  return assertions(brief).map((a) => ({ text: a.text, miss: assertionContextMiss(a.text, whole) }));
 }
 /**
  * ⭐ L2 (DL brief 12 Oct; AIE #94 6134029017): the drafter's quote for a declared SUM, located by CEE as ONE direct sentence
