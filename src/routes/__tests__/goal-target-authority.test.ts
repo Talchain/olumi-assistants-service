@@ -199,3 +199,36 @@ it('positive, the live drafter’s own hiring draft (ab3df4cb): "increase produc
   expect(goalRecord(out.graph)?.target).toMatchObject({ raw: 10, source: 'brief_extraction' });
   expect(saidUnbound(out.result)).toBe(false);
 });
+
+/**
+ * ⛔ THE UNBOUND-TARGET GUARD READS THE RAW AMOUNTS (PL on #3438 R7, source-read admit-model's S2 C4 guard): it withholds, so a
+ * figure the one eligibility refuses as the user's (a tolerance, a range end in words, an incomplete span) still blocks an unbound
+ * goal target. It never becomes an auto-admitted target because it dropped off the credited list. SYNTHETIC wording.
+ */
+describe('the unbound-target guard: a refused fragment still blocks, a bound target stays, an inferred one is as before', () => {
+  it.each([
+    ['a tolerance', 'We have twenty give or take five engineers. We want to complete the PoC and explore ways to grow the product.', 5, 'engineers'],
+    ['an incomplete span', 'We have a budget of a hundred and twenty-odd. We want to complete the PoC and explore ways to grow the product.', 120, 'GBP'],
+    ['a range end in words', 'We have two to three engineers. We want to complete the PoC and explore ways to grow the product.', 3, 'engineers'],
+  ])('NEGATIVE %s: the figure is not the goal\u2019s target, and it is said', async (_case, brief, value, unit) => {
+    const out = await construct(brief, [draft(brief, 'Complete the PoC', value, unit)]);
+    expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
+    expect(goalRecord(out.graph)?.target?.raw).toBeUndefined();
+    expect(saidUnbound(out.result), 'the unused figure is said, never dropped silently').toBe(true);
+  });
+  it('POSITIVE a target the AI bound to the goal sentence stays the user\u2019s target', async () => {
+    const brief = 'We need at least 120 paying customers. Explore ways to grow the product.';
+    const out = await construct(brief, [draft(brief, 'Paying customers', 120, 'customers', null,
+      [statement('goal', 'Paying customers', 'target', 'lower_bound', 120, 'customers', 'We need at least 120 paying customers.')])]);
+    expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
+    expect(goalRecord(out.graph)?.target).toMatchObject({ raw: 120, source: 'brief_extraction' });
+    expect(saidUnbound(out.result)).toBe(false);
+  });
+  it('CONTROL a figure the brief never writes is Olumi\u2019s reading, as before: never said as the user\u2019s unbound figure', async () => {
+    const brief = 'We want to complete the PoC and explore ways to grow the product.';
+    const out = await construct(brief, [draft(brief, 'Complete the PoC', 7, 'engineers')]);
+    expect(out.result, JSON.stringify(out.result)).toMatchObject({ ok: true, mutated: true });
+    expect(saidUnbound(out.result)).toBe(false);
+    expect(goalNode(out.graph).threshold_source, 'never stamped as the user\u2019s target').not.toBe('brief_extraction');
+  });
+});

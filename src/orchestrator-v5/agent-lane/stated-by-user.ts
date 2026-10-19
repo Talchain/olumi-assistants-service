@@ -415,7 +415,8 @@ const JOIN = `[\\s,\\u2013\\u2014-]+(?:(?:and|plus|minus|point|times|of)[\\s,\\u
 const WORD_END = `(?=$|[^\\p{L}\\d-]|-(?:${NUMBER_WORDS}|and|an?)(?![\\p{L}]))`;
 const NUMBER_AFTER = new RegExp(`^${JOIN}(?:(?:${NUMBER_WORDS})${WORD_END}|\\d)`, 'iu');
 const NUMBER_BEFORE = new RegExp(`(?:(?<![\\p{L}\\d])(?:${NUMBER_WORDS_BEFORE})|\\d)${JOIN}$`, 'iu');
-const NUMBER_WORD_BEFORE = new RegExp(`(?<![\\p{L}\\d])(?:${NUMBER_WORDS_BEFORE})${JOIN}$`, 'iu');
+// A scale word straight after digits is that amount's own magnitude, never a number word joined to the next end (C5 on #3438 R7).
+const NUMBER_WORD_BEFORE = new RegExp(`(?<![\\p{L}\\d])(?<!\\d\\s*)(?:${NUMBER_WORDS_BEFORE})${JOIN}$`, 'iu');
 const NUMBER_WORD_AFTER = new RegExp(`^${JOIN}(?:${NUMBER_WORDS})${WORD_END}`, 'iu');
 /** Whether the words at [start, end) touch another number word or digit through a join: they are part of a longer number. */
 function touchesAnotherNumber(text: string, start: number, end: number): boolean {

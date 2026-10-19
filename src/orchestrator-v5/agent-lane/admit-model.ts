@@ -80,8 +80,9 @@ import {
 import { briefAttestsEventByDate, admitEventByDate, isQuantityGoalCandidate, withEventNumberLoss, eventByDateAdmissionRefusal, refusedEventByDate, EVENT_BY_DATE_REFUSALS } from '../goal-target/event-by-date-model.js';
 import { isUnverifiedUserMaterial, nodeProvenanceDisplay, type ProvenanceDisplay } from '../../cee/transforms/provenance-display.js';
 import { authorshipOf, hasUserStatedSize, settingProvenanceOf } from '../../cee/provenance/provenance-of.js';
-import { figureSource, figuresWritten, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
+import { figureSource, goalTargetStatements, linkEffectRangeEnd, linkEffectRangeInOtherUnit, linkEffectStatedRange, sourceMapOf, subjectSource, type FigureSource, type StatedWholeRangeOfLink } from './construction-source-map.js';
 import { retainUnsizedOlumiRisks, UNSIZED_OLUMI_RISK_REASON, unsizedOlumiRiskIds } from './unsized-risk.js';
+import { amountsWrittenIn } from './stated-by-user.js';
 import { carriesStatements, levelQuotedByBrief, recordedRawLevelQuote, statementCitesLevel, briefAttributedLevelRange, briefStatedLevelRange, briefWritesFactorFigure, locatedBriefSentence, quoteBindsFactorFigure, verifiedFactorLevel, verifiedFactorLevelValue, verifiedGoalLevel, verifiedOptionSetting } from './verified-option-setting.js';
 import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { labelHoldsQuantity } from '../goal-target/held-user-links.js';
@@ -4169,7 +4170,9 @@ function admitOnce(
         // the user never wrote ("break even" read as 0) is Olumi's reading, as before. A recorded pre-SYSTEM-2 draft is as before.
         const boundStatements = typeof brief === 'string' && typeof raw === 'number' ? goalTargetStatements(model, brief, raw) : undefined;
         const unbound = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw) && boundStatements?.length === 0
-          && figuresWritten(brief ?? '').some((f) => f.low === Math.abs(raw));
+          // The RAW located amounts (`amountsWrittenIn`), never the credited list: this guard withholds, so a fragment the one
+          // eligibility refuses (a tolerance, a range end, an incomplete span) still blocks an unbound target (PL on #3438 R7).
+          && amountsWrittenIn(brief ?? '').some((a) => a.magnitude === Math.abs(raw));
         if (unbound) {
           loss.push({ field_path: `nodes[${slugId(model.goal.metric)}].goal_target_unbound`,
             before: { value: raw, unit: model.goal.unit ?? null }, after: null, severity: 'warn',
