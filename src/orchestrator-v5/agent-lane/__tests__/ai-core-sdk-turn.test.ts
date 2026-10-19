@@ -1,12 +1,12 @@
 /**
  * ⭐ PATH-B: an ordinary `core` turn on the OpenAI Agents SDK (`core/sdk-turn.ts`). The SDK runs the loop; these rows pin
  * what Olumi keeps around it: the consent check on a tool call, the witness on every provider row (returned model, tools
- * sent, input digest), the SDK session as the conversation memory, and the turn's state given fresh on every call, never
- * stored. Scripted provider (global fetch), fake capabilities; SYNTHETIC wording; 0 provider calls.
+ * sent, input digest), ONE durable OpenAI Conversation per scenario as the conversation state, and the turn's state given
+ * fresh on every call, never stored. Scripted provider (global fetch), fake capabilities; SYNTHETIC wording; 0 provider calls.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OPENAI_ONLY, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
-import { AGENTS_SDK, resetCoreSessionsForTests, runCoreTurn } from '../core/sdk-turn.js';
+import { AGENTS_SDK, CORE_COMPACT_THRESHOLD, resetCoreConversationsForTests, runCoreTurn, type ConversationIdStore } from '../core/sdk-turn.js';
 import { budgetFor } from '../model-budgets.js';
 import type { AgentCapabilities, AgentToolContext } from '../runtime/agent-tools.js';
 
@@ -18,7 +18,10 @@ const ctx = (message: string): AgentToolContext => ({ scenario_id: SCENARIO, aut
   verified_user_messages: [message], user_turn_text: message });
 
 let scripted: Json[][] = [];
+/** Every Responses request body, in order. */
 const sent: Json[] = [];
+/** Every Conversation the code created (request bodies). */
+const created: Json[] = [];
 let served = 0;
 const body = (output: Json[]): Json => {
   served += 1;
@@ -31,8 +34,12 @@ const body = (output: Json[]): Json => {
   };
 };
 beforeEach(() => {
-  scripted = []; sent.length = 0; resetCoreSessionsForTests();
-  vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+  scripted = []; sent.length = 0; created.length = 0; resetCoreConversationsForTests();
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+    if (String(url).endsWith('/v1/conversations')) {
+      created.push(JSON.parse(String(init?.body ?? '{}')) as Json);
+      return new Response(JSON.stringify({ id: `conv_${created.length}`, object: 'conversation' }), { status: 200 });
+    }
     sent.push(JSON.parse(String(init?.body ?? '{}')) as Json);
     return new Response(JSON.stringify(body(scripted.shift() ?? [{ type: 'message', text: 'Noted.' }])), { status: 200 });
   }));
@@ -44,10 +51,11 @@ const caps = () => ({
   proposeOptionStatus: vi.fn(async () => ({ ok: true, mutated: false, proposal_id: PID, public_label: 'Take option B out of the comparison' })),
   authoriseChange: vi.fn(async () => ({ ok: true, mutated: true, applied: true })),
 });
-const turn = (message: string, c: ReturnType<typeof caps>) => runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
+const turn = (message: string, c: ReturnType<typeof caps>, extra: { briefText?: string; conversationStore?: ConversationIdStore; state?: unknown } = {}) =>
+  runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
   const result = await runCoreTurn({ ctx: ctx(message), caps: c as unknown as AgentCapabilities, mode: 'core', message,
     instructions: 'Synthetic instructions.', budget: budgetFor('gpt-6.1-sol', 'conversation'), userId: null,
-    canonicalState: { empty: true, entities: [] } });
+    canonicalState: extra.state ?? { empty: true, entities: [] }, briefText: extra.briefText, conversationStore: extra.conversationStore });
   return { result, calls: recordedProviderCalls() };
 });
 
@@ -75,7 +83,10 @@ describe('PATH-B core turn on the Agents SDK', () => {
     scripted = [[{ type: 'function_call', name: 'get_canonical_state', args: {} }], [{ type: 'message', text: 'The model is empty.' }]];
     const { result, calls } = await turn('What is in my model?', caps());
     expect(result.sdk.runtime).toBe(AGENTS_SDK);
-    expect(result.sdk.session).toBe('sdk_memory_session');
+    expect(result.sdk.state).toBe('openai_conversation');
+    expect(result.sdk.conversation_id).toBe('conv_1');
+    // Native compaction is requested on every call; the threshold is on the wire for the witness.
+    expect(sent[0]!.context_management).toEqual([{ type: 'compaction', compact_threshold: CORE_COMPACT_THRESHOLD }]);
     // The SDK's own trace id (tests run with tracing off, so the SDK reports its no-op trace).
     expect(result.sdk.trace_id).toBe('no-op');
     expect(calls).toHaveLength(2);
@@ -99,17 +110,46 @@ describe('PATH-B core turn on the Agents SDK', () => {
     expect(sent, 'no further model call after the throw').toHaveLength(1);
   });
 
-  it('MEMORY: the SDK session carries the conversation to the next turn; the turn\'s state is given fresh and never stored', async () => {
+  it('CONVERSATION: ONE OpenAI Conversation per scenario; each turn sends only its new input; the state rides the instructions', async () => {
+    const saved = new Map<string, string>();
+    const store: ConversationIdStore = {
+      read: async (sid) => saved.get(sid) ?? null,
+      claim: async (sid, id) => { if (!saved.has(sid)) saved.set(sid, id); return saved.get(sid)!; },
+    };
     scripted = [[{ type: 'message', text: 'First answer.' }]];
-    await turn('First synthetic question.', caps());
+    const one = await turn('First synthetic question.', caps(), { conversationStore: store, briefText: 'A synthetic brief, written apart.', state: { revision: 1 } });
+    expect(one.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: true, conversation_saved: true });
+    expect(created).toHaveLength(1);
+    // The brief written apart from the message is the Conversation's first item, once, as the user's words.
+    expect(JSON.stringify(created[0]!.items)).toContain('A synthetic brief, written apart.');
+    expect(created[0]!.items[0].role).toBe('user');
+    expect(saved.get(SCENARIO)).toBe('conv_1');
+
+    resetCoreConversationsForTests(); // a restart: the process forgets; the scenario remembers
     scripted = [[{ type: 'message', text: 'Second answer.' }]];
-    await turn('Second synthetic question.', caps());
-    const second = JSON.stringify(sent[1]!.input);
-    expect(second).toContain('First synthetic question.');
-    expect(second).toContain('First answer.');
-    expect(second).toContain('Second synthetic question.');
-    // The state and today's date ride every call once: they are not piled up in the session.
-    expect(second.split('CURRENT MODEL STATE').length - 1).toBe(1);
-    expect(second.split('TODAY, from Olumi').length - 1).toBe(1);
+    const two = await turn('Second synthetic question.', caps(), { conversationStore: store, briefText: 'A synthetic brief, written apart.', state: { revision: 2 } });
+    expect(two.result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: false, conversation_saved: true });
+    expect(created, 'a reopen reuses the saved Conversation').toHaveLength(1);
+    const second = sent[1]!;
+    expect(second.conversation).toBe('conv_1');
+    expect(second.previous_response_id, 'never combined with previous_response_id').toBeUndefined();
+    const input = JSON.stringify(second.input);
+    expect(input).toContain('Second synthetic question.');
+    expect(input, 'no replay: the server holds turn 1').not.toContain('First synthetic question.');
+    expect(input).not.toContain('First answer.');
+    expect(input, 'the state is never put in the Conversation').not.toContain('CURRENT MODEL STATE');
+    // Today's facts, fresh: the CURRENT state (revision 2, not 1) and the date ride this call's instructions, once each.
+    expect(second.instructions.split('CURRENT MODEL STATE').length - 1).toBe(1);
+    expect(second.instructions).toContain('"revision":2');
+    expect(second.instructions).not.toContain('"revision":1');
+    expect(second.instructions.split('TODAY, from Olumi').length - 1).toBe(1);
+  });
+
+  it('a store that cannot hold the id yet keeps it in process memory, and says so', async () => {
+    const store: ConversationIdStore = { read: async () => undefined, claim: async () => undefined };
+    const { result } = await turn('A synthetic question.', caps(), { conversationStore: store });
+    expect(result.sdk).toMatchObject({ conversation_id: 'conv_1', conversation_created: true, conversation_saved: false });
+    await turn('Another synthetic question.', caps(), { conversationStore: store });
+    expect(created, 'reused within the process').toHaveLength(1);
   });
 });
