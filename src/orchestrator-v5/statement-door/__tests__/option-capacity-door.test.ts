@@ -79,9 +79,13 @@ describe('M5: an option\'s new share of time is a statement on the door (served 
     expect(after.nodes.find((n: Rec) => n.id === CARRIER).observed_state.extra_share_by_date.ratio_source.settings).toEqual({ [LEGACY_TIME]: 15 });
   });
 
-  it('CONTRAST (binding): the same words answering no ask Olumi said are not bound to the share, so nothing is prepared', async () => {
-    const r = await offer(world(), SUBJECT, PAUL, PAUL, null);
-    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'not_this_subject' });
+  it('CONTRAST (binding): the same words answering no ask Olumi said are not bound to the share: a labelled card, never theirs by itself', async () => {
+    const w = world();
+    const r = await offer(w, SUBJECT, PAUL, PAUL, null);
+    // ⭐ GATE → LABEL (change 1): which item the words concern is Olumi's reading, said on the card; nothing is written before the press.
+    expect(r).toMatchObject({ ok: true, mutated: false, statement: { item_is_olumis_reading: true } });
+    expect(String(r.public_label)).toContain('Olumi’s reading: these words concern “');
+    expect(w.registers).toEqual([]);
   });
 
   it('CONTRAST: a statement with no new figure for the share prepares nothing, and keeps the words', async () => {

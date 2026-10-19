@@ -7,13 +7,19 @@
  * key. Pure.
  */
 import { isDeepStrictEqual } from 'node:util';
-import { namesBothEnds, speechReading, wholeStatementIn } from '../goal-target/input-claim-context.js';
+import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+import { linkSizing, valueProvenanceOf } from '../../cee/provenance/provenance-of.js';
+import { namesBothEnds, speechReading } from '../goal-target/input-claim-context.js';
 import { isFactorNamedByUser } from '../routing/stated-event-risk.js';
 import { answeredAsk, askedSubjects, type StatementAsk } from './ask.js';
 
-import { userStatementOf, verifyStatements, type UserStatement } from '../agent-lane/user-statements.js';
+import { saidByOf, userStatementOf, verifyStatement, verifyStatements, type ClaimStatus, type UserStatement } from '../agent-lane/user-statements.js';
 import { plainQuoteWords, verbatimSourceLine } from '../agent-lane/quote-confirmation.js';
-import { quoteSpansIn } from '../agent-lane/stated-by-user.js';
+import { amountsWrittenIn, amountTheUserWrote, comparatorTheUserWroteFor, figureTheUserWroteForSpan, figureTheUserWroteSpan, figuresWrittenIn, quoteSpansIn,
+  withoutCorrectedFigureTail, wordsTheUserWrote } from '../agent-lane/stated-by-user.js';
+import { normaliseFactorValue } from '../tools/handlers/d1-shared/normalise-factor-value.js';
+import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { isStatementField, subjectKey, subjectNodeKey, resolveSubject, SUBJECT_KINDS, type DoorSubject, type StatementField } from './subject.js';
 
 type Rec = Record<string, unknown>;
@@ -49,7 +55,7 @@ export function statementBoundTo(graph: unknown, subject: DoorSubject, quote: st
       const labelled = same.filter(n => isFactorNamedByUser(String(n.label), outside));
       const cited = retired !== '' && quoteSpansIn(speech.text, retired).some(at => speech.inSpeech(at) && speech.inSpeech(at + retired.length));
       const holders = cited ? nodes.filter(n => [
-        ...recordsWithUnknownSpeakerOn(n).flatMap(r => r.statements.map(s => s.quote)),
+        ...claimRecordsOn(n).flatMap(r => r.statements.map(s => s.quote)),
         ...[legacyOf(n, 'already_true_quote'), legacyOf(n, 'dependency')].filter((s): s is string => typeof s === 'string'),
       ].some(held => quoteSpansIn(speechReading(held).text, retired).length > 0)) : [];
       named = labelled.length > 0 ? labelled : cited ? holders.length === 1 ? holders.filter(n => n.kind === subject.kind) : []
@@ -98,6 +104,8 @@ export interface UserStatementRecord {
   readonly field: StatementField;
   readonly statements: readonly UserStatement[];
   readonly recorded_at: string;
+  /** Claims an explicit correction retired (superseded or withdrawn), whole, newest first: kept, never read as current. */
+  readonly history?: readonly UserStatement[];
   readonly attest?: StatementAttest;
 }
 
@@ -138,16 +146,27 @@ const attestOf = (v: unknown): StatementAttest | undefined | null => {
     ? v as StatementAttest : null;
 };
 
-/** A stored record whole, or `undefined` if any part is malformed; `unknownSpeaker` keeps the brief's speaker-unknown words too. */
-function recordOf(v: unknown, unknownSpeaker: boolean): UserStatementRecord | undefined {
+/**
+ * ⭐ CLAIM RECORD (spec v2 §4; GATE-TO-LABEL-DESIGN, authorship invariant): a claim reads as "you said" only where the user asserts it
+ * (`said_by`), it is current, and their words, figure and unit were all found. A press approves the displayed operation only: it may
+ * confirm Olumi's reading of WHICH subject their words are about (`subject_bound: false`), but it never makes words or a figure the
+ * user did not write theirs (AIE 13:43Z). A party's, an unresolved or an Olumi claim never reads as theirs.
+ */
+const youSaid = (s: UserStatement): boolean => saidByOf(s) === 'user' && s.status !== 'superseded' && s.status !== 'withdrawn'
+  && (s.checks === undefined || (s.checks.words_found && s.checks.figure_found && s.checks.unit_found
+    && (s.checks.subject_bound !== false || s.approval !== undefined)));
+
+/** A stored record whole, or `undefined` if any part is malformed; `every` keeps every claim (each with its `said_by`), else "you said" only. */
+function recordOf(v: unknown, every: boolean): UserStatementRecord | undefined {
   if (!isRec(v) || !text(v.subject_key, 400) || !isStatementField(v.field) || !text(v.recorded_at, 40) || !Array.isArray(v.statements)
-    || v.statements.length === 0) return undefined;
+    || v.statements.length === 0 || (v.history !== undefined && !Array.isArray(v.history))) return undefined;
   const parsed = v.statements.map(userStatementOf);
+  const history = Array.isArray(v.history) ? v.history.map(userStatementOf) : [];
   const attest = attestOf(v.attest);
-  if (parsed.some((s) => s === undefined) || attest === null) return undefined;
-  const statements = (parsed as UserStatement[]).filter((s) => unknownSpeaker || s.speaker === 'user');
+  if (parsed.some((s) => s === undefined) || history.some((s) => s === undefined) || attest === null) return undefined;
+  const statements = (parsed as UserStatement[]).filter((s) => every || youSaid(s));
   return statements.length === 0 ? undefined : { subject_key: v.subject_key, field: v.field, statements, recorded_at: v.recorded_at,
-    ...(attest !== undefined ? { attest } : {}) };
+    ...(attest !== undefined ? { attest } : {}), ...(every && history.length > 0 ? { history: history as UserStatement[] } : {}) };
 }
 
 /**
@@ -156,6 +175,41 @@ function recordOf(v: unknown, unknownSpeaker: boolean): UserStatementRecord | un
  */
 export function userStatementRecordOf(v: unknown): UserStatementRecord | undefined {
   return recordOf(v, false);
+}
+
+/** A well-formed record with EVERY claim, whoever asserts it (spec v2 §4): the writers' parse and the read-back's. */
+export function claimRecordOf(v: unknown): UserStatementRecord | undefined {
+  return recordOf(v, true);
+}
+
+/**
+ * A claim's status as stored; a legacy claim (none stored) is `proposed` where construction wrote it and otherwise UNKNOWN
+ * (`undefined`): never presented as confirmed, and no receipt is inferred (AIE LEGACY, 14:00Z). Derived on read; nothing is rewritten.
+ */
+export function claimStatusOf(s: UserStatement, record: Pick<UserStatementRecord, 'attest'>): ClaimStatus | undefined {
+  return s.status ?? (record.attest?.recorded_by === 'construction' ? 'proposed' : undefined);
+}
+
+/**
+ * ⭐ CLAIM RECORD (spec v2 rule 1; AIE 14:00Z DISSENT): the subject's record once `fresh` is written beside what it already holds.
+ * A held claim from ANOTHER source (another party, the user vs a party, an unresolved one) or under other conditions stays current:
+ * recency never retires a different view. A held claim from the SAME source under the same conditions is that source's earlier view:
+ * it moves to `history` as superseded (kept whole), and the new claim names it in `supersedes` where it has an id. A carried claim
+ * construction wrote keeps its meaning explicitly (`proposed`), since the record's `attest` is now the new write's.
+ */
+export function withClaimsKept(graph: unknown, subject: DoorSubject, fresh: UserStatementRecord): UserStatementRecord {
+  const held = claimRecordFor(graph, subject);
+  if (held === undefined) return fresh;
+  const sourceKey = (st: UserStatement): string => [saidByOf(st), st.party ?? '', st.conditions ?? ''].join('|');
+  const incoming = new Set(fresh.statements.map(sourceKey));
+  const explicit = (st: UserStatement): UserStatement => (st.status === undefined && claimStatusOf(st, held) !== undefined
+    ? { ...st, status: claimStatusOf(st, held)! } : st);
+  const kept = held.statements.filter((st) => !incoming.has(sourceKey(st))).map(explicit);
+  const retired = held.statements.filter((st) => incoming.has(sourceKey(st))).map((st): UserStatement => ({ ...st, status: 'superseded' }));
+  const ids = retired.flatMap((st) => (st.claim_id !== undefined ? [st.claim_id] : []));
+  const statements = [...kept, ...fresh.statements.map((st) => (ids.length > 0 && st.supersedes === undefined ? { ...st, supersedes: ids } : st))];
+  const history = [...retired, ...(held.history ?? [])];
+  return { ...fresh, statements, ...(history.length > 0 ? { history } : {}) };
 }
 
 /**
@@ -181,11 +235,16 @@ export function userStatementsOn(node: unknown): UserStatementRecord[] {
 }
 
 /**
- * ⛔ The ONE read of the brief's speaker-unknown words (`UserStatement.speaker`), beside the user's own, for the code that shows
- * them: the AI's context and the not-represented list. Never the user's; every other reader takes `userStatementsOn`.
+ * ⭐ THE ONE CLAIM READER (spec v2 §4; was `recordsWithUnknownSpeakerOn`): every current claim on a node, each with its `said_by`, for
+ * the read-back, the AI's context, sizing and the Run's "claims used". "You said" readers take `userStatementsOn` instead.
  */
-export function recordsWithUnknownSpeakerOn(node: unknown): UserStatementRecord[] {
-  return heldOn(node).map((r) => recordOf(r, true)).filter((r): r is UserStatementRecord => r !== undefined);
+export function claimRecordsOn(node: unknown): UserStatementRecord[] {
+  return heldOn(node).map(claimRecordOf).filter((r): r is UserStatementRecord => r !== undefined);
+}
+
+/** The subject's record with every claim, or `undefined`. */
+export function claimRecordFor(graph: unknown, subject: DoorSubject): UserStatementRecord | undefined {
+  return claimRecordsOn(nodeOf(graph, nodeIdOf(subject))).find((r) => r.subject_key === subjectKey(subject));
 }
 
 /** The subject's record on its node, or `undefined`. */
@@ -235,8 +294,9 @@ export function withUserStatement(graph: Rec & { nodes: unknown[] }, record: Use
 
 /** Whether the graph holds exactly this record for the subject: the read-back's half. */
 export function holdsUserStatement(graph: unknown, record: UserStatementRecord, subject: DoorSubject): boolean {
-  const held = userStatementFor(graph, subject);
-  return held !== undefined && isDeepStrictEqual(held, userStatementRecordOf(JSON.parse(JSON.stringify(record))));
+  // The read-back reads EVERY claim (spec v2 §4): a party's or an unresolved claim is held exactly as written, never read as absent.
+  const held = claimRecordFor(graph, subject);
+  return held !== undefined && isDeepStrictEqual(held, claimRecordOf(JSON.parse(JSON.stringify(record))));
 }
 
 /** Scoped source correction stays with the canonical record owner; no second store or text-to-retraction matcher. */
@@ -248,13 +308,36 @@ interface CorrectionEditRequest {
   readonly retained: readonly string[];
   readonly reading_words: string;
   readonly legacy?: { readonly field: 'already_true_quote' | 'dependency'; readonly expected: string; readonly replacement: string | null };
+  /**
+   * ⭐ REPLACE (release replay 166a5280; PL 16:58 "the COMPLETE supplied replacement"): the corrected figure the user gives for a
+   * factor's level in THIS message, with its unit (period included), as the AI reads it. The host writes it only where the figure is
+   * in the user's own correction words and the model can hold it in its own units; otherwise it is kept on the claim and the
+   * calculation that used the old figure is unavailable (never called complete).
+   */
+  readonly replacement?: { readonly value: number; readonly unit: string; readonly span?: string };
 }
-export interface StatementCorrectionRequest { readonly quote: string; readonly edits: readonly CorrectionEditRequest[]; /** The AI's own speaker reading (`QUOTE_SPEAKER`, lean core P2). */ readonly speaker?: unknown }
+export interface StatementCorrectionRequest { readonly quote: string; readonly edits: readonly CorrectionEditRequest[]; /** The AI's own speaker reading (`QUOTE_SPEAKER`, lean core P2). */ readonly speaker?: unknown;
+  /** ⭐ CLAIM RECORD: who asserts the correction, and the party's name as written. */ readonly said_by?: unknown; readonly party?: unknown }
 interface ApprovedCorrectionEdit extends CorrectionEditRequest {
   readonly expected_record: UserStatementRecord | null;
   readonly expected_node: Rec;
   readonly record: UserStatementRecord;
+  /**
+   * ⭐ GATE → LABEL (GATE-TO-LABEL-DESIGN; Codex co-design §1): what the host could NOT establish, frozen with the card and shown on
+   * it, never a reason to refuse. `binding`: the words do not name this item by the host's binder, so the item is Olumi's reading
+   * (`bound_label`: the item the binder read instead). `unheld`: retired or kept words not found in the held record. `approved`:
+   * the record held an approval of its own, which stays in its history. `replacement_owner`: the item the source gives the replacement
+   * figure for, when it is another item (never written here).
+   */
+  readonly labels?: { readonly binding?: 'olumi_reading'; readonly bound_label?: string; readonly unheld?: readonly string[]; readonly approved?: true;
+    readonly replacement_owner?: string };
+  /** The operative value that rests on the retired words, and what the same commit does to it (`link_unsized`), with its preimage. */
+  readonly dependent?: { readonly action: 'link_unsized'; readonly expected_edge: Rec; readonly label: string }
+    | { readonly action: 'level_unavailable'; readonly label: string; readonly incomplete?: true; readonly held_unit?: string; readonly defined?: readonly DefinedFigure[] }
+    | { readonly action: 'level_replaced'; readonly label: string; readonly observed_state: Rec; readonly defined?: readonly DefinedFigure[] };
 }
+/** Olumi's figure for another factor that a link DEFINES from the corrected level, with its preimage: withdrawn in the same commit. */
+interface DefinedFigure { readonly id: string; readonly label: string; readonly observed_state: Rec }
 export interface StatementCorrection {
   readonly source: UserStatement;
   readonly edits: readonly ApprovedCorrectionEdit[];
@@ -268,7 +351,14 @@ const legacyOf = (node: Rec, field: 'already_true_quote' | 'dependency'): unknow
 
 /** Untouched context from this subject's existing carrier; never evidence for the correction's source or retained spans. */
 const correctionUnknowns = (node: unknown, subject: DoorSubject): readonly UserStatement[] =>
-  recordsWithUnknownSpeakerOn(node).find(r => r.subject_key === subjectKey(subject))?.statements.filter(s => s.speaker === 'unknown') ?? [];
+  claimRecordsOn(node).find(r => r.subject_key === subjectKey(subject))?.statements.filter(s => saidByOf(s) === 'unknown') ?? [];
+/**
+ * ⭐ ANOTHER SOURCE'S CLAIM STAYS CURRENT (Buddy-A §1, "an unchanged party estimate"; `withClaimsKept`: "recency never retires a
+ * different view"): the user's correction retires only the user's own earlier claims. Another party's estimate and unresolved words
+ * on the same subject are written back untouched; before, only the unresolved ones were, and a party's estimate was dropped.
+ */
+const correctionOthers = (node: unknown, subject: DoorSubject): readonly UserStatement[] =>
+  claimRecordsOn(node).find(r => r.subject_key === subjectKey(subject))?.statements.filter(s => saidByOf(s) !== 'user') ?? [];
 
 /** A source correction cannot silently replace adoption or other held attestation. Carry-forward needs its own contract. */
 function protectedAttestation(record: UserStatementRecord | null | undefined): boolean {
@@ -295,15 +385,56 @@ function correctionAttest(e: CorrectionEditRequest): StatementAttest {
 }
 
 /** Keep complete earlier quotes, never manufacture a new human quotation by splicing a bundled sentence. */
-function replacementStatements(source: UserStatement, e: CorrectionEditRequest): UserStatement[] {
+function replacementStatements(graph: unknown, source: UserStatement, e: CorrectionEditRequest): UserStatement[] {
   const current: UserStatement = { ...source, subject: { quantity: subjectKey(e.subject), node_id: e.subject.id,
     ...(e.subject.option_id === undefined ? {} : { option_id: e.subject.option_id }) } };
-  return [{ ...current, qualifier: e.reading_words, qualifier_in_quote: source.quote.includes(e.reading_words) }, ...e.retained.map(span => {
+  // REPLACE: the corrected figure is a claim of its OWN exact span (its words, unit with period, sign and kind), read in its whole line
+  // (`readReplacement`); unbound by name, it is Olumi's reading the press confirms; refused, it is labelled and never written.
+  const replaced = e.replacement === undefined ? undefined : replacementOf(e.replacement);
+  const v = replaced === undefined ? undefined : verifiedReplacement(graph, source, e);
+  const claim: UserStatement = replaced === undefined ? current : v !== undefined
+    ? { ...current, quote: v.span, form: 'point', low: v.value, high: v.value, unit: v.unit,
+      ...(v.bound ? {} : { checks: { words_found: true, figure_found: true, unit_found: true, subject_bound: false } }) }
+    : { ...current, form: 'point', low: replaced.value, high: replaced.value, unit: replaced.unit,
+      checks: { ...source.checks, words_found: source.checks?.words_found ?? true, figure_found: false, unit_found: false } };
+  return [{ ...claim, qualifier: e.reading_words, qualifier_in_quote: claim.quote.includes(e.reading_words) }, ...e.retained.map(span => {
     const earlier = e.expected_record?.statements.find(s => s.quote.includes(span));
-    if (earlier !== undefined) return { ...earlier };
+    if (earlier !== undefined) return keptClaim(earlier, e);
     // A legacy string with no source record has unknown origin. Only the current verified message is human evidence.
     return { ...current, qualifier: span, qualifier_in_quote: current.quote.includes(span) };
   })];
+}
+
+/**
+ * ⭐ RETAIN BY IDENTITY, NOT BY QUOTE CONTAINMENT (Buddy-A §1 trap: a kept span copied the WHOLE earlier claim, including the
+ * now-wrong condition). Identity is quantity + period + source + condition. Where the withdrawn words are not part of the earlier
+ * claim, it stays exactly as it was. Where they ARE (one statement holds both the kept and the withdrawn words), its quote stays
+ * whole (never spliced) and its source stays, but what the withdrawn words held does not stay current:
+ *  - its condition, where the condition IS withdrawn words (byte identity, as for every retired and kept span); a condition the
+ *    withdrawn words do not hold is kept exactly as stated (N2);
+ *  - its figure, unit and period, where the claim door's own figure reader places that figure inside the withdrawn words.
+ * The earlier claim stays whole in history as superseded (`retiredHistory`), so nothing is lost. ⭐ An EXPLICIT keep wins over a
+ * retirement of the same words (Codex R3 §3, PL 22:35: "Keep explicitly: X" never saves X's figure as withdrawn): only what the
+ * retired words hold OUTSIDE every kept span goes.
+ */
+function keptClaim(earlier: UserStatement, e: Pick<CorrectionEditRequest, 'retirement' | 'retained'>): UserStatement {
+  const at = e.retirement.quote.trim() === '' ? -1 : earlier.quote.indexOf(e.retirement.quote);
+  if (at < 0) return { ...earlier };
+  const end = at + e.retirement.quote.length;
+  const keptAt = (from: number, to: number): boolean => e.retained.some((span) => {
+    const k = earlier.quote.indexOf(span);
+    return k >= 0 && k <= from && to <= k + span.length;
+  });
+  const { conditions, ...rest } = earlier;
+  const kept: UserStatement = conditions === undefined
+    || (e.retirement.quote.includes(conditions) && !e.retained.some((span) => span.includes(conditions))) ? rest : earlier;
+  const withdrawn = [earlier.low, earlier.high].some((x) => {
+    const span = x === undefined ? null : figureTheUserWroteSpan(x, earlier.unit, earlier.quote);
+    return span !== null && span.start < end && span.end > at && !keptAt(span.start, span.end);
+  });
+  if (!withdrawn) return kept;
+  const { low: _l, high: _h, value: _v, unit: _u, period: _p, negated: _n, qualifier: _q, qualifier_in_quote: _qi, ...words } = kept;
+  return { ...words, form: 'describes' };
 }
 
 /** A pending card must not turn malformed context into a crash or a different binding on its native press. */
@@ -321,11 +452,11 @@ function isCorrectionContext(value: unknown): value is DoorContext {
 /** Parse persisted approval bytes with the same complete-record parser as every other statement card. */
 export function statementCorrectionOf(value: unknown): StatementCorrection | undefined {
   if (!isRec(value) || !Array.isArray(value.edits) || value.edits.length < 1 || value.edits.length > 6
-    || !isRec(value.source) || value.source.speaker !== 'user' || value.source.reading !== 'olumi'
+    || !isRec(value.source) || value.source.reading !== 'olumi'
     || typeof value.source.quote !== 'string' || typeof value.source.source !== 'string') return undefined;
   const source = userStatementOf(value.source);
-  if (source === undefined || source.form !== 'describes' || source.low !== undefined || source.high !== undefined
-    || !wholeStatementIn(source.source, source.quote)) return undefined;
+  // The source's own attribution travels with it (`said_by`, checks): an excerpt or an unverified source is labelled, never refused.
+  if (source === undefined || source.form !== 'describes' || source.low !== undefined || source.high !== undefined) return undefined;
   const context = value.binding_context;
   if (context !== undefined && !isCorrectionContext(context)) return undefined;
   const keys = new Set<string>();
@@ -336,8 +467,10 @@ export function statementCorrectionOf(value: unknown): StatementCorrection | und
       || !['whole', 'part'].includes(String(raw.retirement.scope)) || !['historical', 'retracted'].includes(String(raw.retirement.disposition))
       || !Array.isArray(raw.retained) || !raw.retained.every(x => typeof x === 'string' && x.trim() !== '')
       || (raw.retirement.scope === 'part' && raw.retained.length === 0)
-      || typeof raw.reading_words !== 'string' || raw.reading_words.trim() === '') return undefined;
-    const record = userStatementRecordOf(raw.record);
+      || typeof raw.reading_words !== 'string' || raw.reading_words.trim() === ''
+      || (raw.replacement !== undefined && replacementOf(raw.replacement) === undefined)) return undefined;
+    const record = claimRecordOf(raw.record);
+    if (!labelsOf(raw.labels) || !dependentOf(raw.dependent)) return undefined;
     if (record === undefined || record.subject_key !== subjectKey(raw.subject)
       || (raw.expected_record !== null && userStatementRecordOf(raw.expected_record) === undefined)) return undefined;
     if (keys.has(record.subject_key)) return undefined;
@@ -361,14 +494,18 @@ interface CorrectionDiagnostic {
 /** The native postimage. Expected records/nodes are checked before any member changes; a refusal changes nothing. */
 export function applyStatementCorrection(graph: unknown, value: unknown, diagnostic?: CorrectionDiagnostic): { candidate?: Rec; refused?: string; unchanged?: true } {
   const approved = statementCorrectionOf(value);
+  // ⭐ GATE → LABEL: for a well-formed approved correction only `node_not_found` and `node_changed` refuse; `invalid_statement` is the
+  // payload's integrity (the written record is exactly the one the card showed), never a judgement of the words.
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || approved === undefined) return { refused: 'invalid_statement' };
-  if (approved.edits.some(e => protectedAttestation(e.expected_record))) return { refused: 'correction_attestation_protected' };
   // A complete matching postimage is a retry, never an excuse to ignore a stale preimage on a partial write.
   const held = approved.edits.every(e => {
     const node = nodeOf(graph, e.subject.id);
-    return node !== undefined && isDeepStrictEqual(userStatementFor(graph, e.subject), e.record)
-      && isDeepStrictEqual(correctionUnknowns(node, e.subject), correctionUnknowns(e.expected_node, e.subject))
-      && (e.legacy === undefined || isDeepStrictEqual(legacyOf(node, e.legacy.field), e.legacy.replacement === null ? undefined : e.legacy.replacement));
+    return node !== undefined && isDeepStrictEqual(claimRecordFor(graph, e.subject), claimRecordOf(writtenRecord(e)))
+      && (e.legacy === undefined || isDeepStrictEqual(legacyOf(node, e.legacy.field), e.legacy.replacement === null ? undefined : e.legacy.replacement))
+      && (e.dependent?.action !== 'link_unsized' || isDeepStrictEqual(edgeOf(graph, e.subject), unsizedEdge(e.dependent.expected_edge)))
+      && (e.dependent?.action !== 'level_unavailable' || !isRec(node.observed_state))
+      && (e.dependent?.action !== 'level_replaced' || isDeepStrictEqual(node.observed_state, e.dependent.observed_state))
+      && definedOf(e).every((d) => !isRec(nodeOf(graph, d.id)?.observed_state));
   });
   if (held) return { candidate: graph, unchanged: true };
   for (const [editIndex, e] of approved.edits.entries()) {
@@ -376,34 +513,28 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
     const node = nodeOf(graph, e.subject.id);
     if (resolved.kind !== 'resolved' || !isDeepStrictEqual(resolved.subject, e.subject) || node === undefined) return { refused: 'node_not_found' };
     if (!isDeepStrictEqual(node, e.expected_node)
-      || !isDeepStrictEqual(userStatementFor(graph, e.subject) ?? null, e.expected_record)) return { refused: 'node_changed' };
-    const found: { subject?: DoorSubject } = {};
-    let binding = statementBoundTo(graph, e.subject, approved.source.quote, approved.binding_context, undefined, [], found, e);
-    // A bundle can name several items; a question about one item does not bind the others.
-    if (binding === 'unbound') binding = statementBoundTo(graph, e.subject, approved.source.quote, {}, undefined,
-      approved.edits.map(edit => edit.subject), found, e);
-    if (binding !== 'bound') {
-      if (diagnostic !== undefined) Object.assign(diagnostic, { binder_result: binding, failed_edit_index: editIndex, bound_subject: found.subject,
-        failed_check: `correction.postimage.unrelated_correction.${binding}` });
-      return { refused: 'unrelated_correction' };
+      || !isDeepStrictEqual(userStatementFor(graph, e.subject) ?? null, e.expected_record)
+      || (e.legacy !== undefined && legacyOf(node, e.legacy.field) !== e.legacy.expected)) {
+      if (diagnostic !== undefined) Object.assign(diagnostic, { failed_edit_index: editIndex, failed_check: 'correction.postimage.node_changed' });
+      return { refused: 'node_changed' };
     }
-    // Unknown words prove held source bytes only; their original attribution remains unchanged in the postimage.
-    const oldQuotes = [...(e.expected_record?.statements.map(s => s.quote) ?? []), ...correctionUnknowns(node, e.subject).map(s => s.quote)];
-    if (e.legacy !== undefined) {
-      if (legacyOf(node, e.legacy.field) !== e.legacy.expected) return { refused: 'node_changed' };
-      oldQuotes.push(e.legacy.expected);
-      if (e.legacy.replacement !== null && !approved.source.quote.includes(e.legacy.replacement)) return { refused: 'replacement_not_stated' };
+    // The operative value it disables is the one the card showed: its link is still there, unchanged since.
+    if (e.dependent?.action === 'link_unsized') {
+      const edge = edgeOf(graph, e.subject);
+      if (edge === undefined) return { refused: 'node_not_found' };
+      if (!isDeepStrictEqual(edge, e.dependent.expected_edge)) return { refused: 'node_changed' };
     }
-    if (!oldQuotes.some(q => q.includes(e.retirement.quote))) return { refused: 'retired_source_not_held' };
-    if (!e.retained.every(q => oldQuotes.some(old => old.includes(q)))) return { refused: 'retained_source_not_stated' };
-    // Compare the exact stored representation, including every retained form, figure and condition.
-    if (!isDeepStrictEqual(e.record.statements, JSON.parse(JSON.stringify(replacementStatements(approved.source, e))))) return { refused: 'invalid_statement' };
-    if (!isDeepStrictEqual(e.record.attest, correctionAttest(e))) return { refused: 'invalid_statement' };
+    // The figures the card withdraws with it are still the ones it showed.
+    if (definedOf(e).some((d) => !isDeepStrictEqual(nodeOf(graph, d.id)?.observed_state, d.observed_state))) return { refused: 'node_changed' };
+    // Integrity: exactly the record, history and dependent action the card was prepared with.
+    if (!isDeepStrictEqual(e.record.statements, JSON.parse(JSON.stringify(replacementStatements(graph, approved.source, e))))
+      || !isDeepStrictEqual(e.record.attest, correctionAttest(e))
+      || !isDeepStrictEqual(e.record.history ?? [], JSON.parse(JSON.stringify(retiredHistory(e))))
+      || !isDeepStrictEqual(e.dependent, dependentAction(graph, e, approved.source, levelIdsOf(graph, approved.edits, approved.source)))) return { refused: 'invalid_statement' };
   }
   let candidate = structuredClone(graph) as Rec & { nodes: unknown[] };
   for (const e of approved.edits) {
-    const next = withUserStatement(candidate, { ...e.record,
-      statements: [...e.record.statements, ...correctionUnknowns(e.expected_node, e.subject)] }, e.subject);
+    const next = withUserStatement(candidate, writtenRecord(e), e.subject);
     if (next === undefined) return { refused: 'node_not_found' };
     candidate = next;
     if (e.legacy !== undefined) {
@@ -413,27 +544,335 @@ export function applyStatementCorrection(graph: unknown, value: unknown, diagnos
       if (e.legacy.replacement === null) delete owner[key]; else owner[key] = e.legacy.replacement;
       if (e.legacy.field === 'dependency') node.draft_widening = owner;
     }
+    // ⭐ ONE COMMIT (Codex co-design §1 "atomic representations"): the size that rested on the withdrawn words is withdrawn in the SAME
+    // candidate. Never a source-only write that leaves the old figure live.
+    if (e.dependent?.action === 'link_unsized') {
+      const edges = candidate.edges as unknown[];
+      const at = edges.findIndex((x) => isRec(x) && x.from === e.subject.id && x.to === e.subject.to_id);
+      edges[at] = unsizedEdge(e.dependent.expected_edge);
+    }
+    // REPLACE: the user's corrected figure becomes the level, exactly as the card showed it, in the SAME candidate.
+    if (e.dependent?.action === 'level_replaced') nodeOf(candidate, e.subject.id)!.observed_state = structuredClone(e.dependent.observed_state);
+    // The level that was the retired figure is no longer held: no current figure, so readiness asks for it again.
+    if (e.dependent?.action === 'level_unavailable') {
+      const node = nodeOf(candidate, e.subject.id)!;
+      delete node.observed_state;
+    }
+    // ⭐ DEPENDENT CURRENTNESS: Olumi's figures worked out from the corrected level by definition go in the SAME candidate.
+    for (const d of definedOf(e)) delete nodeOf(candidate, d.id)?.observed_state;
   }
   return { candidate };
 }
 
+/** The record the correction writes: its claims, the subject's other speakers' claims untouched, and the retired claims' history. */
+function writtenRecord(e: ApprovedCorrectionEdit): UserStatementRecord {
+  return { ...e.record, statements: [...e.record.statements, ...correctionOthers(e.expected_node, e.subject)] };
+}
+
+const definedOf = (e: Pick<ApprovedCorrectionEdit, 'dependent'>): readonly DefinedFigure[] =>
+  (e.dependent?.action === 'level_replaced' || e.dependent?.action === 'level_unavailable' ? e.dependent.defined ?? [] : []);
+/**
+ * The factors whose figure an edit of this same correction ACTUALLY decides, read by the same rules that write it: a corrected figure
+ * that is written (the user's own words, held in the model's unit: `level_replaced`), or an earlier figure of theirs they EXPLICITLY
+ * keep (the claim door's figure reader places it inside a span they keep, and `keptClaim` still holds it). Such a factor is never
+ * withdrawn as another edit's dependent. Field or text presence decides nothing (Buddy-A 18:54Z, 19:08Z): a replacement that is not
+ * written (a rejected "999"), kept qualitative words beside an unkept figure, or kept words the record does not hold.
+ */
+function levelIdsOf(graph: unknown, edits: readonly CorrectionEditRequest[], source: UserStatement): string[] {
+  return edits.flatMap((x) => {
+    if (x.subject?.kind !== 'factor' || x.subject.option_id !== undefined || x.subject.field !== 'level') return [];
+    const node = nodeOf(graph, x.subject.id);
+    if (node === undefined) return [];
+    const replaced = verifiedReplacement(graph, source, x);
+    if (replaced !== undefined && replacedObservedState(node, replaced) !== undefined) return [x.subject.id];
+    const held = x.expected_record === undefined ? userStatementFor(graph, x.subject) ?? null : x.expected_record;
+    const retained = Array.isArray(x.retained) ? x.retained : [];
+    const os = isRec(node.observed_state) ? node.observed_state : undefined;
+    const keptFigure = os !== undefined && (held?.statements ?? []).some((st) => {
+      const k = keptClaim(st, x);
+      // ⭐ Buddy-A 19:29Z: the kept figure must BE the operative level (the retract rule's identity), not a figure of another period.
+      return isLevelFigure(k, os) && [k.low, k.high].some((v) => {
+        const at = v === undefined ? null : figureTheUserWroteSpan(v, k.unit, st.quote);
+        return at !== null && retained.some((span) => {
+          const from = st.quote.indexOf(span);
+          return from >= 0 && from <= at.start && at.end <= from + span.length;
+        });
+      });
+    });
+    return keptFigure ? [x.subject.id] : [];
+  });
+}
+
+/** The user's earlier claims this correction retires (all but the explicitly kept), kept whole in history: withdrawn or superseded. */
+function retiredHistory(e: Pick<ApprovedCorrectionEdit, 'expected_record' | 'retained' | 'retirement'>): UserStatement[] {
+  const kept = (st: UserStatement): boolean => e.retained.some((span) => st.quote.includes(span));
+  const status: ClaimStatus = e.retirement.disposition === 'retracted' ? 'withdrawn' : 'superseded';
+  // An approval or adoption the record held stays with the claims it covered, as a historical receipt; it no longer applies. Then
+  // even a kept claim's earlier version (the one the approval covered) is history: superseded by its corrected record.
+  const approved = protectedAttestation(e.expected_record);
+  const attested = approved ? { attested: { ...e.expected_record!.attest! } } : {};
+  // A kept claim that also held the withdrawn words is current only in part (`keptClaim`): its whole earlier version is history.
+  const narrowed = (st: UserStatement): boolean => kept(st) && !isDeepStrictEqual(keptClaim(st, e), st);
+  return [...(e.expected_record?.statements.filter((st) => approved || !kept(st) || narrowed(st))
+    .map((st) => ({ ...st, status: kept(st) ? 'superseded' as const : status, ...attested })) ?? []), ...(e.expected_record?.history ?? [])];
+}
+
+const edgeOf = (graph: unknown, subject: DoorSubject): Rec | undefined => (subject.kind !== 'link' || !isRec(graph) || !Array.isArray(graph.edges)
+  ? undefined : graph.edges.filter((x): x is Rec => isRec(x) && x.from === subject.id && x.to === subject.to_id).length === 1
+    ? graph.edges.find((x): x is Rec => isRec(x) && x.from === subject.id && x.to === subject.to_id) : undefined);
+
+/**
+ * The operative value a whole retraction of a link's effect withdraws: the link's size, where it is the user's (`linkSizing`) or its
+ * stored source words are among the retired ones (byte identity, never a word match). `undefined`: nothing operative rests on them.
+ */
+function dependentAction(graph: unknown, e: Pick<ApprovedCorrectionEdit, 'subject' | 'retirement' | 'retained' | 'expected_record' | 'replacement'>,
+  source: UserStatement, levelIds: readonly string[]): ApprovedCorrectionEdit['dependent'] {
+  const kept = (st: UserStatement): boolean => e.retained.some((span) => st.quote.includes(span));
+  const retired = (e.expected_record?.statements ?? []).filter((st) => !kept(st));
+  /**
+   * ⭐ A FACTOR'S LEVEL FOLLOWS THE CORRECTION'S OWN EXPLICIT MEANING, NOTHING ELSE (release replay 166a5280, R07 BLOCKING; PL 16:58):
+   *  - REPLACE: the user gave the corrected figure (`replacement`, in their own words): it becomes the level in the same commit. Where
+   *    the model cannot hold it in its own units, the old figure goes, the new one stays on the claim, and the calculation is
+   *    unavailable: an incomplete correction, said so, never called complete.
+   *  - A RETIRED BASIS (`retracted` OR `historical`, Codex BLOCK @94b330bd P1-4): the level that IS a retired claim's figure leaves the
+   *    current account with it (R09), unavailable until given, unless a kept claim IS that level or a written replacement replaces it.
+   *    "IS" means the same figure in the same unit and period (`isLevelFigure`); never a raw value alone, and never a zero or any
+   *    other figure in its place. A figure the user gave is kept by default unless the correction says so of it (`keptByDefault`).
+   * ⛔ RETIRED SHORTCUT (Buddy-A §1): before, ANY disposition withdrew a level whose raw value equalled a retired claim's figure, and
+   * the corrected claim was always `describes` (no figure), so a correction could only ever withdraw, never write.
+   * Replaced or withdrawn, Olumi's figures that a link defines from this level go with it (`definedFrom`).
+   */
+  if (e.subject.kind === 'factor' && e.subject.option_id === undefined && e.subject.field === 'level') {
+    const node = nodeOf(graph, e.subject.id);
+    if (typeof node?.label !== 'string') return undefined;
+    const os = isRec(node.observed_state) ? node.observed_state : undefined;
+    const defined = definedFrom(graph, e.subject.id, levelIds);
+    const also = defined.length > 0 ? { defined } : {};
+    const replaced = verifiedReplacement(graph, source, e);
+    if (replaced !== undefined) {
+      const written = replacedObservedState(node, replaced);
+      if (written !== undefined) {
+        return { action: 'level_replaced', label: node.label, observed_state: written, ...also };
+      }
+      return os === undefined ? undefined
+        : { action: 'level_unavailable', label: node.label, incomplete: true, ...(typeof os.unit === 'string' ? { held_unit: os.unit } : {}), ...also };
+    }
+    return os === undefined || !restsOnRetired(e, os) || keptByDefault(e, os) ? undefined : { action: 'level_unavailable', label: node.label, ...also };
+  }
+  if (e.subject.kind !== 'link' || e.subject.field !== 'effect' || e.retirement.disposition !== 'retracted' || e.retained.length > 0) return undefined;
+  const edge = edgeOf(graph, e.subject);
+  if (edge === undefined) return undefined;
+  const p = isRec(edge.provenance) ? edge.provenance : {};
+  const quotes = [e.retirement.quote, ...retired.map((st) => st.quote)];
+  const restsOn = linkSizing(edge) === 'user'
+    || (typeof p.source_quote === 'string' && p.source_quote.trim() !== '' && quotes.some((q) => q.includes(p.source_quote as string) || (p.source_quote as string).includes(q)));
+  const label = labelOfSubject(graph, e.subject);
+  return restsOn && linkSizing(edge) !== 'placeholder' && label !== undefined ? { action: 'link_unsized', expected_edge: structuredClone(edge), label } : undefined;
+}
+
+/**
+ * ⭐ DEPENDENT CURRENTNESS, THE COMPLETE CLOSURE (Buddy-A §1, 20:42 §2; Codex P1-2/P1-3, round 2 finding 2). Olumi's figures, accepted
+ * ones included, that definitional links derive from a corrected level go in the same commit. The walk follows EVERY definitional link,
+ * through a node with no figure, a structural definition or a figure of unknown origin (each kept as it is), and stops only at an
+ * independent value: a figure a person gave, or a factor an edit of this correction decides (`levelIds`). Records are never touched.
+ */
+function definedFrom(graph: unknown, id: string, levelIds: readonly string[]): DefinedFigure[] {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const out: DefinedFigure[] = [], seen = new Set<string>([id]), queue = [id];
+  while (queue.length > 0) {
+    const from = queue.shift()!;
+    for (const x of edges) {
+      const target = x.to;
+      if (x.from !== from || typeof target !== 'string' || seen.has(target) || !isRec(x.provenance) || x.provenance.definitional !== true) continue;
+      seen.add(target);
+      const n = nodeOf(graph, target);
+      const os = isRec(n?.observed_state) ? n.observed_state : undefined;
+      const p = os === undefined ? undefined : valueProvenanceOf(os);
+      if (n === undefined || levelIds.includes(target) || p?.origin === 'human') continue;
+      if (p?.origin === 'ai' && !p.structural && n.kind === 'factor' && typeof n.label === 'string') out.push({ id: target, label: n.label, observed_state: structuredClone(os!) });
+      queue.push(target);
+    }
+  }
+  return out;
+}
+
+/** The level's figure IS one of the claims this correction retires (`isLevelFigure`), and no kept claim still states it. */
+function restsOnRetired(e: Pick<ApprovedCorrectionEdit, 'retirement' | 'retained' | 'expected_record'>, os: Rec): boolean {
+  const statements = e.expected_record?.statements ?? [];
+  const kept = (st: UserStatement): boolean => e.retained.some((span) => st.quote.includes(span));
+  return statements.some((st) => isLevelFigure(st, os)) && !statements.filter(kept).some((st) => isLevelFigure(keptClaim(st, e), os));
+}
+
+/**
+ * ⭐ DEFAULT KEEP (DL-3 decision 1; Buddy-A 20:42 §3): the user's own figure is withdrawn only when the correction says so of THAT figure:
+ * a retraction, a replacement, or earlier context for words stating that figure alone (P1-4). Earlier context for words stating none,
+ * or other figures too (R07's bundled sentence), keeps it, and the card says so. Olumi's figures are never kept by default.
+ */
+function keptByDefault(e: Pick<ApprovedCorrectionEdit, 'retirement' | 'replacement'>, os: Rec): boolean {
+  return valueProvenanceOf(os).origin === 'human' && e.replacement === undefined && e.retirement.disposition === 'historical'
+    && !(figuresWrittenIn(e.retirement.quote) === 1 && figureTheUserWroteSpan(Number(os.raw_value), os.unit, e.retirement.quote) !== null);
+}
+
+/**
+ * ⭐ THE ONE LEVEL-IDENTITY RULE: a claim IS a factor's operative level when it states that same figure in the same unit and period
+ * (`unitComparisonKey`). Never a raw value alone. Retract withdraws only such a level; only such a kept figure exempts a dependent.
+ */
+function isLevelFigure(st: UserStatement, os: Rec): boolean {
+  const held = typeof os.raw_value === 'number' && typeof os.unit === 'string' ? unitComparisonKey(os.unit) : undefined;
+  return held !== undefined && st.low === os.raw_value && st.high === os.raw_value && unitComparisonKey(st.unit) === held;
+}
+
+/** A well-formed replacement figure: finite, a unit as written (period included), and the user's exact words stating it (`span`). */
+function replacementOf(v: unknown): { value: number; unit: string; span?: string } | undefined {
+  return isRec(v) && typeof v.value === 'number' && Number.isFinite(v.value) && typeof v.unit === 'string' && v.unit.trim() !== ''
+    && v.unit.length <= 60 && (v.span === undefined || (typeof v.span === 'string' && v.span.trim() !== '' && v.span.length <= 400))
+    && Object.keys(v).every((k) => k === 'value' || k === 'unit' || k === 'span')
+    ? { value: v.value, unit: v.unit.trim(), ...(typeof v.span === 'string' ? { span: v.span } : {}) } : undefined;
+}
+
+/**
+ * ⭐ A FIGURE IS READ IN ITS WHOLE SOURCE, NEVER IN A CROPPED SPAN (Buddy-A 20:42 §1; Codex round 2 finding 1; DL-3 R3, amended 21:26Z).
+ * The claim door's own readers on the user's whole line (`source.source`): the words are theirs and drop no bound (`verifyStatement`);
+ * the figure is a point, neither asked nor denied (`comparatorTheUserWroteFor`, `wordsTheUserWrote`; a trailing "…, not 40" names the
+ * figure replaced). Whose it is, by the strict scoped reader at that occurrence: `bound`; `another` (a KNOWN other item); `unbound` (an
+ * elliptical answer, the line's only figure: Olumi's reading, labelled). Else nobody's: an unnamed figure among several, or a line giving
+ * this item two figures (a contradiction, as "day shifts take 70" read as the night figure where the model holds no day item).
+ */
+const amountsAsFigures = (q: string): { low: number; high: number }[] => amountsWrittenIn(q).map((x) => ({ low: x.magnitude, high: x.magnitude }));
+function figureOwner(graph: unknown, subject: DoorSubject, line: string, quote: string, value: number, unit: string, at: number, phrase: string):
+  { readonly kind: 'bound' | 'unbound' } | { readonly kind: 'another'; readonly owner: string } | undefined {
+  const verified = verifyStatement({ quote, form: 'point', value, speaker: 'user' }, { now: line },
+    { subject: { quantity: subjectKey(subject), node_id: subject.id }, unit, forms: ['point'], figuresIn: amountsAsFigures, allowsZero: true });
+  if (verified.kind !== 'verified' || verified.statement.low !== value || comparatorTheUserWroteFor(line, value) !== null
+    || quoteSpansIn(line, phrase).length !== 1 || !wordsTheUserWrote(phrase, line)) return undefined;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const label = String(nodeOf(graph, subject.id)?.label ?? '');
+  const others = nodes.filter((n) => n.id !== subject.id && n.kind !== 'option' && n.kind !== 'decision' && typeof n.label === 'string').map((n) => String(n.label));
+  const text = withoutCorrectedFigureTail(line);
+  const reads = (target: string, named: boolean): boolean => figureTheUserWroteForSpan(value, unit, text,
+    { target: [target], others: [label, ...others].filter((x) => x !== target), strict: true, at, ...(named ? { requireNamed: true } : {}) }) !== null;
+  const owner = [label, ...others].find((target) => reads(target, true));
+  const contradicted = amountsWrittenIn(text).some((x) => x.magnitude !== value && figureTheUserWroteForSpan(x.magnitude, unit, text,
+    { target: [label], others, strict: true, requireNamed: true, at: x.index }) !== null);
+  if (contradicted && owner !== undefined && owner !== label) return { kind: 'another', owner };
+  return contradicted ? undefined : owner === label ? { kind: 'bound' } : owner !== undefined ? { kind: 'another', owner } : reads(label, false) ? { kind: 'unbound' } : undefined;
+}
+
+/** ⭐ THE REPLACEMENT BINDS TO ITS OWN QUANTITY (Codex P1-1): only its own exact span, read in its whole line (`figureOwner`). */
+type ReplacementReading = { readonly kind: 'verified'; readonly value: number; readonly unit: string; readonly span: string; readonly bound: boolean }
+  | { readonly kind: 'refused'; readonly owner?: string };
+function readReplacement(graph: unknown, source: UserStatement, e: Pick<CorrectionEditRequest, 'replacement' | 'subject'>): ReplacementReading | undefined {
+  const r = e.replacement === undefined ? undefined : replacementOf(e.replacement);
+  if (r === undefined) return undefined;
+  const line = source.source;
+  const starts = r.span === undefined ? [] : quoteSpansIn(line, r.span);
+  if (r.span === undefined || saidByOf(source) !== 'user' || source.checks?.words_found === false || !source.quote.includes(r.span)
+    || starts.length !== 1) return { kind: 'refused' };
+  // THE one located-amount reader (#3429), on the WHOLE line: the span writes this figure in this unit exactly ONCE, digits or words, as
+  // the user's own (never another speaker's quotation, never an ordinal, a word that counts something). Other figures in the span (the
+  // old one in "45 hours per week, not 40") are context: whose THIS occurrence is, `figureOwner` reads.
+  const end = starts[0]! + r.span.length;
+  const own = amountsWrittenIn(line).filter((x) => x.index < end && starts[0]! < x.index + x.matchedText.length && amountTheUserWrote(x, r.value, r.unit, line));
+  const a = own.length === 1 ? own[0]! : undefined;
+  const from = a === undefined ? 0 : a.index + a.matchedText.length - a.matchedText.trimStart().length;
+  const read = a === undefined ? undefined : figureOwner(graph, e.subject, line, r.span, r.value, r.unit, a.index, line.slice(from, end));
+  return read === undefined ? { kind: 'refused' } : read.kind === 'another' ? { kind: 'refused', owner: read.owner }
+    : { kind: 'verified', value: r.value, unit: r.unit, span: r.span, bound: read.kind === 'bound' };
+}
+function verifiedReplacement(graph: unknown, source: UserStatement, e: Pick<CorrectionEditRequest, 'replacement' | 'subject'>):
+  Extract<ReplacementReading, { kind: 'verified' }> | undefined {
+  const read = readReplacement(graph, source, e);
+  return read?.kind === 'verified' ? read : undefined;
+}
+
+/**
+ * The level as the user's corrected figure, through the value writer's own normaliser (`normaliseFactorValue`), in the model's OWN
+ * unit only: the normaliser refuses a figure in another unit or period (it would silently re-denominate the factor, whose links and
+ * frame were stated in the old one), so it is `undefined` and the correction is incomplete. The stated spread and Olumi's markers of
+ * the old figure go with it.
+ */
+function replacedObservedState(node: Rec, r: { value: number; unit: string }): Rec | undefined {
+  const os = isRec(node.observed_state) ? node.observed_state : undefined;
+  const held = typeof os?.unit === 'string' && os.unit.trim() !== '' ? os.unit : undefined;
+  const num = (x: unknown): number | undefined => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
+  try {
+    const n = normaliseFactorValue({ rawInput: r.value, unit: r.unit, ...(num(os?.cap) !== undefined && num(os?.cap)! > 0 ? { factorCap: num(os?.cap) } : {}),
+      ...(held !== undefined ? { factorUnit: held } : {}), ...(num(os?.value) !== undefined ? { factorObservedValue: num(os?.value) } : {}),
+      ...(num(os?.raw_value) !== undefined ? { factorObservedRawValue: num(os?.raw_value) } : {}),
+      ...(num(node.scale_frame) !== undefined ? { factorScaleFrame: num(node.scale_frame) } : {}), inputHasUnit: true });
+    const { std: _std, extractionType: _x, user_material_unverified: _u, ...kept } = os ?? {};
+    return { ...kept, value: n.value, raw_value: n.raw_value, unit: held ?? r.unit, source: USER_EDIT_SOURCE };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The link as nobody has sized it: Olumi's placeholder at the default strength, in its own direction; the user's figure is gone. */
+function unsizedEdge(edge: Rec): Rec {
+  const sign = isRec(edge.strength) && typeof edge.strength.mean === 'number' && edge.strength.mean < 0 ? -1 : 1;
+  const { natural_effect: _n, source_quote: _q, magnitude: _m, reviewed_by_user: _r, ...rest } = isRec(edge.provenance) ? edge.provenance : {} as Rec;
+  return { ...edge, strength: { ...(isRec(edge.strength) ? edge.strength : {}), mean: sign * STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
+    provenance: { ...rest, source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } };
+}
+
+const labelsOf = (v: unknown): boolean => v === undefined || (isRec(v)
+  && (v.binding === undefined || v.binding === 'olumi_reading') && (v.bound_label === undefined || typeof v.bound_label === 'string')
+  && (v.unheld === undefined || (Array.isArray(v.unheld) && v.unheld.every((x) => typeof x === 'string'))) && (v.approved === undefined || v.approved === true)
+  && (v.replacement_owner === undefined || typeof v.replacement_owner === 'string'));
+const definedListOf = (v: unknown): boolean => v === undefined || (Array.isArray(v) && v.length > 0
+  && v.every((d) => isRec(d) && typeof d.id === 'string' && typeof d.label === 'string' && isRec(d.observed_state)));
+const dependentOf = (v: unknown): boolean => v === undefined || (isRec(v) && typeof v.label === 'string'
+  && ((v.action === 'link_unsized' && isRec(v.expected_edge))
+    || (v.action === 'level_unavailable' && v.expected_edge === undefined && (v.incomplete === undefined || v.incomplete === true)
+      && (v.held_unit === undefined || (v.incomplete === true && typeof v.held_unit === 'string')) && definedListOf(v.defined))
+    || (v.action === 'level_replaced' && isRec(v.observed_state) && definedListOf(v.defined))));
+
+/** What the card says the correction does to a factor's level, each once (AIE bb91dcdd lines; never an incomplete correction called complete). */
+function levelWords(e: ApprovedCorrectionEdit, withdrawnByAnother: ReadonlySet<string>, shown: Set<string>): string[] {
+  if (e.subject.kind !== 'factor' || e.subject.option_id !== undefined || e.subject.field !== 'level') return [];
+  const label = String(e.expected_node.label);
+  const os = isRec(e.expected_node.observed_state) ? e.expected_node.observed_state : undefined;
+  const r = e.replacement === undefined ? undefined : replacementOf(e.replacement);
+  const said = r === undefined ? '' : `${r.value} ${r.unit}`, old = os === undefined ? '' : `${String(os.raw_value)} ${String(os.unit)}`;
+  const d = e.dependent;
+  // Attested by its own span (the prepared record's first claim is that span, with its figure checked); unbound, it says so.
+  const claim = e.record.statements[0];
+  const attested = r !== undefined && claim?.quote === r.span && claim.checks?.figure_found !== false;
+  const reading = attested && claim?.checks?.subject_bound === false ? [bindingReadingWords(label)] : [];
+  const problem = r === undefined || attested ? '' : e.labels?.replacement_owner !== undefined
+    ? `The source gives ${said} for “${e.labels.replacement_owner}”, so this card will not use it for “${label}”. `
+    : `I could not confirm that ${said} describes “${label}” in this source, so this card will not save it there. `;
+  const outcome = d?.action === 'level_replaced' ? `It will use ${said}, your corrected figure, instead.`
+    : d?.action !== 'level_unavailable' ? ''
+      : d.incomplete === true ? `Your corrected figure, ${said}, stays with your words, but the model ${d.held_unit === undefined ? 'cannot hold it on its current scale'
+        : `measures “${label}” in ${d.held_unit}`}, so this correction is incomplete: it will have no current figure until one is given${d.held_unit === undefined ? '' : ` in ${d.held_unit}`}.`
+        : 'It will have no current figure until one is given.';
+  const basis = os !== undefined && restsOnRetired(e, os);
+  const level = os === undefined ? [] : d?.action === 'level_replaced' || d?.action === 'level_unavailable'
+    ? [`${problem}If you approve, “${label}” will no longer use ${old}${basis ? ', because this correction removes the source it rests on' : ''}. ${outcome}${basis ? ' The earlier source remains in the history.' : ''}`]
+    : withdrawnByAnother.has(e.subject.id) ? (problem === '' ? [] : [problem.trim()])
+      : [`${problem}${valueProvenanceOf(os).origin === 'human' ? `${old} stays as stated for “${label}”.${basis ? ' If it no longer holds, say so.' : ''}`
+        : `The current figure for “${label}”, ${old}, stays as it is.`}`];
+  // AIE bb91dcdd: a dependent goes because its inputs changed, never because it was proved false.
+  const defined = definedOf(e).filter((x) => !shown.has(x.id)).map((x) => {
+    shown.add(x.id);
+    return `If you approve, the calculation for “${x.label}” will become unavailable because its inputs have changed. This does not establish that the earlier result was false; its source remains in the history.`;
+  });
+  return [...reading, ...(os === undefined && problem !== '' ? [problem.trim()] : []), ...level, ...defined];
+}
+
 /** All changes are existing record/source members. The complete old/new bytes are available before approval. */
-export function statementCorrectionWords(c: StatementCorrection | { readonly selected_label: string; readonly bound_label?: string }
-  | { readonly readings: readonly string[]; readonly source_state: 'missing' | 'partial' | 'reported' | 'unknown';
-    readonly source_words?: string; readonly excerpt_words?: string }, legacy = false): string {
-  if ('readings' in c) return ['Review the correction’s source',
-    ...[...new Set(c.readings)].map(reading => `Olumi’s reading: ${reading}.`),
-    c.source_state === 'missing' ? 'Olumi could not find words of your own stating this correction. This review does not authorise a change.'
-      : c.source_state === 'partial' ? 'Olumi could not verify this excerpt as the complete applicable statement. This review does not authorise a change.'
-        : c.source_state === 'reported' ? 'These words report another speaker’s view; they do not establish that you assert the reported correction. This review does not authorise a change.'
-          : 'Olumi could not establish who asserted these words. This review does not authorise a change.',
-    ...(c.excerpt_words === undefined ? [] : [`Excerpt — your recorded words: “${c.excerpt_words}”.`]),
-    ...(c.source_words === undefined ? [] : [c.source_state === 'partial' ? `Recorded words — you: “${c.source_words}”.`
-      : c.source_state === 'reported' ? `Reported words — speaker unknown: “${c.source_words}”.` : `Words — speaker unknown: “${c.source_words}”.`]),
-  ].join('\n');
-  if ('selected_label' in c) return c.bound_label === undefined
-    ? 'Olumi could not establish which item these words concern. Which item should this correction concern?'
-    : `Olumi reads these words as referring to “${c.bound_label}”, rather than “${c.selected_label}”. Which item should this correction concern?`;
+/**
+ * ⭐ GATE → LABEL (change 1): the ONE label line for words the host's binder does not bind to the item they are applied to: which item
+ * they concern is Olumi's reading, and the press confirms it (`bound_label`: the item the binder read them as naming instead).
+ */
+export const bindingReadingWords = (selected: string, boundLabel?: string): string => `Olumi’s reading: these words concern “${selected}”.`
+  + (boundLabel === undefined ? '' : ` Olumi’s item reader matched them to “${boundLabel}” instead; approve only if “${selected}” is the item you mean.`);
+
+export function statementCorrectionWords(c: StatementCorrection | { readonly readings: readonly string[] }, legacy = false): string {
+  // No words of the user's at all: a non-authorising review, never a card (every other source is a labelled card).
+  if ('readings' in c) return ['Review the correction’s source', ...[...new Set(c.readings)].map(reading => `Olumi’s reading: ${reading}.`),
+    'Olumi could not find words of your own stating this correction. This review does not authorise a change.'].join('\n');
   const amountWords = (s: UserStatement): string[] => {
     const unit = s.unit ? ` ${s.unit}` : ' (unit unknown)';
     if (s.low !== undefined && s.high !== undefined) return [s.low === s.high
@@ -446,30 +885,46 @@ export function statementCorrectionWords(c: StatementCorrection | { readonly sel
     lead: 'timing', effect: 'effect', measure: 'meaning', relation: 'explanation' };
   const recordWords = (record: UserStatementRecord | null): string => record === null ? 'No earlier source was recorded.'
     : record.statements.map(s => [
-      legacy || s.speaker === 'user' ? `Your words: “${s.source}”.` : `Recorded words — speaker/source unknown: “${s.source}”.`,
+      legacy || saidByOf(s) === 'user' ? `Your words: “${s.source}”.` : saidByOf(s) === 'party' ? `Reported source: ${s.party}${s.relayed_by === 'user' ? ', as relayed by you' : ''}. “${s.source}”.`
+        : `Recorded words — speaker/source unknown: “${s.source}”.`,
       ...(s.quote === s.source ? [] : [`Quoted words: “${s.quote}”.`]), ...amountWords(s),
       ...(s.reference === undefined ? [] : [`Reference: ${s.reference}.`]), ...(s.period === undefined ? [] : [`Period: ${s.period}.`]),
       ...(s.qualifier === undefined ? [] : [`Olumi’s reading of the relevant words: ${s.qualifier}.`]),
       ...(s.conditions === undefined ? [] : [`Scope and conditions: ${s.conditions}.`]),
       ...(s.negated === true ? ['The statement is negated.'] : []),
     ].join('\n')).join('\n');
+  // ⭐ GATE → LABEL: who the correction's words are, as established; never a bare "yours" for words the host could not find.
+  const by = saidByOf(c.source);
+  const sourceWords = by === 'user' ? `Recorded words — you: “${c.source.source}”.`
+    : by === 'party' ? `Reported source: ${c.source.party}${c.source.relayed_by === 'user' ? ', as relayed by you' : ''}. “${c.source.source}”.`
+      : c.source.checks?.words_found === false ? `Olumi’s proposed reading — source unverified: “${c.source.quote}”.`
+        : `Recorded words — speaker/source unknown: “${c.source.source}”.`;
+  // Each figure worked out from a corrected level is named once on the card, and never said to stay.
+  const withdrawn = new Set(c.edits.flatMap((x) => definedOf(x).map((d) => d.id))), shown = new Set<string>();
   return [legacy ? `From your message: “${c.source.quote}”. Olumi proposes this reading of your correction.`
-    : `Review Olumi’s proposed correction\nRecorded words — you: “${c.source.source}”.`,
+    : `Review Olumi’s proposed correction\n${sourceWords}`,
     ...c.edits.flatMap(e => [
       `For ${String(e.expected_node.label)}, correct the ${fieldWords[e.subject.field] ?? 'account'}.`,
+      ...(e.labels?.binding === 'olumi_reading' ? [bindingReadingWords(String(e.expected_node.label), e.labels.bound_label)] : []),
+      ...(e.labels?.unheld === undefined ? [] : [`Olumi could not find ${e.labels.unheld.map(q => `“${q}”`).join(' or ')} in the recorded source; what is withdrawn or kept here is Olumi’s reading.`]),
+      ...(e.labels?.approved === true ? ['This replaces a record you approved on its card. That approval stays in its history and no longer applies once this correction is approved.'] : []),
+      ...(e.dependent?.action === 'link_unsized' ? [`If you approve, the size of the relationship “${e.dependent.label}” will become unavailable because this correction removes the source it rests on.`] : []),
+      ...levelWords(e, withdrawn, shown),
       ...(legacy ? [] : [`Olumi’s reading: ${e.reading_words}. Proposed change to “${String(e.expected_node.label)}” — ${fieldWords[e.subject.field] ?? 'account'}:`]),
-      e.retirement.disposition === 'retracted' ? `Withdraw “${e.retirement.quote}” from the current account.`
-        : `Keep “${e.retirement.quote}” only as earlier context.`,
+      // A retirement wholly inside an explicitly kept span retires nothing (the keep wins, `keptClaim`): no line says otherwise.
+      ...(e.retained.some((span) => span.includes(e.retirement.quote)) ? [] : [e.retirement.disposition === 'retracted'
+        ? `Withdraw “${e.retirement.quote}” from the current account.` : `Keep “${e.retirement.quote}” only as earlier context.`]),
       `Keep explicitly: ${e.retained.length ? e.retained.map(q => `“${q}”`).join('; ') : 'nothing from the retired record'}.`,
       ...e.retained.filter(span => !e.expected_record?.statements.some(s => s.quote.includes(span)))
         .map(span => `For the earlier words “${span}”, the original speaker and source are unknown. Your current correction is the human source; it does not verify who supplied those earlier words.`),
       `Earlier source and reading:\n${recordWords(legacy ? e.expected_record
-        : recordsWithUnknownSpeakerOn(e.expected_node).find(r => r.subject_key === subjectKey(e.subject)) ?? e.expected_record)}`,
+        : claimRecordsOn(e.expected_node).find(r => r.subject_key === subjectKey(e.subject)) ?? e.expected_record)}`,
       `${legacy ? '' : '→\n'}Replacement source and reading:\n${recordWords(legacy ? e.record : { ...e.record,
-        statements: [...e.record.statements, ...correctionUnknowns(e.expected_node, e.subject)] })}`,
+        statements: [...e.record.statements, ...correctionOthers(e.expected_node, e.subject)] })}`,
       ...(e.legacy === undefined ? [] : [`${e.legacy.field === 'dependency' ? 'Recorded dependency' : 'Current evidence claim'}: “${e.legacy.expected}” → ${e.legacy.replacement === null ? 'removed from current evidence' : `“${e.legacy.replacement}”`}.`]),
     ]),
-    'Only the explicitly kept parts remain current from the earlier account; its other content is withdrawn or kept as earlier context as shown. This card records only the listed source corrections. Other changes need their own supported card. Unknowns, figures, link strengths, options, settings and other people’s recorded views remain unchanged. This records meaning; it does not calculate a numerical effect. Your quote stays yours; the reading remains Olumi’s after approval.',
+    // AIE bb91dcdd closing line: one for every card, since each change it makes is listed above it.
+    'If you approve, this card will save only the changes listed above. Your original source remains in the history, and Olumi’s interpretation stays separate from it.',
     ...(legacy ? [] : ['Approving authorises only this displayed change as an Olumi reading; it does not make it something you said.']),
   ].join('\n');
 }
@@ -480,60 +935,94 @@ export function prepareStatementCorrection(graph: unknown, request: StatementCor
     if (diagnostic !== undefined) diagnostic.failed_check = check;
     return { refused: reason, ...(words === undefined ? {} : { words }) };
   };
-  // The existing preconditions, in the same order; the observation never grants permission or enters the record.
+  // Structure only: the observation never grants permission or enters the record.
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return refused('correction_not_stated', 'correction.graph_shape');
   const readings = Array.isArray(request?.edits) ? request.edits.flatMap(e => isRec(e) && typeof e.reading_words === 'string' ? [e.reading_words] : []) : [];
-  if (typeof request?.quote !== 'string') return refused('correction_not_stated', 'correction.quote_present',
-    statementCorrectionWords({ readings, source_state: 'missing' }));
-  // Recover ONLY the same complete line in the existing quote reader's spelling, never an omitted remainder or another speaker.
+  if (typeof request?.quote !== 'string' || request.quote.trim() === '') return refused('correction_not_stated', 'correction.quote_present',
+    statementCorrectionWords({ readings }));
+  if (!Array.isArray(request.edits) || request.edits.length === 0) return refused('correction_not_stated', 'correction.edits_nonempty');
+  // ⭐ GATE → LABEL (GATE-TO-LABEL-DESIGN 5; Codex co-design §1): WHO the correction's words are is a label on its card, never a refusal.
+  // The complete line of this message that holds them, in the quote reader's spelling; else the words as the AI gave them, unverified.
   const line = verbatimSourceLine({ now: texts.now }, request.quote);
   const quote = line !== undefined && plainQuoteWords(line) === plainQuoteWords(request.quote) ? line : request.quote;
-  if (!wholeStatementIn(texts.now ?? '', quote)) {
-    // Display only facts from the existing literal/whole-statement and paired-speech readers; no source permission changes.
-    const speech = speechReading(texts.now ?? ''), said = speechReading(request.quote).text;
-    const spans = quoteSpansIn(speech.text, said);
-    const quoted = spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length));
-    const reported = quoted && request.speaker === 'other';
-    const partial = !quoted && spans.length > 0 && line !== undefined && wholeStatementIn(texts.now ?? '', line);
-    return refused('correction_not_stated', 'correction.quote_whole_current_turn', statementCorrectionWords({ readings,
-      source_state: reported ? 'reported' : partial ? 'partial' : spans.length === 0 && line === undefined ? 'missing' : 'unknown',
-      ...(line === undefined ? {} : { source_words: line }), ...(partial ? { excerpt_words: request.quote } : {}) }));
-  }
-  if (!Array.isArray(request.edits) || request.edits.length === 0) return refused('correction_not_stated', 'correction.edits_nonempty');
   const edits: ApprovedCorrectionEdit[] = [];
-  let source: UserStatement | undefined;
   const requested: readonly CorrectionEditRequest[] = request.edits;
+  let source: UserStatement | undefined;
   for (const e of requested) {
     if (!isRec(e) || !isRec(e.subject)) return refused('invalid_statement', 'correction.edit_subject_shape');
     const node = nodeOf(graph, e.subject?.id);
     if (node === undefined) return refused('node_not_found', 'correction.edit_subject_exists');
-    const verified = verifyStatements([{ quote, form: 'describes', ...(request.speaker !== undefined ? { speaker: request.speaker } : {}) }], texts,
-      { subject: { quantity: subjectKey(e.subject), node_id: e.subject.id }, unit: '', forms: ['describes'], figuresIn: () => [] });
-    if (verified.kind === 'refused') return refused(verified.refusal, `correction.source.${verified.refusal}`,
-      request.speaker === 'other' || request.speaker === 'unknown' ? statementCorrectionWords({ readings,
-        source_state: request.speaker === 'other' ? 'reported' : 'unknown', source_words: line ?? quote }) : undefined);
-    source = verified.statements[0]!;
-    if (!Array.isArray(e.retained)) return refused('retained_list_required', 'correction.retained_list');
+    if (!Array.isArray(e.retained) || isRec(e.retirement) === false || typeof e.retirement?.quote !== 'string') return refused('retained_list_required', 'correction.retained_list');
+    source ??= correctionSource(request, quote, line, texts, e.subject);
     const expected = e.expected_record === undefined ? userStatementFor(graph, e.subject) ?? null : e.expected_record;
-    if (protectedAttestation(expected)) return refused('correction_attestation_protected', 'correction.protected_attestation');
-    edits.push({ ...e, expected_record: expected, expected_node: structuredClone(node),
-      record: userStatementRecord(e.subject, replacementStatements(source, { ...e, expected_record: expected }), at,
-        correctionAttest({ ...e, expected_record: expected })) });
+    // ⭐ R07 FIRST LOSS (real-AI replay on 94b330bd: the offer was refused `node_changed`). The AI attached a legacy expectation to a
+    // carrier this item does not hold at all. That is no stale preimage: nothing there changes, and the card SAYS Olumi could not find
+    // those words (a label, never a refusal). A carrier the item DOES hold with other words is still stale (`node_changed`).
+    const legacyUnheld = e.legacy !== undefined && legacyOf(node, e.legacy.field) === undefined;
+    const { legacy: _unheldLegacy, ...withoutLegacy } = e;
+    const draft = { ...(legacyUnheld ? withoutLegacy : e), expected_record: expected };
+    // The labels: what the host could not establish, said on the card.
+    const found: { subject?: DoorSubject } = {};
+    let binding = statementBoundTo(graph, e.subject, source.quote, context, undefined, [], found, draft);
+    if (binding === 'unbound') binding = statementBoundTo(graph, e.subject, source.quote, {}, undefined, requested.map(x => x.subject), found, draft);
+    const oldQuotes = [...(expected?.statements.map(st => st.quote) ?? []), ...correctionUnknowns(node, e.subject).map(st => st.quote),
+      ...(e.legacy !== undefined && !legacyUnheld ? [e.legacy.expected] : [])];
+    const unheld = [e.retirement.quote, ...e.retained, ...(legacyUnheld ? [e.legacy!.expected] : [])].filter((q) => !oldQuotes.some((old) => old.includes(q)));
+    const boundLabel = binding === 'another' ? labelOfSubject(graph, found.subject) : undefined;
+    const replacement = readReplacement(graph, source, draft);
+    const labels = { ...(binding === 'bound' ? {} : { binding: 'olumi_reading' as const, ...(boundLabel === undefined ? {} : { bound_label: boundLabel }) }),
+      ...(unheld.length > 0 ? { unheld } : {}), ...(protectedAttestation(expected) ? { approved: true as const } : {}),
+      ...(replacement?.kind === 'refused' && replacement.owner !== undefined ? { replacement_owner: replacement.owner } : {}) };
+    if (draft.replacement !== undefined && replacementOf(draft.replacement) === undefined) return refused('invalid_statement', 'correction.replacement_shape');
+    const dependent = dependentAction(graph, draft, source!, levelIdsOf(graph, requested, source!));
+    const history = retiredHistory(draft);
+    edits.push({ ...draft, expected_node: structuredClone(node),
+      record: { ...userStatementRecord(e.subject, replacementStatements(graph, source, draft), at, correctionAttest(draft)), ...(history.length > 0 ? { history } : {}) },
+      ...(Object.keys(labels).length > 0 ? { labels } : {}), ...(dependent !== undefined ? { dependent } : {}) });
   }
   const correction: StatementCorrection = { source: source!, edits,
     ...(context.selection === undefined && context.preceding_ask === undefined ? {} : { binding_context: structuredClone(context) }) };
-  const observed = diagnostic ?? {};
-  const written = applyStatementCorrection(graph, correction, observed);
-  if (written.refused === 'unrelated_correction') {
-    const edit = edits[observed.failed_edit_index!];
-    const bound = observed.bound_subject;
-    const boundNode = bound === undefined ? undefined : nodeOf(graph, bound.id);
-    const end = bound?.to_id === undefined ? undefined : nodeOf(graph, bound.to_id);
-    const boundLabel = typeof boundNode?.label !== 'string' || (bound?.kind === 'link' && typeof end?.label !== 'string') ? undefined
-      : bound?.kind === 'link' ? `${boundNode.label} → ${String(end!.label)}` : boundNode.label;
-    return { refused: written.refused, words: statementCorrectionWords({ selected_label: String(edit?.expected_node.label ?? 'the selected item'),
-      ...(observed.binder_result !== 'another' || boundLabel === undefined ? {} : { bound_label: boundLabel }) }) };
-  }
+  const written = applyStatementCorrection(graph, correction, diagnostic ?? {});
   if (written.refused || written.candidate === undefined) return refused(written.refused ?? 'invalid_statement', diagnostic?.failed_check ?? `correction.postimage.${written.refused ?? 'invalid_statement'}`);
   return { correction, candidate: written.candidate, words: statementCorrectionWords(correction) };
 }
+
+/**
+ * The correction's own source, attributed (spec v2; AIE 14:00Z ORIGIN): the user's complete statement in this message; another
+ * speaker's view they report, as that party's; else the words as the AI gave them, speaker unresolved and `words_found` false. A
+ * failed literal check changes the label, never the speaker the words are read as.
+ */
+function correctionSource(request: StatementCorrectionRequest, quote: string, line: string | undefined, texts: { now?: string; conversation?: string },
+  subject: DoorSubject): UserStatement {
+  const about = { quantity: subjectKey(subject), node_id: subject.id };
+  // ⛔ Quoted-speaker laundering stays impossible (Codex co-design §1): words that sit inside another speaker's paired quotation marks in
+  // this message are THAT speaker's view the user reports — the named party where the AI names one, else unresolved — never the
+  // user's own correction, whatever speaker the AI read. Evidence for the label, not a refusal.
+  const speech = speechReading(texts.now ?? ''), said = speechReading(quote).text;
+  const spans = quoteSpansIn(speech.text, said);
+  if (spans.length > 0 && spans.every(at => speech.inSpeech(at) || speech.inSpeech(at + said.length))) {
+    const party = typeof request.party === 'string' && request.party.trim() !== '' && (request.speaker === 'other' || request.said_by === 'party')
+      ? request.party.trim() : undefined;
+    return { ...(party !== undefined ? { said_by: 'party' as const, party, relayed_by: 'user' as const } : { said_by: 'unknown' as const }),
+      quote, source: line ?? quote, subject: about, form: 'describes', reading: 'olumi' };
+  }
+  // A correction is what the user says NOW: only this turn's typed words can be its source. Words held from earlier (the user's or
+  // retained) are labelled unverified for this correction, never relabelled as a new statement of theirs.
+  const verified = verifyStatements([{ quote, form: 'describes', ...(request.speaker !== undefined ? { speaker: request.speaker } : {}),
+    ...(request.said_by !== undefined ? { said_by: request.said_by } : {}), ...(request.party !== undefined ? { party: request.party } : {}) }],
+  { now: texts.now }, { subject: about, unit: '', forms: ['describes'], figuresIn: () => [], claims: true });
+  // The claim door's verifier labels words not in THIS message as found nowhere; a correction labels them by whether the
+  // conversation holds them at all (below), as before the claim door's labels.
+  if (verified.kind === 'verified' && verified.statements[0]!.checks?.words_found !== false) return verified.statements[0]!;
+  // Words not found as anyone's in the messages: kept as the AI gave them, speaker unresolved, labelled.
+  const found = line !== undefined || spans.length > 0;
+  return { said_by: 'unknown', quote, source: line ?? quote, subject: about, form: 'describes', reading: 'olumi',
+    checks: { words_found: found, figure_found: true, unit_found: true } };
+}
+
+export const labelOfSubject = (graph: unknown, subject: DoorSubject | undefined): string | undefined => {
+  if (subject === undefined) return undefined;
+  const from = nodeOf(graph, subject.id), to = subject.to_id === undefined ? undefined : nodeOf(graph, subject.to_id);
+  if (typeof from?.label !== 'string' || (subject.kind === 'link' && typeof to?.label !== 'string')) return undefined;
+  return subject.kind === 'link' ? `${from.label} → ${String(to!.label)}` : from.label;
+};

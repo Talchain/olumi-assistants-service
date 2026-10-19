@@ -8,7 +8,7 @@ import { wholeStatementIn } from '../goal-target/input-claim-context.js';
 import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { riskOccurrenceAskWords, riskOccurrenceSubject, SET_RISK_OCCURRENCE_OP } from '../agent-lane/risk-occurrence.js';
 import type { StatementAsk } from './ask.js';
-import { readStatement, type DoorContext, type DoorQuote } from './read.js';
+import { boundReading, readStatement, type DoorContext, type DoorQuote } from './read.js';
 import { doorRowFor, ROLE_TABLE, rowKey, type RoleRow } from './role-table.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from './subject.js';
 import { RECORD_STATEMENT_OP, type DoorWriteMember } from './write.js';
@@ -60,12 +60,28 @@ export function doorCardOf(op: { readonly op: string; readonly value?: unknown }
 export const doorRowOf = (card: Pick<DoorCard, 'field' | 'carrier'>): RoleRow | undefined => ROLE_TABLE.find((r) => rowKey(r) === rowKey(card));
 
 /**
+ * The receipt after a confirmed write and read-back: the row's words, then (GATE → LABEL; Codex amendment 2) the card's labels as the
+ * record keeps them: never a bare "yours" for an item Olumi chose, nor for words found in no message of the user's.
+ */
+export function doorRecordedWords(row: RoleRow, card: DoorCard, graph: unknown): string {
+  const words = row.recordedWords(card.statements, card.subject, card.label, graph).trim();
+  const figure = card.statements.some((s) => s.low !== undefined || s.high !== undefined);
+  const labels = [...(card.statements.some((s) => s.checks?.subject_bound === false)
+    ? [`${figure ? 'Your figure' : 'Your words'}, applied to “${card.label}”: Olumi’s reading, approved by you.`] : []),
+  ...(card.statements.some((s) => s.checks?.words_found === false)
+    ? ['Olumi could not find the quoted words in your messages, so their source stays unverified.'] : [])];
+  return labels.length === 0 ? words : `${words}${/[.!?…]”?$/.test(words) ? '' : '.'} ${labels.join(' ')}`;
+}
+
+/**
  * The card's write as its member's OWN operation (the operation that member's press, preview and held-card rule already read),
  * or `undefined` for a member the door does not carry yet.
  */
-export function asMemberOp(op: { readonly op: string; readonly value?: unknown }): ProposalOperation | undefined {
-  const card = doorCardOf(op);
-  if (card === undefined || !isRec(card.payload)) return undefined;
+export function asMemberOp(op: { readonly op: string; readonly value?: unknown }, pressed?: { readonly proposal_id: string }): ProposalOperation | undefined {
+  const found = doorCardOf(op);
+  if (found === undefined || !isRec(found.payload)) return undefined;
+  const card = pressed === undefined ? found : { ...found, payload: confirmedBy(found.payload, pressed.proposal_id) };
+  if (!isRec(card.payload)) return undefined;
   if (card.member === 'risk_occurrence' && typeof card.payload.risk_id === 'string') {
     return { op: SET_RISK_OCCURRENCE_OP, path: card.payload.risk_id, value: card.payload };
   }
@@ -81,6 +97,27 @@ export function asMemberOp(op: { readonly op: string; readonly value?: unknown }
     return { op: SET_OPTION_CAPACITY_CHANGE_OP, path: card.payload.option_id, value: card.payload };
   }
   return undefined;
+}
+
+/**
+ * ⭐ CLAIM RECORD (spec v2 §1, rule 5): the press confirms the card's NEW claims, each with the host's receipt (the displayed card's
+ * proposal id). Claims the payload carries with a status already (another speaker's, kept beside it) are untouched; `said_by` never
+ * moves. Applied to the member's payload before its write and its read-back, so both hold the same claims. ⭐ GATE → LABEL: a
+ * statement whose item is Olumi's reading (`checks.subject_bound: false`) carries the receipt wherever its member stores it (a risk's
+ * statement, a forecast's, an option's), so the record says the user approved that reading.
+ */
+function confirmedBy(payload: Rec, proposalId: string): Rec {
+  const approval = { proposal_id: proposalId };
+  const readingApproved = (v: unknown): unknown => (Array.isArray(v) ? v.map(readingApproved) : !isRec(v) ? v
+    : isRec(v.checks) && v.checks.subject_bound === false && typeof v.quote === 'string' && v.approval === undefined ? { ...v, approval }
+      : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, readingApproved(x)])));
+  const labelled = readingApproved(payload) as Rec;
+  const said = isRec(labelled.user_statement) ? labelled.user_statement : undefined;
+  const record = said !== undefined && isRec(said.record) ? said.record : undefined;
+  if (record === undefined || !Array.isArray(record.statements)) return labelled;
+  const statements = record.statements.map((st: unknown) => (isRec(st) && st.status === undefined
+    ? { ...st, status: 'confirmed', approval } : st));
+  return { ...labelled, user_statement: { ...said, record: { ...record, statements } } };
 }
 
 /** The door's operation for a card: ONE `record_statement`, keyed by its subject. */
@@ -130,7 +167,8 @@ export function typedDoorStatement(graph: unknown, typed: string | null | undefi
   const risks = nodesOf(graph).filter((n) => n.kind === 'risk' && typeof n.id === 'string' && typeof n.label === 'string');
   const found = risks.flatMap((n) => statementsIn(typed).flatMap((quote) => {
     const subject: DoorSubject = { kind: 'risk', id: String(n.id), field: 'occurrence' };
-    return readStatement(graph, subject, String(n.label), [quote], { now: typed }, { ...ctx, asks: ctx.asks ?? doorAsks(graph) }).kind === 'read'
+    // Only words the binder binds to this risk: an item that is Olumi's reading is never issued by elimination.
+    return boundReading(readStatement(graph, subject, String(n.label), [quote], { now: typed }, { ...ctx, asks: ctx.asks ?? doorAsks(graph) }))
       ? [{ subject, quotes: [quote] }] : [];
   }));
   return found.length === 1 ? found[0] : undefined;
@@ -151,7 +189,7 @@ export function typedWindowAnswer(graph: unknown, typed: string | null | undefin
     const ask = windowHoldsAskOf(graph, String(n.id));
     if (ask === undefined || !ctx.preceding_ask!.includes(ask)) return [];
     const subject: DoorSubject = { kind: 'risk', id: String(n.id), field: 'holds_now' };
-    return readStatement(graph, subject, String(n.label), [{ quote, answering: ask }], { now: typed }, { ...ctx, asks: ctx.asks ?? doorAsks(graph) }).kind === 'read'
+    return boundReading(readStatement(graph, subject, String(n.label), [{ quote, answering: ask }], { now: typed }, { ...ctx, asks: ctx.asks ?? doorAsks(graph) }))
       ? [{ subject, quotes: [{ quote, answering: ask }] }] : [];
   });
   return found.length === 1 ? found[0] : undefined;

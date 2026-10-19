@@ -13,7 +13,7 @@ import { statedTailParts } from '../../agent-lane/same-unit.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf, type ApprovedStatementRecord } from '../../goal-target/cohort-forecast-write.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { holdsUserStatement, userStatementRecord } from '../statements.js';
+import { holdsUserStatement, userStatementRecord, withClaimsKept } from '../statements.js';
 import type { DoorSubject } from '../subject.js';
 import type { DoorWrite, FieldWriter } from '../write.js';
 
@@ -91,7 +91,8 @@ export const LINK_EFFECT_RANGE_ROW: RoleRow = {
 export function linkEffectRangeRecord(graph: unknown, subject: DoorSubject, reading: DoorReading, at: string): ApprovedStatementRecord | undefined {
   const from = nodesOf(graph).find((n) => n.id === subject.id);
   if (from === undefined || !linkHeld(subject, graph) || reading.statements.length !== 1 || reading.statements[0]!.form !== 'range') return undefined;
-  return { node_id: subject.id, expected_node: structuredClone(from), user_statement: { subject, record: userStatementRecord(subject, reading.statements, at) } };
+  // Another party's or the user's earlier view of this link stays beside it (claim record spec v2 rule 1); the same source's is superseded.
+  return { node_id: subject.id, expected_node: structuredClone(from), user_statement: { subject, record: withClaimsKept(graph, subject, userStatementRecord(subject, reading.statements, at)) } };
 }
 
 /** The adapter onto the `statement_record` member: the record alone; no edge byte moves. */

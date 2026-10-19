@@ -33,7 +33,7 @@ import {
 import type { StatementAsk } from '../ask.js';
 import type { DoorReading } from '../read.js';
 import type { RoleRow } from '../role-table.js';
-import { holdsUserStatement, userStatementOnNode, userStatementRecord, userStatementRecordOf, type UserStatementRecord } from '../statements.js';
+import { holdsUserStatement, userStatementOnNode, userStatementRecord, claimRecordOf, type UserStatementRecord } from '../statements.js';
 import { subjectKey, type DoorSubject } from '../subject.js';
 import type { FieldWriter } from '../write.js';
 
@@ -431,7 +431,7 @@ export const TIMING_ROW: RoleRow = {
 /** The read-back: the reading the card showed with the flag it set, and the user's words recorded (the stored JSON payload only). */
 export function timingHolds(payload: unknown, after: unknown): boolean {
   if (!isRec(payload) || typeof payload.goal_id !== 'string' || !isRec(payload.expected_basis) || !isRec(payload.user_statement)) return false;
-  const record = userStatementRecordOf(payload.user_statement.record);
+  const record = claimRecordOf(payload.user_statement.record);
   const s = isRec(payload.user_statement.subject) ? payload.user_statement.subject : undefined;
   if (record === undefined || s === undefined || typeof s.id !== 'string' || s.field !== 'lead') return false;
   const goalId = payload.goal_id;

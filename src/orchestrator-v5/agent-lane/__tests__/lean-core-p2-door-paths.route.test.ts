@@ -54,14 +54,26 @@ describe('B1: the statement door hands the AI speaker reading to the ONE verifie
 describe('B2: an assumption claimed as the user\'s figure WITH its statement is theirs only through the ONE verifier', () => {
   const REPORT = 'A colleague said: Team effort is 40 hours a week.';
   const OWN = 'Team effort is 40 hours a week.';
-  it.each(['other', 'unknown'])('a reported revision the AI reads as "%s" prepares nothing (never authored_by user_stated)', async (speaker) => {
+  // ⭐ GATE → LABEL (change 1; Codex amendment 1): the report is the card's LABEL, never a refusal and never the user's figure. The
+  // protection these rows guarded stays: no "your figure", no "you gave", and the write is human material whose role is unverified
+  // (`user_material_unverified`, read as never yours and never Olumi's), quoted with its source.
+  it.each(['other', 'unknown'])('a reported revision the AI reads as "%s" is a labelled card, never "your figure"', async (speaker) => {
     const { caps, store } = world();
     const r = await dispatchTool('propose_assumptions', JSON.stringify({ assumptions: [{
       factor_label: 'Team effort', value: 40, unit: 'hours a week', basis: 'the user gave 40 hours', user_stated: true, revise: true,
       statements: [{ quote: REPORT, speaker, form: 'point', value: 40 }] }] }), ctx(REPORT) as never, caps) as Rec;
-    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'level_not_stated' });
-    expect(r).not.toHaveProperty('proposal_id');
-    expect(store.outstanding(SCENARIO, null)).toEqual([]);
+    const source = `Recorded words — speaker/source unknown: “${REPORT}”`;
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false, assumptions: [{ factor: 'Team effort', value: 40, replaces: 30,
+      user_material_unverified: true, not_the_users_statement: source }] });
+    expect((r.assumptions as Rec[])[0]).not.toHaveProperty('your_figure');
+    expect(r.public_label).toBe(`${source}. The quoted source is retained as shown; approving does not make it your own statement of the figure. `
+      + 'Revise 1 value: Team effort: 30 hours a week → 40 hours a week (not verified as a figure you stated)');
+    // NEGATIVE: a reported figure is Olumi's reading of the binding, never a change the user asked for.
+    expect(r.public_label).not.toContain('you asked to change');
+    const p = store.get(String(r.proposal_id))!;
+    expect(p.provenance.authored_by).toBe('model_proposed');
+    expect(p.operations).toEqual([expect.objectContaining({ op: 'set_factor_value', path: 'effort',
+      value: expect.objectContaining({ value: 40, user_material_unverified: true, confirmation: { source: REPORT, quote: REPORT } }) })]);
   });
 
   it('CONTRAST: the user\'s own revision, read as theirs, prepares the card as theirs', async () => {

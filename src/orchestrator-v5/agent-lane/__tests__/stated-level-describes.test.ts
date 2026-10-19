@@ -71,13 +71,41 @@ describe('S2 describes: the user’s words about a factor are kept as theirs; it
     expect(valueClassOf(os), 'Olumi’s estimate, accepted: never the user’s stated figure').toBe('user_ratified');
     expect(((buildCanonicalAnalysisReadyFromGraph(p.graph()) as Rec).blockers ?? []).filter((b: Rec) => b.factor_id === FACTOR)).toEqual([]);
   });
-  it('never on other words: a partial quote, or retained unverified words, prepares nothing', async () => {
+  // ⭐ GATE → LABEL R5 (real path, Codex amendment 1 "approval never changes who supplied a claim"): a figure the user RELAYS from a named
+  // party is a card quoting that party, never "your figure"; its press writes human material whose role stays unverified, never theirs.
+  it('R5: a relayed party’s figure → labelled card → the press → kept as unverified human material, never the user’s stated figure', async () => {
+    const p = product();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const relayed = 'My cofounder reckons our marketing experience is a 20.';
+    const card = await caps.proposeAssumptions(ctx({ user_text: [BODY.brief_text, relayed].join('\n'), user_turn_text: relayed }) as never, { assumptions: [{
+      factor_label: 'Founder marketing experience', value: 20, unit: '', user_stated: true, basis: 'the cofounder’s figure',
+      statements: [{ quote: relayed, said_by: 'party', party: 'My cofounder', form: 'point', value: 20 }] }] } as never) as Rec;
+    expect(card, JSON.stringify(card)).toMatchObject({ ok: true, mutated: false, assumptions: [{ value: 20, user_material_unverified: true,
+      not_the_users_statement: `Reported source: My cofounder, as relayed by you: “${relayed}”` }] });
+    expect(card.assumptions).toEqual([expect.not.objectContaining({ your_figure: true })]);
+    expect(String(card.public_label)).toMatch(/^Reported source: My cofounder, as relayed by you: “My cofounder reckons our marketing experience is a 20\.”\. The quoted source is retained as shown; approving does not make it your own statement of the figure\. Use 1 figure from the quoted words: /);
+    expect(p.node().observed_state ?? null, 'nothing before the press').toBeNull();
+    // Its press is the card's own (a card whose figure carries its source binds only the displayed card).
+    const pressed = await caps.authoriseChange(ctx({ user_text: 'Yes', typed_approval_of: String(card.proposal_id) }) as never, { proposal_id: String(card.proposal_id) });
+    expect(pressed, JSON.stringify(pressed)).toMatchObject({ ok: true });
+    const os = p.node().observed_state as Rec;
+    expect(os).toMatchObject({ user_material_unverified: true });
+    expect(valueClassOf(os), 'never the user’s stated figure').not.toBe('user_stated');
+  });
+
+  // ⭐ GATE → LABEL (change 1; Codex amendment 1): words that are not his own are quoted with their source, never as "your words"; the
+  // figure stays Olumi's estimate either way, and nothing is written before the press.
+  it('never on other words: a partial quote, or retained unverified words, are labelled by their source, never "your words"', async () => {
     const p = product();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     // Not his literal words ("in marketing"). A literal span of his sentence is his under the confirmed lean-core widening.
-    expect(await caps.proposeAssumptions(ctx() as never, estimate('not that experienced in marketing') as never)).toMatchObject({ ok: false, refusal: 'description_not_stated' });
-    expect(await caps.proposeAssumptions(ctx({ user_text: 'Hi', user_turn_text: 'Hi', unverified_user_text: BODY.brief_text }) as never, estimate(SENTENCE) as never))
-      .toMatchObject({ ok: false, refusal: 'origin_unknown' });
+    const partial = await caps.proposeAssumptions(ctx() as never, estimate('not that experienced in marketing') as never) as Rec;
+    expect(partial).toMatchObject({ ok: true, mutated: false });
+    expect(String(partial.public_label)).toContain('Olumi’s proposed reading — source unverified: “not that experienced in marketing”. Olumi’s figure from them is its own estimate, not yours.');
+    expect(String(partial.public_label)).not.toContain('From your words');
+    const retained = await caps.proposeAssumptions(ctx({ user_text: 'Hi', user_turn_text: 'Hi', unverified_user_text: BODY.brief_text }) as never, estimate(SENTENCE) as never) as Rec;
+    expect(retained).toMatchObject({ ok: true, mutated: false });
+    expect(String(retained.public_label)).toContain(`Recorded words — speaker/source unknown: “${SENTENCE}”. Olumi’s figure from them is its own estimate, not yours.`);
     expect(p.node().observed_state ?? null).toBeNull();
   });
 });

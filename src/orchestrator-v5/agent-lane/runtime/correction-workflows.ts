@@ -2,7 +2,8 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentToolContext, ToolResult } from './agent-tools.js';
-import { createProposal, type ProposalStore, type StructuredProposal } from '../proposal.js';
+import { createProposal, type ProposalStore, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { prepareStatementCorrection, statementCorrectionWords, statementBoundTo, userStatementRecord, withUserStatement,
   type StatementCorrectionRequest, type DoorContext } from '../../statement-door/statements.js';
 import { applyStatementRecordEdit, approvedStatementRecordOf } from '../../goal-target/cohort-forecast-write.js';
@@ -40,8 +41,26 @@ export function proposeStatementCorrection(ctx: AgentToolContext, graph: unknown
     provenance: { authored_by: 'model_proposed', basis: prepared.correction.source.source },
     validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: prepared.words });
   proposals.put(proposal);
+  retireSupersededCards(ctx, proposals, proposal.proposal_id, prepared.correction.edits.map(e => e.subject));
   return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
     base_revision: baseHash, note: 'Show the complete correction card before its own approval. Source, interpretation and approval remain separate.' };
+}
+
+/**
+ * ⭐ A CORRECTION RETIRES THE CARDS IT SUPERSEDES (DL-3 19 Oct; verifier joined diagnosis R07/C3, a stale result). An older card the
+ * user has not approved that writes a subject this correction corrects was built on the source the correction retires ("30 minutes
+ * per night" after the user said it is per block), so it is never offered again, beside or after the correction card. Exact subject
+ * paths only (a node, or a link as `from->to`); cards on any other subject, applied or partly applied cards and the correction card
+ * itself are untouched.
+ */
+function retireSupersededCards(ctx: AgentToolContext, proposals: ProposalStore, keep: string,
+  subjects: readonly { readonly id: string; readonly to_id?: string }[]): void {
+  const paths = new Set(subjects.map(s => (s.to_id === undefined ? s.id : `${s.id}->${s.to_id}`)));
+  for (const o of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+    const p = o.proposal_id === keep ? undefined : proposals.get(o.proposal_id);
+    if (p === undefined || proposals.isApplied(p.proposal_id) || proposals.partialProgressOf(p.proposal_id) !== undefined) continue;
+    if (p.operations.some(op => typeof op.path === 'string' && paths.has(op.path))) proposals.discard(p.proposal_id);
+  }
 }
 
 /** The existing statement operation's scoped correction is one complete native CAS registration. */
@@ -70,8 +89,15 @@ export async function applyCorrectedStatement(ctx: AgentToolContext, parent: Str
     || !approvedGraphHeld(written.mutatedGraph, after.raw)
     || applyStatementRecordEdit(after.raw, approved).kind !== 'unchanged') return {
       ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed' };
-  proposals.markApplied(parent.proposal_id, []);
-  return { ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts: [], follow_up: written.confirmation,
+  // ⭐ The register's own receipt (Codex co-design §1; assist.v1.scenario-graph-register.ts model_version): the version this write
+  // made, and in every case the durable acknowledgement it was stored under (its operation id and identity), never an empty success.
+  const mv = registered.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+  const receipts: ReceiptSummary[] = mv !== undefined && mv !== null && typeof mv.version_id === 'string'
+    ? [{ version: Number(mv.version_number), version_id: mv.version_id, mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+      source_turn_id: registrationTurnId(ctx.scenario_id, operationId) }] : [];
+  proposals.markApplied(parent.proposal_id, receipts);
+  return { ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts, follow_up: written.confirmation,
+    acknowledgement: { operation_id: operationId, graph_identity_hash: acknowledged, ...(registered.json.replayed === true ? { replayed: true } : {}) },
     revision_after: computeAnalysisAffectingGraphHash(after.raw as never) };
 }
 

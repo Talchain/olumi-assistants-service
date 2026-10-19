@@ -369,6 +369,12 @@ function speechRegions(marked: string, single = true): { open: number; close: nu
         const possessive = closes && /s/iu.test(prevOf(i)) && /^\s[\p{L}\p{N}]/u.test(para.slice(i + 1));
         if (open < 0) { if (opens) open = i; continue; } // a closing-shaped mark with nothing open is text ("the users' pilot")
         if (closes && !possessive) { regions.push({ open: offset + open, close: offset + i }); open = -1; continue; }
+        // A possessive-shaped mark with NO later mark in the paragraph is the only mark that can close this term, and no reading puts
+        // the words after it inside the marks: it closes the term (the marked words stay inside). A colon-introduced opener keeps the
+        // fail-safe (DL-3 19 Oct, #3427: "keep 'delayed scans' as the report" is the user's own correction, not unbounded speech).
+        if (possessive && !/['\u2018\u2019]/u.test(para.slice(i + 1)) && !/:\s*$/u.test(para.slice(0, open))) {
+          regions.push({ open: offset + open, close: offset + i }); open = -1; continue;
+        }
         regions.push({ open: offset + open, close: end }); open = -2; break; // ambiguous: an inner/elided mark or a possessive
       }
       if (open >= 0 && /:\s*$/u.test(para.slice(0, open))) regions.push({ open: offset + open, close: end });

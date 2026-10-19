@@ -22,10 +22,10 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
+import { saidByOf, userStatementOf, type UserStatement } from '../agent-lane/user-statements.js';
 import { cohortTargetsOf, isCohortRateRow, readCohortForecast, type CohortForecast } from './cohort-forecast.js';
 import { goalTargetBasisOf, periodWords } from './goal-target-basis.js';
-import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, userStatementRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
+import { applyStatementCorrection, statementCorrectionOf, type StatementCorrection, holdsUserStatement, pressedRecord, userStatementFor, claimRecordOf, withUserStatement, type UserStatementRecord } from '../statement-door/statements.js';
 import { isStatementField, subjectKey, SUBJECT_KINDS, type DoorSubject, type SubjectKind } from '../statement-door/subject.js';
 import { GOAL_TARGET_ROLE } from './goal-targets-joint.js';
 
@@ -191,7 +191,7 @@ export function applyCohortForecastEdit(persistedGraph: unknown, approved: Appro
   // The user's words go with the forecast their reading sets, on THIS option, as the door recorded them.
   const said = approved.user_statement;
   if (said !== undefined && (said.subject.kind !== 'option' || said.subject.id !== approved.option_id
-    || said.record.subject_key !== subjectKey(said.subject) || userStatementRecordOf(said.record) === undefined)) {
+    || said.record.subject_key !== subjectKey(said.subject) || claimRecordOf(said.record) === undefined)) {
     return { kind: 'refused', reason: 'invalid_forecast' };
   }
   // The option as the write leaves it: the card's forecast, and the door's record of the words when there is one.
@@ -269,9 +269,13 @@ function recordable(subject: DoorSubject, record: UserStatementRecord): boolean 
       && typeof record.attest.low === 'number' && typeof record.attest.high === 'number';
   }
   // G3 (TL 21:18Z): a link's effect the user stated as a range in chat (`LINK_EFFECT_RANGE_ROW`): their range, kept as words and
-  // ends only. It sizes nothing, so it carries no attest (no law, no adoption) and is never read as a size.
+  // ends only. It sizes nothing, so it carries no attest (no law, no adoption) and is never read as a size. ⭐ CLAIM RECORD (spec v2
+  // rule 1; AIE DISSENT): another source's view of the same link stays current beside it (`withClaimsKept`, one per source), so the
+  // record holds one range claim per source, never a second claim of one source.
   if (subject.kind === 'link' && subject.field === 'effect' && subject.to_id !== undefined && subject.option_id === undefined) {
-    return record.statements.length === 1 && record.statements[0]!.form === 'range' && record.attest === undefined;
+    const source = (st: UserStatementRecord['statements'][number]): string => JSON.stringify([saidByOf(st), st.party ?? null, st.conditions ?? null]);
+    return record.statements.length >= 1 && record.statements.every((st) => st.form === 'range') && record.attest === undefined
+      && new Set(record.statements.map(source)).size === record.statements.length;
   }
   // DL-3 05:21Z (AIE 6183352754): what a factor's quantity covers, in the user's words (`FACTOR_DEFINITION_ROW`). It changes no
   // figure, so it carries no attest (no law, no adoption) and is never read as a value, a limit or a size.
@@ -290,8 +294,16 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
       || !isDeepStrictEqual(approved.expected_node, first.expected_node)
       || !isDeepStrictEqual(approved.user_statement, { subject: first.subject, record: first.record })) return { kind: 'refused', reason: 'invalid_statement' };
     const written = applyStatementCorrection(persistedGraph, correction);
+    const unsized = correction!.edits.flatMap((e) => (e.dependent?.action === 'link_unsized' ? [e.dependent.label] : []));
+    const unavailable = correction!.edits.flatMap((e) => (e.dependent?.action === 'level_unavailable' ? [e.dependent] : []));
+    // REPLACE: the user's corrected figure written as the level (the card's frozen postimage), said with its figure.
+    const replaced = correction!.edits.flatMap((e) => (e.dependent?.action === 'level_replaced' && e.replacement !== undefined
+      ? [{ label: e.dependent.label, said: `${e.replacement.value} ${e.replacement.unit.trim()}` }] : []));
+    // DEPENDENT CURRENTNESS: Olumi's figures worked out from a corrected level by definition, withdrawn in the same commit.
+    const defined = [...new Set(correction!.edits.flatMap((e) => (e.dependent?.action === 'level_replaced' || e.dependent?.action === 'level_unavailable'
+      ? (e.dependent.defined ?? []).map((d) => d.label) : [])))];
     if (written.refused !== undefined || written.candidate === undefined) return { kind: 'refused',
-      reason: written.refused === 'node_changed' ? 'node_changed' : 'invalid_statement' };
+      reason: written.refused === 'node_changed' || written.refused === 'node_not_found' ? written.refused : 'invalid_statement' };
     if (written.unchanged) return { kind: 'unchanged' };
     const fact = EditGraphHandlerFactSchema.parse({ fact_type: 'edit_graph', fact_version: 1, noop: false,
       result: { edit_kind: 'parameter_update', status: 'applied', operations_count: correction!.edits.length,
@@ -300,12 +312,19 @@ export function applyStatementRecordEdit(persistedGraph: unknown, approved: Appr
         graph_hash_before: computeAnalysisAffectingGraphHash(persistedGraph as never) || null,
         graph_hash_after: computeAnalysisAffectingGraphHash(written.candidate as never) || null,
         safe_summary: 'Recorded your source correction and explicitly retained material',
-        impact: 'low', rerun_recommended: false } });
+        // A correction that withdrew a size the analysis used changes what any earlier Run rested on (GATE → LABEL, one commit).
+        impact: unsized.length + unavailable.length + replaced.length + defined.length > 0 ? 'high' : 'low',
+        rerun_recommended: unsized.length + unavailable.length + replaced.length + defined.length > 0 } });
     return { kind: 'mutated', mutatedGraph: written.candidate, handlerFacts: [fact as HandlerFact],
-      confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.' };
+      confirmation: 'Recorded your correction and the material explicitly kept on its card. Your source stays yours; Olumi’s reading remains separate.'
+        + unsized.map((label) => ` The link “${label}” is now unsized: the analysis cannot use its size until it is sized again.`).join('')
+        + replaced.map((r) => ` “${r.label}” now has your corrected figure, ${r.said}.`).join('')
+        + unavailable.map((d) => ` “${d.label}” now has no current figure: the analysis cannot use one until it is given again`
+          + `${d.held_unit === undefined ? '' : ` in ${d.held_unit}`}${d.incomplete === true ? '. Your corrected figure is kept with your words; this correction is incomplete' : ''}.`).join('')
+        + defined.map((label) => ` The calculation for “${label}” is now unavailable because its inputs have changed.`).join('') };
   }
   const said = approved.user_statement;
-  const record = userStatementRecordOf(said.record);
+  const record = claimRecordOf(said.record);
   if (said.subject.id !== approved.node_id || said.record.subject_key !== subjectKey(said.subject) || record === undefined
     || !recordable(said.subject, record)) return { kind: 'refused', reason: 'invalid_statement' };
   // A link's record lives on its `from` node (`withUserStatement`), and only while the link itself is in the graph.
@@ -396,7 +415,7 @@ function userStatementCarriedBy(v: Rec): ApprovedStatementRecord['user_statement
   if (v.user_statement === undefined) return undefined;
   const u = isRec(v.user_statement) ? v.user_statement : {};
   const subject = isRec(u.subject) ? u.subject : undefined;
-  const record = userStatementRecordOf(u.record);
+  const record = claimRecordOf(u.record);
   if (subject === undefined || typeof subject.id !== 'string' || !(SUBJECT_KINDS as readonly unknown[]).includes(subject.kind)
     || !isStatementField(subject.field) || record === undefined) return null;
   // An option's setting of a factor (`RANGE_LAW_ROW`) is keyed by its option too: the subject keeps it, or the key never matches.

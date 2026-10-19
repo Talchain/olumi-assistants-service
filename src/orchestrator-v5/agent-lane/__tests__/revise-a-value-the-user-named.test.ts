@@ -79,7 +79,10 @@ describe('the user can change an assumption the analysis named', () => {
     // The old figure must be in the label the receipt quotes, not only the new one.
     expect(r.public_label).toContain('4%');
     expect(r.public_label).toContain('6%');
-    expect(r.public_label).toBe(`From your words: “${ctx.user_text}”. The quoted source is retained; these field bindings are Olumi’s reading, including after approval. Revise 1 value you asked to change: Monthly churn rate: 4% → 6% (figure from the quoted message; field binding unverified)`);
+    expect(r.public_label).toBe(`From your words: “${ctx.user_text}”. The quoted source is retained; these field bindings are Olumi’s reading, including after approval. Revise 1 value: Monthly churn rate: 4% → 6% (figure from the quoted message; field binding unverified)`);
+    // NEGATIVE: a binding that is Olumi's reading is never "you asked to change" (8b on #3429 7abd1c82); the CONTROL in
+    // share-unit-range.test.ts keeps the words where no binding is Olumi's reading.
+    expect(r.public_label).not.toContain('you asked to change');
   });
 
   it('a revision the user named is THEIRS, not the model’s', async () => {
