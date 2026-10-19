@@ -83,6 +83,14 @@ describe('sources, as the ONE authority answers them', () => {
     expect(n.observed).toEqual({ value: observed.value, raw_value: observed.raw_value, unit: observed.unit });
   });
 
+  it('a person\'s figure whose role is unverified says its carrier keeps neither who said it nor their words; a verified one does not', async () => {
+    const UNVERIFIED = { value: 0.2, raw_value: 20, unit: 'minutes', cap: 100, source: 'user_override', user_material_unverified: true };
+    const g = graph() as { nodes: Rec[] };
+    const d = await data(read({ graph: { ...g, nodes: g.nodes.map((n) => n.id === 'queue' ? { ...n, observed_state: UNVERIFIED } : n) } }));
+    expect(node(d, 'queue')).toMatchObject({ observed_source: { origin: 'human', role: 'unverified' }, observed_not_recorded: ['speaker', 'words'] });
+    expect(node(d, 'staff').observed_not_recorded).toBeUndefined();
+  });
+
   it('an option\'s setting carries the authority\'s answer for THAT cell', async () => {
     const settings = node(await data(), 'add_staff').settings as Rec[];
     expect(settings).toEqual([{ factor_id: 'staff', cell: ADD_CELL, source: provenanceOf({ setting: ADD_CELL, target: graph().nodes && (graph().nodes as Rec[]).find((n) => n.id === 'staff') }) }]);
