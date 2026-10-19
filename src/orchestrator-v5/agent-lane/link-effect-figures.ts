@@ -12,20 +12,25 @@ function normalised(quote: string): { text: string; starts: number[]; ends: numb
   let at = 0;
   for (const m of quote.matchAll(re)) {
     const start = m.index!;
-    append(quote.slice(at, start), at, start, true);
+    if (start < at) continue; // the high end of a range already written back with its low end
     const half = /\s+and\s+a\s+half$/i.test(m[0]);
     const base = half ? m[0].replace(/\s+and\s+a\s+half$/i, '') : m[0];
     // A range written in words is written back as its two ends in digits, as the user joined them (a shared scale applied to
-    // both; "between … and …" kept), never as one figure (`cardinalReadings`).
-    const readings = /^half(?:\s+a)?$/i.test(base) || base.toLowerCase() === 'a' ? [] : cardinalReadings(base, start);
-    if (readings.length === 2) {
-      const joiner = /^between\s/i.test(base) ? null : (/\s(to|or)\s/i.exec(base)?.[1] ?? 'to');
+    // both; "between … and …" kept), never as one figure (`cardinalReadings`), over its whole span: an article low end before
+    // this capture, or a high end after it, included.
+    const readings = /^half(?:\s+a)?$/i.test(base) || base.toLowerCase() === 'a' ? [] : cardinalReadings(quote, start, start + base.length);
+    const range = readings.length === 2 && readings[0]!.index >= at ? readings[0]! : null;
+    if (range !== null) {
+      const end = range.index + range.matchedText.length;
+      const joiner = /^between\s/i.test(range.matchedText) ? null : (/\s(to|or)\s/i.exec(range.matchedText)?.[1] ?? 'to');
+      append(quote.slice(at, range.index), at, range.index, true);
       append(joiner === null ? `between ${readings[0]!.magnitude} and ${readings[1]!.magnitude}` : `${readings[0]!.magnitude} ${joiner} ${readings[1]!.magnitude}`,
-        start, start + m[0].length);
-      at = start + m[0].length;
+        range.index, end);
+      at = end;
       continue;
     }
-    const value = /^half(?:\s+a)?$/i.test(base) ? 0.5 : base.toLowerCase() === 'a' ? 1 : readings[0]?.magnitude ?? null;
+    append(quote.slice(at, start), at, start, true);
+    const value = /^half(?:\s+a)?$/i.test(base) ? 0.5 : base.toLowerCase() === 'a' ? 1 : readings.length === 1 ? readings[0]!.magnitude : null;
     // Unknown fractions are never admitted as the integer fragment ("one and a quarter").
     const unclear = !half && /^\s+and\s+(?:a\s+)?(?:half|quarter|third)\b/i.test(quote.slice(start + m[0].length));
     append(value === null || unclear ? m[0] : String(value + (half ? 0.5 : 0)), start, start + m[0].length);
@@ -95,7 +100,8 @@ const fractionOfAFigure = new RegExp(`\\b(?:${FRACTION}|half)\\s+of\\s+(?:(?:a|a
 /** Ranges cannot license either endpoint or a midpoint as a single user's figure. */
 export function hasLinkEffectRange(quote: string): boolean {
   if (fractionOfANumber.test(quote) || fractionOfAUnit.test(quote) || fractionOfAFigure.test(quote) || digitsAndAFraction.test(quote)
-    || new RegExp(`\\bpoint\\s+(?:${CARDINAL_AMOUNT_SOURCE}|\\d)\\b`, 'iu').test(quote)) return true;
+    // A decimal the reader does not read whole ("2 point five", "seven point twenty five"); one read whole is a figure ("two point five").
+    || new RegExp(`\\bpoint\\s+(?:${CARDINAL_AMOUNT_SOURCE}|\\d)\\b`, 'iu').test(normalised(quote).text)) return true;
   const amounts = findLinkEffectAmounts(quote);
   return amounts.some((a, i) => {
     const b = amounts[i + 1];

@@ -212,7 +212,8 @@ describe("L67 — the parser fails closed", () => {
  * ========================================================================= */
 
 const readAll = (text: string): number[] =>
-  [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})`, "gi"))].flatMap((m) => cardinalReadings(m[0], m.index!).map((r) => r.magnitude));
+  [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, "gi"))]
+    .flatMap((m) => cardinalReadings(text, m.index!, m.index! + m[0].length).map((r) => r.magnitude));
 
 describe("the range class: two ends or nothing", () => {
   it.each([
@@ -242,8 +243,9 @@ describe("the range class: two ends or nothing", () => {
   ])("%s", (_case, text, expected) => { expect(readAll(text)).toEqual(expected); });
 
   it("a range's two ends carry the whole capture, so the unit after it is read for both", () => {
-    const [m] = [..."Revenue is two to three million pounds.".matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})`, "gi"))];
-    expect(cardinalReadings(m![0], m!.index!)).toEqual([
+    const text = "Revenue is two to three million pounds.";
+    const [m] = [...text.matchAll(new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE})\\b`, "gi"))];
+    expect(cardinalReadings(text, m!.index!, m!.index! + m![0].length)).toEqual([
       { magnitude: 2_000_000, index: 11, matchedText: "two to three million" },
       { magnitude: 3_000_000, index: 11, matchedText: "two to three million" },
     ]);

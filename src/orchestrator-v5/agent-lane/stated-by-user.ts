@@ -881,7 +881,7 @@ export function quoteOfFigure(value: number, unit: unknown, userText: string | n
 export function countsInWords(text: string): { kind: 'words'; magnitude: number; index: number; matchedText: string }[] {
   // A range written in words gives its two ends, or nothing (`cardinalReadings`: the range class, C5 #3442).
   return [...text.matchAll(CARDINAL_PHRASE)].flatMap((m) => m.index === undefined ? []
-    : cardinalReadings(m[0], m.index).map((r) => ({ kind: 'words' as const, ...r })));
+    : cardinalReadings(text, m.index, m.index + m[0].length).map((r) => ({ kind: 'words' as const, ...r })));
 }
 
 /**

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { amountsWrittenIn, figureTheUserWrote, timesTheUserWrote } from '../stated-by-user.js';
 import { figuresWritten, userStated } from '../user-statements.js';
 import { findJoinedRanges, findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
+import { findLinkEffectAmounts } from '../link-effect-figures.js';
 
 const read = (text: string): [string, number][] =>
   [...amountsWrittenIn(text)].sort((x, y) => x.index - y.index).map((a) => [a.kind, a.magnitude]);
@@ -146,6 +147,32 @@ describe('⛔ a range is found by its connector: an end the grammar does not rea
   });
 });
 
+/** Codex R4 on #3445 @c26a0fee (held-out witnesses, adopted verbatim), DL-3's rows, then each end, form and connector. */
+const AN_END_NOT_COMPLETE = [
+  'a dozen or so to 30', 'twenty to thirty-odd', 'around 2 or so to 5', 'ten-ish to 20',
+  'We expect twenty to thirty or so users.', 'We expect 20 to 30 or so users.', 'We expect 20 to 30-odd users.', 'We expect 20-odd to 30 users.',
+  'We expect a dozen to thirty or so users.', 'We expect twenty or so to thirty users.', 'We expect between 20 and 30-odd users.',
+  'We expect between twenty and thirty or so users.',
+];
+
+describe('⛔ a range end is complete, or the whole range gives nothing (Codex R4 on #3445)', () => {
+  it.each(AN_END_NOT_COMPLETE)('"%s": no reader reads either end', (text) => {
+    expect(read(text)).toEqual([]);
+    expect(figuresWritten(text)).toEqual([]);
+    expect(findLinkEffectAmounts(text).map((a) => a.magnitude)).toEqual([]);
+  });
+  const texts = (m: string) => ({ now: m, conversation: m, messages: [m] });
+  it.each([['a dozen or so to 30', 30], ['twenty to thirty-odd', 30], ['twenty to thirty-odd', 20]] as const)('"%s": %d is never the user\'s', (quote, value) => {
+    expect(userStated({ quote, value }, texts(`We think ${quote} is right.`), { quantity: 'level', node_id: 'fac_1' }).origin).not.toBe('human');
+  });
+  it.each([
+    ['a scalar "or more" is not a range end', 'We need 20 or more customers.', [20]],
+    ['a hyphenated compound is one number', 'We sold twenty-five units.', [25]],
+    ['a digit scalar keeps its own grammar', 'We signed a 3-year contract.', [3]],
+    ['a complete range with its unit', 'Hire two to three engineers.', [2, 3]],
+  ] as const)('CONTROL %s: "%s"', (_case, text, expected) => { expect(read(text).map(([, v]) => v)).toEqual(expected); });
+});
+
 describe('"dozen" is a compounder like "hundred" (DL-3, 19 Oct): Codex R3\'s witness reads its true range', () => {
   it.each([
     ['a dozen to twenty (Codex R3)', 'People total a dozen to twenty people.', [['words', 12], ['words', 20]]],
@@ -223,6 +250,12 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
       cases.push({ text, truth: lowScaled || highScaled ? [2 * s, 3 * s] : [2, 3] });
     }
   }
+  // An end that is not complete ("-odd", "or so"), on either end of every form and connector: the whole range gives nothing.
+  for (const low of ['digits', 'words'] as const) for (const high of ['digits', 'words'] as const) for (const join of joins) for (const tail of ['-odd', ' or so']) {
+    const [l, h] = [ends[low][0], ends[high][1]];
+    cases.push({ text: `We expect ${join(l, h + tail)} users.`, truth: [] });
+    cases.push({ text: `We expect ${join(l + tail, h)} users.`, truth: [] });
+  }
   // An end the grammar reads no figure from, on either side of every connector: the range has no true reading, so nothing.
   for (const unread of ['a hundred', 'a million', 'a few hundred', 'several hundred']) for (const join of joins) for (const other of ['twenty', '20']) {
     cases.push({ text: `We expect ${join(unread, other)} users.`, truth: [] });
@@ -239,7 +272,7 @@ describe('⭐ GENERATED: every two-ended range gives its two true ends or nothin
 
   it('CONTROL the property is not vacuous: one form with one shared scale reads both ends', () => {
     const read2 = cases.filter((c) => read(c.text).length === 2);
-    expect(read2.length).toBeGreaterThan(cases.length / 5);
+    expect(read2.length).toBeGreaterThan(cases.filter((c) => c.truth.length === 2).length / 4);
     expect(cases.filter((c) => c.truth.length === 0).length).toBeGreaterThan(50);
     expect(read2.some((c) => /\btwo\b/.test(c.text)) && read2.some((c) => /\b2\b/.test(c.text))).toBe(true);
   });
