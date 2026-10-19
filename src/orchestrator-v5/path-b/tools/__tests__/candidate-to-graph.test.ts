@@ -30,7 +30,7 @@ const S = [
 const BRIEF = S.join(' ');
 const SHIPPED = 'Board game shipped before the holidays';
 const link = (from: string, to: string, direction: string, quote: string | null = null, size: Rec = {}): Rec => ({ from, to, direction,
-  provenance: quote === null ? 'inferred' : 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null,
+  provenance: quote === null ? 'ai_proposed' : 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null,
   definitional: null, basis: null, source_quote: quote, ...size });
 const statement = (quote: string, label: string, speaker: 'user' | 'other' | 'unknown', value: number, unit: string, form = 'point'): Rec => ({
   quote, subject: { kind: 'factor', label, to_label: null, factor_label: null }, field: 'level', form, value, low: null, high: null, unit,
@@ -79,7 +79,7 @@ const salesDraft = (size: 'olumi' | 'user' = 'olumi'): Rec => ({
     plausible_max: 10000, baseline_evidence: { quote: 'We spend £2,000 a month on ads.' } }],
   risks: [], outcomes: [],
   links: [link('Ad spend', 'Monthly pre-orders', 'positive', size === 'user' ? AD_QUOTE : null,
-    { effect_amount: 1, effect_per_source_change: 20, effect_provenance: size === 'user' ? 'explicit' : 'inferred' })],
+    { effect_amount: 1, effect_per_source_change: 20, effect_provenance: size === 'user' ? 'explicit' : 'ai_proposed' })],
   identities: [], unknowns: [], decision_question: 'How should we change our ad spend?', unknown_concerns: [], statements: [],
 });
 
@@ -90,9 +90,9 @@ const structureDraft = (): Rec => ({
   constraints: [{ metric: 'Ad spend', operator: '<=', value: 5000, unit: '£', provenance: 'explicit', frame: 'level', role: 'limit' },
     { metric: 'Word of mouth', operator: '>=', value: 200, unit: 'mentions', provenance: 'explicit', frame: 'level', role: 'ambition' }],
   factors: [...salesDraft().factors, factor('Word of mouth', 50, 'mentions', 'explicit'), { ...factor('Influencer posts', null, 'posts', 'inferred'), plausible_max: 40 }],
-  links: [...salesDraft().links, link('Ad spend', 'Word of mouth', 'positive', null, { effect_amount: 1, effect_per_source_change: 100, effect_provenance: 'inferred' }),
-    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'inferred' }),
-    link('Influencer posts', 'Monthly pre-orders', 'positive', null, { effect_amount: 10, effect_per_source_change: 1, effect_provenance: 'inferred' })],
+  links: [...salesDraft().links, link('Ad spend', 'Word of mouth', 'positive', null, { effect_amount: 1, effect_per_source_change: 100, effect_provenance: 'ai_proposed' }),
+    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'ai_proposed' }),
+    link('Influencer posts', 'Monthly pre-orders', 'positive', null, { effect_amount: 10, effect_per_source_change: 1, effect_provenance: 'ai_proposed' })],
 });
 
 // A goal the AI declared to be two parts added together, with the sentence it read it from.
@@ -105,8 +105,8 @@ const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Re
     { label: 'Shop orders', role: 'observable', baseline_known: true, baseline_value: 100, unit: 'orders', provenance: 'explicit', plausible_max: null },
   ],
   links: ['Online orders', 'Shop orders'].map((part) => link(part, 'Total orders', 'positive', null,
-    { provenance: definedBy === 'user' ? 'explicit' : 'inferred', effect_amount: 1, effect_per_source_change: 1,
-      effect_provenance: definedBy === 'user' ? 'explicit' : 'inferred', definitional: true })),
+    { provenance: definedBy === 'user' ? 'explicit' : 'ai_proposed', effect_amount: 1, effect_per_source_change: 1,
+      effect_provenance: definedBy === 'user' ? 'explicit' : 'ai_proposed', definitional: true })),
   identities: [{ operation: 'sum', outcome: 'Total orders', factors: ['Online orders', 'Shop orders'],
     evidence: { quote: 'All our orders come either online or from the shop.' } }],
 });
@@ -126,8 +126,8 @@ const scienceDraft = (opts: { userFold?: boolean; otherFold?: boolean; undeclare
     sciOption('Status quo', 'explicit', [], [], opts.undeclaredStatusQuo === true ? null : true)],
   factors: [{ ...factor('Price', 20, '£', 'explicit'), role: 'controllable', plausible_max: 50 }, { ...factor('Customers', 1000, 'customers', 'explicit'), role: 'controllable', plausible_max: 3000 },
     { ...factor('Brand awareness', 30, '%', 'explicit'), role: 'controllable', plausible_max: 100 }],
-  risks: [{ label: 'Competitor price cut', provenance: 'inferred' }, { label: 'Key supplier failure', provenance: opts.otherRisk === true ? 'inferred' : 'explicit' },
-    { label: 'Churn spike', provenance: 'inferred' }],
+  risks: [{ label: 'Competitor price cut', provenance: 'ai_proposed' }, { label: 'Key supplier failure', provenance: opts.otherRisk === true ? 'inferred' : 'explicit' },
+    { label: 'Churn spike', provenance: 'ai_proposed' }],
   outcomes: [{ label: 'Monthly churn', provenance: 'inferred' }],
   links: [link('Price', 'Monthly revenue', 'positive'), link('Customers', 'Monthly revenue', 'positive'), link('Brand awareness', 'Customers', 'positive'),
     { ...link('Price', 'Churn spike', 'positive'), ...(opts.userFold === true || opts.otherFold === true ? { provenance: 'explicit' } : {}) },
@@ -148,7 +148,7 @@ const definitionDraft = (): Rec => ({
     sciOption('Open a second line', 'explicit', [sciLevel('Net change in orders per day', 50, 'orders per day')])],
   factors: [{ ...factor('Net change in orders per day', 0, 'orders per day', 'inferred'), role: 'controllable', baseline_known: true }],
   risks: [], outcomes: [],
-  links: [link('Net change in orders per day', 'Orders per day', 'positive', null, { effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'inferred', definitional: true })],
+  links: [link('Net change in orders per day', 'Orders per day', 'positive', null, { effect_amount: 1, effect_per_source_change: 1, effect_provenance: 'ai_proposed', definitional: true })],
   unknowns: [], decision_question: 'How do we reach 120 orders a day?', unknown_concerns: [], statements: [],
 });
 
@@ -168,11 +168,12 @@ const ofKind = (g: Rec, kind: string): Rec[] => (g.nodes as Rec[]).filter((n) =>
 const edge = (g: Rec, from: string, to: string): Rec | undefined =>
   (g.edges as Rec[]).find((e) => e.from === byLabel(g, from).id && e.to === byLabel(g, to).id);
 
-/** Whose the AI declared an entity or link to be (the spec of B's rule): a speaker other/unknown wins; else explicit = the user's. */
+/** Whose the AI declared an entity or link to be (the spec of B's rule): a speaker other/unknown wins; else explicit = the user's,
+ * ai_proposed = Olumi's, and inferred (the drafter's contract: a reformulation of supplied material, or unresolved) = unknown. */
 const declaredWho = (draft: Rec, kind: string, label: string, provenance: unknown, field = 'level'): string => {
   const st = ((draft.statements ?? []) as Rec[]).find((x) => x?.subject?.kind === kind && x?.field === field
     && canonicalLabel(String(x.subject.label ?? '')) === canonicalLabel(label));
-  return st?.speaker === 'other' || st?.speaker === 'unknown' ? st.speaker : provenance === 'explicit' ? 'user' : 'olumi';
+  return st?.speaker === 'other' || st?.speaker === 'unknown' ? st.speaker : provenance === 'explicit' ? 'user' : provenance === 'ai_proposed' ? 'olumi' : 'unknown';
 };
 
 /**
@@ -861,6 +862,58 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(loss.some((l) => String(l.field_path).endsWith('.nonlinear_identity_rejected') && String(l.reason).includes('"Stall visitors" has no figure yet'))).toBe(true);
     expect(differential(draft)).toMatchObject({ mismatches: [] });
     expect(blindness(draft)).toEqual([]);
+  });
+
+  // ⛔ AUTHORSHIP BY THE DRAFTER'S OWN CONTRACT (gap 3 swap, DL 19 Oct; `introducedBy`, runtime/build-model.ts): `explicit` is the
+  // user's, `ai_proposed` Olumi's, `inferred` ("a reformulation of a supplied item, or genuinely unresolved … never ai_proposed by
+  // default") UNKNOWN; a factor level is Olumi's estimate unless the AI declared it known. One row per figure class.
+  it('⛔ AUTHORSHIP (setting): a setting the AI declared `inferred` is of unknown origin, never Olumi\'s', () => {
+    const origin = (provenance: string): string => {
+      const draft = salesDraft(); draft.options[0].interventions[0].provenance = provenance;
+      const { graph } = converted(draft);
+      return settingProvenanceOf(byLabel(graph, 'Double the ad spend').interventions[byLabel(graph, 'Ad spend').id]).origin;
+    };
+    expect(['explicit', 'ai_proposed', 'inferred'].map(origin)).toEqual(['human', 'ai', 'unknown']);
+  });
+
+  it('⛔ AUTHORSHIP (factor level): a level the AI declared known and `inferred` is of unknown origin; a level it did not declare known is Olumi\'s estimate', () => {
+    const origin = (provenance: string, known: boolean): string => {
+      const draft = salesDraft(); draft.factors[0] = { ...draft.factors[0], provenance, baseline_known: known };
+      return valueProvenanceOf(byLabel(converted(draft).graph, 'Ad spend').observed_state).origin;
+    };
+    expect([origin('explicit', true), origin('ai_proposed', true), origin('inferred', true)]).toEqual(['human', 'ai', 'unknown']);
+    // The item's introducer is not the level's author: a factor the user named, with a level the AI did not declare known.
+    expect([origin('explicit', false), origin('inferred', false)]).toEqual(['ai', 'ai']);
+  });
+
+  it('⛔ AUTHORSHIP (goal): today\'s level and the target the AI declared `inferred` are of unknown origin, listed where GraphV3 cannot hold it', () => {
+    const draft = salesDraft(); draft.goal = { ...draft.goal, provenance: 'inferred', baseline_provenance: 'inferred' };
+    const { graph, blocked_schema } = converted(draft);
+    expect(valueProvenanceOf(ofKind(graph, 'goal')[0]!.observed_state).origin).toBe('unknown');
+    expect(blocked_schema).toContainEqual({ field_path: 'nodes[monthly_pre_orders].goal_threshold_raw', declared: 'unknown', missing: 'target_origin' });
+    // Contrast: declared the user's.
+    const own = converted(salesDraft());
+    expect(valueProvenanceOf(ofKind(own.graph, 'goal')[0]!.observed_state).origin).toBe('human');
+    expect(own.blocked_schema.filter((b) => String(b.field_path).startsWith('nodes[monthly_pre_orders]'))).toEqual([]);
+  });
+
+  it('⛔ AUTHORSHIP (link): a link and a size the AI declared `inferred` are not Olumi\'s: the size keeps the placeholder, said, and both origins are listed', () => {
+    const draft = salesDraft(); draft.links[0] = { ...draft.links[0], provenance: 'inferred', effect_provenance: 'inferred' };
+    const { graph, loss, blocked_schema } = converted(draft);
+    expect(blocked_schema).toEqual(expect.arrayContaining([
+      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_origin' },
+      { field_path: 'edges[ad_spend::monthly_pre_orders]', declared: 'unknown', missing: 'link_size_origin' }]));
+    expect(loss.some((l) => String(l.field_path) === 'edges[ad_spend::monthly_pre_orders].link_size_not_used')).toBe(true);
+    // Contrast: declared Olumi's, the size is A's and nothing is listed.
+    const olumi = converted(salesDraft());
+    expect(olumi.blocked_schema.filter((b) => String(b.field_path).startsWith('edges['))).toEqual([]);
+    expect(edge(olumi.graph, 'Ad spend', 'Monthly pre-orders')!.strength.mean).not.toBe(edge(graph, 'Ad spend', 'Monthly pre-orders')!.strength.mean);
+  });
+
+  it('⛔ AUTHORSHIP (risk): an unsized risk the AI declared `inferred` is not Olumi\'s suggestion, so it stays in the Run', () => {
+    const draft = scienceDraft(); draft.risks[0] = { ...draft.risks[0], provenance: 'inferred' };
+    expect(byLabel(converted(draft).graph, 'Competitor price cut').analysis_participation).toBeUndefined();
+    expect(byLabel(converted(scienceDraft()).graph, 'Competitor price cut').analysis_participation).toBe('retained_excluded');
   });
 
   it('⛔ LABEL-BLIND (#3464 R2): B\'s graph is the same under any names, for every synthetic draft', () => {

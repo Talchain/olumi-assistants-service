@@ -2,9 +2,10 @@
  * ⛔ CORE CAN DRAFT THE FIRST MODEL (VERIFIER CORE run on 86c9663a, redteam/core-accept/runs/20261019T174921Z: every case failed at
  * turn 1 — `build_model_from_brief` → unavailable `read_malformed`). A NEW scenario's graph read is `graph: null, graph_present:
  * false, graph_hash: null, graph_identity_hash: null` (assist.v1.scenario-graph.ts, "An EMPTY graph is a valid answer"), and the
- * adapters' one reader called that malformed. Through the REAL route in core mode: a scripted AI, the REAL construction
- * (`buildModelFromBrief`) with a scripted drafter answer, and the graph / register / versions routes as doubles that answer in
- * the served shapes. SYNTHETIC wording; no journey brief. (The brief stays the AI's literal copy of the user's words, as on base.)
+ * adapters' one reader called that malformed. Through the REAL route in core mode: a scripted AI, the REAL draft adapter (one
+ * drafter call with a scripted answer, Step 8's `candidateToGraph`, create-only registration), and the graph / register / versions
+ * routes as doubles that answer in the served shapes. SYNTHETIC wording; no journey brief. (The brief stays the AI's literal copy
+ * of the user's words, as on base.)
  */
 import { runPressToolResponse } from '../../../agent-lane/__tests__/fixtures/run-press-model.js';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +13,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
 import { registrationTurnId } from '../../../graph-registration/registration-identity.js';
+import { candidateToGraph } from '../candidate-to-graph.js';
 
 type Json = Record<string, any>;
 /** A NEW scenario per row: the route keeps each scenario's verified typed messages for the process. */
@@ -74,6 +76,8 @@ vi.mock('../../../../orchestrator/user-identity.js', async (original) => ({
 }));
 
 let served = 0;
+/** What the route hands the AI after each tool call (`function_call_output`), as sent. */
+const toolOutputs: Json[] = [];
 const responsesBody = (output: Record<string, unknown>[]): Json => {
   served += 1;
   return {
@@ -108,6 +112,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
       }
       // The core agent: first the draft call, then its words.
       const input = Array.isArray(body.input) ? body.input as Json[] : [];
+      toolOutputs.push(...input.filter((i) => i.type === 'function_call_output'));
       if (!input.some((i) => i.type === 'function_call_output')) {
         return ok([{ type: 'function_call', name: 'build_model_from_brief', call_id: 'draft_call', arguments: JSON.stringify({ brief: briefArg }) }]);
       }
@@ -135,7 +140,7 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; });
+  beforeEach(() => { SCENARIO = randomUUID(); rows.clear(); conversationIds.clear(); saved = null; registered = []; read = EMPTY_READ; toolOutputs.length = 0; });
 
   const turn = async (): Promise<Json> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-olumi-ai-mode': 'core' }, payload: {
@@ -151,6 +156,20 @@ describe('core drafts the FIRST model of a new scenario (graph null is a valid e
     expect(registered).toHaveLength(1);
     expect(registered[0]).toMatchObject({ brief_text: BRIEF, expected_graph_identity_hash: null });
     expect((saved?.nodes as Json[]).length).toBeGreaterThan(0);
+  });
+
+  it('⭐ STEP 8 gap 3 (RED on the bridge): the model saved is candidateToGraph\'s conversion of the ONE draft, and the draft travels to the AI beside the receipt', async () => {
+    const body = await turn();
+    expect(draftCall(body), JSON.stringify(body._agent)).toMatchObject({ ok: true, mutated: true, outcome: 'ok' });
+    const converted = candidateToGraph(DRAFT);
+    if ('refused' in converted) throw new Error(converted.refused);
+    // The registered bytes are the conversion's: A's numbers on a label-blind copy, each figure with the origin the AI declared.
+    expect(registered).toHaveLength(1);
+    expect(registered[0]!.graph).toEqual(converted.graph);
+    // The AI reads the drafter's JSON verbatim, and what the conversion said, in the tool's answer (the conversation keeps them).
+    const answer = JSON.parse(String(toolOutputs.find((o) => o.call_id === 'draft_call')?.output ?? '{}')) as Json;
+    expect(answer).toMatchObject({ status: 'ok', mutated: true, data: { provisional: 'olumi', draft: { declared: DRAFT, not_expressible: converted.blocked_schema } } });
+    expect(answer.data.draft.said).toEqual([...new Set(converted.loss.map((l) => l.reason))]);
   });
 
   it('CONTRAST: a non-null read that is not a graph is still malformed: refused, nothing registered', async () => {

@@ -12,9 +12,10 @@
  *    links come from the stored-graph sizing view (`magnitudeNodes` → `sizeLink`, never `user_stated`).
  *  · STRUCTURE AND AUTHORSHIP ARE THE DRAFT's, with NO C1/C2: every declared option, risk, outcome and link is kept; each
  *    figure keeps the origin the AI DECLARED, in the fields the one provenance authority reads (`cee/provenance/provenance-of.ts`):
- *    the user's = a type-less `brief_extraction` (human, by its stamp: declared, not attested); Olumi's = `cee_inference` +
- *    `inferred` / `cee_hypothesis`; an unknown speaker or a named third party = no stamp (unknown), or `user_material_unverified`
- *    on a setting. A computed total is Olumi's derived figure, said with its arithmetic (signed plan item 7). A link size the
+ *    the user's (`explicit`) = a type-less `brief_extraction` (human, by its stamp: declared, not attested); Olumi's (`ai_proposed`,
+ *    or a factor level the AI did not declare known) = `cee_inference` + `inferred` / `cee_hypothesis`; the drafter's `inferred`
+ *    (its contract: a reformulation of supplied material, or unresolved), an unknown speaker or a named third party = no stamp
+ *    (unknown), or `user_material_unverified` on a setting. A computed total is Olumi's derived figure, said with its arithmetic (signed plan item 7). A link size the
  *    AI declared as a person's keeps Olumi's placeholder (DL ruling (a)). Origins GraphV3 cannot hold are `blocked_schema`.
  *  · The raw draft travels beside the graph verbatim (`declared`); C5's draft tool returns it, so the scenario's one
  *    Conversation keeps it. The draft is Olumi's provisional model. A is untouched: it still applies its gates.
@@ -198,8 +199,12 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
   const statements = list<Rec>((input as Rec).statements);
   const speakerOf = (kind: string, label: string, extra: (s: Rec) => boolean = () => true): unknown =>
     statements.find((s) => s?.subject?.kind === kind && canonicalLabel(String(s.subject.label ?? '')) === canonicalLabel(label) && extra(s))?.speaker;
+  // ⛔ THE DRAFTER'S OWN CONTRACT (runtime/build-model.ts `introducedBy`; DL 19 Oct, gap 3 swap): `explicit` is supplied in the
+  // retained source, `ai_proposed` is Olumi's own addition, and `inferred` is "an interpretation or reformulation of a supplied item,
+  // or genuinely unresolved introduction … never ai_proposed by default". So `inferred`, or anything else, is UNKNOWN: never the
+  // user's and never Olumi's (TL 14:17Z G3 #4). A declared speaker of another person or an unknown one wins, as before.
   const whoOf = (provenance: unknown, speaker: unknown): Who => (speaker === 'other' ? 'other' : speaker === 'unknown' ? 'unknown'
-    : provenance === 'explicit' ? 'user' : 'olumi');
+    : provenance === 'explicit' ? 'user' : provenance === 'ai_proposed' ? 'olumi' : 'unknown');
   // A's own sentences, by the field they are about: a science decision this converter takes from A is said in A's words.
   const aSaid = (path: string): RepairEntry[] => a.loss.filter((l) => l.field_path === path);
   // SCIENCE (structure: what each option sets and acts on): an Olumi option that sets nothing the model can hold that another
@@ -241,7 +246,10 @@ export function candidateToAdmittedGraph(input: unknown): Converted | { readonly
     ...options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance, node: {} })),
     ...c.factors.map((f) => {
       const an = aFor(f.label);
-      const who = whoOf(f.provenance, speakerOf('factor', f.label, (s) => s.field === 'level'));
+      // A factor's `provenance` says who introduced the ITEM; its level's own declared field is `baseline_known` ("true only for a
+      // baseline supplied by the user or supported evidence; a provisional AI estimate keeps this false").
+      const levelSpeaker = speakerOf('factor', f.label, (s) => s.field === 'level');
+      const who = levelSpeaker === 'other' || levelSpeaker === 'unknown' || f.baseline_known === true ? whoOf(f.provenance, levelSpeaker) : 'olumi';
       factorWho.set(canonicalLabel(f.label), who);
       if (who === 'other' && an?.observed_state !== undefined) blocked.push({ field_path: `nodes[${slugId(f.label)}].observed_state`, declared: 'other', missing: 'speaker_name' });
       if (finite(f.baseline_value) && an?.observed_state === undefined) loss.push(notConverted(a, `nodes[${slugId(f.label)}].observed_state`, f.label, "Today's level", f.baseline_value));
