@@ -466,7 +466,7 @@ const levelSourceFor = (provenance: string): ConstructedLevelSource =>
  * ⚠ AND ONLY THEN, DELIBERATELY: an UNFRAMED level (no range; the level is its own figure) keeps
  * `{ value, source, target_match }` — `InterventionV3`: "value = raw_value (or raw_value omitted)".
  */
-export function constructedLevel(
+function constructedLevel(
   factorId: string,
   figure: number,
   cap: number | undefined,

@@ -8,8 +8,10 @@
  * SYNTHETIC wording throughout (a board-game maker; another domain from any served brief). 0 provider calls.
  */
 import { describe, expect, it } from 'vitest';
-import { candidateToGraph } from '../candidate-to-graph.js';
-import { admitCandidateModel } from '../../../agent-lane/admit-model.js';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { candidateToAdmittedGraph, candidateToGraph, type AdmitDraft } from '../candidate-to-graph.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, canonicalLabel, withQuantityFrames } from '../../../agent-lane/admit-model.js';
+import { prepareProvisionalCandidate } from '../../../agent-lane/runtime/build-model.js';
 import { linkProvenanceOf, settingProvenanceOf, valueProvenanceOf } from '../../../../cee/provenance/provenance-of.js';
 import { GraphV3 } from '../../../../schemas/cee-v3.js';
 
@@ -81,6 +83,16 @@ const salesDraft = (size: 'olumi' | 'user' = 'olumi'): Rec => ({
   identities: [], unknowns: [], decision_question: 'How should we change our ad spend?', unknown_concerns: [], statements: [],
 });
 
+// Structure A shapes itself: a loop between two factors, a limit, and a later ambition (A restates that node's label, keeping its id).
+const structureDraft = (): Rec => ({
+  ...salesDraft(),
+  constraints: [{ metric: 'Ad spend', operator: '<=', value: 5000, unit: '£', provenance: 'explicit', frame: 'level', role: 'limit' },
+    { metric: 'Word of mouth', operator: '>=', value: 200, unit: 'mentions', provenance: 'explicit', frame: 'level', role: 'ambition' }],
+  factors: [...salesDraft().factors, factor('Word of mouth', 50, 'mentions', 'explicit')],
+  links: [...salesDraft().links, link('Ad spend', 'Word of mouth', 'positive', null, { effect_amount: 1, effect_per_source_change: 100, effect_provenance: 'inferred' }),
+    link('Word of mouth', 'Ad spend', 'positive'), link('Word of mouth', 'Monthly pre-orders', 'positive', null, { effect_amount: 1, effect_per_source_change: 5, effect_provenance: 'inferred' })],
+});
+
 // A goal the AI declared to be two parts added together, with the sentence it read it from.
 const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Rec => ({
   ...salesDraft(),
@@ -97,8 +109,12 @@ const sumDraft = (totalToday: number, definedBy: 'olumi' | 'user' = 'olumi'): Re
     evidence: { quote: 'All our orders come either online or from the shop.' } }],
 });
 
+// A's admission with no brief, injected as the build injects its own (S7: the converter never imports the raw admitter).
+const admitA: AdmitDraft = (c) => {
+  try { return admitCandidateModel(withQuantityFrames(c), {}, undefined); } catch { return admitOrdinaryCandidateModel(withQuantityFrames(c), {}, undefined); }
+};
 const converted = (draft: Rec): { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] } => {
-  const out = candidateToGraph(draft);
+  const out = candidateToGraph(draft, admitA);
   if ('refused' in out) throw new Error(`refused: ${out.refused}`);
   return out as unknown as { graph: Rec; declared: Rec; loss: Rec[]; blocked_schema: Rec[] };
 };
@@ -106,6 +122,92 @@ const byLabel = (g: Rec, label: string): Rec => (g.nodes as Rec[]).find((n) => n
 const ofKind = (g: Rec, kind: string): Rec[] => (g.nodes as Rec[]).filter((n) => n.kind === kind);
 const edge = (g: Rec, from: string, to: string): Rec | undefined =>
   (g.edges as Rec[]).find((e) => e.from === byLabel(g, from).id && e.to === byLabel(g, to).id);
+
+/**
+ * The differential: A's own admission of the draft (the build's preparation + admission, no brief) against B's converted
+ * graph before the refit chain. For every figure A admits — a value, a level, a goal threshold, a limit, a link size — B's
+ * number, unit, frame and sign must equal A's. A person's link size B keeps as a placeholder (DL ruling (a)) and a level in
+ * another unit than its factor or set on something that is not a factor (B does not use it, and says so) are counted apart,
+ * never as equal. A draft B refuses as unreadable is reported with A's figures it does not carry.
+ */
+function differential(draft: Rec): { compared: number; equal: number; mismatches: string[]; not_used: string[]; a_created: string[]; refused?: { reason: string; figures: number } } {
+  const prepared = prepareProvisionalCandidate(draft as never).candidate;
+  const a: Rec = admitA(prepared);
+  const converted = candidateToAdmittedGraph(draft, admitA);
+  // A draft B refuses as unreadable (protocol) is reported with the count of A's figures it does not carry, never hidden.
+  const refused = 'refused' in converted ? converted.refused : undefined;
+  const b = 'refused' in converted ? { graph: { nodes: [], edges: [], goal_constraints: [] }, loss: [], blocked_schema: [] } : converted;
+  const bg = b.graph as Rec;
+  const key = (n: Rec): string => canonicalLabel(String(n.description ?? n.label));
+  const aKey = new Map((a.nodes as Rec[]).map((n) => [n.id, key(n)]));
+  const bByKey = new Map((bg.nodes as Rec[]).filter((n) => n.kind !== 'decision').map((n) => [key(n), n]));
+  // The goal is the goal (A may restate its label); an entity the draft never declared is A's own structure, counted apart.
+  const bGoal = (bg.nodes as Rec[]).find((n) => n.kind === 'goal');
+  const aGoalId = (a.nodes as Rec[]).find((n) => n.kind === 'goal' && n.id === bGoal?.id)?.id ?? (a.nodes as Rec[]).find((n) => n.kind === 'goal')?.id;
+  // B's counterpart of an A node: the goal for A's goal; else the same id (A keeps ids when it restates a label); else the same label.
+  const bNodeFor = (n: Rec): Rec | undefined => (n.id === aGoalId ? bGoal
+    : (bg.nodes as Rec[]).find((x) => x.id === n.id && x.kind !== 'decision') ?? bByKey.get(key(n)));
+  const bIdFor = (aId: string): string | undefined => { const n = (a.nodes as Rec[]).find((x) => x.id === aId); return n === undefined ? undefined : bNodeFor(n)?.id; };
+  const declaredKeys = new Set([draft.goal?.metric, ...[...(draft.factors ?? []), ...(draft.options ?? []), ...(draft.risks ?? []), ...(draft.outcomes ?? [])]
+    .map((n: Rec) => n?.label)].filter((l): l is string => typeof l === 'string').map((l) => canonicalLabel(l)));
+  const aCreated = new Set((a.nodes as Rec[]).filter((n) => n.id !== aGoalId && n.kind !== 'decision' && n.kind !== 'option' && bNodeFor(n) === undefined
+    && !declaredKeys.has(key(n))).map((n) => n.id));
+  const a_created: string[] = [];
+  const personSized = new Set(b.blocked_schema.filter((x) => x.missing === 'link_size_origin').map((x) => x.field_path));
+  // A level B says it does not use (its unit differs from its factor's, or its target is not a factor), by B's own note.
+  const levelNotUsed = new Map(b.loss.flatMap((l) => {
+    const why = / is measured in .*so that level is not used/.test(String(l.reason)) ? 'unit' : / is not a factor in this model, so that level is not used/.test(String(l.reason)) ? 'not_a_factor' : undefined;
+    return why === undefined ? [] : [[String(l.field_path), why] as const];
+  }));
+  let compared = 0, equal = 0; const mismatches: string[] = [], not_used: string[] = [];
+
+  const same = (x: unknown, y: unknown): boolean => (typeof x === 'number' && typeof y === 'number' ? Math.abs(x - y) <= 1e-12 * Math.max(1, Math.abs(x)) : JSON.stringify(x) === JSON.stringify(y));
+  const check = (where: string, aObj: Rec | undefined, bObj: Rec | undefined, fields: readonly string[]): void => {
+    for (const f of fields) {
+      const av = aObj?.[f];
+      if (av === undefined || av === null) continue;
+      compared += 1;
+      if (bObj !== undefined && same(av, bObj[f])) equal += 1; else mismatches.push(`${where}.${f}: A ${JSON.stringify(av)} B ${JSON.stringify(bObj?.[f])}`);
+    }
+  };
+  for (const n of a.nodes as Rec[]) {
+    if (n.kind === 'decision' || n.kind === 'option') continue;
+    if (aCreated.has(n.id)) { a_created.push(`node ${key(n)}`); continue; }
+    const bn = bNodeFor(n);
+    check(`node ${key(n)}`, n, bn, ['scale_frame', 'goal_threshold', 'goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold_unit', 'goal_threshold_frame', 'quantity_frame']);
+    check(`node ${key(n)}.observed_state`, n.observed_state, bn?.observed_state, ['value', 'raw_value', 'cap', 'unit', 'baseline']);
+  }
+  for (const o of (a.nodes as Rec[]).filter((n) => n.kind === 'option' && n.interventions)) {
+    const bo = bNodeFor(o);
+    for (const [aFid, lv] of Object.entries(o.interventions as Rec)) {
+      const bFid = bIdFor(aFid);
+      const where = `setting ${key(o)} → ${aKey.get(aFid)}`;
+      const drafted = (draft.options ?? []).some((x: Rec) => canonicalLabel(String(x.label)) === key(o)
+        && (x.interventions ?? []).some((iv: Rec) => canonicalLabel(String(iv.factor_label)) === aKey.get(aFid)));
+      if (!drafted || aCreated.has(aFid)) { a_created.push(where); continue; }
+      const why = bo === undefined ? undefined : levelNotUsed.get(`nodes[${bo.id}].interventions.${bFid ?? aFid}`);
+      if (why !== undefined) { not_used.push(`${why}: ${where}`); continue; }
+      check(where, lv as Rec, bo?.interventions?.[bFid ?? ''], ['value', 'raw_value', 'unit']);
+    }
+  }
+  const structural = new Set((a.nodes as Rec[]).filter((n) => n.kind === 'option' || n.kind === 'decision').map((n) => n.id));
+  for (const e of (a.edges as Rec[]).filter((x) => !structural.has(x.from))) {
+    const where = `edge ${aKey.get(e.from)} → ${aKey.get(e.to)}`;
+    if (aCreated.has(e.from) || aCreated.has(e.to)) { a_created.push(where); continue; }
+    const be = (bg.edges as Rec[]).find((x) => x.from === bIdFor(e.from) && x.to === bIdFor(e.to));
+    if (be !== undefined && personSized.has(`edges[${be.from}::${be.to}]`)) { not_used.push(`person_size: ${where}`); continue; }
+    check(where, e, be, ['exists_probability', 'effect_direction']);
+    check(`${where}.strength`, e.strength, be?.strength, ['mean', 'std']);
+    check(`${where}.natural_effect`, e.provenance?.natural_effect, be?.provenance?.natural_effect, ['amount', 'per_source_change', 'amount_unit', 'per_source_change_unit']);
+  }
+  for (const k of (a.goal_constraints ?? []) as Rec[]) {
+    if (aCreated.has(k.node_id)) { a_created.push(`limit ${aKey.get(k.node_id)}`); continue; }
+    const bk = ((bg.goal_constraints ?? []) as Rec[]).find((x) => x.node_id === bIdFor(k.node_id) && x.operator === k.operator);
+    check(`limit ${aKey.get(k.node_id)} ${k.operator}`, k, bk, ['value', 'unit', 'value_frame']);
+  }
+  return refused !== undefined ? { compared, equal, mismatches: [], not_used, a_created, refused: { reason: refused, figures: mismatches.length } }
+    : { compared, equal, mismatches, not_used, a_created };
+}
 
 describe('candidateToGraph: conversion + science only', () => {
   it('⭐ the dated-dilemma draft → a valid graph with the aim open, every drafted claim kept with the origin the AI declared', () => {
@@ -306,10 +408,13 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(graph, 'Ad spend').observed_state).toMatchObject({ value: 0.09, raw_value: 9000, cap: 100000 });
   });
 
-  it('round 2 (B2): an "above" target keeps today\'s level on the floor rule (400 of 750), with no label read', () => {
+  it('A\'s numbers (DL 19 Oct): an "above" target\'s level is what A admits — not used, with A\'s reason; the comparator is kept', () => {
     const draft = salesDraft(); draft.goal.operator = '>';
-    const goal = ofKind(converted(draft).graph, 'goal')[0]!;
-    expect(goal).toMatchObject({ goal_direction: '>', observed_state: { baseline: 400 / 750, raw_value: 400 } });
+    const { graph, loss } = converted(draft);
+    const goal = ofKind(graph, 'goal')[0]!;
+    expect(goal).toMatchObject({ goal_direction: '>', goal_threshold_raw: 600, goal_threshold_cap: 750 });
+    expect(goal.observed_state).toBeUndefined();
+    expect(loss.map((l) => l.reason).join(' ')).toContain('cannot be calculated exactly yet');
   });
 
   it('round 2 (B4, B5): a setting\'s speaker is its LEVEL statement\'s; a declared speaker wins over the provenance tag', () => {
@@ -334,18 +439,80 @@ describe('candidateToGraph: conversion + science only', () => {
     expect(byLabel(graph, 'Keep spending as now').is_baseline).toBeUndefined();
   });
 
-  it('round 2 (B7): a relative change in % is not carried yet (said, kept, no label read); a change in the metric\'s own unit is', () => {
-    const rel = salesDraft(); rel.goal = { ...rel.goal, frame: 'change_rel', value: 10, unit: '%' };
-    const r = converted(rel);
-    expect('goal_threshold_raw' in ofKind(r.graph, 'goal')[0]!).toBe(false);
-    expect(r.loss.map((l) => l.reason).join(' ')).toContain('does not say whether "Monthly pre-orders" is itself measured in %');
-    expect(r.declared.goal).toMatchObject({ frame: 'change_rel', value: 10 });
-    const abs = salesDraft(); abs.goal = { ...abs.goal, frame: 'change_abs', value: 200 };
-    expect(ofKind(converted(abs).graph, 'goal')[0]).toMatchObject({ goal_threshold_frame: 'change_abs', goal_threshold_raw: 200 });
+  it('A\'s numbers (DL 19 Oct): a change target carries exactly A\'s threshold, cap and frame', () => {
+    for (const goal of [{ frame: 'change_rel', value: 10, unit: '%' }, { frame: 'change_abs', value: 200 }]) {
+      const draft = salesDraft(); draft.goal = { ...draft.goal, ...goal };
+      expect(differential(draft).mismatches).toEqual([]);
+      expect(ofKind(converted(draft).graph, 'goal')[0]).toMatchObject({ goal_threshold_frame: goal.frame });
+    }
   });
 
+  it('⛔ Codex #3464 R1 probe (unit): a setting in weeks is never written as pounds — it is not used, and said', () => {
+    const draft = salesDraft();
+    draft.options[0].interventions[0].unit = 'weeks';
+    const { graph, loss } = converted(draft);
+    const setting = byLabel(graph, 'Double the ad spend').interventions?.[byLabel(graph, 'Ad spend').id];
+    expect(setting?.unit).not.toBe('£');
+    expect(setting).toBeUndefined();
+    expect(loss.map((l) => l.reason)).toContain('"Double the ad spend" sets "Ad spend" to 4000 weeks, but "Ad spend" is measured in £, so that level is not used; Olumi kept it as drafted.');
+  });
+
+  it('a name drafted both as an option and as a factor: one node (the option, as A keeps it); a level set on it is not used, and both are said', () => {
+    const draft = salesDraft();
+    draft.factors.push({ label: 'Double the ad spend', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'yes/no',
+      provenance: 'explicit', plausible_max: null });
+    draft.options[1].interventions.push({ factor_label: 'Double the ad spend', value: 1, value_kind: 'absolute', unit: 'yes/no', provenance: 'explicit', stated_evidence: null });
+    const { graph, loss } = converted(draft);
+    expect((graph.nodes as Rec[]).filter((n) => n.label === 'Double the ad spend').map((n) => n.kind)).toEqual(['option']);
+    expect(Object.keys(byLabel(graph, 'Add £1,000 of ad spend').interventions ?? {})).toEqual([byLabel(graph, 'Ad spend').id]);
+    expect(loss.map((l) => l.reason)).toEqual(expect.arrayContaining([
+      '"Double the ad spend" is drafted both as an option and as a factor; the model keeps it as an option, and Olumi kept the other as drafted.',
+      '"Add £1,000 of ad spend" sets "Double the ad spend" to 1 yes/no, but "Double the ad spend" is not a factor in this model, so that level is not used; Olumi kept it as drafted.']));
+    // A writes that level onto the option node; B does not, and the differential names it rather than counting it equal.
+    const diff = differential(draft);
+    expect(diff.mismatches).toEqual([]);
+    expect(diff.not_used).toEqual(['not_a_factor: setting add £1,000 of ad spend → double the ad spend']);
+  });
+
+  it('⛔ Codex #3464 R1 probe (frame): a case-equivalent operand label binds, and the total is framed as A frames it (0.11 of 100,000)', () => {
+    const draft = salesDraft(); draft.factors[0].baseline_value = 9000;
+    draft.options[1].interventions[0].value = 2000;
+    draft.options[1].interventions[0].factor_label = 'ad spend';
+    const { graph } = converted(draft);
+    expect(byLabel(graph, 'Add £1,000 of ad spend').interventions[byLabel(graph, 'Ad spend').id]).toMatchObject({ raw_value: 11000, value: 0.11 });
+    expect(byLabel(graph, 'Ad spend').observed_state).toMatchObject({ value: 0.09, cap: 100000 });
+  });
+
+  it('⭐ DIFFERENTIAL (synthetic drafts): every figure A admits, B carries with the same number, unit, frame and sign', () => {
+    const drafts = [dilemmaDraft(), salesDraft(), salesDraft('user'), sumDraft(400), sumDraft(500), sumDraft(400, 'user'), structureDraft()];
+    const results = drafts.map(differential);
+    expect(results.flatMap((r) => r.mismatches)).toEqual([]);
+    expect(results.filter((r) => r.refused !== undefined)).toEqual([]);
+    expect(results.reduce((n, r) => n + r.compared, 0)).toBeGreaterThan(40);
+  });
+
+  // ⭐ DIFFERENTIAL (stored drafts, DL 19 Oct): run locally against `C2G_DIFFERENTIAL_DRAFTS` (one stored drafter JSON per
+  // line; never committed). Skipped where the file is absent (CI). Writes its counts to `C2G_DIFFERENTIAL_OUT`.
+  const STORED = process.env.C2G_DIFFERENTIAL_DRAFTS;
+  it.runIf(STORED !== undefined && existsSync(STORED))('⭐ DIFFERENTIAL (stored drafts): every figure A admits, B carries equal', () => {
+    const lines = readFileSync(STORED!, 'utf8').split('\n').filter((l) => l.trim() !== '');
+    const results: (ReturnType<typeof differential> & { error?: string })[] = lines.map((l) => {
+      try { return differential(JSON.parse(l)); } catch (e) { return { compared: 0, equal: 0, mismatches: [], not_used: [], a_created: [], error: String(e) }; }
+    });
+    const summary = { drafts: lines.length, converted: results.filter((r) => r.error === undefined && r.refused === undefined).length,
+      errors: results.filter((r) => r.error !== undefined).length, compared: results.reduce((n, r) => n + r.compared, 0),
+      equal: results.reduce((n, r) => n + r.equal, 0), not_used: results.reduce((n, r) => n + r.not_used.length, 0),
+      not_used_by_class: results.flatMap((r) => r.not_used.map((x) => x.split(':')[0]!)).reduce<Rec>((m, k) => ({ ...m, [k]: (m[k] ?? 0) + 1 }), {}),
+      refused: results.flatMap((r, i) => (r.refused ? [`#${i} ${r.refused.reason}: ${r.refused.figures} of A's figures not carried`] : [])),
+      not_used_detail: results.flatMap((r, i) => r.not_used.filter((x) => !x.startsWith('person_size')).map((x) => `#${i} ${x}`)),
+      a_created_entities: results.reduce((n, r) => n + r.a_created.length, 0), errors_detail: results.flatMap((r, i) => (r.error !== undefined ? [`#${i} ${r.error.slice(0, 160)}`] : [])),
+      mismatches: results.flatMap((r, i) => r.mismatches.map((m) => `#${i} ${m}`)) };
+    if (process.env.C2G_DIFFERENTIAL_OUT) writeFileSync(process.env.C2G_DIFFERENTIAL_OUT, JSON.stringify(summary, null, 1));
+    expect(summary.mismatches).toEqual([]);
+  }, 600_000);
+
   it('protocol only: a draft with no goal is refused as unreadable; nothing is refused for what it means', () => {
-    expect(candidateToGraph(null)).toEqual({ refused: 'candidate_invalid' });
-    expect(candidateToGraph({ goal: { metric: ' ' }, options: [], factors: [], links: [] })).toEqual({ refused: 'candidate_invalid' });
+    expect(candidateToGraph(null, admitA)).toEqual({ refused: 'candidate_invalid' });
+    expect(candidateToGraph({ goal: { metric: ' ' }, options: [], factors: [], links: [] }, admitA)).toEqual({ refused: 'candidate_invalid' });
   });
 });
