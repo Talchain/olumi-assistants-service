@@ -376,3 +376,37 @@ describe('STANCE: carried with each figure, never promoted to an operative curre
     expect(ProposeChangeParams.safeParse({ public_label: 'x', basis: 'b', ops: [noStance] }).success).toBe(false);
   });
 });
+
+/**
+ * #3461 R1 BLOCK 1 (Codex R1, /private/tmp/rev-3461-r1/recovery-notes/R1-review.md §1): an option setting on a factor with no
+ * range, with a declared unit, must never take the frameless 0–1 path (its figure and unit were dropped, and the commit was
+ * only found incomplete afterwards). It comes back unavailable BEFORE any proposal or write, with the figure kept.
+ * SYNTHETIC probes in Codex's shape: two distinct quantities.
+ */
+describe('R1: a setting with a declared unit on a factor with no range is never written as a bare 0–1 value', () => {
+  it.each([
+    ['0.5 people', 'visits', 0.5, 'people'],
+    ['£0.75', 'price', 0.75, 'GBP'],
+  ] as const)('RED: %s → unavailable needs_range, nothing proposed, 0 writes, the figure kept', async (_name, factorId, value, unitWord) => {
+    // `price` with no range of its own (the fixture's stored figure, without a cap); `visits` holds no figure at all.
+    const g = stored() as { nodes: Rec[] };
+    persisted = projectGraphForPersistence({ ...GraphV3.parse({ ...g, nodes: g.nodes.map((n) => n.id === 'price'
+      ? { ...n, observed_state: { value: 0.5, raw_value: 5, unit: 'GBP', source: 'cee_inference' } } : n) }), options: [] as Rec[] });
+    const before = JSON.stringify(persisted);
+    const proposals = new ProposalStore();
+    const out = await proposeChange({ dispatch, proposals }, ctx, { public_label: 'Set the option', basis: 'b', ops: [{
+      op: 'set_option_setting', option_id: 'add_staff', factor_id: factorId, value, unit: unitWord, stance: 'estimate',
+      source: { origin: 'olumi', quote: null, named_source: null } }] } as never);
+    expect(out).toMatchObject({ status: 'unavailable', reason: 'needs_range', write: 'none',
+      data: { op: 0, not_kept: [{ what: 'figure', declared: `${value} ${unitWord}` }] } });
+    expect(proposals.size()).toBe(0);
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
+  it('a unitless share on a factor with no range still takes the model scale (contrast)', async () => {
+    const { proposals, id } = await proposed([{ op: 'set_option_setting', option_id: 'add_staff', factor_id: 'visits', value: 0.5, unit: null,
+      stance: 'estimate', source: { origin: 'olumi', quote: null, named_source: null } }]);
+    expect(await applyChange({ dispatch, proposals, commitOptionLevels: door() }, ctx, { proposal_id: id })).toMatchObject({ status: 'ok', mutated: true });
+  });
+});
