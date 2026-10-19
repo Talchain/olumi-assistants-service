@@ -83,6 +83,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runOmittedRisks, type RunOmittedRisk } from '../orchestrator-v5/agent-lane/unsized-risk.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { runCoreTurn, type CoreTurnSdk } from '../orchestrator-v5/agent-lane/core/sdk-turn.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext, ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -3496,6 +3497,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
+    /** PATH-B: the SDK runtime and trace of a `core` turn the Agents SDK ran (`_agent.sdk`); undefined on every other turn. */
+    let coreSdk: CoreTurnSdk | undefined;
     if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
       result = await drawnLinkPress(
         (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: instructionsForMode(mode, AGENT_INSTRUCTIONS), maxOutputTokens: budget.max_output_tokens, mode },
@@ -4341,6 +4344,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
           timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0,
             provider_calls: 0, tool_calls: 0, hops: 0 } };
+      } else if (mode === 'core' && !runPress && methodTurn === null && widenRun === undefined && risksRun === undefined
+        && (body['chip'] === undefined || body['chip'] === null)) {
+        // ⭐ PATH-B: an ordinary typed `core` turn runs on the OpenAI Agents SDK (`core/sdk-turn.ts`): its runner, its session
+        // memory and its trace, with Olumi's capabilities as the tools. Presses and method turns keep their existing paths.
+        const core = await runCoreTurn({
+          ctx: { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+            ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
+          caps: loopCapabilities, mode, message, budget, userId,
+          instructions: instructionsForMode(mode, eligibleIntervention === undefined ? AGENT_TOOL_INSTRUCTIONS : `${AGENT_TOOL_INSTRUCTIONS}\n\n${ELIGIBLE_INTERVENTION_INSTRUCTION}`),
+          briefText: await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {})
+            .then(read => read.status === 200 ? read.json.brief_text : undefined).catch(() => undefined),
+          canonicalState: canonicalContext?.packet?.state,
+          withheldTools: withheldToolsOf(body),
+        });
+        coreSdk = core.sdk;
+        result = core;
       } else {
         result = await runAgentTurn(
           {
@@ -4924,7 +4943,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const partFigures = identityPartFiguresToIssue({ graph: readbackGraph, userText: typedNow,
       toolCalls: result.tool_calls, mutated: result.mutated,
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, pending: liveHolds });
-    if (partFigures !== undefined || identityAutoIssueAllowed({ issue: !ceilingAnswerSettled && identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
+    // PATH-B `core`: the route issues no card of its own (here, the confirm card and the statement card below); the AI proposes.
+    if (mode !== 'core' && (partFigures !== undefined || identityAutoIssueAllowed({ issue: !ceilingAnswerSettled && identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 }))) {
       const issued = await dispatchTool('propose_identity', JSON.stringify(partFigures ?? {}), toolCtx, capabilities, mode);
       if (issued.ok === true && typeof issued.proposal_id === 'string') automaticIdentityProposalId = issued.proposal_id;
       result = {
@@ -4942,7 +4962,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ S2 CONFIRM, ONE PRESS (DL 20:09Z 14 Oct; served 2a35ff31 pricing turn 02): when this turn's Run asked to confirm a
     // figure the user wrote ("Is your £49 … today's ‘Pro plan price’?") and nothing was proposed, the route issues #3113's
     // confirm card itself, quoting the brief's one sentence that states it: the SAME tool, once, writing nothing.
-    const heldAsk = fastPath === 'approve' ? undefined : heldFigureAskToConfirm({ toolCalls: result.tool_calls, toolResults: result.tool_results,
+    const heldAsk = fastPath === 'approve' || mode === 'core' ? undefined : heldFigureAskToConfirm({ toolCalls: result.tool_calls, toolResults: result.tool_results,
       mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0, heldWaiting: liveHolds.length > 0 });
     const heldConfirm = heldAsk === undefined || readbackGraph == null ? undefined : heldFigureConfirmArgs(readbackGraph, identityOfferBrief, heldAsk);
     if (heldConfirm !== undefined) {
@@ -4959,7 +4979,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * brief's own sentence the model holds for a risk (`already_true_quote`), gets its door card: the SAME tool, once, writing
      * nothing; the door re-verifies it and only the press records it.
      */
-    const doorArgs = fastPath === 'approve' || readbackGraph == null ? undefined : doorIssueArgs(readbackGraph, typedNow,
+    const doorArgs = fastPath === 'approve' || mode === 'core' || readbackGraph == null ? undefined : doorIssueArgs(readbackGraph, typedNow,
       { ...(selectionContext?.grounded !== undefined ? { selection: selectionContext.grounded } : {}),
         ...(precedingAsk === undefined ? {} : { preceding_ask: precedingAsk }) },
       { toolCalls: result.tool_calls, mutated: result.mutated, proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
@@ -6628,6 +6648,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       _agent: {
         session_id: sessionId,
         mode,
+        ...(coreSdk !== undefined ? { sdk: coreSdk } : {}),
         tool_calls: result.tool_calls,
         mutated: result.mutated,
         hops: result.hops,
