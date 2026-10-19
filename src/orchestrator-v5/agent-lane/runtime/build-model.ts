@@ -3,7 +3,6 @@ export { CURRENT_MODEL_CONTEXT_LEAD, REVISION_LEAD, LATER_MESSAGES_CONTEXT_LEAD,
 import { briefAttestsEventByDate, deliverableWrittenIn, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf, eventSetAsideLine, unattestedEventGoal, type UnattestedEventGoal } from '../../goal-target/event-by-date-model.js';
 import { calendarDeadlineClaim } from '../calendar-deadline-claim.js';
 import { wholeStatementIn } from '../../goal-target/input-claim-context.js';
-import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import { OLUMI_PURPOSE_CORE_LINES } from '../olumi-purpose.js';
 import { readGoalRecord } from '../../goal-target/goal-record.js';
 import { linkHoldsStatedRange, userStatementFor } from '../../statement-door/statements.js';
@@ -80,7 +79,7 @@ import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } fr
 import { clampForPersist, frameOf, refitFramesForStatedEffects, refitFramesForOlumiEstimates } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
+import { amountsWrittenIn, amountTheUserWrote, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote } from '../stated-by-user.js';
 import { heldEventRiskLine, holdStatedEventRisks, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
@@ -1874,7 +1873,8 @@ export async function buildModelFromBrief(
   const first = await buildModelFromBriefOnce(scenarioId, brief, dispatch, callStructured, observeConstruction, deadlineAt, wideningCallStructured,
     observeAdmissionForTests, context, attestedDeliverable, revisedDraft, onDraftAdmitted, draftNow === true ? k6 : undefined);
   if (draftNow !== true || first.refusal !== 'construction_needs_redraft' || k6.openAim === undefined || k6.firstText === undefined
-    || findStatedAmounts(brief).length > 0) return first;
+    // A figure in words is a figure (Codex on #3426 @a36d8e6b: "we currently have five cafés" drafted an open aim): the ONE reader.
+    || amountsWrittenIn(brief).some((a) => a.kind !== 'words' || amountTheUserWrote(a, a.magnitude, undefined, brief))) return first;
   const drafted = JSON.stringify(withOpenAim(JSON.parse(k6.firstText) as CandidateModel, k6.openAim));
   let answered = false;
   // The first draft again, with the aim open: no new provider call for it; any repair or size retry still asks the drafter.
