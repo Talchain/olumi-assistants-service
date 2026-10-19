@@ -1,0 +1,418 @@
+{
+ "note": "SYNTHETIC brief HS3 (PROMPT-INT, 19 Oct). Raw: a real gpt-5.6-terra draft at #3459 head (hypothetical-n8 head r1), with ONLY a declared statements[].stance added per entry, as the drafter will declare it. No journey text.",
+ "brief": "We ship 1,150 orders a day with 30 warehouse staff. Suppose we hired 8 temporary pickers who each packed 25 orders a day. Would we reach 1,400 orders a day before peak season, or is automating the packing line more likely to get us there?",
+ "raw": {
+  "goal": {
+   "kind": null,
+   "deliverable": null,
+   "metric": "orders a day",
+   "operator": ">=",
+   "target_stated": true,
+   "value": 1400,
+   "unit": "orders a day",
+   "horizon_months": null,
+   "provenance": "explicit",
+   "frame": "level",
+   "baseline_known": true,
+   "baseline_value": 1150,
+   "baseline_provenance": "explicit",
+   "scope": null,
+   "quantity_frame": "level",
+   "basis": {
+    "reference": "today",
+    "denominator": null,
+    "period_months": null,
+    "period_kind": "at_end",
+    "effect_unit": "orders a day",
+    "effects_at_period_end": false,
+    "also_required": null,
+    "open_question": "What calendar date marks the start of peak season?"
+   },
+   "source_quote": "We ship 1,150 orders a day with 30 warehouse staff. Suppose we hired 8 temporary pickers who each packed 25 orders a day. Would we reach 1,400 orders a day before peak season, or is automating the packing line more likely to get us there?",
+   "deadline_words": "Would we reach 1,400 orders a day before peak season, or is automating the packing line more likely to get us there?"
+  },
+  "constraints": [],
+  "options": [
+   {
+    "label": "Keep current operation",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "added_capacity": null,
+    "is_status_quo": true
+   },
+   {
+    "label": "Hire temporary pickers",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Temporary pickers",
+      "value": 8,
+      "value_kind": "absolute",
+      "unit": "pickers",
+      "provenance": "explicit"
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   },
+   {
+    "label": "Automate packing line",
+    "provenance": "explicit",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Packing-line automation active",
+      "value": 1,
+      "value_kind": "absolute",
+      "unit": "yes/no",
+      "provenance": "inferred"
+     }
+    ],
+    "added_capacity": null,
+    "is_status_quo": null
+   }
+  ],
+  "factors": [
+   {
+    "label": "Current orders a day",
+    "role": "observable",
+    "baseline_known": true,
+    "baseline_value": 1150,
+    "unit": "orders a day",
+    "provenance": "explicit",
+    "plausible_max": null
+   },
+   {
+    "label": "Warehouse staff",
+    "role": "observable",
+    "baseline_known": true,
+    "baseline_value": 30,
+    "unit": "warehouse staff",
+    "provenance": "explicit",
+    "plausible_max": null
+   },
+   {
+    "label": "Temporary pickers",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "pickers",
+    "provenance": "ai_proposed",
+    "plausible_max": null
+   },
+   {
+    "label": "Orders packed per temporary picker per day",
+    "role": "observable",
+    "baseline_known": true,
+    "baseline_value": 25,
+    "unit": "orders per picker per day",
+    "provenance": "explicit",
+    "plausible_max": null
+   },
+   {
+    "label": "Packing-line automation active",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "yes/no",
+    "provenance": "ai_proposed",
+    "plausible_max": null
+   },
+   {
+    "label": "Automation-added orders a day",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": null,
+    "unit": "orders a day",
+    "provenance": "ai_proposed",
+    "plausible_max": null
+   }
+  ],
+  "risks": [],
+  "outcomes": [
+   {
+    "label": "Temporary-picker orders a day",
+    "provenance": "inferred",
+    "unit": "orders a day",
+    "plausible_max": null
+   }
+  ],
+  "links": [
+   {
+    "from": "Warehouse staff",
+    "to": "Current orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Current orders a day",
+    "to": "orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred",
+    "definitional": true,
+    "basis": "Current orders are a defined contribution to total orders shipped per day.",
+    "source_quote": null
+   },
+   {
+    "from": "Temporary pickers",
+    "to": "Temporary-picker orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Orders packed per temporary picker per day",
+    "to": "Temporary-picker orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Temporary-picker orders a day",
+    "to": "orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred",
+    "definitional": true,
+    "basis": "Temporary-picker orders are a defined contribution to total orders shipped per day.",
+    "source_quote": null
+   },
+   {
+    "from": "Packing-line automation active",
+    "to": "Automation-added orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null,
+    "basis": null,
+    "source_quote": null
+   },
+   {
+    "from": "Automation-added orders a day",
+    "to": "orders a day",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred",
+    "definitional": true,
+    "basis": "Automation-added orders are a defined contribution to total orders shipped per day.",
+    "source_quote": null
+   }
+  ],
+  "identities": [
+   {
+    "outcome": "Temporary-picker orders a day",
+    "operation": "product",
+    "factors": [
+     "Temporary pickers",
+     "Orders packed per temporary picker per day"
+    ],
+    "provenance": "inferred",
+    "reading": null,
+    "evidence": null
+   },
+   {
+    "outcome": "orders a day",
+    "operation": "sum",
+    "factors": [
+     "Current orders a day",
+     "Temporary-picker orders a day",
+     "Automation-added orders a day"
+    ],
+    "provenance": "inferred",
+    "reading": null,
+    "evidence": null
+   }
+  ],
+  "unknowns": [
+   "What calendar date marks the start of peak season?",
+   "How many additional orders a day would packing-line automation add, and from when would that effect be available?",
+   "Does the stated 25 orders per day per temporary picker represent their sustained output after any onboarding or supervision requirement?",
+   "The temporary-picker baseline of 0 and the packing-line automation baseline of 0 are Olumi working assumptions, not stated current measurements. Are either already in place?",
+   "Does the existing 30-person warehouse team have enough supervision, space and downstream capacity for eight temporary pickers to sustain their stated output?"
+  ],
+  "decision_question": "Would we reach 1,400 orders a day before peak season, or is automating the packing line more likely to get us there?",
+  "unknown_concerns": [
+   {
+    "unknown": "What calendar date marks the start of peak season?",
+    "concerns": [
+     "orders a day"
+    ]
+   },
+   {
+    "unknown": "How many additional orders a day would packing-line automation add, and from when would that effect be available?",
+    "concerns": [
+     "Packing-line automation active",
+     "Automation-added orders a day",
+     "Automation-added orders a day → orders a day"
+    ]
+   },
+   {
+    "unknown": "Does the stated 25 orders per day per temporary picker represent their sustained output after any onboarding or supervision requirement?",
+    "concerns": [
+     "Orders packed per temporary picker per day",
+     "Temporary pickers",
+     "Temporary-picker orders a day"
+    ]
+   },
+   {
+    "unknown": "The temporary-picker baseline of 0 and the packing-line automation baseline of 0 are Olumi working assumptions, not stated current measurements. Are either already in place?",
+    "concerns": [
+     "Temporary pickers",
+     "Packing-line automation active"
+    ]
+   },
+   {
+    "unknown": "Does the existing 30-person warehouse team have enough supervision, space and downstream capacity for eight temporary pickers to sustain their stated output?",
+    "concerns": [
+     "Warehouse staff",
+     "Temporary pickers",
+     "Orders packed per temporary picker per day",
+     "Temporary-picker orders a day"
+    ]
+   }
+  ],
+  "statements": [
+   {
+    "quote": "We ship 1,150 orders a day with 30 warehouse staff.",
+    "subject": {
+     "kind": "goal",
+     "label": "orders a day",
+     "to_label": null,
+     "factor_label": null
+    },
+    "field": "level",
+    "form": "point",
+    "value": 1150,
+    "low": null,
+    "high": null,
+    "unit": "orders a day",
+    "qualifier": "today",
+    "conditions": null,
+    "speaker": "user",
+    "stance": "stated_current"
+   },
+   {
+    "quote": "We ship 1,150 orders a day with 30 warehouse staff.",
+    "subject": {
+     "kind": "factor",
+     "label": "Warehouse staff",
+     "to_label": null,
+     "factor_label": null
+    },
+    "field": "level",
+    "form": "point",
+    "value": 30,
+    "low": null,
+    "high": null,
+    "unit": "warehouse staff",
+    "qualifier": "today",
+    "conditions": null,
+    "speaker": "user",
+    "stance": "stated_current"
+   },
+   {
+    "quote": "Would we reach 1,400 orders a day before peak season, or is automating the packing line more likely to get us there?",
+    "subject": {
+     "kind": "goal",
+     "label": "orders a day",
+     "to_label": null,
+     "factor_label": null
+    },
+    "field": "target",
+    "form": "lower_bound",
+    "value": 1400,
+    "low": null,
+    "high": null,
+    "unit": "orders a day",
+    "qualifier": "before peak season",
+    "conditions": null,
+    "speaker": "user",
+    "stance": "target"
+   },
+   {
+    "quote": "Suppose we hired 8 temporary pickers who each packed 25 orders a day.",
+    "subject": {
+     "kind": "option",
+     "label": "Hire temporary pickers",
+     "to_label": null,
+     "factor_label": "Temporary pickers"
+    },
+    "field": "level",
+    "form": "point",
+    "value": 8,
+    "low": null,
+    "high": null,
+    "unit": "pickers",
+    "qualifier": "suppose",
+    "conditions": "temporary pickers",
+    "speaker": "user",
+    "stance": "hypothetical"
+   },
+   {
+    "quote": "Suppose we hired 8 temporary pickers who each packed 25 orders a day.",
+    "subject": {
+     "kind": "factor",
+     "label": "Orders packed per temporary picker per day",
+     "to_label": null,
+     "factor_label": null
+    },
+    "field": "level",
+    "form": "point",
+    "value": 25,
+    "low": null,
+    "high": null,
+    "unit": "orders per picker per day",
+    "qualifier": "suppose",
+    "conditions": "for each of the 8 temporary pickers",
+    "speaker": "user",
+    "stance": "hypothetical"
+   },
+   {
+    "quote": "Would we reach 1,400 orders a day before peak season, or is automating the packing line more likely to get us there?",
+    "subject": {
+     "kind": "option",
+     "label": "Automate packing line",
+     "to_label": null,
+     "factor_label": "Packing-line automation active"
+    },
+    "field": "measure",
+    "form": "describes",
+    "value": null,
+    "low": null,
+    "high": null,
+    "unit": null,
+    "qualifier": null,
+    "conditions": "compared with hiring temporary pickers and reaching 1,400 orders a day before peak season",
+    "speaker": "user",
+    "stance": "hypothetical"
+   }
+  ]
+ }
+}
